@@ -113,8 +113,12 @@ import type { AssetOwnership, SetupManifest } from "./setup-manifest.js";
 
 // ─── Freshness states ───────────────────────────────────────────────────────
 
-/** The closed five-state freshness classification (SPEC-076 §C3). */
-export const FILE_FRESHNESS_STATES = ["sync", "outdated", "diverged", "missing", "orphaned"] as const;
+/**
+ * The closed freshness classification (SPEC-076 §C3, plus `retired`: a path the
+ * installed manifest tracks, the target no longer ships, and the disk still
+ * holds byte-identical to the ledger — an unedited leftover `install` removes).
+ */
+export const FILE_FRESHNESS_STATES = ["sync", "outdated", "diverged", "missing", "orphaned", "retired"] as const;
 
 /** One entry's freshness relative to the embedded (target) and installed (recorded) manifests. */
 export type FileFreshness = (typeof FILE_FRESHNESS_STATES)[number];
@@ -177,7 +181,7 @@ export interface UpdatePlannedMerge {
 /**
  * The full pure decision output of {@link planUpdate}.
  *
- * @invariant `files` always has all five {@link FileFreshness} keys present
+ * @invariant `files` always has all six {@link FileFreshness} keys present
  *   (empty arrays where nothing classified into that state).
  * @invariant `writes` and `merges` are mutually exclusive over `path` — a
  *   path appears in at most one action bucket.
@@ -193,7 +197,7 @@ export interface UpdatePlan {
 // ─── Classifier ─────────────────────────────────────────────────────────────
 
 function emptyFileBuckets(): Record<FileFreshness, string[]> {
-  return { sync: [], outdated: [], diverged: [], missing: [], orphaned: [] };
+  return { sync: [], outdated: [], diverged: [], missing: [], orphaned: [], retired: [] };
 }
 
 /**
@@ -232,7 +236,22 @@ function classifyEntry(
 }
 
 /**
- * Pure five-state freshness classifier + update action planner (SPEC-076
+ * Ledger paths the target no longer ships: every installed entry whose path is absent
+ * from the embedded set. The synthetic `mcp` entry has no file behind it, and the
+ * `settings-hook` entry is the MERGED settings file (resolved at install time, never an
+ * embedded asset), so neither can be retired.
+ * Their on-disk truth decides the state: absent → nothing to do; byte-identical
+ * to the ledger → `retired`; edited since → `diverged` (BR-818: kept, listed).
+ */
+function retiredCandidates(embedded: EmbeddedAssetsManifest, installed: SetupManifest | null): { path: string; sha256: string }[] {
+  const embeddedPaths = new Set(embedded.entries.map((e) => e.path));
+  return (installed?.entries ?? [])
+    .filter((e) => e.kind !== "mcp" && e.kind !== "settings-hook" && !embeddedPaths.has(e.path))
+    .map((e) => ({ path: e.path, sha256: e.sha256 }));
+}
+
+/**
+ * Pure freshness classifier + update action planner (SPEC-076
  * §C3, Downstream Handoff). See module-level doc comment for the full
  * invariant set (digest short-circuit, ownership-driven action routing,
  * probe-throw error handling).
@@ -258,7 +277,14 @@ export function planUpdate(
 ): Result<UpdatePlan, LoreError> {
   // Digest short-circuit (SPEC-076 §C3 "整树 digest 相等 → 短路返回 sync") — exact
   // string equality only; a near-miss digest MUST fall through to full expansion.
-  if (installed?.assets_digest !== undefined && installed.assets_digest === embedded.tree_digest) {
+  // A ledger entry the target no longer ships defeats the short-circuit: the digest
+  // fingerprints the shipped tree only, so it cannot vouch for a leftover file.
+  const retiredLedger = retiredCandidates(embedded, installed);
+  if (
+    retiredLedger.length === 0 &&
+    installed?.assets_digest !== undefined &&
+    installed.assets_digest === embedded.tree_digest
+  ) {
     const files = emptyFileBuckets();
     for (const entry of embedded.entries) {
       files.sync.push(entry.path);
@@ -305,6 +331,23 @@ export function planUpdate(
         writes.push({ path: entry.path, kind: entry.kind });
       }
     }
+  }
+
+  // Retired discovery: ledger-tracked, no longer shipped.
+  for (const candidate of retiredLedger) {
+    let diskResult: { sha256: string } | "missing";
+    try {
+      diskResult = probe.resolve(candidate.path);
+    } catch (caught) {
+      return err({
+        code: "STORE_ERROR",
+        message: `planUpdate: probe.resolve threw for "${candidate.path}": ${caught instanceof Error ? caught.message : String(caught)}`,
+        ...(caught instanceof Error ? { cause: caught } : {}),
+      });
+    }
+    if (diskResult === "missing") continue;
+    files[diskResult.sha256 === candidate.sha256 ? "retired" : "diverged"].push(candidate.path);
+    allSync = false;
   }
 
   // Orphan discovery (SPEC-076 §C3: disk has a lore-managed-dir file, neither

@@ -412,6 +412,8 @@ function findDedicatedExtraKeyViolation(
   const guarded = DEDICATED_EXTRA_KEYS[existing.type];
   if (guarded === undefined) return null;
   for (const entry of guarded) {
+    // reason: DC2-8 — a sub_type-scoped key (knowledge `uat`) guards only docs of that sub_type.
+    if (entry.subType !== undefined && existing.extra["sub_type"] !== entry.subType) continue;
     if (!jsonDeepEqual(existing.extra[entry.key], incomingExtra[entry.key])) {
       return { key: entry.key, writer: entry.writer };
     }
@@ -831,6 +833,12 @@ export interface DocWriteRequest {
    */
   readonly foreignIntent?: boolean;
   /**
+   * Owner leaves of an owned-by-only site-map write (`RuleService.setSiteMap`): when `doc` itself is outside the
+   * caller's lease scope, a lease covering every one of these authorizes the write instead
+   * ({@link CorpusWriteAuthority.decide}). Absent = the target's own scope decides.
+   */
+  readonly scopeProof?: readonly DocRecord[];
+  /**
    * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
    * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
    * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
@@ -1200,6 +1208,7 @@ export class CorpusService {
   private async refuseIfForeignCorpusWrite<T>(
     intentDeclared = false,
     targets: readonly DocRecord[] = [],
+    scopeProof?: readonly DocRecord[],
   ): Promise<Result<T, LoreError> | undefined> {
     const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
     if (verdict.allowed) return undefined;
@@ -1208,7 +1217,7 @@ export class CorpusService {
     // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
     // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
     if (this.corpusWriteAuthority !== undefined) {
-      const decided = await this.corpusWriteAuthority.decide(targets);
+      const decided = await this.corpusWriteAuthority.decide(targets, scopeProof);
       return decided.ok ? undefined : err(decided.error);
     }
     return err(foreignCorpusWriteRefusalError(verdict));
@@ -1265,7 +1274,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc], request.scopeProof);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
@@ -3131,21 +3140,6 @@ export class CorpusService {
           value: parsedPatch.data.extra[violation.key],
         });
       }
-    }
-
-    // Guard: extra.outline (SPEC-080 C1; its writers were retired by BR-985) — STRONGER than the
-    // drop-only guard immediately above: ANY direct patch whose `extra` carries
-    // an "outline" key is rejected outright, even a byte-identical restate of
-    // the doc's current outline (no value-equality escape hatch, unlike the
-    // extra.validity guard below which tolerates a same-value restate). Since slice 3a no verb writes
-    // this field at all: the stored outline is read-only history superseded by the baseline tree.
-    if (parsedPatch.data.extra !== undefined && Object.prototype.hasOwnProperty.call(parsedPatch.data.extra, "outline")) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "extra.outline",
-        message: "extra.outline cannot be changed via `lore set` — outline writes are retired; record the structure with `lore baseline add` instead",
-        value: parsedPatch.data.extra["outline"],
-      });
     }
 
     // Cross-entity phase validation when updating a task's extra.phase (AC-PHASE-3,

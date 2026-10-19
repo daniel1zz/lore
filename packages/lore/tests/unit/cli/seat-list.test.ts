@@ -59,6 +59,9 @@ class FakeListGitPort implements GitPort {
   async isMerged(branch: string): Promise<Result<boolean, LoreError>> {
     return ok(this.mergedByBranch[branch] ?? false);
   }
+  async branchDelete(): Promise<Result<void, LoreError>> {
+    throw new Error("not used by this suite");
+  }
   async countUnmergedCommits(): Promise<Result<number, LoreError>> {
     throw new Error("not used by this suite");
   }
@@ -70,8 +73,8 @@ class FakeListGitPort implements GitPort {
   }
 }
 
-async function alwaysReady(): Promise<SeatReadyReportLike> {
-  return { anchor_conflicts: [] };
+async function alwaysReady(): Promise<Result<SeatReadyReportLike, LoreError>> {
+  return ok({ anchor_conflicts: [] });
 }
 
 function makeSeatService(gitPort: FakeListGitPort): SeatService {
@@ -134,7 +137,9 @@ describe("seat list --json — NEGATIVE", () => {
 describe("seat list --json — BOUNDARY", () => {
   it("excludes a detached-HEAD worktree (branch: null) and a non-seat branch, counting only genuine plan/ seats", async () => {
     const gitPort = new FakeListGitPort();
+    // BR-380: entry 0 is the main checkout and must be on a branch, or merge state is "not measured".
     gitPort.worktreeListResult = ok([
+      { path: "/repo", branch: "main", createdAt: "2026-06-30T00:00:00.000Z" },
       { path: "/repo-detached", branch: null, createdAt: "2026-07-01T00:00:00.000Z" },
       { path: "/repo-feature", branch: "feature/foo", createdAt: "2026-07-02T00:00:00.000Z" },
       { path: "/repo-seat-plan-c", branch: "plan/plan-c", createdAt: "2026-07-03T00:00:00.000Z" },

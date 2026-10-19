@@ -41,7 +41,7 @@ import {
   renderRulesFile,
   renderSkillFile,
 } from "../../../src/service/context-fragments/section.js";
-import { LORE_CONTEXT_VARIABLES } from "../../../src/service/context-variables-registry.js";
+import { LORE_CONTEXT_VARIABLES, configVariableValues } from "../../../src/service/context-variables-registry.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LORE_SRC_ENTRY = join(HERE, "../../../src/index.ts");
@@ -239,8 +239,10 @@ describe("AC-CV-2 fragments without '{{lore:' render byte-identical to the pre-c
     expect(staticMain.map((f) => `${f.frontmatter.id}.md`).sort()).toEqual([...goldens].sort());
 
     for (const source of staticMain) {
-      const expanded = mustExpand([source], "rules:project");
-      const render = renderRulesFile(expanded[0] as Fragment);
+      // reason: worktree-dispatch names the configured floor via {{lore:integrate_floor}}; its golden is the render for a project with none set.
+      const result = expandFragments([source], "rules:project", { invocation: configVariableValues({}, {}, "rules:project") }, LORE_CONTEXT_VARIABLES);
+      if (!result.ok) throw new Error(`expected ok, got ${JSON.stringify(result.error)}`);
+      const render = renderRulesFile(result.value[0] as Fragment);
       expect(render.ok).toBe(true);
       if (!render.ok) continue;
       const golden = readFileSync(join(GOLDEN_DIR, `${source.frontmatter.id}.md`), "utf8");

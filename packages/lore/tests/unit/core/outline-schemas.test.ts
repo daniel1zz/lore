@@ -1,7 +1,6 @@
 /** @spec_ref AC-080-3 */
 import { describe, it, expect } from "vitest";
 import {
-  outlineEntrySchema,
   outlineBudgetSchema,
   createDocInputSchema,
   SPEC_KINDS,
@@ -31,69 +30,6 @@ import {
 // REGRESSION: N/A — new module, nothing pre-existing to regress.
 
 const VALID_PARENT_ID = "01J5X7KZRF4AXRHX9WKE6DVP6P";
-
-describe("outlineEntrySchema (SPEC-080 C1)", () => {
-  const validEntry = {
-    section: "distribution",
-    title: "Distribution & Setup",
-    tier: "core" as const,
-    direction: "Bounded summary of the distribution model — single binary, installer, assets tree.",
-    decision_pointers: ["adr-turso-selection"],
-    constraints: ["Single binary, no external runtime deps"],
-    links: [{ slug: "spec-046-distribution-part-1", rel: "detail" as const }],
-  };
-
-  it("accepts a valid tier='core' entry and preserves all 7 fields", () => {
-    const result = outlineEntrySchema.safeParse(validEntry);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(Object.keys(result.data).sort()).toEqual(
-        ["constraints", "decision_pointers", "direction", "links", "section", "title", "tier"].sort(),
-      );
-      expect(result.data).toEqual(validEntry);
-    }
-  });
-
-  it("accepts tier='domain'", () => {
-    const result = outlineEntrySchema.safeParse({ ...validEntry, tier: "domain" });
-    expect(result.success).toBe(true);
-  });
-
-  it("[negative] rejects an unknown tier value, naming the tier field", () => {
-    const result = outlineEntrySchema.safeParse({ ...validEntry, tier: "bogus" });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((issue) => issue.path.includes("tier"))).toBe(true);
-    }
-  });
-
-  it("accepts each declared links[].rel value (detail | landing-spec | adr)", () => {
-    for (const rel of ["detail", "landing-spec", "adr"] as const) {
-      const result = outlineEntrySchema.safeParse({
-        ...validEntry,
-        links: [{ slug: "spec-046-distribution-part-1", rel }],
-      });
-      expect(result.success).toBe(true);
-    }
-  });
-
-  it("[negative] rejects a links[].rel value outside detail|landing-spec|adr, naming rel", () => {
-    const result = outlineEntrySchema.safeParse({
-      ...validEntry,
-      links: [{ slug: "spec-046-distribution-part-1", rel: "bogus" }],
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((issue) => issue.path.includes("rel"))).toBe(true);
-    }
-  });
-
-  it("[negative] rejects a missing required field (section)", () => {
-    const { section, ...rest } = validEntry;
-    const result = outlineEntrySchema.safeParse(rest);
-    expect(result.success).toBe(false);
-  });
-});
 
 describe("outlineBudgetSchema (SPEC-080 C3)", () => {
   const validBudget = {

@@ -15,16 +15,16 @@
  * Invariants:
  *   - Every char-count comparison is STRICTLY GREATER THAN the budget — a
  *     value exactly at the budget is compliant (SPEC-080 C3 "≤" phrasing).
- *   - `TYPED_SCHEMA_KEYS` (requirements/acceptance_criteria/phases/outline)
+ *   - `TYPED_SCHEMA_KEYS` (requirements/acceptance_criteria/phases)
  *     are NEVER scanned by `scanContentFlight` — those are the corpus's own
- *     proven typed-array shapes (SPEC-055/038/023/080), never free prose.
+ *     proven typed-array shapes (SPEC-055/038/023), never free prose.
  *   - Budget values are ALWAYS read from `input.budget` (falling back to
  *     `DEFAULT_PRD_BUDGET` per-field), never hardcoded into a breach's
  *     comparison — `checkPrdBudget` must reflect a caller-supplied
  *     corpus-governed override, not just the stated defaults.
  *   - RETIRED (Baseline slice 3b, D7): the outline-based per-tier entry cap and the detail-link
- *     presence/resolution check. The outline was retired in slice 3a and is read-only history
- *     (BR-694); a stored `extra.outline` is neither measured nor reported. Per-node size caps
+ *     presence/resolution check. The outline is removed (stored outlines were archived by
+ *     `lore migrate outline-sections`); a leftover `extra.outline` is plain `extra` prose. Per-node size caps
  *     now live in `baseline-node-budget.ts`.
  *
  * Side-effect class: pure
@@ -94,15 +94,14 @@ export interface PrdBudgetCheckResult {
 
 /**
  * `prd.extra` keys holding the corpus's own proven typed-array shapes
- * (SPEC-055 requirements, SPEC-038 acceptance_criteria, SPEC-023 phases,
- * SPEC-080 outline) — never scanned as free prose, no matter how long their
+ * (SPEC-055 requirements, SPEC-038 acceptance_criteria, SPEC-023 phases)
+ * — never scanned as free prose, no matter how long their
  * nested string fields are.
  */
 const TYPED_SCHEMA_KEYS: ReadonlySet<string> = new Set([
   "requirements",
   "acceptance_criteria",
   "phases",
-  "outline",
 ]);
 
 /**

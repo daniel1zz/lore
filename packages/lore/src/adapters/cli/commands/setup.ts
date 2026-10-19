@@ -1245,6 +1245,7 @@ export default defineLoreCommand({
       dryRun: args["dry-run"] === true,
       uninstall: args.uninstall === true,
       project: args.project === true,
+      forceDiverged: args["force-diverged"] === true,
       ...(claudeDirFlag !== undefined ? { claudeDir: claudeDirFlag } : {}),
     });
     if (!validated.ok) {

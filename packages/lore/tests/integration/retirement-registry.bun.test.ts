@@ -18,7 +18,6 @@
  *                   RETIRED_FROM_INSTALL_PATHS membership (derived, no second list)
  *   settings-entry: converge removes the planted `settings.json` hook registrations; the kept
  *                   resume hook and a user-owned entry survive; a second converge changes nothing
- *   cli-command:    exit 4 naming the replacement, nothing written
  *   outlet:         exit 2 naming the outlet as retired
  *   structural:     no lore-gate-g1..g4 hook name is left in shipped or registered places
  *
@@ -94,7 +93,7 @@ describe("RETIREMENTS registry shape", () => {
   });
 
   it("every kind has at least one row (a kind with no rows would be checked vacuously)", () => {
-    for (const kind of ["install-asset", "cli-command", "outlet", "settings-entry"] as const) {
+    for (const kind of ["install-asset", "outlet", "settings-entry"] as const) {
       expect(rowsOf(kind).length, kind).toBeGreaterThan(0);
     }
   });
@@ -306,18 +305,10 @@ describe("settings-entry rows", () => {
   });
 });
 
-// ─── cli-command and outlet ─────────────────────────────────────────────────
+// ─── outlet ─────────────────────────────────────────────────────────────────
 
-/** Argv tail (after the registry target) that makes each retired command a complete invocation. */
-const CLI_PROBE_ARGS: Readonly<Record<string, readonly string[]>> = {
-  "outline set": ["--section", "section-1", "--title", "T", "--tier", "domain", "--direction", "d"],
-  "outline rm": ["section-1"],
-  "outline exempt": ["--reason", "no outline change needed"],
-};
-
-describe("cli-command and outlet rows", () => {
+describe("outlet rows", () => {
   let dir = "";
-  let prdSlug = "";
   const env = (): Record<string, string> => ({ HOME: dir, CLAUDECODE: "1", LORE_ACTOR: "agent:retirement-registry-test" });
   const lore = (args: string[]): RunResult => run(args, dir, env());
 
@@ -332,28 +323,11 @@ describe("cli-command and outlet rows", () => {
     execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
     const init = lore(["init"]);
     if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}${init.stdout}`);
-    const created = lore(["create", "prd", "--title", "Retirement PRD", "--content", "root", "--no-ai"]);
-    const slug = created.stdout.match(/Slug:\s+(\S+)/) ?? created.stdout.match(/Created \w+ (\S+) \(/);
-    if (!slug?.[1]) throw new Error(`no slug in: ${created.stdout}${created.stderr}`);
-    prdSlug = slug[1];
   });
 
   afterAll(() => {
     if (dir !== "") rmSync(dir, { recursive: true, force: true });
   });
-
-  for (const row of rowsOf("cli-command")) {
-    it(`${row.id}: \`lore ${row.target}\` exits 4 naming ${row.replacement}`, () => {
-      const tail = CLI_PROBE_ARGS[row.target];
-      if (tail === undefined) throw new Error(`no CLI_PROBE_ARGS entry for registry target "${row.target}"`);
-      const [verb, sub] = row.target.split(" ") as [string, string];
-      const argv = [verb, sub, prdSlug, ...tail];
-      // `outline rm` takes the section positionally after the slug; the others take flags only.
-      const r = lore(argv);
-      expect(r.exitCode).toBe(4);
-      expect(r.stderr).toContain(row.replacement);
-    });
-  }
 
   for (const row of rowsOf("outlet")) {
     it(`${row.id}: \`render --outlet ${row.target}\` exits 2, names it as retired, prints nothing`, () => {

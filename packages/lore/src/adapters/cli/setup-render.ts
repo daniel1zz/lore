@@ -176,6 +176,12 @@ export function renderInstallReceipt(receipt: SetupReceipt, ctx: SetupRenderCtx)
   lines.push(...renderPathList(receipt.backups, "none"));
   lines.push("");
 
+  if (receipt.removed.length > 0) {
+    lines.push("Removed:");
+    lines.push(...renderPathList(receipt.removed, "none"));
+    lines.push("");
+  }
+
   lines.push(renderMcpLine(receipt.mcp, ctx, "install"));
   lines.push("");
 
@@ -222,6 +228,11 @@ export function renderInstallPlan(plan: InstallPlan, ctx: SetupRenderCtx): strin
   if (plan.removals.length > 0) {
     lines.push("Would remove (no longer declared by the asset payload):");
     lines.push(...renderPathList(plan.removals, "none"));
+    lines.push("");
+  }
+  if (plan.divergedRemovals.length > 0) {
+    lines.push("Would keep (no longer declared, but edited since lore wrote them; --force-diverged backs up then removes):");
+    lines.push(...renderPathList(plan.divergedRemovals, "none"));
     lines.push("");
   }
 

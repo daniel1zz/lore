@@ -26,8 +26,11 @@
  *     crash before the CAS leaves no state that matters; the next call resets it.
  *   - Conflicts are NEVER resolved here: outcome `conflict` names the paths (exit 4); the session resolves in its own
  *     worktree and re-runs.
+ *   - One run at a time per integration worktree: after the worktree exists and before any merge or snapshot the run
+ *     takes the worktree's lease (IntegrationLease: an OS lock tied to the process, so a killed run frees it with no
+ *     cleanup). A second run of the same session gets outcome `busy` (exit 75) naming the holder's pid, branch and start.
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
- *   ledger's files, creation of one worktree directory).
+ *   ledger's files, creation of one worktree directory, the lease).
  *
  * Before anything moves (after the request is validated, before the integration worktree exists):
  *   - a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched first and is
@@ -115,6 +118,28 @@ export interface CorpusSnapshotter {
   readonly remove: (integrationWorktree: string) => Result<void, LoreError>;
 }
 
+/** Who holds an integration worktree's lease: written by the holder once it owns the lock, read by a refused second run. */
+export interface LeaseHolder {
+  readonly pid: number;
+  readonly branch: string;
+  /** ISO-8601 instant the holder started. */
+  readonly started_at: string;
+}
+
+/** `held` = this run owns the lease until `release()`; `busy` = another live run does (`holder` names it; `undefined` = it had not recorded itself yet). */
+export type LeaseGrant =
+  | { readonly kind: "held"; readonly release: () => void }
+  | { readonly kind: "busy"; readonly holder: LeaseHolder | undefined };
+
+/**
+ * The exclusive lease one integration worktree has while a run uses it. The implementation MUST be an OS-level lock
+ * tied to the process (released by the kernel when the process dies, however it dies): a crashed run needs no cleanup.
+ * `lockDir` is a directory belonging to that worktree; `acquire` never blocks.
+ */
+export interface IntegrationLease {
+  readonly acquire: (lockDir: string, holder: LeaseHolder) => Result<LeaseGrant, LoreError>;
+}
+
 /**
  * Records a landing on every task whose claim (current or historical) recorded the landed branch. Resolves to the slugs
  * written. Wired by the CLI to `TaskWorkflowService.recordLanding` (the corpus write route); a failure never un-lands main.
@@ -125,6 +150,10 @@ export interface LandingRecorder {
 
 export interface IntegrateDeps {
   readonly git: IntegrateGit;
+  /** One run at a time per integration worktree: a second run for the same session is refused (outcome `busy`, exit 75). */
+  readonly lease: IntegrationLease;
+  /** The running process's pid, recorded as the lease holder (default `process.pid`). */
+  readonly pid?: number;
   /** Landing records (`extra.landing` on the branch's tasks). Absent in a bare construction: nothing is recorded. */
   readonly landings?: LandingRecorder;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
@@ -180,6 +209,7 @@ export type IntegrateOutcome =
   | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
   | { readonly kind: "floor_failed"; readonly branch: string; readonly attempts: number; readonly exit_status: number; readonly output_tail: string }
   | { readonly kind: "conflict"; readonly branch: string; readonly paths: readonly string[] }
+  | { readonly kind: "busy"; readonly branch: string; readonly worktree: string; readonly holder: LeaseHolder | undefined }
   | {
       readonly kind: "lost_races";
       readonly branch: string;
@@ -201,6 +231,7 @@ export function integrateExitCode(outcome: IntegrateOutcome): number {
     case "conflict":
       return 4;
     case "lost_races":
+    case "busy":
       return INTEGRATE_EXIT_LOST_RACES;
     default: {
       const unreachable: never = outcome;
@@ -240,7 +271,8 @@ export class IntegrateService {
   constructor(private readonly deps: IntegrateDeps) {}
 
   /**
-   * Lands `request.branch` on main, or reports exactly why it did not.
+   * Lands `request.branch` on main, or reports exactly why it did not. While another run of the same session is live
+   * the outcome is `busy` (exit 75, naming the holder), decided before any merge or snapshot.
    *
    * @returns ok(outcome) for every defined outcome (landed, already integrated, floor failed, conflict, lost races —
    *   map with {@link integrateExitCode}); err for a refused request (missing floor key, unknown branch, empty session)
@@ -273,6 +305,23 @@ export class IntegrateService {
     if (!worktree.ok) return worktree;
     const wt = worktree.value;
 
+    // one run at a time per integration worktree: a second run would re-take the corpus snapshot under the first floor
+    const gitDir = git(wt, ["rev-parse", "--path-format=absolute", "--git-dir"]);
+    if (gitDir.status !== 0) return err(gitFailure("locating the git dir of the integration worktree", gitDir));
+    const granted = this.deps.lease.acquire(gitDir.stdout.trim(), { pid: this.deps.pid ?? process.pid, branch: request.branch, started_at: new Date(clock()).toISOString() });
+    if (!granted.ok) return granted;
+    if (granted.value.kind === "busy") return ok({ kind: "busy", branch: request.branch, worktree: wt, holder: granted.value.holder });
+    try {
+      return await this.landOn(request, request.floorCommand, tip, wt);
+    } finally {
+      granted.value.release();
+    }
+  }
+
+  /** The attempt loop, run while this process holds the integration worktree's lease. */
+  private async landOn(request: IntegrateRequest, floorCommand: string, tip: string, wt: string): Promise<Result<IntegrateOutcome, LoreError>> {
+    const { git, projectRoot, ledger, log } = this.deps;
+    const clock = this.deps.clock ?? Date.now;
     const remoteOfBranch = this.remoteOf(request.branch);
     if (!remoteOfBranch.ok) return remoteOfBranch;
     const fromRemote = remoteOfBranch.value !== undefined;
@@ -313,7 +362,7 @@ export class IntegrateService {
       if (!snapshot.ok) return snapshot;
       log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
       const floorStart = clock();
-      const floor = this.deps.runFloor(request.floorCommand, wt);
+      const floor = this.deps.runFloor(floorCommand, wt);
       const floorTotalMs = clock() - floorStart;
       const floorTimings = {
         total_ms: floorTotalMs,

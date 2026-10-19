@@ -160,5 +160,6 @@ export function selectionToLayer(
       ...(language === undefined ? {} : { language }),
       fragments: { disable: selection.disable },
     },
+    ...(configLayer.workflow === undefined ? {} : { workflow: configLayer.workflow }),
   });
 }

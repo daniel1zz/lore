@@ -34,12 +34,14 @@
  * @invariant `remove` refuses to delete an UNMERGED seat branch unless
  *   `opts.force === true` (D4, data-loss guard) — the error names the branch
  *   and the `--force` escape explicitly.
- * @invariant `remove` does not require a live `worktreeList()` registration
- *   to proceed — a merged (or forced) removal still calls
- *   `gitPort.worktreeRemove` even when no matching entry is found (a
- *   corpus/git-state drift edge case); the real `GitPort` implementation is
- *   the one that fails loud on a genuinely nonexistent path, not this
- *   service (see `remove`'s own JSDoc for the exact fallback).
+ * @invariant `remove` REQUIRES a live `worktreeList()` registration: a plan
+ *   with no registered seat is refused (`gate:seat-remove:not-found`), never
+ *   attempted against a guessed path. It then removes the worktree AND the
+ *   branch (`GitPort.branchDelete`). The merge check runs against the main
+ *   checkout's checked-out branch (first `worktreeList()` entry), and `force`
+ *   skips it entirely.
+ * @invariant `enter` refuses any non-plan target (`gate:seat-entry:not-a-plan`)
+ *   before touching git, and a readiness-thunk error propagates as a `Result`.
  *
  * Side-effect class: IO (via the injected `GitPort` + `StoreInterface`; no
  *   direct filesystem or `child_process` access — those live behind the port).
@@ -77,6 +79,12 @@ export interface GitPort {
   worktreeRemove(path: string, force: boolean): Promise<Result<void, LoreError>>;
   isMerged(branch: string, into: string): Promise<Result<boolean, LoreError>>;
   /**
+   * Force-deletes a local branch (`git branch -D`). The caller has already
+   * decided deletion is safe (merge check passed, or `--force`) — `-d` would
+   * wrongly refuse a squash-merged seat branch that `isMerged` accepts.
+   */
+  branchDelete(branch: string): Promise<Result<void, LoreError>>;
+  /**
    * Counts commits reachable from `branch` but not from `into` (git's own
    * `into..branch` range syntax) — the fact `isMerged`'s boolean collapses:
    * a branch with 1 unmerged commit and a branch with 200 both read
@@ -109,7 +117,7 @@ export interface SeatReadyReportLike {
  * so `SeatService` never imports `TaskWorkflowService` directly (no
  * cross-service imports; mirrors `GateDependencies.getPlanBundle`'s shape).
  */
-export type GetReadyReport = (planId: string) => Promise<SeatReadyReportLike>;
+export type GetReadyReport = (planId: string) => Promise<Result<SeatReadyReportLike, LoreError>>;
 
 /** Options for {@link SeatService.enter}. */
 export interface SeatEnterOpts {
@@ -121,11 +129,27 @@ export interface SeatEnterOpts {
 export interface SeatListEntry {
   branch: string;
   created_at: string;
-  merged: boolean;
+  /** `null` = NOT MEASURED: the main checkout has no checked-out branch (detached HEAD), so there is no base to judge against (BR-380). Never a guess. */
+  merged: boolean | null;
 }
 
-/** The base branch every seat is entered from / merged against. Not yet configurable — no PRD mandate for it (mirrors the worktree-path convention's "code, not config" posture). */
-const SEAT_BASE_BRANCH = "main";
+/**
+ * The main checkout's checked-out branch — `git worktree list` always reports
+ * the main working tree FIRST. A detached or missing main entry is an error
+ * (never a silent fallback to a literal `"main"`).
+ */
+function mainCheckoutBranch(worktrees: readonly WorktreeInfo[]): Result<string, LoreError> {
+  const main = worktrees[0];
+  if (main === undefined || main.branch === null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "gate:seat-remove:no-base-branch",
+      message: "Cannot determine the base branch: the main checkout has no checked-out branch (detached HEAD?). Check out a branch in the main checkout and retry.",
+      value: main?.path ?? "",
+    });
+  }
+  return ok(main.branch);
+}
 
 /**
  * Strips a doc slug's own `plan-` type prefix (`{type}-{kebab-title}`,
@@ -143,11 +167,11 @@ function deriveShortPlanSlug(docSlug: string): string {
 }
 
 /** Wraps an underlying `GitPort` failure with the failed step's name, so a caller (and this module's own test suite) can assert which step aborted the sequence without depending on the port implementation's own message wording. */
-function wrapStepError(step: string, underlying: LoreError): LoreError {
+function wrapStepError(verb: "entry" | "remove", step: string, underlying: LoreError): LoreError {
   const underlyingMessage = "message" in underlying ? underlying.message : JSON.stringify(underlying);
   return {
     code: "STORE_ERROR",
-    message: `seat entry step "${step}" failed: ${underlyingMessage}`,
+    message: `seat ${verb} step "${step}" failed: ${underlyingMessage}`,
   };
 }
 
@@ -195,9 +219,17 @@ export class SeatService {
     const planResult = await resolveDoc(this.store, planIdOrSlug);
     if (!planResult.ok) return planResult;
     const plan = planResult.value;
+    if (plan.type !== "plan") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gate:seat-entry:not-a-plan",
+        message: `Seat entry blocked: "${plan.slug}" is a ${plan.type}, not a plan — a seat belongs to a plan. Run \`lore seat <plan-slug>\` with a plan.`,
+        value: plan.slug,
+      });
+    }
 
     const dirtyResult = await this.gitPort.isDirty(opts.mainCwd);
-    if (!dirtyResult.ok) return err(wrapStepError("isDirty", dirtyResult.error));
+    if (!dirtyResult.ok) return err(wrapStepError("entry", "isDirty", dirtyResult.error));
     if (dirtyResult.value) {
       return err({
         code: "VALIDATION_ERROR",
@@ -208,10 +240,11 @@ export class SeatService {
     }
 
     const rebaseResult = await this.gitPort.rebaseFromMain(opts.mainCwd);
-    if (!rebaseResult.ok) return err(wrapStepError("rebaseFromMain", rebaseResult.error));
+    if (!rebaseResult.ok) return err(wrapStepError("entry", "rebaseFromMain", rebaseResult.error));
 
     const readyReport = await this.getReadyReport(plan.id);
-    const readyCheck = assertSeatEntryReady(readyReport);
+    if (!readyReport.ok) return readyReport;
+    const readyCheck = assertSeatEntryReady(readyReport.value);
     if (!readyCheck.ok) return readyCheck;
 
     const shortSlug = deriveShortPlanSlug(plan.slug);
@@ -219,7 +252,7 @@ export class SeatService {
     const path = computeSeatWorktreePath(opts.mainCwd, shortSlug);
 
     const addResult = await this.gitPort.worktreeAdd(path, branch);
-    if (!addResult.ok) return err(wrapStepError("worktreeAdd", addResult.error));
+    if (!addResult.ok) return err(wrapStepError("entry", "worktreeAdd", addResult.error));
 
     return ok({ path, branch });
   }
@@ -228,8 +261,9 @@ export class SeatService {
    * Lists every active seat worktree — the G13 cost counter-metric data
    * surface (SPEC-057 AC-S-7). Filters `worktreeList()` down to entries
    * whose branch is a genuine seat branch (`parseSeatBranch(...) !== null`)
-   * and resolves each one's merge status via `isMerged` against
-   * {@link SEAT_BASE_BRANCH}.
+   * and resolves each one's merge status via `isMerged` against the SAME base
+   * branch `remove` uses ({@link mainCheckoutBranch}). A detached main checkout
+   * yields `merged: null` (not measured) — never a guess, never an error.
    *
    * @returns `ok([])` for a corpus/repo with no active seats — an empty list
    *   is a valid result, never an error.
@@ -238,12 +272,17 @@ export class SeatService {
     const listResult = await this.gitPort.worktreeList();
     if (!listResult.ok) return listResult;
 
+    const base = mainCheckoutBranch(listResult.value);
     const entries: SeatListEntry[] = [];
     for (const worktree of listResult.value) {
       if (worktree.branch === null) continue;
       if (parseSeatBranch(worktree.branch) === null) continue;
 
-      const mergedResult = await this.gitPort.isMerged(worktree.branch, SEAT_BASE_BRANCH);
+      if (!base.ok) {
+        entries.push({ branch: worktree.branch, created_at: worktree.createdAt, merged: null });
+        continue;
+      }
+      const mergedResult = await this.gitPort.isMerged(worktree.branch, base.value);
       if (!mergedResult.ok) return mergedResult;
 
       entries.push({ branch: worktree.branch, created_at: worktree.createdAt, merged: mergedResult.value });
@@ -288,18 +327,15 @@ export class SeatService {
 
   /**
    * Removes a plan's seat worktree + branch. Refuses an UNMERGED branch
-   * unless `opts.force === true` (D4, data-loss guard). Does not require a
-   * `worktreeList()` registration to exist for a merged (or forced) removal
-   * to proceed — when no matching entry is found, `gitPort.worktreeRemove`
-   * is still invoked, with the seat's branch name as a best-effort path
-   * fallback (a corpus/git-state drift edge case; the real `GitPort` is what
-   * fails loud on a genuinely nonexistent path — this service does not mask
-   * that by refusing to attempt the call).
+   * unless `opts.force === true` (D4, data-loss guard); `force` skips the merge
+   * check. A plan with no registered seat worktree is refused as not-found.
+   * Order: worktree removal, then branch deletion.
    *
    * @param planIdOrSlug - The target plan's id or slug.
    * @param opts - `{force?: boolean}` — bypasses the unmerged-branch refusal.
    * @returns `ok(undefined)` on success; `err` naming the branch + `--force`
-   *   escape when unmerged and not forced, or a wrapped `GitPort` failure.
+   *   escape when unmerged and not forced, `gate:seat-remove:not-found` when no
+   *   seat is registered, or a wrapped `GitPort` failure naming its step.
    */
   async remove(planIdOrSlug: string, opts?: { force?: boolean }): Promise<Result<void, LoreError>> {
     const planResult = await resolveDoc(this.store, planIdOrSlug);
@@ -309,30 +345,38 @@ export class SeatService {
     const branch = seatBranchName(deriveShortPlanSlug(plan.slug));
     const force = opts?.force === true;
 
-    const mergedResult = await this.gitPort.isMerged(branch, SEAT_BASE_BRANCH);
-    if (!mergedResult.ok) return err(wrapStepError("isMerged", mergedResult.error));
-
-    if (!mergedResult.value && !force) {
+    const listResult = await this.gitPort.worktreeList();
+    if (!listResult.ok) return err(wrapStepError("remove", "worktreeList", listResult.error));
+    const match = listResult.value.find((w) => w.branch === branch);
+    if (match === undefined) {
       return err({
         code: "VALIDATION_ERROR",
-        field: "gate:seat-remove:unmerged",
-        message: `Refusing to remove seat branch "${branch}" — it has unmerged commits. Re-run with --force to delete it anyway (commits will be LOST).`,
+        field: "gate:seat-remove:not-found",
+        message: `No seat worktree found for plan "${plan.slug}" (expected branch "${branch}") — nothing to remove.`,
         value: branch,
       });
     }
 
-    const listResult = await this.gitPort.worktreeList();
-    if (!listResult.ok) return err(wrapStepError("worktreeList", listResult.error));
-    const match = listResult.value.find((w) => w.branch === branch);
-    // reason: no live git worktree registration matches this seat's branch —
-    // corpus/git-state drift, not this service's job to reconcile. Falling
-    // back to the branch name itself as the "path" keeps the removal
-    // best-effort rather than refusing outright; the real GitPort fails loud
-    // on a path git doesn't recognize (see module JSDoc).
-    const path = match?.path ?? branch;
+    if (!force) {
+      const base = mainCheckoutBranch(listResult.value);
+      if (!base.ok) return base;
+      const mergedResult = await this.gitPort.isMerged(branch, base.value);
+      if (!mergedResult.ok) return err(wrapStepError("remove", "isMerged", mergedResult.error));
+      if (!mergedResult.value) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gate:seat-remove:unmerged",
+          message: `Refusing to remove seat branch "${branch}" — it has unmerged commits. Re-run with --force to delete it anyway (commits will be LOST).`,
+          value: branch,
+        });
+      }
+    }
 
-    const removeResult = await this.gitPort.worktreeRemove(path, force);
-    if (!removeResult.ok) return err(wrapStepError("worktreeRemove", removeResult.error));
+    const removeResult = await this.gitPort.worktreeRemove(match.path, force);
+    if (!removeResult.ok) return err(wrapStepError("remove", "worktreeRemove", removeResult.error));
+
+    const deleteResult = await this.gitPort.branchDelete(branch);
+    if (!deleteResult.ok) return err(wrapStepError("remove", "branchDelete", deleteResult.error));
 
     return ok(undefined);
   }

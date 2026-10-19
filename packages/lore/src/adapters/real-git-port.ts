@@ -791,6 +791,13 @@ export class RealGitPort implements GitPort {
     return ok(undefined);
   }
 
+  async branchDelete(branch: string): Promise<Result<void, LoreError>> {
+    const args = ["branch", "-D", branch];
+    const result = await runGit(this.repoRoot, args);
+    if (result.exitCode !== 0) return err(gitFailure(args, result));
+    return ok(undefined);
+  }
+
   async isMerged(branch: string, into: string): Promise<Result<boolean, LoreError>> {
     const ancestorArgs = ["merge-base", "--is-ancestor", branch, into];
     const ancestorResult = await runGit(this.repoRoot, ancestorArgs);

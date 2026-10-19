@@ -13,15 +13,16 @@
  *     copies every set member into the npm staging dir and a deleted file would break it.
  *     `still_shipped: false` means the file was deleted from `assets/`; the row exists so
  *     the converge test can prove a tracked copy on an old machine is removed.
- *   - `cli-command` targets are space-joined argv prefixes (`outline set`); `outlet`
- *     targets are the outlet id (`hook:session-start`); `settings-entry` targets are
+ *   - `outlet` targets are the outlet id (`hook:session-start`); `settings-entry` targets are
  *     `<Event>:<hook file name>` of a retired hook registration in `settings.json`.
+ *   - There is no `cli-command` kind: a removed command is simply unknown to the CLI (its ordinary
+ *     unknown-command refusal), never kept registered to refuse itself.
  * Side-effect class: pure (constants only).
  *
  * @spec_ref spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-9
  */
 
-export type RetirementKind = "install-asset" | "cli-command" | "outlet" | "settings-entry";
+export type RetirementKind = "install-asset" | "outlet" | "settings-entry";
 
 /** One retired surface. */
 export interface Retirement {
@@ -95,27 +96,6 @@ export const RETIREMENTS: readonly Retirement[] = [
     target: "SessionStart:session-start-fragments.mjs",
     replacement: "SessionStart:session-start-resume.mjs",
     spec_ref: "AC-UR-5",
-  },
-  {
-    id: "cli-outline-set",
-    kind: "cli-command",
-    target: "outline set",
-    replacement: "lore baseline add",
-    spec_ref: "AC-BLS3-6",
-  },
-  {
-    id: "cli-outline-rm",
-    kind: "cli-command",
-    target: "outline rm",
-    replacement: "lore baseline add",
-    spec_ref: "AC-BLS3-6",
-  },
-  {
-    id: "cli-outline-exempt",
-    kind: "cli-command",
-    target: "outline exempt",
-    replacement: "lore baseline add",
-    spec_ref: "AC-BLS3-6",
   },
   {
     id: "outlet-hook-session-start",

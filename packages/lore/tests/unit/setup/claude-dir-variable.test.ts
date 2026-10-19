@@ -5,9 +5,11 @@
  * AC-CV-7 RED scenarios — the settings-hook claude dir is an invocation
  * variable `{{lore:claude_dir}}` resolved through expandTemplate (spec D7).
  *
- * (a) REGRESSION: a fresh spawned `lore setup` writes a settings.json that is
- *     byte-identical to the golden captured from the PRE-change code (after
- *     normalising the absolute `<HOME>/.claude` path to `<CLAUDE_DIR>`).
+ * (a) REGRESSION: a fresh spawned `lore setup` renders every hook command the
+ *     PRE-change golden recorded byte-identically (after normalising the
+ *     absolute `<HOME>/.claude` path to `<CLAUDE_DIR>`). The oracle is the
+ *     rendered command paths, not the whole settings file, so adding a hook
+ *     does not break it; a hook that renders differently (or vanishes) does.
  * (b) NEGATIVE: the legacy `{{CLAUDE_DIR}}` token survives in no shipped file.
  * (c) HAPPY: the shipped settings-hook asset carries `{{lore:claude_dir}}`.
  */
@@ -53,16 +55,48 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
+/** Every `command` string anywhere in a settings document, in document order. */
+function collectCommands(node: unknown, out: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const v of node) collectCommands(v, out);
+  } else if (node !== null && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "command" && typeof v === "string") out.push(v);
+      else collectCommands(v, out);
+    }
+  }
+  return out;
+}
+
+/** Golden commands that the rendered (normalised) settings fails to carry verbatim. */
+function missingGoldenCommands(renderedNormalised: string, golden: string): string[] {
+  const rendered = new Set(collectCommands(JSON.parse(renderedNormalised)));
+  return [...new Set(collectCommands(JSON.parse(golden)))].filter((c) => !rendered.has(c));
+}
+
 describe("AC-CV-7 claude_dir invocation variable", () => {
-  it("AC-CV-7 (a) fresh setup settings.json equals the pre-change golden after <CLAUDE_DIR> normalisation", () => {
+  it("AC-CV-7 (a) fresh setup renders every pre-change golden hook command identically after <CLAUDE_DIR> normalisation", () => {
     const { claudeDir, settings, status, log } = spawnSetupInFreshHome();
     expect(status, log).toBe(0);
     const golden = readFileSync(FIXTURE, "utf8");
-    expect(settings.split(claudeDir).join("<CLAUDE_DIR>")).toBe(golden);
+    const normalised = settings.split(claudeDir).join("<CLAUDE_DIR>");
+    expect(missingGoldenCommands(normalised, golden)).toEqual([]);
+    // every rendered hook command (including hooks added after the golden) resolves the variable
+    for (const c of collectCommands(JSON.parse(normalised))) expect(c).toMatch(/^node <CLAUDE_DIR>\/hooks\/\S+\.mjs/);
     // the golden itself must be normalised (guards against a self-referential fixture)
     expect(golden).toContain("<CLAUDE_DIR>/hooks/");
     expect(golden).not.toContain("{{");
   }, 150_000);
+
+  it("AC-CV-7 (a) falsifier: a command rendered differently from the golden, or a dropped one, is reported", () => {
+    const golden = readFileSync(FIXTURE, "utf8");
+    expect(missingGoldenCommands(golden, golden)).toEqual([]);
+    const drifted = golden.replaceAll(
+      "node <CLAUDE_DIR>/hooks/pre-tool-harness-run.mjs",
+      "node /elsewhere/hooks/pre-tool-harness-run.mjs",
+    );
+    expect(missingGoldenCommands(drifted, golden)).toEqual(["node <CLAUDE_DIR>/hooks/pre-tool-harness-run.mjs"]);
+  });
 
   it("AC-CV-7 (b) no file under assets/ or packages/*/src contains the legacy {{CLAUDE_DIR}} token", () => {
     const roots = [join(REPO_ROOT, "assets")];

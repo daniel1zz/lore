@@ -320,7 +320,7 @@ describe("lore setup --check — STATE (zero-write invariant)", () => {
 // ─── REGRESSION ─────────────────────────────────────────────────────────────
 
 describe("lore setup --check — REGRESSION", () => {
-  it("AC-076-2.R1: --json's files object carries exactly the four documented buckets (no leaked sync list)", () => {
+  it("AC-076-2.R1: --json's files object carries exactly the five documented buckets (no leaked sync list)", () => {
     const scratch = makeScratchDir("lore-setup-check-shape-");
     const targetDir = join(scratch, ".claude");
     seedConvergedTarget(scratch, targetDir);
@@ -328,7 +328,7 @@ describe("lore setup --check — REGRESSION", () => {
     const result = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch);
     const payload = JSON.parse(result.stdout);
 
-    expect(Object.keys(payload.data.files).sort()).toEqual(["diverged", "missing", "orphaned", "outdated"]);
+    expect(Object.keys(payload.data.files).sort()).toEqual(["diverged", "missing", "orphaned", "outdated", "retired"]);
     // `installed_binary_version`/`installed_at` are OPTIONAL on `SetupCheckReport` (absent
     // when the installed manifest doesn't carry them, e.g. a pre-SPEC-076 manifest) but ARE
     // now populated (SPEC-076 T5, task-skill-implement-t5-converge-hardening-diverged-skip-force)

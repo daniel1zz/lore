@@ -17,6 +17,11 @@ export interface DedicatedExtraKey {
   readonly key: string;
   /** Human-readable writer verb(s), quoted verbatim in the service-layer refusal. */
   readonly writer: string;
+  /**
+   * When set, the key is guarded only on docs whose `extra.sub_type` equals this value
+   * (a knowledge doc's `uat` key is the verdict; other sub_types may use `uat` freely).
+   */
+  readonly subType?: string;
 }
 
 /**
@@ -36,4 +41,7 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
     { key: "commands", writer: "lore baseline map --command" },
   ],
   spec: [{ key: "rule_changes", writer: "lore rule propose" }],
+  // reason: DC2-8 — a recorded UAT verdict is writer-owned evidence; `lore set` replaces `extra`
+  // wholesale, so without this entry a `lore_set` could flip `extra.uat.verdict` on every route.
+  knowledge: [{ key: "uat", writer: "lore uat record", subType: "uat" }],
 };
