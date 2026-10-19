@@ -1,29 +1,18 @@
 // @vitest-environment jsdom
 /**
- * @layer dashboard-component AC-ICL-9 (IssuesList; the AC's oracle is the Playwright issues-resolution spec)
- * @spec_ref SPEC-078 T13 dispatch deliverable, AC-078-7/AC-078-8
+ * @layer dashboard-component AC-GS-14 (IssuesList on the live join)
+ * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries T9; SPEC-078 AC-078-7/AC-078-8
  *
- * Tests for `IssuesList` (`components/IssuesList.tsx`) — the SPEC-074 issues
- * triage list body. Unlike `ExecutionPage`/`IssueDetail`/`TriageQueue`,
- * `IssuesList` takes NO explicit `project` prop: it reads the shared
- * `useIssueReportsQuery()` hook (`lib/issue-reports-query.ts`), which calls
- * `useProjectParam()` (`project-api.ts`) internally — a route-agnostic hook
- * that resolves the active project straight from the router's live pathname.
- * That means `IssuesList` already resolves the correct project scope under
- * `routes/p.$name.issues.tsx` with ZERO code changes of its own; these tests
- * exist to pin that "already works" claim down as an oracle, the same way
- * `ProjectSwitcher.test.tsx` pins `useProjectParam()`'s pathname parsing.
- * (No prior test file existed for this component before this task.)
+ * Tests for `IssuesList` (`components/IssuesList.tsx`), which reads the shared `useIssueReportsQuery()` hook
+ * (project resolved from the router pathname) and renders one row per GitHub-listed issue.
  *
- * Test plan (six-dimension coverage, scoped to project threading — row
- * rendering/empty/error states are SPEC-074's own already-covered concern by
- * construction; this file exists to pin the T13 project-scoping claim):
- *   HAPPY — registry-less pathname ("/issues"): `apiGetIssueReports` called
- *     with `null`, cache key carries no project segment.
- *   STATE (project scoping) — `/p/acme/issues` pathname: `apiGetIssueReports`
- *     called with `"acme"`, cache key carries the `project:acme` segment.
- *   REGRESSION — clicking a row still calls `onNavigate` with the report id
- *     regardless of which pathname (registry-less or project-scoped) mounted it.
+ *   HAPPY — registry-less pathname: `apiGetIssueReports(null)`, key without a project segment.
+ *   STATE (project scoping) — `/p/acme/issues`: `apiGetIssueReports("acme")`, key with `project:acme`.
+ *   REGRESSION — clicking a row calls `onNavigate` with the issue NUMBER as a string.
+ *   STATE — the badge shows the row's derived status, including an anomaly status.
+ *   ERROR — a 401 renders the `gh auth login` hint and NO list items (AC-GS-14); 429 / 503 / other
+ *     failures render an error, never the empty-list text.
+ *   BOUNDARY — an empty listing renders the labeled empty state.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -34,13 +23,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockUseRouterState = vi.fn();
 vi.mock("@tanstack/react-router", async (importOriginal) => {
-  // reason: same seam as `SearchPageBody.test.tsx` — only `useRouterState`
-  // (what `useProjectParam()` reads) needs mocking; `IssuesList` itself
-  // never calls `createFileRoute`, but its dependency chain
-  // (`issue-reports-query.ts` -> `project-api.ts`) imports the real module,
-  // so a full replace (rather than `importOriginal` passthrough) would still
-  // work here — using the SAME pattern as the other T13 test files for
-  // consistency.
+  // reason: only `useRouterState` (what `useProjectParam()` reads) needs mocking.
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
   return {
     ...actual,
@@ -54,10 +37,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return { ...actual, apiGetIssueReports: vi.fn() };
 });
 
-import { apiGetIssueReports } from "@/lib/api";
+import { ApiError, apiGetIssueReports } from "@/lib/api";
 import { IssuesList } from "@/components/IssuesList";
 
 const mockedApiGetIssueReports = vi.mocked(apiGetIssueReports);
+
+const SPEC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries";
 
 function renderList(onNavigate: (id: string) => void = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -73,99 +58,87 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockedApiGetIssueReports.mockResolvedValue({
     open_count: 1,
-    rows: [
-      {
-        id: "01HISSUE0000000000000000001",
-        slug: "task-issue",
-        title: "Bug report",
-        reporter_project: "acme-agent",
-        reporter_actor: "agent:x",
-        lore_version: "1.0.0",
-        reported_at: "2026-07-01T00:00:00Z",
-        possible_duplicates: [],
-        status: "in-review",
-        resolution: "open",
-      },
-    ],
+    rows: [{ number: 12, title: "Bug report", state: "open", status: "open", carrier: null, carriers: [] }],
   });
 });
 
-describe("IssuesList (SPEC-078 T13)", () => {
-  describe("happy path — registry-less mode", () => {
-    it("calls apiGetIssueReports with null and keys the query without a project segment", async () => {
-      mockUseRouterState.mockReturnValue("/issues");
-      const { client } = renderList();
+describe("IssuesList (live join)", () => {
+  it("HAPPY: calls apiGetIssueReports with null and keys the query without a project segment", async () => {
+    mockUseRouterState.mockReturnValue("/issues");
+    const { client } = renderList();
 
-      await screen.findByText("Bug report");
+    await screen.findByText("Bug report");
 
-      expect(mockedApiGetIssueReports).toHaveBeenCalledWith(null);
-      const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
-      expect(keys).toContainEqual(["issue-reports"]);
-    });
+    expect(mockedApiGetIssueReports).toHaveBeenCalledWith(null);
+    expect(client.getQueryCache().getAll().map((q) => q.queryKey)).toContainEqual(["issue-reports"]);
   });
 
-  describe("state — project scoping (AC-078-8)", () => {
-    it("calls apiGetIssueReports with the resolved project and keys the query with a project segment", async () => {
-      mockUseRouterState.mockReturnValue("/p/acme/issues");
-      const { client } = renderList();
+  it("STATE: a project-scoped pathname scopes the fetch and the cache key", async () => {
+    mockUseRouterState.mockReturnValue("/p/acme/issues");
+    const { client } = renderList();
 
-      await screen.findByText("Bug report");
+    await screen.findByText("Bug report");
 
-      await waitFor(() => expect(mockedApiGetIssueReports).toHaveBeenCalledWith("acme"));
-      const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
-      expect(keys).toContainEqual(["project:acme", "issue-reports"]);
-    });
+    await waitFor(() => expect(mockedApiGetIssueReports).toHaveBeenCalledWith("acme"));
+    expect(client.getQueryCache().getAll().map((q) => q.queryKey)).toContainEqual(["project:acme", "issue-reports"]);
   });
 
-  describe("regression — row navigation unaffected by project scoping", () => {
-    it("calls onNavigate with the report id when a row is clicked under a project-scoped pathname", async () => {
-      mockUseRouterState.mockReturnValue("/p/acme/issues");
-      const onNavigate = vi.fn();
-      const user = userEvent.setup();
-      renderList(onNavigate);
+  it("REGRESSION: clicking a row calls onNavigate with the issue number as a string", async () => {
+    mockUseRouterState.mockReturnValue("/p/acme/issues");
+    const onNavigate = vi.fn();
+    const user = userEvent.setup();
+    renderList(onNavigate);
 
-      await user.click(await screen.findByTestId("issue-report-row"));
+    await user.click(await screen.findByTestId("issue-report-row"));
 
-      expect(onNavigate).toHaveBeenCalledWith("01HISSUE0000000000000000001");
-    });
+    expect(onNavigate).toHaveBeenCalledWith("12");
   });
 
-  describe("D8 resolution rendering (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9)", () => {
-    it("renders the row's computed resolution, not its raw status", async () => {
-      mockUseRouterState.mockReturnValue("/issues");
-      renderList();
-
-      const badge = await screen.findByTestId("issue-report-resolution");
-      expect(badge).toHaveTextContent("open");
-      // reason: the row's `status` ("in-review", see beforeEach fixture) and
-      // its `resolution` ("open") are DIFFERENT fields — this pins that the
-      // component renders `resolution`, never falls back to `status`.
-      expect(badge).not.toHaveTextContent("in-review");
+  it("STATE: the badge shows the derived status, including an anomaly status", async () => {
+    mockedApiGetIssueReports.mockResolvedValue({
+      open_count: 0,
+      rows: [
+        { number: 3, title: "Pending close", state: "open", status: "fixed (close pending)", carrier: "task-x", carriers: ["task-x"] },
+      ],
     });
+    mockUseRouterState.mockReturnValue("/issues");
+    renderList();
 
-    it("STATE: an unclosed escalation (status stays draft, resolution is fixed) renders 'fixed', not 'draft'", async () => {
-      mockedApiGetIssueReports.mockResolvedValue({
-        open_count: 0,
-        rows: [
-          {
-            id: "01HISSUE0000000000000000002",
-            slug: "task-escalation",
-            title: "Unclosed escalation",
-            reporter_project: "acme-agent",
-            reporter_actor: "agent:x",
-            lore_version: "1.0.0",
-            reported_at: "2026-07-02T00:00:00Z",
-            possible_duplicates: [],
-            status: "draft",
-            resolution: "fixed",
-          },
-        ],
-      });
-      mockUseRouterState.mockReturnValue("/issues");
-      renderList();
+    expect(await screen.findByTestId("issue-report-resolution")).toHaveTextContent("fixed (close pending)");
+    expect(screen.getByText("carried by task-x")).toBeInTheDocument();
+  });
 
-      const badge = await screen.findByTestId("issue-report-resolution");
-      expect(badge).toHaveTextContent("fixed");
-    });
+  it("BOUNDARY: an empty listing renders the labeled empty state", async () => {
+    mockedApiGetIssueReports.mockResolvedValue({ open_count: 0, rows: [] });
+    mockUseRouterState.mockReturnValue("/issues");
+    renderList();
+
+    expect(await screen.findByText("GitHub lists no issues.")).toBeInTheDocument();
+  });
+
+  it(`${SPEC}#AC-GS-14 ERROR: a 401 renders the gh auth login hint and no list items`, async () => {
+    mockedApiGetIssueReports.mockRejectedValue(new ApiError(401, "AUTH_REQUIRED", "run gh auth login"));
+    mockUseRouterState.mockReturnValue("/issues");
+    renderList();
+
+    const state = await screen.findByTestId("issues-auth-required");
+    expect(state).toHaveTextContent("gh auth login");
+    expect(screen.queryAllByTestId("issue-report-row")).toHaveLength(0);
+    expect(screen.queryByText("GitHub lists no issues.")).not.toBeInTheDocument();
+  });
+
+  it("ERROR: 429 and 503 render an error, never the empty-list text", async () => {
+    mockUseRouterState.mockReturnValue("/issues");
+    for (const [status, code, fragment] of [
+      [429, "RATE_LIMITED", "rate limit"],
+      [503, "TRANSPORT_UNAVAILABLE", "could not be reached"],
+    ] as const) {
+      mockedApiGetIssueReports.mockRejectedValue(new ApiError(status, code, "gh failed"));
+      const { unmount } = renderList();
+      expect(await screen.findByRole("alert")).toHaveTextContent(fragment);
+      expect(screen.queryAllByTestId("issue-report-row")).toHaveLength(0);
+      expect(screen.queryByText("GitHub lists no issues.")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });

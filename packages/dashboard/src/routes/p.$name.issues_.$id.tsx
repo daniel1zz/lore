@@ -16,7 +16,7 @@
  * Source: SPEC-078 T13 dispatch deliverable
  */
 
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { IssueDetail } from "@/components/IssueDetail";
 
 export const Route = createFileRoute("/p/$name/issues_/$id")({
@@ -25,11 +25,5 @@ export const Route = createFileRoute("/p/$name/issues_/$id")({
 
 function ProjectIssueDetailPage(): React.ReactElement {
   const { name, id } = Route.useParams();
-  const navigate = useNavigate();
-
-  function handleAdjudicated(): void {
-    void navigate({ to: "/p/$name/issues", params: { name } });
-  }
-
-  return <IssueDetail reportId={id} project={name} onAdjudicated={handleAdjudicated} />;
+  return <IssueDetail issueNumber={id} project={name} />;
 }
