@@ -53,10 +53,11 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
-import { NON_BUSINESS_PREFIX, computeLeafCoverage } from "../../../service/leaf-coverage.js";
+import { NON_BUSINESS_PREFIX, commandFixCommand, computeLeafCoverage, computeUndeclaredCommands, siteFixCommand } from "../../../service/leaf-coverage.js";
+import { listRunnableCommands } from "../runnable-commands.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
@@ -250,6 +251,8 @@ interface LeafCoverageReport {
   /** Imports the census could not resolve; non-empty means the site list is a lower bound and the leaf is NOT complete. */
   unresolved_imports: string[];
   bootstrap: string[];
+  /** One fix command per entry of `gaps` then `not_measured`, in that order: how to account for that (site, leaf) pair. */
+  fix_commands: string[];
   ok: boolean;
 }
 
@@ -311,21 +314,43 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         not_measured: verdict.notMeasured,
         unresolved_imports: verdict.unresolvedImports ?? [],
         bootstrap: [...bootstrapByKey.keys()].sort(),
+        fix_commands: [...verdict.gaps, ...verdict.notMeasured].map((key) => siteFixCommand(leaf.slug, key)),
         ok: commands.length > 0 && verdict.ok,
       };
     });
-    const ok = reports.length > 0 && reports.every((r) => r.ok);
+    // reason: complete coverage is absolute at the root (BR-660): a runnable command declared by no leaf is never
+    // censused, so the root is incomplete however clean every leaf is. Only the root asks; a leaf or branch judges its own commands.
+    const undeclared =
+      resolved.value.extra["node"] === "root"
+        ? computeUndeclaredCommands(
+            await listRunnableCommands(rootDir),
+            new Set(
+              leaves
+                .flatMap(leafCommands)
+                .map((command) => resolveCommandEntry({ rootDir, command }))
+                .map((entry) => `${entry.file}#${entry.symbol}`),
+            ),
+          )
+        : [];
+    const ok = reports.length > 0 && reports.every((r) => r.ok) && undeclared.length === 0;
     if (json) {
-      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { target: resolved.value.slug, complete: ok, leaves: reports } }, null, 2));
+      const undeclaredCommands = undeclared.map((command) => ({ command, fix: commandFixCommand(command) }));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { target: resolved.value.slug, complete: ok, leaves: reports, undeclared_commands: undeclaredCommands } }, null, 2));
     } else {
       if (reports.length === 0) printLine(inv.io.stdout, `${resolved.value.slug}: no leaves under this node.`);
       for (const r of reports) {
         const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
         printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
-        for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}`);
-        for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}`);
+        for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
+        for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
         for (const key of r.bootstrap) printLine(inv.io.stdout, `  bootstrap    ${key}`);
+      }
+      const incomplete = reports.filter((r) => !r.ok).map((r) => r.slug);
+      if (incomplete.length > 0) printLine(inv.io.stdout, `incomplete leaves (${incomplete.length}): ${incomplete.join(", ")}`);
+      if (undeclared.length > 0) {
+        printLine(inv.io.stdout, `undeclared commands (${undeclared.length}): runnable commands no leaf declares, so none of their sites are censused`);
+        for (const command of undeclared) printLine(inv.io.stdout, `  undeclared   ${command}\n    fix: ${commandFixCommand(command)}`);
       }
     }
     if (!ok) return 1;

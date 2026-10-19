@@ -38,6 +38,31 @@ export interface LeafCoverage {
   readonly ok: boolean;
 }
 
+/** The command that accounts for one unaccounted (site, leaf) pair: map the site to a live rule or justify it. */
+export function siteFixCommand(leafSlug: string, siteKey: string): string {
+  return `lore baseline map ${leafSlug} --site ${siteKey} --rule <BR-n> | --non-business <reason>`;
+}
+
+/** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
+export function commandFixCommand(command: string): string {
+  return `lore baseline map <leaf> --command ${/\s/.test(command) ? `"${command}"` : command}`;
+}
+
+/**
+ * Runnable commands no leaf declares (BR-660: root coverage is absolute, so a command nobody declares is unmeasured).
+ * Commands compare by census entry, so `ac-add` and `ac add` are the same command.
+ *
+ * @param runnable - registry commands (`name` + census `entry`).
+ * @param declaredEntries - `file#symbol` of every command any leaf declares.
+ * @returns the names of the undeclared commands, in `runnable` order.
+ */
+export function computeUndeclaredCommands(
+  runnable: readonly { name: string; entry: { file: string; symbol: string } }[],
+  declaredEntries: ReadonlySet<string>,
+): string[] {
+  return runnable.filter((c) => !declaredEntries.has(`${c.entry.file}#${c.entry.symbol}`)).map((c) => c.name);
+}
+
 function isAccountedFor(
   entries: readonly string[] | undefined,
   live: ReadonlySet<string>,
