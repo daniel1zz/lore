@@ -1,7 +1,7 @@
 /**
- * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries#AC-GS-8
  * @task task-skill-refactor-gs-t4-close-on-archive-keyed-on-carriers
  *
+ * Unit companion of the carrier-close oracle (owned by integration/cli/issue-close-on-archive-carrier.bun.test.ts).
  * The post-archive step closes every GitHub issue a just-archived CARRIER names in `extra.issues`.
  * Real services over InMemoryStore + a RECORDING FAKE `IssueCloser` — nothing here can reach GitHub.
  *   HAPPY:      plan close, `lore done`, archive sweep and the plan-close cascade each close ALL named issues.
@@ -156,7 +156,7 @@ async function passEvidence(w: World, taskId: string): Promise<void> {
 
 const FIXED_COMMENT = (n: number, type: string, slug: string): string => `comment:${n}:Fixed by ${type} ${slug} (archived 2026-10-12)`;
 
-describe("AC-GS-8 (a): archiving a plan carrier closes EVERY named issue", () => {
+describe("carrier close (a): archiving a plan carrier closes EVERY named issue", () => {
   it("three issues: close, then comment naming the plan, then label resolution:fixed — for each, in declared order", async () => {
     const w = await buildWorld();
     const plan = await createPlan(w, "Fix three", [11, 12, 13]);
@@ -180,7 +180,7 @@ describe("AC-GS-8 (a): archiving a plan carrier closes EVERY named issue", () =>
   });
 });
 
-describe("AC-GS-8 (b): every archive path reaches the step", () => {
+describe("carrier close (b): every archive path reaches the step", () => {
   it("TaskWorkflowService.done on a task carrier closes all its issues", async () => {
     const w = await buildWorld();
     const plan = await createPlan(w, "Plan for done");
@@ -220,7 +220,7 @@ describe("AC-GS-8 (b): every archive path reaches the step", () => {
   });
 });
 
-describe("AC-GS-8 (c): an issue already closed with a verdict is skipped, and only that issue", () => {
+describe("carrier close (c): an issue already closed with a verdict is skipped, and only that issue", () => {
   it("not_planned + resolution:rejected: no write at all, a stdout line says closed as rejected; the others still close", async () => {
     const w = await buildWorld();
     w.closer.seed(13, { state: "closed", stateReason: "not_planned", labels: ["resolution:rejected"] });
@@ -264,7 +264,7 @@ describe("AC-GS-8 (c): an issue already closed with a verdict is skipped, and on
   });
 });
 
-describe("AC-GS-8 (d): GitHub failures never undo the archive and never stop the next issue", () => {
+describe("carrier close (d): GitHub failures never undo the archive and never stop the next issue", () => {
   it("a failed close on #12: archive kept, ONE audit row naming #12, #11 and #13 still closed", async () => {
     const w = await buildWorld();
     w.closer.closeError.set(12, transportError("error connecting to api.github.com"));
@@ -322,7 +322,7 @@ describe("AC-GS-8 (d): GitHub failures never undo the archive and never stop the
   });
 });
 
-describe("AC-GS-8 (e): no carrier, no closer, no repo", () => {
+describe("carrier close (e): no carrier, no closer, no repo", () => {
   it("a task and a plan without extra.issues make no GitHub call and return no line", async () => {
     const w = await buildWorld();
     const plan = await createPlan(w, "Plain plan");
@@ -379,7 +379,7 @@ describe("AC-GS-8 (e): no carrier, no closer, no repo", () => {
   });
 });
 
-describe("AC-GS-8 REGRESSION: an App without the port behaves as before", () => {
+describe("carrier close REGRESSION: an App without the port behaves as before", () => {
   it("a bare CorpusService archives a plan carrier with no issueClose field", async () => {
     const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
