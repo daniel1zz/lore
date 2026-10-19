@@ -1364,8 +1364,11 @@ export function recordInProjectLedger(
   if (!next.success) {
     return err({ code: "VALIDATION_ERROR", field: "manifest", message: `updated project install ledger failed schema validation: ${next.error.message}`, value: ledgerPath });
   }
+  const nextRaw = `${JSON.stringify(next.data, null, 2)}\n`;
+  // reason: a re-run that changes nothing must write nothing (BR idempotent re-run: zero writer calls).
+  if (nextRaw === raw) return ok(undefined);
   try {
-    fs.writeFile(ledgerPath, `${JSON.stringify(next.data, null, 2)}\n`, 0o644);
+    fs.writeFile(ledgerPath, nextRaw, 0o644);
   } catch (cause) {
     return err({ code: "STORE_ERROR", message: `writing the project install ledger "${ledgerPath}" failed: ${toMessage(cause)}`, ...(cause instanceof Error ? { cause } : {}) });
   }
