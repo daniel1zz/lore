@@ -455,7 +455,7 @@ export function deriveCommitSetForPlan(
   cwd: string,
   taskSlugs: string[],
   allTasksArchived: boolean,
-  recordedRanges: ReadonlyMap<string, RecordedRange>,
+  recordedRanges: ReadonlyMap<string, RecordedRange | { not_measured: string }>,
 ): CommitDerivationResult {
   const warnings: string[] = [];
   const matchedBySha = new Map<string, { subject: string; taskSlugs: Set<string> }>();
@@ -467,7 +467,17 @@ export function deriveCommitSetForPlan(
   let excludedMergedCommitCount = 0;
 
   for (const slug of taskSlugs) {
-    const recorded = recordedRanges.get(slug);
+    const entry = recordedRanges.get(slug);
+    if (entry !== undefined && "not_measured" in entry) {
+      // reason: `lore done` tried to find the landing and could not (or the claim held no work): the range is NOT
+      // measured, and is shown as such — never replaced by a diff of a claim worktree or a slug guess.
+      warnings.push(`${slug}: commit range not measured: ${entry.not_measured}`);
+      tasksWithoutCommits.push(slug);
+      tasksNotMeasured.push(slug);
+      attribution[slug] = "not_measured";
+      continue;
+    }
+    const recorded = entry;
     let resolvedRange = recorded === undefined ? undefined : resolveRecordedRange(cwd, slug, recorded, warnings);
     if (recorded?.worktree !== undefined && (resolvedRange === undefined || resolvedRange.commits.length === 0)) {
       // reason: no landing record and the claim's range holds no own commit — backfill from the `merge(<branch>)`

@@ -41,11 +41,15 @@ export const recordedCommitRangeSchema = z.discriminatedUnion("state", [
     worktree: z.string().min(1),
     /** Landing-derived ranges only: the commit that moved main (the merge commit, or the tip on a fast-forward). */
     landing_commit: z.string().min(1).optional(),
+    /** Claim-derived ranges only: why no landing was found (the claim's own range was kept, loudly). */
+    landing_unresolved: z.string().min(1).optional(),
     recorded_at: z.string().min(1),
   }),
   z.object({
     state: z.literal("not-measured"),
     reason: z.string().min(1),
+    /** Branch/worktree names the claims recorded and the landing lookup tried. */
+    candidates: z.array(z.string().min(1)).optional(),
     recorded_at: z.string().min(1),
   }),
 ]);
@@ -77,6 +81,22 @@ export function readTaskLanding(extra: Record<string, unknown> | undefined): Tas
   if (raw === undefined) return undefined;
   const parsed = taskLandingSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The one line `lore done` prints on stderr (and assess shows) when a task's range is not landing-derived:
+ * `commit range not measured: <reason>` for a not-measured range, or the claim's range kept with the landing unresolved.
+ * `undefined` for a landing-derived or plainly measured range.
+ */
+export function commitRangeNote(extra: Record<string, unknown> | undefined): string | undefined {
+  const raw = extra?.["commit_range"];
+  const parsed = recordedCommitRangeSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  if (parsed.data.state === "not-measured") return `commit range not measured: ${parsed.data.reason}`;
+  if (parsed.data.landing_unresolved !== undefined) {
+    return `commit range taken from the claim on ${parsed.data.worktree}; no landing found: ${parsed.data.landing_unresolved}`;
+  }
+  return undefined;
 }
 
 /** The recorded range a landing implies: the branch head over main-before, naming the landing commit. */
@@ -119,19 +139,28 @@ export function findLandingInMainLog(logText: string, branch: string): LandingFa
 /** A usable range: only the `recorded` shape carries commits. */
 export type MeasuredCommitRange = Extract<TaskCommitRange, { state: "recorded" }>;
 
+/** What assess gets per task: a usable range (+ branch hint), or the reason the range is not measured. */
+export type CollectedRange = { base?: string; head: string; worktree?: string } | { not_measured: string };
+
 /**
  * slug -> usable range for every task that has one (tasks done before this feature, or recorded
  * `not-measured`, are simply absent — the assess derivation then falls back to the slug search).
  */
 export function collectRecordedRanges(
   tasks: ReadonlyArray<{ slug: string; extra?: Record<string, unknown> | undefined }>,
-): Map<string, { base?: string; head: string; worktree?: string }> {
-  const ranges = new Map<string, { base?: string; head: string; worktree?: string }>();
+): Map<string, CollectedRange> {
+  const ranges = new Map<string, CollectedRange>();
   for (const task of tasks) {
     // reason: the landing record outranks `commit_range` — a later re-claim can rewrite the latter, never the former.
     const landing = readTaskLanding(task.extra);
     if (landing !== undefined) {
       ranges.set(task.slug, { head: landing.branch_head, base: landing.main_before, worktree: landing.branch });
+      continue;
+    }
+    const parsed = recordedCommitRangeSchema.safeParse(task.extra?.["commit_range"]);
+    if (parsed.success && parsed.data.state === "not-measured" && parsed.data.candidates !== undefined) {
+      // a landing lookup was tried and failed: assess shows "not measured" instead of diffing a claim worktree
+      ranges.set(task.slug, { not_measured: parsed.data.reason });
       continue;
     }
     const range = readMeasuredCommitRange(task.extra);

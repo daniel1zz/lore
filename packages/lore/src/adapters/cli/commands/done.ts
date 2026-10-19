@@ -445,8 +445,13 @@ export default defineLoreCommand({
         inv.io.stderr.write(lastTaskAdvisory + "\n");
       }
 
+      // reason: an unmeasured / claim-derived commit range is stated, never silent (the evid-* range defect); done is not refused
+      if (result.value.commit_range_note !== undefined) {
+        inv.io.stderr.write(`lore done: ${result.value.commit_range_note}\n`);
+      }
+
       if (args.json) {
-        printLine(inv.io.stdout, 
+        printLine(inv.io.stdout,
           JSON.stringify(
             {
               ok: true,
