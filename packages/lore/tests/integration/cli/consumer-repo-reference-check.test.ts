@@ -135,5 +135,5 @@ describe("consumer repo: lore status --check-claude-md reports unresolved refere
     appendFileSync(join(dir, "CLAUDE.md"), "See `src/definitely-missing-file.ts` and `package.json#nope`.\n");
 
     expect(referenceFindings(check(dir).json)).toEqual(["src/definitely-missing-file.ts"]);
-  });
+  }, 120_000); // 4 CLI spawns (two runs x json + human), each a cold `bun run`
 });
