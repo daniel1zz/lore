@@ -397,8 +397,6 @@ import type { WorktreeRemovalFactsPort } from "./worktree-removal-test.js";
 import {
   commitRangeFromLanding,
   commitRangeNote,
-  findLandingInMainLog,
-  MAIN_FIRST_PARENT_LOG_FORMAT,
   readTaskLanding,
   type LandingFact,
   type TaskCommitRange,
@@ -645,8 +643,8 @@ export type DoneFloorId =
   | "unfiltered-test-file"
   // reason: DCL-1 (e) — evaluated by `evaluateDoneFloors` right after `attested-pass`.
   | "latest-attested-fail"
-  // reason: DCL-1 (a) — async (needs git); evaluated by `findUnlandedWorkFloor` before `missing-oracle-file`.
-  | "unmerged-branch"
+  // reason: BR-1291 — async (needs git); evaluated by `findNotLandedFloor` before `missing-oracle-file`.
+  | "not-landed"
   // reason: AC-TG-6 — evaluated after the four synchronous floors, by `findMissingOracleFileFloor` (async: resolves criteria).
   | "missing-oracle-file";
 
@@ -3112,6 +3110,9 @@ export class TaskWorkflowService {
     const gateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
     if (!gateResult.ok) return gateResult;
 
+    const holderResult = await this.refuseWhileWorkingCopyHoldsUnlandedTask(task, opts);
+    if (!holderResult.ok) return holderResult;
+
     const existingClaim = readClaimRecord(task);
     const claimant = buildClaimParty(opts);
     let carryForward = false;
@@ -4066,55 +4067,76 @@ export class TaskWorkflowService {
   }
 
   /**
-   * The `unmerged-branch` floor (DCL-1 (a), issue #171): the work a task claims must have LANDED on the
-   * integration branch before the task archives. Measured from the claim's recorded worktree/branch — the
-   * current claim's, else the latest one the claim audit history recorded (same pick as
-   * {@link recordCommitRange}) — by `git rev-list --count <main>..<head>` (0 ⇒ head is an ancestor of main).
+   * The `not-landed` floor (BR-1291, spec-a-task-is-archived-only-on-a-landing-lore-recorded-one): a task whose
+   * claim ever named a working copy archives only when `lore integrate` recorded a landing on it
+   * (`extra.landing`) whose landed commit is on the integration branch, and its claimed branch — if the ref still
+   * exists — holds no commit outside that branch (work committed after the landing). The claimed working copy's own
+   * head is never consulted, and there is no fail-open path: an unwired probe, an unreadable integration branch or
+   * an unreadable commit count REFUSES. A claimed branch whose ref is gone counts as having no unlanded commits
+   * (`git branch -d` only deletes a merged branch, and the landing record is what proves it landed).
    *
-   * Fail-open cases, each deliberate and visible: no claim ever recorded a worktree/branch (nothing to
-   * test — adhoc and orchestrator-run tasks), no worktree probe wired (bare unit construction), the head
-   * or the integration branch cannot be read (a deleted branch/worktree: `git branch -d` only deletes a
-   * merged branch). `recordCommitRange` writes the same unreadable-head fact into `extra.commit_range` as
-   * `not-measured` with its reason on every `lore done`, so "not measured" is never recorded as "landed".
+   * Not armed (returns `ok(null)`) for a task whose claims never named a working copy (adhoc and orchestrator-run
+   * tasks have no branch to land).
    *
-   * @returns `ok(refusal)` naming the unmerged branch and its unlanded commit count; `ok(null)` otherwise;
+   * @returns `ok(refusal)` named `not-landed` (naming the branch and how to land it); `ok(null)` when landed;
    *   `err` only when the claim audit history itself is unreadable.
    */
-  private async findUnlandedWorkFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const probe = this.worktreeProbe;
-    if (probe === undefined) return ok(null);
+  private async findNotLandedFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
     const recordedResult = await this.readRecordedWorktrees(task);
     if (!recordedResult.ok) return recordedResult;
-    const currentWorktree = readClaimRecord(task)?.worktree;
-    const recorded =
-      recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
-    if (recorded === undefined) return ok(null);
-
-    const cwd = probe.currentWorkingDirectory();
-    const head = resolveClaimHead(probe, recorded.path, cwd);
-    if (!head.ok) return ok(null);
-    const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return ok(null);
-    const unlanded = probe.countCommits(cwd, `${integration.value}..${head.value.sha}`);
-    if (!unlanded.ok || unlanded.value === 0) return ok(null);
-
-    const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
-      code: "VALIDATION_ERROR",
-      field: "extra.claim",
-      message:
-        `Task "${task.slug}" was claimed on "${recorded.path}" whose head ${head.value.sha.slice(0, 12)} is NOT ` +
-        `on ${integration.value}: ${unlanded.value} commit(s) are not merged — lore done archives only landed work. ` +
-        `Land the branch (\`lore integrate\` / merge it into ${integration.value}), ` +
-        `then re-run \`lore done ${task.slug}\`. [floor: unmerged-branch]`,
-      value: { branch: recorded.path, head: head.value.sha, integration: integration.value, unmerged: unlanded.value },
+    if (recordedResult.value.length === 0) return ok(null);
+    const claimedOn = recordedResult.value.map((r) => r.path).join(", ");
+    const refuse = (why: string, value: Record<string, unknown>): Result<DoneFloorRefusal, LoreError> => {
+      const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
+        code: "VALIDATION_ERROR",
+        field: "extra.landing",
+        message:
+          `Task "${task.slug}" was claimed on ${claimedOn} and lore done archives only work whose landing lore integrate ` +
+          `recorded: ${why}. Land the branch with \`lore integrate <branch>\` (it records the landing on this task, also ` +
+          `when the branch is already integrated), then re-run \`lore done ${task.slug}\`. [floor: not-landed]`,
+        value: { claimed_on: claimedOn, ...value },
+      };
+      return ok({ floor: "not-landed", error: { ...error, details: { floor: "not-landed" } } });
     };
-    return ok({ floor: "unmerged-branch", error: { ...error, details: { floor: "unmerged-branch" } } });
+
+    const landing = readTaskLanding(task.extra);
+    if (landing === undefined) return refuse("no landing is recorded on it", { reason: "no-landing" });
+    const probe = this.worktreeProbe;
+    if (probe === undefined) return refuse(`the landing cannot be checked against main (${NO_WORKTREE_PROBE_REASON})`, { reason: "unmeasurable" });
+    const cwd = probe.currentWorkingDirectory();
+    const integration = probe.integrationBranch(cwd);
+    if (!integration.ok) return refuse(`the integration branch is unreadable (${integration.reason})`, { reason: "unmeasurable" });
+    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
+    if (!offMain.ok) return refuse(`the landing commit ${landing.landing_commit.slice(0, 12)} cannot be checked (${offMain.reason})`, { reason: "unmeasurable" });
+    if (offMain.value > 0) {
+      return refuse(`its landing commit ${landing.landing_commit.slice(0, 12)} is not on ${integration.value}`, {
+        reason: "landing-not-on-main",
+        landing_commit: landing.landing_commit,
+      });
+    }
+
+    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+    if (!auditResult.ok) return auditResult;
+    for (const name of await this.landingCandidateNames(auditResult.value, task)) {
+      const tip = probe.branchTip(cwd, name);
+      if (!tip.ok) continue; // reason: no such branch ref (a path name, or a branch deleted after it landed)
+      const ahead = probe.countCommits(cwd, `${integration.value}..${tip.value}`);
+      if (!ahead.ok) return refuse(`branch ${name} cannot be compared with ${integration.value} (${ahead.reason})`, { reason: "unmeasurable", branch: name });
+      if (ahead.value > 0) {
+        return refuse(`branch ${name} has ${ahead.value} commit(s) not on ${integration.value} (committed after the landing)`, {
+          reason: "commits-after-landing",
+          branch: name,
+          unmerged: ahead.value,
+        });
+      }
+    }
+    return ok(null);
   }
 
   /**
    * One {@link AnchorRemovalVerdict} per anchored test file that still lacks an attested unfiltered run — the
    * input of the `unfiltered-test-file` floor's "removed by this task" exception. Measured from the claim's
-   * recorded worktree/branch exactly as {@link findUnlandedWorkFloor} picks it; git is spawned only for an
+   * recorded worktree/branch (the current claim's, else the latest the audit history recorded); git is spawned only for an
    * anchor the floor would otherwise refuse, so a fully-attested task costs nothing.
    *
    * A task whose claims never recorded a worktree has no branch that could have deleted anything: its anchors
@@ -4152,7 +4174,7 @@ export class TaskWorkflowService {
 
   /** The async floors, in order: landed work, then oracle-file existence. The first refusal wins. */
   private async findAsyncFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const unlanded = await this.findUnlandedWorkFloor(task);
+    const unlanded = await this.findNotLandedFloor(task);
     if (!unlanded.ok || unlanded.value !== null) return unlanded;
     return this.findMissingOracleFileFloor(task);
   }
@@ -4359,9 +4381,10 @@ export class TaskWorkflowService {
   }
 
   /**
-   * Records a landing (`extra.landing`) on every task whose claim, current or historical (claim audit), recorded
-   * `landing.branch`, through the one write route (`writer.writeDoc`). Called by `lore integrate` after main moved.
-   * Idempotent: a task already holding the same landing is reported, not rewritten. Every task is attempted; the first
+   * Records a landing (`extra.landing`) on every task not archived or deprecated whose claim, current or historical
+   * (claim audit), recorded `landing.branch` (or a working copy on it), through the one write route
+   * (`writer.writeDoc`). Called by `lore integrate` after main moved, and when the branch is found already integrated.
+   * Idempotent: a task already holding a landing of the same branch head is reported, not rewritten. Every task is attempted; the first
    * write failure is returned after the rest were tried.
    *
    * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
@@ -4375,15 +4398,14 @@ export class TaskWorkflowService {
     const slugs: string[] = [];
     let firstFailure: LoreError | undefined;
     for (const task of tasksResult.value) {
+      // reason: BR-1336 — a finished task is never rewritten by a later landing of a branch it once claimed.
+      if (task.status === "archived" || task.status === "deprecated") continue;
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
       if (!(await this.landingCandidateNames(rows, task)).includes(landing.branch)) continue;
       const existing = readTaskLanding(task.extra);
-      if (
-        existing !== undefined &&
-        existing.branch === landing.branch &&
-        existing.branch_head === landing.branch_head &&
-        existing.landing_commit === landing.landing_commit
-      ) {
+      // reason: BR-1336 — "holds no landing for that head": a task already carrying a landing of this branch head is
+      // reported, not rewritten (an already-integrated re-run must not replace the real merge commit's record).
+      if (existing !== undefined && existing.branch === landing.branch && existing.branch_head === landing.branch_head) {
         slugs.push(task.slug);
         continue;
       }
@@ -4421,117 +4443,89 @@ export class TaskWorkflowService {
   }
 
   /**
-   * The landing `lore done` derives the commit range from: the recorded `extra.landing`, else BACKFILLED from main's
-   * first-parent history — the `merge(<branch>)` commit `lore integrate` left — for a branch name one of the task's
-   * claims recorded. Otherwise `unresolved` with the REASON (log unreadable, or no `merge(<name>)` commit for the
-   * claimed `candidates`) — an unreadable log is never read as "no landing", and the caller records the reason.
-   * `none` only when no claim recorded any name (nothing to look for).
+   * BR-1337 — one working copy carries one unlanded task. A claim naming a working copy is refused (exit 4, nothing
+   * written) while ANOTHER task not archived or deprecated has a claim, current or in its audit history, that named
+   * the same working copy (same name, or the same branch) and holds no landing whose commit is on the integration
+   * branch. The same actor and the same session are refused alike. An unmeasurable landing counts as not landed.
+   *
+   * @returns `ok(undefined)` when `opts.worktree` is absent or no other task holds the working copy unlanded;
+   *   `err(VALIDATION_ERROR)` naming the holding task otherwise.
    */
-  private async resolveLanding(
-    task: DocRecord,
-    nowIso: string,
-  ): Promise<
-    | { kind: "found"; landing: TaskLanding; source: "recorded" | "backfilled" }
-    | { kind: "unresolved"; reason: string; candidates: string[] }
-    | { kind: "none" }
-  > {
-    const recorded = readTaskLanding(task.extra);
-    if (recorded !== undefined) return { kind: "found", landing: recorded, source: "recorded" };
-    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
-    if (!auditResult.ok) return { kind: "none" }; // reason: recordCommitRange reports the unreadable claim history itself
-    const candidates = await this.landingCandidateNames(auditResult.value, task);
-    if (candidates.length === 0) return { kind: "none" };
-    const probe = this.worktreeProbe;
-    if (probe?.firstParentLog === undefined) {
-      return { kind: "unresolved", reason: `log unreadable: ${NO_WORKTREE_PROBE_REASON}`, candidates };
+  private async refuseWhileWorkingCopyHoldsUnlandedTask(task: DocRecord, opts: ClaimOpts): Promise<Result<void, LoreError>> {
+    if (opts.worktree === undefined) return ok(undefined);
+    const claimantNames = new Set<string>([opts.worktree]);
+    if (opts.branch !== undefined) claimantNames.add(opts.branch);
+    if (isAbsolute(opts.worktree)) {
+      const measurement = await this.detectBranch(opts.worktree);
+      if (measurement.status === "measured") claimantNames.add(measurement.branch);
     }
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const auditResult = await this.store.queryAudit({ action: "claim" });
+    if (!auditResult.ok) return auditResult;
+    for (const other of tasksResult.value) {
+      if (other.id === task.id || other.status === "archived" || other.status === "deprecated") continue;
+      const rows = auditResult.value.filter((row) => row.doc_id === other.id);
+      if (rows.length === 0 && readClaimRecord(other) === undefined) continue;
+      const names = await this.landingCandidateNames(rows, other);
+      if (!names.some((name) => claimantNames.has(name))) continue;
+      if (await this.isLandingOnMain(other)) continue;
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.claim.worktree",
+        message:
+          `Working copy "${opts.worktree}" already carries task "${other.slug}", whose work has not landed: one working ` +
+          `copy carries one unlanded task. Land it first (\`lore integrate <branch>\` records the landing on ${other.slug}), ` +
+          `or claim "${task.slug}" from another working copy. Nothing was written.`,
+        value: { working_copy: opts.worktree, holding_task: other.slug },
+      });
+    }
+    return ok(undefined);
+  }
+
+  /** Whether `task` holds a landing whose commit is on the integration branch; any unmeasurable step answers false. */
+  private async isLandingOnMain(task: DocRecord): Promise<boolean> {
+    const landing = readTaskLanding(task.extra);
+    const probe = this.worktreeProbe;
+    if (landing === undefined || probe === undefined) return false;
     const cwd = probe.currentWorkingDirectory();
     const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return { kind: "unresolved", reason: `log unreadable: ${integration.reason}`, candidates };
-    const log = probe.firstParentLog(cwd, integration.value, MAIN_FIRST_PARENT_LOG_FORMAT);
-    if (!log.ok) return { kind: "unresolved", reason: `log unreadable: ${log.reason}`, candidates };
-    for (const name of candidates) {
-      const found = findLandingInMainLog(log.value, name);
-      if (found !== undefined) return { kind: "found", landing: { ...found, recorded_at: nowIso }, source: "backfilled" };
-    }
-    return { kind: "unresolved", reason: `no merge(<name>) commit on ${integration.value} for claimed names ${candidates.join(", ")}`, candidates };
+    if (!integration.ok) return false;
+    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
+    return offMain.ok && offMain.value === 0;
   }
 
   /**
-   * Measures and writes `extra.commit_range` (see `task-commit-range.ts`). Never refuses `done` on
-   * a measurement problem — an unmeasurable range is RECORDED as `not-measured` with its reason, so
-   * `lore assess` can tell "not measured" from "no commits"; only a failed store write is an error.
-   * The worktree is the current claim's, else the latest one the claim audit history recorded
-   * (a released claim drops `extra.claim` but its audit row survives).
+   * Writes `extra.commit_range` (see `task-commit-range.ts`) from the landing `lore integrate` recorded on the task.
+   * Nothing else is a source: the claimed working copy's head is never measured and main's history is never searched
+   * (BR-1291). A task whose claims named no working copy has no landing, so its range is RECORDED as `not-measured`
+   * with that reason, which `lore assess` tells apart from "no commits". Only a failed store write is an error.
    */
   private async recordCommitRange(task: DocRecord, nowIso: string, by: string): Promise<Result<DocRecord, LoreError>> {
-    // reason: a task's commit range is a fact of its LANDING, not of its last claim — an evidence re-claim from a
-    // worktree of main must not replace it (the DCL-1 / DCL-4 defect). Recorded landing first, else backfilled.
-    const landed = await this.resolveLanding(task, nowIso);
-    const unresolved = landed.kind === "unresolved" ? landed : undefined;
-    if (landed.kind === "found") {
-      const landedRange = commitRangeFromLanding(landed.landing, nowIso);
+    const landing = readTaskLanding(task.extra);
+    if (landing !== undefined) {
+      const landedRange = commitRangeFromLanding(landing, nowIso);
       return this.writeTaskExtra(
         task,
-        { ...task.extra, landing: landed.landing, commit_range: landedRange },
+        { ...task.extra, commit_range: landedRange },
         nowIso,
         by,
-        `lore done: recorded commit range from the ${landed.source} landing of ${landed.landing.branch}: ${landed.landing.main_before.slice(0, 12)}..${landedRange.head.slice(0, 12)}`,
+        `lore done: recorded commit range from the landing of ${landing.branch}: ${landing.main_before.slice(0, 12)}..${landedRange.head.slice(0, 12)}`,
         "update",
-        { by, commit_range: landedRange, landing: landed.landing, landing_source: landed.source },
+        { by, commit_range: landedRange, landing },
       );
     }
-    const notMeasured = (reason: string): TaskCommitRange => ({
+    const range: TaskCommitRange = {
       state: "not-measured",
-      reason,
-      ...(unresolved !== undefined ? { candidates: unresolved.candidates } : {}),
+      reason: "no landing is recorded on this task (no claim named a working copy that lore integrate landed)",
       recorded_at: nowIso,
-    });
-    let range: TaskCommitRange;
-    const recordedResult = await this.readRecordedWorktrees(task);
-    if (!recordedResult.ok) {
-      range = notMeasured(`claim history unreadable: ${recordedResult.error.code}`);
-    } else {
-      const currentWorktree = readClaimRecord(task)?.worktree;
-      const recorded =
-        recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
-      if (recorded === undefined) {
-        range = notMeasured("no claim recorded a worktree, so there is no HEAD to measure");
-      } else {
-        const head =
-          this.worktreeProbe === undefined
-            ? ({ ok: false, reason: NO_WORKTREE_PROBE_REASON } as const)
-            : resolveClaimHead(this.worktreeProbe, recorded.path, this.worktreeProbe.currentWorkingDirectory());
-        if (!head.ok) {
-          range = notMeasured(`worktree/branch ${recorded.path} HEAD unreadable: ${head.reason}${unresolved !== undefined ? `; landing: ${unresolved.reason}` : ""}`);
-        } else if (recorded.baseSha !== undefined && head.value.sha === recorded.baseSha) {
-          // reason: a claim whose head equals its base holds no work (a detached worktree of main, the evid-* evidence
-          // re-claim): recording it as the task's range is the DCL-1/DCL-4 defect, so it is never recorded.
-          range = notMeasured(
-            `the claim on ${recorded.path} has head == base (${head.value.sha.slice(0, 12)}), so it holds no work${unresolved !== undefined ? `; landing: ${unresolved.reason}` : "; no landing recorded"}`,
-          );
-        } else {
-          range = {
-            state: "recorded",
-            head: head.value.sha,
-            head_source: head.value.source,
-            ...(recorded.baseSha !== undefined ? { base: recorded.baseSha } : {}),
-            worktree: recorded.path,
-            // reason: the claim's range is kept (a manual merge leaves no merge(<name>) commit) but says out loud that no landing was found
-            ...(unresolved !== undefined ? { landing_unresolved: unresolved.reason } : {}),
-            recorded_at: nowIso,
-          };
-        }
-      }
-    }
+    };
     return this.writeTaskExtra(
       task,
       { ...task.extra, commit_range: range },
       nowIso,
       by,
-      range.state === "recorded"
-        ? `lore done: recorded commit range ${range.base === undefined ? "(head only)" : range.base.slice(0, 12)}..${range.head.slice(0, 12)}`
-        : `lore done: commit range not measured (${range.reason})`,
+      `lore done: commit range not measured (${range.reason})`,
       "update",
       { by, commit_range: range },
     );
@@ -5131,7 +5125,7 @@ export class TaskWorkflowService {
    * Which unarchived blockers of `plan` have LANDED on the plan's declared integration branch
    * (`plan.extra.integration_branch`) — the readiness-only relaxation of "a blocker is met when archived".
    *
-   * A blocker qualifies iff its recorded claim head (same pick as {@link findUnlandedWorkFloor}) is an
+   * A blocker qualifies iff its recorded claim head (the claim's worktree or branch tip, via `resolveClaimHead`) is an
    * ancestor of the integration branch (`rev-list --count <branch>..<head>` is 0) AND carries at least
    * one commit past its claim-time base — a claim that has done no work has a head that is trivially an
    * ancestor of everything, and must NOT unblock its dependents.

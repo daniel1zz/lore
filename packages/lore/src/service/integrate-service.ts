@@ -333,6 +333,10 @@ export class IntegrateService {
       const base = this.resolveCommit(TARGET_REF);
       if (!base.ok) return base;
       if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
+        // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
+        // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
+        // and the branch head itself is the landed commit: it is an ancestor of main.
+        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -414,8 +418,8 @@ export class IntegrateService {
 
   /**
    * Records the landing on the branch's tasks. Never fails the integration (main has already moved): a task that
-   * could not be written is logged loudly, so the missing record is visible and `lore done` backfills it from the
-   * `merge(<branch>)` commit.
+   * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
+   * `not-landed` until `lore integrate` is run again on the branch (BR-1336).
    */
   private async recordLanding(landing: LandingFact): Promise<void> {
     const recorder = this.deps.landings;

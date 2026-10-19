@@ -59,7 +59,6 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { findLandingInMainLog, MAIN_FIRST_PARENT_LOG_FORMAT } from "../../service/task-commit-range.js";
 
 /** Explicit maxBuffer — the 1 MiB spawnSync default silently truncates a growing diff/log payload. */
 const GIT_MAX_BUFFER = 20 * 1024 * 1024;
@@ -80,11 +79,7 @@ export type TaskAttribution = "recorded_range" | "slug_match" | "not_measured";
 export interface RecordedRange {
   base?: string;
   head: string;
-  /**
-   * The branch/worktree the range was recorded for. When the range yields no own commits (a claim from a worktree of
-   * main recorded main itself) and no landing record exists, it names the branch whose `merge(<branch>)` commit on
-   * main's first-parent history is the landing to backfill from.
-   */
+  /** The branch/worktree the range was recorded for. */
   worktree?: string;
 }
 
@@ -384,17 +379,6 @@ function resolveRecordedRange(
 }
 
 /**
- * The range `base..head` = (main before the landing)..(branch head) read from the `merge(<branch>)` commit on HEAD's
- * first-parent history, or `undefined` when there is none or the log cannot be read.
- */
-function backfillRangeFromMergeCommit(cwd: string, branch: string): RecordedRange | undefined {
-  const log = runGit(cwd, ["log", "--first-parent", `--format=${MAIN_FIRST_PARENT_LOG_FORMAT}`, "HEAD"]);
-  if (!log.ok) return undefined;
-  const landing = findLandingInMainLog(log.stdout, branch);
-  return landing === undefined ? undefined : { base: landing.main_before, head: landing.branch_head };
-}
-
-/**
  * Derives the commit set + assembled diff for a plan's own tasks. Never throws — every
  * git-command failure degrades to an empty match for that step, surfaced in `warnings`.
  *
@@ -478,19 +462,7 @@ export function deriveCommitSetForPlan(
       continue;
     }
     const recorded = entry;
-    let resolvedRange = recorded === undefined ? undefined : resolveRecordedRange(cwd, slug, recorded, warnings);
-    if (recorded?.worktree !== undefined && (resolvedRange === undefined || resolvedRange.commits.length === 0)) {
-      // reason: no landing record and the claim's range holds no own commit — backfill from the `merge(<branch>)`
-      // commit `lore integrate` left on main's first-parent history (same rule as `lore done`'s backfill).
-      const backfilled = backfillRangeFromMergeCommit(cwd, recorded.worktree);
-      if (backfilled !== undefined) {
-        const fromLanding = resolveRecordedRange(cwd, slug, backfilled, warnings);
-        if (fromLanding !== undefined && fromLanding.commits.length > 0) {
-          warnings.push(`${slug}: no landing record — attributed from the merge(${recorded.worktree}) commit on main`);
-          resolvedRange = fromLanding;
-        }
-      }
-    }
+    const resolvedRange = recorded === undefined ? undefined : resolveRecordedRange(cwd, slug, recorded, warnings);
     if (resolvedRange !== undefined) {
       attribution[slug] = "recorded_range";
       excludedMergedCommitCount += resolvedRange.excludedMerged;
