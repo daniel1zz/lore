@@ -172,8 +172,8 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
   [CITED_RULE_STATE_FIELD]: {
     invariant:
       "A plan must not close over a baseline rule its spec's criteria cite while that rule is " +
-      "contradicted by a failing attested run, or stale (its code anchors changed since the last " +
-      "attested pass) with no attested pass recorded since.",
+      "contradicted by a failing attested run, or stale (a citing spec's code anchors changed after " +
+      "the latest attested pass of its criterion, by any plan).",
     measured:
       "citedRuleStateClean over the offending list the caller derives from RuleStateService.full(): " +
       "the rules cited by spec.extra.acceptance_criteria[].cites of the plan's resolved ancestor spec, " +

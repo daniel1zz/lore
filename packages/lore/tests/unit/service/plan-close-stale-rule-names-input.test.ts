@@ -158,10 +158,10 @@ async function twoSpecWorld(bResult: "pass" | "fail"): Promise<TwoSpecWorld> {
   return { cs, planA, oldSha: repo.oldSha, headSha: repo.headSha };
 }
 
-async function closeA(w: TwoSpecWorld): Promise<LoreError> {
+async function closeA(w: TwoSpecWorld): Promise<{ message: string; code: string }> {
   const r: Result<DocRecord, LoreError> = await w.cs.set(w.planA.id, { status: "archived" });
   if (r.ok) throw new Error("expected the close to be refused");
-  return r.error;
+  return r.error as { message: string; code: string };
 }
 
 describe("plan-close cited-rule refusal names the offending citing input (BR-984)", () => {

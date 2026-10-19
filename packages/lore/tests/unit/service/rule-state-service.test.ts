@@ -101,6 +101,7 @@ interface GitPort {
   headSha(): Result<string, LoreError>;
   isAncestor(sha: string): Result<boolean, LoreError>;
   changedSince(sha: string, paths: string[]): Result<boolean, LoreError>;
+  changedPaths(sha: string, paths: string[]): Result<string[], LoreError>;
 }
 
 interface RuleStateInput {
@@ -204,6 +205,9 @@ class CountingGit implements GitPort {
   changedSince(s: string, paths: string[]): Result<boolean, LoreError> {
     this.calls.push({ method: "changedSince", sha: s, paths: [...paths] });
     return this.unavailable ? this.gone() : ok(this.changed.has(s));
+  }
+  changedPaths(s: string, paths: string[]): Result<string[], LoreError> {
+    return this.unavailable ? this.gone() : ok(this.changed.has(s) ? [...paths].sort() : []);
   }
   count(method: GitCall["method"], s?: string): number {
     return this.calls.filter((c) => c.method === method && (s === undefined || c.sha === s)).length;

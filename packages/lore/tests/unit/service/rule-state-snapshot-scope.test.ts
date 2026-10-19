@@ -32,6 +32,7 @@ const git = {
   headSha: (): Result<string, LoreError> => ok(HEAD),
   isAncestor: (): Result<boolean, LoreError> => ok(true),
   changedSince: (): Result<boolean, LoreError> => ok(false),
+  changedPaths: (): Result<string[], LoreError> => ok([]),
 };
 
 let seq = 0;

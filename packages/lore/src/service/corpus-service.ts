@@ -4187,9 +4187,10 @@ export class CorpusService {
 
   /**
    * The rules the closing plan's spec criteria cite whose state makes the close refuse (BR-984):
-   * `contradicted`, or `stale` — a pass recorded after staleness makes the latest attested run fresh,
-   * so `RuleStateService.full()` already reports such a rule `verified` and it never lists here.
-   * `verified`, `unverified` and `unknown` never refuse.
+   * `contradicted`, or `stale` (BR-984: ANY citing spec's code changed after its criterion's latest
+   * attested pass, by any plan). A fresh attested pass of the stale criterion makes the rule `verified`,
+   * so it no longer lists here. `verified`, `unverified` and `unknown` never refuse. Each violation
+   * carries the per-input `offences` `RuleStateService.full()` computed, for the refusal to name.
    *
    * @param spec - The closing plan's resolved ancestor spec (`PlanBundle.spec`).
    * @returns `ok([])` when the spec cites nothing (rule state is then not even read), when no
@@ -4217,7 +4218,7 @@ export class CorpusService {
     for (const rule of full.value.rules) {
       if (!cited.has(rule.rule_id)) continue;
       if (rule.state === "contradicted" || rule.state === "stale") {
-        violations.push({ rule_id: rule.rule_id, state: rule.state });
+        violations.push({ rule_id: rule.rule_id, state: rule.state, offences: rule.offences });
       }
     }
     return ok(violations);
