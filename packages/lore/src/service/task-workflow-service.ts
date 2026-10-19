@@ -3983,7 +3983,7 @@ export class TaskWorkflowService {
     if (probe === undefined) return ok(null);
     const recordedResult = await this.readRecordedWorktrees(task);
     if (!recordedResult.ok) return recordedResult;
-    const currentWorktree = readClaim(task)?.worktree;
+    const currentWorktree = readClaimRecord(task)?.worktree;
     const recorded =
       recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
     if (recorded === undefined) return ok(null);

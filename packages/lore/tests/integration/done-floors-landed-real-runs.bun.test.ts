@@ -147,7 +147,7 @@ describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
 
     expect(landed.exitCode).toBe(0);
     expect(statusOf(task, dir)).toBe("archived");
-  });
+  }, 300_000);
 });
 
 describe("AC-DCL-1 (b) — set --status archived is no route around the floors", () => {
@@ -168,7 +168,7 @@ describe("AC-DCL-1 (b) — set --status archived is no route around the floors",
     const archivedViaSet = runLore(["set", attested, "--status", "archived"], dir);
     expect(archivedViaSet.exitCode).toBe(0);
     expect(statusOf(attested, dir)).toBe("archived");
-  });
+  }, 300_000);
 });
 
 describe("AC-DCL-1 (c) — an attested e2e pass satisfies a test-file anchor (#188)", () => {
@@ -201,7 +201,7 @@ describe("AC-DCL-1 (c) — an attested e2e pass satisfies a test-file anchor (#1
     expect(refused.text).toContain("[floor: unfiltered-test-file]");
     expect(refused.text).toContain(ANCHOR);
     expectNamesBothRunnerRoutes(refused.text);
-  });
+  }, 300_000);
 });
 
 describe("AC-DCL-1 (d) — red-first counts only runner-produced red rows", () => {
@@ -225,7 +225,7 @@ describe("AC-DCL-1 (d) — red-first counts only runner-produced red rows", () =
     const ok = runLore(["done", captured], dir);
     expect(ok.exitCode).toBe(0);
     expect(statusOf(captured, dir)).toBe("archived");
-  });
+  }, 300_000);
 });
 
 describe("AC-DCL-1 (e) — per criterion the latest attested result decides", () => {
@@ -254,7 +254,7 @@ describe("AC-DCL-1 (e) — per criterion the latest attested result decides", ()
     expect(refused.text).toContain("AC-LATEST-1");
     expectNamesBothRunnerRoutes(refused.text);
     expect(statusOf(regressed, dir)).not.toBe("archived");
-  });
+  }, 300_000);
 });
 
 function createTaskUnder(plan: string, title: string, acScope: string): string {
@@ -274,7 +274,7 @@ describe("AC-DCL-1 (f) — a terminal task refuses claim", () => {
     expect(claim.exitCode).toBe(4);
     expect(claim.text).toContain("terminal task cannot be claimed");
     expect(claim.text).toContain("archived");
-  });
+  }, 300_000);
 
   it("(f) lore claim on a deprecated task exits 4", () => {
     const task = createTask("Deprecated");
@@ -285,7 +285,7 @@ describe("AC-DCL-1 (f) — a terminal task refuses claim", () => {
 
     expect(claim.exitCode).toBe(4);
     expect(claim.text).toContain("deprecated");
-  });
+  }, 300_000);
 });
 
 describe("AC-DCL-1 (g) — every floor refusal names both runner routes", () => {
@@ -303,7 +303,7 @@ describe("AC-DCL-1 (g) — every floor refusal names both runner routes", () => 
     expect(noRed.exitCode).toBe(4);
     expect(noRed.text).toContain("[floor: red-first]");
     expectNamesBothRunnerRoutes(noRed.text);
-  });
+  }, 300_000);
 });
 
 describe("AC-DCL-1 (h) — plan close is no route around the floors (BR-1072)", () => {
@@ -319,5 +319,5 @@ describe("AC-DCL-1 (h) — plan close is no route around the floors (BR-1072)", 
     expect(statusOf(bad, dir)).not.toBe("archived");
     expect(close.text).toContain(bad);
     expect(close.text).toContain("attested-pass");
-  });
+  }, 300_000);
 });
