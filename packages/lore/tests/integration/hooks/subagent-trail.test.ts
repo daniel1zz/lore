@@ -172,3 +172,40 @@ describe("AC-ST-2 subagent-trail SubagentStop measurement", () => {
     expect(rec.changes.measured).toBe(true);
   });
 });
+
+describe("helper record carries the working copy's head and branch (task-skill-fix-turn-end-helper-review-handles-a-helper-whose)", () => {
+  it("HAPPY: head records the helper's HEAD commit and its checked-out branch", () => {
+    const f = makeFixture();
+    start(f);
+    expectSilent(stop(f, f.worktree));
+    expect(record(f).head).toEqual({ measured: true, value: { commit: git(f.worktree, "rev-parse", "HEAD"), branch: "helper" } });
+  });
+
+  it("BOUNDARY: a detached HEAD records the commit with branch null", () => {
+    const f = makeFixture();
+    start(f);
+    git(f.worktree, "checkout", "-q", "--detach");
+    expectSilent(stop(f, f.worktree));
+    expect(record(f).head).toEqual({ measured: true, value: { commit: git(f.worktree, "rev-parse", "HEAD"), branch: null } });
+  });
+
+  it("ERROR: a removed working copy records head as not measured with a reason, never an empty string", () => {
+    const f = makeFixture();
+    start(f);
+    git(f.main, "worktree", "remove", "--force", f.worktree);
+    expectSilent(stop(f, f.worktree));
+    const head = record(f).head;
+    expect(head.measured).toBe(false);
+    expect(head.reason).toMatch(/\S/);
+  });
+
+  it("STATE: a failed later end keeps the head an earlier end measured", () => {
+    const f = makeFixture();
+    start(f);
+    stop(f, f.worktree);
+    const first = record(f).head;
+    git(f.main, "worktree", "remove", "--force", f.worktree);
+    expectSilent(stop(f, f.worktree));
+    expect(record(f).head).toEqual(first);
+  });
+});

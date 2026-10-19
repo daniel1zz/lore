@@ -112,6 +112,8 @@ export const HelperRecordSchema = z
     changes: measuredOf(
       z.object({ base: z.string().min(1), files: z.array(TrailChangeSchema) }).strict(),
     ).optional(),
+    /** The working copy's HEAD commit and branch (null = detached) read at the latest end, while the copy existed. */
+    head: measuredOf(z.object({ commit: z.string().min(1), branch: z.string().min(1).nullable() }).strict()).optional(),
   })
   .strict();
 export type HelperRecord = z.infer<typeof HelperRecordSchema>;

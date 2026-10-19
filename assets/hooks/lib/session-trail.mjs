@@ -158,14 +158,19 @@ function validHelperChanges(v) {
   return hasShape(v, ['base', 'files']) && isText(v.base) && validChangeList(v.files);
 }
 
+function validHelperHead(v) {
+  return hasShape(v, ['commit', 'branch']) && isText(v.commit) && (v.branch === null || isText(v.branch));
+}
+
 function validHelperRecord(v) {
-  return hasShape(v, ['run', 'started_at', 'end_count'], ['ended_at', 'working_copy', 'isolated', 'base', 'changes'])
+  return hasShape(v, ['run', 'started_at', 'end_count'], ['ended_at', 'working_copy', 'isolated', 'base', 'changes', 'head'])
     && isText(v.run) && isText(v.started_at) && isCount(v.end_count)
     && (v.base === undefined || isText(v.base))
     && (v.ended_at === undefined || isText(v.ended_at))
     && (v.working_copy === undefined || isText(v.working_copy))
     && (v.isolated === undefined || typeof v.isolated === 'boolean')
-    && (v.changes === undefined || validMeasured(v.changes, validHelperChanges));
+    && (v.changes === undefined || validMeasured(v.changes, validHelperChanges))
+    && (v.head === undefined || validMeasured(v.head, validHelperHead));
 }
 
 const validJudged = (v) => hasShape(v, ['judged_end_count'], ['judged_at_ms'])
@@ -524,6 +529,24 @@ function helperOwnPaths(workingCopy, base, env) {
   return own;
 }
 
+/** HEAD commit and branch (null when detached) of `workingCopy`; a failed read is measured:false, never ''. */
+function readHelperHead(workingCopy) {
+  try {
+    const commit = runGit(workingCopy, ['rev-parse', 'HEAD']).trim();
+    if (commit === '') return { measured: false, reason: 'git rev-parse HEAD printed nothing' };
+    let branch = null;
+    try {
+      branch = runGit(workingCopy, ['symbolic-ref', '--short', '-q', 'HEAD']).trim() || null;
+    } catch {
+      branch = null; // reason: detached HEAD exits 1; the commit alone still proves landing
+    }
+    return { measured: true, value: { commit, branch } };
+  } catch (err) {
+    const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
+    return { measured: false, reason: `git head read failed: ${detail}` };
+  }
+}
+
 /**
  * Measure an isolated helper's changes in its own working copy: diff(base, working tree) through
  * a temporary index seeded from the helper's real index plus `add -A`, so committed, staged,
@@ -531,20 +554,25 @@ function helperOwnPaths(workingCopy, base, env) {
  * @param {string} cwd - SubagentStop payload cwd (the helper worktree when isolated).
  * @param {string} run - `cc:<session>:<agent>`, the source label of every file.
  * @param {string | null} storedBase - base stored at the first measured end; null at the first.
- * @returns {{isolated?: boolean, changes: object}}
+ * The result also carries `head`: the working copy's HEAD commit and checked-out branch (null when detached), read
+ * while the working copy still exists so a later review can show landing after the copy is removed. Unreadable =
+ * `{measured:false, reason}`, never an empty string.
+ * @returns {{isolated?: boolean, changes: object, head: object}}
  */
 export function measureHelperChanges(cwd, run, storedBase) {
   if (typeof cwd !== 'string' || cwd === '' || !existsSync(cwd)) {
-    return { changes: { measured: false, reason: 'working copy not found' } };
+    return { changes: { measured: false, reason: 'working copy not found' }, head: { measured: false, reason: 'working copy not found' } };
   }
   let tempIndex = null;
   let isolated;
+  let head = { measured: false, reason: 'not read' };
   try {
     const gitDir = realpathSync(runGit(cwd, ['rev-parse', '--absolute-git-dir']).trim());
     const commonDir = realpathSync(resolve(cwd, runGit(cwd, ['rev-parse', '--git-common-dir']).trim()));
     isolated = gitDir !== commonDir;
-    if (!isolated) return { isolated, changes: { measured: false, reason: 'not isolated' } };
+    if (!isolated) return { isolated, changes: { measured: false, reason: 'not isolated' }, head: { measured: false, reason: 'not isolated' } };
     const workingCopy = realpathSync(runGit(cwd, ['rev-parse', '--show-toplevel']).trim());
+    head = readHelperHead(workingCopy);
     // reason: in a non-bare repo the common dir's HEAD is the main checkout's HEAD (spec D6)
     const mainHead = runGit(workingCopy, [`--git-dir=${commonDir}`, 'rev-parse', 'HEAD']).trim();
     const base = storedBase ?? runGit(workingCopy, ['merge-base', 'HEAD', mainHead]).trim();
@@ -557,12 +585,13 @@ export function measureHelperChanges(cwd, run, storedBase) {
     const numstat = runGit(workingCopy, ['diff', '--cached', '--no-renames', '--numstat', base], env);
     const own = helperOwnPaths(workingCopy, base, env);
     const files = parseDiff(nameStatus, numstat, run, workingCopy).filter((f) => own.has(f.path));
-    return { isolated, changes: { measured: true, value: { base, files } } };
+    return { isolated, changes: { measured: true, value: { base, files } }, head };
   } catch (err) {
     const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
     return {
       ...(isolated === undefined ? {} : { isolated }),
       changes: { measured: false, reason: `git measurement failed: ${detail}` },
+      head,
     };
   } finally {
     if (tempIndex !== null) rmSync(tempIndex, { force: true });
@@ -597,6 +626,8 @@ export function recordHelperEnd(base, sessionId, agentId, cwd, nowMs = Date.now(
     ...(measurement.isolated === undefined ? {} : { isolated: measurement.isolated }),
     ...(keptBase === null ? {} : { base: keptBase }),
     changes: measurement.changes,
+    // reason: a failed read at a later end must not erase the head an earlier end measured
+    head: measurement.head.measured === false && prior?.head?.measured === true ? prior.head : measurement.head,
   };
   writeJsonAtomic(file, record);
   return record;

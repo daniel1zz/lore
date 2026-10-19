@@ -16,7 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { reviewHelperScope, spawnGitCheckIgnore, type IgnoreProbeFn } from "../../../src/service/helper-scope-review.js";
+import { reviewHelperScope, spawnGitCheckIgnore, spawnGitCheckIgnoreAtRoot, spawnGitLanding, type IgnoreProbeFn } from "../../../src/service/helper-scope-review.js";
 import type { RunClaimedTask } from "../../../src/service/run-service.js";
 
 const SESSION = "s-t19";
@@ -25,7 +25,7 @@ const BASE = "b".repeat(40);
 
 type Claims = Record<string, Array<{ slug: string; anchors: string[] }>>;
 
-function helper(agent: string, over: { files?: string[]; workingCopy?: string; judged?: number; base?: string } = {}): TrailHelper {
+function helper(agent: string, over: { files?: string[]; workingCopy?: string; judged?: number; base?: string; head?: string | "none" } = {}): TrailHelper {
   const run = `cc:${SESSION}:${agent}`;
   return {
     agent_id: agent,
@@ -36,6 +36,7 @@ function helper(agent: string, over: { files?: string[]; workingCopy?: string; j
     judged_end_count: over.judged ?? 0,
     working_copy: over.workingCopy ?? WC,
     isolated: true,
+    ...(over.head === undefined || over.head === "none" ? {} : { head: { measured: true, value: { commit: over.head, branch: "b" } } }),
     changes: {
       measured: true,
       value: { base: over.base ?? BASE, files: (over.files ?? []).map((path) => ({ path, status: "M" as const, lines: 1, source: { kind: "run" as const, run } })) },
@@ -333,5 +334,126 @@ describe("SendMessage-resumed helper: a second run of one working copy on a newe
       original: [{ slug: "task-x", anchors: ["src/", "tests/"] }],
     });
     expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["docs/x.md"]]]);
+  });
+});
+
+describe("a helper whose working copy was removed after landing (task-skill-fix-turn-end-helper-review-handles-a-helper-whose)", () => {
+  const repo = mkdtempSync(join(tmpdir(), "hsr-removed-"));
+  const sh = (...args: string[]) => {
+    const r = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+  };
+  const MERGED = "worktree-agent-merged1";
+  const UNMERGED = "worktree-agent-unmerged1";
+  mkdirSync(join(repo, "src"), { recursive: true });
+  mkdirSync(join(repo, "other"), { recursive: true });
+  writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
+  writeFileSync(join(repo, "other/tracked.ts"), "x\n");
+  sh("init", "-q", "-b", "main");
+  sh("config", "user.email", "t@example.com");
+  sh("config", "user.name", "t");
+  sh("add", ".");
+  sh("commit", "-q", "-m", "base");
+  sh("checkout", "-q", "-b", MERGED);
+  writeFileSync(join(repo, "src/a.ts"), "a\n");
+  sh("add", ".");
+  sh("commit", "-q", "-m", "work");
+  const mergedHead = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).stdout.trim();
+  sh("checkout", "-q", "main");
+  sh("merge", "-q", "--no-ff", MERGED, "-m", `merge(${MERGED})`);
+  sh("branch", "-d", MERGED);
+  sh("checkout", "-q", "-b", UNMERGED);
+  writeFileSync(join(repo, "src/b.ts"), "b\n");
+  sh("add", ".");
+  sh("commit", "-q", "-m", "unlanded");
+  const unmergedHead = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).stdout.trim();
+  sh("checkout", "-q", "main");
+  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+  const claim: Claims = { parent: [{ slug: "task-x", anchors: ["src/"] }] };
+  const run = (agentDir: string, files: string[], head: string | "none") =>
+    reviewHelperScope({
+      trail: trailOf([helper("parent", { files, head, workingCopy: join(repo, "..", agentDir) })]),
+      claimedTasks: claims(claim),
+      openClaimsOfWorkingCopy: openClaimsOf({}),
+      projectRoot: repo,
+      realpath: (p) => {
+        if (/\/agent-[a-z0-9]+(\/|$)/.test(p)) throw new Error("ENOENT");
+        return p;
+      },
+      ignoreProbe: spawnGitCheckIgnore,
+      ignoreProbeAtRoot: spawnGitCheckIgnoreAtRoot(repo),
+      landing: spawnGitLanding(repo),
+    }).then((r) => {
+      if (!r.ok) throw new Error("review failed");
+      return r.value;
+    });
+
+  it("AC-1 removed copy, branch merged: an ignored .scratch edit is no finding, a tracked out-of-anchor edit still is", async () => {
+    const out = await run("agent-merged1", [".scratch/patch.py", "src/a.ts", "other/tracked.ts"], mergedHead);
+    expect(out.not_measured).toEqual([]);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["other/tracked.ts"]]]);
+    expect(out.notes.join("\n")).toContain("after landing");
+  });
+
+  it("AC-1 control: a tracked path matching an ignore rule is still judged (never treated as ignored)", async () => {
+    writeFileSync(join(repo, ".gitignore"), ".scratch/\nother/\n");
+    try {
+      const out = await run("agent-merged1", ["other/tracked.ts"], mergedHead);
+      expect(out.findings.map((f) => f.files)).toEqual([["other/tracked.ts"]]);
+    } finally {
+      writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
+    }
+  });
+
+  it("AC-2 removed copy, branch unmerged: ONE not-measured line per helper naming \"working copy removed\", paths stay judged", async () => {
+    const out = await run("agent-unmerged1", [".scratch/patch.py", "other/x.ts"], unmergedHead);
+    expect(out.not_measured).toHaveLength(1);
+    expect(out.not_measured[0]).toContain("working copy removed");
+    expect(out.not_measured[0]).toContain("is not on main");
+    expect(out.not_measured[0]).not.toContain("undefined");
+    expect(out.findings.map((f) => f.files)).toEqual([[".scratch/patch.py", "other/x.ts"]]);
+  });
+
+  it("AC-2 a record without a head cannot show landing: the named not-measured line, never assumed landed", async () => {
+    const out = await run("agent-nohead", [".scratch/patch.py"], "none");
+    expect(out.not_measured).toHaveLength(1);
+    expect(out.not_measured[0]).toContain("working copy removed");
+    expect(out.not_measured[0]).toContain("landing not shown: helper record has no head");
+    expect(out.findings.map((f) => f.kind)).toEqual(["outside-anchors"]);
+  });
+
+  it("AC-3 a spawn error's message appears verbatim, never undefined (missing cwd)", async () => {
+    const gone = join(repo, "..", "hsr-no-such-dir-xyz");
+    const probed = spawnGitCheckIgnore(gone, ["a.ts"]);
+    expect(probed.error).toContain("ENOENT");
+    const out = await reviewHelperScope({
+      trail: trailOf([helper("parent", { files: ["a.ts"], workingCopy: gone })]),
+      claimedTasks: claims(claim),
+      openClaimsOfWorkingCopy: openClaimsOf({}),
+      projectRoot: repo,
+      realpath: (p) => p,
+      ignoreProbe: spawnGitCheckIgnore,
+    }).then((r) => {
+      if (!r.ok) throw new Error("review failed");
+      return r.value;
+    });
+    expect(out.not_measured.join("\n")).toContain("ENOENT");
+    expect(out.not_measured.join("\n")).not.toContain("undefined");
+  });
+
+  it("AC-3 a fake probe's reported error is carried verbatim", async () => {
+    const out = await reviewHelperScope({
+      trail: trailOf([helper("parent", { files: ["a.ts"], workingCopy: repo })]),
+      claimedTasks: claims(claim),
+      openClaimsOfWorkingCopy: openClaimsOf({}),
+      projectRoot: repo,
+      realpath: (p) => p,
+      ignoreProbe: () => ({ status: null, stdout: "", error: "spawn git ENOENT" }),
+    }).then((r) => {
+      if (!r.ok) throw new Error("review failed");
+      return r.value;
+    });
+    expect(out.not_measured.join("\n")).toContain("spawn git ENOENT");
   });
 });

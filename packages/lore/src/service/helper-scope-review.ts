@@ -44,6 +44,10 @@
  *   (check-ignore does not report tracked files). A probe that fails, or whose output does not account for every
  *   input path, is reported in `not_measured` naming the paths, and those paths stay judged (never treated as
  *   ignored). Only an absent `ignoreProbe` skips the filter (unit fixtures with fake working copies).
+ * @invariant A helper whose working copy no longer exists (removed after landing) cannot host the probe. If its
+ *   landing is shown (its RECORDED head commit is an ancestor of main, `landing` port), ignore rules are read from the repository root (`ignoreProbeAtRoot`,
+ *   repo-relative, a tracked path never ignored) and a note says so; otherwise ONE `not_measured` line per helper
+ *   names "working copy removed" and every path stays judged. A spawn error's message is carried verbatim.
  * @invariant Findings, per helper and kind (one finding lists every file of that kind): a file outside the
  *   helper's working copy; a file no anchor of any claimed task covers (matching is `anchorsOverlap`, no new
  *   matcher; a file a `workflow.turn_end.co_change` rule REQUIRES counts as covered when an anchor-covered changed
@@ -74,6 +78,8 @@ export type RealpathFn = (path: string) => string;
 export interface IgnoreProbeRun {
   readonly status: number | null;
   readonly stdout: string;
+  /** The spawn error's message (e.g. `spawnSync git ENOENT` for a working copy that no longer exists), when the process did not start. */
+  readonly error?: string;
 }
 
 /** Runs `git check-ignore --stdin -z -v --non-matching` in `workingCopy` with the NUL-joined `paths` on stdin. */
@@ -86,8 +92,55 @@ export const spawnGitCheckIgnore: IgnoreProbeFn = (workingCopy, paths) => {
     input: paths.join("\0") + "\0",
     encoding: "utf8",
   });
-  return { status: run.status, stdout: run.stdout ?? "" };
+  return { status: run.status, stdout: run.stdout ?? "", ...(run.error !== undefined ? { error: run.error.message } : {}) };
 };
+
+/**
+ * Ignore probe for a helper whose working copy is gone: evaluated from the repository root `root` against
+ * repo-relative paths with `--no-index`, so the verdict is the repository's ignore RULES. A path the checkout
+ * tracks (`git ls-files`) is never ignored, so its record is rewritten to non-matching (rule: "a tracked path is
+ * never treated as ignored" holds although `--no-index` alone would report it).
+ */
+export function spawnGitCheckIgnoreAtRoot(root: string): IgnoreProbeFn {
+  return (_workingCopy, paths) => {
+    const ruled = spawnSync("git", ["check-ignore", "--no-index", "--stdin", "-z", "-v", "--non-matching"], {
+      cwd: root,
+      input: paths.join("\0") + "\0",
+      encoding: "utf8",
+    });
+    const base: IgnoreProbeRun = { status: ruled.status, stdout: ruled.stdout ?? "", ...(ruled.error !== undefined ? { error: ruled.error.message } : {}) };
+    if (base.status !== 0 && base.status !== 1) return base;
+    const listed = spawnSync("git", ["ls-files", "-z", "--", ...paths], { cwd: root, encoding: "utf8" });
+    if (listed.status !== 0) return { status: null, stdout: "", error: `git ls-files exited ${String(listed.status)}${listed.error !== undefined ? `: ${listed.error.message}` : ""}` };
+    const tracked = new Set((listed.stdout ?? "").split("\0").filter((p) => p !== ""));
+    const fields = base.stdout.split("\0");
+    if (fields.at(-1) === "") fields.pop();
+    for (let at = 0; at + 3 < fields.length; at += 4) {
+      if (tracked.has(fields[at + 3] ?? "")) fields.splice(at, 3, "", "", "");
+    }
+    return { status: base.status, stdout: fields.length === 0 ? "" : fields.join("\0") + "\0" };
+  };
+}
+
+/** Outcome of asking whether a removed working copy's work reached the integration branch. */
+export type LandingVerdict = { readonly landed: true; readonly evidence: string } | { readonly landed: false; readonly reason: string };
+
+/** Shows (or fails to show) that the recorded head commit of a removed working copy is on the integration branch. */
+export type LandingProbeFn = (headCommit: string) => LandingVerdict;
+
+/**
+ * The real {@link LandingProbeFn}: landing is shown exactly when the helper record's head commit is an ancestor of
+ * `integrationBranch` (`git merge-base --is-ancestor`, run at the repository root). Nothing is inferred from names.
+ */
+export function spawnGitLanding(root: string, integrationBranch = "main"): LandingProbeFn {
+  return (headCommit) => {
+    const run = spawnSync("git", ["merge-base", "--is-ancestor", headCommit, integrationBranch], { cwd: root, encoding: "utf8" });
+    if (run.error !== undefined) return { landed: false, reason: `git could not run: ${run.error.message}` };
+    if (run.status === 0) return { landed: true, evidence: `head ${headCommit.slice(0, 12)} is an ancestor of ${integrationBranch}` };
+    if (run.status === 1) return { landed: false, reason: `head ${headCommit.slice(0, 12)} is not on ${integrationBranch}` };
+    return { landed: false, reason: `git merge-base exited ${String(run.status)}: ${(run.stderr ?? "").trim().split("\n")[0] ?? ""}` };
+  };
+}
 
 /** Paths of `paths` git ignores, or the reason the probe could not be trusted. */
 type IgnoreVerdict = { readonly measured: true; readonly ignored: ReadonlySet<string> } | { readonly measured: false; readonly reason: string };
@@ -99,7 +152,9 @@ type IgnoreVerdict = { readonly measured: true; readonly ignored: ReadonlySet<st
  * pattern starts with `!` is a negation (the path is NOT ignored).
  */
 function judgeIgnoreProbe(paths: readonly string[], run: IgnoreProbeRun): IgnoreVerdict {
-  if (run.status !== 0 && run.status !== 1) return { measured: false, reason: `git check-ignore exited ${String(run.status)}` };
+  if (run.error !== undefined) return { measured: false, reason: `git check-ignore could not run: ${run.error}` };
+  if (run.status === null) return { measured: false, reason: "git check-ignore did not run to an exit (no error reported)" };
+  if (run.status !== 0 && run.status !== 1) return { measured: false, reason: `git check-ignore exited ${run.status}` };
   const fields = run.stdout.split("\0");
   if (fields.at(-1) === "") fields.pop();
   if (fields.length !== paths.length * 4) return { measured: false, reason: `git check-ignore answered ${fields.length / 4} of ${paths.length} paths` };
@@ -139,6 +194,8 @@ export interface HelperScopeReview {
   readonly findings: readonly HelperScopeFinding[];
   /** Parts that could not be measured (an unreadable edit log, a failed helper measurement). */
   readonly not_measured: readonly string[];
+  /** Facts the review relied on that are not findings (e.g. a removed working copy whose landing was shown). */
+  readonly notes: readonly string[];
 }
 
 export interface ReviewHelperScopeInput {
@@ -150,6 +207,10 @@ export interface ReviewHelperScopeInput {
   readonly realpath: RealpathFn;
   /** Git ignore probe; absent = no ignore filtering. The CLI passes {@link spawnGitCheckIgnore}. */
   readonly ignoreProbe?: IgnoreProbeFn;
+  /** Ignore probe for a helper whose working copy is gone (repository-root rules); used with {@link landing}. */
+  readonly ignoreProbeAtRoot?: IgnoreProbeFn;
+  /** Shows whether a removed working copy's work landed; absent = landing can never be shown. */
+  readonly landing?: LandingProbeFn;
   /** The validated co_change rules plus the glob matcher; absent = no co-change coverage (rules unmeasured or unset). */
   readonly coChange?: { readonly rules: readonly CoChangeRule[]; readonly matches: GlobMatchFn };
 }
@@ -226,6 +287,24 @@ function sharesIsolatedCopy(mate: TrailHelper, helper: TrailHelper, workingCopy:
   return canonicalPath(mate.working_copy, realpath) === workingCopy;
 }
 
+/** Landing of a helper from its RECORDED head: no record of a head means landing is not shown, never guessed. */
+function landingOf(helper: TrailHelper, probe: LandingProbeFn | undefined): LandingVerdict {
+  if (helper.head === undefined) return { landed: false, reason: "landing not shown: helper record has no head" };
+  if (!helper.head.measured) return { landed: false, reason: `landing not shown: helper record has no head (${helper.head.reason})` };
+  if (probe === undefined) return { landed: false, reason: "landing not shown: no landing probe wired" };
+  return probe(helper.head.value.commit);
+}
+
+/** True when `path` still exists (its realpath resolves). */
+function existsOn(path: string, realpath: RealpathFn): boolean {
+  try {
+    realpath(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function listOf(files: readonly string[]): string {
   return files.join(", ");
 }
@@ -242,6 +321,7 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
   const helpers: JudgedHelper[] = [];
   const findings: HelperScopeFinding[] = [];
   const notMeasured: string[] = [];
+  const notes: string[] = [];
   for (const turn of trail.turns) {
     if (!turn.edits.measured) notMeasured.push(`turn ${turn.turn}: edit records unreadable (${turn.edits.reason})`);
   }
@@ -294,14 +374,28 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
     }
     if (input.ignoreProbe !== undefined && inside.size > 0) {
       const asked = [...inside].sort();
+      const removedCopy = helper.working_copy !== undefined && !existsOn(helper.working_copy, realpath);
       let verdict: IgnoreVerdict;
-      try {
-        verdict = judgeIgnoreProbe(asked, input.ignoreProbe(workingCopy, asked));
-      } catch (cause) {
-        verdict = { measured: false, reason: `git check-ignore could not run: ${cause instanceof Error ? cause.message : String(cause)}` };
+      if (removedCopy) {
+        // reason: a removed copy cannot host `git check-ignore` (spawn ENOENT, once "exited undefined"); its landing decides
+        // whether the repository's own rules at the root may stand in for it. One line per helper, not per path.
+        const landing = landingOf(helper, input.landing);
+        if (landing.landed && input.ignoreProbeAtRoot !== undefined) {
+          verdict = judgeIgnoreProbe(asked, input.ignoreProbeAtRoot(input.projectRoot, asked));
+          if (verdict.measured) notes.push(`helper ${helper.agent_id}: working copy removed after landing (${landing.evidence}); ignore rules read at ${input.projectRoot}`);
+        } else {
+          verdict = { measured: false, reason: landing.landed ? "no root ignore probe wired" : landing.reason };
+        }
+        if (!verdict.measured) notMeasured.push(`helper ${helper.agent_id}: working copy removed (${workingCopy}); landing or ignore status not measured for ${asked.length} path(s), all judged (${verdict.reason})`);
+      } else {
+        try {
+          verdict = judgeIgnoreProbe(asked, input.ignoreProbe(workingCopy, asked));
+        } catch (cause) {
+          verdict = { measured: false, reason: `git check-ignore could not run: ${cause instanceof Error ? cause.message : String(cause)}` };
+        }
+        if (!verdict.measured) notMeasured.push(`helper ${helper.agent_id}: ignore status not measured for ${listOf(asked)} (${verdict.reason})`);
       }
       if (verdict.measured) for (const path of verdict.ignored) inside.delete(path);
-      else notMeasured.push(`helper ${helper.agent_id}: ignore status not measured for ${listOf(asked)} (${verdict.reason})`);
     }
     const files = [...inside].sort();
     helpers.push({ agent_id: helper.agent_id, run: helper.run, end_count: helper.end_count, judged_end_count: helper.judged_end_count, files });
@@ -342,5 +436,5 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
       }
     }
   }
-  return ok({ helpers, findings, not_measured: notMeasured });
+  return ok({ helpers, findings, not_measured: notMeasured, notes });
 }

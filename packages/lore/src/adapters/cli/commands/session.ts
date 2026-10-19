@@ -41,7 +41,7 @@ import { defineLoreCommand } from "../cli-exit.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeRulesLoad, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
-import { reviewHelperScope, spawnGitCheckIgnore } from "../../../service/helper-scope-review.js";
+import { reviewHelperScope, spawnGitCheckIgnore, spawnGitCheckIgnoreAtRoot, spawnGitLanding } from "../../../service/helper-scope-review.js";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import {
@@ -239,6 +239,8 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
       projectRoot,
       realpath: realpathSync,
       ignoreProbe: spawnGitCheckIgnore,
+      ignoreProbeAtRoot: spawnGitCheckIgnoreAtRoot(projectRoot),
+      landing: spawnGitLanding(projectRoot),
       ...(coChangeRules.measured ? { coChange: { rules: coChangeRules.rules, matches: createGlobMatcher() } } : {}),
     });
     if (!review.ok) {
