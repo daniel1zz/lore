@@ -25,7 +25,8 @@
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { ambientOfInvocation, createApp } from "../../../app.js";
+import { ambientOfInvocation, createApp, type App } from "../../../app.js";
+import type { Invocation } from "@lore/core";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
@@ -33,6 +34,23 @@ import { formatErrorFor, resolveActor } from "../utils.js";
 import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+
+/**
+ * Register the MAIN agent run (`cc:<session>`) the invocation names in the corpus `init` has just created.
+ *
+ * Why: the integration's SessionStart hook cannot register a run in a repository that has no corpus yet, and every later
+ * write of that session would be refused as an unknown run (BR-1351). A subagent run (`cc:<session>:<agent>`) needs an
+ * agent type this command lacks, a non-agent party has its own registration, and an already-registered run is left alone.
+ *
+ * Side-effect class: IO (one `runs` row). A failure to register is not fatal: the invocation is then simply not a known
+ * party in this corpus and `init` reports that it did not arm.
+ */
+async function registerInvokingMainRun(app: App, inv: Invocation): Promise<void> {
+  const run = inv.identity.harnessRun;
+  if (run === null || !run.startsWith("cc:") || run.split(":").length !== 2) return;
+  const sessionId = run.slice("cc:".length);
+  await app.runService?.register({ harness: "claude-code", sessionId, composition: { schemaVersion: 1, fragments: [] } });
+}
 
 export default defineLoreCommand({
   meta: {
@@ -109,8 +127,14 @@ export default defineLoreCommand({
     // write needs a known party. A person has no human session yet at `init` (`lore session start` needs the corpus
     // this command creates), so init does NOT arm for an invocation with no known party and says so, exactly as it
     // does outside git; `lore audit arm --confirm` arms it once a session is open.
-    // A run named on the command line is checked against THIS corpus's registry, which `init` has just created empty:
-    // a hook-injected run cannot have been registered here yet, so it is no known party until `lore run register`.
+    // A MAIN agent run named on the command line is registered below (this corpus's registry was just created empty);
+    // a subagent run is checked against that registry and is no known party until `lore run register`.
+    // reason: the integration that vouched for the run named on the command line (`--harness-run cc:<session>`) can only
+    // register it in a corpus that exists, and this command is what creates it: registering that MAIN run here, with the
+    // record `lore run register` would have written, keeps every later write of the same session from being refused as
+    // unknown. A subagent run (it needs an agent type this command does not have) and a run that is already registered
+    // are left to the hook / `lore run register`.
+    await registerInvokingMainRun(app, inv);
     const stateBinding = app.stateBindingService;
     const insideGit = isInsideGitRepository(cwd);
     const verifiedParty = inv.identity.claimed === null ? undefined : await app.verifiedInvocationIdentity?.();

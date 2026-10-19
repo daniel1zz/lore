@@ -10,7 +10,10 @@
  * argv: <dbPath> <pendingId> <--accept|--reject> [reason]
  * env:  FIXTURE_ANCESTRY_COMMAND — when set, the synthetic ancestry carries that command as the driver's parent.
  */
-import { liveInvocation } from "../../live-invocation.js";
+import { deriveHumanRunId, type Invocation } from "@lore/core";
+import { actedStore, liveInvocation } from "../../live-invocation.js";
+import { RunService } from "../../../src/service/run-service.js";
+import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { runDecideFlow } from "../../../src/adapters/cli/decide-flow.js";
 import { createProductionHumanChannelPorts } from "../../../src/adapters/real-human-channel-port.js";
 
@@ -20,8 +23,27 @@ if (dbPath === undefined || id === undefined || flag === undefined) {
   process.exit(64);
 }
 
+// The driver stands for the person at the terminal, so it runs as a HUMAN party (never an agent run: the channel refuses
+// an agent identity, BR-1350). The person's run is registered in the corpus the way `lore session start --human` does it.
+const HUMAN_TOKEN_HASH = "ab".repeat(32);
+const humanStore = actedStore(new SQLiteStore(dbPath));
+const registered = await new RunService(humanStore, undefined, undefined, undefined, process.cwd()).registerParty({
+  harness: "human",
+  name: "driver",
+  tokenHash: HUMAN_TOKEN_HASH,
+});
+humanStore.close();
+if (!registered.ok) {
+  process.stderr.write(`driver: registering the human run failed: ${JSON.stringify(registered.error)}\n`);
+  process.exit(65);
+}
+const invocation: Invocation = {
+  ...liveInvocation(),
+  identity: { harnessRun: deriveHumanRunId(HUMAN_TOKEN_HASH), claimed: "driver", claimedSource: "human" },
+};
+
 const parentCommand = process.env["FIXTURE_ANCESTRY_COMMAND"];
-const ports = createProductionHumanChannelPorts(liveInvocation(), {
+const ports = createProductionHumanChannelPorts(invocation, {
   readProcessTable: () => ({
     ok: true as const,
     value:
@@ -39,7 +61,7 @@ const ports = createProductionHumanChannelPorts(liveInvocation(), {
 });
 
 const exit = await runDecideFlow(
-  liveInvocation(),
+  invocation,
   { dbPath, id, accept: flag === "--accept", reject: flag === "--reject", ...(reason === undefined ? {} : { reason }) },
   ports,
 );

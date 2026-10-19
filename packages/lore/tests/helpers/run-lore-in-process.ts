@@ -34,6 +34,7 @@ import { RunIdentityArgumentError } from "@lore/core/node";
 import type { Invocation, InvocationReader } from "@lore/core";
 import { runCli } from "../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "./test-invocation";
+import { registerTestRun, testRunIdFor } from "./test-run-identity";
 
 /** Environment bag, same shape as `process.env`. */
 export type InProcessEnv = Readonly<Record<string, string | undefined>>;
@@ -148,5 +149,8 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
     err.push(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
     exitCode = 1;
   }
+  // reason: `init` creates the corpus the run is registered in, so the registration the invocation builder attempted before
+  // it found no corpus; register now so the NEXT command (and any replica copied from this file) finds the run known.
+  if (options.identity !== "none" && args[0] === "init" && exitCode === 0) registerTestRun(options.cwd, testRunIdFor(args, env));
   return { stdout: out.join(""), stderr: err.join(""), exitCode };
 }
