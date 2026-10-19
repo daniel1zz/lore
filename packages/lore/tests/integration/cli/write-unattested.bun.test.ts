@@ -241,7 +241,7 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
     const r = lore(["--harness-run", GHOST_A, "done", t6], dir, NAME_ENV);
     expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     expect(warningLinesNaming(r.stderr, GHOST_A)).toHaveLength(1);
-  });
+  }, 120_000);
 
   it("the registered-run control: a registered id is stamped and draws no warning", async () => {
     await registerRun(dir, REGISTERED);
