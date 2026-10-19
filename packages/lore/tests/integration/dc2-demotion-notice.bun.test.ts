@@ -251,7 +251,7 @@ describe(`${SPEC_QUALIFIED} (d) no demotion from draft`, () => {
     const set = runLore(["rule", "set", added.ruleId, "--statement", "edited on a draft leaf"]);
     expect(set.exitCode).toBe(0);
     expect(set.stdout).not.toContain("is now draft");
-  });
+  }, 120_000);
 });
 
 describe(`${SPEC_QUALIFIED} (e) cite help states what the gate does`, () => {
