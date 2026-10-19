@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CORPUS_DEPENDENT_CHECKS, DEFAULT_STEPS, deriveFloorSteps, deriveStaticSteps, main, renderTable, runChain, runStaticFloor } from "../run-chain";
+import { FLOOR_TAIL_CHARS } from "../../packages/lore/src/service/integrate-service";
+import { boundFailureOutput, CORPUS_DEPENDENT_CHECKS, DEFAULT_STEPS, deriveFloorSteps, deriveStaticSteps, FAILURE_BLOCK_MAX_CHARS, main, renderFailureBlocks, renderTable, runChain, runStaticFloor } from "../run-chain";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const fake = (codes: Record<string, number>) => {
@@ -223,5 +224,36 @@ describe("machine-readable per-step timings (LORE_FLOOR_TIMINGS_FILE)", () => {
     const r = spawnSync("bun", ["scripts/run-chain.ts", "exit 0"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, LORE_FLOOR_TIMINGS_FILE: "" } });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("all 1 steps passed");
+  });
+});
+
+describe("integrate floor failure shows the failing step's own output (task-integrate-floor-failure-shows-the-failing-step-s-own)", () => {
+  const stepLines = (n: number) => `i=1; while [ $i -le ${n} ]; do echo "S2-FAIL-LINE-$i"; i=$((i+1)); done; exit 1`;
+  const bigStep = (tag: string) => `head -c 10000 /dev/zero | tr '\\0' x; echo; echo ${tag}`;
+
+  it("REAL SPAWN: step 2 of 4 fails with 200 lines, steps 3-4 print 10 KB each -> the last 4000 chars carry step 2's last failure lines and an omitted-lines marker", () => {
+    const r = spawnSync("bun", ["scripts/run-chain.ts", "echo one", stepLines(200), bigStep("STEP3-DONE"), bigStep("STEP4-DONE")], { cwd: ROOT, encoding: "utf8" });
+    expect(r.status).toBe(1);
+    const tail = r.stdout.slice(-4000);
+    expect(tail).toContain("=== run-chain: FAILED step output (exit 1): i=1; while");
+    expect(tail).toContain("S2-FAIL-LINE-200");
+    expect(tail).toContain("S2-FAIL-LINE-161");
+    expect(tail).not.toContain("S2-FAIL-LINE-160\n");
+    expect(tail).toContain("... 160 lines omitted");
+  });
+
+  it("boundFailureOutput: short output is kept whole with no marker; a long single line is cut with an explicit chars marker", () => {
+    expect(boundFailureOutput("a\nb\n")).toBe("a\nb");
+    const cut = boundFailureOutput("y".repeat(3000));
+    expect(cut.startsWith("... 500 chars omitted from the first kept line\n")).toBe(true);
+    expect(cut.length).toBe("... 500 chars omitted from the first kept line\n".length + FAILURE_BLOCK_MAX_CHARS);
+  });
+
+  it("renderFailureBlocks: passing steps and steps without captured output print nothing", () => {
+    expect(renderFailureBlocks([{ step: "ok", exit: 0, seconds: 0, output: "fine" }, { step: "bare", exit: 2, seconds: 0 }])).toBe("");
+  });
+
+  it("integrate's stored tail is sized to hold four failed steps' blocks", () => {
+    expect(FLOOR_TAIL_CHARS).toBeGreaterThanOrEqual(4 * (FAILURE_BLOCK_MAX_CHARS + 200));
   });
 });
