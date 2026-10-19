@@ -32,15 +32,20 @@ interface LeafReport {
   readonly not_measured: readonly string[];
   readonly unresolved_imports: readonly string[];
   readonly fix_commands: readonly string[];
+  readonly absent_commands: readonly { readonly command: string; readonly fix: string }[];
+  readonly measured_by: "commands" | "owned_sites" | "absent" | "none";
   readonly ok: boolean;
 }
 
-interface CoverageData {
+export interface CoverageData {
   readonly target: string;
   readonly complete: boolean;
   readonly leaves: readonly LeafReport[];
   readonly undeclared_commands: readonly { readonly command: string; readonly fix: string }[];
 }
+
+/** Prefix of a line that is information only: it never counts against coverage. */
+export const INFORMATIONAL_PREFIX = "  absent (informational, not failing)";
 
 function runLore(args: string[]): { status: number; stdout: string; stderr: string } {
   const r = spawnSync("bun", ["run", LORE_ENTRY, ...args], { cwd: process.cwd(), encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
@@ -80,16 +85,20 @@ function coverageOf(root: string): CoverageData {
   }
 }
 
-/** The lines naming what a root still lacks (empty when complete). */
+/**
+ * The lines stating what the CLI's `--json` reports for a root: the CLI decided, this renders (no verdict logic here).
+ * A leaf the CLI measured (by commands or owned sites) and found ok prints nothing; `measured_by: "none"` is the CLI's own
+ * unmeasured state; each declared-but-absent command is printed as INFORMATIONAL (the CLI does not count it against coverage).
+ */
 export function renderMissing(data: CoverageData): string[] {
   const lines: string[] = [];
   for (const leaf of data.leaves) {
-    if (leaf.commands.length === 0) lines.push(`  unmeasured   ${leaf.slug}: no command declared\n    fix: lore baseline map ${leaf.slug} --command <name>`);
+    if (leaf.measured_by === "none") lines.push(`  unmeasured   ${leaf.slug}: measured_by none (no command declared and no owned site)\n    fix: lore baseline map ${leaf.slug} --command <name>`);
     for (const key of leaf.unresolved_imports) lines.push(`  unresolved   ${key} (${leaf.slug}: census incomplete behind this import)`);
-    const pairs = [...leaf.gaps.map((k) => ["gap         ", k] as const), ...leaf.not_measured.map((k) => ["not_measured", k] as const)];
-    for (const [kind, key] of pairs) {
-      lines.push(`  ${kind} ${key}\n    fix: lore baseline map ${leaf.slug} --site ${key} --rule <BR-n> | --non-business <reason>`);
-    }
+    for (const key of leaf.gaps) lines.push(`  gap          ${key}`);
+    for (const key of leaf.not_measured) lines.push(`  not_measured ${key}`);
+    for (const fix of leaf.fix_commands) lines.push(`    fix: ${fix}`);
+    for (const a of leaf.absent_commands) lines.push(`${INFORMATIONAL_PREFIX} ${a.command} (${leaf.slug}: declared command not in this tree; pending or stale)\n    if stale: ${a.fix}`);
   }
   for (const u of data.undeclared_commands) lines.push(`  undeclared   ${u.command}\n    fix: ${u.fix}`);
   return lines;
@@ -105,7 +114,8 @@ function main(): number {
     }
     incomplete += 1;
     const lines = renderMissing(data);
-    console.log(`check:baseline-coverage: ${root} INCOMPLETE, ${lines.length} item(s) unaccounted:`);
+    const failing = lines.filter((l) => !l.startsWith(INFORMATIONAL_PREFIX) && !l.startsWith("    fix: ")).length;
+    console.log(`check:baseline-coverage: ${root} INCOMPLETE, ${failing} item(s) unaccounted:`);
     for (const line of lines) console.log(line);
   }
   return incomplete === 0 ? 0 : 1;

@@ -118,6 +118,7 @@ import { DriftCheckService } from "./service/drift-check-service.js";
 import { OutlineMigrationService } from "./service/outline-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
+import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
@@ -460,6 +461,12 @@ export interface App {
    * `ordinalMigrationService`; always present in production; the CLI guards `=== undefined`.
    */
   specParentMigrationService?: SpecParentMigrationService;
+  /**
+   * PlanOutlineExemptMigrationService — `lore migrate plan-outline-exempt [--apply]` (BL-D2, BR-250): removes the
+   * legacy `extra.prd_sync_exempt` from every stored plan, through the corpus write route. Optional for the same
+   * hand-built-App-stub reason as `specParentMigrationService`; always present in production.
+   */
+  planOutlineExemptMigrationService?: PlanOutlineExemptMigrationService;
   /**
    * UatService — the sole write orchestrator for a structured UAT verdict
    * (`lore uat record`, SPEC-054). Narrow injected ports (`corpusService.createUatDoc` /
@@ -1024,6 +1031,7 @@ function buildAppFromSqlite(
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
+    planOutlineExemptMigrationService: new PlanOutlineExemptMigrationService(store, corpusService),
     specParentMigrationService: new SpecParentMigrationService(store, corpusService),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
@@ -1443,6 +1451,7 @@ function buildAppFromTurso(
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
+    planOutlineExemptMigrationService: new PlanOutlineExemptMigrationService(store, corpusService),
     specParentMigrationService: new SpecParentMigrationService(store, corpusService),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a

@@ -77,8 +77,8 @@ export const INTEGRATE_MARKER_ENV = "LORE_INTEGRATE";
 const TARGET_REF = "refs/heads/main";
 const TARGET_NAME = "main";
 
-/** How much of a failing floor's output the outcome carries. */
-const FLOOR_TAIL_CHARS = 4000;
+/** How much of a failing floor's output the outcome carries: sized so the failed steps' re-printed blocks (run-chain prints them last, up to 2500 chars each) always fit. */
+export const FLOOR_TAIL_CHARS = 12000;
 
 /** Raw outcome of one git call; never thrown. */
 export interface GitOutcome {

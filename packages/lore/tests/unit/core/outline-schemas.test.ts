@@ -3,7 +3,6 @@ import { describe, it, expect } from "vitest";
 import {
   outlineEntrySchema,
   outlineBudgetSchema,
-  prdSyncExemptSchema,
   createDocInputSchema,
   SPEC_KINDS,
 } from "@lore/core";
@@ -12,7 +11,7 @@ import {
 // implementation task `task-skill-implement-t1-core-schemas-outlineentry-outline`,
 // which is expected to make this whole file GREEN without editing it).
 //
-// `outlineEntrySchema` / `outlineBudgetSchema` / `prdSyncExemptSchema` do not exist
+// `outlineEntrySchema` / `outlineBudgetSchema` do not exist
 // yet (packages/core/src/outline.ts is unwritten, and `SPEC_KINDS` has not yet been
 // extended with "domain-overview") — every scenario below is expected to fail RED
 // today, either because the imported schema is `undefined` (module-not-found /
@@ -21,11 +20,9 @@ import {
 //
 // Test plan (SPEC-080 C1 OutlineEntry / C2 SPEC_KINDS+domain-overview / C3 outline_budget):
 // HAPPY: valid OutlineEntry parses + preserves all 7 fields; each declared tier/rel value
-//   accepts; spec_kind="domain-overview" is accepted by createDocInputSchema; a
-//   fully-specified prd_sync_exempt accepts.
+//   accepts; spec_kind="domain-overview" is accepted by createDocInputSchema.
 // NEGATIVE: unknown tier rejected (names `tier`); links.rel outside the enum rejected
-//   (names `rel`); spec_kind typo "domain-orview" rejected; prd_sync_exempt missing/empty
-//   reason rejected (names `reason`).
+//   (names `rel`); spec_kind typo "domain-orview" rejected.
 // BOUNDARY: non-positive outline_budget section values (zero and negative) rejected;
 //   extra_prose_chars defaults to 1000 when absent.
 // ERROR: N/A — pure Zod parsing, no external IO / no thrown exceptions expected from
@@ -162,35 +159,5 @@ describe("SPEC_KINDS domain-overview extension + createDocInputSchema (SPEC-080 
       extra: { spec_kind: "domain-orview" },
     });
     expect(result.success).toBe(false);
-  });
-});
-
-describe("prdSyncExemptSchema (SPEC-080 C4)", () => {
-  const validExemption = {
-    reason: "Feature landed off-cycle; domain doc update tracked in follow-up plan-042.",
-    by: "agent:main-orchestrator",
-    at: "2026-07-26T00:00:00.000Z",
-  };
-
-  it("accepts a fully-specified exemption", () => {
-    const result = prdSyncExemptSchema.safeParse(validExemption);
-    expect(result.success).toBe(true);
-  });
-
-  it("[negative] rejects a missing reason, naming reason as required", () => {
-    const { reason, ...rest } = validExemption;
-    const result = prdSyncExemptSchema.safeParse(rest);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((issue) => issue.path.includes("reason"))).toBe(true);
-    }
-  });
-
-  it("[negative] rejects an empty-string reason (required means non-empty, not merely present)", () => {
-    const result = prdSyncExemptSchema.safeParse({ ...validExemption, reason: "" });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((issue) => issue.path.includes("reason"))).toBe(true);
-    }
   });
 });

@@ -166,7 +166,7 @@ describe("checkPlanClose — cited-rule-state pushes a verdict only when it meas
       // companion `notApplicable` verdict out of these assertions.
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
-      prdSyncEnabled: true,
+      citedRuleCheckEnabled: true,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
       // reason: keeps assessment-freshness's own vacuous `notApplicable` entry out of these assertions.
       assessmentFreshnessExempt: true,
@@ -203,7 +203,7 @@ describe("checkPlanClose — cited-rule-state pushes a verdict only when it meas
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
-      prdSyncEnabled: true,
+      citedRuleCheckEnabled: true,
       assessmentFreshnessExempt: true,
     };
     const results = planClose.check(ctx);
@@ -213,10 +213,10 @@ describe("checkPlanClose — cited-rule-state pushes a verdict only when it meas
     expect(isCheckpointBlocked(results)).toBe(false);
   });
 
-  // ERROR (config-shaped) — the prd_sync knob disabled means the predicate never runs, violations or not.
-  it("ERROR: prd_sync disabled by config means the predicate never runs even with violations supplied", () => {
+  // ERROR (config-shaped) — the cited_rule_check knob disabled means the predicate never runs, violations or not.
+  it("ERROR: cited_rule_check disabled by config means the predicate never runs even with violations supplied", () => {
     const results = planClose.check(
-      baseCtx({ prdSyncEnabled: false, citedRuleViolations: [{ rule_id: "BR-5", state: "contradicted", offences: [] }] }),
+      baseCtx({ citedRuleCheckEnabled: false, citedRuleViolations: [{ rule_id: "BR-5", state: "contradicted", offences: [] }] }),
     );
 
     expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(false);
