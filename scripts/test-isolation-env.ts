@@ -13,7 +13,8 @@
  * fail-loud consistency check: it spawns a probe child with no env and refuses to run any
  * test when the marker did not arrive.
  *
- * Public surface: `armSandboxEnv`, `assertChildrenInheritSandbox`, `resolveProtectedRepo` (pure).
+ * Public surface: `armSandboxEnv`, `assertChildrenInheritSandbox`, `resolveProtectedRepo` (pure), `createRunRoot`,
+ * `removeDeadRunRoots`.
  * Consistency rule for the protected repository (LORE_TEST_SANDBOX_REPO):
  *   - unset -> this checkout's root (`checkoutRoot`);
  *   - set   -> must be an absolute path to a lore checkout (contains `scripts/test-isolation-env.ts`
@@ -25,7 +26,8 @@
  * Side-effect class: stateful (`armSandboxEnv` mutates the env object it is given); the probe spawns a process.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 const MARKER = "LORE_TEST_SANDBOX";
@@ -114,4 +116,56 @@ export function assertChildrenInheritSandbox(spawn: ProbeSpawn = DEFAULT_PROBE_S
         `the run's environment is inconsistent.`,
     );
   }
+}
+
+/** Name of the folder, inside the original temp dir, that holds one run root per live test run. */
+export const RUN_ROOTS_DIR = "lore-test-runs";
+
+/** True when no process has this pid (ESRCH); a process owned by another user (EPERM) is alive. */
+export function isPidGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/**
+ * Removes every run root under `runRootsDir` whose owner pid (the number before the first `-` in its name) is gone.
+ * This is the removal a run that was SIGKILLed could not do for itself; a root whose pid is alive is never touched.
+ * Entries not named `<pid>-<suffix>` are not run roots and are left alone.
+ */
+export function removeDeadRunRoots(runRootsDir: string, pidGone: (pid: number) => boolean = isPidGone): string[] {
+  if (!existsSync(runRootsDir)) return [];
+  const removed: string[] = [];
+  for (const name of readdirSync(runRootsDir)) {
+    const m = /^(\d+)-/.exec(name);
+    if (m === null || !pidGone(Number(m[1]))) continue;
+    rmSync(join(runRootsDir, name), { recursive: true, force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
+/**
+ * Creates this run's root `realpath(<original temp dir>)/lore-test-runs/<pid>-<random>/` holding `home/` and `tmp/`,
+ * and points HOME, TMPDIR, TMP and TEMP of `env` at them, so every directory a test creates through `tmpdir()` lives in
+ * the root and is removed with it. Dead runs' roots are removed first. Throws when the root cannot be created (no
+ * fallback to the shared temp dir). Returns the root; the caller removes it when its run ends.
+ */
+export function createRunRoot(env: EnvBag = process.env): { readonly root: string; readonly home: string } {
+  const runRootsDir = join(realpathSync(env["TMPDIR"] !== undefined && env["TMPDIR"] !== "" ? env["TMPDIR"] : tmpdir()), RUN_ROOTS_DIR);
+  mkdirSync(runRootsDir, { recursive: true });
+  removeDeadRunRoots(runRootsDir);
+  const root = mkdtempSync(join(runRootsDir, `${String(process.pid)}-`));
+  const home = join(root, "home");
+  const tmp = join(root, "tmp");
+  mkdirSync(home);
+  mkdirSync(tmp);
+  env["HOME"] = home;
+  env["TMPDIR"] = tmp;
+  env["TMP"] = tmp;
+  env["TEMP"] = tmp;
+  return { root, home };
 }
