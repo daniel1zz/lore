@@ -81,7 +81,7 @@ interface Ctx {
 async function seed(store: InMemoryStore): Promise<Pick<Ctx, "staleId" | "detailedId" | "legacyId" | "auditId">> {
   const must = async (input: DecisionRecordInput): Promise<number> => {
     const r = await store.appendDecisionRecord(input);
-    if (!r.ok) throw new Error(`seed append failed: ${r.error.message}`);
+    if (!r.ok) throw new Error(`seed append failed: ${r.error.code}`);
     return r.value.id;
   };
   const staleId = await must(row({ subject_id: "stale-subject", subject_version: "v1" }));
