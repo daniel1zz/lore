@@ -217,7 +217,7 @@ import {
   // the task path uses (an orphaned_dirty claim never ages out, a clean ended-run claim does not block).
   resolveEffectiveClaimStaleness,
   resolveEffectiveStalenessByDoc,
-  applyEffectiveSiblingStaleness,
+  buildEffectiveAnchorGateContext,
 } from "./task-workflow-service.js";
 
 /**
@@ -854,6 +854,20 @@ export class PhaseWorkflowService {
   }
 
   // ── claim ────────────────────────────────────────────────────────────────
+
+  /**
+   * The gate context for a phase claim: the one shared builder ({@link buildEffectiveAnchorGateContext}) bound to
+   * this service's store and TTL. Public so the phase gate CLI reaches the verdict `claim()` reaches.
+   */
+  buildAnchorGateContext(
+    by: string,
+    phase: DocRecord,
+    siblings: readonly DocRecord[],
+    nowIso: string,
+    candidateSessionId?: string,
+  ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
+    return buildEffectiveAnchorGateContext(this.store, by, phase, siblings, nowIso, this.claimTtlMinutes, candidateSessionId);
+  }
 
   /**
    * Acquires, refreshes, or steals the advisory execution lease on a phase doc.
@@ -1728,26 +1742,13 @@ export class PhaseWorkflowService {
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (phase.parent_id === null) {
-      ctx = {
-        ...buildUpstreamSpecContext(undefined),
-        candidateBy: by,
-        candidateAnchors: extractFileAnchors(phase),
-        siblingClaims: [],
-        // reason: omitted (never `undefined`-valued) when this run measured no
-        // session — `exactOptionalPropertyTypes`, and the SAME present-iff-measured
-        // shape `buildAnchorGateContext` produces for the populated branch below.
-        ...(sessionId !== undefined ? { candidateSessionId: sessionId } : {}),
-      };
+      const anchorCtx = await this.buildAnchorGateContext(by, phase, [], nowIso, sessionId);
+      if (!anchorCtx.ok) return anchorCtx;
+      ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
       const bundleResult = await this.gate.getPlanBundle(phase.parent_id);
       if (!bundleResult.ok) return bundleResult;
-      const anchorCtx = await applyEffectiveSiblingStaleness(
-        this.store,
-        buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, this.claimTtlMinutes, sessionId),
-        bundleResult.value.tasks,
-        nowIso,
-        this.claimTtlMinutes,
-      );
+      const anchorCtx = await this.buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, sessionId);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
     }

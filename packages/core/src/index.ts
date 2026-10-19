@@ -40,6 +40,7 @@ export * from "./command-pipe.js";
 export * from "./oracle-file-existence.js";
 export * from "./autonomy/index.js";
 export * from "./task-workflow.js";
+export * from "./claim-held.js";
 export * from "./stamp-binding.js";
 export * from "./acceptance.js";
 export * from "./ac-quality.js";

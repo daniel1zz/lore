@@ -325,6 +325,7 @@ import type { ActorSource } from "@lore/core/node";
 import {
   evidenceEntrySchema,
   taskClaimSchema,
+  extractHeldClaim,
   isClaimStale,
   isClaimStaleForRun,
   isValidTransition,
@@ -1021,7 +1022,8 @@ export async function resolveEffectiveStalenessByDoc(
   const staleByDoc = new Map<DocId, boolean>();
   const endedRuns = new Map<string, boolean>();
   for (const doc of docs) {
-    const claim = readClaim(doc);
+    // reason: a terminal task holds no claim (one definition: `extractHeldClaim`).
+    const claim = extractHeldClaim(doc);
     if (claim === undefined) continue;
     const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns);
     if (!stale.ok) return stale;
@@ -1057,6 +1059,31 @@ export async function applyEffectiveSiblingStaleness<C extends { siblingClaims?:
       stale: staleBySlug.get(claim.slug) ?? claim.stale,
     })),
   });
+}
+
+/**
+ * THE gate-context builder: sibling selection (held claims only, via `buildAnchorGateContext`) plus run-aware
+ * staleness, in one call. The real task claim, the real phase claim, `lore gate task-claim` and the phase gate
+ * all call this and nothing else, so a dry-run verdict equals the real verdict by construction.
+ *
+ * @param siblings - The candidate's sibling docs (plan bundle tasks, or corpus-wide ad-hoc tasks); `[]` when none.
+ */
+export async function buildEffectiveAnchorGateContext(
+  store: StoreInterface,
+  by: string,
+  candidate: DocRecord,
+  siblings: readonly DocRecord[],
+  nowIso: string,
+  ttlMinutes: number,
+  candidateSessionId?: string,
+): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
+  return applyEffectiveSiblingStaleness(
+    store,
+    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes, candidateSessionId),
+    siblings,
+    nowIso,
+    ttlMinutes,
+  );
 }
 
 /** History wording for the run on a claim/release: the run id, or `unattested`. */
@@ -3369,10 +3396,10 @@ export class TaskWorkflowService {
     if (!tasksResult.ok) return tasksResult;
     const outcomes: RunEndClaimOutcome[] = [];
     const held = tasksResult.value
-      .filter((t) => readClaim(t)?.harness_run === runId)
+      .filter((t) => extractHeldClaim(t)?.harness_run === runId)
       .sort((a, b) => a.slug.localeCompare(b.slug));
     for (const task of held) {
-      const claim = readClaim(task);
+      const claim = extractHeldClaim(task);
       if (claim === undefined || claim.orphaned_dirty !== undefined) continue;
       const nowIso = now();
       const cleanliness = measureWorktreeCleanliness(claim.worktree);
@@ -4824,7 +4851,7 @@ export class TaskWorkflowService {
       if (taskAnchors.length > 0) {
         for (const other of tasks) {
           if (other.id === task.id) continue;
-          const otherClaim = readClaim(other);
+          const otherClaim = extractHeldClaim(other);
           if (otherClaim === undefined) continue;
           if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
           // reason: BR-1056 — same holder means same RUN. Two runs that share a derived name are TWO holders and
@@ -5108,36 +5135,20 @@ export class TaskWorkflowService {
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      ctx = {
-        ...buildUpstreamSpecContext(undefined),
-        candidateBy: by,
-        candidateAnchors: extractFileAnchors(task),
-        siblingClaims: [],
-        ...(candidateSessionId !== undefined ? { candidateSessionId } : {}),
-      };
+      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso, candidateSessionId);
+      if (!anchorCtx.ok) return anchorCtx;
+      ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
       const bundleResult = await this.gate.getPlanBundle(task.parent_id);
       if (!bundleResult.ok) {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = await applyEffectiveSiblingStaleness(
-          this.store,
-          buildAnchorGateContext(by, task, siblingsResult.value, nowIso, this.claimTtlMinutes, candidateSessionId),
-          siblingsResult.value,
-          nowIso,
-          this.claimTtlMinutes,
-        );
+        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateSessionId);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
       } else {
-        const anchorCtx = await applyEffectiveSiblingStaleness(
-          this.store,
-          buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, this.claimTtlMinutes, candidateSessionId),
-          bundleResult.value.tasks,
-          nowIso,
-          this.claimTtlMinutes,
-        );
+        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateSessionId);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
       }
@@ -5167,14 +5178,28 @@ export class TaskWorkflowService {
   }
 
   /**
+   * The gate context for a task claim: the one shared builder ({@link buildEffectiveAnchorGateContext}) bound to
+   * this service's store and TTL. Public so `lore gate task-claim` reaches the verdict `claim()` reaches.
+   */
+  buildAnchorGateContext(
+    by: string,
+    task: DocRecord,
+    siblings: readonly DocRecord[],
+    nowIso: string,
+    candidateSessionId?: string,
+  ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
+    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateSessionId);
+  }
+
+  /**
    * Corpus-wide `extra.adhoc === true` task scan — the `noAnchorOverlap`
    * sibling universe for a task with no governing plan (SPEC-069 ad-hoc gap
    * fix, see `enforceClaimGate`'s JSDoc). Mirrors `readyAdhoc`'s identical
    * `store.findMany({type: "task"})` + `extra.adhoc === true` filter, MINUS
-   * its open/issue-report narrowing — anchor-overlap must consider every
-   * ad-hoc task holding a claim regardless of status; `buildAnchorGateContext`
-   * already discounts a stale claim (`isClaimStale`) and skips the candidate
-   * task itself (matched by id), so no further filtering belongs here.
+   * its open/issue-report narrowing — every ad-hoc task is returned in any status;
+   * `buildAnchorGateContext` keeps only HELD claims (`extractHeldClaim`: a terminal task
+   * holds none), discounts stale ones and skips the candidate task itself (matched by id),
+   * so no further filtering belongs here.
    *
    * PUBLIC (not just an `enforceClaimGate` internal) because `gate.ts`'s
    * `runTaskClaimGate` (the `lore gate task-claim` pre-flight CLI command)
