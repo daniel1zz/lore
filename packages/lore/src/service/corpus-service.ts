@@ -5721,6 +5721,42 @@ export class CorpusService {
   }
 
   /**
+   * Remove ONE link row of an exact type between two docs addressed by ID (a deleted doc included), with one
+   * `unlink` audit row. Unlike {@link unlink} it never touches the pair's other link types and does not resolve
+   * slugs, so `lore issues migrate` can delete a retired `resolves`/`relates-to` edge whose target is a soft-deleted
+   * mirror. A missing row is a no-op (idempotent, no audit row).
+   *
+   * @param request - `fromId`/`toId` doc ids and the stored `linkType` string (legacy types such as `resolves` are
+   *   valid here: deleting one is never refused)
+   * @returns `ok(true)` when a row was removed and audited, `ok(false)` when none existed
+   */
+  async removeLinkOfType(request: {
+    readonly fromId: DocId;
+    readonly toId: DocId;
+    readonly linkType: string;
+    readonly by?: string;
+  }): Promise<Result<boolean, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<boolean>();
+    if (refusal !== undefined) return refusal;
+    const found = await this.store.findLinks(request.fromId, "out");
+    if (!found.ok) return found;
+    const row = found.value.find((link) => link.to_id === request.toId && (link.link_type as string) === request.linkType);
+    if (row === undefined) return ok(false);
+    const removed = await this.store.removeLink(request.fromId, request.toId, row.link_type);
+    if (!removed.ok) return removed;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      actor: this.resolveWriteActor(request.by),
+      session_id: request.fromId,
+      action: "unlink",
+      doc_id: request.fromId,
+      details: { to_id: request.toId, link_type: [request.linkType] },
+    });
+    if (!audited.ok) return audited;
+    return ok(true);
+  }
+
+  /**
    * D7 (spec-issue-closure-loop-computed-resolution-agent-reachable) — the
    * ONE cross-doc read-orchestration locus (per this module's own "never
    * duplicated into an adapter" convention, see `service/CLAUDE.md`) for

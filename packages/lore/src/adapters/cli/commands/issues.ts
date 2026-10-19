@@ -248,6 +248,11 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
+  // reason: `lore issues migrate` is the one-time mirror -> carrier conversion (spec D1/Migration, AC-GS-12); a nested
+  // lazy import keeps this listing command's cold start free of the migration's imports.
+  subCommands: {
+    migrate: () => import("./issues-migrate.js").then((module) => module.default),
+  },
   async run(context): Promise<number> {
     const inv = invocationOf(context);
     const { args } = context;
