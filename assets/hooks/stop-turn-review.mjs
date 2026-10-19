@@ -26,15 +26,15 @@
  *   (c) a CLAUDE.md changed this turn that is over its ceiling per `lore status --check-claude-md`
  *       (config-only check; spawned only when a CLAUDE.md changed).
  *
- *   (d) helper review — ONE `lore session trail-review` spawn, only when a helper end is unjudged
- *       (`end_count > judged_end_count`, snapshotted at start) or the `workflow.turn_end.co_change` key is
- *       present; its findings join the single block, and only after it succeeded are the snapshotted helpers
- *       marked judged (`helpers/<agent>.judged.json`). A failed or timed-out spawn marks nothing and leaves one
- *       not-measured line naming the unjudged helpers (spec-session-trail, AC-ST-9 / AC-ST-10).
+ *   (d) shared-checkout changes (BR-1349) — ONE `git status --porcelain` on the shared checkout (the main working
+ *       tree: the parent of `git rev-parse --git-common-dir`). Every changed or untracked, not-ignored path is a
+ *       finding in the single block, except a path finding (a) already lists. A clean checkout adds nothing. The
+ *       cost is one git call however many helpers ran; helper work is judged at `lore integrate`, not here (the
+ *       per-turn helper review this replaced took 117 s for 1296 helpers).
  *
  * Flow: stop_hook_active=true -> exit 0 silent (loop prevention) | turn state unreadable ->
  * exit 0 + ONE stderr line "turn state not measured: ..." (lore issue #156, same policy as
- * the retired stop-doc-sync hook) | measure (a)(b)(c) | no finding -> exit 0 silent | else one block.
+ * the retired stop-doc-sync hook) | measure (a)(b)(c)(d) | no finding -> exit 0 silent | else one block.
  *
  * Side-effect class: IO — reads the turn dir and `.lore/config.yaml`, spawns git (temporary
  * index under os.tmpdir(), removed afterwards) and, conditionally, `lore`. Writes only to
@@ -52,13 +52,13 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { getTurnDir, readHookPayload } from './lib/turn-state.mjs';
-import { diffTrees, recordTurnChanges, runTrailReview, snapshotUnjudgedHelpers, snapshotWorkingTree } from './lib/session-trail.mjs';
+import { diffTrees, recordTurnChanges, snapshotWorkingTree } from './lib/session-trail.mjs';
 
 /** Setting path inside `.lore/config.yaml`; values: off (default) | block. */
 const SETTING_KEYS = ['workflow', 'turn_end', 'main_session_source_edits'];
 const SETTING_VALUES = ['off', 'block'];
-/** Co-change rule list; its PRESENCE arms the `trail-review` spawn (spec Design, "Spawn gating"). */
-const CO_CHANGE_KEYS = ['workflow', 'turn_end', 'co_change'];
+/** Most shared-checkout paths listed in the block; the rest are counted (the block must stay readable). */
+const SHARED_CHECKOUT_LIST_LIMIT = 50;
 
 /** Main-session source edits totalling this many changed lines or fewer are exempt (spec Scope 4a). */
 const SOURCE_EDIT_ALLOWANCE = 3;
@@ -114,22 +114,6 @@ function readYamlScalar(text, keys) {
     if (rest === '' || rest.startsWith('#')) { indents.push(indent); level++; }
   }
   return undefined;
-}
-
-/**
- * True when `.lore/config.yaml` carries the `workflow.turn_end.co_change` key at all (presence only: the rule
- * list is judged by `lore session trail-review`, this hook has no list grammar). An unreadable config is
- * reported as not measured and counts as absent.
- */
-function hasCoChangeKey(root) {
-  const configPath = join(root, '.lore', 'config.yaml');
-  if (!existsSync(configPath)) return false;
-  try {
-    return readYamlScalar(readFileSync(configPath, 'utf8'), CO_CHANGE_KEYS) !== undefined;
-  } catch (err) {
-    notMeasuredReasons.push(`co_change key not measured (${configPath} unreadable: ${err.message})`);
-    return false;
-  }
 }
 
 /** `off` (absent) | `block`; an unrecognised value is reported as not measured and treated as off. */
@@ -269,6 +253,41 @@ function findClaudeMdBreach(realRoot, changedPaths) {
 }
 
 
+/**
+ * (d) Changed or untracked, not-ignored paths of the shared checkout (BR-1349): one `git status --porcelain`.
+ * The shared checkout is the main working tree, i.e. the parent of `git rev-parse --git-common-dir`; from a
+ * linked worktree that is NOT the worktree the hook runs in.
+ * Returns `{root, paths}`; `paths` is null when the checkout could not be read (a not-measured reason is recorded,
+ * never a silent empty list).
+ */
+function findSharedCheckoutChanges(cwd) {
+  const common = runProcess('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd);
+  if (!common.ok) {
+    notMeasuredReasons.push(`shared checkout changes (git rev-parse --git-common-dir failed: ${common.error?.message ?? (common.stderr.trim() || `exit ${common.status}`)})`);
+    return { root: null, paths: null };
+  }
+  const gitDir = common.stdout.trim();
+  const root = basename(gitDir) === '.git' ? dirname(gitDir) : null;
+  if (root === null) {
+    notMeasuredReasons.push(`shared checkout changes (${gitDir} is not a .git directory: bare repository?)`);
+    return { root: null, paths: null };
+  }
+  const status = runProcess('git', ['status', '--porcelain', '-z', '--untracked-files=all'], root);
+  if (!status.ok) {
+    notMeasuredReasons.push(`shared checkout changes (git status failed in ${root}: ${status.error?.message ?? (status.stderr.trim() || `exit ${status.status}`)})`);
+    return { root, paths: null };
+  }
+  const tokens = status.stdout.split('\0').filter(Boolean);
+  const paths = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i];
+    paths.push(entry.slice(3));
+    // reason: in -z output a rename/copy carries the ORIGINAL path as one extra token, which is not a changed path.
+    if (entry[0] === 'R' || entry[0] === 'C' || entry[1] === 'R' || entry[1] === 'C') i++;
+  }
+  return { root, paths };
+}
+
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const describeFile = (f) => `   - ${f.file} (${plural(f.lines, 'changed line')}, ${f.label})`;
 
@@ -362,9 +381,11 @@ try {
 
 // ── 4. findings ───────────────────────────────────
 const infoLines = [];
+const listedBySourceEdits = [];
 if (!quiet) {
   const sourceEdits = findSourceEdits(turnChanges, `cc:${sessionId}`, diff?.changedLines ?? new Map(), realRoot ?? cwd);
   const notCounted = sourceEdits.notCounted.map(describeFile);
+  listedBySourceEdits.push(...(sourceEdits.counted ?? []).map((c) => c.file), ...sourceEdits.notCounted.map((c) => c.file));
   if (sourceEdits.counted) {
     findings.push([
       `Main-session source edits (${plural(sourceEdits.total, 'changed line')}; allowance ${SOURCE_EDIT_ALLOWANCE}; ${SETTING_KEYS.join('.')} = block):`,
@@ -403,18 +424,21 @@ if (changedClaudeMd.size > 0 && !quiet) {
   }
 }
 
-// ── 4b. helper review: one `lore session trail-review` spawn, only when something needs judging ──
-// reason: the unjudged-helper snapshot is read ONCE here and is what gets marked judged afterwards, never a
-// re-read (a SubagentStop landing during the spawn is judged by the NEXT review — AC-ST-9). A quiet turn
-// (continuing after a block) neither spawns nor marks: its findings could not be spoken.
-let helperReview = null;
+// ── 4b. shared checkout: one `git status --porcelain` (BR-1349) ──
 if (!quiet) {
-  const unjudged = snapshotUnjudgedHelpers(dirname(dirname(dirname(turnDir))), sessionId);
-  if (unjudged.unreadable) notMeasuredReasons.push(`helper review ${unjudged.unreadable}`);
-  if (unjudged.helpers.length > 0 || hasCoChangeKey(realRoot ?? cwd)) {
-    helperReview = runTrailReview({ base: dirname(dirname(dirname(turnDir))), sessionId, turnId: basename(turnDir), cwd: realRoot ?? cwd, helpers: unjudged.helpers });
-    findings.push(...helperReview.findings);
-    notMeasuredReasons.push(...helperReview.notMeasured);
+  const shared = findSharedCheckoutChanges(realRoot ?? cwd);
+  // reason: a path finding (a) already lists is not raised twice; its paths are relative to this hook's own
+  // repo root, so they only name the same files when that root IS the shared checkout.
+  const alreadyListed = new Set(shared.root !== null && shared.root === realRoot ? listedBySourceEdits : []);
+  const pending = (shared.paths ?? []).filter((p) => !alreadyListed.has(p));
+  if (pending.length > 0) {
+    const shown = pending.slice(0, SHARED_CHECKOUT_LIST_LIMIT);
+    findings.push([
+      `Shared checkout has ${plural(pending.length, 'changed or untracked path')} (BR-1349; ${shared.root}):`,
+      ...shown.map((p) => `   - ${p}`),
+      ...(pending.length > shown.length ? [`   ... and ${pending.length - shown.length} more`] : []),
+      '   Land them on a branch (a task claim + commit) or revert them; the main checkout stays clean between turns.',
+    ].join('\n'));
   }
 }
 
@@ -430,7 +454,4 @@ if (findings.length > 0) {
   const notes = [...infoLines, ...sourceEditNotMeasured.map((reason) => `Turn-end review: ${reason}; no verdict.`)];
   if (notes.length > 0) process.stdout.write(JSON.stringify({ systemMessage: notes.join('\n') }));
 }
-// reason: marked only now, after the findings were written — a review that dies before here leaves the helpers
-// unjudged, so the next review reports them again instead of losing them.
-for (const failure of helperReview?.markJudged() ?? []) process.stderr.write(`[stop-turn-review] ${failure}\n`);
 process.exit(0);
