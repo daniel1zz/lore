@@ -5,8 +5,14 @@
  *   (spec baseline-slice-2 C1). Starting at an entry symbol it follows, with the TypeScript
  *   compiler API, every call the type checker can resolve statically into a function / method
  *   body, and lists each `err({ code })` / `gateFailure({ code })` site it meets.
- * Public surface: {@link listSites}, {@link resolveCommandEntry}, {@link SiteCensusError},
- *   {@link findCensusRoot}, {@link Site}, {@link SiteCensusEntry}, {@link ERR_CALLEES}.
+ * Public surface: {@link listSites}, {@link listSitesMany}, {@link traceCensusMany}, {@link resolveCommandEntry},
+ *   {@link SiteCensusError}, {@link findCensusRoot}, {@link Site}, {@link SiteCensusEntry}, {@link ERR_CALLEES}.
+ * Many-entry census (BR-1248 design): {@link traceCensusMany} builds ONE TypeScript program for every entry file and walks
+ *   each entry with a walker RESTRICTED to that entry's import closure (the module resolution the workspace host performed).
+ *   Every analysis that depends on which files are in the program (the product error type, the injected-binding scans
+ *   `objectMembersNamed` / `callSitesOf`, `unresolvedImports`) sees only the closure, so each entry's result is identical to
+ *   the per-entry {@link traceCensus} program; without the restriction an injected member bound differently in another
+ *   entry's closure would leak extra bindings (`closureScoped: false` exists only as the falsifying probe of that fact).
  * Invariants:
  *   - A command entry symbol `default(.subCommands.<x>)*.run` is resolved by following the declared
  *     structure: a `subCommands.<x>` value may be an inline command or an identifier bound to a
@@ -164,7 +170,10 @@ type FunctionLike = TS.FunctionDeclaration | TS.MethodDeclaration | TS.FunctionE
  * listSites({ rootDir, entry: { file: "command.ts", symbol: "runCommand" } });
  */
 export function listSites(input: { rootDir: string; entry: SiteCensusEntry }): SiteList {
-  const { sites, bootstrap, unresolvedImports } = traceCensus(input);
+  return asSiteList(traceCensus(input));
+}
+
+function asSiteList({ sites, bootstrap, unresolvedImports }: CensusTrace): SiteList {
   // reason: non-enumerable so structural equality / spreads of the main list ignore the side-channels.
   const list = [...sites];
   Object.defineProperty(list, "bootstrap", { value: bootstrap, enumerable: false });
@@ -197,12 +206,27 @@ export interface UnresolvedImport {
  * "was this `return err(` hit unreached, or missed?" when auditing the census against a grep.
  */
 export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }): CensusTrace {
+  return traceCensusMany({ rootDir: input.rootDir, entries: [input.entry] })[0] as CensusTrace;
+}
+
+/**
+ * {@link traceCensus} for many entries over ONE shared TypeScript program (see the module header).
+ *
+ * @param input.entries - Entries to census; the result has one trace per entry, in the same order (duplicates allowed).
+ * @param input.closureScoped - Default true: each entry is walked within its own import closure, so its trace equals
+ *   `traceCensus` of that entry alone. `false` walks every entry against the whole shared program: a falsifying probe
+ *   that leaks bindings across closures, never a mode a caller should use for results.
+ * @throws SiteCensusError exactly as {@link traceCensus} (the first failing entry, in order).
+ */
+export function traceCensusMany(input: { rootDir: string; entries: readonly SiteCensusEntry[]; closureScoped?: boolean }): CensusTrace[] {
+  if (input.entries.length === 0) return [];
   const ts = loadTypeScript();
   const rootDir = path.resolve(input.rootDir);
-  const entryPath = path.resolve(rootDir, input.entry.file);
-  if (!existsSync(entryPath)) {
-    throw new SiteCensusError("entry-file-missing", { file: input.entry.file, rootDir });
-  }
+  const entryPaths = input.entries.map((entry) => {
+    const entryPath = path.resolve(rootDir, entry.file);
+    if (!existsSync(entryPath)) throw new SiteCensusError("entry-file-missing", { file: entry.file, rootDir });
+    return entryPath;
+  });
   const options: TS.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
@@ -214,28 +238,71 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
     jsx: ts.JsxEmit.ReactJSX,
     ...tsconfigPathOptions(ts, rootDir),
   };
-  const unresolved = new Map<string, UnresolvedImport>();
-  const host = createWorkspaceHost(ts, options, rootDir, unresolved);
-  const program = ts.createProgram({ rootNames: [entryPath], options, host });
+  const resolutions: HostResolutions = { importsByFile: new Map(), unresolvedByFile: new Map() };
+  const host = createWorkspaceHost(ts, options, rootDir, resolutions);
+  const program = ts.createProgram({ rootNames: [...new Set(entryPaths)], options, host });
   const checker = program.getTypeChecker();
-  const entryFile = program.getSourceFile(entryPath);
-  if (entryFile === undefined) {
-    throw new SiteCensusError("entry-file-missing", { file: input.entry.file, rootDir });
+  const scoped = input.closureScoped !== false;
+  return input.entries.map((entry, i): CensusTrace => {
+    const entryPath = entryPaths[i] as string;
+    const entryFile = program.getSourceFile(entryPath);
+    if (entryFile === undefined) throw new SiteCensusError("entry-file-missing", { file: entry.file, rootDir });
+    const closure = scoped ? importClosure(entryPath, resolutions.importsByFile) : undefined;
+    const walker = new CensusWalker(ts, program, checker, rootDir, closure);
+    walker.resolveErrorTypes();
+    let roots = walker.functionsNamed(entryFile, entry.symbol);
+    if (roots.length === 0) roots = walker.commandRunNamed(entryFile, entry.symbol);
+    if (roots.length === 0) {
+      throw new SiteCensusError("entry-symbol-missing", {
+        file: entry.file,
+        symbol: entry.symbol,
+        available: walker.namedFunctions(entryFile).join(", "),
+      });
+    }
+    for (const root of roots) walker.visit(root, 0);
+    const unresolved = new Map<string, UnresolvedImport>();
+    for (const [file, found] of resolutions.unresolvedByFile) {
+      if (closure !== undefined && !closure.has(file)) continue;
+      for (const [key, value] of found) unresolved.set(key, value);
+    }
+    const unresolvedImports = [...unresolved.values()].sort((a, b) => (a.specifier === b.specifier ? (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) : a.specifier < b.specifier ? -1 : 1));
+    return { sites: walker.result(), bootstrap: walker.bootstrapResult(), reached: walker.reachedSymbols(), unresolvedImports };
+  });
+}
+
+/** Files reachable from `entryPath` through the imports the workspace host resolved (the entry included). */
+function importClosure(entryPath: string, importsByFile: ReadonlyMap<string, ReadonlySet<string>>): Set<string> {
+  const closure = new Set<string>([entryPath]);
+  const queue = [entryPath];
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    for (const next of importsByFile.get(file) ?? []) {
+      if (closure.has(next)) continue;
+      closure.add(next);
+      queue.push(next);
+    }
   }
-  const walker = new CensusWalker(ts, program, checker, rootDir);
-  walker.resolveErrorTypes();
-  let roots = walker.functionsNamed(entryFile, input.entry.symbol);
-  if (roots.length === 0) roots = walker.commandRunNamed(entryFile, input.entry.symbol);
-  if (roots.length === 0) {
-    throw new SiteCensusError("entry-symbol-missing", {
-      file: input.entry.file,
-      symbol: input.entry.symbol,
-      available: walker.namedFunctions(entryFile).join(", "),
-    });
-  }
-  for (const root of roots) walker.visit(root, 0);
-  const unresolvedImports = [...unresolved.values()].sort((a, b) => (a.specifier === b.specifier ? (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) : a.specifier < b.specifier ? -1 : 1));
-  return { sites: walker.result(), bootstrap: walker.bootstrapResult(), reached: walker.reachedSymbols(), unresolvedImports };
+  return closure;
+}
+
+/**
+ * {@link listSites} for many CLI commands over one shared program: each distinct command is censused once.
+ *
+ * @param input.commands - CLI command names as {@link resolveCommandEntry} reads them.
+ * @returns command name -> the list {@link listSites} returns for it (same sites, bootstrap, unresolvedImports).
+ * @throws SiteCensusError as {@link resolveCommandEntry} / {@link traceCensusMany}.
+ * @example
+ * listSitesMany({ rootDir, commands: ["claim", "done"] }).get("claim");
+ */
+export function listSitesMany(input: { rootDir: string; commands: readonly string[]; closureScoped?: boolean }): Map<string, SiteList> {
+  const distinct = [...new Set(input.commands)];
+  const traces = traceCensusMany({
+    rootDir: input.rootDir,
+    entries: distinct.map((command) => resolveCommandEntry({ rootDir: input.rootDir, command })),
+    ...(input.closureScoped === undefined ? {} : { closureScoped: input.closureScoped }),
+  });
+  const lists = new Map<string, SiteList>();
+  distinct.forEach((command, i) => lists.set(command, asSiteList(traces[i] as CensusTrace)));
+  return lists;
 }
 
 /**
@@ -370,7 +437,16 @@ function exportTarget(target: unknown): string | undefined {
  * (so a worktree's node_modules links to another checkout can never change what is analysed);
  * every other specifier goes through TypeScript's normal resolution.
  */
-function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir: string, unresolved: Map<string, UnresolvedImport>): TS.CompilerHost {
+/**
+ * What the workspace host observed while the program resolved modules: per containing file the files it imports (the
+ * import-closure graph) and the unresolved imports it made (in-root, non-runtime, non-asset only).
+ */
+interface HostResolutions {
+  readonly importsByFile: Map<string, Set<string>>;
+  readonly unresolvedByFile: Map<string, Map<string, UnresolvedImport>>;
+}
+
+function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir: string, resolutions: HostResolutions): TS.CompilerHost {
   const host = ts.createCompilerHost(options);
   const packages = readWorkspacePackages(rootDir);
   const resolveFile = (specifier: string, containingFile: string): TS.ResolvedModuleFull | undefined =>
@@ -396,7 +472,15 @@ function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir
     const rel = path.relative(rootDir, containingFile);
     if (rel.startsWith("..") || path.isAbsolute(rel) || rel.split(path.sep).includes("node_modules") || runtimeProvided(specifier) || relativeAsset(specifier)) return;
     const from = rel.split(path.sep).join("/");
-    unresolved.set(`${specifier}\0${from}`, { specifier, from });
+    const forFile = resolutions.unresolvedByFile.get(containingFile) ?? new Map<string, UnresolvedImport>();
+    forFile.set(`${specifier}\0${from}`, { specifier, from });
+    resolutions.unresolvedByFile.set(containingFile, forFile);
+  };
+  const recordImport = (containingFile: string, resolved: TS.ResolvedModuleFull | undefined): void => {
+    if (resolved === undefined) return;
+    const imports = resolutions.importsByFile.get(containingFile) ?? new Set<string>();
+    imports.add(resolved.resolvedFileName);
+    resolutions.importsByFile.set(containingFile, imports);
   };
   host.resolveModuleNameLiterals = (literals, containingFile) =>
     literals.map((literal): TS.ResolvedModuleWithFailedLookupLocations => {
@@ -406,6 +490,7 @@ function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir
         const resolvedModule = resolveFile(specifier, containingFile);
         // reason: the compiler appends a synthetic `react/jsx-runtime` import (position -1) to every file under `jsx: ReactJSX`; it is not source.
         if (resolvedModule === undefined && literal.pos >= 0) recordUnresolved(specifier, containingFile);
+        recordImport(containingFile, resolvedModule);
         return { resolvedModule };
       }
       const resolved = resolveWorkspace(pkg, specifier.slice(pkg.name.length + 1), containingFile);
@@ -416,6 +501,7 @@ function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir
           packageDir: path.relative(rootDir, pkg.dir),
         });
       }
+      recordImport(containingFile, resolved);
       return { resolvedModule: resolved };
     });
   return host;
@@ -451,6 +537,8 @@ class CensusWalker {
     private readonly program: TS.Program,
     private readonly checker: TS.TypeChecker,
     private readonly rootDir: string,
+    /** The entry's import closure (absolute file names); `undefined` = the whole program (single-entry / falsifying probe). */
+    private readonly scope: ReadonlySet<string> | undefined = undefined,
   ) {}
 
   /**
@@ -1117,6 +1205,8 @@ class CensusWalker {
 
   private isFollowable(file: TS.SourceFile): boolean {
     if (file.isDeclarationFile) return false;
+    // reason: in a shared program a file outside this entry's closure is invisible to it (see the module header).
+    if (this.scope !== undefined && !this.scope.has(file.fileName)) return false;
     const rel = path.relative(this.rootDir, file.fileName);
     return !rel.startsWith("..") && !path.isAbsolute(rel) && !rel.split(path.sep).includes("node_modules");
   }
