@@ -56,6 +56,9 @@ function legacyDb(path: string): void {
   const db = new Database(path);
   db.exec(MIGRATION_020_SQL);
   db.exec(MIGRATION_023_SQL);
+  // reason: this fixture models only the decision_log tables; migration-025 indexes `versions`, so the upgrade
+  // chain needs that table to exist (its columns are all migration-025 reads).
+  db.exec("CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL)");
   let prev = DECISION_GENESIS_HASH;
   for (const n of [1, 2]) {
     const row = input(n);

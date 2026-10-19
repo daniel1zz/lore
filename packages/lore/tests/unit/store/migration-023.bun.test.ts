@@ -33,6 +33,9 @@ function input(n: number, verdict: DecisionRecordInput["verdict"]): DecisionReco
 function legacyDb(path: string, version: 21 | 22 = 21): void {
   const db = new Database(path);
   db.exec(MIGRATION_020_SQL);
+  // reason: this fixture models only the tables migration 023 touches; migration-025 indexes `versions`, so the
+  // upgrade chain needs that table to exist (its columns are all migration-025 reads).
+  db.exec("CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL)");
   let prev = DECISION_GENESIS_HASH;
   for (const [i, verdict] of (["auto", "escalate", "refuse"] as const).entries()) {
     const row = input(i + 1, verdict);
