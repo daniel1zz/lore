@@ -117,9 +117,24 @@ export interface CommitDerivationResult {
   tasks_not_measured: string[];
   /** How each task's commits were found, per slug. */
   attribution: Record<string, TaskAttribution>;
+  /**
+   * Commits inside a recorded range that were NOT the task's own work: they reached the task
+   * branch through `git merge main` (lore integrate's documented conflict-resolution step), so
+   * they are excluded from `commits` and `diff_text`. Reported so the exclusion is auditable
+   * ("N commits, excluding M merged in from main"). `0` when no recorded range merged anything.
+   */
+  excluded_merged_commit_count: number;
   /** Concatenated unified diff across every selected commit, oldest first. `""` unless status is `"derived"`. */
   diff_text: string;
   warnings: string[];
+}
+
+/**
+ * The one-line "N commits, excluding M merged in from main" summary of a derivation — the
+ * single rendering both the stderr announcement and the persisted `Diff source:` line use.
+ */
+export function describeCommitCount(commitCount: number, excludedMergedCount: number): string {
+  return `${String(commitCount)} commit(s), excluding ${String(excludedMergedCount)} merged in from main`;
 }
 
 /**
@@ -308,7 +323,7 @@ function resolveRecordedRange(
   slug: string,
   range: RecordedRange,
   warnings: string[],
-): { commits: { sha: string; subject: string }[]; diff: string } | undefined {
+): { commits: { sha: string; subject: string }[]; diff: string; excludedMerged: number } | undefined {
   if (!commitExists(cwd, range.head) || (range.base !== undefined && !commitExists(cwd, range.base))) {
     warnings.push(
       `${slug}: recorded commit range ${range.base ?? "(none)"}..${range.head} not found in this repository — falling back to the slug search`,
@@ -327,21 +342,38 @@ function resolveRecordedRange(
     const commits = parseLogLines(log.stdout);
     const head = commits[0];
     if (head === undefined) return undefined;
-    return { commits, diff: diffAgainstFirstParent(cwd, head.sha, warnings) };
+    return { commits, diff: diffAgainstFirstParent(cwd, head.sha, warnings), excludedMerged: 0 };
   }
-  const log = runGit(cwd, ["log", "--reverse", "--format=%H%x09%s", `${range.base}..${range.head}`]);
+  // Rule: a task's OWN commits are the non-merge commits on the FIRST-PARENT chain of its head.
+  // The integrate model merges main INTO the task branch (`git merge main`), so everything main
+  // contributed arrives as a merge commit's SECOND parent and is never on the first-parent chain;
+  // the task's own commits always are. `base..head` alone also lists every merged-in main commit,
+  // which is the defect this replaces (a peer session's unrelated rewrite landed in the plan's diff).
+  // Residual: a branch that fast-forwarded to main (no merge commit) leaves main's commits on the
+  // first-parent chain and cannot be told apart from own commits here.
+  const all = runGit(cwd, ["rev-list", "--count", `${range.base}..${range.head}`]);
+  if (!all.ok) {
+    warnings.push(all.warning);
+    return undefined;
+  }
+  const log = runGit(cwd, [
+    "log",
+    "--first-parent",
+    "--no-merges",
+    "--reverse",
+    "--format=%H%x09%s",
+    `${range.base}..${range.head}`,
+  ]);
   if (!log.ok) {
     warnings.push(log.warning);
     return undefined;
   }
   const commits = parseLogLines(log.stdout);
-  if (commits.length === 0) return { commits, diff: "" };
-  const diff = runGit(cwd, ["diff", range.base, range.head]);
-  if (!diff.ok) {
-    warnings.push(diff.warning);
-    return undefined;
-  }
-  return { commits, diff: diff.stdout };
+  // Everything in base..head that is not an own commit: the main commits merged in, plus the merge
+  // commits themselves (whose content is main's, so it is never diffed).
+  const excludedMerged = Math.max(0, Number.parseInt(all.stdout.trim(), 10) - commits.length);
+  const diff = commits.map((c) => diffAgainstFirstParent(cwd, c.sha, warnings)).join("");
+  return { commits, diff, excludedMerged };
 }
 
 /**
@@ -414,12 +446,14 @@ export function deriveCommitSetForPlan(
   const attribution: Record<string, TaskAttribution> = {};
   const rangeCommits = new Map<string, { subject: string; taskSlugs: Set<string> }>();
   const rangeDiffs: string[] = [];
+  let excludedMergedCommitCount = 0;
 
   for (const slug of taskSlugs) {
     const recorded = recordedRanges.get(slug);
     const resolvedRange = recorded === undefined ? undefined : resolveRecordedRange(cwd, slug, recorded, warnings);
     if (resolvedRange !== undefined) {
       attribution[slug] = "recorded_range";
+      excludedMergedCommitCount += resolvedRange.excludedMerged;
       if (resolvedRange.commits.length === 0) {
         // Measured zero: the range was recorded and is empty. NOT "not measured".
         tasksWithoutCommits.push(slug);
@@ -463,6 +497,7 @@ export function deriveCommitSetForPlan(
       tasks_without_commits: [...taskSlugs],
       tasks_not_measured: tasksNotMeasured,
       attribution,
+      excluded_merged_commit_count: excludedMergedCommitCount,
       diff_text: "",
       warnings,
     };
@@ -498,6 +533,7 @@ export function deriveCommitSetForPlan(
     tasks_without_commits: tasksWithoutCommits,
     tasks_not_measured: tasksNotMeasured,
     attribution,
+    excluded_merged_commit_count: excludedMergedCommitCount,
     diff_text: diffText,
     warnings,
   };
