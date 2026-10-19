@@ -123,6 +123,7 @@ import type { OsUser, PlanBundle } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
+  describeAssessmentFreshnessNotApplicable,
   describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
@@ -646,6 +647,11 @@ export class GateEnforcer {
     // `lore set --status archived` shows it without altering stdout or the exit
     // code — an observation, never an outcome, exactly like `recordSkip`.
     this.warnVacuousCheckpoint(checkpoint, results);
+    // reason: BL-D4 / BR-225 — the per-conjunct complement of the all-inapplicable notice above:
+    // an unassessed plan whose other conditions measured would otherwise close with no mention
+    // that assessment freshness was never checked. Never blocks (same channel, same contract).
+    const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
+    if (freshnessLine !== null) this.warnSink(freshnessLine);
     if (!isCheckpointBlocked(results)) {
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — the ONE thing that, before this task, left NO trace

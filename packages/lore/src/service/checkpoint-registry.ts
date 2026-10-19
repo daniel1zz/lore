@@ -848,6 +848,42 @@ export function describeCheckpointVacuity(
   );
 }
 
+/** Prefix shared by both lines {@link describeAssessmentFreshnessNotApplicable} can return (BR-225). */
+export const ASSESSMENT_FRESHNESS_NOT_APPLICABLE_PREFIX = "assessment freshness not applicable";
+
+/**
+ * The line `plan-close` prints when its assessment-freshness condition had nothing to compare
+ * (BL-D4, baseline-close-a-plan BR-225): a never-assessed plan, or an assessed plan with no task
+ * evidence/completion after it. Without this line that condition passes with no trace whenever any
+ * OTHER condition measured something, because {@link describeCheckpointVacuity} only speaks when
+ * EVERY condition was inapplicable — "vacuously true" must be distinguishable from "true".
+ *
+ * Decision: a plan is never REFUSED for lacking an assessment (BR-225: having none "is not checked");
+ * the close succeeds and says so. Pure: reads only `ctx`.
+ *
+ * @param checkpoint - The checkpoint being enforced; only `"plan-close"` can produce a line.
+ * @param ctx - The same context `checkPlanClose` read.
+ * @returns The line, or `null` when the condition was measured, exempted, or the checkpoint is another.
+ * @example
+ * describeAssessmentFreshnessNotApplicable("plan-close", {}); // => "assessment freshness not applicable: no assessment linked"
+ * @example
+ * describeAssessmentFreshnessNotApplicable("plan-close", { assessmentFreshnessExempt: true }); // => null
+ */
+export function describeAssessmentFreshnessNotApplicable(
+  checkpoint: GateCheckpoint,
+  ctx: GateContext,
+): string | null {
+  if (checkpoint !== "plan-close") return null;
+  if (ctx.assessmentFreshnessExempt === true) return null;
+  if (ctx.newestAssessmentAt === undefined) {
+    return `${ASSESSMENT_FRESHNESS_NOT_APPLICABLE_PREFIX}: no assessment linked`;
+  }
+  if (ctx.newestTaskActivityAt === undefined) {
+    return `${ASSESSMENT_FRESHNESS_NOT_APPLICABLE_PREFIX}: no task evidence or completion since the assessment`;
+  }
+  return null;
+}
+
 /**
  * The `extra` key a closing PLAN doc carries {@link describeCheckpointVacuity}'s
  * `"plan-close"` notice under (task-assert-the-plan-close-vacuity-discriminator-
