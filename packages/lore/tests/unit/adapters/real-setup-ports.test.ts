@@ -413,6 +413,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
   // pre-edit-anchor-gate (a helper's edit outside its claim's anchors is declared via `lore anchor declare` or denied; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-edit-anchor-gate.mjs",
+  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
+  "hooks/post-edit-bindings.mjs",
   // shared cwd-aware shell parser, generated from packages/core/src/shell-cwd.ts (DCL-4)
   "hooks/lib/shell-cwd.mjs",
   "hooks/lib/turn-state.mjs",

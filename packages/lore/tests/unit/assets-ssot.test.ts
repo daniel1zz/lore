@@ -432,6 +432,8 @@ const DECLARED_FILES = [
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
   // pre-edit-anchor-gate (a helper's edit outside its claim's anchors is declared via `lore anchor declare` or denied; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-edit-anchor-gate.mjs",
+  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
+  "hooks/post-edit-bindings.mjs",
   "hooks/lib/turn-state.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library
   "hooks/session-trail-start.mjs",
