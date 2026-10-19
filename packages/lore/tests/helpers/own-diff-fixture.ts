@@ -11,6 +11,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "./clean-tree-repo.js";
+import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -28,6 +29,7 @@ export type FileChanges = Readonly<Record<string, string | null>>;
 
 export class OwnDiffFixture {
   readonly dir: string;
+  private readonly hooksDir: string;
   private taskSeq = 0;
   private planSlug = "";
   private prdSlug = "";
@@ -39,6 +41,11 @@ export class OwnDiffFixture {
     this.dir = mkdtempSync(join(tmpdir(), "lore-own-diff-"));
     makeCleanTreeRepo(this.dir);
     appendFileSync(join(this.dir, ".git", "info", "exclude"), ".claude/\n");
+    // the main-ref guard (spec-no-working-copy-can-check-out-main-the-main-ref-guard): `lore integrate` exits 4 without
+    // it, so every refusal asserted here is told apart from the guard's by its rule id (BR-1346/1347/1348).
+    this.git(["checkout", "-q", "--detach", "main"]);
+    this.hooksDir = mkdtempSync(join(tmpdir(), "lore-own-diff-hooks-"));
+    installShippedGuard(this.dir, this.hooksDir);
     this.mustLore(["init"]);
     appendFileSync(
       join(this.dir, ".lore", "config.yaml"),
@@ -52,6 +59,7 @@ export class OwnDiffFixture {
   dispose(): void {
     try {
       rmSync(this.dir, { recursive: true, force: true });
+      rmSync(this.hooksDir, { recursive: true, force: true });
     } catch {
       // best-effort cleanup of a tmp dir
     }
@@ -93,11 +101,17 @@ export class OwnDiffFixture {
     return this.planSlug;
   }
 
-  /** Commits `files` on main directly (the shared checkout ends detached at main, as `lore integrate` leaves it). */
+  /**
+   * Commits `files` on top of main and moves main there the way the guard allows (`LORE_INTEGRATE=1` on the ref update);
+   * no working copy ever has main checked out. The shared checkout ends detached at the new main.
+   */
   commitOnMain(files: FileChanges, message: string): void {
-    this.git(["checkout", "-q", "main"]);
+    this.git(["checkout", "-q", "-b", "tmp-main-mover", "main"]);
     this.applyAndCommit(files, message);
-    this.git(["checkout", "-q", "--detach", "main"]);
+    const sha = this.git(["rev-parse", "HEAD"]);
+    this.git(["checkout", "-q", "--detach", sha]);
+    execFileSync("git", ["update-ref", "refs/heads/main", sha], { cwd: this.dir, env: { ...process.env, LORE_INTEGRATE: "1" } });
+    this.git(["branch", "-q", "-D", "tmp-main-mover"]);
   }
 
   /** Creates branch `name` from `from` (default main) with one commit of `files`. */

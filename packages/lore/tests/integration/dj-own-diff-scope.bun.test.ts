@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-a-branch-s-own-diff-is-judged-at-integrate-the-turn-end  AC-DJ-1;
  *   business rules BR-1346 (a change held by another live claim is refused), BR-1348 (tasks of a branch).

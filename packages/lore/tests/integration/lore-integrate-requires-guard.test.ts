@@ -15,8 +15,12 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { claimBranchTask } from "../helpers/claim-branch-task.js";
 import { GuardRepo, SHIPPED_HOOK_PATH, installShippedGuard, makeTempRoot, oldGitShim } from "./support/main-guard-repo.js";
+
+const INDEX_TS = join(new URL("../../", import.meta.url).pathname.replace(/\/$/, ""), "src", "index.ts");
 
 let root = "";
 
@@ -101,6 +105,11 @@ describe("AC-MG-2 integrate lands with the guard in force", () => {
   it("AC-MG-2 the shipped hook on git >= 2.46: the branch lands (exit 0) and main holds it", async () => {
     const { fx, branch } = fixture();
     installShippedGuard(fx.repo);
+    // BR-1348: the branch needs a task claimed on it for integrate to judge it
+    claimBranchTask((args) => {
+      const run = spawnSync("bun", ["run", INDEX_TS, ...args], { cwd: fx.repo, env: fx.env("claim"), encoding: "utf8" });
+      return { status: run.status ?? 1, out: `${run.stdout}${run.stderr}` };
+    }, fx.repo, branch);
     const before = fx.main();
     const tip = fx.git(["rev-parse", branch]);
     const r = await fx.integrate(branch, "mg2-lands");

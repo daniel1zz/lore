@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-a-branch-s-own-diff-is-judged-at-integrate-the-turn-end  AC-DJ-2;
  *   business rules BR-1347 (co-change judged on the branch's own change).

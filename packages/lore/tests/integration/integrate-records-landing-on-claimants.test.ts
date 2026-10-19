@@ -161,14 +161,16 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(landingOf(first)).toEqual(firstLanding);
   }, 300_000);
 
-  it("(3) a branch no claim named prints that the landing names no task", () => {
+  it("(3) a branch no claim named is refused (BR-1348): no task belongs to it, so no landing could name one", () => {
     makeBranch("feat-unclaimed");
     createTask("Bystander");
+    const mainBefore = git(["rev-parse", "main"]);
 
-    const landed = integrate("feat-unclaimed");
+    const refused = integrate("feat-unclaimed");
 
-    expect(landed.exitCode, landed.text).toBe(0);
-    expect(landed.text).toContain("recorded on no task");
+    expect(refused.exitCode, refused.text).toBe(4);
+    expect(refused.text).toContain("BR-1348");
+    expect(git(["rev-parse", "main"])).toBe(mainBefore);
   }, 300_000);
 
   it("(4) an archived task that once claimed the branch keeps its record", () => {

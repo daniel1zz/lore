@@ -220,7 +220,10 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(git(unclaimedPath, "add", "-A"), "unclaimed add");
     mustOk(git(unclaimedPath, "commit", "-q", "-m", "unclaimed own commit"), "unclaimed commit");
     armGuard();
-    mustOk(lore(["integrate", unclaimedBranch, "--session", "wtc-fixture-session"]), "unclaimed integrate");
+    // no task belongs to this branch, which `lore integrate` refuses (BR-1348); main reaches it the way integrate's CAS
+    // moves it (the reference-transaction guard lets a ref update carrying the integrate marker through)
+    const tip = git(repo, "rev-parse", unclaimedBranch).stdout.trim();
+    mustOk(exec("git", ["update-ref", "refs/heads/main", tip], repo, baseEnv({ LORE_INTEGRATE: "1" })), "unclaimed branch to main");
   }, 300_000);
 
   afterAll(() => {

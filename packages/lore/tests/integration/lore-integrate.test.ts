@@ -43,6 +43,7 @@
  * @spec_ref AC-INT-1, AC-INT-2, AC-INT-3
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { claimBranchTask } from "../helpers/claim-branch-task.js";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -192,6 +193,18 @@ class Fixture {
     return name;
   }
 
+  private readonly branchesWithTask = new Set<string>();
+
+  /** BR-1348: `lore integrate` refuses a branch no task belongs to, so the first integrate of a branch claims a task on it. */
+  private ensureTask(branch: string): void {
+    if (this.branchesWithTask.has(branch)) return;
+    this.branchesWithTask.add(branch);
+    claimBranchTask((args) => {
+      const r = spawnSync("bun", ["run", INDEX_TS, ...args], { cwd: this.repo, env: this.env("claim"), encoding: "utf8" });
+      return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
+    }, this.repo, branch);
+  }
+
   main(): string {
     return this.git(["rev-parse", "refs/heads/main"]);
   }
@@ -218,6 +231,7 @@ class Fixture {
   }
 
   integrate(branch: string, session: string, extra: string[] = [], cwd: string = this.repo): Promise<RunResult> {
+    this.ensureTask(branch);
     return this.lore(["integrate", branch, "--session", session, ...extra], session, cwd);
   }
 
