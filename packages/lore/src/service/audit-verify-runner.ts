@@ -44,9 +44,6 @@ export type AuditVerifyStoreSpec =
 /** What the worker receives: a persistent store location plus the verify inputs. Plain data (structured-cloneable). */
 export interface AuditVerifyJob {
   readonly store: Exclude<AuditVerifyStoreSpec, { readonly kind: "memory" }>;
-  /** The configured `audit.verify_since` watermark — the worker builds its own `AuditService` with it. */
-  readonly verifySince: string;
-  readonly since?: string;
   readonly anchor?: AuditAnchorRef;
 }
 
@@ -56,8 +53,8 @@ export type AuditVerifyWorkerPort = (job: AuditVerifyJob) => Promise<Result<Audi
 export interface AuditVerifyRunner {
   /** Which runner the composition chose — `worker` for every persistent store, `in-loop` for InMemory only. */
   readonly mode: "worker" | "in-loop";
-  /** `since` overrides the configured watermark for this call only (as `lore audit --verify --since`). */
-  verify(opts?: { readonly since?: string }): Promise<Result<AuditVerifyResult, LoreError>>;
+  /** Verifies every version and the whole chain; no date or per-call option bounds it. */
+  verify(): Promise<Result<AuditVerifyResult, LoreError>>;
 }
 
 // ─── .lore/audit-anchor.json ────────────────────────────────────────────────
@@ -152,23 +149,21 @@ export const spawnAuditVerifyWorker: AuditVerifyWorkerPort = (job) =>
  * Builds the runner for a store kind — the single decision point (see the module invariants).
  *
  * @param spec - the store kind and where the worker opens it (or, for `memory`, the in-thread service)
- * @param deps.verifySince - the configured `audit.verify_since` watermark
  * @param deps.anchorRoot - the project root whose `.lore/audit-anchor.json` is passed to verify
  * @param deps.workerPort - overrides the worker spawn (tests); defaults to {@link spawnAuditVerifyWorker}
  */
 export function buildAuditVerifyRunner(
   spec: AuditVerifyStoreSpec,
-  deps: { readonly verifySince: string; readonly anchorRoot: string; readonly workerPort?: AuditVerifyWorkerPort },
+  deps: { readonly anchorRoot: string; readonly workerPort?: AuditVerifyWorkerPort },
 ): AuditVerifyRunner {
   if (spec.kind === "memory") {
     const service = spec.auditService;
     return {
       mode: "in-loop",
-      async verify(opts) {
+      async verify() {
         const anchor = readAuditAnchorFile(deps.anchorRoot);
         if (!anchor.ok) return anchor;
         return service.verify({
-          ...(opts?.since !== undefined ? { since: opts.since } : {}),
           ...(anchor.value !== undefined ? { anchor: anchor.value } : {}),
         });
       },
@@ -179,13 +174,11 @@ export function buildAuditVerifyRunner(
   const port = deps.workerPort ?? spawnAuditVerifyWorker;
   return {
     mode: "worker",
-    async verify(opts) {
+    async verify() {
       const anchor = readAuditAnchorFile(deps.anchorRoot);
       if (!anchor.ok) return anchor;
       const job: AuditVerifyJob = {
         store,
-        verifySince: deps.verifySince,
-        ...(opts?.since !== undefined ? { since: opts.since } : {}),
         ...(anchor.value !== undefined ? { anchor: anchor.value } : {}),
       };
       try {
