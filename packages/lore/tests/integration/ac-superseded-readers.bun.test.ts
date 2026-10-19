@@ -17,6 +17,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  AC_COVERAGE_GLYPH_ALPHABET,
+  AC_COVERAGE_STATES,
+  computeAcCoverage,
+  deriveAcCoverageState,
+  projectAcCoverageGlyph,
+} from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { liveAmbient, liveInvocation, liveWriteContext } from "../live-invocation.js";
@@ -130,6 +137,45 @@ afterAll(() => {
   if (dir !== "") rmSync(dir, { recursive: true, force: true });
 });
 
+describe("superseded is its own coverage state in the one derivation (pure)", () => {
+  const evidenceHeavyFact = {
+    ac_id: "AC-X",
+    mode: "script" as const,
+    pass: 3,
+    fail: 2,
+    refs: [],
+    attested_pass: 3,
+    attested_fail: 1,
+    falsified: 2,
+  };
+  const mark = { spec: "S2", ac: "AC-9", reason: "r", by: "agent:t", at: "2026-10-19T00:00:00.000Z" };
+
+  it("a superseded fact is `superseded` whatever evidence it holds, never fail/pass/none", () => {
+    expect(deriveAcCoverageState({ ...evidenceHeavyFact, superseded_by: mark })).toBe("superseded");
+    expect(deriveAcCoverageState({ ...evidenceHeavyFact, pass: 0, fail: 0, attested_pass: 0, superseded_by: mark })).toBe("superseded");
+    // negative: the same evidence without the mark is NOT superseded
+    expect(deriveAcCoverageState(evidenceHeavyFact)).not.toBe("superseded");
+  });
+
+  it("computeAcCoverage carries the mark from the criterion onto the fact", () => {
+    const criterion = {
+      id: "AC-X",
+      statement: "s",
+      verify: { mode: "human", note: "n" },
+      superseded_by: mark,
+    } as unknown as Parameters<typeof computeAcCoverage>[0][number];
+    const [fact] = computeAcCoverage([criterion], []);
+    expect(fact?.superseded_by).toEqual(mark);
+    expect(deriveAcCoverageState(fact as NonNullable<typeof fact>)).toBe("superseded");
+  });
+
+  it("its glyph is distinct from every other state's (rendering stays injective)", () => {
+    expect(AC_COVERAGE_STATES).toContain("superseded");
+    expect(new Set(AC_COVERAGE_GLYPH_ALPHABET).size).toBe(AC_COVERAGE_STATES.length);
+    expect(projectAcCoverageGlyph("superseded")).not.toBe(projectAcCoverageGlyph("fail_superseded"));
+  });
+});
+
 describe("a superseded criterion is read as superseded by every coverage and floor reader", () => {
   it("control: before supersession AC-1 is not `superseded` and the done floor demands a red run", async () => {
     const states = await coverageStates(specS);
@@ -145,6 +191,10 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     expect(states["AC-1"]).toBe("superseded");
     expect(states["AC-2"]).toBe("none");
     expect(states["AC-3"]).toBe("none");
+    // the human table renders the same state: the retired badge on AC-1 only
+    const table = await must(["ac", "list", specS]);
+    expect(table).toMatch(/⊖ AC-1/);
+    expect(table).not.toMatch(/⊖ AC-2/);
   }, 120_000);
 
   it("(2) a task scoped to only the superseded id passes the ac_scope floor and the output names the supersession", async () => {
