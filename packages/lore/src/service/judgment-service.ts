@@ -197,6 +197,11 @@ export class JudgmentService {
       });
     }
 
+    // reason: the judgment row is not carried by the write route, so ask its foreign-corpus refusal FIRST — a refused
+    // call must not leave the judgment row behind with no audit row (the audit append below is refused too).
+    const writable = await this.writer.assertWritable();
+    if (!writable.ok) return writable;
+
     const insertResult = await this.store.insertJudgment(parsed.data);
     if (!insertResult.ok) return insertResult;
 

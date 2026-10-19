@@ -552,6 +552,9 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     callerDir: ambient.cwd,
     claimTtlMinutes: resolveClaimTtlMinutes(telemetryOnlyConfig),
   };
+  // reason: the write route itself consults the same authority before refusing a foreign write (task-skill-fix-the-
+  // one-write-route-honours-claim-scoped-corpus), so a scoped lease that authorized a baseline write is honoured by it.
+  app.corpusService.setCorpusWriteContext(corpusWriteAuthority);
   app.ruleService?.setCorpusWriteContext(corpusWriteAuthority);
   app.ruleChangeService?.setCorpusWriteContext(corpusWriteAuthority);
   app.acService?.setCorpusWriteContext(corpusWriteAuthority);

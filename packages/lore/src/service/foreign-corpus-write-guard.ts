@@ -515,14 +515,10 @@ export class CorpusWriteAuthority {
     operation: string,
     actor: string,
   ): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
-    // reason: inert short-circuit through the shared predicate — never re-derive the table here.
-    if (checkForeignCorpusWrite(this.context.foreign, false).allowed) return ok(undefined);
-
-    const grant = await this.findCoveringGrant(targets);
-    if (!grant.ok) return grant;
-    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined);
-    if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
-    if (grant.value === undefined) return ok(undefined);
+    const decided = await this.decide(targets);
+    if (!decided.ok) return decided;
+    if (decided.value === undefined) return ok(undefined);
+    const grant = { ok: true as const, value: decided.value };
 
     const first = targets[0];
     // reason: foreign "record" — this row IS the record of the scoped authorization just granted; applying the
@@ -545,6 +541,24 @@ export class CorpusWriteAuthority {
       },
     });
     if (!audited.ok) return audited;
+    return ok(grant.value);
+  }
+
+  /**
+   * THE decision: may a write to `targets` proceed from this process? Inert (`ok(undefined)`) outside a foreign
+   * crossing; otherwise the fresh scoped lease covering every target as a {@link CorpusScopeGrant}, or the
+   * foreign-write refusal. Writes NOTHING — {@link authorize} adds the audit row, and the write route
+   * (`CorpusService`) calls this directly, so the authorization report and the write it reports on read the SAME
+   * decision and cannot disagree.
+   */
+  async decide(targets: readonly DocRecord[]): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
+    // reason: inert short-circuit through the shared predicate — never re-derive the table here.
+    if (checkForeignCorpusWrite(this.context.foreign, false).allowed) return ok(undefined);
+
+    const grant = await this.findCoveringGrant(targets);
+    if (!grant.ok) return grant;
+    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined);
+    if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return ok(grant.value);
   }
 

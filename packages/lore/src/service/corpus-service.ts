@@ -136,7 +136,9 @@ import {
 } from "./validity-service.js";
 import {
   checkForeignCorpusWrite,
+  CorpusWriteAuthority,
   foreignCorpusWriteRefusalError,
+  type CorpusWriteAuthorityContext,
   type ForeignCorpusWriteContext,
 } from "./foreign-corpus-write-guard.js";
 
@@ -948,7 +950,7 @@ export interface RuleAllocateRequest {
  */
 export type DocWritePort = Pick<
   CorpusService,
-  "writeDoc" | "insertDoc" | "reserveProposedRule" | "setDocParent" | "appendAudit" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
+  "writeDoc" | "insertDoc" | "assertWritable" | "reserveProposedRule" | "setDocParent" | "appendAudit" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
 >;
 
 /** The post-patch value of one patched field of `doc`. */
@@ -1208,11 +1210,33 @@ export class CorpusService {
    * @returns `undefined` when the write may proceed; a ready-to-return
    *   `err(...)` `Result` when it must be refused.
    */
-  private refuseIfForeignCorpusWrite<T>(intentDeclared = false): Result<T, LoreError> | undefined {
+  private async refuseIfForeignCorpusWrite<T>(
+    intentDeclared = false,
+    targets: readonly DocRecord[] = [],
+  ): Promise<Result<T, LoreError> | undefined> {
     const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
-    return verdict.allowed ? undefined : err(foreignCorpusWriteRefusalError(verdict));
+    if (verdict.allowed) return undefined;
+    // reason: claim-scoped corpus authoring (spec-baseline-slice-2 §C8, issue #39) — a worktree implementer whose fresh
+    // claim lease declares a `corpus_scope` covering every baseline target may write there. The decision is the
+    // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
+    // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
+    if (this.corpusWriteAuthority !== undefined) {
+      const decided = await this.corpusWriteAuthority.decide(targets);
+      return decided.ok ? undefined : err(decided.error);
+    }
+    return err(foreignCorpusWriteRefusalError(verdict));
   }
 
+  /**
+   * Arms the claim-scoped corpus-write authority the write route consults before refusing a foreign-corpus write
+   * (see {@link refuseIfForeignCorpusWrite}). Called once per CLI process by `adapters/cli/loader.ts`, next to
+   * {@link setForeignCorpusWriteContext}. Unarmed (every bare construction) ⇒ the route refuses every foreign write.
+   */
+  setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
+    this.corpusWriteAuthority = new CorpusWriteAuthority(this.store, context, this);
+  }
+
+  private corpusWriteAuthority: CorpusWriteAuthority | undefined;
 
   // ── The one write route ────────────────────────────────────────────────────
 
@@ -1254,7 +1278,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true);
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
@@ -1316,7 +1340,7 @@ export class CorpusService {
    * @param request - See {@link DocInsertRequest}.
    */
   async insertDoc(request: DocInsertRequest): Promise<Result<DocRecord, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocRecord>(request.foreignIntent === true);
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1354,7 +1378,7 @@ export class CorpusService {
   async reserveProposedRule(
     request: ProposedRuleReserveRequest,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(request.foreignIntent === true);
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(request.foreignIntent === true);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1378,6 +1402,17 @@ export class CorpusService {
   }
 
   /**
+   * The foreign-corpus refusal alone, for a caller whose operation writes something this route does not carry
+   * (a judgment row) BEFORE the routed write: asking first keeps a refused call from leaving that earlier row behind.
+   *
+   * @param foreignIntent - See {@link DocWriteRequest.foreignIntent}.
+   * @returns `ok` when a write into this corpus is allowed; the `gate:corpus-write:foreign-provenance` refusal otherwise.
+   */
+  async assertWritable(foreignIntent = false): Promise<Result<void, LoreError>> {
+    return (await this.refuseIfForeignCorpusWrite<void>(foreignIntent)) ?? ok(undefined);
+  }
+
+  /**
    * THE write route for re-pointing a doc's parent (a hierarchy migration): foreign-corpus refusal, then the
    * store's ONE transaction (`setDocParentWithProvenance`: the parent write, the `parent` link-edge removal on a
    * clear, the audit row) naming the calling actor. The migration's audit row is its record: it bumps no version.
@@ -1385,7 +1420,7 @@ export class CorpusService {
    * @param request - See {@link DocParentRequest}.
    */
   async setDocParent(request: DocParentRequest): Promise<Result<DocRecord, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocRecord>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>();
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1408,7 +1443,7 @@ export class CorpusService {
    */
   async appendAudit(request: AuditAppendRequest): Promise<Result<void, LoreError>> {
     if (request.foreign !== "record") {
-      const refusal = this.refuseIfForeignCorpusWrite<void>(request.foreignIntent === true);
+      const refusal = await this.refuseIfForeignCorpusWrite<void>(request.foreignIntent === true);
       if (refusal !== undefined) return refusal;
     }
     const actor = this.resolveWriteActorResult(request.by);
@@ -1438,7 +1473,7 @@ export class CorpusService {
     by?: string,
     now: string = new Date().toISOString(),
   ): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(by);
     if (!actor.ok) return actor;
@@ -1480,7 +1515,13 @@ export class CorpusService {
    * @param request - See {@link RuleMoveRequest}.
    */
   async moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>();
+    const moveTargets: DocRecord[] = [];
+    for (const id of [request.from.id, request.to.id]) {
+      const found = await this.store.find(id);
+      if (!found.ok) return found;
+      if (found.value !== null) moveTargets.push(found.value);
+    }
+    const refusal = await this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>(false, moveTargets);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1508,7 +1549,7 @@ export class CorpusService {
    * @param request - See {@link RuleAllocateRequest}.
    */
   async allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>();
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(false, [request.leaf]);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1808,7 +1849,7 @@ export class CorpusService {
     // it without reading §D5 first is a spec change wearing a refactor's
     // clothes.
     if (opts?.allowHandoff !== true && opts?.allowUat !== true) {
-      const refusal = this.refuseIfForeignCorpusWrite<CreateDocResult>();
+      const refusal = await this.refuseIfForeignCorpusWrite<CreateDocResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -2795,7 +2836,7 @@ export class CorpusService {
   ): Promise<Result<CorpusSetResult, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<CorpusSetResult>();
+      const refusal = await this.refuseIfForeignCorpusWrite<CorpusSetResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -4133,7 +4174,7 @@ export class CorpusService {
     // checked BEFORE the confirm gate, since a foreign write is refused
     // regardless of confirmation state.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
+      const refusal = await this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -5440,7 +5481,7 @@ export class CorpusService {
   ): Promise<Result<LinkRecord, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<LinkRecord>();
+      const refusal = await this.refuseIfForeignCorpusWrite<LinkRecord>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -5576,7 +5617,7 @@ export class CorpusService {
   ): Promise<Result<void, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<void>();
+      const refusal = await this.refuseIfForeignCorpusWrite<void>();
       if (refusal !== undefined) return refusal;
     }
 
