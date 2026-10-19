@@ -23,8 +23,9 @@
    ```
    lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other> \
      --command "<exact command>" --result <pass|fail> \
-     [--ac <spec-AC-id>] [--output-tail-file <path>]
+     --capture [--ac <spec-AC-id>]
    ```
+   - `--capture` makes the runner spawn `--command` and record its own output; `--result pass` without it is refused (only `--oracle manual` takes a hand-written `--output-tail`)
    - A failing oracle is recorded as `--result fail`, then fixed, then re-recorded — the trail is the point
    - Script-mode spec ACs: prefer `lore verify <plan> --task <task>` — the trusted runner
      executes the declared command and records ATTESTED evidence (exit code decides).

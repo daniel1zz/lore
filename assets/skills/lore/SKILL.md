@@ -66,7 +66,7 @@ Advisory lease + append-only oracle evidence, for agents executing plan tasks:
 ```bash
 lore claim <task> [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
 lore evidence <task> --oracle tsc|test|lint|build|e2e|manual|other \
-  --command "<cmd>" --result pass|fail [--output-tail "..." | --output-tail-file <path>]
+  --command "<cmd>" --result pass|fail --capture   # --capture: runner spawns --command and records its output; pass needs it (manual: --output-tail instead)
 lore release <task> [--reason "why"] [--force]   # non-holder needs --force
 lore ready <plan> [--json]     # computed readiness over blocks links — never stored
 ```

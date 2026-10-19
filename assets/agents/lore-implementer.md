@@ -57,7 +57,7 @@ lore get <task-slug>            # task body + AC
 lore get <spec-slug>            # governing spec (from dispatch bundle's Spec Reference)
 lore ac list <spec-slug>        # structured acceptance criteria
   → implement → write/adjust tests → run SCOPED oracles (see Oracle Scope below)
-lore evidence <task-slug> --oracle <tsc|test|lint|build|e2e> --command "<cmd>" --result <pass|fail> [--ac <ac-id>]
+lore evidence <task-slug> --oracle <tsc|test|lint|build|e2e> --command "<cmd>" --result <pass|fail> --capture [--ac <ac-id>]
 lore release <task-slug>   # drops YOUR lease only — it does not archive; lore done (approved→active→archived) is a separate step owned by whoever can assert the merge, never you
 ```
 
