@@ -465,7 +465,7 @@ export class PhaseMigrationService {
       auditSessionId: `phase-migration-${phaseDoc.id}`,
       ...(by !== undefined ? { by } : {}),
     });
-    if (!inserted.ok) return err(inserted.error);
+    if (!inserted.ok) return inserted;
 
     for (const task of group.tasks) {
       const archived = await this.writer.writeDoc({
@@ -480,7 +480,7 @@ export class PhaseMigrationService {
         ...(by !== undefined ? { by } : {}),
         now: nowIso,
       });
-      if (!archived.ok) return err(archived.error);
+      if (!archived.ok) return archived;
     }
 
     return ok(undefined);

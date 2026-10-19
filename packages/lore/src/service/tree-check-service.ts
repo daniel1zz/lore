@@ -302,8 +302,8 @@ export class TreeCheckService {
         continue;
       }
 
-      const currentDoc = byId.get(doc.id);
-      if (currentDoc === undefined) return err({ code: "DOC_NOT_FOUND", id: doc.id });
+      // reason: `doc` is `drift.actual`, built from `allDocs`, and `byId` is keyed from the same list — present by construction.
+      const currentDoc = byId.get(doc.id)!;
 
       // reason: AC-DCL-3 / #276 — a repair that moves `parent_id` is a document write: it goes through the one
       // write route so the version bump has its version row (it used to write only an audit row), the audit row
