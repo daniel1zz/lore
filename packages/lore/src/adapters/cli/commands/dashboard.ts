@@ -159,7 +159,7 @@ function parsePort(io: CliIo, rawValue: string | undefined, flagName: string, fa
  *   registry records it as that entry's `error` diagnosis; the project is never served from its local file)
  */
 export async function mountRegisteredProject(inv: Invocation, registryDbPath: string): Promise<App> {
-  await primeReplicaClientForProject(registryDbPath, inv.io);
+  await primeReplicaClientForProject(registryDbPath, inv.io, inv.env);
   const projectConfig = loadConfig(dirname(dirname(registryDbPath)), () => {});
   // reason: a project without sync keeps the no-config construction it always had; only a sync-enabled project
   // needs its config to select the replica. A config that does not parse is reported by `loadLoreApp` for the

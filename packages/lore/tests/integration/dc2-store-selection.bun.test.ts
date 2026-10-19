@@ -155,7 +155,7 @@ async function makeReplicaDouble(seedFrom: string): Promise<{ store: TursoStore;
   };
 }
 
-function loadRoute(sb: Sandbox, argv: readonly string[], surface: "http" | "mcp"): { close: () => void } {
+function loadRoute(sb: Sandbox, argv: readonly string[], surface: "http" | "cli"): { close: () => void } {
   const out: string[] = [];
   const inv = buildTestInvocation({
     argv,
@@ -247,7 +247,8 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
       expect(double.opens.map((c) => c.localPath)).toEqual([sb.dbPath]);
       serve.close();
 
-      const mcp = loadRoute(sb, ["--mcp-server"], "mcp");
+      // src/index.ts boots the MCP server with `loadLoreApp({ inv })`: the default "cli" surface
+      const mcp = loadRoute(sb, ["--mcp-server"], "cli");
       expect(double.opens.map((c) => c.localPath)).toEqual([sb.dbPath, sb.dbPath]);
       mcp.close();
 
