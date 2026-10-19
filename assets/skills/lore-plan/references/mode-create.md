@@ -361,39 +361,33 @@ Skip when: pure research/design plan, no implement tasks, or user explicitly opt
      - ✅ `Given empty cart, When checkout, Then return 400 with code=CART_EMPTY`
      - ❌ `Test that checkout function handles empty cart correctly`
 
-2. **Generate preceding test tasks** — create a paired test task for each implement task:
-   ```
-   lore create task --title "[Skill:test] {feature} — RED test scenarios" \
-     --parent <plan> --plan-id <plan> --phase "{same phase as impl}" \
-     --anchor <test-file-path> --content-file /tmp/test-task.md
-   ```
-   test task content:
-   ```
-   Estimate: S (test tasks are typically S, same phase as impl)
-   Source: AC of task-{impl-slug}
-   TDD-Role: red | Paired-Impl: task-{impl-slug}
+2. **Fold the red step into the implement task** — never split the red step into its own task, and never make another task block the implement task for it. A red test that lands on main alone turns `bun run typecheck` red for every concurrent session, and a test task that blocks its implementer can never satisfy `lore done`'s floors. One task carries the whole cycle:
+   - Write the scenarios into the implement task's own content, under a `Scenarios:` heading:
+     ```
+     Scenarios:
+     - {scenario 1, Given/When/Then format}
+     - {scenario 2, ...}
 
-   Scenarios:
-   - {scenario 1, Given/When/Then format}
-   - {scenario 2, ...}
+     Red-first: capture the failing tests before implementing, then capture the pass.
+     ```
+   - Add the implement task's test file path to its `--anchor` list.
+   - Declare the task red-first: `lore red-first <impl-task>`.
 
-   AC:
-   - All scenarios written as executable tests
-   - Run tests → all RED (must fail)
-   - Failure reason is "missing implementation", not "test bug"
-   ```
+3. **No extra dependency edges** — the red step adds no task and no `blocks` edge. The implement task keeps only the prerequisites it already had.
 
-3. **Wire dependency** — `lore link <test-task> <impl-task> --type=blocks`
-   - test blocks impl: RED before GREEN
-   - Preserves existing cross-task blocks edges (the test task inherits the impl task's original prerequisites — re-link them onto the test task)
+   The implementer then runs, inside its own worktree, in this order:
+   1. write the failing tests; run `lore evidence <impl-task> --oracle test --command "<cmd>" --result expected-fail --capture` (the runner records the red);
+   2. implement until green;
+   3. `lore verify` (or `lore evidence ... --result pass --capture`) records the pass;
+   4. commit test and implementation together, so the red never lands on main alone; after landing, `lore done <impl-task>` archives it.
 
 **Output**:
 ```
-**[TDD_INJECTION]** impl tasks: N | test tasks generated: N | scenarios total: M | avg per task: M/N
+**[TDD_INJECTION]** impl tasks: N | red-first declared: N | scenarios total: M | avg per task: M/N
 ```
 
 **Anti-pattern guards**:
-- test task scenario count < paired impl task AC count → warn "insufficient test coverage"
+- scenario count < the implement task's AC count → warn "insufficient test coverage"
 - scenarios contain implementation details like "call function X" → warn "tests should not anchor to implementation"
 - impl AC changed but scenarios not updated → the lore-reader audit (8.3) should flag as stale
 
