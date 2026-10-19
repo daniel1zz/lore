@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveCodeReferences, type FsProbe } from "@lore/core";
 import { extractCodeReferences } from "../../../src/service/claude-md-admission.js";
+import { renderRulesFile } from "../../../src/service/context-fragments/section.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -130,6 +131,40 @@ describe("AC-BIND-2: bun run <script> in a context fragment", () => {
 
     expect(unresolved(findings)).toEqual([]);
     expect(exitCode).toBe(0);
+  });
+});
+
+describe("AC-BIND-2: generated rules files are checked at their fragment, not at the copy", () => {
+  const fragmentSource = (): string =>
+    ["---", "id: gen-frag", "title: Generated", 'audience: [main]', "mode: static", "---", "Run `bun run no-such-script`.", ""].join("\n");
+
+  it("NEGATIVE: a lore-managed rules file naming a missing script is not a finding; the same text hand-written is", () => {
+    const rendered = renderRulesFile({
+      frontmatter: { id: "gen-frag", title: "Generated", audience: ["main"], mode: "static", delivery: "rules" },
+      body: "Run `bun run no-such-script`.\n",
+      layer: "project",
+      path: ".lore/context/gen-frag.md",
+      bodyLineOffset: 7,
+    });
+    if (!rendered.ok) throw new Error("fixture fragment must render");
+    writeFileSync(join(dir, ".claude", "rules", rendered.value.fileName), rendered.value.content);
+
+    const generated = runCheck(dir);
+    expect(unresolved(generated.findings)).toEqual([]);
+    expect(generated.exitCode).toBe(0);
+
+    writeFileSync(join(dir, RULES_FILE), "Run `bun run no-such-script`.\n");
+    expect(unresolved(runCheck(dir).findings)).toHaveLength(1);
+    expect(fragmentSource()).toContain("no-such-script");
+  });
+
+  it("the fragment source that produced the generated file IS checked at its own line", () => {
+    writeFileSync(join(dir, ".lore", "context", "gen-frag.md"), fragmentSource());
+
+    const { exitCode, findings } = runCheck(dir);
+
+    expect(exitCode).toBe(3);
+    expect(unresolved(findings)).toEqual([expect.objectContaining({ path: ".lore/context/gen-frag.md", line: 7 })]);
   });
 });
 

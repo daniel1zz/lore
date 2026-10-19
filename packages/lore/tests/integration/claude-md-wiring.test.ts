@@ -255,7 +255,6 @@ describe("claude-md wiring — an unresolved reference reaches the CLI as a dete
   });
 
   it("NEGATIVE: reports no reference_unresolved for a backtick-quoted path that actually exists, exit code exactly 0", () => {
-    pinEnforce();
     mkdirSync(join(tmpDir, "notes"), { recursive: true });
     writeFileSync(join(tmpDir, "notes", "present.md"), "real file\n");
     writeFileSync(join(tmpDir, "CLAUDE.md"), "See `notes/present.md` for the mechanism.\n");

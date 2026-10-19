@@ -252,6 +252,13 @@ function joinPaths(dir: string, rel: string): string {
   return dir === "" ? rel : `${dir}/${rel}`;
 }
 
+/**
+ * First line of a lore-managed rules file (a generated projection of a fragment). Mirrors
+ * `service/context-fragments/section.ts`'s fingerprint line; that module reads the filesystem, so
+ * this pure module cannot import it, and `bind-script-reference.test.ts` pins the two in agreement.
+ */
+const MANAGED_PROJECTION_RE = /^<!-- lore:managed fragment=\S+ hash=[0-9a-f]{8} -->\n/;
+
 /** A source file whose `#Symbol` suffix names an export (the only files whose exports the resolver can scan). */
 const CODE_FILE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
@@ -898,7 +905,12 @@ export function runMemoryFileChecks(
   for (const file of files) {
     advisory.push(...detectNarrativeSmells(file.content));
 
-    if (deps.probe !== undefined) wouldBeDeterministic.push(...checkCodeReferences(file, deps.probe));
+    // reason: a lore-managed rules file is a generated projection of a fragment; its references are
+    // checked once, at the fragment (`referenceDocuments`) where they are authored. Checking the copy
+    // would also flag shipped default text in a project that never wrote it.
+    if (deps.probe !== undefined && !MANAGED_PROJECTION_RE.test(file.content)) {
+      wouldBeDeterministic.push(...checkCodeReferences(file, deps.probe));
+    }
 
     for (const finding of checkSlugPointers(file.content, deps.docExists)) {
       wouldBeDeterministic.push({ ...finding, path: file.path, role: file.role });
