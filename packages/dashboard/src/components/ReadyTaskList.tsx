@@ -30,6 +30,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { getAllowedTransitions } from "@lore/core";
 import type { ReadyRecord } from "@lore/core";
 import { Badge } from "@/components/ui/badge";
 
@@ -94,12 +95,15 @@ function ClaimBadge({ claim, claimTtlMinutes }: ClaimBadgeProps): React.ReactEle
 }
 
 /**
- * The row's status badge. The task's own status comes first: an archived task is "done"
- * (the server's `ready` is false for it, which says nothing about being blocked); only a
- * non-archived task is "ready" or "blocked", from `ready`.
+ * The row's status badge, total over task statuses. A terminal status (no lifecycle edge
+ * leaves it, per core's `getAllowedTransitions`) renders its own honest label: archived is
+ * "done", every other terminal status (today: deprecated) renders its status name. Only a
+ * non-terminal task is "ready" or "blocked", from `ready` (the server's `ready` is false for
+ * every terminal task, which says nothing about being blocked).
  */
-function readyBadgeLabel(record: ReadyRecord): "done" | "ready" | "blocked" {
-  if (record.task.status === "archived") return "done";
+function readyBadgeLabel(record: ReadyRecord): string {
+  const { status } = record.task;
+  if (getAllowedTransitions(status).length === 0) return status === "archived" ? "done" : status;
   return record.ready ? "ready" : "blocked";
 }
 
