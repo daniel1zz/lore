@@ -71,7 +71,7 @@ function collectCommands(node: unknown, out: string[] = []): string[] {
 /** Golden commands that the rendered (normalised) settings fails to carry verbatim. */
 function missingGoldenCommands(renderedNormalised: string, golden: string): string[] {
   const rendered = new Set(collectCommands(JSON.parse(renderedNormalised)));
-  return collectCommands(JSON.parse(golden)).filter((c) => !rendered.has(c));
+  return [...new Set(collectCommands(JSON.parse(golden)))].filter((c) => !rendered.has(c));
 }
 
 describe("AC-CV-7 claude_dir invocation variable", () => {
@@ -91,7 +91,7 @@ describe("AC-CV-7 claude_dir invocation variable", () => {
   it("AC-CV-7 (a) falsifier: a command rendered differently from the golden, or a dropped one, is reported", () => {
     const golden = readFileSync(FIXTURE, "utf8");
     expect(missingGoldenCommands(golden, golden)).toEqual([]);
-    const drifted = golden.replace(
+    const drifted = golden.replaceAll(
       "node <CLAUDE_DIR>/hooks/pre-tool-harness-run.mjs",
       "node /elsewhere/hooks/pre-tool-harness-run.mjs",
     );
