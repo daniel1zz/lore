@@ -2596,7 +2596,12 @@ export class TaskWorkflowService {
     // recordVerifiedEvidence's own public contract stays a plain resolved `nowIso: string`
     // (VerifyRunnerService resolves "now" once per verifyPlan() call) — trivially wrapped
     // here rather than widening the public signature back to a thunk.
-    const result = await this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, () => nowIso);
+    // reason: foreign-corpus intent (task-skill-fix-lore-verify-from-a-linked-worktree-is-refused-on). A runner-attested
+    // row is DERIVED from a `lore verify` run the caller explicitly aimed at THIS task; running verify from a linked
+    // worktree is the mandated route, and that run is the declared intent — the task need not hold a lease naming the
+    // worktree (it may be claimed from the main checkout, or by nobody). Self-reported `addEvidence` keeps reading its
+    // intent from the persisted lease only.
+    const result = await this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, () => nowIso, true);
     this.recordEvent("task.evidence_added", startMs, result, undefined, {
       oracle: entry.oracle,
       result: entry.result,
@@ -2752,6 +2757,7 @@ export class TaskWorkflowService {
     entry: VerifiedEvidenceInput,
     actor: string,
     now: () => string,
+    verifyRunIntent = false,
   ): Promise<Result<DocRecord, LoreError>> {
     // §M5 (AC-DC-8) — fail-loud, NOT a silent strip, and bound to the SHARED chokepoint
     // rather than the self-report path: `ac_oracle_generation` is resolved from the
@@ -2932,6 +2938,7 @@ export class TaskWorkflowService {
         result: entry.result,
         ...(renewedClaim !== null ? { claim_renewed: true } : {}),
       },
+      verifyRunIntent || readClaimRecord(task)?.worktree !== undefined,
     );
   }
 
