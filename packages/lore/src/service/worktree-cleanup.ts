@@ -81,6 +81,11 @@ export interface WorktreeGitProbe {
   headSha(path: string): ProbeResult<string>;
   /** `git rev-parse --verify refs/heads/<name>` run in `cwd` (any worktree of the repo — branch refs are shared). */
   branchTip(cwd: string, name: string): ProbeResult<string>;
+  /**
+   * `git log --first-parent --format=<format> <ref>` run in `cwd`: the landing backfill reads main's `merge(<branch>)`
+   * commits from it. Optional: an absent method means the backfill is not measured, never "no landing".
+   */
+  firstParentLog?(cwd: string, ref: string, format: string): ProbeResult<string>;
   /** Plain `git worktree remove <path>` run from `repoRoot`. */
   removeWorktree(repoRoot: string, path: string): ProbeResult<true>;
   /** Plain `git branch -d <branch>` run from `repoRoot`. */
@@ -660,6 +665,10 @@ export function createRealWorktreeProbe(cwd: string): WorktreeGitProbe {
     branchTip: (cwd, name) => {
       const out = runGit(cwd, ["rev-parse", "--verify", `refs/heads/${name}`]);
       return out.ok ? { ok: true, value: out.value.trim() } : out;
+    },
+    firstParentLog: (cwd, ref, format) => {
+      const out = runGit(cwd, ["log", "--first-parent", `--format=${format}`, ref]);
+      return out.ok ? { ok: true, value: out.value } : out;
     },
     removeWorktree: (repoRoot, path) => {
       const out = runGit(repoRoot, ["worktree", "remove", path]);

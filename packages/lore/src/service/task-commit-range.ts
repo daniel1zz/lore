@@ -17,6 +17,13 @@
  *   - A range is evidence of where the work was, so it is a hint that is verified at read time
  *     (commit objects must exist); a missing object degrades to the slug search with a warning.
  *
+ * Landing (the preferred source): a task's commit range is a fact of its LANDING, not of its last claim.
+ * `lore integrate` records `extra.landing` ({@link TaskLanding}) on every task whose claim recorded the landed
+ * branch; `lore done` and assess derive the range from it (`head` = the branch head, `base` = main before the
+ * landing, so `base..head` is exactly the branch's own commits). A re-claim from a worktree of main (evidence
+ * repair) therefore cannot replace the range. A task landed before this record existed is backfilled from main's
+ * first-parent history, where `lore integrate` left a `merge(<branch>)` commit ({@link findLandingInMainLog}).
+ *
  * Pure: no IO. The service measures; the assess adapter reads.
  */
 
@@ -27,10 +34,13 @@ export const recordedCommitRangeSchema = z.discriminatedUnion("state", [
     state: z.literal("recorded"),
     head: z.string().min(1),
     /** How `head` was resolved: HEAD inside a worktree directory, or the tip of a branch NAME. */
-    head_source: z.enum(["worktree", "branch"]),
+    head_source: z.enum(["worktree", "branch", "landing"]),
     /** Absent for a claim recorded before base_sha existed — head-only range. */
     base: z.string().min(1).optional(),
+    /** The worktree/branch the claim recorded; for a landing-derived range, the landed branch. */
     worktree: z.string().min(1),
+    /** Landing-derived ranges only: the commit that moved main (the merge commit, or the tip on a fast-forward). */
+    landing_commit: z.string().min(1).optional(),
     recorded_at: z.string().min(1),
   }),
   z.object({
@@ -42,6 +52,70 @@ export const recordedCommitRangeSchema = z.discriminatedUnion("state", [
 
 export type TaskCommitRange = z.infer<typeof recordedCommitRangeSchema>;
 
+/**
+ * The landing of a task's branch on main (`extra.landing`), written by `lore integrate` (or backfilled from the
+ * `merge(<branch>)` commit). `main_before..branch_head` is the branch's own work; `landing_commit` is the commit
+ * that moved main (`main_after`).
+ */
+export const taskLandingSchema = z.object({
+  branch: z.string().min(1),
+  branch_head: z.string().min(1),
+  main_before: z.string().min(1),
+  main_after: z.string().min(1),
+  landing_commit: z.string().min(1),
+  recorded_at: z.string().min(1),
+});
+
+export type TaskLanding = z.infer<typeof taskLandingSchema>;
+
+/** A landing without its timestamp: what integrate (or the backfill) measures. */
+export type LandingFact = Omit<TaskLanding, "recorded_at">;
+
+/** Reads `extra.landing`; `undefined` when absent or malformed (a malformed record is never trusted). */
+export function readTaskLanding(extra: Record<string, unknown> | undefined): TaskLanding | undefined {
+  const raw = extra?.["landing"];
+  if (raw === undefined) return undefined;
+  const parsed = taskLandingSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The recorded range a landing implies: the branch head over main-before, naming the landing commit. */
+export function commitRangeFromLanding(landing: TaskLanding, recordedAt: string): MeasuredCommitRange {
+  return {
+    state: "recorded",
+    head: landing.branch_head,
+    head_source: "landing",
+    base: landing.main_before,
+    worktree: landing.branch,
+    landing_commit: landing.landing_commit,
+    recorded_at: recordedAt,
+  };
+}
+
+/** `git log` format the backfill reads: sha, parents, subject (tab separated). */
+export const MAIN_FIRST_PARENT_LOG_FORMAT = "%H%x09%P%x09%s";
+
+/**
+ * Finds the landing of `branch` in main's first-parent log (lines of {@link MAIN_FIRST_PARENT_LOG_FORMAT}, newest
+ * first): the most recent two-parent commit whose subject is `merge(<branch>)` or `merge(<branch>): ...` — the message
+ * `lore integrate` writes. Parent 1 is main before the landing, parent 2 the branch head. `undefined` when none.
+ *
+ * @example
+ * findLandingInMainLog("m1\tp1 p2\tmerge(feat-x): subject", "feat-x")
+ * // → { branch: "feat-x", branch_head: "p2", main_before: "p1", main_after: "m1", landing_commit: "m1" }
+ */
+export function findLandingInMainLog(logText: string, branch: string): LandingFact | undefined {
+  for (const line of logText.split("\n")) {
+    const [sha, parents, subject] = line.split("\t");
+    if (sha === undefined || parents === undefined || subject === undefined) continue;
+    if (subject !== `merge(${branch})` && !subject.startsWith(`merge(${branch}): `)) continue;
+    const [first, second, ...rest] = parents.split(" ");
+    if (first === undefined || second === undefined || rest.length > 0) continue;
+    return { branch, branch_head: second, main_before: first, main_after: sha, landing_commit: sha };
+  }
+  return undefined;
+}
+
 /** A usable range: only the `recorded` shape carries commits. */
 export type MeasuredCommitRange = Extract<TaskCommitRange, { state: "recorded" }>;
 
@@ -51,12 +125,18 @@ export type MeasuredCommitRange = Extract<TaskCommitRange, { state: "recorded" }
  */
 export function collectRecordedRanges(
   tasks: ReadonlyArray<{ slug: string; extra?: Record<string, unknown> | undefined }>,
-): Map<string, { base?: string; head: string }> {
-  const ranges = new Map<string, { base?: string; head: string }>();
+): Map<string, { base?: string; head: string; worktree?: string }> {
+  const ranges = new Map<string, { base?: string; head: string; worktree?: string }>();
   for (const task of tasks) {
+    // reason: the landing record outranks `commit_range` — a later re-claim can rewrite the latter, never the former.
+    const landing = readTaskLanding(task.extra);
+    if (landing !== undefined) {
+      ranges.set(task.slug, { head: landing.branch_head, base: landing.main_before, worktree: landing.branch });
+      continue;
+    }
     const range = readMeasuredCommitRange(task.extra);
     if (range === undefined) continue;
-    ranges.set(task.slug, { head: range.head, ...(range.base !== undefined ? { base: range.base } : {}) });
+    ranges.set(task.slug, { head: range.head, worktree: range.worktree, ...(range.base !== undefined ? { base: range.base } : {}) });
   }
   return ranges;
 }

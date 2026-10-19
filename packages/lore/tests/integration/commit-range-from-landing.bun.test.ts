@@ -66,6 +66,7 @@ const gitRunner: IntegrateGit = (cwd, args, env) => {
 interface Fixture {
   readonly repo: string;
   readonly svc: TaskWorkflowService;
+  readonly store: ReturnType<typeof actedStore>;
   readonly taskId: string;
   readonly slug: string;
   readonly ownCommit: string;
@@ -107,7 +108,7 @@ async function fixture(): Promise<Fixture> {
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   const claim = await svc.claim(task.value.id, { by: "alice", worktree: "feat-landing" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
-  return { repo, svc, taskId: task.value.id, slug: task.value.slug, ownCommit, branchHead: ownCommit };
+  return { repo, svc, store, taskId: task.value.id, slug: task.value.slug, ownCommit, branchHead: ownCommit };
 }
 
 function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
@@ -195,18 +196,28 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     expect(derived.diff_text).toContain("own-landing-file.txt");
   }, 60_000);
 
-  it("NEGATIVE: a branch that never landed and has no merge commit is not given an invented landing", async () => {
+  it("AC-LAND-1 (b) assess: a task archived before this change (range = main, no landing) is backfilled from merge(<branch>)", async () => {
     const f = await fixture();
-    // an unrelated merge commit on main must not be mistaken for this branch's landing
+    await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s5", floorCommand: "true" });
+    const main = run(f.repo, "rev-parse", "main");
+    // the measured defect: the evidence re-claim recorded main itself as the range (base == head)
+    const stale = { state: "recorded", head: main, base: main, head_source: "worktree", worktree: "feat-landing", recorded_at: "t" };
+    const ranges = collectRecordedRanges([{ slug: f.slug, extra: { commit_range: stale } }]);
+    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
+    expect(derived.commits.map((c) => c.sha)).toEqual([f.ownCommit]);
+    expect(derived.diff_text).toContain("own-landing-file.txt");
+    expect(derived.attribution[f.slug]).toBe("recorded_range");
+  }, 60_000);
+
+  it("NEGATIVE: landing a different branch records nothing on a task claimed elsewhere", async () => {
+    const f = await fixture();
     run(f.repo, "checkout", "-q", "-b", "other-branch", "main");
     commit(f.repo, "other.txt", "feat: other");
     run(f.repo, "checkout", "-q", "main");
-    run(f.repo, "merge", "--no-ff", "-q", "-m", "merge(other-branch): other", "other-branch");
-    const done = await f.svc.done(f.taskId, { by: "alice" });
-    // the unmerged-branch floor refuses a done on unlanded work; no landing record is written either way
-    const task = await f.svc.checkDoneFloors(f.taskId);
-    expect(done.ok ? done.value.task.extra["landing"] : undefined).toBeUndefined();
-    expect(task).toBeDefined();
+    const landed = await integrateService(f, true).integrate({ branch: "other-branch", sessionId: "s4", floorCommand: "true" });
+    expect(landed.ok && landed.value.kind).toBe("landed");
+    const task = await f.store.find(f.taskId);
+    expect(task.ok && task.value !== null ? task.value.extra["landing"] : "unreadable").toBeUndefined();
   }, 60_000);
 
   it("REGRESSION: integrate with no task claimed on the branch records nothing and still lands", async () => {

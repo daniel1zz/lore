@@ -320,7 +320,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
-import type { LoreError } from "@lore/core";
+import type { AuditEntry, LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
   evidenceEntrySchema,
@@ -388,7 +388,15 @@ import {
   type WorktreeOutcome,
 } from "./worktree-cleanup.js";
 import type { WorktreeRemovalFactsPort } from "./worktree-removal-test.js";
-import type { TaskCommitRange } from "./task-commit-range.js";
+import {
+  commitRangeFromLanding,
+  findLandingInMainLog,
+  MAIN_FIRST_PARENT_LOG_FORMAT,
+  readTaskLanding,
+  type LandingFact,
+  type TaskCommitRange,
+  type TaskLanding,
+} from "./task-commit-range.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
@@ -3177,6 +3185,9 @@ export class TaskWorkflowService {
       harness_run: claimant.harnessRun,
       ...(inheritedDirtyWorktree !== undefined ? { inherited_dirty_worktree: inheritedDirtyWorktree } : {}),
       ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
+      // reason: the landing record (recordLanding) matches a landed branch to the tasks whose claim recorded it; the
+      // audit row survives `lore release`, so a claim by worktree PATH still names its branch here.
+      ...(capturedBranch !== undefined ? { branch: capturedBranch } : {}),
       ...(claimBase !== undefined && claimBase.ok ? { base_sha: claimBase.value } : {}),
     }, opts.worktree !== undefined);
     if (!writeResult.ok) return writeResult;
@@ -4179,6 +4190,105 @@ export class TaskWorkflowService {
   }
 
   /**
+   * Branch names `task`'s claims recorded: every claim audit row's `worktree` (a branch NAME under the dispatch
+   * protocol) and `branch` (auto-captured), plus the current claim's. `lore integrate <branch>` matches on these.
+   */
+  private static claimedNames(auditRows: readonly AuditEntry[], task: DocRecord): string[] {
+    const names = new Set<string>();
+    for (const row of auditRows) {
+      for (const key of ["worktree", "branch"] as const) {
+        const value = row.details?.[key];
+        if (typeof value === "string" && value.trim() !== "") names.add(value);
+      }
+    }
+    const current = readClaimRecord(task);
+    if (current?.worktree !== undefined) names.add(current.worktree);
+    if (current?.branch !== undefined) names.add(current.branch);
+    return [...names];
+  }
+
+  /**
+   * Records a landing (`extra.landing`) on every task whose claim, current or historical (claim audit), recorded
+   * `landing.branch`, through the one write route (`writer.writeDoc`). Called by `lore integrate` after main moved.
+   * Idempotent: a task already holding the same landing is reported, not rewritten. Every task is attempted; the first
+   * write failure is returned after the rest were tried.
+   *
+   * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
+   */
+  async recordLanding(landing: LandingFact, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const auditResult = await this.store.queryAudit({ action: "claim" });
+    if (!auditResult.ok) return auditResult;
+    const nowIso = now();
+    const slugs: string[] = [];
+    let firstFailure: LoreError | undefined;
+    for (const task of tasksResult.value) {
+      const rows = auditResult.value.filter((row) => row.doc_id === task.id);
+      if (!TaskWorkflowService.claimedNames(rows, task).includes(landing.branch)) continue;
+      const existing = readTaskLanding(task.extra);
+      if (
+        existing !== undefined &&
+        existing.branch === landing.branch &&
+        existing.branch_head === landing.branch_head &&
+        existing.landing_commit === landing.landing_commit
+      ) {
+        slugs.push(task.slug);
+        continue;
+      }
+      const record: TaskLanding = { ...landing, recorded_at: nowIso };
+      const written = await this.writer.writeDoc({
+        doc: task,
+        patch: { extra: { ...task.extra, landing: record } },
+        action: "update",
+        changeSummary: `lore integrate: recorded the landing of ${landing.branch} (${landing.landing_commit.slice(0, 12)})`,
+        auditAction: "update",
+        auditDetails: { landing: record },
+        auditSessionId: `landing-${task.id}`,
+        lock: "none",
+        now: nowIso,
+        // reason: the name match above is a claim that declared a worktree/branch, which is the declared intent a
+        // write into a linked-worktree corpus requires (DocWriteRequest.foreignIntent).
+        foreignIntent: true,
+      });
+      if (!written.ok) {
+        firstFailure ??= written.error;
+        continue;
+      }
+      slugs.push(task.slug);
+    }
+    return firstFailure === undefined ? ok(slugs) : err(firstFailure);
+  }
+
+  /**
+   * The landing `lore done` derives the commit range from: the recorded `extra.landing`, else BACKFILLED from main's
+   * first-parent history — the `merge(<branch>)` commit `lore integrate` left — for a branch name one of the task's
+   * claims recorded. `undefined` when neither exists or the history cannot be read (the claim's own range is then
+   * measured as before; an unreadable log is never read as a landing).
+   */
+  private async resolveLanding(
+    task: DocRecord,
+    nowIso: string,
+  ): Promise<{ landing: TaskLanding; source: "recorded" | "backfilled" } | undefined> {
+    const recorded = readTaskLanding(task.extra);
+    if (recorded !== undefined) return { landing: recorded, source: "recorded" };
+    const probe = this.worktreeProbe;
+    if (probe?.firstParentLog === undefined) return undefined;
+    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+    if (!auditResult.ok) return undefined;
+    const cwd = probe.currentWorkingDirectory();
+    const integration = probe.integrationBranch(cwd);
+    if (!integration.ok) return undefined;
+    const log = probe.firstParentLog(cwd, integration.value, MAIN_FIRST_PARENT_LOG_FORMAT);
+    if (!log.ok) return undefined;
+    for (const name of TaskWorkflowService.claimedNames(auditResult.value, task)) {
+      const found = findLandingInMainLog(log.value, name);
+      if (found !== undefined) return { landing: { ...found, recorded_at: nowIso }, source: "backfilled" };
+    }
+    return undefined;
+  }
+
+  /**
    * Measures and writes `extra.commit_range` (see `task-commit-range.ts`). Never refuses `done` on
    * a measurement problem — an unmeasurable range is RECORDED as `not-measured` with its reason, so
    * `lore assess` can tell "not measured" from "no commits"; only a failed store write is an error.
@@ -4186,6 +4296,21 @@ export class TaskWorkflowService {
    * (a released claim drops `extra.claim` but its audit row survives).
    */
   private async recordCommitRange(task: DocRecord, nowIso: string, by: string): Promise<Result<DocRecord, LoreError>> {
+    // reason: a task's commit range is a fact of its LANDING, not of its last claim — an evidence re-claim from a
+    // worktree of main must not replace it (the DCL-1 / DCL-4 defect). Recorded landing first, else backfilled.
+    const landed = await this.resolveLanding(task, nowIso);
+    if (landed !== undefined) {
+      const landedRange = commitRangeFromLanding(landed.landing, nowIso);
+      return this.writeTaskExtra(
+        task,
+        { ...task.extra, landing: landed.landing, commit_range: landedRange },
+        nowIso,
+        by,
+        `lore done: recorded commit range from the ${landed.source} landing of ${landed.landing.branch}: ${landed.landing.main_before.slice(0, 12)}..${landedRange.head.slice(0, 12)}`,
+        "update",
+        { by, commit_range: landedRange, landing: landed.landing, landing_source: landed.source },
+      );
+    }
     const notMeasured = (reason: string): TaskCommitRange => ({ state: "not-measured", reason, recorded_at: nowIso });
     let range: TaskCommitRange;
     const recordedResult = await this.readRecordedWorktrees(task);
