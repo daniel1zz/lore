@@ -36,6 +36,13 @@ const BUN_BIN = execSync("command -v bun", { encoding: "utf8" }).trim();
 const NEW_HOOK = "stop-turn-review.mjs";
 const USER_COMMAND = "node /opt/user-owned/my-stop-hook.mjs";
 const GIT_SAFETY = "pre-bash-git-safety-gate.mjs";
+/**
+ * The one other registered per-call refuser, an explicit exception to BR-1092's "irreversible git
+ * operations only" scope (task-skill-implement-an-isolated-helper-s-write-edit-outside): it refuses
+ * only an isolated helper's own file write outside its worktree and never applies to the main
+ * session. Any further per-call refuser must be added here deliberately.
+ */
+const HELPER_WRITE_SCOPE = "pre-helper-write-scope-gate.mjs";
 
 interface LegacyRegistration {
   file: string;
@@ -190,9 +197,9 @@ describe("turn-end-review roster swap (AC-TE-5)", () => {
     for (const file of perCall) {
       const source = readFileSync(join(REPO_ROOT, "assets", "hooks", file), "utf8");
       const hits = DENY_SHAPES.filter((shape) => shape.test(source)).length;
-      if (file === GIT_SAFETY) {
+      if (file === GIT_SAFETY || file === HELPER_WRITE_SCOPE) {
         // Positive control: the scan really detects a refusal, so a zero elsewhere is not vacuous.
-        expect(hits, "the git safety gate must still be detected as a refuser").toBeGreaterThan(0);
+        expect(hits, `${file} must still be detected as a refuser`).toBeGreaterThan(0);
       } else {
         expect(hits, `${file} can emit a deny/block`).toBe(0);
       }
