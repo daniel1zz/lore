@@ -234,13 +234,15 @@ function seedLedger(except: ReadonlySet<string>): number {
  */
 export function renderReport(all: readonly CoverageData[], verdict: LedgerVerdict, opts: { readonly listStale: boolean }): string[] {
   const out: string[] = [];
+  const informational = verdict.failingLines.filter((l) => l.startsWith(INFORMATIONAL_PREFIX));
+  out.push(...informational);
+  if (verdict.stale.length > 0) {
+    out.push(`check:baseline-coverage: ${verdict.stale.length} stale debt row(s) in scripts/baseline-coverage-debt.json (informational, not failing)${opts.listStale ? ":" : "; list them: bun run check:baseline-coverage -- --list-stale"}`);
+    if (opts.listStale) for (const line of verdict.staleLines) out.push(`  ${line}`);
+  }
   if (verdict.failingCount > 0) {
     out.push(`check:baseline-coverage: INCOMPLETE, ${verdict.failingCount} item(s) unaccounted (not in the debt ledger):`);
-    out.push(...verdict.failingLines);
-  }
-  if (verdict.stale.length > 0) {
-    out.push(`check:baseline-coverage: ${verdict.stale.length} stale debt row(s) in scripts/baseline-coverage-debt.json (informational, not failing):`);
-    for (const line of verdict.staleLines) out.push(`  ${line}`);
+    out.push(...verdict.failingLines.filter((l) => !l.startsWith(INFORMATIONAL_PREFIX)));
   }
   out.push(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${verdict.ledgered} ledgered (debt), ${verdict.failingCount} unaccounted, ${verdict.stale.length} stale (informational)`);
   return out;
