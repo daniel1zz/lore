@@ -64,6 +64,18 @@ describe("ReadyTaskList", () => {
       expect(screen.getByText("3 evidence")).toBeInTheDocument();
     });
 
+    it("badges an archived (ready:false) record 'done' and a draft (ready:true) record 'ready', one row each", () => {
+      const archived = makeRecord({
+        ready: false,
+        task: { ...makeRecord().task, id: "01HTASK0000000000000000002", slug: "task-b", title: "Task B", status: "archived" },
+      });
+      render(<ReadyTaskList records={[archived, makeRecord()]} claimTtlMinutes={120} />);
+      expect(screen.getAllByLabelText("Ready tasks")[0].children).toHaveLength(2);
+      expect(screen.getByText("done")).toBeInTheDocument();
+      expect(screen.getByText("ready")).toBeInTheDocument();
+      expect(screen.queryByText("blocked")).not.toBeInTheDocument();
+    });
+
     it("renders 'blocked' and unmet-blocker slugs for a blocked record", () => {
       const record = makeRecord({
         ready: false,
