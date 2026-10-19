@@ -127,6 +127,7 @@ import { ok, err, truncateSection } from "@lore/core";
 import type { AcOracleGenerationSplit, AcVerifyMode, LoreError, DocRecord, Result, deriveAcCoverageState } from "@lore/core";
 import { projectValidityStatus, type ValidityStatus } from "../service/validity-service.js";
 import type { GoverningRules } from "../service/governing-rules.js";
+import type { DefinitionOfDone } from "../service/task-workflow-service.js";
 import type { KnowledgePointer, HandoffPointer } from "./feed-shared-types.js";
 
 /** Re-exported for import-compat — see `feed-shared-types.ts` for the authoritative shapes. */
@@ -285,6 +286,8 @@ export interface TaskBundle {
    * no baseline rule governs it — the pack then carries no `governing_rules` and renders no section.
    */
   readonly governingRules?: GoverningRules;
+  /** The task's definition of done (BR-1357), computed by the wiring from the done floors' own predicates. */
+  readonly definitionOfDone?: DefinitionOfDone;
 }
 
 /**
@@ -389,6 +392,8 @@ export interface TaskStartPack {
    * the task's file anchors, plus the overflow count (BL-15). ABSENT (key omitted) when none govern.
    */
   readonly governing_rules?: GoverningRules;
+  /** What `lore done` will require of this task (BR-1357); the same value `lore claim --json` prints. ABSENT when the bundle carries none. */
+  readonly definition_of_done?: DefinitionOfDone;
 }
 
 /** The fixed scoped-oracle discipline line embedded in every `boundaries` section (2026-07-23 full-suite-contention lesson, mechanized as pack text — SPEC-070 D3). */
@@ -703,5 +708,6 @@ export async function buildTaskStartPack(
     truncated,
     acceptance_detail: bundle.acceptance,
     ...(bundle.governingRules !== undefined ? { governing_rules: bundle.governingRules } : {}),
+    ...(bundle.definitionOfDone !== undefined ? { definition_of_done: bundle.definitionOfDone } : {}),
   });
 }

@@ -18,6 +18,7 @@
  */
 
 import type { TaskStartPack } from "../../flows/task-feed-flow.js";
+import { renderDefinitionOfDone } from "./definition-of-done-render.js";
 
 /**
  * Renders a `TaskStartPack`'s eight sections to a single string, plus a
@@ -49,6 +50,9 @@ export function renderTaskStartPack(pack: TaskStartPack): string {
   lines.push(pack.sections.knowledge_pointers);
   lines.push("\n## Latest handoff");
   lines.push(pack.sections.handoff);
+  if (pack.definition_of_done !== undefined) {
+    lines.push(`\n## ${renderDefinitionOfDone(pack.definition_of_done).join("\n")}`);
+  }
   if (pack.governing_rules !== undefined) {
     lines.push("\n## Governing rules");
     for (const rule of pack.governing_rules.rules) lines.push(`- ${rule.id}: ${rule.statement}`);

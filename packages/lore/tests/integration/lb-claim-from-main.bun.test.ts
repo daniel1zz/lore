@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * AC-LB-1 (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1353): a task's FIRST claim from a
  * linked worktree is refused when the worktree's HEAD carries commits not on main; a later claim of the same task on
