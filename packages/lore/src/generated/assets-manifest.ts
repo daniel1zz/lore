@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "44f3d1471de1b21f3052779160c969bdab3289a41b60d049acd0b9234c6653e6",
+  tree_digest: "db787e150717614c71f0b02c4d29716d49b8ac387ffa4b6676d966a687fc4693",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -55,7 +55,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "9ffda72eb264f2ec358a1631ff6716f34a0d5279a47c48930ae677bccc0194a4" },
   { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "c97c3731947951c869ca4541f21548ffc8fecf936129bbe14c2f19d2b07f3116" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "2264ffe628851da11a33c9090e7da4f396577da0fa16a0ee26aff7afc5af7259" },
-  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "c31654859ae3c44eb078c3f10057b5fdb86caeb7b7b63faf9f11b3aa34efd9de" },
+  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "741dc35d24628dc821e1f61702d2e09585642dcc45d6136b863c72ef43ff4c54" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "fad2df8beb68f36fd591290ec8d91bbec836eeaf149708d8b6ec263b869cac39" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "1202d4007575d28a3403245b6d797771b3f0a9bc0b66d75830b028ab22d6c79d" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "f1fab470d792479ccae9dbaee7a2fff23a10ebd2a21d0deb03d06b70322e505b" },
