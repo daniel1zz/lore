@@ -1129,10 +1129,12 @@ export class TursoStore implements StoreInterface {
         async (candidate) => {
           try {
             const updateRs = await tx.execute({
-              sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+              sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL RETURNING id",
               args: [candidate, newVersion, id, expectedVersion] as InValue[],
             });
-            if (updateRs.rowsAffected > 0) {
+            // reason: outcomes are decided from RETURNING rows, never the driver's affected-row count
+            // (task-a-version-guarded-store-update-decides-its-outcome-from; same contract as SQLiteStore).
+            if (updateRs.rows.length > 0) {
               return {
                 kind: "success",
                 value: { ...current, ordinal: candidate, version: newVersion },
@@ -1524,7 +1526,7 @@ export class TursoStore implements StoreInterface {
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
                  created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
                  fts_tags = ?
-               WHERE id = ? AND version = ?`,
+               WHERE id = ? AND version = ? RETURNING id`,
           args: [
             updated.slug,
             updated.type,
@@ -1549,7 +1551,7 @@ export class TursoStore implements StoreInterface {
           ] as InValue[],
         });
 
-        if (updateRs.rowsAffected === 0) {
+        if (updateRs.rows.length === 0) {
           // Row exists (checked above) but version didn't match — re-read actual
           const actualRs = await this.client.execute({
             sql: "SELECT version FROM docs WHERE id = ?",
@@ -1966,7 +1968,7 @@ export class TursoStore implements StoreInterface {
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
                  created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
                  fts_tags = ?
-               WHERE id = ? AND version = ?`,
+               WHERE id = ? AND version = ? RETURNING id`,
           args: [
             updated.slug,
             updated.type,
@@ -1991,7 +1993,7 @@ export class TursoStore implements StoreInterface {
           ] as InValue[],
         });
 
-        if (updateRs.rowsAffected === 0) {
+        if (updateRs.rows.length === 0) {
           const actualRs = await tx.execute({
             sql: "SELECT version FROM docs WHERE id = ?",
             args: [id],
@@ -2226,10 +2228,10 @@ export class TursoStore implements StoreInterface {
 
       if (link.link_type === "parent") {
         const updateRs = await tx.execute({
-          sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ?",
+          sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ? RETURNING id",
           args: [link.to_id, link.created_at, link.from_id],
         });
-        if (updateRs.rowsAffected === 0) {
+        if (updateRs.rows.length === 0) {
           await tx.rollback();
           return err({ code: "DOC_NOT_FOUND", id: link.from_id });
         }
@@ -2274,10 +2276,10 @@ export class TursoStore implements StoreInterface {
     }
     try {
       const updateRs = await tx.execute({
-        sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ?",
+        sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ? RETURNING id",
         args: [parentId, audit.timestamp, id] as InValue[],
       });
-      if (updateRs.rowsAffected === 0) {
+      if (updateRs.rows.length === 0) {
         await tx.rollback();
         return err({ code: "DOC_NOT_FOUND", id });
       }
@@ -2847,7 +2849,7 @@ export class TursoStore implements StoreInterface {
              tags = ?, version = ?, created_at = ?, updated_at = ?,
              created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
              fts_tags = ?
-           WHERE id = ? AND version = ?`,
+           WHERE id = ? AND version = ? RETURNING id`,
       args: [
         updated.slug,
         updated.type,
@@ -2871,7 +2873,7 @@ export class TursoStore implements StoreInterface {
         patch.expectedVersion,
       ] as InValue[],
     });
-    if (updateRs.rowsAffected === 0) {
+    if (updateRs.rows.length === 0) {
       return err({
         code: "STALE_VERSION",
         id: patch.id,
@@ -3553,10 +3555,10 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       const rs = await this.client.execute({
-        sql: "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?)",
+        sql: "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?) RETURNING id",
         args: [cutoffIso, batchSize],
       });
-      return ok(Number(rs.rowsAffected));
+      return ok(rs.rows.length);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3633,10 +3635,10 @@ export class TursoStore implements StoreInterface {
       await this.ensureReady();
       // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.
       const updated = await this.client.execute({
-        sql: "UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL",
+        sql: "UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL RETURNING id",
         args: [endedAt, reason, id],
       });
-      if (updated.rowsAffected > 0) return ok("ended");
+      if (updated.rows.length > 0) return ok("ended");
       const found = await this.client.execute({ sql: "SELECT id FROM runs WHERE id = ?", args: [id] });
       return ok(found.rows[0] === undefined ? "unknown-run" : "already-ended");
     } catch (e) {
@@ -3648,10 +3650,10 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       const updated = await this.client.execute({
-        sql: "UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL",
+        sql: "UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL RETURNING id",
         args: [id],
       });
-      return ok(updated.rowsAffected > 0);
+      return ok(updated.rows.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3674,10 +3676,10 @@ export class TursoStore implements StoreInterface {
       await this.ensureReady();
       // reason: the NEWEST registration wins here (unlike the identity columns): a resumed run lives in a new process.
       const updated = await this.client.execute({
-        sql: "UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ?",
+        sql: "UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ? RETURNING id",
         args: [proc.pid, proc.startTime, proc.worktree, id],
       });
-      return ok(updated.rowsAffected > 0);
+      return ok(updated.rows.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }
