@@ -108,32 +108,40 @@ describe("verify: cost independent of stored payload size", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function bestOfVerifyMs(contentChars: number): Promise<number> {
+  async function openFixture(contentChars: number): Promise<{ service: AuditService; close: () => void }> {
     const dir = mkdtempSync(join(tmpdir(), "lore-verify-payload-"));
     dirs.push(dir);
     const fixture = await seedAuditVerifyCorpus(dir, "sqlite", { ...SHAPE, contentChars });
     const store = new SQLiteStore(fixture.dbPath);
-    try {
-      const service = new AuditService(store, { verifySince: "2000-01-01T00:00:00.000Z" });
-      let best = Infinity;
-      for (let i = 0; i < 5; i++) {
-        const t = performance.now();
-        const r = await service.verify();
-        const ms = performance.now() - t;
-        if (!r.ok || !r.value.clean) throw new Error(`verify not clean: ${JSON.stringify(r)}`);
-        best = Math.min(best, ms);
-      }
-      return best;
-    } finally {
-      store.close();
-    }
+    return { service: new AuditService(store, { verifySince: "2000-01-01T00:00:00.000Z" }), close: () => store.close() };
+  }
+
+  async function timeOnce(service: AuditService): Promise<number> {
+    const t = performance.now();
+    const r = await service.verify();
+    const ms = performance.now() - t;
+    if (!r.ok || !r.value.clean) throw new Error(`verify not clean: ${JSON.stringify(r)}`);
+    return ms;
   }
 
   it("verify's run time moves by no more than 20% when every version's content is 10x larger", async () => {
-    const base = await bestOfVerifyMs(1_000);
-    const tenX = await bestOfVerifyMs(10_000);
-    console.log(`verify best-of-5: content 1k -> ${base.toFixed(1)} ms; content 10k -> ${tenX.toFixed(1)} ms; ratio ${(tenX / base).toFixed(2)}`);
-    expect(tenX / base).toBeLessThanOrEqual(1.2);
+    const small = await openFixture(1_000);
+    const big = await openFixture(10_000);
+    try {
+      // reason: the two corpora are timed ALTERNATELY and each is judged by its best of 11 runs, so machine load
+      // that comes and goes hits both sides and cannot be mistaken for a payload effect.
+      let base = Infinity;
+      let tenX = Infinity;
+      for (let i = 0; i < 11; i++) {
+        base = Math.min(base, await timeOnce(small.service));
+        tenX = Math.min(tenX, await timeOnce(big.service));
+      }
+      console.log(`verify best-of-11: content 1k -> ${base.toFixed(1)} ms; content 10k -> ${tenX.toFixed(1)} ms; ratio ${(tenX / base).toFixed(2)}`);
+      expect(tenX / base).toBeLessThanOrEqual(1.2);
+    } finally {
+      small.close();
+      big.close();
+    }
   }, 300_000);
 });
 
