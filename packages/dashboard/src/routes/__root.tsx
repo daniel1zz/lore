@@ -115,6 +115,14 @@ function RootLayout(): React.ReactElement {
             >
               Settings
             </Link>
+            {/* reason: HR-T6 — read-only page listing decisions, audit items and documents waiting for the person. */}
+            <Link
+              to={projectPath(project, "/needs-you")}
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Needs you
+            </Link>
             {/* reason: SPEC-074 — badge hidden at 0 open reports (AC-074-4). */}
             <Link
               to={projectPath(project, "/issues")}
