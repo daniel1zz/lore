@@ -4292,6 +4292,23 @@ export class TaskWorkflowService {
   }
 
   /**
+   * The ONE candidate-name derivation for a task's landing, shared by `recordLanding` (integrate time) and
+   * `resolveLanding` (done time): the names the claims recorded ({@link claimedNames}) plus, for every recorded
+   * worktree PATH, the branch that worktree is on, read from git. `lore integrate` names the landing merge
+   * `merge(<branch>)`, while a claim from a linked worktree may have recorded only the path (branch not measured at
+   * claim time), so the path alone never matches. An unmeasurable worktree (deleted, detached) adds nothing.
+   */
+  private async landingCandidateNames(auditRows: readonly AuditEntry[], task: DocRecord): Promise<string[]> {
+    const names = new Set(TaskWorkflowService.claimedNames(auditRows, task));
+    for (const name of [...names]) {
+      if (!isAbsolute(name)) continue;
+      const measurement = await this.detectBranch(name);
+      if (measurement.status === "measured") names.add(measurement.branch);
+    }
+    return [...names];
+  }
+
+  /**
    * Records a landing (`extra.landing`) on every task whose claim, current or historical (claim audit), recorded
    * `landing.branch`, through the one write route (`writer.writeDoc`). Called by `lore integrate` after main moved.
    * Idempotent: a task already holding the same landing is reported, not rewritten. Every task is attempted; the first
@@ -4309,7 +4326,7 @@ export class TaskWorkflowService {
     let firstFailure: LoreError | undefined;
     for (const task of tasksResult.value) {
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
-      if (!TaskWorkflowService.claimedNames(rows, task).includes(landing.branch)) continue;
+      if (!(await this.landingCandidateNames(rows, task)).includes(landing.branch)) continue;
       const existing = readTaskLanding(task.extra);
       if (
         existing !== undefined &&
@@ -4372,7 +4389,7 @@ export class TaskWorkflowService {
     if (recorded !== undefined) return { kind: "found", landing: recorded, source: "recorded" };
     const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
     if (!auditResult.ok) return { kind: "none" }; // reason: recordCommitRange reports the unreadable claim history itself
-    const candidates = TaskWorkflowService.claimedNames(auditResult.value, task);
+    const candidates = await this.landingCandidateNames(auditResult.value, task);
     if (candidates.length === 0) return { kind: "none" };
     const probe = this.worktreeProbe;
     if (probe?.firstParentLog === undefined) {
