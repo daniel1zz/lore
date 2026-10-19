@@ -30,8 +30,8 @@
  *   - extractTestFileTokens(command) — pull test-file-like path tokens out of
  *     a shell command string, scoped to its recognised runner segments only.
  *   - extractCdPrefixTarget(command) — derive the working directory a
- *     command's test-file tokens resolve against: the LAST `cd <path>`
- *     segment of the `&&`/`;` chain that precedes the test invocation, if any.
+ *     command's test-file tokens resolve against, read by the shared cwd-aware
+ *     parser (`shell-cwd.ts`); this module has no `cd` handling of its own.
  *   - describeDerivedCdTarget(command) — names the cd target
  *     `extractCdPrefixTarget` derived, as a ready-to-append refusal clause.
  *   - findMissingOracleFiles(command, opts) — composes both extractors with
@@ -83,6 +83,8 @@
  *   (THIS promotion — spec-oracle-executability-a-runner-s-discovery-
  *   refusal-is-not-a §M6.3/D8)
  */
+
+import { ABSTRACT_ROOT, CWD_BUILTINS, parseShellCommand, type NotMeasured } from "./shell-cwd.js";
 
 /**
  * Matches a path-like token ending in a recognized test-file suffix
@@ -437,7 +439,7 @@ const SHELL_EXPANSION_PATTERN = /[$`*?<>()|{}]/;
  * never reported as unchecked (it is not an oracle invocation). Anything else the extractor cannot classify IS reported.
  */
 const BENIGN_SHELL_LEADERS: ReadonlySet<string> = new Set([
-  "cd", "echo", "printf", "test", "[", "true", "false", ":", "export", "set", "exit",
+  ...CWD_BUILTINS, "echo", "printf", "test", "[", "true", "false", ":", "export", "set", "exit",
 ]);
 
 function tokenizeSegment(segment: string): string[] {
@@ -544,77 +546,19 @@ export function findUncheckedOracleSegments(command: string): string[] {
 }
 
 /**
- * Matches a segment that consists of NOTHING BUT `cd <target>` — the target
- * being a double-quoted, single-quoted, or bare run. Anchored at BOTH ends on
- * purpose: `cd a b` is not a recognized cd segment (the pre-chain-scan regex
- * likewise refused it, since it required a separator immediately after the
- * single target token), and neither is a segment that merely CONTAINS the word
- * `cd`.
- */
-const CD_SEGMENT_PATTERN = /^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*$/;
-
-/**
- * Derives the working directory a command's test-file tokens resolve against:
- * the LAST `cd <dir>` segment of the `&&`/`;` chain that PRECEDES the first
- * segment naming a test file, quotes stripped.
+ * Derives the working directory a command's test-file tokens resolve against: the directory the LAST
+ * test-naming segment runs in, root-relative, as the ONE shell parser ({@link parseShellCommand}) reads it.
  *
- * Scanning the whole chain — rather than only its first segment — is the fix
- * for task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a. The
- * previous regex was anchored at `^`, so this repo's OWN mandated compiled-e2e
- * form (`bun run build && cd packages/lore && bun test <e2e file>`) and its
- * mandated fresh-worktree form (`bun install && cd … && …`) derived no cd
- * target at all; the precheck then resolved the test path against the repo
- * root and REFUSED a correct command naming an existing file. The measured
- * harm was second-order: the cheapest escape from that refusal is
- * `--oracle manual`, which skips file checking entirely, so a false refusal
- * converted verifiable rows into unverifiable ones as the path of least
- * resistance.
+ * Real cwd semantics, not a proxy: a later `cd` composes onto an earlier relative one (`cd a && cd b` runs in
+ * `a/b`), a `( cd x && … )` subshell scopes its `cd` to itself, a `cd` AFTER the runner never applies to it, and a
+ * `cd` in any earlier chain segment applies (#229). A directory the text cannot name — an unset `$VAR`, `cd -`,
+ * `$( )`, `pushd` — derives `null` AND is named in {@link describeDerivedCdTarget}'s refusal clause; an absolute `cd`
+ * outside the working root derives `null` and is reported as refused (#221), never resolved onto a base.
  *
- * "LAST one that precedes the test invocation" is shell semantics: a later
- * `cd` overrides an earlier one, and a `cd` AFTER the runner has already
- * resolved its paths does not apply at all. The trailing-`cd` bound is what
- * keeps this fix from widening into "any `cd` anywhere", which would add a
- * candidate root capable only of a FALSE ACCEPT.
- *
- * // reason: when the command names NO test-file token, the scan falls back to
- * // the last `cd` in the whole chain (there is no invocation to bound it).
- * // That branch is unreachable from this module's own consumers —
- * // `findMissingOracleFiles` and `describePrecheckRoots` both short-circuit
- * // on zero tokens before ever asking for a cd target — and exists solely so
- * // a direct caller keeps the historical answer for a token-free command like
- * // `cd packages/lore && bun run typecheck`. Do not "simplify" it into
- * // returning null: that would silently change this function's contract for
- * // every non-test command.
- *
- * Per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the:
- *   - **Proxy** — "the last pre-invocation `cd` segment of an `&&`/`;` chain"
- *     is a proxy for "the shell's cwd when the runner resolves the path".
- *     Concrete input satisfying the property while violating the proxy:
- *     `cd a || cd b && bun test f.test.ts` (`||` is not a recognized
- *     separator, so `cd a || cd b` is one unmatched segment → `null`), and
- *     `cd $TARGET && bun test f.test.ts` (an unexpanded variable is returned
- *     literally and joins to a root that cannot exist). Accepted: both
- *     subtract a candidate root, so both can only produce a LOUD refusal
- *     naming the roots and the derived target — never a false accept. The
- *     inverse direction (proxy satisfied, property violated) is a `cd` this
- *     scan sees but the shell would not reach; it adds one candidate root, and
- *     is accepted for the same reason {@link findMissingOracleFiles} is
- *     already deliberately permissive about WHERE a file lives. A THIRD,
- *     narrower gap, named rather than fixed: successive RELATIVE cds are not
- *     COMPOSED — `cd a && cd b` derives `b`, whereas a shell would sit in
- *     `a/b`. This is what the originating task's own AC-5 pins ("resolve
- *     against the LAST one … assert the derived target BY VALUE"), and
- *     composing them would contradict it. The residual false-accept requires
- *     a file to exist at `<base>/b` while the shell looks in `<base>/a/b`; no
- *     command shape this repo emits chains relative cds at all, so it is
- *     accepted, not fixed.
- *   - **Silence** — none: the derived target (INCLUDING the "none" case) is
- *     named verbatim in the refusal message via
- *     {@link describeDerivedCdTarget}, so a future mismatch between "what the
- *     author meant" and "what this derived" is diagnosable from the message
- *     alone, without reading this source.
- *   - **Opt-in** — n/a: unconditional for every command the precheck examines;
- *     there is no flag that turns the chain scan off.
+ * Per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the: the property is "the shell's cwd when the
+ * runner resolves the path"; the parser follows `&&`/`||`/`;`/`|`/`&`/newline chains and subshells, and reports
+ * what it cannot follow instead of guessing. {@link findMissingOracleFiles} stays deliberately permissive about
+ * WHERE a file lives (it tries every segment's directory plus the bare base), strict about WHETHER it exists.
  *
  * @param command - the exact command string being analyzed
  * @returns the cd target (quotes stripped), or `null` when no `cd` segment
@@ -636,22 +580,53 @@ const CD_SEGMENT_PATTERN = /^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*$/;
  *   // => null
  */
 export function extractCdPrefixTarget(command: string): string | null {
-  const segments = splitCommandSegments(command);
-  const invocationIndex = segments.findIndex(
-    (segment) => extractOraclePathTokens(segment).length > 0,
-  );
-  const scanEnd = invocationIndex === -1 ? segments.length : invocationIndex;
+  return readOracleSegmentCwds(command, ABSTRACT_ROOT).lastOffset;
+}
 
-  for (let index = scanEnd - 1; index >= 0; index -= 1) {
-    // reason: `as string` is a bounds assertion — `scanEnd <= segments.length`
-    // and `index >= 0` guarantee the read (same rationale as
-    // splitCommandSegments's own cast).
-    const match = CD_SEGMENT_PATTERN.exec(segments[index] as string);
-    if (match?.[1] === undefined) continue;
-    const target = stripWrappingQuotes(match[1]);
-    if (target.length > 0) return target;
+/** What the shared parser ({@link parseShellCommand}) says about the directories of a command's path-naming segments. */
+interface OracleSegmentCwdReading {
+  /** Distinct non-empty root-relative directories of the path-naming segments, in source order. */
+  readonly offsets: string[];
+  /** Root-relative directory of the LAST path-naming segment when it is a non-empty `inside` one, else `null`. */
+  readonly lastOffset: string | null;
+  /** Absolute directories (outside the root) path-naming segments run in: refused, never resolved. */
+  readonly refused: string[];
+  /** Path-naming segments whose directory could not be measured, with the named cause. */
+  readonly notMeasured: NotMeasured[];
+}
+
+/**
+ * Reads, through the ONE shell parser, the directory each path-naming segment of `command` runs in.
+ * Every site that needs "where does this oracle file resolve" goes through here; none reads `cd` itself.
+ *
+ * @param command - the exact command string
+ * @param root - absolute directory the command starts in ({@link ABSTRACT_ROOT} when only relative answers matter)
+ */
+function readOracleSegmentCwds(command: string, root: string): OracleSegmentCwdReading {
+  const parse = parseShellCommand(command, { root, env: {} });
+  const offsets: string[] = [];
+  const refused: string[] = [];
+  const notMeasured: NotMeasured[] = [];
+  if (parse.kind === "not-measured") {
+    notMeasured.push(parse);
+    return { offsets, lastOffset: null, refused, notMeasured };
   }
-  return null;
+  let lastOffset: string | null = null;
+  for (const segment of parse.segments) {
+    if (extractOraclePathTokens(segment.raw).length === 0) continue;
+    const { cwd } = segment;
+    if (cwd.kind === "not-measured") {
+      notMeasured.push(cwd);
+      lastOffset = null;
+    } else if (cwd.kind === "outside") {
+      refused.push(cwd.absolute);
+      lastOffset = null;
+    } else {
+      lastOffset = cwd.relative.length > 0 ? cwd.relative : null;
+      if (lastOffset !== null && !offsets.includes(lastOffset)) offsets.push(lastOffset);
+    }
+  }
+  return { offsets, lastOffset, refused, notMeasured };
 }
 
 /**
@@ -679,16 +654,23 @@ export function extractCdPrefixTarget(command: string): string | null {
  *   // => "Derived cd target: none (…)"
  */
 export function describeDerivedCdTarget(command: string): string {
-  const target = extractCdPrefixTarget(command);
+  const reading = readOracleSegmentCwds(command, ABSTRACT_ROOT);
+  const target = reading.lastOffset;
+  const caveats = [
+    ...reading.refused.map((path) => ` Refused: a segment runs in ${path}, outside the working root.`),
+    ...reading.notMeasured.map((cause) => ` Not measured (${cause.cause}): ${cause.detail}.`),
+  ].join("");
   if (target === null) {
     return (
       "Derived cd target: none — no `cd <dir>` segment precedes the named test " +
-      "file(s) in this command chain, so each root above is a base directory as-is."
+      "file(s) in this command chain, so each root above is a base directory as-is." +
+      caveats
     );
   }
   return (
-    `Derived cd target: ${target} — the last \`cd\` segment preceding the named ` +
-    "test file(s); each cd-joined root above is that target resolved onto a base directory."
+    `Derived cd target: ${target} — the directory the last test-naming segment runs in after the ` +
+    "`cd` segment(s) before it; each cd-joined root above is that target resolved onto a base directory." +
+    caveats
   );
 }
 
@@ -755,7 +737,6 @@ function computeCandidateRoots(
   command: string,
   opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string; executionRoot?: string },
 ): string[] {
-  const cdTarget = extractCdPrefixTarget(command);
   const plainBases = [opts.cwd, ...(opts.additionalCwds ?? [])];
   // reason: F7 — an attested execution root is a base like any cwd, tried
   // FIRST and ADDITIVELY (every plain base is still tried, so it can only
@@ -774,7 +755,9 @@ function computeCandidateRoots(
     roots.push(root);
   };
   for (const base of bases) {
-    if (cdTarget !== null) pushUnique(joinPath(base, cdTarget));
+    // reason: the parse runs PER BASE so an absolute `cd` is classified against the base it would run from:
+    // inside it, it becomes an offset; outside it, it is refused (no candidate root) — #221, never joined in.
+    for (const offset of readOracleSegmentCwds(command, base).offsets) pushUnique(joinPath(base, offset));
     pushUnique(base);
   }
   if (opts.corpusRoot !== undefined) pushUnique(opts.corpusRoot);
