@@ -17,7 +17,7 @@
  *
  * Every fixture below declares a VALID `attestation_exempt` (mirrors
  * `assessment-freshness.test.ts`'s `ATTESTATION_EXEMPT_EXTRA` precedent) and
- * opts out of `requires_uat`/`prd_sync` (the cited-rule-state predicate) by omission, so `checkPlanClose`'s
+ * opts out of `requires_uat`/`cited_rule_check` (the cited-rule-state predicate) by omission, so `checkPlanClose`'s
  * results array contains EXACTLY the assessment-freshness conjunct's own
  * verdict — no ambiguity about which predicate produced which entry.
  *
@@ -38,7 +38,7 @@ if (planClose === undefined) {
 /**
  * Isolates the assessment-freshness conjunct: a valid attestation exemption
  * keeps `attestationFloor` (and its Amendment-A companion push) out of the
- * results array entirely; no `requires_uat`/`prd_sync` opt-in leaves those
+ * results array entirely; no `requires_uat`/`cited_rule_check` opt-in leaves those
  * predicates unpushed too. Whatever `checkPlanClose` returns for a ctx built
  * from this helper is therefore EXCLUSIVELY the assessment-freshness verdict.
  */

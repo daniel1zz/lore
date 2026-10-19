@@ -1602,7 +1602,7 @@ export interface CitedRuleViolation {
 
 /**
  * `plan-close`'s rule-state predicate (BR-984; replaces the retired domain-document-edit proxy
- * `prdOutlineSynced`). Default-OFF behind `workflow.gates."plan-close".prd_sync.enabled` (resolved
+ * `prdOutlineSynced`). Default-OFF behind `workflow.gates."plan-close".cited_rule_check.enabled` (resolved
  * by the CALLER). Pure: no store, no IO, no config. The CALLER (`CorpusService.set`) resolves the
  * rules the closing plan's spec criteria cite, reads their state through `RuleStateService.full()`,
  * and passes ONLY the offending ones here.

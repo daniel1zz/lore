@@ -121,7 +121,7 @@ async function twoSpecWorld(bResult: "pass" | "fail", bTaskHasPlan = true): Prom
   const store = actedStore(new InMemoryStore());
   const config = {
     project: { name: "t", author: "t" },
-    workflow: { gates: { "plan-close": { prd_sync: { enabled: true } } } },
+    workflow: { gates: { "plan-close": { cited_rule_check: { enabled: true } } } },
   } as unknown as LoreConfig;
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(config));
   const prd = await put(store, rawDoc("prd", "root-prd", {}, null));

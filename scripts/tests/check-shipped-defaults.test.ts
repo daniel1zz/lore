@@ -300,7 +300,7 @@ describe("isAllowlistedKey: HAPPY / NEGATIVE / BOUNDARY", () => {
   });
 
   it("matches anything nested UNDER a prefix entry", () => {
-    expect(isAllowlistedKey('workflow.gates."plan-close".prd_sync.enabled', allowlist)).toBe(true);
+    expect(isAllowlistedKey('workflow.gates."plan-close".cited_rule_check.enabled', allowlist)).toBe(true);
   });
 
   it("does NOT match an unrelated key", () => {
@@ -579,7 +579,7 @@ workflow:
       min_acs: 0
   gates:
     plan-close:
-      prd_sync:
+      cited_rule_check:
         enabled: true
 `;
     const root = buildFixtureRepo(realConfigSnapshot, REAL_TEMPLATE_TEXT);

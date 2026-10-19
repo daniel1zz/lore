@@ -312,7 +312,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
     "ac_quantifiable",
     "oracle_coverage",
     "requires_uat",
-    "prd_sync",
+    "cited_rule_check",
     "foreign_corpus_write",
   ] as const;
 
@@ -344,7 +344,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
    * resolveAnchorOverlapGateEnabled, actor_identity -> resolveActorIdentityGateEnabled,
    * ac_quantifiable -> resolveAcQuantifiableGateEnabled, oracle_coverage ->
    * resolveOracleCoverageGateEnabled, requires_uat -> resolveRequiresUatGateEnabled,
-   * prd_sync -> resolvePrdSyncGateEnabled). A seventh predicate whose resolver
+   * cited_rule_check -> resolveCitedRuleCheckGateEnabled). A seventh predicate whose resolver
    * is missing, misnamed, or not re-exported from `@lore/core` is invisible to
    * every ACTUAL caller (gate-enforcer.ts / commands/gate.ts import by this
    * exact name) exactly as it would be invisible to this lookup.

@@ -8,7 +8,7 @@
  *   "Closing a plan is refused when a rule cited by its spec's criteria is contradicted, or stale with
  *    no attested pass recorded by the plan's tasks since it went stale. The former requirement that a
  *    domain document was edited during the plan no longer applies."
- *   Config key `workflow.gates.plan-close.prd_sync.enabled` stays the on/off switch.
+ *   Config key `workflow.gates.plan-close.cited_rule_check.enabled` stays the on/off switch.
  *
  * CONTRACT (this RED task's interface choices; the implementer builds exactly these):
  *   1. Rule state is read through the slice-1 `RuleStateService` (`rule-state-service.ts`, `full()`),
@@ -156,7 +156,7 @@ function scopeOf(evidence: EvidenceEntry[]): string[] {
 function config(enabled: boolean): LoreConfig {
   return {
     project: { name: "t", author: "t" },
-    ...(enabled ? { workflow: { gates: { "plan-close": { prd_sync: { enabled: true } } } } } : {}),
+    ...(enabled ? { workflow: { gates: { "plan-close": { cited_rule_check: { enabled: true } } } } } : {}),
   } as unknown as LoreConfig;
 }
 
@@ -367,7 +367,7 @@ describe("plan-close rule state (BL-16)", () => {
 
   // ---------- STATE: the config key stays the switch ----------
 
-  it("with prd_sync disabled a contradicted cited rule does not refuse the close (knob off = predicate off)", async () => {
+  it("with cited_rule_check disabled a contradicted cited rule does not refuse the close (knob off = predicate off)", async () => {
     const w = await world({ enabled: false, rules: { "leaf-a": ["BR-5"] }, specAcs: [scriptAc("AC-X-1", ["BR-5"])] });
     await w.task("t1", [attested("AC-X-1", "fail", T0, OLD)]);
 

@@ -160,7 +160,7 @@ export const RATIONALE_PLACEHOLDER_TOKENS: readonly string[] = ["TODO", "TBD", "
  *     shipping this tightened number to the template is correct — see that
  *     entry's own field-level JSDoc in `contextConfigSchema`.
  *   - `workflow.gates` — per-checkpoint gate arming (e.g. `plan-close`'s
- *     `prd_sync` sub-predicate, `resolvePrdSyncGateEnabled`) is a deliberate,
+ *     `cited_rule_check` sub-predicate, `resolveCitedRuleCheckGateEnabled`) is a deliberate,
  *     default-OFF corpus-maturity decision (SPEC-080 Migration Plan Phase 0)
  *     — this repo armed it only after 5 observed clean plan-closes. Shipping
  *     any one project's arming choice to every fresh corpus would force
@@ -237,7 +237,7 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
   {
     key: "workflow.gates",
     rationale:
-      "Per-checkpoint gate arming is a deliberate, corpus-maturity opt-in (e.g. plan-close's prd_sync sub-predicate is default-OFF); shipping one project's arming choice would force unearned strictness on every fresh corpus.",
+      "Per-checkpoint gate arming is a deliberate, corpus-maturity opt-in (e.g. plan-close's cited_rule_check sub-predicate is default-OFF); shipping one project's arming choice would force unearned strictness on every fresh corpus.",
   },
 ];
 
@@ -420,7 +420,7 @@ export function deepEqualJsonValue(a: unknown, b: unknown): boolean {
  *
  * @example
  *   isAllowlistedKey("project.name", PROJECT_SPECIFIC_KEYS) // => true
- *   isAllowlistedKey("workflow.gates.\"plan-close\".prd_sync.enabled", PROJECT_SPECIFIC_KEYS) // => true
+ *   isAllowlistedKey("workflow.gates.\"plan-close\".cited_rule_check.enabled", PROJECT_SPECIFIC_KEYS) // => true
  *   isAllowlistedKey("workflow.evidence.capture_timeout_ms", PROJECT_SPECIFIC_KEYS) // => false
  */
 export function isAllowlistedKey(path: string, allowlist: readonly ProjectSpecificKeyEntry[]): boolean {
