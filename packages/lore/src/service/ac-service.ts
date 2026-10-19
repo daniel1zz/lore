@@ -1210,7 +1210,8 @@ function codeAnchorsOf(spec: DocRecord): string[] {
   return Array.isArray(anchors) ? (anchors as unknown[]).filter((a): a is string => typeof a === "string") : [];
 }
 
-function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
+/** Pure. A spec's well-formed criteria (`[]` when unparseable). Exported so `scripts/check-ac-oracle-ownership-corpus.ts` shares the rule (SSOT). */
+export function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
   const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
   return parsed.success ? parsed.data : [];
 }
@@ -1296,7 +1297,8 @@ function checkDeclaredPathExistence(
  * would be silently DROPPED on the very next `safeParse`, which is exactly
  * the untracked-silent-fallback shape D8 exists to prevent.
  */
-function extractAllowMissingPathDeclarations(spec: DocRecord): AllowMissingPathDeclaration[] {
+/** Pure. Exported for the same SSOT reason as {@link extractCriteria}. */
+export function extractAllowMissingPathDeclarations(spec: DocRecord): AllowMissingPathDeclaration[] {
   const raw = spec.extra["allow_missing_path_declarations"];
   if (!Array.isArray(raw)) return [];
   const declarations: AllowMissingPathDeclaration[] = [];
