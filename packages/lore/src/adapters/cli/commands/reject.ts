@@ -51,14 +51,14 @@ export default defineLoreCommand({
       const opts: Record<string, unknown> = { reviewer };
       if (args.reason !== undefined) opts["reason"] = args.reason;
 
-      const result = await app.reviewService.reject(args.id as DocId, opts);
+      const result = await app.reviewService.rejectWithOutcome(args.id as DocId, opts);
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         return exitCode(result.error);
       }
 
-      const doc = result.value;
+      const { doc, from_status: fromStatus } = result.value;
 
       // reason: ReviewService.reject() never bumps doc.version (status stays
       // 'draft') — the version the human was reviewing IS the returned doc's
@@ -72,9 +72,11 @@ export default defineLoreCommand({
       });
 
       if (args.json) {
-        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ...doc, from_status: fromStatus } }, null, 2));
       } else {
-        printLine(inv.io.stdout, `Rejected ${doc.slug} (status remains: ${doc.status})`);
+        printLine(inv.io.stdout, `Rejected ${doc.slug} (${
+            fromStatus === doc.status ? `status unchanged: ${doc.status}` : `${fromStatus} -> ${doc.status}`
+          })`);
         if (args.reason) printLine(inv.io.stdout, `  Reason: ${args.reason}`);
       }
     } finally {

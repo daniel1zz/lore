@@ -92,6 +92,7 @@ function makeApp(opts: {
     task: { id: "task-1", slug: "task-1" },
     results: [{ ac_id: "AC-VRF-1", result: "pass", exit_code: 0, duration_ms: 5, timed_out: false }],
     skipped: [],
+    superseded: [],
     warnings: [],
   };
 

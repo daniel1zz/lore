@@ -621,7 +621,7 @@ export default defineLoreCommand({
         return exitCode(result.error);
       }
 
-      const { task, results, skipped, warnings } = result.value;
+      const { task, results, skipped, superseded, warnings } = result.value;
       const failedCount = results.filter((r) => r.result === "fail").length;
       // SPEC-061 §Scope D3 — the attestation-completeness guard's own outcome
       // class; takes precedence over a plain failed count (see this file's
@@ -647,6 +647,7 @@ export default defineLoreCommand({
                 task,
                 results,
                 skipped,
+                superseded,
                 warnings,
                 // SPEC-063 — the SAME resolved root/mode the CLI computed before
                 // calling verifyPlan (not re-derived; `VerifyPlanResult` itself
@@ -675,7 +676,7 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, line);
       }
 
-      if (results.length === 0 && skipped.length === 0) {
+      if (results.length === 0 && skipped.length === 0 && superseded.length === 0) {
         printLine(inv.io.stdout, "  (no declared acceptance criteria matched the selection)");
       } else if (results.length === 0) {
         printLine(inv.io.stdout, `  ${VERIFY_NO_SCRIPT_ACS} (all declared ACs are ai/human-mode).`);
@@ -686,6 +687,13 @@ export default defineLoreCommand({
       if (skipped.length > 0) {
         printLine(inv.io.stdout, 
           `  Skipped (non-script): ${skipped.map((s) => `${s.ac_id} (${s.mode})`).join(", ")}`,
+        );
+      }
+
+      if (superseded.length > 0) {
+        printLine(
+          inv.io.stdout,
+          `  Superseded (not run): ${superseded.map((s) => `${s.ac_id} (by ${s.superseded_by.spec}:${s.superseded_by.ac})`).join(", ")}`,
         );
       }
 

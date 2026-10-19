@@ -11,7 +11,11 @@
  *       Record an audited exemption from the plan-close ASSESSMENT-FRESHNESS
  *       predicate (`extra.assessment_freshness_exempt` + `_reason`).
  *
- * Both accept `--json`. Thin pipe over `PlanExemptionService` — zero business
+ *   integration-branch <plan> <branch>
+ *       Declare the feature branch the plan lands through (`extra.integration_branch`): a `blocks` edge is
+ *       READY-met when the blocker landed there, while `lore done` still requires main.
+ *
+ * All accept `--json`. Thin pipe over `PlanExemptionService` — zero business
  * logic here (read-merge-write, taxonomy validation, audit shape all live in
  * the service; see its module header), the same split `commands/ac.ts` uses
  * over `AcService`.
@@ -159,6 +163,45 @@ export default defineLoreCommand({
             `Recorded plan-close ATTESTATION EXEMPTION [${result.value.kind}] for ` +
               `${args.plan as string}: ${result.value.reason}`,
           );
+          printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
+        } finally {
+          app.close();
+        }
+        return 0;
+      },
+    }),
+
+    "integration-branch": defineLoreCommand({
+      meta: {
+        name: "integration-branch",
+        description: "Declare the integration branch a plan lands through (blocks edges are ready-met on it)",
+      },
+      args: {
+        plan: sharedArgs.plan,
+        branch: { type: "positional" as const, description: "Integration branch name", required: true },
+        json: sharedArgs.json,
+      },
+      async run(context): Promise<number> {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { loadLoreApp } = await import("../loader.js");
+        const { app } = loadLoreApp({ inv });
+        try {
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const result = await requirePlanExemptionService(app).setIntegrationBranch(args.plan as string, {
+            branch: args.branch as string,
+            by,
+          });
+          if (!result.ok) {
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
+          }
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+            return 0;
+          }
+          printLine(inv.io.stdout, `Plan ${args.plan as string} integration branch: ${result.value.branch}`);
           printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
         } finally {
           app.close();

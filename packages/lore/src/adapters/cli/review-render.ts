@@ -30,8 +30,8 @@
  * Source: SPEC-034 §4; SPEC-044 §Design Decisions D11
  */
 
-import type { ReviewJudgment } from "@lore/core";
-import { formatTable } from "./utils.js";
+import type { LoreError, ReviewJudgment } from "@lore/core";
+import { exitCode, formatTable } from "./utils.js";
 import { renderSupersededCandidateNudge, type StalenessFlowDeps } from "../../flows/staleness-flow.js";
 
 /**
@@ -71,7 +71,7 @@ export function formatJudgmentSummary(judgment: ReviewJudgment): string {
     lines.push("");
   }
 
-  lines.push(`Judge: ${judgment.judge.provider} (model: ${judgment.judge.model}, prompt v${judgment.judge.prompt_version})`);
+  lines.push(`Judge: ${judgment.judge.provider} (model: ${judgment.judge.model}, prompt ${judgment.judge.prompt_version})`);
   return lines.join("\n");
 }
 
@@ -132,4 +132,35 @@ export function renderTruncationBlock(judgment: ReviewJudgment): string {
   if (cuts === undefined || cuts.length === 0) return "";
   const lines = cuts.map((c) => `  - ${c.section} cut: showed ${c.shown_chars} of ${c.total_chars} chars`);
   return `\n\nTruncated input (the judge did not see the rest):\n${lines.join("\n")}`;
+}
+
+/** Failure tally of one `review --pending` batch: per-code counts and the exit code they imply. */
+export interface BatchFailureSummary {
+  /** Failure count per error code, in first-seen order. */
+  readonly byCode: ReadonlyMap<string, number>;
+  /** 0 when nothing failed or some docs succeeded; else the shared code, or 1 for mixed causes. */
+  readonly exitCode: number;
+}
+
+/**
+ * Exit policy of a `review --pending` batch. A batch where some docs were judged keeps exit 0 (the
+ * failures are warned about); a batch where EVERY doc failed exits with the failures' own code
+ * (VALIDATION_ERROR 4, AI_PROVIDER_ERROR 6, ...), or 1 when the causes differ — never a blanket 6,
+ * which told a caller an AI provider was down when the AI was never reached.
+ *
+ * @param errors - The error of each failed doc.
+ * @param reviewedCount - Total docs in the batch (failed + judged).
+ */
+export function summarizeBatchFailures(errors: readonly LoreError[], reviewedCount: number): BatchFailureSummary {
+  const byCode = new Map<string, number>();
+  for (const e of errors) byCode.set(e.code, (byCode.get(e.code) ?? 0) + 1);
+  if (errors.length === 0 || errors.length < reviewedCount) return { byCode, exitCode: 0 };
+  const exits = new Set(errors.map((e) => exitCode(e)));
+  const [only] = [...exits];
+  return { byCode, exitCode: exits.size === 1 && only !== undefined ? only : 1 };
+}
+
+/** One stderr line per failure code: `  VALIDATION_ERROR: 1`. */
+export function renderBatchFailureCounts(byCode: ReadonlyMap<string, number>): string {
+  return [...byCode].map(([code, n]) => `  ${code}: ${n}`).join("\n");
 }
