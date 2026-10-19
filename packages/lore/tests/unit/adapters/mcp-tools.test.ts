@@ -977,7 +977,8 @@ describe("tool registration completeness", () => {
   // lore_reopen (spec-documents-are-living-or-records D5) brings the total from 44 to 45.
   // baseline slice 2 C6 adds the 3 rule read tools (41 to 44): lore_rule_show/_find/_impact.
   // lore_undelete (spec-defect-clusters-round-2-part-a D6) brings the total from 45 to 46.
-  it("registers all 46 expected tools", () => {
+  // lore_ac_supersede (DC2-15 D15) brings the total from 46 to 47.
+  it("registers all 47 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -1025,12 +1026,13 @@ describe("tool registration completeness", () => {
       "lore_baseline_glossary_add",
       "lore_baseline_glossary_rm",
       "lore_undelete",
+      "lore_ac_supersede",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(46);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(47);
   });
 });
