@@ -29,6 +29,7 @@ interface RunResult {
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 const SESSION = "11111111-2222-3333-4444-555555555555";
+const DEFAULT_SESSION = "99999999-8888-7777-6666-555555555555";
 
 let dir: string;
 let planSlug: string;
@@ -38,7 +39,18 @@ function runLore(args: string[], env: NodeJS.ProcessEnv = {}): RunResult {
   const proc = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:claim-one-unlanded-test", ...env },
+    // The actor resolver never reads a name from the environment (BR-1055): the claimant identity is the session tier
+    // (`CLAUDE_CODE_SESSION_ID` -> `agent:session-<id8>`). Pin it, and clear the alias the resolver also reads, so the
+    // outcome never depends on the runner's own identity (without it a bare runner fell to the OS username and case (4)
+    // hit ACTOR_IDENTITY_COLLISION).
+    env: {
+      ...process.env,
+      HOME: FIXTURE_HOME_OUTSIDE_REPO,
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: DEFAULT_SESSION,
+      CLAUDE_SESSION_ID: undefined,
+      ...env,
+    },
   });
   return { stdout: proc.stdout, exitCode: proc.status ?? 1, text: `${proc.stdout}\n${proc.stderr}` };
 }
