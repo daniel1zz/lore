@@ -83,7 +83,7 @@ describe("migration 023 decision_log superseded verdict", () => {
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 4 });
         expect(after.ok && after.value[3]?.verdict).toBe("superseded");
         const db = store.getDatabase();
-        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(24);
+        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(25);
         expect(() => db.run("UPDATE decision_log SET score = 1 WHERE id = 1")).toThrow(/append-only/);
         expect(() => db.run("DELETE FROM decision_log WHERE id = 1")).toThrow(/append-only/);
         const bad = await store.appendDecisionRecord({ ...input(5, "auto"), verdict: "bogus" as DecisionRecordInput["verdict"] });

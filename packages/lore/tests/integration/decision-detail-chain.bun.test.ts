@@ -129,7 +129,7 @@ describe("decision detail chain", () => {
         expect(appended.ok && renderDecisionDetailSummary(appended.value)).toBe("Loosen the governed autonomy thresholds: stash-drop.threshold: 0.8 -> 0.5");
         const after = await store.listDecisionLog();
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 3 });
-        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(24);
+        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(25);
       } finally {
         store.close();
       }

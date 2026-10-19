@@ -99,6 +99,7 @@ import type {
   RunEndState,
   RunLifecycle,
   RunProcessRecord,
+  VersionKey,
 } from "./store-interface.js";
 import {
   type AuditChainRow,
@@ -133,6 +134,8 @@ import {
   rowToReviewJudgment,
   rowToSearchHit,
   rowToVersionRecord,
+  rowToVersionKey,
+  type VersionKeyRow,
   toStoreError,
   wrapStoreError,
   buildAcExemptionAlreadyActiveError,
@@ -147,6 +150,7 @@ import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migra
 import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
+import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -168,6 +172,13 @@ export interface SQLiteStoreOptions {
    * so a caller reports the bound the connection actually carries.
    */
   readonly writeWaitMs?: number;
+  /**
+   * Open the file read-only (`SQLITE_OPEN_READONLY`): no journal-mode change, no migration, and any write method
+   * fails with a store error. For a reader that must not touch the corpus — the audit-verify worker
+   * (`audit-verify-worker.ts`) opens the same file the serving thread owns, so it must never write or migrate it.
+   * The file must already exist at the schema the serving thread migrated it to.
+   */
+  readonly readonly?: true;
 }
 
 export class SQLiteStore implements StoreInterface {
@@ -194,10 +205,11 @@ export class SQLiteStore implements StoreInterface {
           "(check feedback.upstream.write_wait_ms in .lore/config.yaml)",
       );
     }
-    this.db = new Database(dbPath);
+    this.db = options?.readonly === true ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
     this.writeWaitMs = declaredWriteWaitMs;
     try {
-      this.init();
+      if (options?.readonly === true) this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
+      else this.init();
     } catch (error) {
       // reason: `init()` can legitimately fail on a corpus another process is
       // writing (`PRAGMA journal_mode = WAL` → SQLITE_BUSY) — and since
@@ -745,6 +757,11 @@ export class SQLiteStore implements StoreInterface {
     if (currentVersion < 24) {
       // reason: migration-024 adds the nullable decision_log.detail column (plain ADD COLUMN; hashes stay valid).
       this.db.exec(MIGRATION_024_SQL);
+    }
+
+    if (currentVersion < 25) {
+      // reason: migration-025 adds the covering index AuditService.verify's narrow key read (listVersionKeys) is answered from.
+      this.db.exec(MIGRATION_025_SQL);
     }
   }
 
@@ -1934,6 +1951,22 @@ export class SQLiteStore implements StoreInterface {
               .all(since) as VersionRow[])
           : (this.db.prepare(`SELECT * FROM versions ORDER BY created_at ASC`).all() as VersionRow[]);
       return ok(rows.map(rowToVersionRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>> {
+    try {
+      // reason: the four selected columns are exactly the columns of idx_versions_keys (migration-025), so SQLite
+      // answers this from the index alone and never reads a versions row's content/extra pages.
+      const rows =
+        since !== undefined
+          ? (this.db
+              .prepare(`SELECT doc_id, version, action, created_at FROM versions WHERE created_at >= ? ORDER BY created_at ASC`)
+              .all(since) as VersionKeyRow[])
+          : (this.db.prepare(`SELECT doc_id, version, action, created_at FROM versions ORDER BY created_at ASC`).all() as VersionKeyRow[]);
+      return ok(rows.map(rowToVersionKey));
     } catch (e) {
       return wrapStoreError(e);
     }

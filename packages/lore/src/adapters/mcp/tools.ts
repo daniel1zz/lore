@@ -269,6 +269,7 @@ import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from ".
 import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildFileAnchorProbeContext, buildRealFsProbe } from "../real-fs-probe.js";
 import { collectFileAnchorResolution } from "../../service/anchor-resolution.js";
+import { requireAuditVerifyRunner } from "../../service/audit-verify-runner.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
@@ -2727,7 +2728,11 @@ export function registerTools(
     LoreAuditSchema,
     async (args) => {
       if (args.verify === true) {
-        const result = await auditService.verify(args.since !== undefined ? { since: args.since } : undefined);
+        // reason: the MCP server is long-lived, so the full-chain verdict runs off its loop (worker per persistent
+        // store) and reads the anchor file — the same verdict `lore audit --verify` reports.
+        const runner = requireAuditVerifyRunner(app);
+        if (!runner.ok) return errorContent(runner.error);
+        const result = await runner.value.verify(args.since !== undefined ? { since: args.since } : undefined);
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }

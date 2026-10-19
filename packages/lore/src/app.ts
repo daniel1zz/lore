@@ -78,6 +78,7 @@ import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
+import { buildAuditVerifyRunner, type AuditVerifyRunner } from "./service/audit-verify-runner.js";
 import { StateBindingService } from "./service/state-binding-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
@@ -289,6 +290,17 @@ export interface App {
    * Source: SPEC-035 §2, §5, §9.1
    */
   auditService: AuditService;
+  /**
+   * Where the HTTP route and the MCP tool compute the full-chain audit verdict: in a worker for every persistent
+   * store, in-loop only for an InMemory composition, chosen by store kind in `buildAuditVerifyRunner`. It reads
+   * `.lore/audit-anchor.json`, so those surfaces report the same anchor status as `lore audit --verify`. The CLI
+   * calls `auditService.verify` directly (a one-shot process has no event loop to stall).
+   * Optional on the same precedent as `stalenessProbeService` (hand-built App test stubs stay valid); always present
+   * in production — both build paths wire it unconditionally, and a caller that finds it absent fails loud rather
+   * than running the verdict on the loop.
+   * Source: plan-audit-verify-reads-only-the-keys-it-joins-runs-off-the D2, D3
+   */
+  auditVerifyRunner?: AuditVerifyRunner;
   /**
    * StateBindingService — the per-corpus state-binding arming step (SPEC-143 AC-CT-3) behind
    * `lore audit arm`. Optional on the same precedent as `acService` (hand-built App test stubs
@@ -811,6 +823,8 @@ function buildAppFromSqlite(
   // them. Only a bare `new AcService(store)` / `new CorpusService(store)` is ungated.
   citeGateRaw: unknown,
   ambient: AppAmbient,
+  // reason: built where the store kind and corpus path are known (createAppUnscoped), never re-derived here.
+  auditVerifyRunner: AuditVerifyRunner,
 ): App {
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -1033,6 +1047,7 @@ function buildAppFromSqlite(
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    auditVerifyRunner,
     stateBindingService: new StateBindingService(store),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
@@ -1245,6 +1260,8 @@ function buildAppFromTurso(
   // See buildAppFromSqlite's identical parameter JSDoc.
   citeGateRaw: unknown,
   ambient: AppAmbient,
+  // reason: built where the store kind and corpus path are known (createAppUnscoped), never re-derived here.
+  auditVerifyRunner: AuditVerifyRunner,
 ): App {
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -1444,6 +1461,7 @@ function buildAppFromTurso(
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    auditVerifyRunner,
     stateBindingService: new StateBindingService(store),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
@@ -1860,6 +1878,8 @@ function createAppUnscoped(
       pruneState,
       citeGateRaw,
       ambient,
+      // reason: D2 — a SQLite file is persistent, so verify runs in a worker over this same file (read-only).
+      buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { verifySince: auditVerifySince, anchorRoot: repoRoot }),
     );
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
     return sqliteApp;
@@ -1971,6 +1991,9 @@ function createAppUnscoped(
         pruneState,
         citeGateRaw,
         ambient,
+        // reason: D2 — a Turso store is persistent, so verify runs in a worker over its local replica file,
+        // opened without the remote URL (no second thread syncing the embedded replica).
+        buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { verifySince: auditVerifySince, anchorRoot: repoRoot }),
       );
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
     return { ok: true, value: tursoApp };
