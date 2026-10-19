@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * AC-IC-2 — the COMPILED `dist/lore` closes the GitHub issue a plan resolves when that plan is archived,
  * and binds plans to reports at creation (spec-archiving-the-work-that-resolves-a-defect-report-closes

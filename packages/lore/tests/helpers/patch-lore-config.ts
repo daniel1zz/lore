@@ -30,7 +30,7 @@ export type LoreConfigPatch = Record<string, unknown>;
 export interface PatchLoreConfigOptions {
   /**
    * Replace the whole file with the patch instead of merging into it. For a fixture that needs
-   * exactly its own content (no seeded template keys).
+   * exactly its own content (no seeded template keys). A TEXT patch is written verbatim (comments kept).
    */
   readonly replace?: boolean;
 }
@@ -79,6 +79,11 @@ export function patchLoreConfig(projectDir: string, patch: LoreConfigPatch | str
   if (!isPlainObject(patchObject)) throw new Error("patchLoreConfig: the patch must be a YAML mapping / object");
   const loreDir = join(projectDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const next = opts.replace === true ? patchObject : deepMerge(readLoreConfig(projectDir), patchObject);
-  writeFileSync(join(loreDir, "config.yaml"), yaml.stringify(next), "utf8");
+  // reason: `replace` with TEXT writes that text byte for byte (comments and layout kept) once it is known to parse —
+  // a fixture that is about how a command preserves a hand-edited file needs its own bytes, not a re-serialisation.
+  const text =
+    opts.replace === true && typeof patch === "string"
+      ? patch
+      : yaml.stringify(opts.replace === true ? patchObject : deepMerge(readLoreConfig(projectDir), patchObject));
+  writeFileSync(join(loreDir, "config.yaml"), text, "utf8");
 }

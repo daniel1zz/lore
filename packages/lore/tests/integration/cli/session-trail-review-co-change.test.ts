@@ -219,30 +219,32 @@ describe("AC-ST-7 co-change judgment in trail-review", () => {
     judgeAllHelpers();
   }, 120_000);
 
-  it("AC-ST-7 a rule missing require exits 0 with co_change measured:false naming the key path, and the helper scope finding is still reported", () => {
+  // BR-926: a project config that is invalid is REFUSED by every command (exit 4, naming the file and the key path)
+  // instead of being dropped; the turn-end hook turns that refusal into its one "not measured" line (the
+  // "non-zero trail-review" case below), so a broken config still never blocks a turn.
+  it("AC-ST-7 a rule missing require is refused (exit 4) naming the config file and the key path", () => {
     setConfig(turnEnd("    co_change:", "      - name: broken", '        when: ["assets/**"]'));
-    const { agent } = writeHelper(["assets/x.md"]); // claims no task: a helper-scope finding
-    const { findings, coChange, notMeasured } = review(writeTurn([]));
-    expect(coChange.measured).toBe(false);
-    expect(coChange.reason).toContain("workflow.turn_end.co_change[0].require");
-    expect(coChangeFindings(findings)).toEqual([]);
-    expect(findings.some((f) => f.kind === "no-claimed-task" && f.message.includes(agent))).toBe(true);
-    expect(notMeasured.join("\n")).toContain("workflow.turn_end.co_change[0].require");
+    writeHelper(["assets/x.md"]);
+    const refused = lore(["session", "trail-review", "--turn", writeTurn([]), "--json"], MAIN_RUN);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain(".lore/config.yaml");
+    expect(refused.stderr).toContain("workflow.turn_end.co_change.0.require");
     judgeAllHelpers();
   }, 120_000);
 
-  it("AC-ST-7 malformed YAML in the config reports co_change not measured and still exits 0", () => {
-    setConfig("workflow: [unclosed");
-    const { coChange } = review(writeTurn([]));
-    expect(coChange.measured).toBe(false);
-    expect(coChange.reason).toContain("config.yaml");
+  it("AC-ST-7 malformed YAML in the config is refused (exit 4) naming the config file", () => {
+    // reason: deliberately unparsable bytes — the one place this file writes the config raw (scan allowlist).
+    writeFileSync(join(dir, ".lore", "config.yaml"), "workflow: [unclosed\n");
+    const refused = lore(["session", "trail-review", "--turn", writeTurn([]), "--json"], MAIN_RUN);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain(".lore/config.yaml");
   }, 120_000);
 
-  it("AC-ST-7 an empty when list is invalid and names its key path", () => {
+  it("AC-ST-7 an empty when list is invalid: refused (exit 4) naming the key path", () => {
     setConfig(turnEnd("    co_change:", "      - name: r", "        when: []", '        require: ["a"]'));
-    const { coChange } = review(writeTurn([]));
-    expect(coChange.measured).toBe(false);
-    expect(coChange.reason).toContain("workflow.turn_end.co_change[0].when");
+    const refused = lore(["session", "trail-review", "--turn", writeTurn([]), "--json"], MAIN_RUN);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain("workflow.turn_end.co_change.0.when");
   }, 120_000);
 });
 

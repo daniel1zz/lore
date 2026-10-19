@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * Plans are judged by default: with default review settings a plan whose current version carries a
  * reject judgment cannot be approved (exit 4, `review-judgment` checkpoint named, plan stays draft);

@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * ES-E: stdin and whether it is a terminal come from the Invocation, not from the process
  * (spec-process-state-end-state-one-invocation-per-entry-returned Goal 1 / D1, rule AS-26).

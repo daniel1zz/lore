@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * plan-exempt-attestation-compiled.bun.test.ts — SPEC-069 AC-069-13: THE PAIR.
  *

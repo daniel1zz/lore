@@ -36,6 +36,7 @@ const RAW_WRITE_ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/lore/tests/integration/memory-file-limits-always-enforced.test.ts": "writes retired-key (adoption) and flow-style bytes whose exact text the migration and the refusal are about",
   "packages/lore/tests/integration/setup-user-once-marker.bun.test.ts": "an injected fs-port stub of the unit under test (SetupService), not a write to a real file",
   "scripts/tests/check-shipped-defaults.test.ts": "the checker's INPUT: a config.yaml fixture written exactly as the checker should read it, in a root with no lore init",
+  "packages/lore/tests/integration/cli/session-trail-review-co-change.test.ts": "writes deliberately unparsable YAML for the refusal case (valid snippets go through the helper)",
   "packages/lore/tests/unit/core/config-io.test.ts": "loadConfig/saveConfig I/O tests: exact bytes incl. empty and whitespace-only files",
 };
 

@@ -1,5 +1,7 @@
 // @reads scripts/check-unclaimed-oracle.ts
 // @reads scripts/build.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * AC-BFI-4 oracle — `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor`.
  *

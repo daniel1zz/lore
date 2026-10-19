@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore scope add|rm|list` + `lore create task --ac-scope` — the declared-scope
  * authoring surface's CLI contract (spec-declared-scope-attestation-contract-

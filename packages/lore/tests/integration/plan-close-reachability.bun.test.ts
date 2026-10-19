@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * RED/TDD REGRESSION anchor for spec-plan-closure-must-be-loud-terminality-
  * divergence-silent §Design Decisions DD-4 — AC-CLOSURE-6.

@@ -1,4 +1,6 @@
 // @reads scripts/check-unclaimed-oracle.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore status --check-issues` (D5, spec-issue-closure-loop-computed-
  * resolution-agent-reachable) — the deterministic, report-only detector that

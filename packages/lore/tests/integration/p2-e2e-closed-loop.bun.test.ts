@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§5.1/§11 — closed-loop e2e for the P2
  * gate slice's C2 state machine (task AC-P2-8): "authoring is free; every COMMIT

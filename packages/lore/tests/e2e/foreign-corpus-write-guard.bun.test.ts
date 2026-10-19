@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref AC-CP-3 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5)
  *

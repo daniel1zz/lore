@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * Oracle for task-skill-fix-a-deleted-spec-s-change-set-stops-reserving.
  *
