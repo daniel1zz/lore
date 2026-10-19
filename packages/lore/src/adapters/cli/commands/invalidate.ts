@@ -59,7 +59,7 @@ export default defineLoreCommand({
         return 1;
       }
 
-      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv);
       const opts: InvalidateOpts = { by };
       if (args["superseded-by"] !== undefined) opts.supersededBy = args["superseded-by"];
       if (args.reason !== undefined) opts.reason = args.reason;

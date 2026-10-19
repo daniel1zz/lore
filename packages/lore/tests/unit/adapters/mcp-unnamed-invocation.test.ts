@@ -1,8 +1,8 @@
 // @layer mcp-adapter
 /**
- * ES-D on the MCP surface: a server whose OS user lookup failed (and which has no session name) is an UNNAMED
- * invocation. Only what needs an actor fails; reads proceed, and nothing is dropped silently
- * (spec-process-state-end-state-one-invocation-per-entry-returned D1, rule AS-26).
+ * ES-D on the MCP surface: a server with no known party (no attested run) is an UNNAMED invocation. Only what needs
+ * an actor fails; reads proceed, and nothing is dropped silently
+ * (spec-process-state-end-state-one-invocation-per-entry-returned D1, rule AS-26; BR-1351).
  *
  * Covers: HAPPY (a read tool that never needs `by` proceeds), NEGATIVE (a write tool refuses naming the reason; a read
  * tool that needs the caller's name refuses the same way), BOUNDARY (an explicit read filter `by` needs no name),
@@ -13,8 +13,9 @@
 import { describe, expect, it } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CreateDocInput } from "@lore/core";
+import type { CreateDocInput, InvocationIdentity, RunId } from "@lore/core";
 import { NoOpTelemetry, ok } from "@lore/core";
+import { refusalNamingHowToBecomeKnown } from "@lore/core/node";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
@@ -32,7 +33,7 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore, liveInvocation } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
-const REASON = "ENOENT: no passwd entry for uid 4242";
+const REASON = refusalNamingHowToBecomeKnown("The server has no known party.");
 const SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-aaaa-bbbb-cccc-111122223333" };
 
 interface Fixture {
@@ -75,12 +76,12 @@ function fixture(env: Record<string, string>): Fixture {
   };
   const server = new McpServer({ name: "test", version: "0.0.0" });
   const base = liveInvocation();
-  const inv = { ...base, env, user: { ok: false, reason: REASON } as const };
-  // reason: the identity the entry would have resolved from this env and the failed lookup
-  const identity =
+  const inv = { ...base, env };
+  // reason: the identity the entry would have resolved: no known party, or an attested run named by the session
+  const identity: InvocationIdentity =
     env["CLAUDE_CODE_SESSION_ID"] === undefined
-      ? ({ harnessRun: null, claimed: null, claimedSource: null, unresolvedReason: REASON } as const)
-      : ({ harnessRun: null, claimed: "agent:session-3de02220", claimedSource: "session" } as const);
+      ? { harnessRun: null, claimed: null, claimedSource: null, unresolvedReason: REASON }
+      : { harnessRun: `cc:${env["CLAUDE_CODE_SESSION_ID"]}` as RunId, claimed: "agent:session-3de02220", claimedSource: "run" };
   registerTools(server, app, undefined, { ...inv, identity });
   return { server, corpusService };
 }
@@ -105,7 +106,7 @@ async function seedPlan(corpusService: CorpusService): Promise<string> {
   return created.value.slug;
 }
 
-describe("ES-D MCP: an unnamed server (failed OS user lookup, no session)", () => {
+describe("ES-D MCP: an unnamed server (no known party)", () => {
   it("a read tool that never needs the caller's name proceeds", async () => {
     const { server, corpusService } = fixture({});
     const slug = await seedPlan(corpusService);
@@ -155,7 +156,7 @@ describe("ES-D MCP: an unnamed server (failed OS user lookup, no session)", () =
   });
 });
 
-describe("ES-D MCP: the same server with a session name", () => {
+describe("ES-D MCP: the same server with an attested run", () => {
   it("reports no missing trace and serves the writes", async () => {
     const { server, corpusService } = fixture(SESSION_ENV);
     const slug = await seedPlan(corpusService);

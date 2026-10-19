@@ -515,7 +515,7 @@ export default defineLoreCommand({
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "task-claim", config)) return 0;
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           return await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
           app.close();
@@ -554,7 +554,7 @@ export default defineLoreCommand({
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "phase-claim", config)) return 0;
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           return await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
           app.close();
@@ -771,7 +771,7 @@ function recordHookGateDeny(
   actor?: string,
 ): void {
   if (app.traceRecorder === undefined) return;
-  const resolvedActor = actor ?? resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+  const resolvedActor = actor ?? resolveActor(inv);
   app.traceRecorder.recordGateDeny(
     resolvedActor,
     checkpoint,

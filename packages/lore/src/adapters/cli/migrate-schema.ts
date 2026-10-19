@@ -95,7 +95,7 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
       `schema mismatch: the corpus at '${dbPath}' belongs to another checkout (this one reaches it through git); run \`lore migrate schema\` from the checkout that owns it`,
     );
   }
-  const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+  const actor = resolveActor(inv);
   const startedAt = Date.now();
   let store: SQLiteStore;
   try {

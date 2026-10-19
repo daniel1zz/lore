@@ -4,20 +4,22 @@
  * provider registry (which take their process facts as parameters and read none themselves).
  * Side-effect class: reads process state (that is the point — it mirrors what the entry resolves).
  */
-import { homedir, hostname, tmpdir, userInfo } from "node:os";
-import type { Invocation, OsUser } from "@lore/core";
+import { homedir, hostname, tmpdir } from "node:os";
+import { nameOfAgentRun } from "@lore/core";
+import type { Invocation, RunId } from "@lore/core";
 import type { AppAmbient } from "../src/app.js";
 import type { ProviderRuntime } from "../src/ai/registry.js";
 import { declareWriteActorForTests } from "../src/store/write-context-store.js";
 import type { StoreInterface } from "../src/store/store-interface.js";
-import { resolveActorWithSource } from "@lore/core/node";
 import { CliExit } from "../src/adapters/cli/cli-exit.js";
 import { warnSinkOf, type WarnSink } from "../src/service/warn-sink.js";
 
-/** The live OS account lookup as the entry records it: a success with the real name (tests run where it resolves). */
-export function liveOsUser(): OsUser {
-  return { ok: true, name: userInfo().username };
-}
+/**
+ * The agent run every live-process test writes as: an attested run of a fixed fake session. A test that WRITES through
+ * an App built with {@link liveWriteContext} registers it in that corpus first (`registerTestRun`, test-run-identity.ts),
+ * as the installed hooks register a real run.
+ */
+export const LIVE_TEST_RUN = "cc:live-test-session" as RunId;
 
 /** The live process as an Invocation: `env` is the LIVE `process.env` object, so a test's later env edits stay visible. */
 export function liveInvocation(): Invocation {
@@ -35,10 +37,9 @@ export function liveInvocation(): Invocation {
     },
     paths: { home, claudeDir: `${home}/.claude`, userConfigDir: `${home}/.config/lore`, projectRoot: null, tmpDir: tmpdir() },
     host: hostname(),
-    user: liveOsUser(),
     execPath: process.execPath,
     isCompiled: false,
-    identity: { harnessRun: null, claimed: "test-actor", claimedSource: "os" },
+    identity: { harnessRun: LIVE_TEST_RUN, claimed: liveWriteActor(), claimedSource: "run" },
     io: liveIo(),
   };
 }
@@ -71,16 +72,16 @@ export function liveProviderRuntime(): ProviderRuntime {
 }
 
 /**
- * The author name a bare-constructed service's writes carried before the write actor became explicit: the session tier of
- * the live env, else the OS user — exactly what the CLI claims outside a worktree.
+ * The author name every live-process test writes under: the name of {@link LIVE_TEST_RUN} (`agent:session-live-tes`),
+ * derived from the run exactly as production derives an agent run's name.
  */
 export function liveWriteActor(): string {
-  return resolveActorWithSource(undefined, process.env, liveOsUser()).actor;
+  return nameOfAgentRun(LIVE_TEST_RUN);
 }
 
-/** The write context `createApp(dbPath, config, ambient, writeContext)` takes: the live process's claimed name, no run. */
+/** The write context `createApp(dbPath, config, ambient, writeContext)` takes: the live test run and its name. */
 export function liveWriteContext(): { readonly identity: Invocation["identity"] } {
-  return { identity: { harnessRun: null, claimed: liveWriteActor(), claimedSource: "os" } };
+  return { identity: { harnessRun: LIVE_TEST_RUN, claimed: liveWriteActor(), claimedSource: "run" } };
 }
 
 /** Declares the live author on a bare test store (see {@link declareWriteActorForTests}); returns the same store. */

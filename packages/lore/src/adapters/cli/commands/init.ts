@@ -111,7 +111,7 @@ export default defineLoreCommand({
       ? "not_a_git_repo"
       : stateBinding === undefined
         ? undefined
-        : await stateBinding.arm({ actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() });
+        : await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
     app.close();
     if (armed === "not_a_git_repo") {
       const line = `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`;

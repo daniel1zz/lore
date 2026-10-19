@@ -578,7 +578,7 @@ export default defineLoreCommand({
       // SPEC-079 G2 — resolved once, reused as the create's own audit actor
       // (both branches below) and, when --supersedes is set, the invalidate
       // step's actor too.
-      const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const resolvedActor = resolveActor(inv);
 
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {

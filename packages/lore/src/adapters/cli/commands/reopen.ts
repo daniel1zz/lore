@@ -41,7 +41,7 @@ export default defineLoreCommand({
     }
     const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const reviewer = resolveActor(inv);
 
       const result = await app.reviewService.reopen(args.id, args.reason, { reviewer });
       if (!result.ok) {

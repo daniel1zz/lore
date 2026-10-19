@@ -13,7 +13,7 @@
  * hint). Thin pipe over `SessionService.bootstrap` — zero store mutations.
  *
  * Actor resolution: `--by` is a read-only FILTER naming whose claims to report; absent, the
- * invoking identity (utils.ts::resolveActor) is used. Only filters `my_claims`; every other field is
+ * invocation's known-party name (`inv.identity.claimed`) is used. Only filters `my_claims`; every other field is
  * corpus-wide regardless of `by`.
  *
  * **`--injection` (spec-session-start-injection-carries-only-the-session-s-own)** —
@@ -50,12 +50,15 @@ import type { BootstrapReport } from "@lore/core";
 import { warnSinkOf } from "../../../service/warn-sink.js";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatErrorFor, relativeTime, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, relativeTime } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+
+/** The report's filter name for an invocation with no known party and no `--by`: names nobody, so it matches no claim. */
+const NO_KNOWN_PARTY_FILTER = "(no known party)";
 
 /**
  * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14
@@ -225,7 +228,10 @@ export default defineLoreCommand({
         return 1;
       }
 
-      const by = resolveActor(inv.io, typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd, inv.user);
+      // reason: `bootstrap` is a READ (never refused for identity, BR-1351) and `--by` is its own filter naming whose
+      // claims to report (never a write identity, BR-1055). Absent a filter it reports the invocation's known-party
+      // name; an invocation with no known party reports under a sentinel that matches no claim.
+      const by = typeof args.by === "string" && args.by.trim() !== "" ? args.by : (inv.identity.claimed ?? NO_KNOWN_PARTY_FILTER);
       const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
       const seatWorktreeArg = typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : undefined;
 
