@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { applyMigration026, MIGRATION_026_STEPS, MigrationFailedError } from "../../../src/store/migrations/migration-026.js";
 
 let dir = "";
 let dbPath = "";
@@ -77,6 +78,43 @@ describe("migration 026 versions.action admits 'undelete'", () => {
       expect(() => insertAction(upgraded, 4, "bogus")).toThrow(/CHECK/i);
     } finally {
       upgraded.close();
+    }
+  });
+
+  it("a write failure mid-copy rolls everything back: schema stays 25, rows unchanged, no versions_new, and the error names step and corpus", () => {
+    const old = new SQLiteStore(dbPath, { schemaCeiling: 25 });
+    seed(old);
+    const before = versionRows(old);
+    const db = old.getDatabase();
+    // The injected step runs AFTER the real copy step, so a half-built table exists when it fails (a disk-full
+    // stand-in: any statement error inside the transaction).
+    const failing = MIGRATION_026_STEPS.flatMap((step) =>
+      step.name.startsWith("copy every")
+        ? [step, { name: "injected write failure", sql: "INSERT INTO versions_new (doc_id) VALUES (NULL);" }]
+        : [step],
+    );
+    let caught: unknown;
+    try {
+      applyMigration026(db, dbPath, failing);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(MigrationFailedError);
+    expect((caught as Error).message).toContain("injected write failure");
+    expect((caught as Error).message).toContain(dbPath);
+    expect((caught as Error).message).toContain("schema 25");
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(25);
+    expect(db.query("SELECT name FROM sqlite_master WHERE name = 'versions_new'").all()).toEqual([]);
+    expect(versionRows(old)).toEqual(before);
+    expect(() => insertAction(old, 3, "undelete")).toThrow(/CHECK/i);
+    old.close();
+
+    const reopened = new SQLiteStore(dbPath);
+    try {
+      expect(versionRows(reopened)).toEqual(before);
+      expect((reopened.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+    } finally {
+      reopened.close();
     }
   });
 

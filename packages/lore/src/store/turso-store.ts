@@ -51,7 +51,7 @@ import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
-import { MIGRATION_026_SQL } from "./migrations/migration-026.js";
+import { MIGRATION_026_SQL, MigrationFailedError } from "./migrations/migration-026.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -484,6 +484,8 @@ function libsqlRowToCalibrationRowWithPromptVersion(row: Row): CalibrationRowWit
 export class TursoStore implements StoreInterface {
   private readonly client: Client;
   private readonly hasRemote: boolean;
+  /** The local corpus file; named by a failed migration. */
+  private readonly localPath: string;
 
   /**
    * @param config - Local path + optional remote/auth/interval.
@@ -506,6 +508,7 @@ export class TursoStore implements StoreInterface {
    */
   constructor(config: TursoConfig, injectedClient?: Client) {
     this.hasRemote = Boolean(config.remoteUrl);
+    this.localPath = config.localPath;
     this.client =
       injectedClient !== undefined
         ? injectedClient
@@ -801,7 +804,13 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 26) {
         // reason: migration-026 rebuilds `versions` (one BEGIN/COMMIT string) so its action CHECK admits 'undelete'.
-        await this.client.executeMultiple(MIGRATION_026_SQL);
+        try {
+          await this.client.executeMultiple(MIGRATION_026_SQL);
+        } catch (error) {
+          // reason: executeMultiple rolls the open transaction back on error (see migration-004's note), so the
+          // corpus stays at 25; the step is unknown here (one script), so say so rather than guess.
+          throw new MigrationFailedError(26, "executeMultiple (single transaction)", this.localPath, error);
+        }
       }
     })();
 
