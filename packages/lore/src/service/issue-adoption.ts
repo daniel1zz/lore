@@ -87,7 +87,8 @@ export interface CarrierTaskParams {
 
 /**
  * The draft carrier task: title = issue title, body = a link to the issue plus the issue's description (frozen at
- * adoption). A plan member gets `parent_id` and `extra.plan_id`; an ad-hoc one gets `extra.adhoc` and an empty `ac_scope`.
+ * adoption). A plan member gets `parent_id` and `extra.plan_id`; an ad-hoc one gets `extra.adhoc`. Both declare an empty
+ * `ac_scope` (an adopted defect claims no acceptance criterion; the declaration is mandatory when the plan's spec has script ACs).
  */
 export function buildCarrierTaskInput(params: CarrierTaskParams): CreateDocInput {
   const { issue, repo, repoId, slug, planId } = params;
@@ -102,6 +103,6 @@ export function buildCarrierTaskInput(params: CarrierTaskParams): CreateDocInput
     title: issue.title,
     content,
     slug,
-    ...(planId !== undefined ? { parent_id: planId, extra: { plan_id: planId, issues } } : { extra: { adhoc: true, ac_scope: [], issues } }),
+    ...(planId !== undefined ? { parent_id: planId, extra: { plan_id: planId, ac_scope: [], issues } } : { extra: { adhoc: true, ac_scope: [], issues } }),
   };
 }
