@@ -323,6 +323,11 @@ export interface ContextRefreshCheck {
    * must label each entry by `kind`, never call a structure finding a ceiling breach (MI-T3).
    */
   findings: ContextRefreshCheckFinding[];
+  /**
+   * How many discovered folders carry no memory file (the count the module-index section no longer renders, D5);
+   * `null` when this run did not walk folders (user scope, rules-only, or no CLAUDE.md to refresh).
+   */
+  modulesWithoutMemoryFile: number | null;
 }
 
 /** Outcome of one {@link runContextRefresh} call. */
@@ -351,8 +356,8 @@ export interface ContextRefreshReport {
 
 // ─── Rendering (facts -> ManagedSection[]) ──────────────────────────────────
 
-/** Plural-aware count line for folders that have no memory file; `null` when there are none. */
-function renderWithoutMemoryFileLine(count: number): string | null {
+/** Plural-aware count line for folders that have no memory file, printed by `refresh --check`; `null` when there are none. */
+export function renderWithoutMemoryFileLine(count: number): string | null {
   if (count === 0) return null;
   return count === 1
     ? "1 folder has no memory file and is not listed."
@@ -375,8 +380,10 @@ function renderModuleIndexBody(facts: ContextFacts): string {
       lines.push(`- [\`${module.path}\`](${module.memoryFilePath}) — ${module.purpose ?? "no Purpose section"}`);
     }
   }
-  const withoutLine = renderWithoutMemoryFileLine(facts.modulesWithoutMemoryFile);
-  if (withoutLine !== null) lines.push("", withoutLine);
+  // reason: the without-memory-file count is deliberately NOT rendered here (D5 of
+  // spec-prose-about-code-is-bound-to-what-it-describes-one): it changes on every folder add or remove, so
+  // committing it made unrelated work edit CLAUDE.md. `refresh --check` reports it instead
+  // ({@link ContextRefreshCheck.modulesWithoutMemoryFile}); nothing is silently dropped.
   if (facts.walkTruncated) {
     lines.push("", `Folder discovery stopped after ${String(facts.moduleIndex.length)} folders; deeper folders are neither listed nor counted.`);
   }
@@ -397,7 +404,7 @@ function renderCommandTableBody(facts: ContextFacts): string {
   }
   // reason: no `## Commands` heading here — the setup template's hand-written part already carries that
   // required section and a second one fails the section check (`section_duplicate`).
-  const lines = entries.map(([name, command]) => `- \`${name}\`: \`${command}\``);
+  const lines = entries.map(([name, entry]) => `- \`${name}\`: \`${entry.command}\` — ${entry.description}`);
   return ["Documented commands (package.json `lore.documentedScripts`):", ...lines].join("\n");
 }
 
@@ -841,6 +848,7 @@ export async function runContextRefresh(
   let migratedLegacyBlocks: string[] = [];
   const checkMode = opts.check === true;
   const differing: string[] = [];
+  let modulesWithoutMemoryFile: number | null = null;
   if (scope === "project" && !rulesOnly) {
     const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
     if (existing === null && checkMode) {
@@ -859,6 +867,7 @@ export async function runContextRefresh(
       migratedLegacyBlocks = migration.migrated;
       const factsResult = await collectContextFacts(deps.fs, root, budgets);
       if (!factsResult.ok) return factsResult;
+      modulesWithoutMemoryFile = factsResult.value.modulesWithoutMemoryFile;
 
       const spliceResult = spliceManagedSections(migration.content, renderContextSections(factsResult.value));
       if (!spliceResult.ok) return spliceResult;
@@ -936,7 +945,7 @@ export async function runContextRefresh(
       path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
       sections: sectionOutcomes,
       migratedLegacyBlocks,
-      check: { differing, findings: checkFindings },
+      check: { differing, findings: checkFindings, modulesWithoutMemoryFile },
       rules: ruleActions.map((action) => action.outcome),
       skills: skillActions.map((action) => action.outcome),
       downgraded,

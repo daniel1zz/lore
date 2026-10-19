@@ -16,16 +16,9 @@ Target: development ~100% by AI, one project worked by MANY CONCURRENT SESSIONS,
 
 ## Commands
 
-```bash
-bun run dev               # run from source
-bun run build             # compile dist/lore
-bun run typecheck         # tsc for all packages + scripts
-bun run test:vitest       # every test file (*.bun.test.ts included): vitest on Bun, then vitest on Node (vitest.node-files.ts); builds dist/lore first
-bun run test              # check:* steps plus test:vitest in a fixed order (scripts/run-chain.ts); every step runs, a per-step exit table prints, any red step exits non-zero
-bun run test:changed [<base>]  # worktree oracle; ⛔ under- AND over-selects — hand-pick consumers, re-verify on main
-bun run test:file <path...> [-t <name>]  # specific files, each routed to the runner that collects it (works for *.bun.test.ts)
-```
+The command table (name, command, description) is generated below from `package.json` `lore.documentedScripts`; invoke each as `bun run <name>`. Edit a description there, then `lore context refresh`.
 
+- ⛔ `test:changed` under- AND over-selects: hand-pick consumers, re-verify on main.
 - One runner, vitest: `bun run test:bun` is retired (prints a notice, exits 1). Run a single file with `bun run test:file <path>`.
 - ⛔ Never write to the repo's own `.lore/` from tests or smoke checks — use a throwaway corpus (`mkdtemp` + `lore init`). ⛔ Never assume a server on port 8787 is yours.
 - Pre-push gate: its checks and their order live in `hooks/pre-push`, never here. ⛔ Every merge to main is followed by `bun run build` (a `dist/lore` older than HEAD is refused), after the batch's last agent returns. After clone: `git config core.hooksPath hooks`.
@@ -53,7 +46,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - Standing lessons (oracle design, mirror export, test selection, governance tooling quirks) and their slugs: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 # ─── lore governance (managed) ───
-<!-- lore:managed section=module-index hash=360dcf6f -->
+<!-- lore:managed section=module-index hash=21f1a5ef -->
 ## Module Index
 
 Folders with their own memory file — read it before working there:
@@ -67,10 +60,17 @@ Folders with their own memory file — read it before working there:
 - [`packages/lore/src/service`](packages/lore/src/service/CLAUDE.md) — Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`.
 - [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape.
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
-
-212 folders have no memory file and are not listed.
-<!-- lore:managed section=command-table hash=4bf6c197 -->
-No scripts are marked as documented (package.json `lore.documentedScripts`); see package.json `scripts` and the Commands section above.
+<!-- lore:managed section=command-table hash=9de9f53a -->
+Documented commands (package.json `lore.documentedScripts`):
+- `dev`: `bun run packages/lore/src/index.ts` — Run the lore CLI from source; arguments after the script name go to lore.
+- `build`: `bun run scripts/build.ts` — Compile the standalone binary to dist/lore.
+- `typecheck`: `bun run typecheck:core && bun run typecheck:lore && bun run typecheck:lore-tests && bun run typecheck:scripts && bun run typecheck:dashboard && bun run typecheck:dashboard-tests && bun run typecheck:dashboard-e2e` — Run tsc over core, lore (src and tests), scripts and the dashboard (src, tests, e2e).
+- `test:vitest`: `bun scripts/run-tests.ts` — Build dist/lore, then run every test file: vitest on Bun, then vitest on Node for the files in vitest.node-files.ts, then the test-file census.
+- `test`: `bun scripts/oracle-lock.ts bun scripts/run-chain.ts` — Take the checkout's oracle lock, then run each check script and test:vitest in a fixed order; every step runs and a per-step exit table prints.
+- `test:changed`: `bun scripts/changed-tests.ts` — Select and run the tests a change can affect, printing a reason per file; --list previews, an optional ref sets the diff base.
+- `test:file`: `bun scripts/test-file.ts` — Run the named test files, each on the runner that collects it (Bun, or Node for files in vitest.node-files.ts); -t <name> and other flags pass through.
+- `check:floor`: `bun scripts/run-chain.ts --floor` — Build, typecheck and run every check: script except the corpus-dependent ones (the integrate floor).
+- `check:memory-files`: `bun run packages/lore/src/index.ts context refresh --check` — Run `lore context refresh --check`: exit 1 when CLAUDE.md or a lore rules file differs from a fresh refresh, or the root file is over its ceiling.
 <!-- lore:managed section=governance-pointer hash=760d2396 -->
 ## Finding Live Project State
 
