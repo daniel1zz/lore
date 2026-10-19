@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads packages/lore/src/store/schema-version.ts
+// @reads packages/lore/src/store/sqlite-store.ts
 /**
  * INT-T12 oracle — `lore integrate` runs its floor against a snapshot of the shared corpus, so a branch whose binary
  * needs a newer schema can land without migrating the live corpus first (task-skill-fix-int-t12-lore-integrate-runs-
@@ -7,7 +8,9 @@
  *
  * Throwaway repo + throwaway corpus (mkdtemp, `git init`, `lore init`), REAL git worktrees and REAL `lore` processes;
  * never the repo's own `.lore/`. "A branch binary that needs a newer schema" is staged by putting the shared corpus
- * one schema version BEHIND this checkout's binary (`PRAGMA user_version = LATEST - 1`, set by the floor script on the corpus it resolves): the floor then opens the
+ * one schema version BEHIND this checkout's binary: the floor script REBUILDS the corpus it resolves as a genuine LATEST-1 database
+ * (a fresh db migrated by the real `SQLiteStore` only up to `schemaCeiling = LATEST - 1`, then every row of the LATEST copy carried over), so it holds
+ * whatever the newest migration does; rewriting `user_version` alone would re-run a plain ADD COLUMN migration and fail. The floor then opens the
  * corpus with the real code path and the real foreign-schema guard decides, exactly as for a branch that adds a
  * migration. The floor command is a small shell script (outside the repo) that runs real `lore` commands in the
  * integration worktree, reads a doc created in the shared corpus, and writes a marker into whatever corpus it sees.
@@ -20,17 +23,43 @@ import { join } from "node:path";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+const SQLITE_STORE_TS = join(PACKAGE_ROOT, "src", "store", "sqlite-store.ts");
 
 interface RunResult {
   readonly out: string;
   readonly exitCode: number;
 }
 
-/** Reads or writes the corpus db in `cwd/.lore`: `userVersion <n>` | `getVersion` | `marker` | `hasMarker <dbPath>`. */
+/** Reads or writes a corpus db: `stageOlder <dbPath> <version>` | `getVersion <dbPath>` | `marker <dbPath>` | `hasMarker <dbPath>`. */
 const DB_TOOL_TS = `
 import { Database } from "bun:sqlite";
+import { renameSync, rmSync } from "node:fs";
+import { SQLiteStore } from ${JSON.stringify(SQLITE_STORE_TS)};
 const [verb, arg] = process.argv.slice(2);
-if (verb === "setVersion") { const db = new Database(arg); db.run("PRAGMA user_version = " + Number(process.argv[4])); db.close(); }
+if (verb === "stageOlder") {
+  const version = Number(process.argv[4]);
+  const older = arg + ".older";
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(older + suffix, { force: true });
+  // the store's own handle does the copying (it keeps cached statements, so it is never closed; the process exit ends it)
+  const db = new SQLiteStore(older, { schemaCeiling: version }).getDatabase();
+  db.run("PRAGMA foreign_keys = OFF");
+  db.run("ATTACH DATABASE '" + arg.replaceAll("'", "''") + "' AS src");
+  const cols = (schema, table) => db.query("PRAGMA " + schema + ".table_info(" + table + ")").all().map((c) => c.name);
+  const tables = db.query("SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'docs_fts%' AND sql NOT LIKE 'CREATE VIRTUAL%'").all().map((t) => t.name);
+  for (const t of tables) {
+    const have = new Set(cols("src", t));
+    const shared = cols("main", t).filter((c) => have.has(c)).map((c) => '"' + c + '"').join(", ");
+    if (shared !== "") db.run('INSERT INTO main."' + t + '" (' + shared + ') SELECT ' + shared + ' FROM src."' + t + '"');
+  }
+  // VACUUM INTO writes one self-contained rollback-journal file (user_version kept, no -wal/-shm), which a cold readonly probe can open
+  const staged = arg + ".staged";
+  rmSync(staged, { force: true });
+  db.run("VACUUM main INTO '" + staged.replaceAll("'", "''") + "'");
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(arg + suffix, { force: true });
+  renameSync(staged, arg);
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(older + suffix, { force: true });
+  process.exit(0);
+}
 else if (verb === "getVersion") { const db = new Database(arg, { readonly: true }); console.log(db.query("PRAGMA user_version").get().user_version); db.close(); }
 else if (verb === "marker") { const db = new Database(arg); db.run("CREATE TABLE floor_marker (x TEXT)"); db.run("INSERT INTO floor_marker VALUES ('written by the floor')"); db.close(); }
 else if (verb === "hasMarker") { const db = new Database(arg, { readonly: true }); console.log(db.query("SELECT count(*) AS n FROM sqlite_master WHERE name = 'floor_marker'").get().n); db.close(); }
@@ -83,7 +112,7 @@ class Fixture {
       [
         "set -e",
         `if [ -f .lore/lore.db ]; then DB=.lore/lore.db; else DB="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.lore/lore.db"; fi`,
-        `bun run ${JSON.stringify(toolPath)} setVersion "$DB" ${latestVersion - 1}`,
+        `bun run ${JSON.stringify(toolPath)} stageOlder "$DB" ${latestVersion - 1}`,
         `bun run ${JSON.stringify(INDEX_TS)} get ${JSON.stringify(this.docSlug)} > floor-read.out`,
         `grep -q "present in the shared corpus" floor-read.out`,
         `bun run ${JSON.stringify(toolPath)} marker .lore/lore.db`,
