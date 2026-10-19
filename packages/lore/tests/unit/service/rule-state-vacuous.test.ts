@@ -25,6 +25,7 @@ const git: GitPort = {
   headSha: () => ok(HEAD),
   isAncestor: () => ok(true),
   changedSince: () => ok(false),
+  changedPaths: () => ok([]),
 };
 
 let seq = 0;

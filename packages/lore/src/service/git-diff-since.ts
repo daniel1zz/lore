@@ -39,3 +39,32 @@ export function gitDiffChangedSince(repoRoot: string, sha: string, paths: readon
   const detail = run.error !== undefined ? run.error.message : `exit ${String(run.status)}: ${(run.stderr ?? "").trim()}`;
   return err({ code: "STORE_ERROR", message: `git unavailable for diff since ${sha}: ${detail}` });
 }
+
+/**
+ * Which of `paths` changed between `sha` and HEAD? (`git diff --name-only <sha> HEAD -- <paths>`.)
+ * The listing twin of {@link gitDiffChangedSince}: same range, same pathspecs, so the names it returns are
+ * exactly the reason that function answered `true`.
+ *
+ * @param repoRoot - directory `git` runs in (repository root; pathspecs are root-relative).
+ * @param sha - the recorded revision to compare HEAD against.
+ * @param paths - repo-relative pathspecs.
+ * @returns `ok(sorted changed paths)` (empty when nothing changed), `err` when git cannot answer.
+ * @example
+ * gitDiffChangedPaths("/repo", "abc123…", ["src/a.ts"]); // => { ok: true, value: ["src/a.ts"] }
+ */
+export function gitDiffChangedPaths(repoRoot: string, sha: string, paths: readonly string[]): Result<string[], LoreError> {
+  const run = spawnSync("git", ["diff", "--name-only", sha, "HEAD", "--", ...paths], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (run.status === 0) {
+    return ok(
+      (run.stdout ?? "")
+        .split("\n")
+        .filter((line) => line !== "")
+        .sort(),
+    );
+  }
+  const detail = run.error !== undefined ? run.error.message : `exit ${String(run.status)}: ${(run.stderr ?? "").trim()}`;
+  return err({ code: "STORE_ERROR", message: `git unavailable for changed paths since ${sha}: ${detail}` });
+}

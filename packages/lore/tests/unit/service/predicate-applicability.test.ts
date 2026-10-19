@@ -94,7 +94,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
 
   // NEGATIVE — a refusing rule is a plain fail carrying the predicate's reason/field.
   it("NEGATIVE: citedRuleStateClean with a refusing rule is a plain fail carrying its reason/field", () => {
-    const result = citedRuleStateClean([{ rule_id: "BR-5", state: "contradicted" }]);
+    const result = citedRuleStateClean([{ rule_id: "BR-5", state: "contradicted", offences: [] }]);
     expect(result).toEqual({ ok: false, reason: CITED_RULE_STATE_REASON, field: CITED_RULE_STATE_FIELD });
     expect("notApplicable" in result).toBe(false);
   });
@@ -185,7 +185,7 @@ describe("checkPlanClose — cited-rule-state pushes a verdict only when it meas
 
   // NEGATIVE — a contradicted/stale cited rule is a real failure that blocks the checkpoint.
   it("NEGATIVE: a refusing cited rule produces a real cited-rule-state failure and blocks the checkpoint", () => {
-    const results = planClose.check(baseCtx({ citedRuleViolations: [{ rule_id: "BR-5", state: "stale" }] }));
+    const results = planClose.check(baseCtx({ citedRuleViolations: [{ rule_id: "BR-5", state: "stale", offences: [] }] }));
 
     expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(true);
     expect(results.some((r) => "notApplicable" in r)).toBe(false);
@@ -216,7 +216,7 @@ describe("checkPlanClose — cited-rule-state pushes a verdict only when it meas
   // ERROR (config-shaped) — the prd_sync knob disabled means the predicate never runs, violations or not.
   it("ERROR: prd_sync disabled by config means the predicate never runs even with violations supplied", () => {
     const results = planClose.check(
-      baseCtx({ prdSyncEnabled: false, citedRuleViolations: [{ rule_id: "BR-5", state: "contradicted" }] }),
+      baseCtx({ prdSyncEnabled: false, citedRuleViolations: [{ rule_id: "BR-5", state: "contradicted", offences: [] }] }),
     );
 
     expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(false);
@@ -225,7 +225,7 @@ describe("checkPlanClose — cited-rule-state pushes a verdict only when it meas
 
   // REGRESSION — a cited-rule failure leaves every OTHER plan-close predicate's verdict untouched.
   it("REGRESSION: a cited-rule-state failure does not perturb attestationFloor's own passing verdict", () => {
-    const results = planClose.check(baseCtx({ citedRuleViolations: [{ rule_id: "BR-5", state: "stale" }] }));
+    const results = planClose.check(baseCtx({ citedRuleViolations: [{ rule_id: "BR-5", state: "stale", offences: [] }] }));
 
     expect(selectFailures(results).some((f) => f.field === ATTESTATION_FLOOR_FIELD)).toBe(false);
     expect(results.some((r) => "notApplicable" in r && r.reason === "no-evidence")).toBe(false);

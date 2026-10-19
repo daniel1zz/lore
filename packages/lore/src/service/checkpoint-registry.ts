@@ -155,6 +155,7 @@ import {
   type ReachabilityResult,
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
+import type { RuleOffence } from "./rule-state-service.js";
 import { PREDICATE_CONTRACTS } from "./predicate-contracts.js";
 import { uncitedSpecMessage } from "./spec-approval-citation.js";
 
@@ -1923,27 +1924,52 @@ function assessmentFreshnessNote(ctx: GateContext): string {
   );
 }
 
+/** Most per-input lines one rule contributes before the rest collapse into a count (keeps the pack bounded). */
+const MAX_OFFENCE_LINES_PER_RULE = 6;
+
+/** The command that clears an offence: re-run the criterion's attested verify on the task that recorded it. */
+function clearingCommand(offence: RuleOffence): string {
+  if (offence.task === null) return "lore verify <the plan whose task recorded this run> --task <that task>";
+  return offence.plan === null ? `lore verify --task ${offence.task}` : `lore verify ${offence.plan} --task ${offence.task}`;
+}
+
+/** One line per offending input of a cited rule: criterion, spec, the run's sha, what changed / failed, and the clearing command. */
+function renderRuleOffences(violation: CitedRuleViolation): string[] {
+  const shown = violation.offences.slice(0, MAX_OFFENCE_LINES_PER_RULE).map((o) => {
+    const head = `- ${violation.rule_id} ${o.kind}: ${o.ac_id} of ${o.spec}`;
+    return o.kind === "stale"
+      ? `${head} — latest attested pass at ${o.run_sha}; anchored paths changed since: ${o.changed_paths.join(", ")}. Clear: \`${clearingCommand(o)}\``
+      : `${head} — latest attested run FAILED at ${o.run_sha ?? "an unrecorded commit"}. Clear: fix the code or the rule, then \`${clearingCommand(o)}\``;
+  });
+  const hidden = violation.offences.length - shown.length;
+  return hidden > 0 ? [...shown, `- ${violation.rule_id}: …and ${String(hidden)} more offending input(s); see \`lore baseline tree --states\``] : shown;
+}
+
 /**
  * Renders the cited-rule-state feeding pack (BR-984): names every offending rule with its state word
  * and the recovery that clears each (re-run the citing criteria's attested `lore verify`; a
  * contradicted rule needs the code or the rule fixed first).
  */
 function feedCitedRuleState(ctx: GateContext, failures: PredicateResult[]): string {
-  const plan = ctx.targetIdOrSlug ?? "<plan>";
   const violations = ctx.citedRuleViolations ?? [];
   const listed = violations.map((v) => `${v.rule_id} (${v.state})`).join(", ");
+  const inputLines = violations.flatMap((v) => renderRuleOffences(v));
   const contract = PREDICATE_CONTRACTS[CITED_RULE_STATE_FIELD];
+  // reason: the per-input lines come BEFORE the contract prose — the pack truncates the leading slice, and
+  // the inputs (which criterion, which sha, which command) are the part a refused closer must not lose.
   const pack = buildFeedingPack({
     ruleSource: "corpus (cited baseline rule state)",
     ruleMarkdown:
-      `Required for plan-close: no rule cited by the plan's spec criteria may be contradicted, or ` +
-      `stale with no attested pass recorded by this plan's tasks since it went stale. ` +
-      `Offending rules: ${listed}. Contract (field: ${CITED_RULE_STATE_FIELD}) — invariant: ` +
-      `${contract.invariant} Measured: ${contract.measured} Recovery: for a stale rule re-run the citing criterion's attested ` +
-      `\`lore verify ${plan} --task <task>\`; for a contradicted rule fix the code (or the rule) ` +
-      `until the criterion passes, then re-verify. \`lore baseline tree --states\` shows the live state.`,
+      `Required for plan-close (BR-984): no rule cited by the plan's spec criteria may be contradicted, or ` +
+      `stale — a citing spec's code changed after the latest attested pass of its criterion, by any plan ` +
+      `(the closing plan's own tasks clear only the criteria they cover). ` +
+      `Offending rules: ${listed}.\n${inputLines.join("\n")}\n` +
+      `Contract (field: ${CITED_RULE_STATE_FIELD}) — invariant: ` +
+      `${contract.invariant} Measured: ${contract.measured} Recovery: run the \`lore verify\` command named ` +
+      `on each line above; for a contradicted rule fix the code (or the rule) until the criterion passes, ` +
+      `then re-verify. \`lore baseline tree --states\` shows the live state.`,
     missing: selectFailures(failures).map((f) => f.reason),
-    maxChars: 1800,
+    maxChars: 3000,
   });
   return renderFeedingPack(pack);
 }
