@@ -235,7 +235,7 @@ function findFixtureScale(maxPerKb: number): { markerCount: number; kb: number }
 
 /**
  * The five required root H2 sections (marker-free), prefixed to every root
- * fixture so a fixture pinning `adoption: enforce` is refused ONLY for
+ * fixture so a fixture is refused ONLY for
  * emphasis, never for `section_missing`
  * (spec-claude-md-root-section-structure-check-and-adoption-mode). Counted
  * INSIDE the exact-KiB budget below, so the density arithmetic is unchanged.
@@ -244,12 +244,6 @@ const SECTIONS_PREFIX =
   ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
     .map((name) => `## ${name}\n\nbody of ${name}\n`)
     .join("\n") + "\n";
-
-/** Pins `adoption: enforce` in a config-only `.lore/` — absent key resolves to warn, which would make every exit-3 assertion here unreachable. */
-function pinEnforce(dir: string): void {
-  mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
-}
 
 /** One of the four AC-EMPH emphasis markers (⛔ / IMPORTANT / MUST / NEVER) — chosen because a bare emoji needs no word-boundary reasoning, unlike the three ASCII words. */
 const MARKER = "⛔";
@@ -302,7 +296,6 @@ describe("emphasis saturation — over-threshold density is refused", () => {
   afterEach(() => cleanupDir(tmpDir));
 
   it("HAPPY: a fixture at TWICE the resolved max_per_kb yields exactly one emphasis_saturated, exit code exactly 3", () => {
-    pinEnforce(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount * 2, scale.kb));
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
@@ -312,7 +305,6 @@ describe("emphasis saturation — over-threshold density is refused", () => {
   });
 
   it("NEGATIVE (BOUNDARY: exactly at default): a fixture at EXACTLY the resolved max_per_kb yields none, exit code exactly 0", () => {
-    pinEnforce(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount, scale.kb));
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
@@ -322,7 +314,6 @@ describe("emphasis saturation — over-threshold density is refused", () => {
   });
 
   it("BOUNDARY: one marker more than exactly the default already fires (a saturation ceiling, not merely 'way above')", () => {
-    pinEnforce(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount + 1, scale.kb));
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
@@ -332,7 +323,6 @@ describe("emphasis saturation — over-threshold density is refused", () => {
   });
 
   it("REGRESSION (N5): the emphasis_saturated finding carries no warn/evict fraction field — density is not a capacity metric", () => {
-    pinEnforce(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount * 2, scale.kb));
 
     const { parsed } = runCheckClaudeMdJson(tmpDir);
@@ -346,7 +336,7 @@ describe("emphasis saturation — over-threshold density is refused", () => {
   });
 
   it("ERROR (no crash): an empty CLAUDE.md produces zero emphasis_saturated findings, exit code exactly 0", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), "");
+    writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX);
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
@@ -355,7 +345,6 @@ describe("emphasis saturation — over-threshold density is refused", () => {
   });
 
   it("STATE: a real ceiling breach in a SIBLING module file and over-threshold emphasis in the root file are BOTH reported by the same run", () => {
-    pinEnforce(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount * 2, scale.kb));
     mkdirSync(join(tmpDir, "nested-module"), { recursive: true });
     // module max_lines ceiling is 200 (D3) — 250 lines is a genuine, unrelated breach.
@@ -389,7 +378,7 @@ describe("emphasis saturation — positive control plus repo sweep at shipped de
     return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
   }
 
-  /** A fixture corpus (`lore init`) — `--check-memory-pointers` needs a corpus; adoption stays at its default. */
+  /** A fixture corpus (`lore init`) — `--check-memory-pointers` needs a corpus. */
   function initFixture(label: string): string {
     const dir = makeTempDir(label);
     const init = runLore(["init"], dir);
@@ -402,7 +391,6 @@ describe("emphasis saturation — positive control plus repo sweep at shipped de
     // findings, so "zero" must be paired with proof the metric CAN fire at all.
     const controlDir = makeTempDir("repo-sweep-control");
     try {
-      pinEnforce(controlDir);
       writeFileSync(join(controlDir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount * 2, scale.kb));
       const control = runCheckClaudeMdJson(controlDir);
       expect(control.result.exitCode).toBe(3);
@@ -418,7 +406,6 @@ describe("emphasis saturation — positive control plus repo sweep at shipped de
       writeFileSync(join(dir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount * 2, scale.kb));
       const run = runSweep(dir);
       expect(run.exitCode).toBe(1);
-      // default adoption is warn, so the finding surfaces as an advisory downgrade — the script reads both places
       expect(run.stderr).toContain("emphasis_saturated");
     } finally {
       cleanupDir(dir);

@@ -55,7 +55,6 @@ import { AiConfigSchema } from "./ai.js";
 import { verificationProfileSchema } from "./verification-profile.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import type { BootstrapInjectionBudgets } from "./session.js";
-import type { AdoptionMode } from "./memory-file-sections.js";
 
 // ─── Shared Defaults Schema ───────────────────────────────────────────────────
 
@@ -1344,15 +1343,10 @@ export const contextConfigSchema = z
           })
           .strict()
           .default({}),
-        /**
-         * Adoption mode (spec-claude-md-root-section-structure-check-and-adoption-mode,
-         * D2/D3): `enforce` keeps every deterministic memory-file finding
-         * exit-relevant; `warn` reports ALL of them as advisory `downgraded`.
-         * ⛔ Deliberately NO `.default(...)`: an absent key must stay
-         * distinguishable from a written one so `mode_source` is honest —
-         * {@link resolveAdoption} is the ONE place the absent→`warn` default lives.
-         */
-        adoption: z.enum(["enforce", "warn"]).optional(),
+        // reason: there is NO adoption setting. Every deterministic memory-file finding is always exit-relevant
+        // (task-memory-file-limits-are-always-enforced-the-warn-adoption). A config still naming
+        // `context.memory_files.adoption` never reaches this schema: `loadConfigFromString` refuses it first,
+        // naming `lore migrate memory-limits --apply` (RETIRED_ADOPTION_MESSAGE).
       })
       .strict()
       .superRefine((value, ctx) => {
@@ -2220,27 +2214,6 @@ export function resolveMemoryFileBudgets(config: LoreConfig | undefined): Memory
 }
 
 /**
- * The effective adoption mode and where it came from. ⛔ The ONLY site that
- * defaults an absent `memory_files.adoption` (to `warn`, `mode_source:
- * "default"`) — consumers call this, never `?? "warn"` themselves, so a
- * project that never wrote the key is never silently enforced NOR silently
- * unenforced (spec D3/D7: the default is announced via `mode_source`).
- *
- * @param budgets - Resolved {@link MemoryFileBudgets}.
- * @returns `{ mode, mode_source }` — `"config"` iff the key was written.
- * @example
- *   resolveAdoption(resolveMemoryFileBudgets(undefined)) // => { mode: "warn", mode_source: "default" }
- */
-export function resolveAdoption(budgets: MemoryFileBudgets): {
-  readonly mode: AdoptionMode;
-  readonly mode_source: "config" | "default";
-} {
-  return budgets.adoption === undefined
-    ? { mode: "warn", mode_source: "default" }
-    : { mode: budgets.adoption, mode_source: "config" };
-}
-
-/**
  * Where a resolved {@link MemoryFileBudgets} actually came from — the channel
  * {@link resolveMemoryFileBudgets}'s plain-value return does not have.
  *
@@ -2278,7 +2251,8 @@ export type MemoryFileBudgetResolution =
   | { readonly source: "context-salvage"; readonly budgets: MemoryFileBudgets }
   | { readonly source: "no-config"; readonly budgets: MemoryFileBudgets }
   | { readonly source: "no-context-section"; readonly budgets: MemoryFileBudgets }
-  | { readonly source: "substituted-defaults"; readonly budgets: MemoryFileBudgets; readonly reason: string };
+  | { readonly source: "substituted-defaults"; readonly budgets: MemoryFileBudgets; readonly reason: string }
+  | { readonly source: "retired-setting"; readonly budgets: MemoryFileBudgets; readonly error: LoreError };
 
 /** Renders a `ZodError`'s issues as `path: message` pairs — keeps the offending FIELD NAME in the relayed text. */
 function formatContextIssues(error: z.ZodError): string {
@@ -2340,6 +2314,10 @@ export function resolveMemoryFileBudgetsFromConfigResult(
 
   const schemaDefaults = resolveMemoryFileBudgets(undefined);
   const { error } = configResult;
+
+  // reason: a config still naming the retired adoption setting is REFUSED, never read around: the caller turns this
+  // source into the refusal naming `lore migrate memory-limits --apply` (the `budgets` are inert placeholders).
+  if (isRetiredAdoptionError(error)) return { source: "retired-setting", budgets: schemaDefaults, error };
 
   if (error.code === "STORE_ERROR") {
     if (isFileNotFoundCause(error.cause)) return { source: "no-config", budgets: schemaDefaults };
@@ -2654,6 +2632,119 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
   });
 }
 
+/** The `LoreError.field` of the refusal about the retired memory-file adoption setting. */
+export const RETIRED_ADOPTION_FIELD = "context.memory_files.adoption";
+
+/** The command that removes the retired adoption setting, named by every refusal about it. */
+export const MEMORY_LIMITS_MIGRATE_COMMAND = "lore migrate memory-limits --apply";
+
+/**
+ * The refusal text for a config that still names the retired adoption setting. One constant: the loader refusal and
+ * the migrate command's own output quote the same words.
+ */
+export const RETIRED_ADOPTION_MESSAGE =
+  `${RETIRED_ADOPTION_FIELD} was retired: memory-file limits are always enforced. ` +
+  `Run \`${MEMORY_LIMITS_MIGRATE_COMMAND}\` to remove it from .lore/config.yaml and list the memory-file findings a person must fix.`;
+
+/**
+ * Whether `error` is the refusal about the retired adoption setting — the loader fails LOUD on it instead of falling
+ * back to default settings (a silent fallback would enforce limits the config said to downgrade, without saying so).
+ */
+export function isRetiredAdoptionError(error: LoreError): boolean {
+  return error.code === "VALIDATION_ERROR" && error.field === RETIRED_ADOPTION_FIELD;
+}
+
+/**
+ * Names the retired `context.memory_files.adoption` setting when a YAML-parsed config still carries it, whatever its
+ * value (`warn` and `enforce` alike: the setting no longer exists). Nothing reads it and no loader writes.
+ *
+ * @returns a VALIDATION_ERROR payload naming the setting and the migrate command, or `undefined` when it is absent
+ */
+function detectRetiredAdoptionSetting(raw: unknown): LoreError | undefined {
+  const at = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  const memoryFiles = at(at(raw, "context"), "memory_files");
+  if (typeof memoryFiles !== "object" || memoryFiles === null || !("adoption" in memoryFiles)) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: RETIRED_ADOPTION_FIELD,
+    message: RETIRED_ADOPTION_MESSAGE,
+    value: (memoryFiles as Record<string, unknown>)["adoption"],
+  } satisfies LoreError;
+}
+
+/** What {@link removeRetiredAdoptionSetting} computed for a config text. */
+export interface RetiredAdoptionRemoval {
+  /** The config text without the setting: every other byte is identical to the input. */
+  readonly text: string;
+  /** The value the removed setting carried (`"warn"`, `"enforce"`, or whatever was written). */
+  readonly value: unknown;
+}
+
+/**
+ * PURE computation of the removal of `context.memory_files.adoption` from a config text: the setting's own line is
+ * cut out, and so is every parent mapping (`memory_files`, then `context`) that the cut leaves empty. Every other byte
+ * is identical. Writing the result is `lore migrate memory-limits --apply`'s job: no loader ever writes a config file.
+ *
+ * @param yamlText - the raw config file text
+ * @returns `ok(undefined)` when the setting is absent (nothing to migrate, never an error); `ok({text, value})` when
+ *   it is present; `err(VALIDATION_ERROR)` when the YAML is malformed, or the setting shares its line with other keys
+ *   (flow style), which cannot be cut out without rewriting them: the operator deletes it by hand.
+ * @example
+ *   removeRetiredAdoptionSetting("context:\n  memory_files:\n    adoption: warn\n");
+ *   // => ok({ text: "", value: "warn" })
+ */
+export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
+  const doc = yaml.parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText } satisfies LoreError);
+  }
+  const memoryFiles = doc.getIn(["context", "memory_files"], true);
+  if (!yaml.isMap(memoryFiles)) return ok(undefined);
+  const pair = memoryFiles.items.find((item) => yaml.isScalar(item.key) && item.key.value === "adoption");
+  if (pair === undefined) return ok(undefined);
+  const value = doc.getIn(["context", "memory_files", "adoption"]);
+
+  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty `memory_files:` / `context:`.
+  let cutPair = pair;
+  const context = doc.getIn(["context"], true);
+  if (memoryFiles.items.length === 1 && yaml.isMap(context)) {
+    const memoryFilesPair = context.items.find((item) => item.value === memoryFiles);
+    if (memoryFilesPair !== undefined) cutPair = memoryFilesPair;
+    if (memoryFilesPair !== undefined && context.items.length === 1 && yaml.isMap(doc.contents)) {
+      const contextPair = doc.contents.items.find((item) => item.value === context);
+      if (contextPair !== undefined) cutPair = contextPair;
+    }
+  }
+
+  const handEdit = (reason: string): Result<never, LoreError> =>
+    err({
+      code: "VALIDATION_ERROR",
+      field: RETIRED_ADOPTION_FIELD,
+      message: `${RETIRED_ADOPTION_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
+      value: yamlText,
+    } satisfies LoreError);
+  const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
+  const adoptionKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
+  const adoptionValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
+  if (keyRange === undefined || keyRange === null || adoptionKeyRange === undefined || adoptionKeyRange === null) {
+    return handEdit("has no source position, so it cannot be removed in place");
+  }
+  // The cut ends where the setting's own content ends (it is the last content inside any escalated parent).
+  const contentEnd = adoptionValueRange === undefined || adoptionValueRange === null ? adoptionKeyRange[1] : adoptionValueRange[1];
+
+  const lineStart = yamlText.lastIndexOf("\n", keyRange[0] - 1) + 1;
+  const newline = yamlText.indexOf("\n", contentEnd);
+  const lineEnd = newline === -1 ? yamlText.length : newline + 1;
+  const before = yamlText.slice(lineStart, keyRange[0]);
+  const after = yamlText.slice(contentEnd, newline === -1 ? yamlText.length : newline).trim();
+  // A flow-style mapping puts other keys on the same line; only a trailing `# comment` may share it.
+  if (before.trim() !== "" || (after !== "" && !after.startsWith("#"))) {
+    return handEdit("shares its line with other settings, so it cannot be removed line-wise");
+  }
+  return ok({ text: yamlText.slice(0, lineStart) + yamlText.slice(lineEnd), value });
+}
+
 /**
  * Parse a YAML string into LoreConfig.
  * Pure function — no filesystem access.
@@ -2687,6 +2778,9 @@ export function loadConfigFromString(
 
   const renamed = detectPrdSyncConfigKey(parsed);
   if (renamed !== undefined) return err(renamed);
+
+  const retiredAdoption = detectRetiredAdoptionSetting(parsed);
+  if (retiredAdoption !== undefined) return err(retiredAdoption);
 
   const result = parseConfig(parsed);
   if (result.ok && warn !== undefined) {

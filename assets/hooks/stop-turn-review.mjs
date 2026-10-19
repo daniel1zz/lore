@@ -241,8 +241,8 @@ function findAnchorDrift(realRoot, deletedPaths) {
 /**
  * (c) Report lines for the changed CLAUDE.md files that are over a ceiling, from the JSON of
  * `lore status --check-claude-md`; null when all are within budget.
- * reason: the exit code is NOT the verdict — under the default `adoption: warn` an over-ceiling file
- * exits 0 with the breach downgraded to advisory; negative headroom is the ceiling fact itself.
+ * reason: the exit code is NOT the verdict here — negative headroom is the ceiling fact itself, read per
+ * changed file (the exit code only says that SOME memory file has a finding).
  */
 function findClaudeMdBreach(realRoot, changedPaths) {
   const run = runProcess('lore', ['status', '--check-claude-md', '--json'], realRoot);

@@ -9,9 +9,8 @@
  * was linted as a module).
  *
  * Every scenario spawns the real CLI (`lore status --check-claude-md --json`)
- * against a `mkdtemp` git repo with a config-only `.lore/` pinning
- * `adoption: enforce` explicitly (absent key = warn, which would make the
- * exit-code assertions vacuous). This repo's own `.lore/` is never touched.
+ * against a `mkdtemp` git repo (limits are always enforced, so the exit-code assertions
+ * are never vacuous). This repo's own `.lore/` is never touched.
  *
  * Coverage: HAPPY (nested repo skipped, exit EXACTLY 0) / NEGATIVE (nested
  * path absent from findings, advisory AND headroom) / BOUNDARY (`.git`
@@ -69,7 +68,6 @@ interface CheckJson {
       findings?: PathItem[];
       advisory?: PathItem[];
       headroom?: PathItem[];
-      adoption?: { mode?: string };
     };
   };
 }
@@ -109,8 +107,6 @@ function nLineBody(lineCount: number): string {
 function makeHostRepo(label: string): string {
   const dir = mkdtempSync(join(tmpdir(), `lore-claude-md-nested-${label}-`));
   runGit(["init", "-q"], dir);
-  mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
   writeFileSync(join(dir, "CLAUDE.md"), SECTIONS);
   return dir;
 }
@@ -144,13 +140,12 @@ describe("memory-file discovery stops at nested git repositories", () => {
     expect(allPaths(parsed).filter((p) => p.startsWith("vendor/other/"))).toEqual([]);
   });
 
-  it("nested repo with a .git DIRECTORY: exit is EXACTLY 0 under explicit adoption enforce", () => {
+  it("nested repo with a .git DIRECTORY: exit is EXACTLY 0 (limits always enforced)", () => {
     writeOversizedAt(tmpDir, "vendor/other");
     runGit(["init", "-q"], join(tmpDir, "vendor", "other"));
 
     const { result, parsed } = runCheck(tmpDir);
 
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("enforce");
     expect(result.exitCode).toBe(0);
   });
 
@@ -163,13 +158,12 @@ describe("memory-file discovery stops at nested git repositories", () => {
     expect(allPaths(parsed).filter((p) => p.startsWith("vendor/other/"))).toEqual([]);
   });
 
-  it("nested repo with a .git FILE: exit is EXACTLY 0 under explicit adoption enforce", () => {
+  it("nested repo with a .git FILE: exit is EXACTLY 0 (limits always enforced)", () => {
     writeOversizedAt(tmpDir, "vendor/other");
     writeFileSync(join(tmpDir, "vendor", "other", ".git"), "gitdir: ../../.git/modules/other\n");
 
     const { result, parsed } = runCheck(tmpDir);
 
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("enforce");
     expect(result.exitCode).toBe(0);
   });
 

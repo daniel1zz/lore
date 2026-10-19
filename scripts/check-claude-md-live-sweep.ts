@@ -38,7 +38,6 @@ export const EXIT_PRECONDITION = 2;
 /** One finding-shaped object found anywhere in a parsed `--json` payload. */
 interface JsonFinding {
   kind?: unknown;
-  downgraded_kind?: unknown;
   [key: string]: unknown;
 }
 
@@ -55,20 +54,6 @@ export function collectByKind(value: unknown, kind: string, out: JsonFinding[] =
     for (const nested of Object.values(record)) collectByKind(nested, kind, out);
   }
   return out;
-}
-
-/** Under `adoption: warn` a deterministic finding moves to advisory `downgraded`, so both places are read. */
-export function downgradedOf(payload: unknown, downgradedKind: string): JsonFinding[] {
-  return collectByKind(payload, "downgraded").filter((f) => f.downgraded_kind === downgradedKind);
-}
-
-/**
- * `--check-memory-pointers` reports a warn-downgraded finding as an `adoption_lines` STRING
- * (`[downgraded:slug_pointer_missing] …`), not as an object, so the object scan above is blind to
- * it. Counts those rendered lines for `kind` anywhere in the payload.
- */
-export function downgradedLineHits(payload: unknown, kind: string): number {
-  return JSON.stringify(payload).split(`downgraded:${kind}]`).length - 1;
 }
 
 /** `data.claude_md.headroom` length — the walked-file count, the sweep's non-vacuity witness. */
@@ -103,12 +88,8 @@ export function violationsOf(claudeMd: unknown, pointers: unknown): string[] {
   const violations: string[] = [];
   const emphasis = collectByKind(claudeMd, "emphasis_saturated");
   if (emphasis.length > 0) violations.push(`emphasis_saturated: ${emphasis.length} finding(s) at the shipped default`);
-  const emphasisDowngraded = downgradedOf(claudeMd, "emphasis_saturated").length + downgradedLineHits(claudeMd, "emphasis_saturated");
-  if (emphasisDowngraded > 0) violations.push(`emphasis_saturated (downgraded to advisory): ${emphasisDowngraded}`);
   const slugs = collectByKind(pointers, "slug_pointer_missing");
   if (slugs.length > 0) violations.push(`slug_pointer_missing: ${slugs.length} finding(s)`);
-  const slugsDowngraded = downgradedOf(pointers, "slug_pointer_missing").length + downgradedLineHits(pointers, "slug_pointer_missing");
-  if (slugsDowngraded > 0) violations.push(`slug_pointer_missing (downgraded to advisory): ${slugsDowngraded}`);
   if (headroomCount(claudeMd) === 0) violations.push("vacuous sweep: --check-claude-md walked zero memory files");
   return violations;
 }

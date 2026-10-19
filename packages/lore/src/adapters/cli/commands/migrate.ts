@@ -30,6 +30,10 @@
  *                      `cited_rule_check`). Preview is the DEFAULT; `--apply` changes only the key text
  *                      (every other byte identical) and the output names the file; a second run changes
  *                      nothing. Never loads the config through the app (it repairs that file).
+ *   memory-limits [--apply] Remove the retired `context.memory_files.adoption` setting from .lore/config.yaml
+ *                      (memory-file limits are always enforced) and list the memory-file findings a person must fix.
+ *                      Preview is the DEFAULT; `--apply` removes only that setting's line (every other byte identical);
+ *                      a second run changes nothing. Never loads the config through the app (it repairs that file).
  *   plan-outline-exempt [--apply] Remove the legacy outline-sync exemption (`extra.prd_sync_exempt`) from
  *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
@@ -46,7 +50,8 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.js";
 import { resolveCorpus } from "../corpus-resolution.js";
-import { migrateConfigKeys } from "@lore/core/node";
+import { migrateConfigKeys, migrateMemoryLimits } from "@lore/core/node";
+import { listMemoryFileFindings } from "../memory-limits-migration.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import { invocationOf } from "../command-invocation.js";
@@ -56,12 +61,12 @@ export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), or `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), or `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits",
       required: true,
     },
     from: {
@@ -74,7 +79,7 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits] Execute the migration (default is dry-run/preview-only)",
     },
     revert: {
       type: "boolean",
@@ -106,10 +111,11 @@ export default defineLoreCommand({
       args.version !== "ordinals" &&
       args.version !== "spec-parents" &&
       args.version !== "plan-outline-exempt" &&
-      args.version !== "config-keys"
+      args.version !== "config-keys" &&
+      args.version !== "memory-limits"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys, memory-limits.\n`,
       );
       exitCli(2);
     }
@@ -148,6 +154,64 @@ export default defineLoreCommand({
       printLine(inv.io.stdout, "─".repeat(40));
       printLine(inv.io.stdout, report.notice ?? `${report.file}: no retired keys`);
       if (report.renamed && !report.written) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+      return 0;
+    }
+
+    // ── memory-limits action ──────────────────────────────────────────────
+    // reason: like config-keys, deliberately does NOT go through `loadLoreApp`: every other command refuses the config
+    // this action repairs (the retired adoption setting), so it resolves the corpus location only.
+    if (args.version === "memory-limits") {
+      const dbPath = findLoreDbPath(inv.io, inv);
+      if (args.apply === true && resolveCorpus(inv.io, inv.cwd, inv.env)?.provenance !== "own") {
+        const refusal = {
+          code: "VALIDATION_ERROR" as const,
+          field: "gate:corpus-write:foreign-provenance",
+          message: "`migrate memory-limits --apply` rewrites the config of the checkout that owns the corpus; this checkout reaches it through another one. Run it there.",
+        };
+        inv.io.stderr.write(formatErrorFor(inv, refusal) + "\n");
+        return exitCode(refusal);
+      }
+      const projectDir = dirname(dirname(dbPath));
+      const apply = args.apply === true;
+      const result = migrateMemoryLimits(projectDir, apply);
+      if (!result.ok) {
+        if (args.json) {
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+        } else {
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        }
+        return exitCode(result.error);
+      }
+      const report = result.value;
+      const findings = listMemoryFileFindings(projectDir, report.text);
+      if (!findings.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, findings.error) + "\n");
+        return exitCode(findings.error);
+      }
+      if (args.json) {
+        printLine(
+          inv.io.stdout,
+          JSON.stringify(
+            { ok: true, data: { applied: apply, file: report.file, found: report.found, value: report.value ?? null, written: report.written, findings: findings.value } },
+            null,
+            2,
+          ),
+        );
+        return 0;
+      }
+      printLine(inv.io.stdout, apply ? "Memory limits migration complete" : "Memory limits migration (preview)");
+      printLine(inv.io.stdout, "─".repeat(40));
+      printLine(
+        inv.io.stdout,
+        report.found
+          ? `${report.file}: context.memory_files.adoption: ${String(report.value)} ${report.written ? "removed" : "would be removed"}`
+          : `${report.file}: no adoption setting`,
+      );
+      for (const entry of findings.value) {
+        printLine(inv.io.stdout, `${entry.path}: a person must fix ${entry.lines.length} finding(s):`);
+        for (const line of entry.lines) printLine(inv.io.stdout, `  ${line}`);
+      }
+      if (report.found && !report.written) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
       return 0;
     }
 

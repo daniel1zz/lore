@@ -1,10 +1,11 @@
 /**
  * The required H2 section lists of the project memory-file content contract —
  * the SINGLE home of the section NAMES that `claude-md-structure.ts`'s checks
- * take as their `required` parameter, and the adoption-mode value type
- * (spec-claude-md-root-section-structure-check-and-adoption-mode, D6).
+ * take as their `required` parameter
+ * (spec-claude-md-root-section-structure-check-and-adoption-mode, D6; its adoption
+ * mode was retired by task-memory-file-limits-are-always-enforced-the-warn-adoption).
  *
- * Public surface: ROOT_REQUIRED_SECTIONS, MODULE_REQUIRED_SECTIONS, AdoptionMode.
+ * Public surface: ROOT_REQUIRED_SECTIONS, MODULE_REQUIRED_SECTIONS.
  *
  * Invariants:
  *   - Pure constants/types, no IO, no Node builtins — `@lore/core`'s default
@@ -28,9 +29,3 @@ export const ROOT_REQUIRED_SECTIONS = [
 
 /** The H2 sections a per-module memory file should contain (advisory only). */
 export const MODULE_REQUIRED_SECTIONS = ["Purpose"] as const;
-
-/**
- * `context.memory_files.adoption` — whether deterministic memory-file findings
- * are exit-relevant (`enforce`) or reported as advisory `downgraded` (`warn`).
- */
-export type AdoptionMode = "enforce" | "warn";

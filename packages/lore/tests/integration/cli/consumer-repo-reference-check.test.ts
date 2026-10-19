@@ -6,14 +6,12 @@
  * spec-claude-md-governance-content-dimension-checks-wire-the: arming reference findings needs
  * evidence outside this repo).
  *
- * Where a finding LANDS depends on adoption mode (BR-427): under the default `warn` it is a
- * `downgraded` advisory carrying `downgraded_kind: reference_unresolved` (exit 0, `findings: []`);
- * under `enforce` it is a deterministic finding (exit 3). The check must report it in one of the two
- * places in every mode; an empty `findings` array alone is NOT "no finding".
+ * An unresolved reference is always a deterministic finding (BR-427: limits are always enforced; exit 3),
+ * with no project setting that downgrades it.
  *
- * Coverage: HAPPY (bad reference reported with its line, good one never) / NEGATIVE (a repo whose
- * references all resolve reports none) / BOUNDARY (warn vs enforce placement; the human output also
- * names it) / ERROR (no `package.json`: a `bun run` reference is reported as unresolved, not skipped).
+ * Coverage: HAPPY (bad reference reported with its line, good one never; the human output also
+ * names it) / NEGATIVE (a repo whose references all resolve reports none) / BOUNDARY (a symbol
+ * the file does not export) / ERROR (no `package.json`: a `bun run` reference is reported as unresolved, not skipped).
  *
  * @spec_ref spec-claude-md-governance-content-dimension-checks-wire-the
  * @spec_ref spec-prose-about-code-is-bound-to-what-it-describes-one
@@ -57,8 +55,7 @@ interface CheckJson {
   data: {
     claude_md: {
       findings: Array<{ kind: string; drift_kind?: string; line?: number; reference?: string }>;
-      advisory: Array<{ kind: string; downgraded_kind?: string; reference?: string }>;
-      adoption: { mode: string };
+      advisory: Array<{ kind: string; reference?: string }>;
     };
   };
 }
@@ -76,38 +73,25 @@ function check(dir: string): { exitCode: number; json: CheckJson["data"]["claude
 
 const BAD_AND_GOOD = "# Project\n\nSee `src/missing.ts` and `src/real.ts#Real`.\n";
 
-/** Every place a would-be reference finding can appear, normalized. */
+/** The unresolved references the check reports as deterministic findings. */
 function referenceFindings(json: ReturnType<typeof check>["json"]): string[] {
-  return [
-    ...json.findings.filter((f) => f.kind === "reference_unresolved").map((f) => f.reference ?? ""),
-    ...json.advisory.filter((f) => f.kind === "downgraded" && f.downgraded_kind === "reference_unresolved").map((f) => f.reference ?? ""),
-  ];
+  return json.findings.filter((f) => f.kind === "reference_unresolved").map((f) => f.reference ?? "");
 }
 
 describe("consumer repo: lore status --check-claude-md reports unresolved references", () => {
-  it("HAPPY: under the default warn mode the bad reference is a downgraded reference_unresolved (exit 0); the good one is never reported", () => {
+  it("HAPPY: the bad reference is a deterministic reference_unresolved finding with its line (exit exactly 3), the good one is never reported", () => {
     const dir = consumerRepo(BAD_AND_GOOD);
 
     const { exitCode, json, human } = check(dir);
-
-    expect(json.adoption.mode).toBe("warn");
-    expect(exitCode).toBe(0);
-    expect(referenceFindings(json)).toEqual(["src/missing.ts"]);
-    expect(human).toContain("reference_unresolved");
-    expect(human).toContain("CLAUDE.md:3");
-    expect(human).not.toContain("src/real.ts");
-  });
-
-  it("HAPPY: under enforce the same reference is a deterministic finding with its line, exit exactly 3", () => {
-    const dir = consumerRepo(BAD_AND_GOOD);
-    put(dir, ".lore/config.yaml", "context:\n  memory_files:\n    adoption: enforce\n");
-
-    const { exitCode, json } = check(dir);
 
     expect(exitCode).toBe(3);
     expect(json.findings.filter((f) => f.kind === "reference_unresolved")).toEqual([
       expect.objectContaining({ drift_kind: "file_missing", line: 3, reference: "src/missing.ts" }),
     ]);
+    expect(JSON.stringify(json)).not.toContain("downgraded");
+    expect(human).toContain("reference_unresolved");
+    expect(human).toContain("CLAUDE.md:3");
+    expect(human).not.toContain("src/real.ts");
   });
 
   it("NEGATIVE: a repo whose references all resolve reports none in either place", () => {

@@ -141,25 +141,20 @@ function nLineBody(lineCount: number): string {
 }
 
 /**
- * The five required root H2 sections, each with a body line, so a fixture that
- * pins `adoption: enforce` is not refused for `section_missing` and the
- * assertion under test (capacity / eviction) is the ONLY thing that can trip it
- * (spec-claude-md-root-section-structure-check-and-adoption-mode: absent
- * `adoption` resolves to `warn`, so every enforcement assertion in this file
- * pins `enforce` explicitly and carries a conforming structure).
+ * The five required root H2 sections, each with a body line, so a fixture is not refused for
+ * `section_missing` and the assertion under test (capacity / eviction) is the ONLY thing that
+ * can trip it (limits are always enforced: there is no adoption setting to pin).
  */
 const SECTIONS_PREFIX =
   ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
     .map((name) => `## ${name}\n\nbody of ${name}\n`)
     .join("\n") + "\n";
 
-/** Writes a config-only `.lore/config.yaml` pinning `adoption: enforce` plus any extra memory_files lines. */
+/** Writes a config-only `.lore/config.yaml` carrying the given memory_files lines; writes nothing when there are none. */
 function writeEnforceConfig(dir: string, extraMemoryFilesYaml = ""): void {
+  if (extraMemoryFilesYaml === "") return;
   mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(
-    join(dir, ".lore", "config.yaml"),
-    `context:\n  memory_files:\n    adoption: enforce\n${extraMemoryFilesYaml}`,
-  );
+  writeFileSync(join(dir, ".lore", "config.yaml"), `context:\n  memory_files:\n${extraMemoryFilesYaml}`);
 }
 
 /**
@@ -210,8 +205,7 @@ interface CheckClaudeMdJson {
   data?: {
     claude_md?: {
       findings?: ClaudeMdFindingJson[];
-      advisory?: Array<{ kind: string; downgraded_kind?: string }>;
-      adoption?: { mode?: string; mode_source?: string; downgraded_count?: number };
+      advisory?: Array<{ kind: string }>;
       headroom?: HeadroomReportJson[];
       warnings?: Array<{ kind: string; measured: number; message: string }>;
     };
@@ -229,7 +223,7 @@ describe("lore status --check-claude-md: corpus-less operation (no .lore/ at all
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("with NO .lore/ at all the absent adoption key resolves to warn: exit 0, max_lines downgraded (never red on day one)", () => {
+  it("with NO .lore/ at all the ceiling is enforced: exit 3, max_lines is a finding, nothing is downgraded (the retired default warn exited 0)", () => {
     // Deliberately proves corpus-less operation: no `lore init` was ever run in
     // this fixture — no .lore/ directory, no DB, nothing.
     expect(existsSync(join(tmpDir, ".lore"))).toBe(false);
@@ -238,12 +232,10 @@ describe("lore status --check-claude-md: corpus-less operation (no .lore/ at all
 
     const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(3);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("warn");
-    expect(parsed.data?.claude_md?.adoption?.mode_source).toBe("default");
-    expect(parsed.data?.claude_md?.findings).toEqual([]);
-    expect((parsed.data?.claude_md?.advisory ?? []).some((a) => a.kind === "downgraded" && a.downgraded_kind === "max_lines")).toBe(true);
+    expect((parsed.data?.claude_md?.findings ?? []).map((f) => f.kind)).toContain("max_lines");
+    expect(result.stdout).not.toContain("downgraded");
   });
 
   it("exits 3 and the finding names CLAUDE.md when the root file breaches the 300-line ceiling, with a config-only .lore/ (no DB) pinning adoption: enforce", () => {
@@ -256,7 +248,6 @@ describe("lore status --check-claude-md: corpus-less operation (no .lore/ at all
 
     expect(result.exitCode).toBe(3);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("enforce");
     expect((parsed.data?.claude_md?.findings ?? []).map((f) => f.kind)).toContain("max_lines");
     expect((result.stdout + result.stderr).toLowerCase()).toContain("claude.md");
   });
@@ -273,7 +264,7 @@ describe("lore status --check-claude-md: conformant fixture", () => {
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("exits 0 and reports zero findings for a small, well-within-ceiling CLAUDE.md (adoption: enforce, conforming structure)", () => {
+  it("exits 0 and reports zero findings for a small, well-within-ceiling CLAUDE.md (conforming structure)", () => {
     writeEnforceConfig(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX + nLineBody(10));
 
@@ -282,7 +273,7 @@ describe("lore status --check-claude-md: conformant fixture", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("--json reports an empty findings array on the conformant fixture, under enforce (not vacuously under warn)", () => {
+  it("--json reports an empty findings array on the conformant fixture", () => {
     writeEnforceConfig(tmpDir);
     writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX + nLineBody(10));
 
@@ -290,7 +281,6 @@ describe("lore status --check-claude-md: conformant fixture", () => {
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("enforce");
     expect(parsed.data?.claude_md?.findings).toEqual([]);
   });
 });
@@ -320,7 +310,7 @@ describe("lore status --check-claude-md: disabled via context.memory_files.enabl
 
     // Deliberately oversized — proves the config knob suppresses the check
     // rather than the fixture happening to already be compliant.
-    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(400));
+    writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX + nLineBody(400));
 
     const result = runLore(["status", "--check-claude-md"], tmpDir);
 
@@ -394,7 +384,6 @@ describe("lore status --check-claude-md: headroom reporting (the incident fixtur
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("enforce");
     expect(parsed.data?.claude_md?.findings).toEqual([]);
     expect(parsed.data?.claude_md?.headroom?.[0]?.bytes.warn).toBe(true);
     expect((parsed.data?.claude_md?.warnings ?? []).length).toBeGreaterThan(0);
@@ -455,7 +444,7 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
     // boundary is READ FROM CONFIG rather than baked into the check.
     writeFileSync(
       join(tmpDir, ".lore", "config.yaml"),
-      "context:\n  memory_files:\n    adoption: enforce\n    warn_threshold_fraction: 0.999999\n    evict_threshold_fraction: 1\n",
+      "context:\n  memory_files:\n    warn_threshold_fraction: 0.999999\n    evict_threshold_fraction: 1\n",
     );
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
 
@@ -463,7 +452,6 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
-    expect(parsed.data?.claude_md?.adoption?.mode).toBe("enforce");
     expect(parsed.data?.claude_md?.warnings).toEqual([]);
     expect(parsed.data?.claude_md?.findings).toEqual([]);
     // Headroom numbers themselves are still reported — only the warn flag moved.
@@ -477,7 +465,7 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
     writeFileSync(
       join(tmpDir, ".lore", "config.yaml"),
-      "context:\n  memory_files:\n    adoption: enforce\n    warn_threshold_fraction: 0.2\n    evict_threshold_fraction: 0.3\n",
+      "context:\n  memory_files:\n    warn_threshold_fraction: 0.2\n    evict_threshold_fraction: 0.3\n",
     );
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(Math.ceil(30720 * 0.5)));
 
@@ -491,7 +479,7 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
   it("a threshold lowered to 0.01 makes even the CONTROL (comfortably-small) fixture warn", () => {
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
     writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    warn_threshold_fraction: 0.01\n");
-    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(10));
+    writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX + nLineBody(10));
 
     const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
 
