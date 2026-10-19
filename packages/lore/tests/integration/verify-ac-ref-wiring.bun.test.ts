@@ -95,7 +95,8 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
@@ -141,8 +142,8 @@ async function initCorpus(dir: string): Promise<void> {
  * exactly rather than depend on an untested subset).
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

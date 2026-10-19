@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 interface DocEnvelope {
   id: string;
@@ -126,11 +127,7 @@ describe("plans are judged by default", () => {
   it("HAPPY: a project judging only [spec] approves the same plan (exit 0)", async () => {
     const dir = await freshCorpus("lore-plan-judged-speconly-");
     const plan = await createDraftPlan(dir);
-    writeFileSync(
-      join(dir, ".lore", "config.yaml"),
-      `project:\n  name: test\n  author: test\nworkflow:\n  review:\n    judgment_required_types: [spec]\n`,
-      "utf8",
-    );
+    patchLoreConfig(dir, `project:\n  name: test\n  author: test\nworkflow:\n  review:\n    judgment_required_types: [spec]\n`, { replace: true });
     insertRawJudgment(dir, plan.id, plan.version, "reject");
 
     const result = await runLore(["approve", plan.slug], dir);

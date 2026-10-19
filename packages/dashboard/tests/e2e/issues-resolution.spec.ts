@@ -75,7 +75,8 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, appendFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { patchLoreConfig } from "../../../lore/tests/helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,11 +138,9 @@ function runLoreJson<T>(args: string[], cwd: string, env?: Record<string, string
 /** Appends a `feedback.upstream` stanza onto a consumer's config.yaml (mirrors issues.spec.ts's identical fixture). */
 function configureFeedbackUpstream(consumerRoot: string, upstreamRoot: string, rootPrdIdentity: string): void {
   assertUnderTmp(consumerRoot);
-  appendFileSync(
-    join(consumerRoot, ".lore", "config.yaml"),
-    ["feedback:", "  upstream:", `    corpus_path: ${upstreamRoot}`, `    root_prd: ${rootPrdIdentity}`, ""].join(
-      "\n",
-    ),
+  patchLoreConfig(
+    consumerRoot,
+    ["feedback:", "  upstream:", `    corpus_path: ${upstreamRoot}`, `    root_prd: ${rootPrdIdentity}`, ""].join("\n"),
   );
 }
 

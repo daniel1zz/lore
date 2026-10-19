@@ -26,6 +26,7 @@ import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -89,8 +90,8 @@ function buildFixture(): Fixture {
   git(repo, ["commit", "-q", "-m", "init"]);
 
   mustRun(["init"], repo);
-  appendFileSync(
-    join(repo, ".lore", "config.yaml"),
+  patchLoreConfig(
+    repo,
     ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    task-claim:", "      enabled: false", ""].join("\n"),
   );
 

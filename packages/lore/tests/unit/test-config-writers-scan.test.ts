@@ -1,6 +1,7 @@
 // @reads packages/lore/tests/**
 // @reads packages/core/tests/**
 // @reads packages/dashboard/tests/**
+// @reads scripts/tests/**
 /**
  * @spec_ref BR-926
  *
@@ -32,6 +33,9 @@ const RAW_WRITE_ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/lore/tests/integration/ai-config-fail-loud.bun.test.ts": "writes a deliberately schema-invalid ai block (SPEC-030 AC-HJ-3)",
   "packages/lore/tests/integration/cli/config-prd-sync-rename.bun.test.ts": "writes legacy-keyed (retired prd_sync) bytes to test the rename",
   "packages/lore/tests/unit/core/cited-rule-check-setting.test.ts": "writes legacy-keyed (retired prd_sync) bytes to test the loader refusal",
+  "packages/lore/tests/integration/memory-file-limits-always-enforced.test.ts": "writes retired-key (adoption) and flow-style bytes whose exact text the migration and the refusal are about",
+  "packages/lore/tests/integration/setup-user-once-marker.bun.test.ts": "an injected fs-port stub of the unit under test (SetupService), not a write to a real file",
+  "scripts/tests/check-shipped-defaults.test.ts": "the checker's INPUT: a config.yaml fixture written exactly as the checker should read it, in a root with no lore init",
   "packages/lore/tests/unit/core/config-io.test.ts": "loadConfig/saveConfig I/O tests: exact bytes incl. empty and whitespace-only files",
 };
 
@@ -153,8 +157,8 @@ describe("no test writes .lore/config.yaml except through patchLoreConfig (BR-92
 
   it("every other test file writes the project config only via the helper", () => {
     const offenders: string[] = [];
-    for (const root of ["core", "dashboard", "lore"]) {
-      const testsDir = join(REPO_ROOT, "packages", root, "tests");
+    for (const testsRoot of ["packages/core/tests", "packages/dashboard/tests", "packages/lore/tests", "scripts/tests"]) {
+      const testsDir = join(REPO_ROOT, testsRoot);
       let isDir = false;
       try {
         isDir = statSync(testsDir).isDirectory();

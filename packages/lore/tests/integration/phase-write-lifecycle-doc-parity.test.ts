@@ -159,7 +159,8 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -405,7 +406,7 @@ function makeApprovedPlan(title: string): { readonly dir: string; readonly slug:
 
   // reason: plans are judged by default (BR-281 / BR-1237), and this suite's `lore review` step yields no
   // approving judgment; the plan is approved only to put it in a lifecycle state, never to test review-judgment.
-  appendFileSync(join(dir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
+  patchLoreConfig(dir, "workflow:\n  review:\n    judgment_required_types: []\n");
 
   const created = jsonEnvelope<{ slug: string }>(
     runLoreInFixture(["create", "plan", "--title", title, "--content", "Baseline content.", "--json"], dir),

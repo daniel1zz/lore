@@ -49,6 +49,7 @@ import { tmpdir } from "os";
 import yaml from "yaml";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -103,14 +104,7 @@ function parseSlug(stdout: string): string {
  * step below is reachable without an unrelated judgment fixture.
  */
 function appendWorkflowConfig(dir: string, yamlFragment: string): void {
-  const cfgPath = join(dir, ".lore", "config.yaml");
-  const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-  const fragment = yaml.parse(yamlFragment) as { workflow?: Record<string, unknown> };
-  const mergedWorkflow = {
-    ...(existing["workflow"] as Record<string, unknown> | undefined),
-    ...fragment.workflow,
-  };
-  writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow: mergedWorkflow }), "utf8");
+  patchLoreConfig(dir, yamlFragment);
 }
 
 /**

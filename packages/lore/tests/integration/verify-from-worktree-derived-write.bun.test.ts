@@ -25,6 +25,7 @@ import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -97,8 +98,8 @@ beforeAll(() => {
   git(repo, ["commit", "-q", "-m", "init"]);
 
   mustRun(["init"], repo);
-  appendFileSync(
-    join(repo, ".lore", "config.yaml"),
+  patchLoreConfig(
+    repo,
     [
       "workflow:",
       "  gates:",
