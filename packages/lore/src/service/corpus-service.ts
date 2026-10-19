@@ -3193,7 +3193,7 @@ export class CorpusService {
     //     warning §Scope M3 / §Design Decisions D3 — a missing/invalid kind does NOT
     //     satisfy the floor, `attestationFloor` still runs as if not exempt).
     //   - `citedRuleStateClean` (BR-984, OPT-IN via a DEFAULT-OFF config knob):
-    //     evaluated only when `GateEnforcer.isPrdSyncEnabled()` is true and a rule-state
+    //     evaluated only when `GateEnforcer.isCitedRuleCheckEnabled()` is true and a rule-state
     //     service is wired — see the dedicated block below.
     //   - `assessmentFreshness` (SPEC-106, OPT-OUT): evaluated for EVERY closing plan
     //     unless it declares `extra.assessment_freshness_exempt: true` PLUS a
@@ -3248,7 +3248,7 @@ export class CorpusService {
       const attestationExemptKind =
         typeof attestationExemptKindRaw === "string" ? attestationExemptKindRaw : undefined;
       const exemptKindValid = attestationExemptKindValid(attestationExempt, attestationExemptKind).ok;
-      const prdSyncEnabled = this.gateEnforcer.isPrdSyncEnabled();
+      const citedRuleCheckEnabled = this.gateEnforcer.isCitedRuleCheckEnabled();
       // reason: SPEC-106 §Design Decisions D4 — mirrors `attestationExempt`'s
       // flag-plus-non-empty-reason resolution EXACTLY (a bare
       // `assessment_freshness_exempt: true` with no reason is NOT exempt); there
@@ -3292,7 +3292,7 @@ export class CorpusService {
       // still needs its tasks' evidence counts for the feeding pack's
       // offending-task diagnostics.
       const needsBundle =
-        !attestationExempt || !exemptKindValid || (prdSyncEnabled && this.ruleStateService !== undefined);
+        !attestationExempt || !exemptKindValid || (citedRuleCheckEnabled && this.ruleStateService !== undefined);
       const bundleResult = needsBundle ? await this.getPlanBundle(existing.id) : undefined;
       if (bundleResult !== undefined && !bundleResult.ok) return bundleResult;
 
@@ -3373,11 +3373,11 @@ export class CorpusService {
         };
       }
 
-      planCloseCtx = { ...planCloseCtx, prdSyncEnabled };
+      planCloseCtx = { ...planCloseCtx, citedRuleCheckEnabled };
       // reason: BR-984 — the cited-rule-state predicate. `bundle.spec` is undefined for a PRD-parented or
       // unparented plan (getPlanBundle's own contract): nothing is cited, so `citedRuleViolations` stays
       // unset and `checkPlanClose` pushes nothing. Knob off (default) never reads rule state at all.
-      if (prdSyncEnabled && this.ruleStateService !== undefined) {
+      if (citedRuleCheckEnabled && this.ruleStateService !== undefined) {
         const spec = bundleResult!.value.spec;
         if (spec !== undefined) {
           const violationsResult = await this.resolveCitedRuleViolations(spec);

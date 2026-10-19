@@ -108,7 +108,7 @@ import {
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
-  resolvePrdSyncGateEnabled,
+  resolveCitedRuleCheckGateEnabled,
   resolveVerificationProfile,
   resolveAttestationMinRatio,
   SCOPE_UNDECLARED_REASON,
@@ -1056,23 +1056,23 @@ export class GateEnforcer {
 
   /**
    * Whether `plan-close`'s `citedRuleStateClean` (BR-984) sub-predicate specifically is
-   * enabled (`workflow.gates."plan-close".prd_sync.enabled`, SPEC-080 §C4) —
+   * enabled (`workflow.gates."plan-close".cited_rule_check.enabled`, SPEC-080 §C4) —
    * NARROWER than `isEnabled("plan-close")`, which governs the WHOLE
-   * checkpoint. A caller building `GateContext.prdSyncEnabled`
+   * checkpoint. A caller building `GateContext.citedRuleCheckEnabled`
    * (`CorpusService.set`) consults this, not `isEnabled`.
    *
    * DELIBERATELY THE OPPOSITE DEFAULT of `isTaskClaimAnchorOverlapEnabled` /
    * `isAcQuantifiableEnabled` / `isOracleCoverageEnabled` / `isRequiresUatEnabled`
    * above — those all default ENABLED (an explicit `false` turns them off);
    * this one defaults DISABLED (an explicit `true` turns it on), per
-   * `resolvePrdSyncGateEnabled`'s own JSDoc.
+   * `resolveCitedRuleCheckGateEnabled`'s own JSDoc.
    *
    * @returns `true` iff the sub-key is explicitly enabled; `false` otherwise.
    * @example
-   * enforcer.isPrdSyncEnabled(); // => false unless config explicitly enables it
+   * enforcer.isCitedRuleCheckEnabled(); // => false unless config explicitly enables it
    */
-  isPrdSyncEnabled(): boolean {
-    return resolvePrdSyncGateEnabled(this.config);
+  isCitedRuleCheckEnabled(): boolean {
+    return resolveCitedRuleCheckGateEnabled(this.config);
   }
 
   /**

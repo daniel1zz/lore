@@ -1,5 +1,5 @@
 /**
- * Plan-close, knob `workflow.gates."plan-close".prd_sync.enabled`, AFTER slice 3a (BR-984): the former
+ * Plan-close, knob `workflow.gates."plan-close".cited_rule_check.enabled`, AFTER slice 3a (BR-984): the former
  * domain-document-edit predicate (`prdOutlineSynced`, SPEC-080 §C4: an in-window, attributable content
  * diff on the ancestor spec's linked domain doc, or a `prd_sync_exempt`) is RETIRED. This file used to
  * pin that predicate's window / attribution / exemption behaviour; it now pins that none of it applies
@@ -35,7 +35,7 @@ function makeHarness(config?: LoreConfig) {
 function prdSyncConfig(enabled: boolean): LoreConfig {
   return {
     project: { name: "t", author: "t" },
-    ...(enabled ? { workflow: { gates: { "plan-close": { prd_sync: { enabled: true } } } } } : {}),
+    ...(enabled ? { workflow: { gates: { "plan-close": { cited_rule_check: { enabled: true } } } } } : {}),
   } as unknown as LoreConfig;
 }
 
@@ -94,7 +94,7 @@ async function makeTask(cs: CorpusService, plan: DocRecord): Promise<DocRecord> 
   } as CreateDocInput);
 }
 
-describe("plan-close with the prd_sync knob ON — the domain document is no longer consulted (BR-984)", () => {
+describe("plan-close with the cited_rule_check knob ON — the domain document is no longer consulted (BR-984)", () => {
   it("HAPPY: closes a plan whose linked domain doc was never edited (the former PRD_OUTLINE_NOT_SYNCED denial)", async () => {
     const { corpusService } = makeHarness(prdSyncConfig(true));
     const { featureSpec } = await makeLinkedAncestry(corpusService);

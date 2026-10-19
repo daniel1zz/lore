@@ -306,17 +306,17 @@ export const GateCheckpointConfigSchema = z
      */
     requires_uat: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
-     * `plan-close`-ONLY sub-predicate override (SPEC-080 §C4) — DEFAULT-OFF,
-     * the opposite polarity of every other sub-predicate key on this schema
-     * (`anchor_overlap`/`ac_quantifiable`/`oracle_coverage`/`requires_uat` all
-     * default ENABLED, an explicit `false` disables them). `prdOutlineSynced`
-     * instead requires an EXPLICIT `enabled: true` to run at all (SPEC-080
-     * Migration Plan Phase 0: "plan-close predicate behind default-OFF knob")
-     * — every pre-existing `.lore/config.yaml` (written before this field
-     * existed) stays byte-identical, and a corpus opts in only after its
-     * migration has landed enough domain docs to sync against.
+     * `plan-close`-ONLY switch for the cited-rule check (`citedRuleStateClean`, BR-984; BL-D3 /
+     * baseline-close-a-plan BR-226) — DEFAULT-OFF, the opposite polarity of every other sub-predicate
+     * key on this schema (`anchor_overlap`/`ac_quantifiable`/`oracle_coverage`/`requires_uat` default
+     * ENABLED, an explicit `false` disables them): the check runs only with an EXPLICIT `enabled: true`,
+     * so a corpus opts in once it has criteria citing rules worth checking.
+     *
+     * ⛔ This key was named `prd_sync` while it still switched the retired outline-sync predicate; it now
+     * switches something else, so the old name is no longer in this schema. {@link renamePrdSyncConfigKey}
+     * migrates a file that still carries it (once, loudly); {@link loadConfigFromString} refuses it by name.
      */
-    prd_sync: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    cited_rule_check: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
      * Corpus-write-level sub-predicate override (spec-corpus-resolution-carries-
      * provenance-and-a-foreign-write §D4) — `false` disables JUST the foreign-
@@ -1720,31 +1720,24 @@ export function resolveRequiresUatGateEnabled(config: LoreConfig | undefined): b
 }
 
 /**
- * Resolve whether `plan-close`'s `prdOutlineSynced` sub-predicate specifically is
- * enabled, per `workflow.gates."plan-close".prd_sync.enabled` (SPEC-080 §C4).
- * Narrower than {@link resolveGateEnabled}`(config, "plan-close")`, which governs
- * the WHOLE checkpoint (`prdOutlineSynced` AND `uatP0Accepted`/`attestationFloor`
- * together). Hardcoded to `"plan-close"` (mirrors {@link
- * resolveAnchorOverlapGateEnabled}'s single-checkpoint shape) — SPEC-080 wires
- * this predicate on exactly one checkpoint.
+ * Resolve whether `plan-close`'s cited-rule check (`citedRuleStateClean`, BR-984) is enabled, per
+ * `workflow.gates."plan-close".cited_rule_check.enabled` (BL-D3). THE one reader of that setting.
+ * Narrower than {@link resolveGateEnabled}`(config, "plan-close")`, which governs the WHOLE checkpoint.
  *
- * DELIBERATELY THE OPPOSITE DEFAULT of every sibling `resolve*GateEnabled`
- * function on this checkpoint family: absence of the whole config, the
- * `workflow` section, the `gates` map, the `"plan-close"` entry, OR the nested
- * `prd_sync` key ALL mean "disabled" — only an EXPLICIT `prd_sync.enabled: true`
- * turns this predicate on (SPEC-080 Migration Plan Phase 0: "plan-close
- * predicate behind default-OFF knob").
+ * DELIBERATELY THE OPPOSITE DEFAULT of every sibling `resolve*GateEnabled` function: absence of the
+ * config, the `workflow` section, the `gates` map, the `"plan-close"` entry, OR the `cited_rule_check`
+ * key ALL mean "disabled" — only an EXPLICIT `enabled: true` turns the check on.
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `true` iff `workflow.gates."plan-close".prd_sync.enabled === true`; `false` otherwise
+ * @returns `true` iff `workflow.gates."plan-close".cited_rule_check.enabled === true`; `false` otherwise
  * @example
- *   resolvePrdSyncGateEnabled(undefined) // => false
- *   resolvePrdSyncGateEnabled({
- *     project, workflow: { gates: { "plan-close": { prd_sync: { enabled: true } } } },
+ *   resolveCitedRuleCheckGateEnabled(undefined) // => false
+ *   resolveCitedRuleCheckGateEnabled({
+ *     project, workflow: { gates: { "plan-close": { cited_rule_check: { enabled: true } } } },
  *   }) // => true
  */
-export function resolvePrdSyncGateEnabled(config: LoreConfig | undefined): boolean {
-  return config?.workflow?.gates?.["plan-close"]?.prd_sync?.enabled === true;
+export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.gates?.["plan-close"]?.cited_rule_check?.enabled === true;
 }
 
 /**
@@ -2554,6 +2547,90 @@ export function parseConfig(raw: unknown): Result<LoreConfig, LoreError> {
   } satisfies LoreError);
 }
 
+/** The pre-BL-D3 name of `workflow.gates."plan-close".cited_rule_check` (borrowed from the retired outline-sync predicate). */
+const PRD_SYNC_KEY = "prd_sync";
+const CITED_RULE_CHECK_KEY = "cited_rule_check";
+
+function planCloseGateEntry(raw: unknown): Record<string, unknown> | undefined {
+  const at = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  const entry = at(at(at(raw, "workflow"), "gates"), "plan-close");
+  return typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Names the retired `prd_sync` key when a YAML-parsed config still carries it — the refusal
+ * {@link loadConfigFromString} returns (the pure parser never reads the old name; `loadConfig` migrates the file first).
+ *
+ * @returns a VALIDATION_ERROR payload naming both keys, or `undefined` when the old key is absent
+ */
+function detectPrdSyncConfigKey(raw: unknown): LoreError | undefined {
+  const entry = planCloseGateEntry(raw);
+  if (entry === undefined || !(PRD_SYNC_KEY in entry)) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: `workflow.gates."plan-close".${PRD_SYNC_KEY}`,
+    message:
+      `workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
+      "(it switches the cited-rule check, not outline sync); rename it in .lore/config.yaml, or load the file through loadConfig with a warning channel to migrate it once.",
+    value: entry[PRD_SYNC_KEY],
+  } satisfies LoreError;
+}
+
+/** What {@link renamePrdSyncConfigKey} did to a config text. */
+export interface PrdSyncConfigRename {
+  /** The config text with the key renamed (comments and every other byte of structure kept). */
+  readonly text: string;
+  /** The one named line to show the operator. */
+  readonly notice: string;
+}
+
+/**
+ * The ONE-TIME migration of `workflow.gates."plan-close".prd_sync` to `...cited_rule_check` (BL-D3):
+ * renames the key in the YAML document, keeping its value and every comment.
+ *
+ * @param yamlText - the raw config file text
+ * @returns `ok(undefined)` when the file does not carry the old key (nothing to migrate, never an error);
+ *   `ok({text, notice})` when it does; `err(VALIDATION_ERROR)` naming both keys when BOTH are present
+ *   (which one wins is the operator's decision, never a silent precedence) or when the YAML is malformed.
+ * @example
+ *   renamePrdSyncConfigKey("workflow:\n  gates:\n    plan-close:\n      prd_sync:\n        enabled: true\n");
+ *   // => ok({ text: "...cited_rule_check:...", notice: 'lore: workflow.gates."plan-close".prd_sync was renamed ...' })
+ */
+export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRename | undefined, LoreError> {
+  const doc = yaml.parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "yaml",
+      message: "Failed to parse YAML: malformed input",
+      value: yamlText,
+    } satisfies LoreError);
+  }
+  const entry = doc.getIn(["workflow", "gates", "plan-close"], true);
+  if (!yaml.isMap(entry)) return ok(undefined);
+  const pair = entry.items.find((item) => yaml.isScalar(item.key) && item.key.value === PRD_SYNC_KEY);
+  if (pair === undefined) return ok(undefined);
+  if (entry.has(CITED_RULE_CHECK_KEY)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: `workflow.gates."plan-close"`,
+      message:
+        `workflow.gates."plan-close" carries both ${PRD_SYNC_KEY} and ${CITED_RULE_CHECK_KEY}; ${PRD_SYNC_KEY} was renamed to ` +
+        `${CITED_RULE_CHECK_KEY}. Delete the one you do not want in .lore/config.yaml (nothing was rewritten).`,
+      value: yamlText,
+    } satisfies LoreError);
+  }
+  const enabled = entry.getIn([PRD_SYNC_KEY, "enabled"]);
+  (pair.key as { value: unknown }).value = CITED_RULE_CHECK_KEY;
+  return ok({
+    text: doc.toString(),
+    notice:
+      `lore: workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
+      `and this config was rewritten in place (enabled: ${String(enabled)} kept); the old name is no longer read.`,
+  });
+}
+
 /**
  * Parse a YAML string into LoreConfig.
  * Pure function — no filesystem access.
@@ -2584,6 +2661,9 @@ export function loadConfigFromString(
       value: yamlText,
     } satisfies LoreError);
   }
+
+  const renamed = detectPrdSyncConfigKey(parsed);
+  if (renamed !== undefined) return err(renamed);
 
   const result = parseConfig(parsed);
   if (result.ok && warn !== undefined) {

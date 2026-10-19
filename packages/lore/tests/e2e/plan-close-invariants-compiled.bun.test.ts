@@ -39,7 +39,7 @@
  *   - Plan B (sibling, same governing spec) claims the SAME AC id with only a
  *     self-reported `lore evidence` entry.
  *
- * Config: `workflow.gates."plan-close".prd_sync.enabled: true`, NO
+ * Config: `workflow.gates."plan-close".cited_rule_check.enabled: true`, NO
  * `workflow.attestation.min_ratio` declared at all (§D4's "absent -> null ->
  * the ratio conjunct never runs" default) — scenario B's control REWRITES the
  * config mid-suite to add an explicit floor, after scenario A has run —,
@@ -172,7 +172,7 @@ afterAll(() => {
 // ─── Corpus-building helpers ────────────────────────────────────────────────
 
 /**
- * Writes `.lore/config.yaml` — `prd_sync` ON, NO `workflow.attestation
+ * Writes `.lore/config.yaml` — `cited_rule_check` ON, NO `workflow.attestation
  * .min_ratio` key at all (§D4: absent means `resolveAttestationMinRatio` ===
  * null, the ratio conjunct never runs — the per-claimed-AC coverage conjunct
  * is the only thing this suite is proving), and
@@ -195,7 +195,7 @@ function writeConfig(dir: string): void {
     project: { name: "t5-pci12-compiled-e2e", author: "t5-tester" },
     workflow: {
       gates: {
-        "plan-close": { prd_sync: { enabled: true } },
+        "plan-close": { cited_rule_check: { enabled: true } },
         "task-create": { enabled: false },
       },
       review: { judgment_required_types: [] },
@@ -221,7 +221,7 @@ function writeConfigWithRatioFloor(dir: string, minRatio: number): void {
     project: { name: "t5-pci12-compiled-e2e", author: "t5-tester" },
     workflow: {
       gates: {
-        "plan-close": { prd_sync: { enabled: true } },
+        "plan-close": { cited_rule_check: { enabled: true } },
         "task-create": { enabled: false },
       },
       review: { judgment_required_types: [] },
@@ -377,7 +377,7 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     }
   });
 
-  it("compiled close — scenario A: an attested single-claimed-AC plan archives at exit 0 with prd_sync ON, and approve prints NO retired prd-sync advisory", async () => {
+  it("compiled close — scenario A: an attested single-claimed-AC plan archives at exit 0 with cited_rule_check ON, and approve prints NO retired prd-sync advisory", async () => {
     const planSlug = await createPlan(dir, specSlug, "T5 PCI-12 Plan A (clean close)");
     const taskSlug = await createTask(dir, planSlug, "T5 PCI-12 Task A");
 

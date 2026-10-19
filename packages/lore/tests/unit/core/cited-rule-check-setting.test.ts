@@ -8,7 +8,7 @@
  *   - both names present -> VALIDATION_ERROR naming both, file untouched (no silent precedence).
  *   - no `warn` channel to carry the notice -> VALIDATION_ERROR, file untouched (never a silent rewrite).
  *   - `loadConfigFromString` (pure) never reads the old name: VALIDATION_ERROR naming the new one.
- *   - the setting is read from ONE source: `resolveCitedRuleCheckEnabled`, consumed by
+ *   - the setting is read from ONE source: `resolveCitedRuleCheckGateEnabled`, consumed by
  *     `GateEnforcer.isCitedRuleCheckEnabled`.
  *
  * Coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION. Every `it()` title carries `D3-n`.
@@ -60,14 +60,14 @@ describe("the cited-rule check has a setting named for it (D3)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(lines).toEqual([]);
-    expect((core as Record<string, unknown>)["resolveCitedRuleCheckEnabled"]).toBeTypeOf("function");
-    const resolve = (core as unknown as { resolveCitedRuleCheckEnabled: (c: unknown) => boolean }).resolveCitedRuleCheckEnabled;
+    expect((core as Record<string, unknown>)["resolveCitedRuleCheckGateEnabled"]).toBeTypeOf("function");
+    const resolve = (core as unknown as { resolveCitedRuleCheckGateEnabled: (c: unknown) => boolean }).resolveCitedRuleCheckGateEnabled;
     expect(resolve(result.value)).toBe(true);
     expect(new GateEnforcer(result.value).isCitedRuleCheckEnabled()).toBe(true);
   });
 
   it("D3-2 BOUNDARY: absent or explicit false leaves the check off", () => {
-    const resolve = (core as unknown as { resolveCitedRuleCheckEnabled: (c: unknown) => boolean }).resolveCitedRuleCheckEnabled;
+    const resolve = (core as unknown as { resolveCitedRuleCheckGateEnabled: (c: unknown) => boolean }).resolveCitedRuleCheckGateEnabled;
     expect(resolve(undefined)).toBe(false);
     writeFileSync(configPath, OLD_YAML.replace("prd_sync", "cited_rule_check").replace("enabled: true", "enabled: false"));
     const { result } = loadCollecting();
@@ -83,7 +83,7 @@ describe("the cited-rule check has a setting named for it (D3)", () => {
     expect(rewritten).not.toContain("prd_sync");
     expect(rewritten).toContain("cited_rule_check:");
     expect(rewritten).toContain("# keep this comment");
-    const resolve = (core as unknown as { resolveCitedRuleCheckEnabled: (c: unknown) => boolean }).resolveCitedRuleCheckEnabled;
+    const resolve = (core as unknown as { resolveCitedRuleCheckGateEnabled: (c: unknown) => boolean }).resolveCitedRuleCheckGateEnabled;
     expect(first.result.ok && resolve(first.result.value)).toBe(true);
 
     const second = loadCollecting();

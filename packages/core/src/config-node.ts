@@ -41,6 +41,7 @@ import type { Result, LoreError } from "./errors.js";
 import {
   GlobalLoreConfigSchema,
   loadConfigFromString,
+  renamePrdSyncConfigKey,
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
@@ -56,11 +57,26 @@ const CONFIG_FILE = ".lore/config.yaml";
  * Load LoreConfig from <dir>/.lore/config.yaml.
  * Missing file or invalid content → {ok:false, error}. Never throws.
  * `warn`, when given, receives one line per retired key the file still carries (see `retiredConfigKeyNotices`).
+ *
+ * ONE-TIME MIGRATION (BL-D3): a file still carrying `workflow.gates."plan-close".prd_sync` is rewritten in place
+ * to `cited_rule_check` (atomic temp+rename; value and comments kept) and `warn` receives the named notice, once —
+ * the next load finds no old key. The notice is the only record of the rewrite, so WITHOUT a `warn` channel the
+ * file is NOT touched and the load fails by name (`loadConfigFromString`'s refusal), never a silent rewrite.
+ * Both names present is refused by `renamePrdSyncConfigKey`, file untouched.
  */
 export function loadConfig(dir: string, warn?: (line: string) => void): Result<LoreConfig, LoreError> {
   try {
     const configPath = join(dir, CONFIG_FILE);
-    const raw = readFileSync(configPath, "utf8");
+    let raw = readFileSync(configPath, "utf8");
+    const renamed = renamePrdSyncConfigKey(raw);
+    if (!renamed.ok) return renamed;
+    if (renamed.value !== undefined && warn !== undefined) {
+      const tempPath = `${configPath}.migrating-${process.pid}`;
+      writeFileSync(tempPath, renamed.value.text, "utf8");
+      renameSync(tempPath, configPath);
+      raw = renamed.value.text;
+      warn(renamed.value.notice);
+    }
     return loadConfigFromString(raw, warn);
   } catch (e) {
     const message =

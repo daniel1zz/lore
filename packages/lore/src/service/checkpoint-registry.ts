@@ -567,13 +567,13 @@ export interface GateContext {
   // -- plan-close: check() + feed() (BR-984, cited-rule state) --
   /**
    * Whether the cited-rule-state predicate (`citedRuleStateClean`) is enabled at all
-   * (`workflow.gates."plan-close".prd_sync.enabled`, resolved by the CALLER via
-   * `GateEnforcer.isPrdSyncEnabled` — module invariant: no config access here).
+   * (`workflow.gates."plan-close".cited_rule_check.enabled`, resolved by the CALLER via
+   * `GateEnforcer.isCitedRuleCheckEnabled` — module invariant: no config access here).
    * DEFAULT-OFF, the opposite polarity of every other per-predicate knob on this
    * checkpoint — `undefined`/`false` means the predicate never runs, regardless of
    * `citedRuleViolations`.
    */
-  readonly prdSyncEnabled?: boolean;
+  readonly citedRuleCheckEnabled?: boolean;
   /**
    * Pre-computed by the CALLER (`CorpusService.set`) from `RuleStateService.full()`: the rules cited
    * by the closing plan's spec criteria whose state is `contradicted`, or `stale` with no attested
@@ -1535,7 +1535,7 @@ const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
  *     by THIS predicate's own failure, independent of whatever
  *     `attestationFloor` itself concludes from the evidence.
  *   - `citedRuleStateClean` — OPT-IN, default-OFF (BR-984): only runs when
- *     `ctx.prdSyncEnabled === true` AND `ctx.citedRuleViolations !== undefined` (the
+ *     `ctx.citedRuleCheckEnabled === true` AND `ctx.citedRuleViolations !== undefined` (the
  *     latter is the caller's own "rule state was consulted for a spec-tier
  *     ancestor" signal — absent when no rule-state service is wired or the plan
  *     has no spec ancestor).
@@ -1639,7 +1639,7 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
       results.push({ notApplicable: true, reason: "referent-absent", referent: "planClaimedAcCoverage" });
     }
   }
-  if (ctx.prdSyncEnabled === true && ctx.citedRuleViolations !== undefined) {
+  if (ctx.citedRuleCheckEnabled === true && ctx.citedRuleViolations !== undefined) {
     results.push(citedRuleStateClean(ctx.citedRuleViolations));
   }
   if (ctx.assessmentFreshnessExempt !== true) {
