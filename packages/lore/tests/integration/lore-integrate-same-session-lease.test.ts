@@ -66,7 +66,7 @@ class Fixture {
     writeFileSync(join(this.repo, "base.txt"), "base\n");
     this.git(["add", "base.txt"]);
     this.git(["commit", "-q", "-m", "base"]);
-    const init = sh(this.repo, "bun", ["run", INDEX_TS, "init"], this.env());
+    const init = sh(this.repo, "bun", ["run", INDEX_TS, "init"], this.env("init"));
     if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
     appendFileSync(join(this.repo, ".git", "info", "exclude"), ".lore/\n.claude/\n");
     this.git(["checkout", "-q", "--detach", "main"]);
@@ -193,6 +193,27 @@ describe("a second integrate in the same session's integration worktree", () => 
     const b = await fx.integrate(next, "sess-seq").done;
 
     expect(b.exitCode, b.out).toBe(0);
+    expect(fx.git(["merge-base", "--is-ancestor", next, "main"])).toBe("");
+  }, 240_000);
+
+  it("takes its corpus snapshot over a stale lore.db-journal left by an interrupted earlier snapshot", async () => {
+    const fx = new Fixture();
+    writeFileSync(fx.release, "go\n");
+    const first = fx.makeBranch("seed-branch");
+    const next = fx.makeBranch("journal-branch");
+    const a = await fx.integrate(first, "sess-journal").done;
+    expect(a.exitCode, a.out).toBe(0);
+    const corpusDir = join(fx.integrationWorktree("sess-journal"), ".lore");
+    const stale = join(corpusDir, "lore.db-journal");
+    mkdirSync(corpusDir, { recursive: true });
+    writeFileSync(stale, Buffer.alloc(1024, 1));
+    writeFileSync(join(corpusDir, "lore.db.staging"), "half written");
+
+    const b = await fx.integrate(next, "sess-journal").done;
+
+    expect(b.exitCode, b.out).toBe(0);
+    expect(b.out).toMatch(/floor runs against a corpus snapshot taken/);
+    expect(existsSync(stale)).toBe(false);
     expect(fx.git(["merge-base", "--is-ancestor", next, "main"])).toBe("");
   }, 240_000);
 
