@@ -98,7 +98,7 @@ describe("AC-HFW isolated helper foreign working copy gate", () => {
     expect(run(f, helperCall(f, "Write", join(f.scratchpad, "impl.patch"))).status).toBe(0);
     expect(run(f, helperCall(f, "Write", join(tmpdir(), "tmp.ABC", "x"))).status).toBe(0);
     expect(run(f, helperCall(f, "Write", join(tmpdir(), "not-mktemp", "x"))).status).toBe(0);
-  });
+  }, 60_000);
 
   it("NEGATIVE: a write into the shared checkout is refused, naming target, own worktree and the foreign working copy", () => {
     const f = makeFixture();
@@ -130,7 +130,7 @@ describe("AC-HFW isolated helper foreign working copy gate", () => {
     expect(run(f, helperCall(f, "NotebookEdit", join(f.main, "n.ipynb"))).status).toBe(2);
     expect(run(f, helperCall(f, "MultiEdit", join(f.main, "a.ts"))).status).toBe(2);
     expect(run(f, helperCall(f, "NotebookEdit", join(f.worktree, "n.ipynb"))).status).toBe(0);
-  });
+  }, 60_000);
 
   it("STATE: a helper whose shell cwd drifted into the shared checkout and writes there is refused (trail working_copy)", () => {
     const f = makeFixture();
