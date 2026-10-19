@@ -230,9 +230,10 @@ export class RuleService {
     targets: readonly DocRecord[],
     operation: string,
     by?: string,
+    ownerProof?: readonly DocRecord[],
   ): Promise<Result<void, LoreError>> {
     if (this.writeAuthority === undefined) return ok(undefined);
-    const verdict = await this.writeAuthority.authorize(targets, operation, this.resolveActor(by));
+    const verdict = await this.writeAuthority.authorize(targets, operation, this.resolveActor(by), ownerProof);
     if (!verdict.ok) return verdict;
     return ok(undefined);
   }
@@ -557,6 +558,37 @@ export class RuleService {
   }
 
   /**
+   * The owner leaves that let an OWNED-BY-ONLY site-map change ride a lease scoped to them instead of to the mapped
+   * leaf: `undefined` unless the change is rows-only, every entry parses as `non-business:owned-by <L> ...`, and each
+   * `<L>` is a leaf that itself maps that site to a live rule of its own. Such a row only points coverage at `<L>`; it
+   * cannot add, change or retire another leaf's rules or rule mappings. The SCOPE check stays in the guard.
+   */
+  private async ownedByOwnerProof(change: SiteMapChange, mapped: DocRecord): Promise<Result<DocRecord[] | undefined, LoreError>> {
+    const sites = Object.entries(change.sites ?? {});
+    const hasOther = (change.removeSites ?? []).length + (change.addCommands ?? []).length + (change.removeCommands ?? []).length > 0;
+    if (hasOther || sites.length === 0 || this.writeAuthority === undefined) return ok(undefined);
+    const docs = await this.listBaselineDocs();
+    if (!docs.ok) return docs;
+    const ownerLeaves = buildOwnerLeafIndex(docs.value);
+    const byId = new Map(docs.value.map((d) => [d.id, d]));
+    const owners = new Map<string, DocRecord>();
+    for (const [site, entries] of sites) {
+      if (entries.length === 0) return ok(undefined);
+      for (const entry of entries) {
+        const owned = parseOwnedBy(entry);
+        if (owned.kind !== "owned_by" || !judgeOwnedBy(owned, ownerLeaves, mapped.id).ok) return ok(undefined);
+        const ownerId = ownerLeaves.get(owned.leaf)?.leafId;
+        const ownerDoc = ownerId === undefined ? undefined : byId.get(ownerId);
+        if (ownerId === undefined || ownerDoc === undefined) return ok(undefined);
+        const liveIds = ownerLeaves.get(owned.leaf)?.liveRuleIds ?? new Set<string>();
+        if (!(siteMapOf(ownerDoc)[site] ?? []).some((id) => liveIds.has(id))) return ok(undefined);
+        owners.set(ownerId, ownerDoc);
+      }
+    }
+    return ok([...owners.values()]);
+  }
+
+  /**
    * Edit a leaf's `site_map` (census site key -> rule ids | `non-business:<reason>`) and its
    * `commands` list — the ONLY writer of both keys (`lore baseline map`).
    *
@@ -580,7 +612,9 @@ export class RuleService {
     }
     const target = await this.resolveBaselineDoc(leaf, "leaf");
     if (!target.ok) return target;
-    const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by);
+    const proof = await this.ownedByOwnerProof(change, target.value);
+    if (!proof.ok) return proof;
+    const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by, proof.value);
     if (!gate.ok) return gate;
     // Only the sites SET in this call are judged (entries already stored are never re-validated at write time).
     let ownerLeaves: OwnerLeafIndex | undefined;
@@ -644,7 +678,7 @@ export class RuleService {
         summary: `site_map set ${Object.keys(sites).length} removed ${removeSites.length}; commands +${addCommands.length} -${removeCommands.length}`,
         details: { operation: "baseline-map", sites: Object.keys(sites), removeSites, addCommands, removeCommands },
       });
-    }, keepsApproval);
+    }, keepsApproval, proof.value);
   }
 
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
@@ -859,6 +893,7 @@ export class RuleService {
     actor: string,
     summary: string,
     details: Record<string, unknown>,
+    scopeProof?: readonly DocRecord[],
   ): Promise<Result<DocRecord, LoreError>> {
     const written = await this.writer.writeDoc({
       doc,
@@ -869,6 +904,7 @@ export class RuleService {
       auditDetails: details,
       lock: "none",
       by: actor,
+      ...(scopeProof !== undefined ? { scopeProof } : {}),
     });
     if (!written.ok) return written;
     return ok(written.value.doc);
@@ -880,6 +916,7 @@ export class RuleService {
     actor: string,
     mutate: (doc: DocRecord) => Mutation,
     keepsApproval = false,
+    scopeProof?: readonly DocRecord[],
   ): Promise<Result<DocRecord, LoreError>> {
     // reason: #297 — a mutation that leaves `extra` as stored is a no-op and must write NOTHING, not even the
     // approved->draft demotion that precedes a real edit. `mutate` is pure over the doc, and the demotion changes
@@ -895,7 +932,7 @@ export class RuleService {
       const issue = shape.error.issues[0];
       return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid baseline extra"));
     }
-    return this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details);
+    return this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details, scopeProof);
   }
 
   /** Re-read → mutate → commit, re-applying on STALE_VERSION up to {@link MAX_CAS_REAPPLIES} times. */
@@ -904,13 +941,14 @@ export class RuleService {
     by: string | undefined,
     mutate: (doc: DocRecord) => Mutation,
     keepsApproval = false,
+    scopeProof?: readonly DocRecord[],
   ): Promise<Result<DocRecord, LoreError>> {
     const actor = this.resolveActor(by);
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const fresh = await this.readLeaf(docId);
       if (!fresh.ok) return fresh;
-      const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval);
+      const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval, scopeProof);
       if (written.ok) return written;
       if (written.error.code !== "STALE_VERSION") return written;
       lastStale = written.error;
