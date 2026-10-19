@@ -10,7 +10,7 @@
  * wires onto the SAME `fileGithubIssue` (`report-issue-wiring.ts`) the CLI's
  * `commands/report-issue.ts` calls — one call site, never a second filing
  * path (this task's own bundle). Since GS-T7
- * (spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-15)
+ * (spec-github-owns-issue-report-state-no-mirror-task-work-carries D7)
  * filing creates no corpus task, so the success payload is the GitHub issue's
  * `{number, url}` and names no task slug.
  *
@@ -221,7 +221,7 @@ describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstr
     expect(result.isError).toBeUndefined();
     expect(payload["number"]).toBe(42);
     expect(payload["url"]).toBe("https://github.com/acme/widget/issues/42");
-    // AC-GS-15: GitHub owns the report — no corpus task exists to name.
+    // GS-T7: GitHub owns the report — no corpus task exists to name.
     for (const key of ["task_slug", "slug", "task_id"]) expect(Object.keys(payload)).not.toContain(key);
   });
 

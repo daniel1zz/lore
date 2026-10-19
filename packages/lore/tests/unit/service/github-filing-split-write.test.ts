@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-10
+ * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries D7 (GS-T7)
  *
  * `fileGithubIssue` NEVER writes the corpus. This file previously covered the
  * split-write honesty of the retired mint step (a corpus-write failure after a
@@ -94,7 +94,7 @@ function makeContext(corpusService: CorpusService): GithubFilingContext {
   };
 }
 
-describe("AC-GS-10: fileGithubIssue never writes the corpus", () => {
+describe("GS-T7: fileGithubIssue never writes the corpus", () => {
   it("HAPPY: a fresh filing returns the filed issue and calls no corpus write verb", async () => {
     const { service, writes } = makeCorpusService();
     const result = await fileGithubIssue(INPUT, CFG, makeContext(service));

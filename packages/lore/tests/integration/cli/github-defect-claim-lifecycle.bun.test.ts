@@ -181,9 +181,9 @@ afterAll(() => {
   }
 });
 
-describe("AC-GR-9 (retired by GS-T7 / AC-GS-10): filing alone creates NO corpus task", () => {
+describe("AC-GR-9 (retired by GS-T7): filing alone creates NO corpus task", () => {
   it(
-    "AC-GS-10: report-issue exits 0 against the stub gh and the formerly-derived task slug does not exist (claim exits 3)",
+    "GS-T7: report-issue exits 0 against the stub gh and the formerly-derived task slug does not exist (claim exits 3)",
     () => {
       const fileResult = run([
         "report-issue",
