@@ -40,9 +40,11 @@ export interface StepResult {
   readonly step: string;
   readonly exit: number;
   readonly seconds: number;
+  /** The step's combined stdout+stderr, when the runner captured it (a failed step's block is re-printed after the table). */
+  readonly output?: string;
 }
 
-export type StepRunner = (step: string) => { exit: number; seconds: number };
+export type StepRunner = (step: string) => { exit: number; seconds: number; output?: string };
 
 /** Run every step in order, never stopping at a failure. */
 export function runChain(steps: readonly string[], run: StepRunner): StepResult[] {
@@ -76,6 +78,45 @@ export function renderTable(results: readonly StepResult[], labels: ReadonlyMap<
   const failed = results.filter((r) => r.exit !== 0);
   const verdict = failed.length === 0 ? `run-chain: all ${results.length} steps passed` : `run-chain: ${failed.length} of ${results.length} steps FAILED: ${failed.map((r) => r.step).join("; ")}`;
   return ["", "=== run-chain: per-step exit table", ...rows, verdict].join("\n");
+}
+
+/** Per-failed-step bound of the re-printed block: the last lines, then the last characters (a failure names itself at the end). */
+export const FAILURE_BLOCK_MAX_LINES = 40;
+export const FAILURE_BLOCK_MAX_CHARS = 2500;
+
+/** Bound one failed step's output to its last lines/chars; the cut is never silent (a leading "... N lines omitted" marker). */
+export function boundFailureOutput(output: string): string {
+  const lines = output.replace(/\s+$/, "").split("\n");
+  let keep = lines.slice(-FAILURE_BLOCK_MAX_LINES);
+  while (keep.length > 1 && keep.join("\n").length > FAILURE_BLOCK_MAX_CHARS) keep = keep.slice(1);
+  let body = keep.join("\n");
+  let cutChars = 0;
+  if (body.length > FAILURE_BLOCK_MAX_CHARS) {
+    cutChars = body.length - FAILURE_BLOCK_MAX_CHARS;
+    body = body.slice(-FAILURE_BLOCK_MAX_CHARS);
+  }
+  const omitted = lines.length - keep.length;
+  const markers = [omitted > 0 ? `... ${omitted} lines omitted` : "", cutChars > 0 ? `... ${cutChars} chars omitted from the first kept line` : ""].filter((m) => m !== "");
+  return [...markers, body].join("\n");
+}
+
+/**
+ * The failed steps' own output, re-printed AFTER the exit table so the tail of a long chain output always ends with what
+ * to fix (a consumer keeping only the tail, such as `lore integrate`, would otherwise lose an early failing step).
+ * Empty string when no failed step captured output.
+ */
+export function renderFailureBlocks(results: readonly StepResult[]): string {
+  const blocks = results
+    .filter((r) => r.exit !== 0 && r.output !== undefined && r.output.trim() !== "")
+    .map((r) => `\n=== run-chain: FAILED step output (exit ${r.exit}): ${r.step}\n${boundFailureOutput(r.output as string)}`);
+  return blocks.join("\n");
+}
+
+/** Print the exit table, then the failed steps' own output (the last thing a chain prints). */
+function report(results: readonly StepResult[], labels?: ReadonlyMap<string, string>): void {
+  console.log(renderTable(results, labels));
+  const failures = renderFailureBlocks(results);
+  if (failures !== "") console.log(failures);
 }
 
 /**
@@ -117,7 +158,7 @@ export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnS
   if (scripts === undefined) throw new Error(`check:static: ${packageJsonPath} has no scripts`);
   const { steps, labels } = deriveStaticSteps(scripts);
   const results = runChain(steps, run);
-  console.log(renderTable(results, labels));
+  report(results, labels);
   emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
@@ -141,28 +182,31 @@ export function runFloor(packageJsonPath: string, run: StepRunner = spawnStep): 
   const scripts = (parsed as { scripts?: Record<string, string> }).scripts;
   if (scripts === undefined) throw new Error(`check:floor: ${packageJsonPath} has no scripts`);
   const results = runChain(deriveFloorSteps(scripts), run);
-  console.log(renderTable(results));
+  report(results);
   emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
 
-function spawnStep(step: string): { exit: number; seconds: number } {
+function spawnStep(step: string): { exit: number; seconds: number; output: string } {
   console.log(`\n=== run-chain: ${step}`);
   const t0 = Date.now();
-  const r = spawnSync("sh", ["-c", step], { cwd: ROOT, stdio: "inherit" });
+  // stderr is merged into stdout inside the shell so the captured stream keeps terminal order; printed once the step ends
+  const r = spawnSync("sh", ["-c", `exec 2>&1; ${step}`], { cwd: ROOT, stdio: ["inherit", "pipe", "inherit"], encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const seconds = (Date.now() - t0) / 1000;
+  const output = r.stdout ?? "";
+  process.stdout.write(output);
   if (r.error !== undefined) {
     console.error(`run-chain: step failed to start: ${step}: ${r.error.message}`);
-    return { exit: 127, seconds };
+    return { exit: 127, seconds, output };
   }
   // a step killed by a signal has status null: that is a failure, never a pass
-  return { exit: r.status ?? 128, seconds };
+  return { exit: r.status ?? 128, seconds, output };
 }
 
 export function main(argv: readonly string[], run: StepRunner = spawnStep): number {
   const steps = argv.length === 0 ? DEFAULT_STEPS : argv;
   const results = runChain(steps, run);
-  console.log(renderTable(results));
+  report(results);
   emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
