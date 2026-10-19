@@ -30,7 +30,9 @@
  * corpus (it resolves the repo root via `findLoreDbPath()`, the SAME walk
  * every ordinary corpus command uses) — but it never calls `loadLoreApp()`
  * or touches the corpus DB (SPEC's own "No store/DB dependency anywhere in
- * the context path" module-boundary invariant). Config (`.lore/config.yaml`)
+ * the context path" module-boundary invariant) — with ONE deliberate exception: `refresh` (project scope)
+ * lazily reads the architecture module cards (`loadModuleCardRefs`) so every module memory file can name its
+ * card; the flow itself receives them as plain data and stays store-free. Config (`.lore/config.yaml`)
  * is read directly via `@lore/core/node`'s `loadConfig`, ONCE per invocation
  * (both topics — `refresh` included, not just `init`): for `init`'s own
  * `ai.*` section `--ai` orchestration needs, AND (AC-CTX-8) to resolve the
@@ -94,7 +96,7 @@ import { invocationOf } from "../command-invocation.js";
 import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
-import { collectContextFacts } from "../../../service/context-facts.js";
+import { collectContextFacts, extractModuleCardRefs, type ModuleCardRef } from "../../../service/context-facts.js";
 import {
   CLAUDE_MD_PATH,
   checkInitAllowed,
@@ -127,6 +129,26 @@ type ContextTopic = "init" | "refresh" | "list" | "add" | "remove";
 const KNOWN_TOPICS: readonly ContextTopic[] = ["init", "refresh", "list", "add", "remove"];
 /** Topics that take `--scope`. */
 const SCOPED_TOPICS: readonly ContextTopic[] = ["refresh", "add", "remove"];
+
+/**
+ * Reads the architecture module cards of the corpus for `refresh`'s card-link pass. The ONE place the context
+ * path touches the corpus DB: the flow itself stays store-free, and the loader is imported lazily so `init`,
+ * `list`, `add` and `remove` (and vitest suites that never refresh) never load `bun:sqlite`.
+ *
+ * @returns `ok([])` for a corpus with no module cards (no link lines, no error); `err` on a store failure or
+ *   an ambiguous card pair.
+ */
+async function loadModuleCardRefs(inv: Invocation): Promise<Result<ModuleCardRef[], LoreError>> {
+  const { loadLoreApp } = await import("../loader.js");
+  const { app } = loadLoreApp({ inv });
+  try {
+    const listed = await app.corpusService.listFull({ type: "baseline" });
+    if (!listed.ok) return listed;
+    return extractModuleCardRefs(listed.value.docs);
+  } finally {
+    app.close();
+  }
+}
 
 /** `--scope` values accepted by `refresh` (spec-context-fragments D4/D15): the repo (CLAUDE.md + `.claude/rules/lore-*.md`) or `~/.claude/rules/lore-*.md`. */
 const KNOWN_SCOPES: readonly ContextRefreshScope[] = ["project", "user"];
@@ -385,6 +407,11 @@ function renderOutcome(inv: Invocation,
       printLine(inv.io.stdout, `  ${rule.path}: ${rule.state}`);
     }
   }
+  if ("moduleCards" in result.value) {
+    for (const link of result.value.moduleCards) {
+      if (link.state !== "unchanged") printLine(inv.io.stdout, `  ${link.path}: architecture card ${link.state}`);
+    }
+  }
   return 0;
 }
 
@@ -620,7 +647,18 @@ export default defineLoreCommand({
     if (topic === "refresh") {
       const fragmentDeps = buildFragmentDeps();
       if (!fragmentDeps.ok) return reportFailure(inv, fragmentDeps.error);
-      const result = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope, check: args.check === true });
+      // reason: only the project scope owns module memory files; user scope never reads the corpus.
+      let moduleCards: ModuleCardRef[] | undefined;
+      if (scope === "project") {
+        const cards = await loadModuleCardRefs(inv);
+        if (!cards.ok) return reportFailure(inv, cards.error);
+        moduleCards = cards.value;
+      }
+      const result = await runContextRefresh(
+        { fs: fsPort, budgets, ...fragmentDeps.value, ...(moduleCards === undefined ? {} : { moduleCards }) },
+        "",
+        { scope, check: args.check === true },
+      );
       const outcomeExit = renderOutcome(inv, json, result);
       // reason: --json prints the report (incl. `check`) and returns before the plain-text exit mapping, so the
       // exit-1 contract for a drifted/over-ceiling --check is applied here for both output modes.

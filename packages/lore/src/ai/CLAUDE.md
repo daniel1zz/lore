@@ -1,5 +1,7 @@
 # Module: ai
 
+Architecture card: `baseline-module-card-ai`
+
 ## Purpose
 
 Runtime AI provider implementations, registry builder, template engine, assess/review judge prompt builders, AI-default resolution, and in-memory test double. Wires the `AIProvider` interface (defined type-only in `@lore/core`) to concrete spawn-based execution.

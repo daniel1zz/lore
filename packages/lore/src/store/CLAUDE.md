@@ -1,5 +1,7 @@
 # Module: store
 
+Architecture card: `baseline-module-card-store`
+
 ## Purpose
 
 Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape. Services depend on this one contract, never on a concrete store:

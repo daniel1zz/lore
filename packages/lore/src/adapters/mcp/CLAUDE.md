@@ -1,5 +1,7 @@
 # Module: adapters/mcp
 
+Architecture card: `baseline-module-card-mcp-adapter`
+
 ## Purpose
 
 MCP stdio server adapter: `lore_*` tools and fast-path registration. Entered via `lore --mcp-server`
