@@ -143,7 +143,7 @@ describe("AC-CV-3 invocation variables are refused at every fragment outlet", ()
 
 const ROOT_CLAUDE_MD =
   "# P\n\n" +
-  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+  ["What This Is", "Commands", "Architecture"]
     .map((heading) => `## ${heading}\n\nshort\n`)
     .join("\n");
 

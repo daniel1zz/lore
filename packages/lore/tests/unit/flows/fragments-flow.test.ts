@@ -60,7 +60,7 @@ const RULES_DIR = "/p/.claude/rules";
  * `.lore/context`) and returns the rules files it wrote, keyed by this file's absolute path.
  */
 async function renderedRules(files: Record<string, string>): Promise<Record<string, string>> {
-  const rel: Record<string, string> = { "CLAUDE.md": "# Narrative\n" };
+  const rel: Record<string, string> = { "CLAUDE.md": "# Narrative\n\n## What This Is\n\nx\n\n## Commands\n\nx\n\n## Architecture\n\nx\n" };
   for (const [path, content] of Object.entries(files)) {
     if (path.startsWith("/a/context/")) rel[`assets/context/${path.slice("/a/context/".length)}`] = content;
     else if (path.startsWith("/p/.lore/context/")) rel[`.lore/context/${path.slice("/p/.lore/context/".length)}`] = content;
