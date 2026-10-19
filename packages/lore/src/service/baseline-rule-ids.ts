@@ -42,6 +42,6 @@ export function findUnregisteredRuleIds(
 ): UnregisteredRule[] {
   const registered = new Set(registry.map((row) => row.id));
   return leaves.flatMap((leaf) =>
-    ruleIdsOf(leaf).filter((ruleId) => !registered.has(ruleId)).map((ruleId) => ({ ruleId, leafId: leaf.id })),
+    approvedRuleIdsOf(leaf).filter((ruleId) => !registered.has(ruleId)).map((ruleId) => ({ ruleId, leafId: leaf.id })),
   );
 }
