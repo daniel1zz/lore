@@ -91,6 +91,12 @@ export interface FragmentsFlowDeps {
   readonly projectClaudeMdPath: string;
   /** Absolute path of the shipped agents directory (`<assetsRoot>/agents`). */
   readonly agentsDir: string;
+  /** Absolute path of the user-scope agents directory (`<claude dir>/agents`); its `*.md` names are agent types too. */
+  readonly userAgentsDir: string;
+  /** Absolute path of the project agents directory (`<project>/.claude/agents`); its `*.md` names are agent types too. */
+  readonly projectAgentsDir: string;
+  /** Absolute path of the user-scope rules directory (`<claude dir>/rules`), where `lore context refresh --scope user` writes `lore-*.md`. */
+  readonly userRulesDir: string;
   readonly userSettings: LanguageSettingsTarget;
   readonly projectSettings: LanguageSettingsTarget;
   /**
@@ -236,25 +242,25 @@ export interface RulesDrift {
   readonly files: readonly { readonly fileName: string; readonly reason: "missing" | "changed" | "extra" }[];
 }
 
+/** Where one rules scope lives and which outlet renders it. */
+interface RulesScopeTarget {
+  readonly outlet: "rules:project" | "rules:user";
+  readonly dir: string;
+  /** Whether a scope with no lore rules file yet is already under `lore context` management. */
+  readonly isAdopted: (present: readonly string[], selected: readonly Fragment[]) => Promise<boolean>;
+}
+
 /**
- * Compare the project's `lore-*.md` rules files against a fresh `rules:project` render: a winning
+ * Compare a scope's `lore-*.md` rules files against a fresh render of its outlet: a winning
  * static main fragment whose file is missing or differs is drift, and so is a `lore-*.md` file for
  * a fragment that is no longer selected. Non-`lore-` files are never consulted.
  */
-async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fragment[]): Promise<FlowResult<RulesDrift>> {
-  const selected = selectSafely(all, deps, "rules:project", undefined);
+async function detectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fragment[], target: RulesScopeTarget): Promise<FlowResult<RulesDrift>> {
+  const selected = selectSafely(all, deps, target.outlet, undefined);
   if (!selected.ok) return selected;
 
-  const present = (await deps.fs.listDir(projectRulesDir(deps))).filter(isLoreRulesFileName).sort();
-  // reason: a project that was never put under `lore context` management (no CLAUDE.md, no lore rules
-  // file yet) has nothing to be stale against - the same "no CLAUDE.md is not drift" rule the old Z1
-  // check had - so the SHIPPED-only baseline of a fresh `lore init` stays clean (AC-CF-4 e2e control).
-  // A project- or user-layer static fragment is explicit local intent, so its missing file is always drift.
-  const adopted =
-    present.length > 0 ||
-    (await deps.fs.exists(deps.projectClaudeMdPath)) ||
-    selected.value.some((fragment) => fragment.layer !== "shipped");
-  if (!adopted) return { ok: true, value: { drifted: false, files: [] } };
+  const present = (await deps.fs.listDir(target.dir)).filter(isLoreRulesFileName).sort();
+  if (!(await target.isAdopted(present, selected.value))) return { ok: true, value: { drifted: false, files: [] } };
 
   const files: { fileName: string; reason: "missing" | "changed" | "extra" }[] = [];
   const expectedNames = new Set<string>();
@@ -263,7 +269,7 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
     const rendered = renderRulesFile(fragment);
     if (!rendered.ok) return { ok: false, error: { code: "VALIDATION_ERROR", message: rendered.error.message } };
     expectedNames.add(rendered.value.fileName);
-    const stored = await deps.fs.readFile(`${projectRulesDir(deps)}/${rendered.value.fileName}`);
+    const stored = await deps.fs.readFile(`${target.dir}/${rendered.value.fileName}`);
     if (stored === null) {
       files.push({ fileName: rendered.value.fileName, reason: "missing" });
     } else if (stored !== rendered.value.content) {
@@ -276,6 +282,33 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
   }
 
   return { ok: true, value: { drifted: files.length > 0, files } };
+}
+
+/** The project scope's drift target (`rules:project` -> `<project>/.claude/rules`). */
+function projectRulesTarget(deps: FragmentsFlowDeps): RulesScopeTarget {
+  return {
+    outlet: "rules:project",
+    dir: projectRulesDir(deps),
+    // reason: a project that was never put under `lore context` management (no CLAUDE.md, no lore rules
+    // file yet) has nothing to be stale against - the same "no CLAUDE.md is not drift" rule the old Z1
+    // check had - so the SHIPPED-only baseline of a fresh `lore init` stays clean (AC-CF-4 e2e control).
+    // A project- or user-layer static fragment is explicit local intent, so its missing file is always drift.
+    isAdopted: async (present, selected) =>
+      present.length > 0 || (await deps.fs.exists(deps.projectClaudeMdPath)) || selected.some((fragment) => fragment.layer !== "shipped"),
+  };
+}
+
+/**
+ * The user scope's drift target (`rules:user` -> `<claude dir>/rules`, DC2-27). Only user-layer
+ * fragments reach this outlet, and a user-layer fragment is explicit local intent, so any selected
+ * fragment or existing lore file means the scope is managed; an untouched home stays clean.
+ */
+function userRulesTarget(deps: FragmentsFlowDeps): RulesScopeTarget {
+  return {
+    outlet: "rules:user",
+    dir: deps.userRulesDir,
+    isAdopted: async (present, selected) => present.length > 0 || selected.length > 0,
+  };
 }
 
 /** One drifted project skill directory (`lore-<id>` + why), for `check` findings. */
@@ -346,7 +379,7 @@ export interface ExplainRow {
 }
 
 export interface FragmentsRenderOptions {
-  readonly outlet: HookOutlet;
+  readonly outlet: OutletId;
   readonly agentType?: string;
 }
 
@@ -435,12 +468,28 @@ const CHECK_OUTLETS: readonly OutletId[] = ["rules:project", "rules:user", "hook
 
 const SettingsLanguageSchema = z.object({ language: z.string().optional() }).passthrough();
 
-async function enumerateAgentTypes(deps: FragmentsFlowDeps): Promise<string[]> {
-  const names = (await deps.fs.listDir(deps.agentsDir))
-    .filter((name) => name.endsWith(".md"))
-    .map((name) => name.slice(0, -".md".length))
-    .sort();
-  return [...names, WILDCARD_AGENT_TYPE];
+/** Names of the `*.md` agent files in `dir` (a missing directory lists as empty). */
+async function listAgentNames(deps: FragmentsFlowDeps, dir: string): Promise<string[]> {
+  return (await deps.fs.listDir(dir)).filter((name) => name.endsWith(".md")).map((name) => name.slice(0, -".md".length));
+}
+
+/**
+ * Every agent type a `hook:subagent-start` render can be asked for (DC2-27): shipped, user-scope and
+ * project agent files, plus each `subagent:<type>` audience a fragment names, then `subagent:*`.
+ */
+async function enumerateAgentTypes(deps: FragmentsFlowDeps, fragments: readonly Fragment[]): Promise<string[]> {
+  const names = new Set<string>();
+  for (const dir of [deps.agentsDir, deps.userAgentsDir, deps.projectAgentsDir]) {
+    for (const name of await listAgentNames(deps, dir)) names.add(name);
+  }
+  for (const fragment of fragments) {
+    for (const audience of fragment.frontmatter.audience) {
+      if (!audience.startsWith("subagent:")) continue;
+      const type = audience.slice("subagent:".length);
+      if (type !== "*" && type !== "") names.add(type);
+    }
+  }
+  return [...[...names].sort(), WILDCARD_AGENT_TYPE];
 }
 
 async function checkLanguageDrift(deps: FragmentsFlowDeps): Promise<CheckFinding[]> {
@@ -583,16 +632,16 @@ export async function runFragmentsCheck(rawDeps: FragmentsFlowDeps): Promise<Fra
   for (const problem of applied.problems) {
     findings.push({ kind: problem.kind, code: "VALIDATION_ERROR", message: problem.message });
   }
-  const agentTypes = await enumerateAgentTypes(deps);
+  const discovered = await discoverAllLayers(deps);
+  const agentTypes = await enumerateAgentTypes(deps, discovered.ok ? discovered.value : []);
   if (agentTypes.length <= 1) {
     findings.push({
       kind: "no_agent_types",
       code: "VALIDATION_ERROR",
-      message: `no agent files found in ${deps.agentsDir}; the agent-type set to check is empty`,
+      message: `no agent files found in ${deps.agentsDir}, ${deps.userAgentsDir} or ${deps.projectAgentsDir}, and no fragment names a subagent audience; the agent-type set to check is empty`,
     });
   }
 
-  const discovered = await discoverAllLayers(deps);
   if (!discovered.ok) {
     findings.push({ kind: "discovery", ...discovered.error });
   } else {
@@ -644,17 +693,19 @@ export async function runFragmentsCheck(rawDeps: FragmentsFlowDeps): Promise<Fra
 
     findings.push(...checkDuplicateLines([{ group: "main", fragments: mainFragments }, ...helperGroups]));
 
-    const drift = await detectProjectRulesDrift(deps, all);
-    if (!drift.ok) {
-      findings.push({ kind: "rules_drift", ...drift.error });
-    } else {
+    for (const target of [projectRulesTarget(deps), userRulesTarget(deps)]) {
+      const drift = await detectRulesDrift(deps, all, target);
+      if (!drift.ok) {
+        findings.push({ kind: "rules_drift", ...drift.error });
+        continue;
+      }
       for (const file of drift.value.files) {
         findings.push({
           kind: "rules_drift",
           code: "VALIDATION_ERROR",
           message:
-            `${projectRulesDir(deps)}/${file.fileName}: lore rules file is ${file.reason} versus a fresh render` +
-            ". Run `lore context refresh`.",
+            `${target.dir}/${file.fileName}: lore rules file is ${file.reason} versus a fresh render` +
+            (target.outlet === "rules:user" ? ". Run `lore context refresh --scope user`." : ". Run `lore context refresh`."),
         });
       }
     }
