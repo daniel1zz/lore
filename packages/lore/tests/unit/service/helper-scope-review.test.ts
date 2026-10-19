@@ -25,7 +25,7 @@ const BASE = "b".repeat(40);
 
 type Claims = Record<string, Array<{ slug: string; anchors: string[] }>>;
 
-function helper(agent: string, over: { files?: string[]; workingCopy?: string; judged?: number; base?: string } = {}): TrailHelper {
+function helper(agent: string, over: { files?: string[]; workingCopy?: string; judged?: number; base?: string; head?: string | "none" } = {}): TrailHelper {
   const run = `cc:${SESSION}:${agent}`;
   return {
     agent_id: agent,
@@ -36,6 +36,7 @@ function helper(agent: string, over: { files?: string[]; workingCopy?: string; j
     judged_end_count: over.judged ?? 0,
     working_copy: over.workingCopy ?? WC,
     isolated: true,
+    ...(over.head === undefined || over.head === "none" ? {} : { head: { measured: true, value: { commit: over.head, branch: "b" } } }),
     changes: {
       measured: true,
       value: { base: over.base ?? BASE, files: (over.files ?? []).map((path) => ({ path, status: "M" as const, lines: 1, source: { kind: "run" as const, run } })) },
@@ -357,6 +358,7 @@ describe("a helper whose working copy was removed after landing (task-skill-fix-
   writeFileSync(join(repo, "src/a.ts"), "a\n");
   sh("add", ".");
   sh("commit", "-q", "-m", "work");
+  const mergedHead = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).stdout.trim();
   sh("checkout", "-q", "main");
   sh("merge", "-q", "--no-ff", MERGED, "-m", `merge(${MERGED})`);
   sh("branch", "-d", MERGED);
@@ -364,13 +366,14 @@ describe("a helper whose working copy was removed after landing (task-skill-fix-
   writeFileSync(join(repo, "src/b.ts"), "b\n");
   sh("add", ".");
   sh("commit", "-q", "-m", "unlanded");
+  const unmergedHead = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).stdout.trim();
   sh("checkout", "-q", "main");
   afterAll(() => rmSync(repo, { recursive: true, force: true }));
 
   const claim: Claims = { parent: [{ slug: "task-x", anchors: ["src/"] }] };
-  const run = (agentDir: string, files: string[]) =>
+  const run = (agentDir: string, files: string[], head: string | "none") =>
     reviewHelperScope({
-      trail: trailOf([helper("parent", { files, workingCopy: join(repo, "..", agentDir) })]),
+      trail: trailOf([helper("parent", { files, head, workingCopy: join(repo, "..", agentDir) })]),
       claimedTasks: claims(claim),
       openClaimsOfWorkingCopy: openClaimsOf({}),
       projectRoot: repo,
@@ -387,7 +390,7 @@ describe("a helper whose working copy was removed after landing (task-skill-fix-
     });
 
   it("AC-1 removed copy, branch merged: an ignored .scratch edit is no finding, a tracked out-of-anchor edit still is", async () => {
-    const out = await run("agent-merged1", [".scratch/patch.py", "src/a.ts", "other/tracked.ts"]);
+    const out = await run("agent-merged1", [".scratch/patch.py", "src/a.ts", "other/tracked.ts"], mergedHead);
     expect(out.not_measured).toEqual([]);
     expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["other/tracked.ts"]]]);
     expect(out.notes.join("\n")).toContain("after landing");
@@ -396,7 +399,7 @@ describe("a helper whose working copy was removed after landing (task-skill-fix-
   it("AC-1 control: a tracked path matching an ignore rule is still judged (never treated as ignored)", async () => {
     writeFileSync(join(repo, ".gitignore"), ".scratch/\nother/\n");
     try {
-      const out = await run("agent-merged1", ["other/tracked.ts"]);
+      const out = await run("agent-merged1", ["other/tracked.ts"], mergedHead);
       expect(out.findings.map((f) => f.files)).toEqual([["other/tracked.ts"]]);
     } finally {
       writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
@@ -404,17 +407,19 @@ describe("a helper whose working copy was removed after landing (task-skill-fix-
   });
 
   it("AC-2 removed copy, branch unmerged: ONE not-measured line per helper naming \"working copy removed\", paths stay judged", async () => {
-    const out = await run("agent-unmerged1", [".scratch/patch.py", "other/x.ts"]);
+    const out = await run("agent-unmerged1", [".scratch/patch.py", "other/x.ts"], unmergedHead);
     expect(out.not_measured).toHaveLength(1);
     expect(out.not_measured[0]).toContain("working copy removed");
+    expect(out.not_measured[0]).toContain("is not on main");
     expect(out.not_measured[0]).not.toContain("undefined");
     expect(out.findings.map((f) => f.files)).toEqual([[".scratch/patch.py", "other/x.ts"]]);
   });
 
-  it("AC-2 a removed copy with no branch at all cannot show landing: not measured, never assumed landed", async () => {
-    const out = await run("agent-neverexisted", [".scratch/patch.py"]);
+  it("AC-2 a record without a head cannot show landing: the named not-measured line, never assumed landed", async () => {
+    const out = await run("agent-nohead", [".scratch/patch.py"], "none");
     expect(out.not_measured).toHaveLength(1);
     expect(out.not_measured[0]).toContain("working copy removed");
+    expect(out.not_measured[0]).toContain("landing not shown: helper record has no head");
     expect(out.findings.map((f) => f.kind)).toEqual(["outside-anchors"]);
   });
 

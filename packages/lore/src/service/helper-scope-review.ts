@@ -45,7 +45,7 @@
  *   input path, is reported in `not_measured` naming the paths, and those paths stay judged (never treated as
  *   ignored). Only an absent `ignoreProbe` skips the filter (unit fixtures with fake working copies).
  * @invariant A helper whose working copy no longer exists (removed after landing) cannot host the probe. If its
- *   landing is shown (`landing` port), ignore rules are read from the repository root (`ignoreProbeAtRoot`,
+ *   landing is shown (its RECORDED head commit is an ancestor of main, `landing` port), ignore rules are read from the repository root (`ignoreProbeAtRoot`,
  *   repo-relative, a tracked path never ignored) and a note says so; otherwise ONE `not_measured` line per helper
  *   names "working copy removed" and every path stays judged. A spawn error's message is carried verbatim.
  * @invariant Findings, per helper and kind (one finding lists every file of that kind): a file outside the
@@ -56,7 +56,7 @@
  *   part is reported in `not_measured`, never as "changed nothing".
  */
 import { spawnSync } from "node:child_process";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { anchorsOverlap, err, ok, type CoChangeRule, type LoreError, type Result } from "@lore/core";
 import type { SessionTrail, TrailHelper } from "@lore/core/node";
 import type { OpenClaimsOfWorkingCopy, RunClaimedTask } from "./run-service.js";
@@ -125,32 +125,20 @@ export function spawnGitCheckIgnoreAtRoot(root: string): IgnoreProbeFn {
 /** Outcome of asking whether a removed working copy's work reached the integration branch. */
 export type LandingVerdict = { readonly landed: true; readonly evidence: string } | { readonly landed: false; readonly reason: string };
 
-/** Shows (or fails to show) that the work of the removed working copy `workingCopy` is on the integration branch. */
-export type LandingProbeFn = (workingCopy: string) => LandingVerdict;
+/** Shows (or fails to show) that the recorded head commit of a removed working copy is on the integration branch. */
+export type LandingProbeFn = (headCommit: string) => LandingVerdict;
 
 /**
- * The real {@link LandingProbeFn}. The helper record carries no branch or head, only the working copy directory, and
- * `lore worktree sweep --apply` deletes the branch (`git branch -d`, merged only) with the worktree. The branch of an
- * agent worktree is `worktree-<directory name>` (the harness's naming); landing is shown when that branch still
- * exists and is an ancestor of `main`, or is gone and `main` holds a commit whose message names it (its merge
- * commit). Anything else is "cannot be shown", never assumed.
+ * The real {@link LandingProbeFn}: landing is shown exactly when the helper record's head commit is an ancestor of
+ * `integrationBranch` (`git merge-base --is-ancestor`, run at the repository root). Nothing is inferred from names.
  */
 export function spawnGitLanding(root: string, integrationBranch = "main"): LandingProbeFn {
-  const run = (args: string[]) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
-  return (workingCopy) => {
-    const branch = `worktree-${basename(workingCopy)}`;
-    const exists = run(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
-    if (exists.error !== undefined) return { landed: false, reason: `git could not run: ${exists.error.message}` };
-    if (exists.status === 0) {
-      const ancestor = run(["merge-base", "--is-ancestor", `refs/heads/${branch}`, integrationBranch]);
-      if (ancestor.status === 0) return { landed: true, evidence: `branch ${branch} is merged into ${integrationBranch}` };
-      return { landed: false, reason: `branch ${branch} is not merged into ${integrationBranch}` };
-    }
-    const named = run(["log", integrationBranch, "--fixed-strings", `--grep=${branch}`, "-1", "--format=%H"]);
-    if (named.status === 0 && (named.stdout ?? "").trim() !== "") {
-      return { landed: true, evidence: `branch ${branch} is gone and ${integrationBranch} holds ${(named.stdout ?? "").trim().slice(0, 12)} naming it` };
-    }
-    return { landed: false, reason: `no branch ${branch} and no commit on ${integrationBranch} names it` };
+  return (headCommit) => {
+    const run = spawnSync("git", ["merge-base", "--is-ancestor", headCommit, integrationBranch], { cwd: root, encoding: "utf8" });
+    if (run.error !== undefined) return { landed: false, reason: `git could not run: ${run.error.message}` };
+    if (run.status === 0) return { landed: true, evidence: `head ${headCommit.slice(0, 12)} is an ancestor of ${integrationBranch}` };
+    if (run.status === 1) return { landed: false, reason: `head ${headCommit.slice(0, 12)} is not on ${integrationBranch}` };
+    return { landed: false, reason: `git merge-base exited ${String(run.status)}: ${(run.stderr ?? "").trim().split("\n")[0] ?? ""}` };
   };
 }
 
@@ -299,6 +287,14 @@ function sharesIsolatedCopy(mate: TrailHelper, helper: TrailHelper, workingCopy:
   return canonicalPath(mate.working_copy, realpath) === workingCopy;
 }
 
+/** Landing of a helper from its RECORDED head: no record of a head means landing is not shown, never guessed. */
+function landingOf(helper: TrailHelper, probe: LandingProbeFn | undefined): LandingVerdict {
+  if (helper.head === undefined) return { landed: false, reason: "landing not shown: helper record has no head" };
+  if (!helper.head.measured) return { landed: false, reason: `landing not shown: helper record has no head (${helper.head.reason})` };
+  if (probe === undefined) return { landed: false, reason: "landing not shown: no landing probe wired" };
+  return probe(helper.head.value.commit);
+}
+
 /** True when `path` still exists (its realpath resolves). */
 function existsOn(path: string, realpath: RealpathFn): boolean {
   try {
@@ -383,7 +379,7 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
       if (removedCopy) {
         // reason: a removed copy cannot host `git check-ignore` (spawn ENOENT, once "exited undefined"); its landing decides
         // whether the repository's own rules at the root may stand in for it. One line per helper, not per path.
-        const landing = input.landing?.(workingCopy) ?? { landed: false as const, reason: "no landing probe wired" };
+        const landing = landingOf(helper, input.landing);
         if (landing.landed && input.ignoreProbeAtRoot !== undefined) {
           verdict = judgeIgnoreProbe(asked, input.ignoreProbeAtRoot(input.projectRoot, asked));
           if (verdict.measured) notes.push(`helper ${helper.agent_id}: working copy removed after landing (${landing.evidence}); ignore rules read at ${input.projectRoot}`);
