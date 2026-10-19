@@ -89,9 +89,6 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   const worktree = join(worktreesRoot, BRANCH);
   run(repo, "worktree", "add", "-q", "-b", BRANCH, worktree, "main");
   const realWorktree = realpathSync(worktree);
-  writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
-  run(realWorktree, "add", "own-file.txt");
-  run(realWorktree, "commit", "-q", "-m", "feat: the branch's own work");
 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -125,6 +122,10 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   const claim = await svc.claim(task.value.id, { by: "alice", worktree: realWorktree });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   claiming = false;
+  // reason: BR-1353 — a first claim starts from main, so the branch's own work is committed AFTER the claim.
+  writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
+  run(realWorktree, "add", "own-file.txt");
+  run(realWorktree, "commit", "-q", "-m", "feat: the branch's own work");
   return { repo, worktree: realWorktree, svc, store, taskId: task.value.id };
 }
 
