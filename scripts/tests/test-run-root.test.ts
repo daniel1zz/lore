@@ -1,3 +1,10 @@
+// @spawns vitest.node.config.ts
+// @spawns packages/lore/tests/unit/core/global-config.test.ts
+// @spawns packages/lore/tests/unit/adapters/http/auth-routes.bun.test.ts
+// @spawns packages/lore/tests/integration/hooks/stop-turn-review-cursor.test.ts
+// @spawns packages/lore/tests/unit/hooks/session-bootstrap-injection.test.ts
+// @spawns packages/lore/tests/unit/adapters/real-process-scan-port.test.ts
+// @spawns packages/lore/tests/unit/service/setup-service.test.ts
 /**
  * One run root per test run (plan-test-runs-own-their-temp-dir-one-run-root-holds-home-and, D1-D3; AS-27).
  *
@@ -24,8 +31,9 @@ const BUN_SELECTION = [
   "packages/lore/tests/integration/hooks/stop-turn-review-cursor.test.ts",
 ];
 const NODE_SELECTION = [
-  "packages/lore/tests/unit/service/attestation-head-sha.test.ts",
-  "packages/lore/tests/unit/service/attested-red.test.ts",
+  "packages/lore/tests/unit/hooks/session-bootstrap-injection.test.ts",
+  "packages/lore/tests/unit/adapters/real-process-scan-port.test.ts",
+  "packages/lore/tests/unit/service/setup-service.test.ts",
 ];
 const ARM_SCRIPT = `import "./vitest.shared.ts"; console.log("ROOT_HOME=" + process.env.${MARKER}); setInterval(() => undefined, 1000);`;
 
@@ -44,7 +52,8 @@ function freshTmp(): string {
 
 /** The environment of an OUTER run: the nested-run marker removed, every temp variable pointing at `tmp`. */
 function outerEnv(tmp: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp };
+  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, NO_COLOR: "1" };
+  delete env["FORCE_COLOR"];
   delete env[MARKER];
   return { ...env, ...extra };
 }
@@ -99,7 +108,7 @@ describe("one run root per test run", () => {
     const tmp = freshTmp();
     const r = runVitest("node", NODE_SELECTION, tmp);
     expect(r.status, r.output.slice(-3000)).toBe(0);
-    expect(r.output).toMatch(/Test Files\s+2 passed/);
+    expect(r.output).toMatch(/Test Files\s+3 passed/);
     expect(leaked(tmp)).toEqual([]);
     expect(rootsLeft(tmp)).toEqual([]);
   }, RUN_TIMEOUT_MS + 10_000);
@@ -121,6 +130,7 @@ describe("one run root per test run", () => {
     const tmp = freshTmp();
     const live = await startArmedRun(tmp);
     const liveRoot = dirname(live.home);
+    expect(dirname(liveRoot)).toBe(join(tmp, "lore-test-runs"));
 
     const during = runVitest("bun", [BUN_SELECTION[0]!], tmp);
     expect(during.status, during.output.slice(-3000)).toBe(0);
