@@ -149,6 +149,7 @@ import {
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 // invariant: this service's ONLY use of the shared `isPlanMember` predicate is
 //   the LEGACY flat `task` doc under a plan — `extra.plan_id` is that tier's
@@ -530,11 +531,17 @@ export class PhaseWorkflowService {
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
     private readonly gate?: GateDependencies,
     private readonly processEnv: Record<string, string | undefined> = {},
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `phase-wiring.ts` passes the composed one, a bare test
+    // gets a bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
   ) {
+    this.writer = writer ?? bareDocWriter(store);
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
     this.resolveDeclaredAcIds = resolveDeclaredAcIds;
   }
+
+  private readonly writer: DocWritePort;
 
   // ── addEvidence ───────────────────────────────────────────────────────────
 
@@ -988,7 +995,7 @@ export class PhaseWorkflowService {
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
       ...(previousHolderRun !== undefined ? { previous_run: previousHolderRun } : {}),
       harness_run: claimant.harnessRun,
-    });
+    }, opts.worktree !== undefined);
     if (!writeResult.ok) return writeResult;
 
     // reason: BUG-011 TOCTOU hardening (write-then-verify, no new lock infra) — the
@@ -1783,43 +1790,25 @@ export class PhaseWorkflowService {
     // there (`VERSION_ACTION_AUDIT_FAMILY`, `audit-service.ts`).
     auditAction: "claim" | "release" | "evidence" | "update",
     auditDetails: Record<string, unknown>,
+    // reason: foreign-corpus intent — `claim` declares it through `opts.worktree` (the caller passes that); every later
+    // write reads the persisted lease (see `TaskWorkflowService.writeTaskExtra`).
+    foreignIntent: boolean = readClaimRecord(phase)?.worktree !== undefined,
   ): Promise<Result<DocRecord, LoreError>> {
-    const newVersion = phase.version + 1;
-    const updateResult = await this.store.update(
-      phase.id,
-      { extra: newExtra, updated_at: nowIso, version: newVersion },
-      { expected_version: phase.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: phase.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc: phase,
+      patch: { extra: newExtra },
       action: "update",
-      created_at: nowIso,
-      created_by: actor,
-      change_summary: changeSummary,
-      // SPEC-072 D1/D2 — this write path (claim/release/evidence) never
-      // touches slug (D8-parity bound: only `extra`); carry the current value.
-      slug: updateResult.value.slug,
+      changeSummary,
+      auditAction,
+      auditDetails,
+      auditSessionId: `${auditAction}-${phase.id}`,
+      lock: "none",
+      by: actor,
+      now: nowIso,
+      foreignIntent,
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor,
-      session_id: `${auditAction}-${phase.id}`,
-      action: auditAction,
-      doc_id: phase.id,
-      details: { ...auditDetails, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   /**
@@ -1835,46 +1824,21 @@ export class PhaseWorkflowService {
     actor: string,
     changeSummary: string,
   ): Promise<Result<DocRecord, LoreError>> {
-    const newVersion = phase.version + 1;
-    const updateResult = await this.store.update(
-      phase.id,
-      { status: newStatus, updated_at: nowIso, version: newVersion },
-      { expected_version: phase.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: phase.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc: phase,
+      patch: { status: newStatus },
       action: "update",
-      created_at: nowIso,
-      created_by: actor,
-      change_summary: changeSummary,
-      slug: updateResult.value.slug,
+      changeSummary,
+      auditAction: "update",
+      auditDetails: { by: actor, status_from: phase.status, status_to: newStatus, done: true },
+      auditSessionId: `done-${phase.id}`,
+      lock: "none",
+      by: actor,
+      now: nowIso,
+      foreignIntent: readClaimRecord(phase)?.worktree !== undefined,
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor,
-      session_id: `done-${phase.id}`,
-      action: "update",
-      doc_id: phase.id,
-      details: {
-        by: actor,
-        status_from: phase.status,
-        status_to: newStatus,
-        version: newVersion,
-        done: true,
-      },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   /**

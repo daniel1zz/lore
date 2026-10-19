@@ -40,6 +40,7 @@ import type { DocRecord } from "@lore/core";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore } from "../../live-invocation.js";
+import { resolveWriteActorFor } from "../../../src/store/write-context-store.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -878,7 +879,7 @@ describe("ReviewService", () => {
         expect(result.value.status).toBe("approved");
       });
 
-      it("uses 'system' as reviewer when opts is omitted", async () => {
+      it("uses the store write context's claimed name (never 'system') when opts is omitted", async () => {
         const doc = makeDoc({ status: "draft" });
         await store.insert(doc);
 
@@ -887,7 +888,8 @@ describe("ReviewService", () => {
         const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
-        expect(auditResult.value[0]!.actor).toBe("system");
+        expect(auditResult.value[0]!.actor).toBe(resolveWriteActorFor(store));
+        expect(auditResult.value[0]!.actor).not.toBe("system");
       });
     });
 
@@ -1006,7 +1008,7 @@ describe("ReviewService", () => {
         expect(auditResult.value[0]!.details?.["reason"]).toBeUndefined();
       });
 
-      it("uses 'system' as reviewer when opts is omitted", async () => {
+      it("uses the store write context's claimed name (never 'system') when opts is omitted", async () => {
         const doc = makeDoc({ status: "draft" });
         await store.insert(doc);
 
@@ -1015,7 +1017,8 @@ describe("ReviewService", () => {
         const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
-        expect(auditResult.value[0]!.actor).toBe("system");
+        expect(auditResult.value[0]!.actor).toBe(resolveWriteActorFor(store));
+        expect(auditResult.value[0]!.actor).not.toBe("system");
       });
     });
 

@@ -61,6 +61,7 @@ import {
 } from "@lore/core";
 import type { DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 
 // reason: `phaseExtraSchema.shape.checklist`/`.shape.track` are `.optional()` (the
@@ -85,7 +86,16 @@ export class PhaseChecklistService {
   /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
    */
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `phase-wiring.ts` passes the composed one, a bare test
+    // gets a bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── addChecklistItem ────────────────────────────────────────────────────
 
@@ -421,55 +431,27 @@ export class PhaseChecklistService {
   }
 
   /**
-   * Shared CAS-guarded write path for every checklist/track write: bumps the phase's
-   * version, writes one insertVersion snapshot, then one audit entry (action "update",
-   * actor "system") — same shape as AcService.writeCriteria's spec-extra write, so
-   * AuditService.verify's versions⋈audit completeness oracle needs no special case.
+   * Shared write path for every checklist/track write: ONE `CorpusService.writeDoc` (CAS on the phase's version,
+   * version row + audit row naming the CALLER, foreign-corpus refusal, no-op writes nothing) — same shape as
+   * AcService.writeCriteria's spec-extra write, so AuditService.verify's versions⋈audit completeness oracle needs
+   * no special case.
    */
   private async writePhaseExtra(
     phase: DocRecord,
     extraPatch: Record<string, unknown>,
     changeSummary: string,
   ): Promise<Result<DocRecord, LoreError>> {
-    const now = new Date().toISOString();
-    const newVersion = phase.version + 1;
-    const newExtra: Record<string, unknown> = { ...phase.extra, ...extraPatch };
-
-    const updateResult = await this.store.update(
-      phase.id,
-      { extra: newExtra, updated_at: now, version: newVersion },
-      { expected_version: phase.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: phase.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc: phase,
+      patch: { extra: { ...phase.extra, ...extraPatch } },
       action: "update",
-      created_at: now,
-      created_by: "system",
-      change_summary: changeSummary,
-      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-      // current (unchanged) slug.
-      slug: updateResult.value.slug,
+      changeSummary,
+      auditAction: "update",
+      auditDetails: { change_summary: changeSummary },
+      lock: "none",
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: "system",
-      session_id: phase.id,
-      action: "update",
-      doc_id: phase.id,
-      details: { change_summary: changeSummary, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 }
 

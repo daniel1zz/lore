@@ -54,6 +54,7 @@
 import { attestationExemptKindSchema, err, ok } from "@lore/core";
 import type { AttestationExemptKind, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 
 // ─── Field names (the ONE definition site for what this service owns) ────────
@@ -99,7 +100,16 @@ export interface AttestationExemption extends PlanExemption {
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class PlanExemptionService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Record an audited, typed, required-reason exemption from the plan-close
@@ -232,44 +242,21 @@ export class PlanExemptionService {
     // THE invariant: spread the existing extra FIRST, so every key this service
     // does not own survives byte-identical. Never `{ ...write.fields }` alone.
     const newExtra: Record<string, unknown> = { ...plan.extra, ...write.fields };
-    const newVersion = plan.version + 1;
-
-    const updateResult = await this.store.update(
-      plan.id,
-      { extra: newExtra, updated_at: write.at, version: newVersion },
-      { expected_version: plan.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: plan.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    // reason: the RESOLVED actor (`write.by`), not "system" — AC-069-10. An exemption whose audit row cannot answer
+    // "who, and why" defeats the purpose of preferring a written exemption over a synthesized artifact.
+    const written = await this.writer.writeDoc({
+      doc: plan,
+      patch: { extra: newExtra },
       action: "update",
-      created_at: write.at,
-      created_by: write.by,
-      change_summary: write.changeSummary,
-      slug: updateResult.value.slug,
+      changeSummary: write.changeSummary,
+      auditAction: "update",
+      auditDetails: { operation: write.operation, ...write.auditDetails },
+      lock: "none",
+      by: write.by,
+      now: write.at,
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: write.at,
-      // reason: the RESOLVED actor, not "system" — AC-069-10. An exemption
-      // whose audit row cannot answer "who, and why" defeats the purpose of
-      // preferring a written exemption over a synthesized artifact.
-      actor: write.by,
-      session_id: plan.id,
-      action: "update",
-      doc_id: plan.id,
-      details: { operation: write.operation, version: newVersion, ...write.auditDetails },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 }
 

@@ -32,6 +32,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { resolveDoc } from "../../../service/resolve.js";
+import { bareDocWriter, type DocWritePort } from "../../../service/corpus-service.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../../ac-cite-config-file.js";
 import type { AcCiteSeedOutcome, AcCiteStored } from "../../ac-cite-config-file.js";
@@ -48,16 +49,16 @@ const ADOPT_MODES = CITE_GATE_MODES.filter((m): m is Exclude<CiteGateMode, "off"
 const ADOPT_AUDIT_SESSION_ID = "baseline-adopt";
 
 /** Appends the ONE `baseline_adopt` audit row (the single provenance mechanism, BR-987) for `old` -> `next`. */
-async function appendAdoptAuditRow(
-  store: SQLiteStore,
+export async function appendAdoptAuditRow(
+  writer: DocWritePort,
   actor: string,
   old: AcCiteStored,
   next: AcCiteStored,
 ): Promise<Result<void, LoreError>> {
-  const appended = await store.appendAuditEntry({
-    timestamp: new Date().toISOString(),
-    actor,
-    session_id: ADOPT_AUDIT_SESSION_ID,
+  // reason: AC-DCL-5 — the row goes through the ONE write route (foreign-corpus refusal, caller actor), never a bare store append.
+  const appended = await writer.appendAudit({
+    by: actor,
+    sessionId: ADOPT_AUDIT_SESSION_ID,
     action: BASELINE_ADOPT_AUDIT_ACTION,
     details: { old, new: next },
   });
@@ -79,7 +80,7 @@ export async function seedAcCiteModeAudited(repoDir: string, inv: Invocation): P
   const store = new SQLiteStore(join(repoDir, ".lore", "lore.db"));
   try {
     const row = await appendAdoptAuditRow(
-      store,
+      bareDocWriter(store),
       resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
       { mode: null, armed_branches: [] },
       { mode: "report", armed_branches: [] },
@@ -199,7 +200,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       if (!written.ok) return fail(inv, written.error, json, exitCode(written.error));
     }
 
-    const audited = await appendAdoptAuditRow(store, resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), old, next);
+    const audited = await appendAdoptAuditRow(app.corpusService, resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), old, next);
     if (!audited.ok) {
       return fail(inv, 
         {

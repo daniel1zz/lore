@@ -14,7 +14,8 @@
  *   - a write that changes nothing writes nothing;
  *   - restore is ONE transaction (a failure injected after the doc update leaves no partial row).
  * A static scan finds no `store.update(` / `insertVersion(` / `appendAuditEntry(` (nor the `*WithProvenance` and
- * rule-registry primitives) outside `corpus-service.ts` and `store/*`, bar the pinned, named exception list below.
+ * rule-registry primitives) outside `corpus-service.ts` and `store/*`, with NO exception list (the follow-up spec removed the pinned one;
+ * the full zero rule and the per-module behaviour live in write-path-everywhere.bun.test.ts).
  *
  * Coverage: HAPPY (each write) / NEGATIVE (foreign, locked) / BOUNDARY (no-op) / ERROR (injected failure) /
  * STATE (version bump == rows) / REGRESSION (static scan, wiring).
@@ -829,7 +830,7 @@ describe("AC-DCL-3 wiring — createApp composes every service over the one writ
       ["PhaseService", /new PhaseService\(store, recordLockService, corpusService\)/g],
       ["RequirementService", /new RequirementService\(store, requirementQuantifiableEnabled, corpusService\)/g],
       ["RuleService", /new RuleService\(store, corpusService\.create\.bind\(corpusService\), corpusService\)/g],
-      ["ValidityService", /\}, corpusService\),/g],
+      ["ValidityService", /recordCalibration: judgmentService\.recordCalibration\.bind\(judgmentService\),\n\s+\}, corpusService\),/g],
     ];
     for (const [name, pattern] of wired) {
       expect(appSource.match(pattern)?.length ?? 0, `${name} must be composed over corpusService in both createApp roots`).toBe(2);
@@ -857,6 +858,8 @@ const WRITE_PRIMITIVES = [
   "moveRule",
   "allocateRuleAndUpdateLeaf",
   "reserveProposedRuleAndUpdateSpec",
+  "assignOrdinalForRepair",
+  "assignOrdinalForRepairWithProvenance",
 ];
 const WRITE_CALL = new RegExp(`\\b[A-Za-z]*[sS]tore\\.(?:${WRITE_PRIMITIVES.join("|")})\\(`, "g");
 
@@ -864,32 +867,6 @@ const WRITE_CALL = new RegExp(`\\b[A-Za-z]*[sS]tore\\.(?:${WRITE_PRIMITIVES.join
 function isWritePathModule(rel: string): boolean {
   return rel === "service/corpus-service.ts" || rel.startsWith(`store${sep}`) || rel.startsWith("store/");
 }
-
-/**
- * Modules OUTSIDE AC-DCL-3's reported scope that still call a write primitive directly. Each is pinned at its CURRENT
- * call count, so the list can only shrink: a new bare write anywhere, or one more in a listed file, fails the scan.
- * The nine services D3 names (version, migration, ordinal-migration, phase-migration, validity, rule, phase,
- * tree-check, requirement) are deliberately NOT here and are asserted at zero below.
- */
-const UNMIGRATED_WRITERS: Readonly<Record<string, { calls: number; why: string }>> = {
-  "service/task-workflow-service.ts": { calls: 7, why: "task claim/evidence/release extra writes — not a D3-reported site" },
-  "service/phase-workflow-service.ts": { calls: 6, why: "phase claim/evidence extra writes — not a D3-reported site" },
-  "service/review-service.ts": { calls: 12, why: "approve/reject/reopen/judge writes — not a D3-reported site" },
-  "service/outline-migration-service.ts": { calls: 5, why: "outline migration — not a D3-reported site" },
-  "service/drift-check-service.ts": { calls: 3, why: "anchor RMW verbs — not a D3-reported site" },
-  "service/phase-checklist-service.ts": { calls: 3, why: "phase checklist writes — not a D3-reported site" },
-  "service/plan-exemption-service.ts": { calls: 3, why: "plan exemption writes — not a D3-reported site" },
-  "service/rule-change-service.ts": { calls: 4, why: "spec rule-change set writes — not a D3-reported site" },
-  "service/spec-parent-migration-service.ts": { calls: 2, why: "spec parent migration — not a D3-reported site" },
-  "service/spec-kind-service.ts": { calls: 1, why: "spec_kind migration — not a D3-reported site" },
-  "service/ac-service.ts": { calls: 1, why: "AC criteria write — not a D3-reported site" },
-  "service/issue-close-on-archive.ts": { calls: 2, why: "audit-only rows of the archive issue-close step" },
-  "service/judgment-service.ts": { calls: 1, why: "audit-only judge row; judgments never bump a version" },
-  "service/state-binding-service.ts": { calls: 1, why: "audit-only state-binding row" },
-  "service/foreign-corpus-write-guard.ts": { calls: 1, why: "audit-only record of a refusal/authorization — the guard itself" },
-  "adapters/cli/commands/baseline-adopt.ts": { calls: 1, why: "audit-only adoption row" },
-  "app.ts": { calls: 1, why: "audit sink port handed to the skip recorder" },
-};
 
 function walkTs(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -936,14 +913,8 @@ describe("static scan — no direct write primitive outside the write-path modul
     }
   });
 
-  it("remaining modules, pinned: every other module is clean or a named exception at exactly its recorded call count", () => {
-    const unexpected = [...offenders].filter(([rel, n]) => UNMIGRATED_WRITERS[rel]?.calls !== n);
-    expect(unexpected, `unlisted or changed direct store write call sites: ${JSON.stringify(unexpected)}`).toEqual([]);
-  });
-
-  it("remaining modules, pinned: the exception list carries no stale entry — every listed module still has its calls", () => {
-    const stale = Object.keys(UNMIGRATED_WRITERS).filter((rel) => !offenders.has(rel));
-    expect(stale, `exceptions whose module no longer calls a write primitive — delete them: ${stale.join(", ")}`).toEqual([]);
+  it("the zero rule — NO other module calls a store write primitive (no allowance list, no pinned count)", () => {
+    expect([...offenders], `direct store write call sites outside corpus-service.ts and store/*: ${JSON.stringify([...offenders])}`).toEqual([]);
   });
 
   it("CONTROL: the scan does find the write route's own calls (so a zero elsewhere is not a mis-aimed pattern)", () => {

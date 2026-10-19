@@ -680,6 +680,8 @@ describe("OutlineService.resolve", () => {
         // method; mechanical addition (same class of fix as every other explicit
         // delegate here).
         assignOrdinalForRepair: (id, ordinal) => store.assignOrdinalForRepair(id, ordinal),
+        assignOrdinalForRepairWithProvenance: (id, ordinal, version, audit) =>
+          store.assignOrdinalForRepairWithProvenance(id, ordinal, version, audit),
         update: (id, patch) => store.update(id, patch),
         softDelete: (id) => store.softDelete(id),
         // reason: BUG-002 audit fix — new required StoreInterface methods; mechanical
