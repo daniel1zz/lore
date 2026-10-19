@@ -137,7 +137,7 @@ async function wireRig(kind: "sqlite" | "turso", dbPath: string): Promise<Rig> {
     auditService: new AuditService(store, { verifySince: FAR_PAST }),
     // reason: the same factory the composition roots call, with the store kind the rig is opened on.
     auditVerifyRunner: buildAuditVerifyRunner(
-      { kind: "memory", auditService: new AuditService(store, { verifySince: FAR_PAST }) },
+      kind === "sqlite" ? { kind: "sqlite", dbPath } : { kind: "turso", localPath: dbPath },
       { verifySince: FAR_PAST, anchorRoot: join(dbPath, "..", "..") },
     ),
     callerSurface: "cli" as const,
