@@ -62,31 +62,18 @@ import {
   normalizeCodeAnchorEntries,
   parseCodeAnchor,
   type DriftInputEntry,
-  type AnchorProbe,
+  collectAnchorProbes,
+  type FsProbe,
   type DriftRow,
 } from "@lore/core";
 import type { DocRecord, DocType } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 
-// ─── FsProbe Port (D4) ───────────────────────────────────────────────────────
+// FsProbe (D4) is the core port; re-exported so existing importers keep their path.
+export type { FsProbe };
 
-/**
- * Filesystem probe port — the ONLY way `DriftCheckService` touches the filesystem.
- * The real implementation (node:fs sync, repo root = `process.cwd()`, same
- * assumption as `lore status --check-tree`) is built in the CLI adapter (T2) and
- * passed to {@link DriftCheckService.checkDrift} per call. Every method MAY throw —
- * `checkDrift` wraps each call individually and turns a throw into a `probe_error`
- * drift row rather than aborting the scan (D4).
- */
-export interface FsProbe {
-  /** Classifies `path` on the working tree. MAY throw on an unexpected IO failure. */
-  stat(path: string): "file" | "dir" | "missing";
-  /** Reads full file content. Returns `null` when unreadable; MAY throw. */
-  readFile(path: string): string | null;
-  /** Lists immediate (non-recursive) children, UNFILTERED (dotfiles included — filtering happens in `computeDrift`). Returns `null` when unlistable; MAY throw. */
-  listDir(path: string): string[] | null;
-}
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -139,7 +126,16 @@ const defaultNow = (): string => new Date().toISOString();
 // ─── DriftCheckService ───────────────────────────────────────────────────────
 
 export class DriftCheckService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── checkDrift ──────────────────────────────────────────────────────────
 
@@ -155,12 +151,9 @@ export class DriftCheckService {
    *   only become `probe_error` rows.
    */
   async checkDrift(probe: FsProbe): Promise<Result<DriftCheckResult, LoreError>> {
-    const armedByType = new Map<DocType, ArmedDoc[]>();
-    for (const type of ANCHOR_SCANNED_DOC_TYPES) {
-      const docsResult = await this.store.findMany({ type });
-      if (!docsResult.ok) return docsResult;
-      armedByType.set(type, collectArmedDocs(docsResult.value));
-    }
+    const armedResult = await this.loadArmedDocsByType();
+    if (!armedResult.ok) return armedResult;
+    const armedByType = armedResult.value;
 
     const declared: DriftInputEntry[] = [];
     const statusBreakdown: Record<string, number> = {};
@@ -175,7 +168,7 @@ export class DriftCheckService {
       }
     }
 
-    const probes = collectProbes(declared, probe);
+    const probes = collectAnchorProbes(declared.map((entry) => entry.anchor), probe);
     const { consistent, drifts } = computeDrift(declared, probes);
 
     return ok({
@@ -189,6 +182,38 @@ export class DriftCheckService {
       status_breakdown: statusBreakdown,
       drifts,
     });
+  }
+
+  /**
+   * Every declared `code_anchors` entry of every non-deleted spec and knowledge doc, in the
+   * shape `computeDrift` consumes. The reverse index (`lore refs`) reads anchors through this
+   * single read, so it can never disagree with the drift check about what is declared.
+   *
+   * @returns One entry per declared anchor, labeled with its owning document.
+   * @throws STORE_ERROR (findMany failure).
+   */
+  async listDeclaredAnchors(): Promise<Result<DriftInputEntry[], LoreError>> {
+    const armedResult = await this.loadArmedDocsByType();
+    if (!armedResult.ok) return armedResult;
+    const declared: DriftInputEntry[] = [];
+    for (const [type, armedDocs] of armedResult.value) {
+      for (const { doc, anchors } of armedDocs) {
+        for (const anchor of anchors) {
+          declared.push({ doc_id: doc.id, doc_slug: doc.slug, doc_type: type, doc_status: doc.status, anchor });
+        }
+      }
+    }
+    return ok(declared);
+  }
+
+  private async loadArmedDocsByType(): Promise<Result<Map<DocType, ArmedDoc[]>, LoreError>> {
+    const armedByType = new Map<DocType, ArmedDoc[]>();
+    for (const type of ANCHOR_SCANNED_DOC_TYPES) {
+      const docsResult = await this.store.findMany({ type });
+      if (!docsResult.ok) return docsResult;
+      armedByType.set(type, collectArmedDocs(docsResult.value));
+    }
+    return ok(armedByType);
   }
 
   // ── Authoring RMW (D6) ────────────────────────────────────────────────────
@@ -300,10 +325,9 @@ export class DriftCheckService {
   }
 
   /**
-   * Shared CAS-guarded write path for addCodeAnchors/removeCodeAnchors/
-   * setCodeAnchors — bumps the document's version, writes one insertVersion snapshot,
-   * then one audit entry (action "update", actor "system"). Mirrors
-   * `AcService.writeCriteria` exactly. Target-type admission already happened in
+   * Shared write path for addCodeAnchors/removeCodeAnchors/setCodeAnchors: ONE `CorpusService.writeDoc` (CAS on
+   * the doc's version, version row + audit row naming the CALLER, foreign-corpus refusal, no-op writes nothing).
+   * Mirrors `AcService.writeCriteria`. Target-type admission already happened in
    * {@link DriftCheckService.resolveAnchorableDoc}; this path is type-agnostic.
    */
   private async writeCodeAnchors(
@@ -312,45 +336,18 @@ export class DriftCheckService {
     operation: "add" | "remove" | "set",
     now: () => string,
   ): Promise<Result<string[], LoreError>> {
-    const nowIso = now();
-    const newVersion = doc.version + 1;
-    const newExtra: Record<string, unknown> = { ...doc.extra, code_anchors: anchors };
-
-    const updateResult = await this.store.update(
-      doc.id,
-      { extra: newExtra, updated_at: nowIso, version: newVersion },
-      { expected_version: doc.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
     const changeVerb = operation === "add" ? "updated" : operation === "remove" ? "updated (removal)" : "replaced";
-    const versionResult = await this.store.insertVersion({
-      doc_id: doc.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra: { ...doc.extra, code_anchors: anchors } },
       action: "update",
-      created_at: nowIso,
-      created_by: "system",
-      change_summary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
-      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-      // current (unchanged) slug.
-      slug: updateResult.value.slug,
+      changeSummary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
+      auditAction: "update",
+      auditDetails: { operation, anchor_count: anchors.length },
+      lock: "none",
+      now: now(),
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor: "system",
-      session_id: doc.id,
-      action: "update",
-      doc_id: doc.id,
-      details: { operation, anchor_count: anchors.length, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
+    if (!written.ok) return written;
     return ok(anchors);
   }
 }
@@ -399,71 +396,4 @@ function extractParsedCodeAnchors(doc: DocRecord): DriftInputEntry["anchor"][] {
     if (result.ok) parsed.push(result.value);
   }
   return parsed;
-}
-
-/**
- * Probes every DISTINCT path referenced by `declared`, exactly once per method
- * (`stat` always; `listDir` only when some anchor on that path is a dir anchor;
- * `readFile` only when some anchor on that path carries a `#Symbol`) — the D4
- * probe-level dedup. Every call is individually try/catch-wrapped; a throw (or an
- * explicit `null` from `listDir`/`readFile`) sets `.error` on that path's probe
- * entry, which `computeDrift` turns into a `probe_error` row for every anchor
- * sharing that path.
- */
-function collectProbes(declared: DriftInputEntry[], probe: FsProbe): Map<string, AnchorProbe> {
-  const descriptors = new Map<string, { needsListDir: boolean; needsContent: boolean }>();
-  for (const entry of declared) {
-    const existing = descriptors.get(entry.anchor.path) ?? { needsListDir: false, needsContent: false };
-    if (entry.anchor.isDir) existing.needsListDir = true;
-    if (entry.anchor.symbol !== undefined || entry.anchor.title !== undefined) existing.needsContent = true;
-    descriptors.set(entry.anchor.path, existing);
-  }
-
-  const probes = new Map<string, AnchorProbe>();
-  for (const [path, descriptor] of descriptors) {
-    const result: AnchorProbe = {};
-
-    try {
-      result.stat = probe.stat(path);
-    } catch (caught) {
-      result.error = describeCaught(caught);
-      probes.set(path, result);
-      continue;
-    }
-
-    if (result.stat === "dir" && descriptor.needsListDir) {
-      try {
-        const children = probe.listDir(path);
-        if (children === null) {
-          result.error = `listDir returned null for "${path}"`;
-        } else {
-          result.children = children;
-        }
-      } catch (caught) {
-        result.error = describeCaught(caught);
-      }
-    }
-
-    if (result.stat === "file" && descriptor.needsContent) {
-      try {
-        const content = probe.readFile(path);
-        if (content === null) {
-          result.error = `readFile returned null for "${path}"`;
-        } else {
-          result.content = content;
-        }
-      } catch (caught) {
-        result.error = describeCaught(caught);
-      }
-    }
-
-    probes.set(path, result);
-  }
-
-  return probes;
-}
-
-/** Renders any thrown value as a diagnostic string (never re-throws). */
-function describeCaught(caught: unknown): string {
-  return caught instanceof Error ? caught.message : String(caught);
 }

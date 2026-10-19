@@ -34,6 +34,7 @@ import {
   type Result,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { readArmingRev } from "./stamp-binding-reader.js";
 import { isInsideGitRepository } from "./git-state-stamp.js";
 
@@ -94,7 +95,16 @@ export async function readStateBindingState(
 
 /** Arming step for one corpus's store. */
 export class StateBindingService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /** Arming state of this corpus (see {@link readStateBindingState}). */
   async readState(corpusRoot: string): Promise<Result<StateBindingState, LoreError>> {
@@ -168,10 +178,10 @@ export class StateBindingService {
     const report = await this.reportImpact();
     if (!report.ok) return report;
 
-    const appended = await this.store.appendAuditEntry({
+    const appended = await this.writer.appendAudit({
       timestamp: opts.nowIso,
-      actor: opts.actor,
-      session_id: `${STATE_BINDING_ARMED_ACTION}`,
+      by: opts.actor,
+      sessionId: `${STATE_BINDING_ARMED_ACTION}`,
       action: STATE_BINDING_ARMED_ACTION,
       details: {
         docs_with_evidence: report.value.docs_with_evidence,

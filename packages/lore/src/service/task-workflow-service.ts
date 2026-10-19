@@ -363,6 +363,7 @@ import {
 import type { DocId, DocRecord, DocStatus, StampBindingContext } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 // invariant: every plan-scoped task query in this file goes through the SHARED
 //   `isPlanMember` predicate, never a bare `t.parent_id === planId` —
@@ -2499,7 +2500,11 @@ export class TaskWorkflowService {
     // wired by `app.ts` (a service never imports another service). ABSENT => `done`'s cleanup reports every recorded
     // worktree `not-measured`, never removes — no silent "safe" default.
     private readonly worktreeRemoval?: WorktreeRemovalFactsPort,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
   ) {
+    this.writer = writer ?? bareDocWriter(store);
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
     this.repoRoot = config.repoRoot;
@@ -2508,6 +2513,8 @@ export class TaskWorkflowService {
     this.resolveDeclaredAcCriteria = resolveDeclaredAcCriteria;
     this.resolveAdhocGoverningAcCriteria = resolveAdhocGoverningAcCriteria;
   }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Hands the workflow service the post-archive step that closes the GitHub issues of the defect reports
@@ -3171,7 +3178,7 @@ export class TaskWorkflowService {
       ...(inheritedDirtyWorktree !== undefined ? { inherited_dirty_worktree: inheritedDirtyWorktree } : {}),
       ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
       ...(claimBase !== undefined && claimBase.ok ? { base_sha: claimBase.value } : {}),
-    });
+    }, opts.worktree !== undefined);
     if (!writeResult.ok) return writeResult;
 
     // reason: BUG-011 TOCTOU hardening (write-then-verify, no new lock infra) —
@@ -4259,13 +4266,14 @@ export class TaskWorkflowService {
     trigger: "done",
     outcomes: readonly WorktreeOutcome[],
   ): Promise<Result<void, LoreError>> {
-    return this.store.appendAuditEntry({
+    return this.writer.appendAudit({
       timestamp: nowIso,
-      actor: by,
-      session_id: `${trigger}-${task.id}`,
+      by,
+      sessionId: `${trigger}-${task.id}`,
       action: "worktree-cleanup",
-      doc_id: task.id,
+      docId: task.id,
       details: { by, trigger, worktree_cleanup: outcomes.map((o) => ({ ...o })) },
+      foreignIntent: readClaimRecord(task)?.worktree !== undefined,
     });
   }
 
@@ -5382,43 +5390,26 @@ export class TaskWorkflowService {
     // (`VERSION_ACTION_AUDIT_FAMILY`, `audit-service.ts`).
     auditAction: "claim" | "release" | "evidence" | "anchors" | "update",
     auditDetails: Record<string, unknown>,
+    // reason: foreign-corpus intent (spec-corpus-resolution-carries-provenance D5). A lifecycle write from a linked
+    // worktree is allowed only when the caller's claim lease declares a worktree: `claim` itself declares it through
+    // `opts.worktree` (the caller passes that), every later write reads the persisted lease.
+    foreignIntent: boolean = readClaimRecord(task)?.worktree !== undefined,
   ): Promise<Result<DocRecord, LoreError>> {
-    const newVersion = task.version + 1;
-    const updateResult = await this.store.update(
-      task.id,
-      { extra: newExtra, updated_at: nowIso, version: newVersion },
-      { expected_version: task.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: task.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc: task,
+      patch: { extra: newExtra },
       action: "update",
-      created_at: nowIso,
-      created_by: actor,
-      change_summary: changeSummary,
-      // SPEC-072 D1/D2 — this write path (claim/release/evidence) never
-      // touches slug (D8 bound: only `extra`); carry the current value.
-      slug: updateResult.value.slug,
+      changeSummary,
+      auditAction,
+      auditDetails,
+      auditSessionId: `${auditAction}-${task.id}`,
+      lock: "none",
+      by: actor,
+      now: nowIso,
+      foreignIntent,
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor,
-      session_id: `${auditAction}-${task.id}`,
-      action: auditAction,
-      doc_id: task.id,
-      details: { ...auditDetails, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   /**
@@ -5462,40 +5453,16 @@ export class TaskWorkflowService {
     changeSummary: string,
     escapes: { overrideReason?: string; noNewTestsReason?: string } = {},
   ): Promise<Result<DocRecord, LoreError>> {
-    const newVersion = task.version + 1;
-    const updateResult = await this.store.update(
-      task.id,
-      { status: newStatus, updated_at: nowIso, version: newVersion },
-      { expected_version: task.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: task.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc: task,
+      patch: { status: newStatus },
       action: "update",
-      created_at: nowIso,
-      created_by: actor,
-      change_summary: changeSummary,
-      slug: updateResult.value.slug,
-    });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor,
-      session_id: `done-${task.id}`,
-      action: "update",
-      doc_id: task.id,
-      details: {
+      changeSummary,
+      auditAction: "update",
+      auditDetails: {
         by: actor,
         status_from: task.status,
         status_to: newStatus,
-        version: newVersion,
         done: true,
         ...(escapes.overrideReason !== undefined
           ? { override_reason: escapes.overrideReason, attestation_overridden: true }
@@ -5504,10 +5471,14 @@ export class TaskWorkflowService {
           ? { no_new_tests_reason: escapes.noNewTestsReason, no_new_tests_declared: true }
           : {}),
       },
+      auditSessionId: `done-${task.id}`,
+      lock: "none",
+      by: actor,
+      now: nowIso,
+      foreignIntent: readClaimRecord(task)?.worktree !== undefined,
     });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   /**

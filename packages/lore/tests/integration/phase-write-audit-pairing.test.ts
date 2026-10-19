@@ -160,14 +160,13 @@ const PHASE_SERVICE_PATH = join(REPO_ROOT, "packages", "lore", "src", "service",
 const AC_SERVICE_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "ac-service.ts");
 
 /**
- * The CONTROL for the "zero bare version writes" assertion: a store-only service that still writes its
- * version row bare. It was `ac-service.ts` until the citation gate (spec-baseline-slice-2 C4, D6) moved
- * `AcService.writeCriteria` onto `updateWithProvenance` so the liveness read shares the write's transaction —
- * which made the AC write atomic and the control evaporate, exactly as its own message predicts. It was
- * `requirement-service.ts` until defect-clusters D3 routed that write through the one write route too; `task-workflow-service.ts`
- * is the next store-only service that still writes its version row bare (outside D3's reported scope).
+ * The CONTROL for the "zero bare version writes" assertion. It used to read a store-only service that still wrote its
+ * version row bare (`ac-service.ts`, then `requirement-service.ts`, then `task-workflow-service.ts`). After
+ * spec-no-module-writes-around-the-write-path (AC-DCL-5) NO module outside `corpus-service.ts` and `store/*` writes
+ * one, so there is no file left to aim the control at; it now proves the pattern against a sample of the exact
+ * call shape instead (the repo-wide zero is pinned by `write-path-everywhere.bun.test.ts`).
  */
-const BARE_WRITER_CONTROL_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "task-workflow-service.ts");
+const BARE_WRITER_CONTROL_SAMPLE = "const written = await this.store.insertVersion(versionRecord);";
 
 /** Reached ONLY by the generated tamper script below, never imported — it pulls in `bun:sqlite`. */
 const SQLITE_STORE_PATH = join(REPO_ROOT, "packages", "lore", "src", "store", "sqlite-store.ts");
@@ -720,11 +719,9 @@ describe("green controls — a tampered audit trail is reported, so the clean ve
 
 describe("REGRESSION — writePhases still routes doc, version and audit through one atomic writer", () => {
   let phaseService = "";
-  let bareWriterControl = "";
 
   beforeAll(() => {
     phaseService = readFileSync(PHASE_SERVICE_PATH, "utf8");
-    bareWriterControl = readFileSync(BARE_WRITER_CONTROL_PATH, "utf8");
   });
 
   it("phase-service.ts calls the atomic doc+version+audit writer", () => {
@@ -741,10 +738,10 @@ describe("REGRESSION — writePhases still routes doc, version and audit through
     ).toBe(0);
   });
 
-  it("CONTROL: task-workflow-service.ts does make the bare version write, so the zero above is not a mis-aimed grep", () => {
+  it("CONTROL: the bare-version-write pattern matches the call shape it is aimed at, so the zero above is not a mis-aimed grep", () => {
     expect(
-      countOccurrences(bareWriterControl, BARE_VERSION_WRITE_CALL),
-      `${BARE_WRITER_CONTROL_PATH} no longer contains \`${BARE_VERSION_WRITE_CALL}\` — the control for the preceding zero has evaporated`,
-    ).toBeGreaterThanOrEqual(1);
+      countOccurrences(BARE_WRITER_CONTROL_SAMPLE, BARE_VERSION_WRITE_CALL),
+      `the pattern \`${BARE_VERSION_WRITE_CALL}\` no longer matches a bare version write — the control for the preceding zero has evaporated`,
+    ).toBe(1);
   });
 });

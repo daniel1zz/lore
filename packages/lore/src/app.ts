@@ -23,7 +23,7 @@ import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
 import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
 import type { StoreInterface } from "./store/store-interface.js";
-import { CorpusService } from "./service/corpus-service.js";
+import { CorpusService, type DocWritePort } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
 import { OutlineService, renderResolvedToMarkdown } from "./service/outline-service.js";
@@ -708,10 +708,19 @@ function lazyRadiusDiffPort(cwd: string): RadiusDiffPort {
  * Wires `VerifyRunnerService`'s state-binding SKIP path (SPEC-143 AC-CT-8): the read-only occupancy
  * reader plus the store's audit append. The writer of the lock protocol stays `scripts/oracle-lock.ts`.
  */
-function buildStateBindingOccupancyPort(store: Pick<StoreInterface, "appendAuditEntry">): StateBindingOccupancyPort {
+export function buildStateBindingOccupancyPort(writer: DocWritePort): StateBindingOccupancyPort {
   return {
     probe: probeOccupancyForCheckout,
-    recordSkip: (entry) => store.appendAuditEntry(entry),
+    // reason: AC-DCL-5 — the skip row goes through the ONE write route (foreign-corpus refusal, caller actor), never a bare store append.
+    recordSkip: (entry) =>
+      writer.appendAudit({
+        timestamp: entry.timestamp,
+        by: entry.actor,
+        sessionId: entry.session_id,
+        action: entry.action,
+        ...(entry.doc_id !== undefined ? { docId: entry.doc_id } : {}),
+        ...(entry.details !== undefined ? { details: entry.details } : {}),
+      }),
   };
 }
 
@@ -907,6 +916,7 @@ function buildAppFromSqlite(
     undefined,
     createRealWorktreeProbe(ambient.cwd),
     worktreeRemovalService,
+    corpusService,
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
@@ -924,7 +934,7 @@ function buildAppFromSqlite(
   // both the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration
   // port AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance
   // — never three separately-constructed JudgmentServices.
-  const judgmentService = new JudgmentService(store, telemetry);
+  const judgmentService = new JudgmentService(store, telemetry, corpusService);
   // reason: SPEC-056 phase execution model (PhaseWorkflowService + PhaseChecklistService)
   // — DI construction lives in phase-wiring.ts's buildPhaseServices (same optional-gate
   // DI shape as taskWorkflowService: own telemetry, resolveDeclaredAcIds port,
@@ -941,6 +951,7 @@ function buildAppFromSqlite(
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     judgmentService,
     judgmentRequiredTypes,
+    corpusService,
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
@@ -952,7 +963,7 @@ function buildAppFromSqlite(
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
-  const ruleChangeService = new RuleChangeService(store, recordLockService);
+  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     warn: warnSinkOf(ambient.io.stderr),
@@ -1007,7 +1018,7 @@ function buildAppFromSqlite(
     }, corpusService),
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
-    driftCheckService: new DriftCheckService(store),
+    driftCheckService: new DriftCheckService(store, corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1015,13 +1026,13 @@ function buildAppFromSqlite(
     // reason: OutlineMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-080 §Migration Plan Phase 1.
-    outlineMigrationService: new OutlineMigrationService(store),
+    outlineMigrationService: new OutlineMigrationService(store, corpusService),
     // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
-    specParentMigrationService: new SpecParentMigrationService(store),
     planOutlineExemptMigrationService: new PlanOutlineExemptMigrationService(store, corpusService),
+    specParentMigrationService: new SpecParentMigrationService(store, corpusService),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
@@ -1035,7 +1046,7 @@ function buildAppFromSqlite(
     }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
-    specKindService: new SpecKindService(store),
+    specKindService: new SpecKindService(store, corpusService),
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
     judgmentService,
@@ -1055,10 +1066,10 @@ function buildAppFromSqlite(
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
     auditVerifyRunner,
-    stateBindingService: new StateBindingService(store),
+    stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }),
+    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
@@ -1078,7 +1089,7 @@ function buildAppFromSqlite(
     // reason: PlanExemptionService is store-only, same shape as PrdOutlineService
     // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
     // fields, which were gate-read with no authoring surface before it existed.
-    planExemptionService: new PlanExemptionService(store),
+    planExemptionService: new PlanExemptionService(store, corpusService),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
     // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
@@ -1115,7 +1126,7 @@ function buildAppFromSqlite(
       },
       undefined,
       undefined,
-      buildStateBindingOccupancyPort(store),
+      buildStateBindingOccupancyPort(corpusService),
       worktreeRemovalService,
     ).setOverrideDecisionPort(overrideDecisionPort),
     // reason: ConfigService (SPEC-062 D1) — constructed over the SAME repoRoot
@@ -1331,6 +1342,7 @@ function buildAppFromTurso(
     undefined,
     createRealWorktreeProbe(ambient.cwd),
     worktreeRemovalService,
+    corpusService,
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
@@ -1347,7 +1359,7 @@ function buildAppFromTurso(
   // reason: extracted to a local (mirrors buildAppFromSqlite's identical comment) so both
   // the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration port
   // AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance.
-  const judgmentService = new JudgmentService(store, telemetry);
+  const judgmentService = new JudgmentService(store, telemetry, corpusService);
   // reason: SPEC-056 phase execution model (PhaseWorkflowService + PhaseChecklistService)
   // — see buildAppFromSqlite's identical comment.
   const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService, ambient.env);
@@ -1361,6 +1373,7 @@ function buildAppFromTurso(
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     judgmentService,
     judgmentRequiredTypes,
+    corpusService,
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
@@ -1372,7 +1385,7 @@ function buildAppFromTurso(
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
-  const ruleChangeService = new RuleChangeService(store, recordLockService);
+  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     warn: warnSinkOf(ambient.io.stderr),
@@ -1425,7 +1438,7 @@ function buildAppFromTurso(
     }, corpusService),
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
-    driftCheckService: new DriftCheckService(store),
+    driftCheckService: new DriftCheckService(store, corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1433,13 +1446,13 @@ function buildAppFromTurso(
     // reason: OutlineMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-080 §Migration Plan Phase 1.
-    outlineMigrationService: new OutlineMigrationService(store),
+    outlineMigrationService: new OutlineMigrationService(store, corpusService),
     // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
-    specParentMigrationService: new SpecParentMigrationService(store),
     planOutlineExemptMigrationService: new PlanOutlineExemptMigrationService(store, corpusService),
+    specParentMigrationService: new SpecParentMigrationService(store, corpusService),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
@@ -1453,7 +1466,7 @@ function buildAppFromTurso(
     }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
-    specKindService: new SpecKindService(store),
+    specKindService: new SpecKindService(store, corpusService),
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
     judgmentService,
@@ -1470,10 +1483,10 @@ function buildAppFromTurso(
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
     auditVerifyRunner,
-    stateBindingService: new StateBindingService(store),
+    stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }),
+    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
@@ -1493,7 +1506,7 @@ function buildAppFromTurso(
     // reason: PlanExemptionService is store-only, same shape as PrdOutlineService
     // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
     // fields, which were gate-read with no authoring surface before it existed.
-    planExemptionService: new PlanExemptionService(store),
+    planExemptionService: new PlanExemptionService(store, corpusService),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
     // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
@@ -1528,7 +1541,7 @@ function buildAppFromTurso(
       },
       undefined,
       undefined,
-      buildStateBindingOccupancyPort(store),
+      buildStateBindingOccupancyPort(corpusService),
       worktreeRemovalService,
     ).setOverrideDecisionPort(overrideDecisionPort),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
@@ -1624,7 +1637,7 @@ function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreCo
   const upstream = resolveFeedbackUpstreamCfg(config);
   const repo = upstream !== undefined && isGithubUpstreamCfg(upstream) ? upstream.repo : undefined;
   const closer = repo === undefined ? undefined : new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env }));
-  const step = new IssueCloseOnArchive(store, closer, repo);
+  const step = new IssueCloseOnArchive(store, closer, repo, undefined, app.corpusService);
   app.corpusService.setArchiveIssueClosePort(step);
   app.taskWorkflowService.setArchiveIssueClosePort(step);
   app.issueClose = step;

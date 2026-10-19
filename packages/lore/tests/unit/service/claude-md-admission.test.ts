@@ -12,7 +12,7 @@
  * exports only `lintMemoryFiles` + its supporting types â€” no
  * `checkReferenceExistence`, no `detectNarrativeSmells`):
  *   - `checkReferenceExistence(content, fileExists)` â€” deterministic,
- *     `kind: "reference_missing"`.
+ *     `kind: "reference_unresolved"`.
  *   - `detectNarrativeSmells(content)` â€” advisory, never exit-affecting.
  *
  * Typecheck strategy (the paired implementation task must land with
@@ -99,6 +99,9 @@ type DetectNarrativeSmellsFn = (content: string) => AdvisoryFinding[];
  * matching this task's AC: "every case fails on the missing export ... not
  * test bugs".
  */
+/** Content every existing file "has": exports the one symbol the `#Symbol` boundary case names. */
+const FAKE_SOURCE = "export function checkReferenceExistence() {}\n";
+
 async function loadAdmissionFns(): Promise<{
   checkReferenceExistence: CheckReferenceExistenceFn;
   detectNarrativeSmells: DetectNarrativeSmellsFn;
@@ -111,11 +114,15 @@ async function loadAdmissionFns(): Promise<{
   const modulePathParts = ["..", "..", "..", "src", "service", "claude-md-admission.js"];
   const modulePath = modulePathParts.join("/");
   const mod = (await import(modulePath)) as {
-    checkReferenceExistence: CheckReferenceExistenceFn;
     detectNarrativeSmells: DetectNarrativeSmellsFn;
   };
+  // reason: `checkReferenceExistence` was retired when references moved to the one core
+  // resolver (spec-prose-about-code-is-bound-to-what-it-describes-one D1); the shim drives
+  // the same `extractCodeReferences` + `resolveCodeReferences` path production uses.
+  const shim = await import("./claude-md-reference-shim.js");
   return {
-    checkReferenceExistence: mod.checkReferenceExistence,
+    checkReferenceExistence: (content, fileExists) =>
+      shim.checkReferenceExistence(content, fileExists, undefined, () => FAKE_SOURCE),
     detectNarrativeSmells: mod.detectNarrativeSmells,
   };
 }
@@ -154,7 +161,7 @@ const CLEAN_DISCIPLINE_PARAGRAPH =
 
 describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â€” exports absent from packages/lore/src/service/claude-md-check.ts)", () => {
   describe("checkReferenceExistence", () => {
-    it("HAPPY: missing backtick-quoted repo-relative path -> exactly one reference_missing finding naming the path", async () => {
+    it("HAPPY: missing backtick-quoted repo-relative path -> exactly one reference_unresolved finding naming the path", async () => {
       const { checkReferenceExistence } = await loadAdmissionFns();
 
       const path = "packages/lore/src/service/nonexistent-module.ts";
@@ -164,7 +171,7 @@ describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â
       const findings = checkReferenceExistence(content, fileExists);
 
       expect(findings).toHaveLength(1);
-      expect(findings[0]?.kind).toBe("reference_missing");
+      expect(findings[0]?.kind).toBe("reference_unresolved");
       expect(findings[0]?.message).toContain(path);
     });
 
@@ -235,7 +242,7 @@ describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â
 
       const missingFindings = checkReferenceExistence(content, makeFileExists([]));
       expect(missingFindings).toHaveLength(1);
-      expect(missingFindings[0]?.kind).toBe("reference_missing");
+      expect(missingFindings[0]?.kind).toBe("reference_unresolved");
       expect(missingFindings[0]?.message).toContain("nonexistent-dir");
 
       const existingFindings = checkReferenceExistence(content, makeFileExists([dirPath]));
@@ -262,7 +269,7 @@ describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â
       const missingFileExists = makeFileExists([]); // file part does not exist
       const missingFindings = checkReferenceExistence(content, missingFileExists);
       expect(missingFindings).toHaveLength(1);
-      expect(missingFindings[0]?.kind).toBe("reference_missing");
+      expect(missingFindings[0]?.kind).toBe("reference_unresolved");
       expect(missingFindings[0]?.message).toContain(filePart);
     });
 
@@ -277,7 +284,7 @@ describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â
       const findings = checkReferenceExistence(content, fileExists);
 
       expect(findings).toHaveLength(1);
-      expect(findings[0]?.kind).toBe("reference_missing");
+      expect(findings[0]?.kind).toBe("reference_unresolved");
       expect(findings[0]?.message).toContain(missingPath);
       expect(findings[0]?.message).not.toContain(existingPath);
     });
@@ -331,7 +338,7 @@ describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â
 
       const before = checkReferenceExistence(content, fileExists);
       expect(before).toHaveLength(1);
-      expect(before[0]?.kind).toBe("reference_missing");
+      expect(before[0]?.kind).toBe("reference_unresolved");
 
       // Advisory pass in between â€” must be side-effect-free w.r.t. the
       // deterministic check (separate finding families, spec Â§D7).
@@ -342,8 +349,8 @@ describe("checkReferenceExistence + detectNarrativeSmells admission suite (RED â
       expect(after).toEqual(before);
       // The deterministic finding family is never smuggled into (or
       // replaced by) the advisory one.
-      expect(after.every((f) => f.kind === "reference_missing")).toBe(true);
-      expect(smells.every((f) => f.kind !== "reference_missing")).toBe(true);
+      expect(after.every((f) => f.kind === "reference_unresolved")).toBe(true);
+      expect(smells.every((f) => f.kind !== "reference_unresolved")).toBe(true);
     });
   });
 

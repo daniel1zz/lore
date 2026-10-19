@@ -430,6 +430,8 @@ const DECLARED_FILES = [
   "hooks/pre-tool-harness-run.mjs",
   // pre-helper-foreign-working-copy-gate (isolated helper writing into a foreign git working copy, BR-1092; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
+  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
+  "hooks/post-edit-bindings.mjs",
   "hooks/lib/turn-state.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library
   "hooks/session-trail-start.mjs",

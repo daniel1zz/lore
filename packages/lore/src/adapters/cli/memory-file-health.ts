@@ -12,7 +12,7 @@
  * adoption verdict (`mode`, `mode_source`, `downgraded_count`, `promotable`) is
  * taken from its `adoption` field verbatim.
  *
- * @invariant READ-ONLY: only `discoverMemoryFiles` reads and `existsSync` probes;
+ * @invariant READ-ONLY: only `discoverMemoryFiles`, `discoverFragmentDocuments` and the `FsProbe` read;
  *   nothing is written, so two runs over an unchanged tree are identical.
  * @invariant ROOT ONLY, deduped by realpath: entries come from `budgets.filenames`
  *   (never a hard-coded name, D9); a symlinked `AGENTS.md` -> `CLAUDE.md` counts once.
@@ -24,10 +24,11 @@
  * Source: spec-claude-md-root-section-structure-check-and-adoption-mode §Public Interface, D7-D9
  */
 
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { resolveMemoryFileBudgets, type LoreConfig, type MemoryFileHealth } from "@lore/core";
-import { discoverMemoryFiles } from "../real-memory-file-probe.js";
+import { buildRealFsProbe } from "../real-fs-probe.js";
+import { discoverFragmentDocuments, discoverMemoryFiles } from "../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../service/claude-md-admission.js";
 import type { MemoryFileRecord } from "../../service/claude-md-findings.js";
 
@@ -75,7 +76,8 @@ export function computeMemoryFileHealth(
   if (roots.length === 0) return undefined;
 
   const { deterministic, advisory, adoption } = runMemoryFileChecks(roots, budgets, {
-    fileExists: (p) => existsSync(join(repoRoot, p)),
+    probe: buildRealFsProbe(repoRoot),
+    referenceDocuments: discoverFragmentDocuments(repoRoot),
     // Bootstrap never reaches the corpus DB for this check (same as --check-claude-md).
     docExists: () => true,
   });

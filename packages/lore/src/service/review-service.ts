@@ -33,6 +33,8 @@ import {
   SPEC_KINDS,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
 import { ownProposedRules } from "./rule-changes.js";
@@ -244,7 +246,28 @@ export class ReviewService {
     private readonly gate?: GateDependencies,
     private readonly judgmentService?: JudgmentService,
     private readonly judgmentRequiredTypes?: readonly string[],
-  ) {}
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer sharing this service's record lock. This service never calls a store write primitive itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store, recordLock);
+  }
+
+  private readonly writer: DocWritePort;
+
+  /**
+   * The reviewer of a write: the explicit `by`, else the store write context's claimed name. ⛔ Never `"system"`
+   * (the literal this service used to fall back to): an unresolvable caller is a refusal, not a guess.
+   */
+  private resolveReviewer(by?: string): Result<string, LoreError> {
+    try {
+      return ok(resolveWriteActorFor(this.store, by));
+    } catch (e) {
+      if (e instanceof WriteActorUnresolvedError) return err(e.error);
+      if (e instanceof Error && "loreError" in e) return err((e as Error & { loreError: LoreError }).loreError);
+      throw e;
+    }
+  }
 
   /**
    * Wires the decide() seam of the two self-grantable approval overrides (AC-AU-7). Set by the composition root
@@ -604,15 +627,14 @@ export class ReviewService {
    * Per-doc write failures are COLLECTED, not fatal (mirrors `lore review --pending`'s
    * batch idiom) — one doc's CAS conflict must not abort the whole sweep.
    *
-   * @param opts.actor - Attributed as the audit entry's `actor` — defaults to
-   *   `"system"` (same default `approve()`'s `reviewer` uses when the caller omits it).
+   * @param opts.actor - Attributed as the audit entry's `actor` — defaults to the store write context's claimed
+   *   name; a caller with neither is refused (VALIDATION_ERROR `actor`), never recorded as `"system"`.
    * @returns `{fast_tracked: string[], failed: Array<{slug, reason}>}` — slugs of
    *   every doc successfully fast-tracked, and any that failed to write.
    */
   async backfillLedger(
     opts?: { actor?: string },
   ): Promise<Result<{ fast_tracked: string[]; failed: Array<{ slug: string; reason: string }> }, LoreError>> {
-    const actor = opts?.actor ?? "system";
     const draftsResult = await this.store.findMany({ status: "draft" });
     if (!draftsResult.ok) return draftsResult;
 
@@ -624,35 +646,16 @@ export class ReviewService {
     const failed: Array<{ slug: string; reason: string }> = [];
 
     for (const doc of candidates) {
-      const now = new Date().toISOString();
-      const newVersion = doc.version + 1;
-      const versionRecord: VersionRecord = {
-        doc_id: doc.id,
-        version: newVersion,
-        content: doc.content,
-        extra: doc.extra,
-        status: "approved",
-        title: doc.title,
+      const writeResult = await this.writer.writeDoc({
+        doc,
+        patch: { status: "approved" },
         action: "update",
-        created_at: now,
-        created_by: actor,
-        slug: doc.slug,
-      };
-      const auditEntry: AuditEntry = {
-        timestamp: now,
-        actor,
-        session_id: `review-${doc.id}`,
-        action: "update",
-        doc_id: doc.id,
-        details: { auto: "ledger-fast-track", version: newVersion, backfill: true },
-      };
-      const writeResult = await this.store.updateWithProvenance(
-        doc.id,
-        { status: "approved", version: newVersion, updated_at: now },
-        { expected_version: doc.version },
-        versionRecord,
-        auditEntry,
-      );
+        auditAction: "update",
+        auditDetails: { auto: "ledger-fast-track", backfill: true },
+        auditSessionId: `review-${doc.id}`,
+        lock: "none",
+        ...(opts?.actor !== undefined ? { by: opts.actor } : {}),
+      });
       if (writeResult.ok) {
         fastTracked.push(doc.slug);
       } else {
@@ -821,59 +824,32 @@ export class ReviewService {
     // observes. Neither read ever influences whether this method returns ok/err.
     let reachabilityAdvisories = gateResult.value.reachabilityAdvisories;
 
-    const reviewer = opts?.reviewer ?? "system";
-    const now = new Date().toISOString();
-    const nextVersion = doc.version + 1;
+    const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
+    if (!resolvedReviewer.ok) return resolvedReviewer;
+    const reviewer = resolvedReviewer.value;
 
-    const updateResult = await this.store.update(doc.id, {
-      status: "approved",
-      version: nextVersion,
-      updated_at: now,
-    }, { expected_version: doc.version });
-    if (!updateResult.ok) return updateResult;
-
-    const updatedDoc = updateResult.value;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: doc.id,
-      version: nextVersion,
-      content: updatedDoc.content,
-      extra: updatedDoc.extra,
-      status: "approved",
-      title: updatedDoc.title,
+    // reason: SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was used) rides on this SAME
+    // audit row rather than a second entry — one audited event, "approved, and here's the escape hatch that let it
+    // through." `override_no_judgment` (iff `--override-no-judgment`) rides on the SAME row for the SAME reason; the
+    // two are mutually exclusive (validated above). The route adds the `version` join key (SPEC-035 §2).
+    const approved = await this.writer.writeDoc({
+      doc,
+      patch: { status: "approved" },
       action: "approve",
-      created_at: now,
-      created_by: reviewer,
-      // SPEC-072 D2/D1 — same "state as of this version" convention as
-      // content/extra/status/title above; `approve` never changes slug, so
-      // this is simply the doc's current (unchanged) slug.
-      slug: updatedDoc.slug,
-    });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: reviewer,
-      session_id: `review-${doc.id}`,
-      action: "approve",
-      doc_id: doc.id,
-      // reason: SPEC-035 §2 — join key for AuditService.verify's versions⋈audit walk.
-      // SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was
-      // used) rides on this SAME audit row rather than a second entry — one audited
-      // event, "approved, and here's the escape hatch that let it through."
-      // task-t3-hardening-reachable-override-escape-real-ai-provenance — `override_no_judgment`
-      // (present iff `--override-no-judgment` was used) rides on the SAME row for the SAME
-      // reason; the two are mutually exclusive (validated above), so at most one is ever present.
-      details: {
+      auditAction: "approve",
+      auditDetails: {
         reviewer,
         from_status: doc.status,
         to_status: "approved",
-        version: nextVersion,
         ...(overriddenJudgmentId !== undefined ? { override_judgment_id: overriddenJudgmentId } : {}),
         ...(overrodeNoJudgment ? { override_no_judgment: true } : {}),
       },
+      auditSessionId: `review-${doc.id}`,
+      lock: "none",
+      by: reviewer,
     });
-    if (!auditResult.ok) return auditResult;
+    if (!approved.ok) return approved;
+    const updatedDoc = approved.value.doc;
 
     // reason: ASYNC2-002 — plan-only post-write re-check, see the JSDoc @invariant
     // above. Only runs when a gate dependency is wired AND the just-approved doc is a
@@ -941,53 +917,21 @@ export class ReviewService {
     fromStatus: DocRecord["status"],
     reviewer: string,
   ): Promise<Result<DocRecord, LoreError>> {
-    const now = new Date().toISOString();
-    const rollbackVersion = approved.version + 1;
-
-    const updateResult = await this.store.update(approved.id, {
-      status: fromStatus,
-      version: rollbackVersion,
-      updated_at: now,
-    }, { expected_version: approved.version });
-    if (!updateResult.ok) return updateResult;
-
-    const updatedDoc = updateResult.value;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: approved.id,
-      version: rollbackVersion,
-      content: updatedDoc.content,
-      extra: updatedDoc.extra,
-      status: fromStatus,
-      title: updatedDoc.title,
+    const rolledBack = await this.writer.writeDoc({
+      doc: approved,
+      patch: { status: fromStatus },
       action: "reject",
-      created_at: now,
-      created_by: reviewer,
-      // SPEC-072 D1/D2 — rollback never changes slug; carry the current value.
-      slug: updatedDoc.slug,
-      change_summary:
+      changeSummary:
         "Self-rollback: ancestor spec's approval prerequisites failed a post-write " +
         "re-check (ASYNC2-002 TOCTOU guard)",
+      auditAction: "reject",
+      auditDetails: { reviewer, from_status: "approved", to_status: fromStatus, rollback: true },
+      auditSessionId: `review-${approved.id}`,
+      lock: "none",
+      by: reviewer,
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: reviewer,
-      session_id: `review-${approved.id}`,
-      action: "reject",
-      doc_id: approved.id,
-      details: {
-        reviewer,
-        from_status: "approved",
-        to_status: fromStatus,
-        version: rollbackVersion,
-        rollback: true,
-      },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updatedDoc);
+    if (!rolledBack.ok) return rolledBack;
+    return ok(rolledBack.value.doc);
   }
 
   /**
@@ -1017,18 +961,10 @@ export class ReviewService {
       });
     }
 
-    const reviewer = opts?.reviewer ?? "system";
+    const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
+    if (!resolvedReviewer.ok) return resolvedReviewer;
+    const reviewer = resolvedReviewer.value;
     const reason = opts?.reason;
-    const now = new Date().toISOString();
-
-    // Status stays 'draft' — just update updated_at
-    const updateResult = await this.store.update(doc.id, {
-      status: "draft",
-      updated_at: now,
-    }, { expected_version: doc.version });
-    if (!updateResult.ok) return updateResult;
-
-    const updatedDoc = updateResult.value;
 
     const auditDetails: Record<string, unknown> = {
       reviewer,
@@ -1038,23 +974,37 @@ export class ReviewService {
     if (reason !== undefined) {
       auditDetails["reason"] = reason;
     }
-    // reason: SPEC-035 §2 — additive for writer-coverage consistency. reject() never
-    // calls insertVersion (status stays 'draft', no version bump) so no versions row
-    // with action "reject" exists for AuditService.verify to require this against —
-    // this is purely for parity/future-proofing, not oracle-load-bearing.
-    auditDetails["version"] = doc.version;
 
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: reviewer,
-      session_id: `review-${doc.id}`,
+    // reason: a reject of a doc that is ALREADY draft changes no field, so the write route would (rightly) write
+    // nothing — yet the rejection and its reason are the event, so that case records the audit row alone (the
+    // `version` key is the doc's unchanged version, parity with the other writers, not an oracle join).
+    if (doc.status === "draft") {
+      const recorded = await this.writer.appendAudit({
+        by: reviewer,
+        sessionId: `review-${doc.id}`,
+        action: "reject",
+        docId: doc.id,
+        details: { ...auditDetails, version: doc.version },
+      });
+      if (!recorded.ok) return recorded;
+      return ok(doc);
+    }
+
+    // reason: a reject is NOT a new version — the doc keeps its version so a judgment recorded against it stays fresh
+    // (the dashboard's calibration capture matches the judgment's doc_version to the doc's); `versioning: "keep"`.
+    const rejected = await this.writer.writeDoc({
+      doc,
+      patch: { status: "draft" },
+      versioning: "keep",
       action: "reject",
-      doc_id: doc.id,
-      details: auditDetails,
+      auditAction: "reject",
+      auditDetails,
+      auditSessionId: `review-${doc.id}`,
+      lock: "none",
+      by: reviewer,
     });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updatedDoc);
+    if (!rejected.ok) return rejected;
+    return ok(rejected.value.doc);
   }
 
   /**
@@ -1124,50 +1074,30 @@ export class ReviewService {
     if (!before.ok) return before;
     if (before.value > 0) return err(this.reopenRefusal(doc, before.value, false));
 
-    const reviewer = opts?.reviewer ?? "system";
-    const now = new Date().toISOString();
-    const newVersion = doc.version + 1;
-    const updateResult = await this.store.update(
-      doc.id,
-      { status: "draft", version: newVersion, updated_at: now },
-      { expected_version: doc.version },
-    );
-    if (!updateResult.ok) return updateResult;
-    const reopened = updateResult.value;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: doc.id,
-      version: newVersion,
-      content: reopened.content,
-      extra: reopened.extra,
-      status: "draft",
-      title: reopened.title,
+    const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
+    if (!resolvedReviewer.ok) return resolvedReviewer;
+    const reviewer = resolvedReviewer.value;
+    // reason: `details.operation` is the structural reopen marker RecordLockService reads (a BR-722 demotion has
+    // none); the version row's action stays "update" so the row sits inside the versions-row audit family.
+    const reopenedResult = await this.writer.writeDoc({
+      doc,
+      patch: { status: "draft" },
       action: "update",
-      created_at: now,
-      created_by: reviewer,
-      slug: reopened.slug,
-      change_summary: `Reopened to draft: ${trimmedReason}`,
-    });
-    if (!versionResult.ok) return versionResult;
-
-    // reason: `details.operation` is the structural reopen marker RecordLockService reads (a BR-722
-    // demotion has none); action "update" keeps the row inside the versions-row audit family.
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: reviewer,
-      session_id: `review-${doc.id}`,
-      action: REOPEN_AUDIT_ACTION,
-      doc_id: doc.id,
-      details: {
+      changeSummary: `Reopened to draft: ${trimmedReason}`,
+      auditAction: REOPEN_AUDIT_ACTION,
+      auditDetails: {
         operation: REOPEN_OPERATION,
         reviewer,
         reason: trimmedReason,
         from_status: "approved",
         to_status: "draft",
-        version: newVersion,
       },
+      auditSessionId: `review-${doc.id}`,
+      lock: "none",
+      by: reviewer,
     });
-    if (!auditResult.ok) return auditResult;
+    if (!reopenedResult.ok) return reopenedResult;
+    const reopened = reopenedResult.value.doc;
 
     if (opts?.afterStatusWrite !== undefined) await opts.afterStatusWrite();
 

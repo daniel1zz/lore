@@ -1078,6 +1078,28 @@ export class SQLiteStore implements StoreInterface {
    * free — a collision here means ITS plan is wrong, not a transient race).
    */
   async assignOrdinalForRepair(id: DocId, ordinal: number): Promise<Result<DocRecord, LoreError>> {
+    return this.assignOrdinalForRepairTx(id, ordinal, undefined);
+  }
+
+  /**
+   * @see StoreInterface.assignOrdinalForRepairWithProvenance
+   * The same transaction as {@link assignOrdinalForRepair}, with the version row and audit row inside it: a
+   * failure of either (a version-key collision, an audit-chain error) rolls the ordinal write back too.
+   */
+  async assignOrdinalForRepairWithProvenance(
+    id: DocId,
+    ordinal: number,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.assignOrdinalForRepairTx(id, ordinal, { version, audit });
+  }
+
+  private async assignOrdinalForRepairTx(
+    id: DocId,
+    ordinal: number,
+    provenance: { readonly version: VersionRecord; readonly audit: AuditEntry } | undefined,
+  ): Promise<Result<DocRecord, LoreError>> {
     try {
       this.db.run("BEGIN IMMEDIATE");
     } catch (e) {
@@ -1126,6 +1148,23 @@ export class SQLiteStore implements StoreInterface {
       } catch (e) {
         this.db.run("ROLLBACK");
         return wrapStoreError(e);
+      }
+
+      if (provenance !== undefined) {
+        if (provenance.version.version !== newVersion) {
+          this.db.run("ROLLBACK");
+          return err({ code: "STALE_VERSION", id, expected: provenance.version.version - 1, actual: current.version });
+        }
+        const versionResult = this.insertVersionSync(provenance.version);
+        if (!versionResult.ok) {
+          this.db.run("ROLLBACK");
+          return versionResult;
+        }
+        const auditResult = this.appendAuditEntrySync(provenance.audit);
+        if (!auditResult.ok) {
+          this.db.run("ROLLBACK");
+          return auditResult;
+        }
       }
 
       this.db.run("COMMIT");

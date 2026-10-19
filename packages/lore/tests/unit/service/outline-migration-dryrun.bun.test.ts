@@ -74,8 +74,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ulid } from "ulidx";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import type { StoreInterface, UpdateOpts } from "../../../src/store/store-interface.js";
-import type { DocRecord, LinkRecord, LoreError, Result } from "@lore/core";
+import type { ProvenanceWriteExtras, StoreInterface, UpdateOpts } from "../../../src/store/store-interface.js";
+import type { AuditEntry, DocRecord, LinkRecord, LoreError, Result, VersionRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/src/service/outline-migration-service.js
@@ -553,11 +553,13 @@ describe("OutlineMigrationService.migrateSection — pre-existing complete child
  * ("Two-phase per-section ordering: create+link FIRST, shrink second").
  */
 function wrapStoreRecordingOrder(store: SQLiteStore, log: string[]): StoreInterface {
-  return new Proxy(store, {
+  const proxy = new Proxy(store, {
     get(target, prop, receiver) {
-      if (prop === "insert") {
-        return async (doc: DocRecord) => {
-          const result = await target.insert(doc);
+      // reason: AC-DCL-5 — the child doc lands through the write route's ONE `insertWithProvenance` transaction and
+      // the PRD shrink through its ONE `updateWithProvenance` transaction; the ORDER being proven is unchanged.
+      if (prop === "insertWithProvenance") {
+        return async (doc: DocRecord, version: VersionRecord, audit: AuditEntry) => {
+          const result = await target.insertWithProvenance(doc, version, audit);
           if (result.ok) log.push(`insert:${doc.type}:${doc.slug}`);
           return result;
         };
@@ -569,9 +571,16 @@ function wrapStoreRecordingOrder(store: SQLiteStore, log: string[]): StoreInterf
           return result;
         };
       }
-      if (prop === "update") {
-        return async (id: string, patch: Partial<DocRecord>, opts?: UpdateOpts) => {
-          const result = await target.update(id, patch, opts);
+      if (prop === "updateWithProvenance") {
+        return async (
+          id: DocRecord["id"],
+          patch: Partial<DocRecord>,
+          opts: UpdateOpts | undefined,
+          version: VersionRecord,
+          audit: AuditEntry,
+          extras?: ProvenanceWriteExtras,
+        ) => {
+          const result = await target.updateWithProvenance(id, patch, opts, version, audit, extras);
           if (result.ok) {
             log.push(`update:${id}:${patch.content !== undefined ? "content" : "other"}`);
           }
@@ -582,6 +591,8 @@ function wrapStoreRecordingOrder(store: SQLiteStore, log: string[]): StoreInterf
       return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
     },
   }) as unknown as StoreInterface;
+  // reason: the write route needs a resolvable author; a bare Proxy carries none, so declare the test's one.
+  return actedStore(proxy);
 }
 
 describe("OutlineMigrationService.migrateSection — two-step write order on a fresh live run (AC-080-7 STATE)", () => {

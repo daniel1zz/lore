@@ -41,8 +41,8 @@ import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import type { StoreInterface, UpdateOpts } from "../../../src/store/store-interface.js";
-import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
+import type { ProvenanceWriteExtras, StoreInterface, UpdateOpts } from "../../../src/store/store-interface.js";
+import type { AuditEntry, CreateDocInput, DocRecord, LoreError, Result, VersionRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -72,11 +72,16 @@ function makeRacingStore(real: StoreInterface, planId: string, specId: string): 
   let armed = true;
   return new Proxy(real, {
     get(target, prop, receiver) {
-      if (prop === "update") {
+      // reason: the approval commits through the write route's ONE `updateWithProvenance` transaction (AC-DCL-5), so
+      // the racing writer lands in front of THAT call — the same gate-check-to-commit gap it always modelled.
+      if (prop === "updateWithProvenance") {
         return async (
           id: string,
           patch: Partial<DocRecord>,
-          opts?: UpdateOpts,
+          opts: UpdateOpts | undefined,
+          version: VersionRecord,
+          audit: AuditEntry,
+          extras?: ProvenanceWriteExtras,
         ): Promise<Result<DocRecord, LoreError>> => {
           if (armed && id === planId && patch.status === "approved") {
             armed = false;
@@ -89,7 +94,7 @@ function makeRacingStore(real: StoreInterface, planId: string, specId: string): 
               );
             }
           }
-          return target.update(id, patch, opts);
+          return target.updateWithProvenance(id, patch, opts, version, audit, extras);
         };
       }
       const value = Reflect.get(target, prop, receiver) as unknown;

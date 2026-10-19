@@ -84,6 +84,7 @@ import { ownProposedRules } from "./rule-changes.js";
 import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
+  ProposedRuleWrite,
   ProvenanceWriteExtras,
   RuleLeafPatch,
   SearchHit,
@@ -133,7 +134,9 @@ import {
 } from "./validity-service.js";
 import {
   checkForeignCorpusWrite,
+  CorpusWriteAuthority,
   foreignCorpusWriteRefusalError,
+  type CorpusWriteAuthorityContext,
   type ForeignCorpusWriteContext,
 } from "./foreign-corpus-write-guard.js";
 
@@ -819,6 +822,22 @@ export interface DocWriteRequest {
   readonly extras?: ProvenanceWriteExtras;
   /** Timestamp seam; default now. */
   readonly now?: string;
+  /**
+   * `true` when the CALLER holds a declared-intent fact that authorizes a write into a foreign (linked-worktree
+   * resolved) corpus: a claim lease that names a worktree (task/phase lifecycle writes), or a `CorpusWriteAuthority`
+   * grant already taken for this very write (baseline-scoped authoring). Absent = no intent = refused on a foreign
+   * crossing, which is what every non-lifecycle write wants.
+   */
+  readonly foreignIntent?: boolean;
+  /**
+   * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
+   * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
+   * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
+   * is the unchanged one, and no version row (a second row at the same version cannot exist). The two steps are not
+   * one transaction — the store has no primitive that updates a doc and audits without a version row — which is
+   * exactly how the reject path wrote them before AC-DCL-5.
+   */
+  readonly versioning?: "bump" | "keep";
 }
 
 /** Outcome of {@link CorpusService.writeDoc}: `written: false` means the patch changed nothing and NOTHING was written. */
@@ -835,6 +854,57 @@ export interface DocInsertRequest {
   readonly auditDetails?: Readonly<Record<string, unknown>>;
   readonly auditSessionId?: string;
   readonly by?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
+}
+
+/**
+ * One audit row with no version bump (a judgment, a state-binding skip, an issue-close step, an adoption record,
+ * a foreign-corpus decision), as {@link CorpusService.appendAudit} takes it.
+ */
+export interface AuditAppendRequest {
+  readonly action: string;
+  readonly sessionId: string;
+  readonly docId?: DocId;
+  /** Operation-specific `details`; written verbatim (an audit-only row carries no `version` join key). */
+  readonly details?: Readonly<Record<string, unknown>>;
+  /** Explicit actor; absent = the store write context's claimed name. */
+  readonly by?: string;
+  /** Timestamp seam; default now. */
+  readonly timestamp?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
+  /**
+   * `"refuse"` (default): a foreign crossing without intent is refused like any other write.
+   * `"record"`: this row IS the record of a foreign-corpus decision that was already taken (the scoped
+   * authorization the guard just granted) — refusing the record of an authorization would be circular, so the
+   * refusal predicate is not applied. The row still names the caller and the run.
+   */
+  readonly foreign?: "refuse" | "record";
+}
+
+/** A parent re-pointing (a hierarchy migration), as {@link CorpusService.setDocParent} takes it. */
+export interface DocParentRequest {
+  readonly docId: DocId;
+  /** The new parent, or `null` to clear it (which also removes the doc's `parent` link edge). */
+  readonly parentId: DocId | null;
+  readonly auditAction: string;
+  readonly auditSessionId: string;
+  readonly auditDetails?: Readonly<Record<string, unknown>>;
+  readonly by?: string;
+}
+
+/** A registry-reserved `proposed` rule id written into a spec's change set, as {@link CorpusService.reserveProposedRule} takes it. */
+export interface ProposedRuleReserveRequest {
+  /** The spec write (CAS base, builder of the new `extra`, owner leaf, optional status, change summary). */
+  readonly write: ProposedRuleWrite;
+  /** Id family; the change set is business-only today. */
+  readonly family: RuleIdPrefix;
+  /** Operation-specific audit `details`; the route adds `rule_id`, `version` and `new_version`. */
+  readonly auditDetails: Readonly<Record<string, unknown>>;
+  readonly by?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
 }
 
 /** A store-owned rule move, as {@link CorpusService.moveRule} takes it. */
@@ -866,7 +936,7 @@ export interface RuleAllocateRequest {
  */
 export type DocWritePort = Pick<
   CorpusService,
-  "writeDoc" | "insertDoc" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
+  "writeDoc" | "insertDoc" | "assertWritable" | "reserveProposedRule" | "setDocParent" | "appendAudit" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
 >;
 
 /** The post-patch value of one patched field of `doc`. */
@@ -1126,13 +1196,60 @@ export class CorpusService {
    * @returns `undefined` when the write may proceed; a ready-to-return
    *   `err(...)` `Result` when it must be refused.
    */
-  private refuseIfForeignCorpusWrite<T>(): Result<T, LoreError> | undefined {
-    const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, false);
-    return verdict.allowed ? undefined : err(foreignCorpusWriteRefusalError(verdict));
+  private async refuseIfForeignCorpusWrite<T>(
+    intentDeclared = false,
+    targets: readonly DocRecord[] = [],
+  ): Promise<Result<T, LoreError> | undefined> {
+    const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
+    if (verdict.allowed) return undefined;
+    // reason: claim-scoped corpus authoring (spec-baseline-slice-2 §C8, issue #39) — a worktree implementer whose fresh
+    // claim lease declares a `corpus_scope` covering every baseline target may write there. The decision is the
+    // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
+    // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
+    if (this.corpusWriteAuthority !== undefined) {
+      const decided = await this.corpusWriteAuthority.decide(targets);
+      return decided.ok ? undefined : err(decided.error);
+    }
+    return err(foreignCorpusWriteRefusalError(verdict));
   }
 
+  /**
+   * Arms the claim-scoped corpus-write authority the write route consults before refusing a foreign-corpus write
+   * (see {@link refuseIfForeignCorpusWrite}). Called once per CLI process by `adapters/cli/loader.ts`, next to
+   * {@link setForeignCorpusWriteContext}. Unarmed (every bare construction) ⇒ the route refuses every foreign write.
+   */
+  setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
+    this.corpusWriteAuthority = new CorpusWriteAuthority(this.store, context, this);
+  }
+
+  private corpusWriteAuthority: CorpusWriteAuthority | undefined;
 
   // ── The one write route ────────────────────────────────────────────────────
+
+  /** {@link writeDoc}'s `versioning: "keep"` leg: CAS-guarded doc update, then the audit row; no version row. */
+  private async writeDocKeepingVersion(
+    request: DocWriteRequest,
+    actor: string,
+    now: string,
+  ): Promise<Result<DocWriteOutcome, LoreError>> {
+    const { doc, patch } = request;
+    const updated = await this.store.update(
+      doc.id,
+      { ...definedOnly(patch), updated_at: now },
+      { expected_version: doc.version },
+    );
+    if (!updated.ok) return updated;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor,
+      session_id: request.auditSessionId ?? doc.id,
+      action: request.auditAction,
+      doc_id: doc.id,
+      details: { ...request.auditDetails, version: doc.version },
+    });
+    if (!audited.ok) return audited;
+    return ok({ doc: updated.value, written: true });
+  }
 
   /**
    * THE write route for changing an existing document (spec-defect-clusters-round-1 D3). In order: the
@@ -1147,7 +1264,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
@@ -1164,6 +1281,7 @@ export class CorpusService {
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
     const now = request.now ?? new Date().toISOString();
+    if (request.versioning === "keep") return this.writeDocKeepingVersion(request, actor.value, now);
     const newVersion = doc.version + 1;
     const after: DocRecord = { ...doc, ...definedOnly(patch), version: newVersion, updated_at: now };
     const versionRecord: VersionRecord = {
@@ -1208,7 +1326,7 @@ export class CorpusService {
    * @param request - See {@link DocInsertRequest}.
    */
   async insertDoc(request: DocInsertRequest): Promise<Result<DocRecord, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocRecord>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1237,15 +1355,102 @@ export class CorpusService {
   }
 
   /**
-   * Route for the ordinal repair-assignment (`StoreInterface.assignOrdinalForRepair`): foreign-corpus
-   * refusal, the store's own atomic ordinal write, then the version row and audit row that write never
-   * produced. A repeat call at the same ordinal is a no-op that writes nothing.
+   * Route for reserving a `proposed` rule id inside a spec's change set: foreign-corpus refusal, the store's ONE
+   * transaction (allocate the id, CAS-update the spec, write its version row — stamped with the invocation's run,
+   * register the id as `proposed`), then the audit row as the calling actor.
    *
-   * ⛔ NOT one transaction: the ordinal column write is a store primitive (`update` cannot set `ordinal`), so
-   * a failure of the version/audit step after it leaves the ordinal assigned and is returned as the error.
-   * The migration re-run converges (the same-value repeat is a no-op) but does not backfill the missing rows.
+   * @param request - See {@link ProposedRuleReserveRequest}.
+   */
+  async reserveProposedRule(
+    request: ProposedRuleReserveRequest,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(request.foreignIntent === true);
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const reserved = await this.store.reserveProposedRuleAndUpdateSpec(request.write, actor.value, request.family);
+    if (!reserved.ok) return reserved;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      actor: actor.value,
+      session_id: reserved.value.doc.id,
+      action: "update",
+      doc_id: reserved.value.doc.id,
+      details: {
+        ...request.auditDetails,
+        rule_id: reserved.value.ruleId,
+        version: reserved.value.doc.version,
+        new_version: reserved.value.doc.version,
+      },
+    });
+    if (!audited.ok) return audited;
+    return reserved;
+  }
+
+  /**
+   * The foreign-corpus refusal alone, for a caller whose operation writes something this route does not carry
+   * (a judgment row) BEFORE the routed write: asking first keeps a refused call from leaving that earlier row behind.
    *
-   * @param doc - The doc as read (its `version` decides whether the store call changed anything).
+   * @param foreignIntent - See {@link DocWriteRequest.foreignIntent}.
+   * @returns `ok` when a write into this corpus is allowed; the `gate:corpus-write:foreign-provenance` refusal otherwise.
+   */
+  async assertWritable(foreignIntent = false): Promise<Result<void, LoreError>> {
+    return (await this.refuseIfForeignCorpusWrite<void>(foreignIntent)) ?? ok(undefined);
+  }
+
+  /**
+   * THE write route for re-pointing a doc's parent (a hierarchy migration): foreign-corpus refusal, then the
+   * store's ONE transaction (`setDocParentWithProvenance`: the parent write, the `parent` link-edge removal on a
+   * clear, the audit row) naming the calling actor. The migration's audit row is its record: it bumps no version.
+   *
+   * @param request - See {@link DocParentRequest}.
+   */
+  async setDocParent(request: DocParentRequest): Promise<Result<DocRecord, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>();
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    return this.store.setDocParentWithProvenance(request.docId, request.parentId, {
+      timestamp: new Date().toISOString(),
+      actor: actor.value,
+      session_id: request.auditSessionId,
+      action: request.auditAction,
+      doc_id: request.docId,
+      ...(request.auditDetails !== undefined ? { details: { ...request.auditDetails } } : {}),
+    });
+  }
+
+  /**
+   * THE write route for an audit row that bumps no version (a judgment, a state-binding skip, an issue-close step,
+   * an adoption record, a foreign-corpus decision): foreign-corpus refusal (unless `request.foreign` is
+   * `"record"`), then ONE audit append naming the calling actor; the store's write context stamps the run.
+   *
+   * @param request - See {@link AuditAppendRequest}.
+   */
+  async appendAudit(request: AuditAppendRequest): Promise<Result<void, LoreError>> {
+    if (request.foreign !== "record") {
+      const refusal = await this.refuseIfForeignCorpusWrite<void>(request.foreignIntent === true);
+      if (refusal !== undefined) return refusal;
+    }
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    return this.store.appendAuditEntry({
+      timestamp: request.timestamp ?? new Date().toISOString(),
+      actor: actor.value,
+      session_id: request.sessionId,
+      action: request.action,
+      ...(request.docId !== undefined ? { doc_id: request.docId } : {}),
+      ...(request.details !== undefined ? { details: { ...request.details } } : {}),
+    });
+  }
+
+  /**
+   * Route for the ordinal repair-assignment: foreign-corpus refusal, then the store's ONE transaction
+   * (`assignOrdinalForRepairWithProvenance`) carrying the ordinal write, the version row and the audit row, both
+   * naming the calling actor. All three land or none do: a failure of the version or audit insert leaves the doc
+   * on its previous ordinal and version. A repeat call at the same ordinal is a no-op that writes nothing.
+   *
+   * @param doc - The doc as read (its `version` is the CAS base: the new version is `doc.version + 1`).
    * @param ordinal - The target ordinal, computed by the caller to be free.
    */
   async assignOrdinalForRepair(
@@ -1254,39 +1459,38 @@ export class CorpusService {
     by?: string,
     now: string = new Date().toISOString(),
   ): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(by);
     if (!actor.ok) return actor;
-    const assigned = await this.store.assignOrdinalForRepair(doc.id, ordinal);
+    const newVersion = doc.version + 1;
+    const assigned = await this.store.assignOrdinalForRepairWithProvenance(
+      doc.id,
+      ordinal,
+      {
+        doc_id: doc.id,
+        version: newVersion,
+        content: doc.content,
+        extra: doc.extra,
+        status: doc.status,
+        title: doc.title,
+        action: "update",
+        created_at: now,
+        created_by: actor.value,
+        change_summary: `Ordinal ${ordinal} assigned (ordinal migration)`,
+        slug: doc.slug,
+      },
+      {
+        timestamp: now,
+        actor: actor.value,
+        session_id: `ordinal-migration-${doc.id}`,
+        action: "ordinal-backfill",
+        doc_id: doc.id,
+        details: { new_ordinal: ordinal, version: newVersion, new_version: newVersion },
+      },
+    );
     if (!assigned.ok) return assigned;
-    const after = assigned.value;
-    if (after.version === doc.version) return ok({ doc: after, written: false });
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: after.id,
-      version: after.version,
-      content: after.content,
-      extra: after.extra,
-      status: after.status,
-      title: after.title,
-      action: "update",
-      created_at: now,
-      created_by: actor.value,
-      change_summary: `Ordinal ${ordinal} assigned (ordinal migration)`,
-      slug: after.slug,
-    });
-    if (!versionResult.ok) return versionResult;
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: actor.value,
-      session_id: `ordinal-migration-${after.id}`,
-      action: "ordinal-backfill",
-      doc_id: after.id,
-      details: { new_ordinal: ordinal, version: after.version, new_version: after.version },
-    });
-    if (!auditResult.ok) return auditResult;
-    return ok({ doc: after, written: true });
+    return ok({ doc: assigned.value, written: assigned.value.version !== doc.version });
   }
 
   /**
@@ -1297,7 +1501,13 @@ export class CorpusService {
    * @param request - See {@link RuleMoveRequest}.
    */
   async moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>();
+    const moveTargets: DocRecord[] = [];
+    for (const id of [request.from.id, request.to.id]) {
+      const found = await this.store.find(id);
+      if (!found.ok) return found;
+      if (found.value !== null) moveTargets.push(found.value);
+    }
+    const refusal = await this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>(false, moveTargets);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1325,7 +1535,7 @@ export class CorpusService {
    * @param request - See {@link RuleAllocateRequest}.
    */
   async allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>();
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(false, [request.leaf]);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1625,7 +1835,7 @@ export class CorpusService {
     // it without reading §D5 first is a spec change wearing a refactor's
     // clothes.
     if (opts?.allowHandoff !== true && opts?.allowUat !== true) {
-      const refusal = this.refuseIfForeignCorpusWrite<CreateDocResult>();
+      const refusal = await this.refuseIfForeignCorpusWrite<CreateDocResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -2612,7 +2822,7 @@ export class CorpusService {
   ): Promise<Result<CorpusSetResult, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<CorpusSetResult>();
+      const refusal = await this.refuseIfForeignCorpusWrite<CorpusSetResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -3928,7 +4138,7 @@ export class CorpusService {
     // checked BEFORE the confirm gate, since a foreign write is refused
     // regardless of confirmation state.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
+      const refusal = await this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -5235,7 +5445,7 @@ export class CorpusService {
   ): Promise<Result<LinkRecord, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<LinkRecord>();
+      const refusal = await this.refuseIfForeignCorpusWrite<LinkRecord>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -5371,7 +5581,7 @@ export class CorpusService {
   ): Promise<Result<void, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<void>();
+      const refusal = await this.refuseIfForeignCorpusWrite<void>();
       if (refusal !== undefined) return refusal;
     }
 

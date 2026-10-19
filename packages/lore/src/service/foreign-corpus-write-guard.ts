@@ -152,6 +152,7 @@ import { err, extractHeldClaim, isClaimStale, ok, type LoreError, type Result } 
 import type { CorpusProvenance } from "@lore/core";
 import type { DocRecord, TaskClaim } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import type { ClaimOpts, EvidenceInput, ReleaseOpts, TaskWorkflowService } from "./task-workflow-service.js";
 
 /**
@@ -496,6 +497,9 @@ export class CorpusWriteAuthority {
   constructor(
     private readonly store: StoreInterface,
     private readonly context: CorpusWriteAuthorityContext,
+    // reason: AC-DCL-5 — the authorization row goes through the ONE write route, never a bare store append. The
+    // composing service passes its own writer; a bare construction gets a bare one over the same store.
+    private readonly writer: DocWritePort = bareDocWriter(store),
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
@@ -511,22 +515,21 @@ export class CorpusWriteAuthority {
     operation: string,
     actor: string,
   ): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
-    // reason: inert short-circuit through the shared predicate — never re-derive the table here.
-    if (checkForeignCorpusWrite(this.context.foreign, false).allowed) return ok(undefined);
-
-    const grant = await this.findCoveringGrant(targets);
-    if (!grant.ok) return grant;
-    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined);
-    if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
-    if (grant.value === undefined) return ok(undefined);
+    const decided = await this.decide(targets);
+    if (!decided.ok) return decided;
+    if (decided.value === undefined) return ok(undefined);
+    const grant = { ok: true as const, value: decided.value };
 
     const first = targets[0];
-    const audited = await this.store.appendAuditEntry({
+    // reason: foreign "record" — this row IS the record of the scoped authorization just granted; applying the
+    // refusal predicate to it would refuse the record of the very decision that allows the write.
+    const audited = await this.writer.appendAudit({
       timestamp: this.now(),
-      actor,
-      session_id: first?.id ?? grant.value.task,
+      by: actor,
+      sessionId: first?.id ?? grant.value.task,
       action: "corpus-scope-write",
-      ...(first !== undefined ? { doc_id: first.id } : {}),
+      foreign: "record",
+      ...(first !== undefined ? { docId: first.id } : {}),
       details: {
         operation,
         targets: targets.map((t) => t.slug),
@@ -538,6 +541,24 @@ export class CorpusWriteAuthority {
       },
     });
     if (!audited.ok) return audited;
+    return ok(grant.value);
+  }
+
+  /**
+   * THE decision: may a write to `targets` proceed from this process? Inert (`ok(undefined)`) outside a foreign
+   * crossing; otherwise the fresh scoped lease covering every target as a {@link CorpusScopeGrant}, or the
+   * foreign-write refusal. Writes NOTHING — {@link authorize} adds the audit row, and the write route
+   * (`CorpusService`) calls this directly, so the authorization report and the write it reports on read the SAME
+   * decision and cannot disagree.
+   */
+  async decide(targets: readonly DocRecord[]): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
+    // reason: inert short-circuit through the shared predicate — never re-derive the table here.
+    if (checkForeignCorpusWrite(this.context.foreign, false).allowed) return ok(undefined);
+
+    const grant = await this.findCoveringGrant(targets);
+    if (!grant.ok) return grant;
+    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined);
+    if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return ok(grant.value);
   }
 

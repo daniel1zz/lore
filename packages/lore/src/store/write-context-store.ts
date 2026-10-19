@@ -71,6 +71,7 @@ const STAMPED: Readonly<Record<string, StampedArgs>> = {
   insertWithProvenance: { version: 1, audit: 2 },
   insertWithAllocatedOrdinalAndProvenance: { version: 1, audit: 2 },
   updateWithProvenance: { version: 3, audit: 4, extras: 5 },
+  assignOrdinalForRepairWithProvenance: { version: 2, audit: 3 },
   softDeleteWithProvenance: { version: 1, audit: 2 },
   addLinkWithProvenance: { audit: 1 },
   setDocParentWithProvenance: { audit: 2 },

@@ -25,8 +25,8 @@
 
 import { detectSpecKindSignal, ok, type LoreError, type Result } from "@lore/core";
 import type { SpecKindHeuristicField, SpecKindHeuristicKind } from "@lore/core";
-import type { DocId } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -66,7 +66,16 @@ export class SpecKindService {
   /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
    */
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── migrateSpecKind ───────────────────────────────────────────────────────
 
@@ -124,11 +133,18 @@ export class SpecKindService {
 
       if (!dryRun) {
         const newExtra: Record<string, unknown> = { ...spec.extra, spec_kind: signal.kind };
-        const updateResult = await this.store.update(spec.id as DocId, {
-          extra: newExtra,
-          updated_at: new Date().toISOString(),
+        // reason: a classification migration is a sanctioned metadata edit (lock "none"); it now bumps the version
+        // and leaves its version + audit rows (before AC-DCL-5 it was a bare `store.update` that left neither).
+        const written = await this.writer.writeDoc({
+          doc: spec,
+          patch: { extra: newExtra },
+          action: "update",
+          changeSummary: `spec_kind classified as ${signal.kind} (${signal.signal})`,
+          auditAction: "update",
+          auditDetails: { operation: "spec-kind-migration", spec_kind: signal.kind, signal: signal.signal },
+          lock: "none",
         });
-        if (!updateResult.ok) return updateResult;
+        if (!written.ok) return written;
       }
     }
 

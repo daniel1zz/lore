@@ -46,6 +46,7 @@ import type { GithubIssueRef } from "./resolution-projector.js";
 import { ok } from "@lore/core";
 import type { DocRecord, IssueResolution, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 /** Audit action written once per failed GitHub call (close, comment or label). */
 export const ISSUE_CLOSE_FAILED_AUDIT_ACTION = "issue_close_failed";
@@ -151,6 +152,7 @@ interface ReportFacts {
 /** See the module header. */
 export class IssueCloseOnArchive implements ArchiveIssueClosePort {
   private readonly store: StoreInterface;
+  private readonly writer: DocWritePort;
   private readonly closer: IssueCloser | undefined;
   private readonly upstreamRepo: string | undefined;
   private readonly now: () => string;
@@ -167,7 +169,11 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     closer: IssueCloser | undefined,
     upstreamRepo: string | undefined,
     now: () => string = () => new Date().toISOString(),
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This step never calls `store.appendAuditEntry` itself.
+    writer?: DocWritePort,
   ) {
+    this.writer = writer ?? bareDocWriter(store);
     this.store = store;
     this.closer = closer;
     this.upstreamRepo = upstreamRepo;
@@ -528,12 +534,12 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     number: number,
     reason: string,
   ): Promise<string> {
-    const written = await this.store.appendAuditEntry({
+    const written = await this.writer.appendAudit({
       timestamp: this.now(),
-      actor,
-      session_id: doc.id,
+      by: actor,
+      sessionId: doc.id,
       action: ISSUE_CLOSE_FAILED_AUDIT_ACTION,
-      doc_id: doc.id,
+      docId: doc.id,
       details: { issue: number, step, error: reason, source: doc.slug },
     });
     return written.ok ? "" : ` (audit row NOT written: ${describeError(written.error)})`;
@@ -546,12 +552,12 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     reason: string,
     source: string,
   ): Promise<void> {
-    await this.store.appendAuditEntry({
+    await this.writer.appendAudit({
       timestamp: this.now(),
-      actor: "lore issues --sync",
-      session_id: task.id,
+      by: "lore issues --sync",
+      sessionId: task.id,
       action: ISSUE_CLOSE_FAILED_AUDIT_ACTION,
-      doc_id: task.id,
+      docId: task.id,
       details: { issue: number, step, error: reason, source },
     });
   }
