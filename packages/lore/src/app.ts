@@ -121,6 +121,7 @@ import { SpecParentMigrationService } from "./service/spec-parent-migration-serv
 import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
+import { buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -959,6 +960,8 @@ function buildAppFromSqlite(
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
+  reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
@@ -1381,6 +1384,8 @@ function buildAppFromTurso(
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
+  reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
