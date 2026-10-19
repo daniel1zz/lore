@@ -313,8 +313,8 @@ export const GateCheckpointConfigSchema = z
      * so a corpus opts in once it has criteria citing rules worth checking.
      *
      * ⛔ This key was named `prd_sync` while it still switched the retired outline-sync predicate; it now
-     * switches something else, so the old name is no longer in this schema. {@link renamePrdSyncConfigKey}
-     * migrates a file that still carries it (once, loudly); {@link loadConfigFromString} refuses it by name.
+     * switches something else, so the old name is no longer in this schema. {@link loadConfigFromString}
+     * refuses it by name, naming `lore migrate config-keys --apply`, which renames it in the file.
      */
     cited_rule_check: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
@@ -2571,7 +2571,7 @@ function planCloseGateEntry(raw: unknown): Record<string, unknown> | undefined {
 
 /**
  * Names the retired `prd_sync` key when a YAML-parsed config still carries it — the refusal
- * {@link loadConfigFromString} returns (the pure parser never reads the old name; `loadConfig` migrates the file first).
+ * {@link loadConfigFromString} returns, and so does every loader built on it (nothing reads the old name and no loader writes).
  *
  * @returns a VALIDATION_ERROR payload naming both keys, or `undefined` when the old key is absent
  */
@@ -2583,30 +2583,34 @@ function detectPrdSyncConfigKey(raw: unknown): LoreError | undefined {
     field: PRD_SYNC_RENAME_FIELD,
     message:
       `workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
-      "(it switches the cited-rule check, not outline sync); rename it in .lore/config.yaml (a checkout that owns its config migrates it on the first run of a lore command).",
+      `(it switches the cited-rule check, not outline sync); run \`${CONFIG_KEYS_MIGRATE_COMMAND}\` to rename it in .lore/config.yaml.`,
     value: entry[PRD_SYNC_KEY],
   } satisfies LoreError;
 }
 
-/** What {@link renamePrdSyncConfigKey} did to a config text. */
+/** What {@link renamePrdSyncConfigKey} computed for a config text. */
 export interface PrdSyncConfigRename {
-  /** The config text with the key renamed (comments and every other byte of structure kept). */
+  /** The config text with the key renamed: every other byte is identical to the input. */
   readonly text: string;
-  /** The one named line to show the operator. */
-  readonly notice: string;
+  /** The value of the old key's `enabled` (carried unchanged under the new key), `undefined` when it had none. */
+  readonly enabled: unknown;
 }
 
+/** The command that performs the rename, named by every refusal about the old key. */
+export const CONFIG_KEYS_MIGRATE_COMMAND = "lore migrate config-keys --apply";
+
 /**
- * The ONE-TIME migration of `workflow.gates."plan-close".prd_sync` to `...cited_rule_check` (BL-D3):
- * renames the key in the YAML document, keeping its value and every comment.
+ * PURE computation of the rename of `workflow.gates."plan-close".prd_sync` to `...cited_rule_check` (BL-D3): a
+ * byte-range splice of the key token. Writing the result is `lore migrate config-keys --apply`'s job — no loader
+ * ever writes a config file.
  *
  * @param yamlText - the raw config file text
  * @returns `ok(undefined)` when the file does not carry the old key (nothing to migrate, never an error);
- *   `ok({text, notice})` when it does; `err(VALIDATION_ERROR)` naming both keys when BOTH are present
+ *   `ok({text, enabled})` when it does; `err(VALIDATION_ERROR)` naming both keys when BOTH are present
  *   (which one wins is the operator's decision, never a silent precedence) or when the YAML is malformed.
  * @example
  *   renamePrdSyncConfigKey("workflow:\n  gates:\n    plan-close:\n      prd_sync:\n        enabled: true\n");
- *   // => ok({ text: "...cited_rule_check:...", notice: 'lore: workflow.gates."plan-close".prd_sync was renamed ...' })
+ *   // => ok({ text: "...cited_rule_check:...", enabled: true })
  */
 export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRename | undefined, LoreError> {
   const doc = yaml.parseDocument(yamlText);
@@ -2628,7 +2632,7 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
       field: PRD_SYNC_RENAME_FIELD,
       message:
         `workflow.gates."plan-close" carries both ${PRD_SYNC_KEY} and ${CITED_RULE_CHECK_KEY}; ${PRD_SYNC_KEY} was renamed to ` +
-        `${CITED_RULE_CHECK_KEY}. Delete the one you do not want in .lore/config.yaml (nothing was rewritten).`,
+        `${CITED_RULE_CHECK_KEY}. Delete the one you do not want in .lore/config.yaml, then \`${CONFIG_KEYS_MIGRATE_COMMAND}\` has nothing left to do (nothing was rewritten).`,
       value: yamlText,
     } satisfies LoreError);
   }
@@ -2640,15 +2644,13 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
     return err({
       code: "VALIDATION_ERROR",
       field: PRD_SYNC_RENAME_FIELD,
-      message: ` has no source position, so it cannot be renamed in place; rename it to  by hand.`,
+      message: `${PRD_SYNC_KEY} has no source position, so it cannot be renamed in place; rename it to ${CITED_RULE_CHECK_KEY} by hand.`,
       value: yamlText,
     } satisfies LoreError);
   }
   return ok({
     text: `${yamlText.slice(0, keyRange[0])}${CITED_RULE_CHECK_KEY}${yamlText.slice(keyRange[1])}`,
-    notice:
-      `lore: workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
-      `and this config was rewritten in place (enabled: ${String(enabled)} kept); the old name is no longer read.`,
+    enabled,
   });
 }
 

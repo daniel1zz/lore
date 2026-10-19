@@ -34,6 +34,10 @@
  *                      audit entry per spec (no version row, no status change); `--revert` restores each
  *                      parent from those entries. Both idempotent. Thin pipe over
  *                      `SpecParentMigrationService`. (AC-BLS3B-7)
+ *   config-keys [--apply] Rename retired keys in .lore/config.yaml (BL-D3: plan-close `prd_sync` ->
+ *                      `cited_rule_check`). Preview is the DEFAULT; `--apply` changes only the key text
+ *                      (every other byte identical) and the output names the file; a second run changes
+ *                      nothing. Never loads the config through the app (it repairs that file).
  *   plan-outline-exempt [--apply] Remove the legacy outline-sync exemption (`extra.prd_sync_exempt`) from
  *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
@@ -43,7 +47,9 @@
 import { dirname } from "path";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatErrorFor } from "../utils.js";
+import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.js";
+import { resolveCorpus } from "../corpus-resolution.js";
+import { migrateConfigKeys } from "@lore/core/node";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
@@ -54,12 +60,12 @@ export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), or `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), or `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals | spec-parents | plan-outline-exempt",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals | spec-parents | plan-outline-exempt | config-keys",
       required: true,
     },
     from: {
@@ -80,7 +86,7 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt, config-keys] Execute the migration (default is dry-run/preview-only)",
     },
     revert: {
       type: "boolean",
@@ -111,12 +117,50 @@ export default defineLoreCommand({
       args.version !== "prd-to-outline" &&
       args.version !== "ordinals" &&
       args.version !== "spec-parents" &&
-      args.version !== "plan-outline-exempt"
+      args.version !== "plan-outline-exempt" &&
+      args.version !== "config-keys"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents, plan-outline-exempt.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents, plan-outline-exempt, config-keys.\n`,
       );
       exitCli(2);
+    }
+
+    // ── config-keys action ────────────────────────────────────────────────
+    // reason: deliberately does NOT go through `loadLoreApp` — that loads (and, for a retired key, refuses) the very
+    // config file this action exists to repair. It resolves the corpus location only.
+    if (args.version === "config-keys") {
+      const dbPath = findLoreDbPath(inv.io, inv);
+      // reason: a write into another checkout's config (a linked worktree reaching the main checkout through the
+      // git-common-dir fallback) is refused, like every foreign-corpus write; run it from the checkout that owns the config.
+      if (args.apply === true && resolveCorpus(inv.io, inv.cwd, inv.env)?.provenance !== "own") {
+        const refusal = {
+          code: "VALIDATION_ERROR" as const,
+          field: "gate:corpus-write:foreign-provenance",
+          message: "`migrate config-keys --apply` rewrites the config of the checkout that owns the corpus; this checkout reaches it through another one. Run it there.",
+        };
+        inv.io.stderr.write(formatErrorFor(inv, refusal) + "\n");
+        return exitCode(refusal);
+      }
+      const result = migrateConfigKeys(dirname(dirname(dbPath)), args.apply === true);
+      if (!result.ok) {
+        if (args.json) {
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+        } else {
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        }
+        return exitCode(result.error);
+      }
+      const report = result.value;
+      if (args.json) {
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { applied: args.apply === true, ...report } }, null, 2));
+        return 0;
+      }
+      printLine(inv.io.stdout, args.apply === true ? "Config key migration complete" : "Config key migration (preview)");
+      printLine(inv.io.stdout, "─".repeat(40));
+      printLine(inv.io.stdout, report.notice ?? `${report.file}: no retired keys`);
+      if (report.renamed && !report.written) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+      return 0;
     }
 
     // ── plan-outline-exempt action ────────────────────────────────────────

@@ -267,15 +267,11 @@ async function readTaskClaimLease(app: App, idOrSlug: string): Promise<TaskClaim
  * @returns The raw `loadConfig` result — `sync` NOT yet stripped (each caller
  *   strips it on its own success path, matching their pre-existing behaviour).
  */
-function resolveProjectConfigResult(dbPath: string, io: CliIo, locator: CorpusLocator): Result<LoreConfig, LoreError> {
+function resolveProjectConfigResult(dbPath: string, io: CliIo): Result<LoreConfig, LoreError> {
   // The .lore dir is always one level up from lore.db
   const loreDir = dirname(dbPath);
   const projectDir = dirname(loreDir);
-  // reason: BL-D3 — the one-time `prd_sync` -> `cited_rule_check` rewrite is a WRITE to the config file, so it is
-  // allowed only when this checkout OWNS the corpus it resolved; a linked worktree reaching the main checkout through
-  // the git-common-dir fallback must not edit that checkout's config (it gets the loud refusal instead).
-  const rewrite = resolveCorpus(io, locator.cwd, locator.env)?.provenance === "own";
-  return loadConfig(projectDir, warnOncePerWriter(io), { rewrite });
+  return loadConfig(projectDir, warnOncePerWriter(io));
 }
 
 /** Retired-key notices already printed, per run: keyed on the run's stderr writer, so a re-read of the config stays quiet. */
@@ -336,7 +332,7 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  */
 export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig | undefined {
   const dbPath = findLoreDbPath(io, locator);
-  const configResult = resolveProjectConfigResult(dbPath, io, locator);
+  const configResult = resolveProjectConfigResult(dbPath, io);
   if (!configResult.ok) {
     // reason: the retired-name refusal must not read as "no config" in silence (every gate would run unconfigured).
     if (isPrdSyncRenameError(configResult.error)) printLine(io.stderr, formatError(configResult.error)); // CLI surface
@@ -420,7 +416,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     printLine(opts.inv.io.stderr, `${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
     exitCli(exitCode(refusal));
   }
-  const configResult = resolveProjectConfigResult(dbPath, opts.inv.io, opts.inv);
+  const configResult = resolveProjectConfigResult(dbPath, opts.inv.io);
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
     rawConfig = configResult.value;

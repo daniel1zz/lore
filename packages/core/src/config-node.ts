@@ -58,32 +58,14 @@ const CONFIG_FILE = ".lore/config.yaml";
  * Missing file or invalid content → {ok:false, error}. Never throws.
  * `warn`, when given, receives one line per retired key the file still carries (see `retiredConfigKeyNotices`).
  *
- * ONE-TIME MIGRATION (BL-D3): a file still carrying `workflow.gates."plan-close".prd_sync` is rewritten in place
- * to `cited_rule_check` (atomic temp+rename; a byte-range splice of the key, nothing else changes) and `warn`
- * receives the named notice, once — the next load finds no old key. The rewrite happens ONLY when the caller
- * passes `rewrite: true` (the loader does so only for a config its own checkout owns — never for a corpus
- * resolved through a linked worktree's git-common-dir, which would be a write into another checkout) AND gives a
- * `warn` channel (the notice is the only record of the rewrite). Otherwise the file is NOT touched and the load
- * fails by name (`loadConfigFromString`'s refusal), never a silent rewrite and never a silent fallback.
- * Both names present is refused by `renamePrdSyncConfigKey`, file untouched.
+ * NEVER WRITES. A file still carrying the retired `workflow.gates."plan-close".prd_sync` fails by name
+ * (`loadConfigFromString`'s refusal, which names the fix `lore migrate config-keys --apply`); renaming it is
+ * {@link migrateConfigKeys}'s job, run on purpose.
  */
-export function loadConfig(
-  dir: string,
-  warn?: (line: string) => void,
-  options: { readonly rewrite?: boolean } = {},
-): Result<LoreConfig, LoreError> {
+export function loadConfig(dir: string, warn?: (line: string) => void): Result<LoreConfig, LoreError> {
   try {
     const configPath = join(dir, CONFIG_FILE);
-    let raw = readFileSync(configPath, "utf8");
-    const renamed = renamePrdSyncConfigKey(raw);
-    if (!renamed.ok) return renamed;
-    if (renamed.value !== undefined && warn !== undefined && options.rewrite === true) {
-      const tempPath = `${configPath}.migrating-${process.pid}`;
-      writeFileSync(tempPath, renamed.value.text, "utf8");
-      renameSync(tempPath, configPath);
-      raw = renamed.value.text;
-      warn(renamed.value.notice);
-    }
+    const raw = readFileSync(configPath, "utf8");
     return loadConfigFromString(raw, warn);
   } catch (e) {
     const message =
@@ -93,6 +75,55 @@ export function loadConfig(
       code: "STORE_ERROR",
       message,
       ...(cause !== undefined ? { cause } : {}),
+    } satisfies LoreError);
+  }
+}
+
+/** What {@link migrateConfigKeys} found in (and, with `apply`, did to) one project config file. */
+export interface ConfigKeysMigration {
+  /** Absolute path of the config file examined. */
+  readonly file: string;
+  /** Whether the file carried a retired key (a dry run reports `true` without writing). */
+  readonly renamed: boolean;
+  /** Whether the file was written (`apply` and `renamed`). */
+  readonly written: boolean;
+  /** One line naming the file and the rename, or `undefined` when nothing needed renaming. */
+  readonly notice: string | undefined;
+}
+
+/**
+ * The explicit, one-time rename of retired config keys in `<dir>/.lore/config.yaml` (`lore migrate config-keys`):
+ * currently `workflow.gates."plan-close".prd_sync` -> `cited_rule_check` (BL-D3). Only the key text changes; every
+ * other byte of the file is identical. The write is atomic (temp file in the same directory, then rename). A second
+ * run finds no old key and changes nothing.
+ *
+ * @param dir - project directory holding `.lore/config.yaml`
+ * @param apply - `false` (dry run) reports without writing; `true` writes
+ * @returns `ok(report)`; `err(VALIDATION_ERROR)` when the YAML is malformed or both names are present (nothing
+ *   written); `err(STORE_ERROR)` when the file cannot be read or written. Never throws.
+ * @example
+ *   migrateConfigKeys("/repo", true); // => ok({ file: "/repo/.lore/config.yaml", renamed: true, written: true, notice: "..." })
+ */
+export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKeysMigration, LoreError> {
+  const file = join(dir, CONFIG_FILE);
+  try {
+    const raw = readFileSync(file, "utf8");
+    const renamed = renamePrdSyncConfigKey(raw);
+    if (!renamed.ok) return renamed;
+    if (renamed.value === undefined) return ok({ file, renamed: false, written: false, notice: undefined });
+    const notice =
+      `${file}: workflow.gates."plan-close".prd_sync renamed to workflow.gates."plan-close".cited_rule_check ` +
+      `(enabled: ${String(renamed.value.enabled)} kept)`;
+    if (!apply) return ok({ file, renamed: true, written: false, notice });
+    const tempPath = `${file}.migrating-${process.pid}`;
+    writeFileSync(tempPath, renamed.value.text, "utf8");
+    renameSync(tempPath, file);
+    return ok({ file, renamed: true, written: true, notice });
+  } catch (e) {
+    return err({
+      code: "STORE_ERROR",
+      message: e instanceof Error ? e.message : "Failed to migrate config file",
+      ...(e instanceof Error ? { cause: e } : {}),
     } satisfies LoreError);
   }
 }
