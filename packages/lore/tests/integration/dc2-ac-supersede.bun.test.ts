@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-15 (D15, BR-163)
  *
@@ -11,7 +13,8 @@
  * Coverage: HAPPY (a, b), NEGATIVE (c, d), STATE (a: status/version/audit; d: nothing written on a bad target),
  * BOUNDARY (self-supersede, unknown target AC, missing reason), REGRESSION (b: the live AC-2 still verifies).
  */
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -96,8 +99,8 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-dc2-15-"));
   await must(["init"]);
   await loosenOverrideClasses(dir, ["override-judgment"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:", "  gates:",
       "    spec-create:", "      enabled: false",

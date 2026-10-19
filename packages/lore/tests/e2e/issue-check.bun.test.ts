@@ -1,4 +1,6 @@
 // @reads scripts/check-unclaimed-oracle.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore status --check-issues` (D5, spec-issue-closure-loop-computed-
  * resolution-agent-reachable) — the deterministic, report-only detector that
@@ -72,7 +74,8 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, appendFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
@@ -135,8 +138,8 @@ async function initCorpus(tmpDir: string): Promise<void> {
  * APPENDS rather than overwrites it).
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -155,7 +158,7 @@ function disableAllGates(dir: string): void {
 
 /** Appends `feedback.stale_after_days` (D5b) — a DIFFERENT top-level YAML key than `disableAllGates`'s `workflow:`, so both may be appended to the same file without collision. */
 function configureStaleAfterDays(dir: string, days: number): void {
-  appendFileSync(join(dir, ".lore", "config.yaml"), ["feedback:", `  stale_after_days: ${days}`, ""].join("\n"));
+  patchLoreConfig(dir, ["feedback:", `  stale_after_days: ${days}`, ""].join("\n"));
 }
 
 async function createPrd(tmpDir: string): Promise<CreatedDoc> {

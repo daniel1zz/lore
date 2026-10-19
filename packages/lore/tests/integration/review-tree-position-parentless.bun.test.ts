@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
 import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
 
@@ -84,7 +85,7 @@ function stubJudge(dir: string): void {
     templates: {},
     telemetry: false,
   };
-  writeFileSync(configPath, yaml.stringify(config));
+  patchLoreConfig(dir, config, { replace: true });
 }
 
 /** The tree_position row from `lore review --json`, wherever the checks array sits in the payload. */

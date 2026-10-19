@@ -85,6 +85,7 @@ import { assembleIssueBody, type IssueFrontMatterFields } from "@lore/core";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, readRecordedLabelWrites } from "../helpers/payload-gh-stub";
 import { sessionEnvFor } from "../../helpers/session-actor";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
@@ -164,9 +165,7 @@ beforeAll(() => {
     throw new Error(`root PRD creation failed (exit ${prdResult.exitCode}): ${prdResult.stderr}`);
   }
 
-  const configPath = join(corpusRoot, ".lore", "config.yaml");
-  const existingConfig = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-  writeFileSync(configPath, existingConfig + ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
+  patchLoreConfig(corpusRoot, ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
 }, 180_000);
 
 afterAll(() => {
@@ -333,12 +332,7 @@ describe("AC-GR-3: adopt then claim then resolve round-trips the label", () => {
       throw new Error(`root PRD creation failed (exit ${prdResult.exitCode}): ${prdResult.stderr}`);
     }
 
-    const configPath = join(gr3CorpusRoot, ".lore", "config.yaml");
-    const existingConfig = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-    writeFileSync(
-      configPath,
-      existingConfig + ["feedback:", "  upstream:", `    repo: ${FAKE_REPO_GR3}`, ""].join("\n"),
-    );
+    patchLoreConfig(gr3CorpusRoot, ["feedback:", "  upstream:", `    repo: ${FAKE_REPO_GR3}`, ""].join("\n"));
   }, 180_000);
 
   afterAll(() => {
@@ -465,22 +459,11 @@ describe("AC-GR-3: adopt then claim then resolve round-trips the label", () => {
   it(
     "AC-GR-3/D9: a repository rename after adopt is reflected in the LIVE label call, never the stored provenance repo",
     () => {
-      // reason: a bare rewrite of ONLY the `feedback:` block (as the initial
-      // `beforeAll` setup does against a freshly-`lore init`'d file) would
-      // DROP the `project:` block `lore init` also writes — `loadConfig`
-      // then fails schema validation on the truncated file and
-      // `loadLoreApp()` silently falls back to `config: undefined`
-      // (`loader.ts`'s own documented non-goal for non-`ai`-block parse
-      // failures), which would make this test's "rename" indistinguishable
-      // from "upstream de-configured entirely" — MEASURED while writing
-      // this test (a first draft did exactly that and saw ZERO label
-      // writes of ANY kind on the second resolve, not merely the wrong
-      // repo). A plain substring replace on the ALREADY-WRITTEN file
-      // preserves every other key untouched.
-      const configPath = join(gr3CorpusRoot, ".lore", "config.yaml");
-      const configBeforeRename = readFileSync(configPath, "utf8");
-      expect(configBeforeRename).toContain(FAKE_REPO_GR3);
-      writeFileSync(configPath, configBeforeRename.replace(FAKE_REPO_GR3, RENAMED_REPO_GR3));
+      // reason: `patchLoreConfig` merges into the file `lore init` wrote, so every other key (the required
+      // `project:` block included) stays untouched — a bare rewrite of ONLY the `feedback:` block used to drop
+      // `project:`, leave a schema-invalid file, and make this "rename" indistinguishable from "upstream
+      // de-configured entirely" (BR-926: the loader now refuses such a file instead of ignoring it).
+      patchLoreConfig(gr3CorpusRoot, { feedback: { upstream: { repo: RENAMED_REPO_GR3 } } });
 
       const resolveAgain = runGr3([
         "issue",
@@ -515,10 +498,9 @@ describe("AC-GR-3: adopt then claim then resolve round-trips the label", () => {
         false,
       );
 
-      // Restore the config to its original repo (same preserve-the-rest
-      // substring replace as above) — hygiene/order-independence, even
+      // Restore the config to its original repo (same merge as above) — hygiene/order-independence, even
       // though no later test in this describe reads it.
-      writeFileSync(configPath, readFileSync(configPath, "utf8").replace(RENAMED_REPO_GR3, FAKE_REPO_GR3));
+      patchLoreConfig(gr3CorpusRoot, { feedback: { upstream: { repo: FAKE_REPO_GR3 } } });
     },
     60_000,
   );

@@ -28,6 +28,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, wr
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const DIST_BINARY = join(REPO_ROOT, "dist", "lore");

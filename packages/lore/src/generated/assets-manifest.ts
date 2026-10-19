@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "daf9361371dc7bc7daba7569a042d9364d61b1fe8c18c11896e28d2c5579b044",
+  tree_digest: "c525926036b880583ce91381359a0f5d94109cee12e4f6327dbf27796b89427a",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -61,6 +61,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "f1fab470d792479ccae9dbaee7a2fff23a10ebd2a21d0deb03d06b70322e505b" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "9e5c9f64c3f287ecd4315d8264ed027ab5e7585f00c99977aba52ea70f3ce79d" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "62d33fe1d7f5124e74247fb0491ef65600e11ff8179ba77efc29bbb130ad1894" },
+  { path: "governance/write-spec-rule.md", kind: "governance", ownership: "managed", sha256: "a98940117b9d6e43865df43505a890d978c9c087605674d392ff58baa9392577" },
   { path: "hooks/lib/run-id.mjs", kind: "hook", ownership: "managed", sha256: "d19c976ed1819180c4654587f4c839d02ad2a1f87f49517928a780602024a773" },
   { path: "hooks/lib/session-trail.mjs", kind: "hook", ownership: "managed", sha256: "2968bf7d714e5bd3b975c8e63f1180a4a393d4de986abc721584d184b7f8a881" },
   { path: "hooks/lib/shell-cwd.mjs", kind: "hook", ownership: "managed", sha256: "8b5cb7e95065e837d8a88879617ee750a449cc3d6e0d6477a9f26f8ae44acca8" },

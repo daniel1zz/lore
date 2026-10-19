@@ -14,6 +14,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
@@ -60,14 +61,7 @@ function expectOk(result: RunResult, what: string): void {
 
 /** Scaffolds once so `.lore/config.yaml` exists, then sets the project reply language (the config is created by setup itself). */
 function configureProjectLanguage(repo: string, code: string): void {
-  const configPath = join(repo, ".lore", "config.yaml");
-  const config = readFileSync(configPath, "utf8");
-  // Setup no longer seeds a `context:` block, so the fixture adds one; if a future seed brings one back, the language key joins it.
-  if (/^context:/m.test(config) && !/^context:\n/m.test(config)) throw new Error("fixture assumption broken: config.yaml has an inline context: value");
-  const edited = /^context:\n/m.test(config)
-    ? config.replace(/^context:\n/m, `context:\n  language: ${code}\n`)
-    : `${config.replace(/\n*$/, "\n")}context:\n  language: ${code}\n`;
-  writeFileSync(configPath, edited);
+  patchLoreConfig(repo, { context: { language: code } });
 }
 
 function loreRulesFiles(repo: string): string[] {

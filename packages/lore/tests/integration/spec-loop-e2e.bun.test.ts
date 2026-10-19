@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §9 AC6 — end-to-end closed-loop proof that the
  * spec-production inversion-of-control slice actually works together: a non-compliant
@@ -401,7 +402,10 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("Missing:");
     expect(result.stdout).toContain("a spec takes no parent");
-    expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
+    // BR-587: the placeholder names only commands the product ships (`lore init`), never a dev-repo script.
+    expect(result.stdout.toLowerCase()).toContain("no approved rule doc found");
+    expect(result.stdout.toLowerCase()).toContain("lore init");
+    expect(result.stdout).not.toContain("bun scripts/");
   });
 
   // ── REGRESSION: LORE_GATE_BYPASS=1 short-circuits every step of the chain ──

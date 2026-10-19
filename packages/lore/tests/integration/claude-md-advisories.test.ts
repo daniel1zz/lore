@@ -87,6 +87,7 @@ import { tmpdir } from "os";
 // yet — the dedicated REGRESSION guard test below turns that into a legible
 // failure instead of a downstream NaN.
 import { OFFICIAL_LINE_TARGET } from "../../src/service/claude-md-admission.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Path setup (mirrors tests/integration/claude-md-wiring.test.ts) ───────
 

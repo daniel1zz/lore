@@ -46,6 +46,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { claimBranchTask } from "../helpers/claim-branch-task.js";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installShippedGuard } from "./support/main-guard-repo.js";
@@ -175,10 +176,9 @@ class Fixture {
   }
 
   setFloor(floorCommand: string | null, postRefreshCommand?: string): void {
-    const base = readFileSync(join(this.repo, ".lore", "config.yaml"), "utf8").split("\nworkflow:")[0] ?? "";
-    const post = postRefreshCommand === undefined ? "" : `    post_refresh_command: ${JSON.stringify(postRefreshCommand)}\n`;
-    const block = floorCommand === null ? "" : `\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(floorCommand)}\n${post}`;
-    writeFileSync(join(this.repo, ".lore", "config.yaml"), `${base.trimEnd()}\n${block}`);
+    const { workflow: _seeded, ...rest } = readLoreConfig(this.repo);
+    const integrate = { floor_command: floorCommand, ...(postRefreshCommand === undefined ? {} : { post_refresh_command: postRefreshCommand }) };
+    patchLoreConfig(this.repo, floorCommand === null ? rest : { ...rest, workflow: { integrate } }, { replace: true });
   }
 
   /** A branch off the current main holding one new file; returns the branch name. */

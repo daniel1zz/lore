@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sessionActorFor } from "../helpers/session-actor";
 import { registerRun, runLore } from "./cli/support/claim-run-fixture.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -80,7 +81,7 @@ beforeEach(() => {
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "init");
   mustLore(["init"], repo, false);
-  appendFileSync(join(repo, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
+  patchLoreConfig(repo, ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
   const prd = slugOf(mustLore(["create", "prd", "--title", "SFC PRD", "--content", "root", "--no-ai"], repo, false));
   const plan = slugOf(mustLore(["create", "plan", "--title", "SFC Plan", "--parent", prd, "--content", "x", "--no-ai"], repo, false));
   task = slugOf(

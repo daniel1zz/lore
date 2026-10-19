@@ -23,6 +23,7 @@ import { execFileSync } from "node:child_process";
 import { buildMiniCorpus, MINI_CLI, type MiniCorpus } from "../helpers/coverage-mini-corpus";
 import { sessionEnvFor } from "../helpers/session-actor";
 import { installShippedGuard } from "./support/main-guard-repo.js";
+import { patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -83,9 +84,8 @@ beforeAll(async () => {
   await mini.mapAllSites(mini.leafB, "beta");
   git(["checkout", "-q", "--detach", "main"]);
   installShippedGuard(mini.dir, `${mini.dir}-guard-hooks`); // integrate requires the guard (BR-1273)
-  const cfg = join(mini.dir, ".lore", "config.yaml");
-  const base = readFileSync(cfg, "utf8").split("\nworkflow:")[0] ?? "";
-  writeFileSync(cfg, `${base.trimEnd()}\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(`bun run ${STEP_TS}`)}\n`);
+  const { workflow: _seeded, ...rest } = readLoreConfig(mini.dir);
+  patchLoreConfig(mini.dir, { ...rest, workflow: { integrate: { floor_command: `bun run ${STEP_TS}` } } }, { replace: true });
 }, 240_000);
 
 afterAll(() => mini?.dispose());

@@ -32,7 +32,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, appendFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -105,8 +106,8 @@ function createPrd(title: string): string {
 
 /** Appends `workflow.requirement_quantifiable.enabled: false` to the fixture's config.yaml. */
 function disableRequirementQuantifiable(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     ["workflow:", "  requirement_quantifiable:", "    enabled: false", ""].join("\n"),
   );
 }

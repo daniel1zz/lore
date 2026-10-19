@@ -17,6 +17,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -77,9 +78,8 @@ beforeAll(() => {
   judgeScript = join(corpus, "fake-judge.sh");
   writeFileSync(judgeScript, `#!/bin/sh\ncat > "${capture}"\nn=$(grep -o '### Item [0-9]*' "${capture}" | grep -o '[0-9]*' | head -1)\nsed "s/@N@/$n/g" "${replyFile}"\n`, { mode: 0o755 });
   mustRun(["init"]);
-  mkdirSync(join(corpus, ".lore"), { recursive: true });
-  writeFileSync(
-    join(corpus, ".lore", "config.yaml"),
+  patchLoreConfig(
+    corpus,
     [
       "project:",
       "  name: fid-cli-test",

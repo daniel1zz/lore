@@ -41,6 +41,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
 
@@ -95,7 +96,7 @@ const citeOf = (repo: string): CiteSettings | undefined => readConfig(repo).work
 function handEdit(repo: string, mutate: (cfg: Record<string, any>) => void): void {
   const cfg = readConfig(repo);
   mutate(cfg);
-  writeFileSync(configPath(repo), yaml.stringify(cfg));
+  patchLoreConfig(repo, cfg, { replace: true });
 }
 
 interface AuditEntry {

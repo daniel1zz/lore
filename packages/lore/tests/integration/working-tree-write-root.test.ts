@@ -21,6 +21,7 @@ import { spawnSync } from "node:child_process";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { applyAuditedAdoption } from "../../src/adapters/cli/commands/baseline-adopt";
 import type { DocWritePort } from "../../src/service/corpus-service";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const scratch: string[] = [];
 
@@ -209,7 +210,7 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
   it("INT-T10 a refused authority decision leaves .lore/config.yaml byte-identical and writes no audit row", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-int-t10-refused-"));
     scratch.push(dir);
-    put(dir, ".lore/config.yaml", "# keep me\nproject: demo\n");
+    patchLoreConfig(dir, { project: "demo" });
     const before = readFileSync(join(dir, ".lore", "config.yaml"), "utf8");
     const appended: unknown[] = [];
     const refusal = { code: "VALIDATION_ERROR", field: "gate:corpus-write:foreign-provenance", message: "foreign" } as const;

@@ -58,6 +58,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -99,8 +100,7 @@ function cleanupDir(dir: string): void {
 
 /** Writes `<dir>/.lore/config.yaml` verbatim, creating `.lore/` if needed. */
 function writeConfig(dir: string, yamlText: string): void {
-  mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), yamlText, "utf8");
+  patchLoreConfig(dir, yamlText, { replace: true });
 }
 
 /** A CLAUDE.md body of exactly `byteCount` UTF-8 bytes with a ceiling-safe line count. */

@@ -22,10 +22,11 @@
  *     requires a .lore/lore.db to already exist — the opposite of what --project scaffolds)
  *   - SPEC-030 AC-HJ-3: a project config whose `ai` block fails schema validation is a
  *     LOUD failure (exit code from `exitCode()`, formatted error to stderr) — it must NOT
- *     silently fall back to `AiConfigSchema.parse({})` defaults. Every OTHER config parse
- *     failure (malformed YAML, bad `sync`/`telemetry`/`workflow` section, unknown top-level
- *     key, etc.) keeps the pre-existing silent fallback-to-undefined behaviour — this is a
- *     documented non-goal of SPEC-030, not an oversight.
+ *     silently fall back to `AiConfigSchema.parse({})` defaults. BR-926 extends the same rule
+ *     to EVERY other failure of a project config that exists (malformed YAML such as a duplicate
+ *     key, bad `sync`/`telemetry`/`workflow` section, unknown top-level key): refused with exit 4
+ *     naming `.lore/config.yaml` and the parser's detail. Only an absent or empty file means
+ *     "no project config" (see `describeUnusableProjectConfig`).
  *   - spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5: the
  *     foreign-corpus-write guard's `provenance` is keyed on the BOOT SURFACE
  *     (`opts.surface`), NEVER unconditionally on this process's `process.cwd()`.
@@ -55,7 +56,7 @@
  *         SPEC-073 §Design (error-path report-issue hint, "internal" errClass)
  */
 
-import { dirname } from "path";
+import { dirname, join } from "path";
 import { exitCli } from "./cli-exit.js";
 import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, isRetiredAdoptionError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
@@ -276,6 +277,38 @@ function resolveProjectConfigResult(dbPath: string, io: CliIo): Result<LoreConfi
   return loadConfig(projectDir, warnOncePerWriter(io));
 }
 
+/**
+ * Turns a failed project-config load into the refusal to show, or `null` when the failure only means "there is no
+ * project config" (the file is absent, or holds no YAML value at all) and defaults legitimately apply.
+ *
+ * Every other failure — YAML that does not parse (a duplicate key included), a schema violation, an unreadable
+ * file — is a refusal that names `.lore/config.yaml` and the parser's own detail (BR-926).
+ *
+ * @param dbPath - the discovered `.lore/lore.db`; the config path is derived from it for the message.
+ * @param error - the `loadConfig` failure.
+ * @returns a `VALIDATION_ERROR` (exit 4) naming the file and the defect, or `null` for the no-config cases.
+ */
+function describeUnusableProjectConfig(dbPath: string, error: LoreError): LoreError | null {
+  if (error.code === "STORE_ERROR" && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
+  if (error.code === "VALIDATION_ERROR" && error.field === "root" && error.message === "Config YAML parsed to empty value") {
+    return null;
+  }
+  const configPath = join(dirname(dbPath), "config.yaml");
+  const detail =
+    error.code === "VALIDATION_ERROR" && error.field !== "yaml"
+      ? `${error.field}: ${error.message}`
+      : "message" in error
+        ? error.message
+        : error.code;
+  return {
+    code: "VALIDATION_ERROR",
+    field: ".lore/config.yaml",
+    message:
+      `${configPath} is unusable and was NOT silently replaced by defaults — ${detail}\n` +
+      "Fix the file (lore setup --project repairs it explicitly) and re-run.",
+  };
+}
+
 /** Retired-key notices already printed, per run: keyed on the run's stderr writer, so a re-read of the config stays quiet. */
 const noticesPrinted = new WeakMap<object, Set<string>>();
 
@@ -326,7 +359,8 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  * ONE-TIME CLI-startup concern — a live MCP server's per-call config re-read must
  * never abort the process mid-request). Every parse failure, `ai`-block-invalid
  * included, degrades to `undefined` here — the caller's pre-existing "no config"
- * fallback path (e.g. `resolveTaskStartBudgets(undefined)` returning `{}`).
+ * fallback path (e.g. `resolveTaskStartBudgets(undefined)` returning `{}`) — but a
+ * file that exists and is unusable is NAMED on stderr on every call (BR-926).
  *
  * @returns The parsed project config with `sync` stripped, or `undefined` when no
  *   `.lore/lore.db` is discoverable from `cwd`, or the config file is
@@ -336,8 +370,15 @@ export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig
   const dbPath = findLoreDbPath(io, locator);
   const configResult = resolveProjectConfigResult(dbPath, io);
   if (!configResult.ok) {
-    // reason: the retired-name refusal must not read as "no config" in silence (every gate would run unconfigured).
-    if (isPrdSyncRenameError(configResult.error) || isRetiredAdoptionError(configResult.error)) printLine(io.stderr, formatError(configResult.error)); // CLI surface
+    // reason: a broken config must not read as "no config" in silence (every gate would run unconfigured). This
+    // per-call re-read never aborts a live server mid-request (the start-up `loadLoreApp` already refused a file
+    // broken at boot), so it names the defect on stderr on every call and degrades to `undefined`.
+    if (isPrdSyncRenameError(configResult.error) || isRetiredAdoptionError(configResult.error)) {
+      printLine(io.stderr, formatError(configResult.error)); // CLI surface
+    } else {
+      const unusable = describeUnusableProjectConfig(dbPath, configResult.error);
+      if (unusable !== null) printLine(io.stderr, formatError(unusable)); // CLI surface
+    }
     return undefined;
   }
   const { sync: _sync, ...configWithoutSync } = configResult.value;
@@ -382,9 +423,8 @@ export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig
  * @returns { app, dbPath, defaults, config } — App wired with telemetry; dbPath for
  *   commands that need it; defaults (editor/format/color) merged from global + project
  *   config; config is the parsed project `.lore/config.yaml` (sync section stripped,
- *   same value passed to `createApp`), or `undefined` when no config file was found or
- *   it failed to parse (matching the historical silent-fallback for non-`ai` sections —
- *   see this function's header). Callers that need e.g. `workflow.gates` read `config`
+ *   same value passed to `createApp`), or `undefined` when no config file was found
+ *   (a file that exists but is unusable exits instead — see this function's header). Callers that need e.g. `workflow.gates` read `config`
  *   directly; it is intentionally the raw parsed shape, not yet another resolved helper.
  * @throws process.exit if no .lore/lore.db found in directory tree (code 1), if
  *   ai.provider references an unknown provider name (AC-AI-11, code 1), if the `ai`
@@ -435,9 +475,14 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, configResult.error)); // CLI surface
     exitCli(exitCode(configResult.error));
   } else {
-    // reason: all OTHER config parse failures (malformed YAML, invalid sync/telemetry/
-    // workflow section, unknown top-level key) keep the historical silent fallback —
-    // documented SPEC-030 non-goal, not touched by this change.
+    // reason: BR-926 — a project config that exists but does not parse or fails the schema used to be dropped whole,
+    // running every command on built-in defaults (gates a fixture or a team had switched off silently came back on).
+    // Only a file that is genuinely absent (or empty) means "no project config".
+    const unusable = describeUnusableProjectConfig(dbPath, configResult.error);
+    if (unusable !== null) {
+      printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, unusable)); // CLI surface
+      exitCli(exitCode(unusable));
+    }
     rawConfig = undefined;
   }
 

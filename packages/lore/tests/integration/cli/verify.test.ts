@@ -57,7 +57,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync, appendFileSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { VERIFY_NO_SCRIPT_ACS } from "../../../src/adapters/cli/cli-refusal-messages.js";
@@ -123,8 +124,8 @@ function runLore(args: string[], cwd: string, envOverrides: Record<string, strin
  * coverage (`create-task-ac-scope.test.ts` / `-e2e.bun.test.ts`), not this file.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -158,7 +159,7 @@ function writeVerifyConfig(dir: string, opts: { requireCommandApproval?: boolean
     lines.push(`  require_command_approval: ${String(opts.requireCommandApproval)}`);
   }
   lines.push("");
-  appendFileSync(join(dir, ".lore", "config.yaml"), lines.join("\n"));
+  patchLoreConfig(dir, lines.join("\n"));
 }
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────

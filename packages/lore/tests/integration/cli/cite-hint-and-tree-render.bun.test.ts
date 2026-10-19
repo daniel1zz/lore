@@ -19,7 +19,8 @@
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
-import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -93,8 +94,8 @@ beforeAll(() => {
   // uncited criterion that predates the gate, so a later `ac set` of it is a refused write of an EXISTING criterion.
   mustRun(["ac", "add", specSlug, "AC-H-1", "--statement", "placing human criterion", "--mode", "human", "--cite", ruleId], dir);
   mustRun(["ac", "add", specSlug, "AC-H-0", "--statement", "existing uncited criterion", "--mode", "human"], dir);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     `workflow:\n  gates:\n    ac-cite:\n      mode: enforce\n      armed_branches:\n        - ${branchA}\n`,
   );
 });

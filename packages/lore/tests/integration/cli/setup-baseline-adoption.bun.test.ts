@@ -39,6 +39,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
 
@@ -90,7 +91,7 @@ function makeRepo(preConfig?: (cfg: Record<string, any>) => void): string {
   if (preConfig) {
     const cfg = readConfig(dir);
     preConfig(cfg);
-    writeFileSync(join(dir, ".lore", "config.yaml"), yaml.stringify(cfg));
+    patchLoreConfig(dir, cfg, { replace: true });
   }
   return dir;
 }
@@ -167,7 +168,7 @@ describe("setup seeds baseline adoption (BL-8)", () => {
     expect(citeOf(dir)?.mode).toBe("report");
     const cfg = readConfig(dir);
     cfg.workflow.gates["ac-cite"].mode = "enforce";
-    writeFileSync(join(dir, ".lore", "config.yaml"), yaml.stringify(cfg));
+    patchLoreConfig(dir, cfg, { replace: true });
     expect(setupProject(dir).exitCode).toBe(0);
     expect(citeOf(dir)?.mode).toBe("enforce");
   });

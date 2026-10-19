@@ -41,6 +41,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -75,9 +76,7 @@ function initCorpus(dir: string): void {
 }
 
 function writeConfig(projectDir: string, yamlBody: string): void {
-  const loreDir = join(projectDir, ".lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), yamlBody.trim() + "\n", "utf8");
+  patchLoreConfig(projectDir, yamlBody.trim() + "\n");
 }
 
 function traceEventCount(dir: string): number {

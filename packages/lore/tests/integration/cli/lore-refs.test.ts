@@ -21,7 +21,8 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -72,7 +73,7 @@ function refs(dir: string, path: string): { exitCode: number; bindings: BindingJ
 
 const dir = mkdtempSync(join(tmpdir(), "lore-refs-"));
 runOrThrow(["init"], dir, "lore init");
-appendFileSync(join(dir, ".lore", "config.yaml"), ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"));
+patchLoreConfig(dir, ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"));
 
 mkdirSync(join(dir, "src", "widgets"), { recursive: true });
 mkdirSync(join(dir, ".lore", "context"), { recursive: true });

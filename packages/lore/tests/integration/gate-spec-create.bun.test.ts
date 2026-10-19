@@ -27,6 +27,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -278,7 +279,7 @@ function writeGatesConfig(tmpDir: string, gatesYaml: string): void {
     "  gates:",
     gatesYaml,
   ].join("\n");
-  writeFileSync(join(tmpDir, ".lore", "config.yaml"), config + "\n", "utf8");
+  patchLoreConfig(tmpDir, config, { replace: true });
 }
 
 describe("lore gate spec-create — AC-Quantifiability Gate CLI parity", () => {
@@ -348,7 +349,11 @@ describe("lore gate spec-create: no seeded rule doc", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("no-rule-doc");
     initCorpus(tmpDir);
-    // Deliberately skip seedRuleDoc(tmpDir).
+    // `lore init` seeds the rule document (BR-807); archive it so this suite measures the NO-rule-doc path.
+    const archived = runLore(["set", "knowledge-write-spec-rules-gate-feeding-source", "--status", "archived"], tmpDir);
+    if (archived.exitCode !== 0) {
+      throw new Error(`could not archive the seeded rule doc: ${archived.stdout}${archived.stderr}`);
+    }
   });
 
   afterEach(() => cleanupDir(tmpDir));
@@ -359,6 +364,9 @@ describe("lore gate spec-create: no seeded rule doc", () => {
     expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("MISSING_SKELETON");
     expect(result.stdout).toContain("[source:");
-    expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
+    // BR-587: the placeholder names only commands the product ships, never a dev-repo script.
+    expect(result.stdout).toContain("No approved rule doc found");
+    expect(result.stdout).toContain("lore init");
+    expect(result.stdout).not.toContain("bun scripts/");
   });
 });

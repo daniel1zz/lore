@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * AC-IT-2 — the COMPILED `dist/lore`: `lore done` on a filed report's OWN task closes its GitHub issue, and
  * `lore issues --sync` closes the done-archived ones while only labelling the rest
@@ -23,7 +25,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { Database } from "bun:sqlite";
-import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
@@ -174,7 +177,7 @@ async function makeCorpus(): Promise<Corpus & { slugs: Record<number, string> }>
   const corpus: Corpus = { dir, stubDir };
   makeCleanTreeRepo(dir);
   await mustRun(corpus, "setup", ["init"]);
-  appendFileSync(join(dir, ".lore", "config.yaml"), ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
+  patchLoreConfig(dir, ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
   await mustRun(corpus, "setup", ["create", "prd", "--title", "Task Done Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
   const slugs: Record<number, string> = {};
   for (const number of [9, 10, 11]) {

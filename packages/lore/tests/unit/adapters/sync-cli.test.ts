@@ -45,6 +45,7 @@
  */
 
 import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -168,7 +169,7 @@ function createLoreDb() {
 }
 
 function writeConfigYaml(content: string) {
-  writeFileSync(join(tmpDir, ".lore", "config.yaml"), content);
+  patchLoreConfig(tmpDir, content, { replace: true });
 }
 
 // ===========================================================================

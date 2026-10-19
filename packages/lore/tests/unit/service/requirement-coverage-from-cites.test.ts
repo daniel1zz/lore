@@ -50,6 +50,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { RequirementService } from "../../../src/service/requirement-service.js";
 import { actedStore } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Loosely typed view of the (not yet extended) pure API ────────────────────
 
@@ -510,8 +511,8 @@ function freshCorpus(): { dir: string; prd: string; spec: string } {
   mkdirSync(dir, { recursive: true });
   tmpDir = dir;
   mustRun(["init"], dir);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"),
   );
   const prd = createDoc(dir, "prd", []);

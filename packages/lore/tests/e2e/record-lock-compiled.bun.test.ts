@@ -22,7 +22,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import yaml from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
@@ -114,10 +114,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     mustLore(["create", "prd", "--title", "Record Lock PRD", "--content", "PRD body.", "--no-ai"]);
     // SPEC-103 M2's review-judgment checkpoint defaults spec/adr into `judgment_required_types`; disabled so the
     // approvals below are fixture steps, not the behaviour under test.
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-    const workflow = { ...(existing["workflow"] as Record<string, unknown> | undefined), review: { judgment_required_types: [] } };
-    writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow }), "utf8");
+    patchLoreConfig(dir, { workflow: { review: { judgment_required_types: [] } } });
 
     lockedSpec = createApprovedSpec("Locked Spec", "AC-LK-1");
     newerSpec = parseSlug(

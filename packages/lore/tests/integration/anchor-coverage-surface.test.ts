@@ -1,5 +1,7 @@
 // @reads scripts/check-unclaimed-oracle.ts
 // @reads scripts/build.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * AC-BFI-4 oracle — `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor`.
  *
@@ -67,6 +69,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 /** Repo root: four levels up from `packages/lore/tests/integration/`. Asserted in `beforeAll`. */
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
@@ -144,8 +147,8 @@ async function initCorpus(dir: string): Promise<void> {
  * and these fixtures' placeholder spec bodies would not satisfy `spec-create`).
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

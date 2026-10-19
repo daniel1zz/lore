@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref AC-CP-4 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D4)
  *
@@ -63,7 +65,8 @@
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -278,8 +281,8 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
       // Same map key `resolveForeignCorpusWriteGateEnabled` reads
       // (config.ts) — "corpus-write", deliberately not one of the four real
       // GateCheckpoint ids, per D4's "NOT scoped to task-claim" constraint.
-      appendFileSync(
-        join(repoRoot, ".lore", "config.yaml"),
+      patchLoreConfig(
+        repoRoot,
         ["workflow:", "  gates:", "    corpus-write:", "      foreign_corpus_write:", "        enabled: false", ""].join(
           "\n",
         ),

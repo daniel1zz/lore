@@ -21,6 +21,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
 
@@ -78,10 +79,7 @@ const acCite = (dir: string): AcCiteJson => {
 };
 
 function handEditMode(dir: string, mode: string): void {
-  const path = join(dir, ".lore", "config.yaml");
-  const cfg = yaml.parse(readFileSync(path, "utf8")) as Record<string, any>;
-  cfg.workflow = { ...(cfg.workflow ?? {}), gates: { ...(cfg.workflow?.gates ?? {}), "ac-cite": { mode } } };
-  writeFileSync(path, yaml.stringify(cfg));
+  patchLoreConfig(dir, { workflow: { gates: { "ac-cite": { mode } } } });
 }
 
 afterAll(() => {

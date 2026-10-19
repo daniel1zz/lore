@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { currentTurnDir, makeGitRepo, makeTmpDir } from "./hook-harness";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import {
   initLoreWithAnchoredSpec, markEdit, numberedLines, parseBlock, startTurn, stopTurn, writeRepoFile, writeTurnEndSetting,
   type TurnFixture,
@@ -158,8 +159,7 @@ describe("AC-ST-4 source-edit finding over attributed changes", () => {
     writeRepoFile(f.repo, "src/anchored.ts", "export const a = 1;\n");
     past(f.repo, "anchored file");
     initLoreWithAnchoredSpec(f.repo, ["src/anchored.ts"]);
-    const config = join(f.repo, ".lore", "config.yaml");
-    writeFileSync(config, readFileSync(config, "utf8").replace("workflow:\n", "workflow:\n  turn_end:\n    main_session_source_edits: block\n"));
+    patchLoreConfig(f.repo, "workflow:\n  turn_end:\n    main_session_source_edits: block\n");
     must(f.repo, ["add", "-A"]);
     must(f.repo, ["commit", "-qm", "lore project"], PAST);
     startTurn(f);

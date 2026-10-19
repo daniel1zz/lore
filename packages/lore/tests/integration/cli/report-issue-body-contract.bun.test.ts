@@ -32,6 +32,7 @@ import { parseIssueBody } from "@lore/core";
 
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../helpers/payload-gh-stub";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
@@ -135,9 +136,7 @@ function prepareCorpus(root: string): void {
   if (prdResult.exitCode !== 0) {
     throw new Error(`root PRD creation failed (exit ${prdResult.exitCode}): ${prdResult.stderr}`);
   }
-  const configPath = join(root, ".lore", "config.yaml");
-  const existingConfig = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-  writeFileSync(configPath, existingConfig + ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
+  patchLoreConfig(root, ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
 }
 
 beforeAll(() => {

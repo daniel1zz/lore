@@ -21,6 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -401,8 +402,8 @@ describe("lore sync pull — unconfigured → exit 1 (SPEC-009 §5)", () => {
     runLore(["init", "--name", "pull-token-test"], tmpDir);
 
     // Manually write a config.yaml with sync section
-    writeFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
+    patchLoreConfig(
+      tmpDir,
       [
         "project:",
         "  name: pull-token-test",
@@ -445,8 +446,8 @@ describe("lore sync pull — unconfigured → exit 1 (SPEC-009 §5)", () => {
 
     runLore(["init", "--name", "pull-wired-test"], tmpDir);
 
-    writeFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
+    patchLoreConfig(
+      tmpDir,
       [
         "project:",
         "  name: pull-wired-test",

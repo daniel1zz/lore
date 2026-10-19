@@ -74,6 +74,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -196,9 +197,7 @@ const SECTIONS_PREFIX =
  */
 function configureMemoryFiles(dir: string, extraLines = ""): void {
   if (extraLines === "") return;
-  const configPath = join(dir, ".lore", "config.yaml");
-  const existing = readFileSync(configPath, "utf8");
-  writeFileSync(configPath, `${existing}\ncontext:\n  memory_files:\n${extraLines}`);
+  patchLoreConfig(dir, `context:\n  memory_files:\n${extraLines}`);
 }
 
 /** Appends `context.memory_files.enabled: false` to an already-initialised fixture's config.yaml. */
