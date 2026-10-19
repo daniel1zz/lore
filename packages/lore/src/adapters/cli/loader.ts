@@ -55,7 +55,7 @@
 
 import { dirname } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { err, ok, mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -93,6 +93,8 @@ import { buildReportIssueHint } from "./report-issue-hint.js";
 import { setProcessAuditSurface } from "../../store/audit-surface.js";
 import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
 import { printLine } from "./output.js";
+import { censusRootOfCorpus, measureAbsentDeclarations } from "./absent-declarations.js";
+import { SiteCensusError } from "../../service/site-census.js";
 import type { CliIo } from "./output.js";
 
 /**
@@ -564,6 +566,22 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   app.ruleService?.setCorpusWriteContext(corpusWriteAuthority);
   app.ruleChangeService?.setCorpusWriteContext(corpusWriteAuthority);
   app.acService?.setCorpusWriteContext(corpusWriteAuthority);
+
+  // task-approving-a-baseline-leaf-refuses-while-it-declares-a — approving a baseline node refuses while a leaf under it
+  // declares a command the corpus checkout's tree (main's, from a worktree) lacks. A corpus whose checkout holds no lore
+  // sources has no tree to compare with, so nothing is measured there (the check only governs lore's own tree).
+  app.reviewService.setBaselineDeclarationPort({
+    async absentDeclarations(leaves) {
+      const rootDir = censusRootOfCorpus(dbPath);
+      if (rootDir === undefined) return ok([]);
+      try {
+        return ok(await measureAbsentDeclarations(rootDir, leaves));
+      } catch (cause) {
+        if (!(cause instanceof SiteCensusError)) throw cause;
+        return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message });
+      }
+    },
+  });
 
   // SPEC-102 §Migration Strategy — opportunistic bounded-batch trace
   // retention prune, fired ONCE per CLI invocation (not MCP/HTTP — those are

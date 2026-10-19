@@ -5,6 +5,7 @@
  *   sites a leaf's commands reach, the leaf's `site_map`, and the live rule ids, report what is
  *   still unaccounted for.
  * Public surface: {@link computeLeafCoverage}, {@link collectOwnedSites}, {@link partitionDeclaredCommands}, {@link absentCommandFixCommand},
+ *   {@link leavesUnder}, {@link absentDeclarationsOf}, {@link absentDeclarationRefusal}, {@link AbsentDeclaration},
  *   {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
  * Invariants:
  *   - A `non-business:owned-by <leaf> BR-n — <reason>` entry counts only while the owner leaf is a leaf and every named
@@ -115,6 +116,65 @@ export function partitionDeclaredCommands(
     (key !== undefined && runnableEntries.has(key) ? live : absent).push(command);
   }
   return { live, absent };
+}
+
+/** A leaf's declared commands, as the approval and status checks read them. */
+export interface DeclaringLeaf {
+  readonly slug: string;
+  readonly commands: readonly string[];
+}
+
+/** One stale-or-pending declaration: `leaf` declares `command`, which main's tree does not have. */
+export interface AbsentDeclaration {
+  readonly leaf: string;
+  readonly command: string;
+  readonly fix: string;
+}
+
+/**
+ * The leaves of the baseline tree at or below `node` (the node itself when it is a leaf), each with its declared commands.
+ * Leaves declaring no command are omitted: they have nothing to measure.
+ */
+export function leavesUnder(
+  node: { id: string; slug: string; extra: Record<string, unknown> },
+  baselineDocs: readonly { id: string; slug: string; parent_id?: string | null; extra: Record<string, unknown> }[],
+): DeclaringLeaf[] {
+  const out: DeclaringLeaf[] = [];
+  const queue: { id: string; slug: string; extra: Record<string, unknown> }[] = [node];
+  while (queue.length > 0) {
+    const doc = queue.shift() as { id: string; slug: string; extra: Record<string, unknown> };
+    if (doc.extra["node"] === "leaf") {
+      const commands = Array.isArray(doc.extra["commands"]) ? (doc.extra["commands"] as string[]) : [];
+      if (commands.length > 0) out.push({ slug: doc.slug, commands });
+    } else {
+      queue.push(...baselineDocs.filter((d) => d.parent_id === doc.id));
+    }
+  }
+  return out.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+}
+
+/** Every absent declaration of `leaves`, by the SAME predicate coverage uses ({@link partitionDeclaredCommands}). */
+export function absentDeclarationsOf(
+  leaves: readonly DeclaringLeaf[],
+  entryKeyOf: (command: string) => string | undefined,
+  runnableEntries: ReadonlySet<string>,
+): AbsentDeclaration[] {
+  return leaves.flatMap((leaf) =>
+    partitionDeclaredCommands(leaf.commands, entryKeyOf, runnableEntries).absent.map((command) => ({
+      leaf: leaf.slug,
+      command,
+      fix: absentCommandFixCommand(leaf.slug, command),
+    })),
+  );
+}
+
+/** The approval refusal text: names each absent command with the fix that drops it. */
+export function absentDeclarationRefusal(approvedSlug: string, absent: readonly AbsentDeclaration[]): string {
+  const lines = absent.map((a) => `  ${a.leaf} declares "${a.command}", which main's tree does not have: ${a.fix}`);
+  return (
+    `Cannot approve ${approvedSlug}: ${absent.length} declared command(s) are absent from main's tree. ` +
+    `Remove each stale declaration, or approve once the command has landed on main:\n${lines.join("\n")}`
+  );
 }
 
 /**
