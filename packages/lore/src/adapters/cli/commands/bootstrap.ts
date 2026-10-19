@@ -44,7 +44,7 @@
  * §Module Boundary, D1-D3, D11
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import type { BootstrapReport } from "@lore/core";
 import { warnSinkOf } from "../../../service/warn-sink.js";
@@ -177,7 +177,7 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   return lines.join("\n");
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "bootstrap",
     description: "SPEC-041 S1 volatile session pointer-set (plans, claims, queue, gates, handoffs) — read-only",
@@ -216,7 +216,7 @@ export default defineCommand({
         "--seat-branch is given alone.",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, config } = loadLoreApp({ inv });
@@ -240,7 +240,7 @@ export default defineCommand({
         }
         // Resolved BEFORE the main-checkout early-out so a retired knob is announced on every call (D5).
         const budgets = resolveBootstrapInjectionBudgets(config, warnSinkOf(inv.io.stderr));
-        if (seatBranch === undefined || seatWorktreeArg === undefined) return; // main checkout: print NOTHING (D2)
+        if (seatBranch === undefined || seatWorktreeArg === undefined) return 0; // main checkout: print NOTHING (D2)
 
         const injectionSeat = { branch: seatBranch, worktree: seatWorktreeArg };
         const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
@@ -265,7 +265,7 @@ export default defineCommand({
           budgets,
         );
         if (json !== "") printLine(inv.io.stdout, json);
-        return;
+        return 0;
       }
 
       const seat =
@@ -322,5 +322,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

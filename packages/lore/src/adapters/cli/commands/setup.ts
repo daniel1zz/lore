@@ -100,7 +100,7 @@
  * Confirm prompt (mirrors `commands/verify.ts`'s SPEC-039 §M2 y/N precedent):
  *   `--dry-run` never prompts (non-mutating). Every mutating mode
  *   (install/uninstall/`--project`/`--project --uninstall`) prompts when interactive
- *   (`process.stdin.isTTY`, no `--json`) and `--yes` was not passed; a
+ *   (`inv.io.stdinIsTTY`, no `--json`) and `--yes` was not passed; a
  *   non-`y`/`yes` answer aborts with exit 0 ("no changes made" — a
  *   deliberate, valid user choice, not a failure). Non-interactive without
  *   `--yes` aborts with exit 2, naming `--yes`. `--yes` always skips the
@@ -135,11 +135,11 @@ import { spawnSync } from "node:child_process";
 import { resolveGlobalConfigPath } from "@lore/core/node";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
-import { createInterface } from "node:readline/promises";
+import { promptYesNo } from "../prompt.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
@@ -254,22 +254,10 @@ function renderCtx(targetDir: string, binPath: string, mcpErrorTail: string | un
 type ConfirmDecision = "proceed-no-prompt" | "prompt" | "reject-noninteractive";
 
 /** Classifies how a mutating run's confirmation should be resolved — see this file's header doc. */
-function classifyConfirmation(opts: { yes: boolean; json: boolean }): ConfirmDecision {
+function classifyConfirmation(opts: { yes: boolean; json: boolean; stdinIsTTY: boolean }): ConfirmDecision {
   if (opts.yes) return "proceed-no-prompt";
-  if (process.stdin.isTTY && !opts.json) return "prompt";
+  if (opts.stdinIsTTY && !opts.json) return "prompt";
   return "reject-noninteractive";
-}
-
-/** Interactive y/N confirmation prompt. Any answer other than a case-insensitive "y"/"yes" is "no". */
-async function promptYesNo(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await rl.question(question);
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 /**
@@ -282,13 +270,13 @@ async function promptYesNo(question: string): Promise<boolean> {
  *   printed its own message and set `process.exitCode` (0 for a deliberate
  *   "no", 2 for the non-interactive-without-`--yes` case).
  */
-async function confirmOrReport(io: CliIo, opts: {
+async function confirmOrReport(io: Invocation["io"], opts: {
   yes: boolean;
   json: boolean;
   verb: string;
   preview: () => string;
 }): Promise<{ readonly proceed: true } | { readonly proceed: false; readonly code: number }> {
-  const decision = classifyConfirmation({ yes: opts.yes, json: opts.json });
+  const decision = classifyConfirmation({ yes: opts.yes, json: opts.json, stdinIsTTY: io.stdinIsTTY });
 
   if (decision === "reject-noninteractive") {
     io.stderr.write(
@@ -299,7 +287,7 @@ async function confirmOrReport(io: CliIo, opts: {
 
   if (decision === "prompt") {
     printLine(io.stdout, opts.preview());
-    const confirmed = await promptYesNo("Proceed? [y/N] ");
+    const confirmed = await promptYesNo(io, "Proceed? [y/N] ");
     if (!confirmed) {
       printLine(io.stdout, "Aborted — no changes made.");
       return { proceed: false, code: 0 };
@@ -1165,7 +1153,7 @@ function buildSetupPathContext(inv: Invocation): SetupPathContext {
 
 // ─── Command ─────────────────────────────────────────────────────────────────
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "setup",
     description:

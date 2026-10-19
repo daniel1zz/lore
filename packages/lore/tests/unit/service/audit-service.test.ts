@@ -110,7 +110,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     // test time (this test never mutates process.env, so it's stable within
     // a single run — see audit-actor-fidelity.test.ts for the full env-chain
     // coverage this asymmetry is dedicated to).
-    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, () => liveInvocation().user).actor);
+    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, liveInvocation().user).actor);
     expect(entry.details?.["version"]).toBe(1);
   });
 

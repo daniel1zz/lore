@@ -80,10 +80,9 @@
  */
 
 import { dirname, join } from "node:path";
-import { exitCli } from "../cli-exit.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { defineCommand } from "citty";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { ambientOfInvocation, createApp } from "../../../app.js";
@@ -704,7 +703,7 @@ async function runDevMode(
 
 // ─── Command ───────────────────────────────────────────────────────────────────
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "dashboard",
     description:
@@ -748,13 +747,14 @@ export default defineCommand({
       description: "Open the browser automatically (default: true; pass --no-open to skip)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (args.dev) {
       await runDevMode(args, inv);
-      return;
+      return 0;
     }
     await runPackagedMode(args, inv);
+    return 0;
   },
 });

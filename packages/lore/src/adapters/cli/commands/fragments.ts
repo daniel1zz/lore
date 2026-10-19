@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import {
@@ -245,12 +245,13 @@ async function runRender(args: Record<string, unknown>, cwd: string, inv: Invoca
     // D12: a hook never blocks start and never emits nothing — banner with the code, exit 0.
     emitHookJson(inv.io, outlet, buildHookBanner(result.error));
     inv.io.stderr.write(`lore fragments render: ${result.error.code}: ${result.error.message}\n`);
-    return;
+    return 0;
   }
   if (args["explain"] === true) {
     for (const row of result.value.explain) inv.io.stderr.write(`explain: ${row.id} layer=${row.layer} chars=${row.chars}\n`);
   }
   emitHookJson(inv.io, outlet, result.value.additionalContext);
+  return 0;
 }
 
 /**
@@ -278,9 +279,10 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
     inv.io.stderr.write(`[${finding.kind}] ${finding.code}: ${finding.message}\n`);
   }
   if (!report.ok) return CHECK_FAILED_EXIT;
+  return 0;
 }
 
-async function runPointers(cwd: string, inv: Invocation): Promise<void> {
+async function runPointers(cwd: string, inv: Invocation): Promise<number> {
   const projectRoot = resolveProjectRoot(cwd);
   // reason: from source the re-run is `bun <source entry>`; the Invocation carries no entry-script path, and the
   // entry (`packages/lore/src/index.ts`, the `bin` of packages/lore) is fixed relative to this module.
@@ -301,9 +303,10 @@ async function runPointers(cwd: string, inv: Invocation): Promise<void> {
     inv.io.stderr.write(`lore fragments pointers: no pointers emitted (${result.skipped})\n`);
   }
   if (result.text.length > 0) inv.io.stdout.write(result.text);
+  return 0;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "fragments",
     description:
@@ -320,7 +323,7 @@ export default defineCommand({
     explain: { type: "boolean", description: "render: print per-fragment id/layer/chars to stderr", default: false },
     json: { type: "boolean", description: "check: print the report as JSON", default: false },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const action = typeof args.action === "string" ? args.action : "";

@@ -73,7 +73,7 @@
  *      say about whether a machine may know the doc is retracted.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { ok, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
@@ -174,7 +174,7 @@ async function loadLaterChanges(store: StoreInterface, doc: DocRecord): Promise<
   return ok(out.map(({ slug, linkType }) => ({ slug, linkType })));
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "get",
     description: "Get a document by ID or slug",
@@ -194,7 +194,7 @@ export default defineCommand({
       description: "Skip MDX resolution",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -294,7 +294,7 @@ export default defineCommand({
           ? { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, resolved_components: resolvedComponents }
           : { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json };
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
-        return;
+        return 0;
       }
 
       // Human-readable display
@@ -335,5 +335,6 @@ export default defineCommand({
       attributionStore.close();
       app.close();
     }
+    return 0;
   },
 });

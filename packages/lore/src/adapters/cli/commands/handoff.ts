@@ -82,7 +82,7 @@
 
 import { readFileSync } from "fs";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import {
   handoffExtraSchema,
   tailChars,
@@ -995,7 +995,7 @@ function normalizeRepeatable(value: unknown): string[] {
   return [String(value)];
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "handoff",
     description: "Write a lossless session-continuity handoff document (SPEC-041 S2); or `coverage-check` (Stop-time resume-ticket coverage verb)",
@@ -1042,13 +1042,13 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const subcommand = typeof args.subcommand === "string" ? args.subcommand : undefined;
     if (subcommand === COVERAGE_CHECK_SUBCOMMAND) {
       runCoverageCheck(inv.io);
-      return;
+      return 0;
     }
     if (subcommand !== undefined) {
       inv.io.stderr.write(
@@ -1170,5 +1170,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

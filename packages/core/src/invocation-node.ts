@@ -16,8 +16,8 @@
  * reason: lives under `@lore/core/node` (not the default barrel) because it imports `node:os`.
  */
 
-import { homedir, hostname, tmpdir, userInfo } from "node:os";
-import type { Invocation } from "./invocation.js";
+import { homedir, hostname, tmpdir } from "node:os";
+import type { Invocation, OsUser } from "./invocation.js";
 import { resolveInvocationIdentity } from "./run-identity-node.js";
 
 type EnvBag = Readonly<Record<string, string | undefined>>;
@@ -30,6 +30,8 @@ export interface InvocationResolvers {
   readonly userConfigDir: (env: EnvBag, home: string) => string;
   /** Linked-worktree name tier of the claimed identity; `undefined` when `cwd` is not a linked worktree. */
   readonly worktreeActor: (cwd: string) => string | undefined;
+  /** The OS account name lookup (production: `() => userInfo().username`); may throw, the entry records the outcome. */
+  readonly osUsername: () => string;
   /** Nearest corpus-holding ancestor of `cwd`, or `null`. */
   readonly projectRoot: (cwd: string) => string | null;
 }
@@ -44,6 +46,19 @@ function homeFrom(env: EnvBag): string {
 }
 
 /**
+ * Run the OS-username lookup once and record its outcome as a value.
+ * reason: `os.userInfo()` throws when the uid has no passwd entry (containers); the failure is carried to the
+ * OS-username tier of actor resolution instead of crashing every invocation at the entry.
+ */
+function lookUpOsUser(osUsername: () => string): OsUser {
+  try {
+    return { ok: true, name: osUsername() };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Resolve the invocation of the running process.
  *
  * @param rawArgv - arguments after the program name, as typed (still containing `--harness-run`)
@@ -55,8 +70,8 @@ export function resolveInvocation(rawArgv: readonly string[], resolvers: Invocat
   const cwd = process.cwd();
   const env: EnvBag = Object.freeze({ ...process.env });
   const home = homeFrom(env);
-  const user = userInfo().username;
-  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, () => user, () => resolvers.worktreeActor(cwd));
+  const user = lookUpOsUser(resolvers.osUsername);
+  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, user, () => resolvers.worktreeActor(cwd));
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   const bunMain = (globalThis as { Bun?: { main?: string } }).Bun?.main;
   return Object.freeze({
@@ -75,6 +90,6 @@ export function resolveInvocation(rawArgv: readonly string[], resolvers: Invocat
     execPath: process.execPath,
     isCompiled: bunMain !== undefined && bunMain.startsWith("/$bunfs/"),
     identity: resolution.identity,
-    io: Object.freeze({ stdout: process.stdout, stderr: process.stderr }),
+    io: Object.freeze({ stdout: process.stdout, stderr: process.stderr, stdin: process.stdin, stdinIsTTY: process.stdin.isTTY === true }),
   });
 }

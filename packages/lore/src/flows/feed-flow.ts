@@ -162,7 +162,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { App } from "../app.js";
-import type { DocRecord, Invocation, LoreError, Result } from "@lore/core";
+import type { DocRecord, Invocation, LoreError, OsUser, Result } from "@lore/core";
 import {
   err,
   ok,
@@ -826,7 +826,7 @@ async function buildRuleDiffBlock(
 export async function buildResumeFeed(
   app: App,
   opts: { plan?: string; handoff?: string; by?: string },
-  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly user: string; readonly io: Invocation["io"] },
+  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly user: OsUser; readonly io: Invocation["io"] },
 ): Promise<Result<ResumeFeedOutcome, LoreError>> {
   if (app.sessionService === undefined) {
     return err({

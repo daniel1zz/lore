@@ -16,13 +16,13 @@
 
 import { readFileSync } from "fs";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-const recordCommand = defineCommand({
+const recordCommand = defineLoreCommand({
   meta: { name: "record", description: "Record a structured UAT verdict for a plan (SPEC-054)" },
   args: {
     plan: {
@@ -39,7 +39,7 @@ const recordCommand = defineCommand({
     },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -73,16 +73,17 @@ const recordCommand = defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
-const showCommand = defineCommand({
+const showCommand = defineLoreCommand({
   meta: { name: "show", description: "Show a plan's latest linked UAT verdict (SPEC-054)" },
   args: {
     plan: { type: "positional", description: "Plan doc id/slug (reads its latest informs-linked UAT verdict)" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -98,11 +99,11 @@ const showCommand = defineCommand({
       }
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-        return;
+        return 0;
       }
       if (!result.value.present) {
         printLine(inv.io.stdout, `No UAT verdict linked to plan "${String(args.plan)}".`);
-        return;
+        return 0;
       }
       const v = result.value.verdict!;
       printLine(inv.io.stdout, `UAT verdict for ${result.value.docSlug}:`);
@@ -114,10 +115,11 @@ const showCommand = defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "uat", description: "Structured UAT verdict record/show (SPEC-054)" },
   subCommands: { record: recordCommand, show: showCommand },
 });

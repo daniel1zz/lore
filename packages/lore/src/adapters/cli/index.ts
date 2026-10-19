@@ -77,8 +77,8 @@ async function deliverInvocation(
     // reason: NOT `async`: the introspection-only tree must refuse a leaf with a synchronous throw, not a rejected promise.
     delivered.run = (context: CommandContext) => {
       if (inv === null) throw new CommandTreeWithoutInvocationError(commandPath);
-      return Promise.resolve(originalRun({ ...context, inv } as CommandContext)).then((returned: unknown) => {
-        if (typeof returned === "number") reportExit?.(returned);
+      return Promise.resolve(originalRun({ ...context, inv } as CommandContext)).then((returned: number) => {
+        reportExit?.(returned);
         return returned;
       });
     };

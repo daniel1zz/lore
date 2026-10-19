@@ -15,8 +15,8 @@
 import { format } from "node:util";
 import type { Invocation, InvocationWriter } from "@lore/core";
 
-/** The stdout and stderr writers of one run: `Invocation["io"]`. */
-export type CliIo = Invocation["io"];
+/** The stdout and stderr writers of one run (the output half of `Invocation["io"]`). */
+export type CliIo = Pick<Invocation["io"], "stdout" | "stderr">;
 
 /**
  * Write one line to `writer`, formatted like `console.log(...args)`.

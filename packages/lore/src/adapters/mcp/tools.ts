@@ -252,6 +252,7 @@ import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/
 // `process.cwd()` — see `resolveMcpCorpusProvenance`'s own header below.
 import { checkForeignCorpusWrite, foreignCorpusWriteRefusalError } from "../../service/foreign-corpus-write-guard.js";
 import { resolveCorpus } from "../cli/corpus-resolution.js";
+import { OsUserLookupError } from "@lore/core/node";
 // reason: SPEC-102 — resolveActorWithSource lives in @lore/core/node (node:os
 // only, no bun:sqlite) — safe to import here without breaking this file's
 // vitest-reachability (mirrors this module's own precedent of lazy-importing
@@ -1475,7 +1476,19 @@ function registerToolImpl<T>(
         const resolved: Record<string, unknown> = { ...rest };
         // reason: a schema that still declares `by` is a read-side FILTER (lore_bootstrap, pinned in
         // read-side-by-filters.ts); it keeps the caller's value and defaults to the call's own name.
-        resolved["by"] = "by" in shape && typeof rest["by"] === "string" ? rest["by"] : context.identity.claimed;
+        if ("by" in shape && typeof rest["by"] === "string") resolved["by"] = rest["by"];
+        else if (context.identity.claimed !== null) resolved["by"] = context.identity.claimed;
+        else {
+          // reason: an unnamed call (OS user lookup failed, no other name) has no `by` to give. A tool that never reads
+          // `by` (a read) proceeds; one that needs an actor reads it and `McpCallScope.run` ends the call with the error.
+          const { unresolvedReason } = context.identity;
+          Object.defineProperty(resolved, "by", {
+            enumerable: true,
+            get: (): string => {
+              throw new OsUserLookupError(unresolvedReason);
+            },
+          });
+        }
         return handler(resolved as ResolvedArgs<T>);
       });
     });
@@ -2069,9 +2082,20 @@ export function registerTools(
     // from the kind="get" row `corpusService.get` above already fired
     // (a different consumption pattern — the whole navigation bundle, not a
     // single doc read). A no-op when trace.enabled resolves false.
-    app.traceRecorder?.recordContextBundle(inv.identity.claimed);
+    // reason: a trace row needs an actor; the server's identity has none when its OS user lookup failed. The trace is
+    // advisory observability (fire-and-forget, SPEC-102), not a write the tool depends on, so the read proceeds and the
+    // response says the trace was not recorded and why (never silent, never a guessed actor).
+    const traceNotRecorded =
+      inv.identity.claimed === null ? `trace not recorded: OS user lookup failed: ${inv.identity.unresolvedReason}` : undefined;
+    if (inv.identity.claimed !== null) app.traceRecorder?.recordContextBundle(inv.identity.claimed);
 
-    return textContent({ target: doc, linked_specs: linkedSpecs, related_adrs: relatedAdrs, active_plans: activePlans });
+    return textContent({
+      target: doc,
+      linked_specs: linkedSpecs,
+      related_adrs: relatedAdrs,
+      active_plans: activePlans,
+      ...(traceNotRecorded === undefined ? {} : { trace_not_recorded: traceNotRecorded }),
+    });
   });
 
   // lore_batch

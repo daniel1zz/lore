@@ -104,7 +104,7 @@ import { readFileSync } from "node:fs";
 
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { BOOTSTRAP_FRAMING_LINE, type LoreError } from "@lore/core";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -243,7 +243,7 @@ export function readGovernanceAsset(
   }
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "governance",
     description:
@@ -267,7 +267,7 @@ export default defineCommand({
       default: false,
     },
   },
-  run(context) {
+  run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
     const legacyFlag = args["seat-briefing"] === true;
@@ -305,7 +305,7 @@ export default defineCommand({
     // flag only ever aliases `seat-briefing`.
     if (topic === "bootstrap-framing") {
       inv.io.stdout.write(BOOTSTRAP_FRAMING_LINE);
-      return;
+      return 0;
     }
 
     // Mirrors commands/setup.ts's own path-context resolution verbatim (see
@@ -333,5 +333,6 @@ export default defineCommand({
     }
 
     inv.io.stdout.write(result.value);
+    return 0;
   },
 });

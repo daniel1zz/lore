@@ -29,12 +29,29 @@ export type RunId = string & { readonly __brand: "RunId" };
 /** Where the claimed (self-reported) name came from; never attestation. */
 export type NameSource = "flag" | "env" | "mcp" | "session" | "worktree" | "os";
 
-export interface InvocationIdentity {
+/** An invocation whose writer is named: the claimed name and where it came from. */
+export interface ResolvedInvocationIdentity {
   /** The run the agent integration vouched for; null = unattested. */
   harnessRun: RunId | null;
   claimed: string;
   claimedSource: NameSource;
 }
+
+/**
+ * An invocation that has no name for its writer: no `--by`, session or working-copy name, and the OS user lookup
+ * failed. Reads proceed; a write that needs an actor fails loud with `unresolvedReason` (`OsUserLookupError`).
+ * There is no substitute name.
+ */
+export interface UnresolvedInvocationIdentity {
+  harnessRun: RunId | null;
+  claimed: null;
+  claimedSource: null;
+  /** Why no name could be resolved (the OS user lookup's failure). */
+  unresolvedReason: string;
+}
+
+/** Who this invocation is: a run vouched for plus either a claimed name or the reason there is none. */
+export type InvocationIdentity = ResolvedInvocationIdentity | UnresolvedInvocationIdentity;
 
 export interface WriteContext {
   readonly identity: InvocationIdentity;

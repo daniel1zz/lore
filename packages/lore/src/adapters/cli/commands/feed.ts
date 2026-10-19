@@ -93,7 +93,7 @@
  *   task-derive-lore-feed-s-checkpoint-set-from-the-registry-make
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import type { Invocation, LoreConfig } from "@lore/core";
 import type { App } from "../../../app.js";
@@ -255,7 +255,7 @@ function recordFeedTrace(app: App, inv: Invocation, checkpoint: string, docsServ
 // generic `buildFeed` advisory-note path below and exit 0, masking the gap.
 assertHandlersCoverDescriptor(SPECIAL_FEED_CHECKPOINTS, SPECIAL_CHECKPOINT_HANDLERS);
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "feed",
     description:
@@ -293,7 +293,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, config } = loadLoreApp({ inv });
@@ -344,6 +344,7 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 

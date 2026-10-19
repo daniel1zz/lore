@@ -8,14 +8,14 @@
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-3.
  */
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { findLoreDbPath } from "../utils.js";
 import { runDecideFlow } from "../decide-flow.js";
 import { invocationOf } from "../command-invocation.js";
 import { createProductionHumanChannelPorts } from "../../real-human-channel-port.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "decide",
     description: "Answer a pending decision (human only: interactive terminal, no agent, nonce typed back)",

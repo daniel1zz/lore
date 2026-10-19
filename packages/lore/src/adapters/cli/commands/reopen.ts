@@ -7,13 +7,12 @@
  * (refusal = the shared `exitCode` mapping for VALIDATION_ERROR, usage error = 2).
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "reopen",
     description: "Reopen an approved spec that has no evidence yet (approved -> draft) so it can be edited",
@@ -33,7 +32,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (typeof args.reason !== "string" || args.reason.trim() === "") {
@@ -53,11 +52,12 @@ export default defineCommand({
       const doc = result.value;
       if (args.json) {
         inv.io.stdout.write(JSON.stringify({ id: doc.id, slug: doc.slug, status: doc.status, version: doc.version }) + "\n");
-        return;
+        return 0;
       }
       inv.io.stdout.write(`Reopened ${doc.slug} (v${doc.version}): approved -> draft\n`);
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -5,7 +5,7 @@
  * Side-effect class: reads process state (that is the point — it mirrors what the entry resolves).
  */
 import { homedir, hostname, tmpdir, userInfo } from "node:os";
-import type { Invocation } from "@lore/core";
+import type { Invocation, OsUser } from "@lore/core";
 import type { AppAmbient } from "../src/app.js";
 import type { ProviderRuntime } from "../src/ai/registry.js";
 import { declareWriteActorForTests } from "../src/store/write-context-store.js";
@@ -13,6 +13,11 @@ import type { StoreInterface } from "../src/store/store-interface.js";
 import { resolveActorWithSource } from "@lore/core/node";
 import { CliExit } from "../src/adapters/cli/cli-exit.js";
 import { warnSinkOf, type WarnSink } from "../src/service/warn-sink.js";
+
+/** The live OS account lookup as the entry records it: a success with the real name (tests run where it resolves). */
+export function liveOsUser(): OsUser {
+  return { ok: true, name: userInfo().username };
+}
 
 /** The live process as an Invocation: `env` is the LIVE `process.env` object, so a test's later env edits stay visible. */
 export function liveInvocation(): Invocation {
@@ -30,17 +35,17 @@ export function liveInvocation(): Invocation {
     },
     paths: { home, claudeDir: `${home}/.claude`, userConfigDir: `${home}/.config/lore`, projectRoot: null, tmpDir: tmpdir() },
     host: hostname(),
-    user: userInfo().username,
+    user: liveOsUser(),
     execPath: process.execPath,
     isCompiled: false,
     identity: { harnessRun: null, claimed: "test-actor", claimedSource: "os" },
-    io: { stdout: process.stdout, stderr: process.stderr },
+    io: liveIo(),
   };
 }
 
 /** The live process streams as the writers of a run: what a test passes where production passes `inv.io`. */
 export function liveIo(): Invocation["io"] {
-  return { stdout: process.stdout, stderr: process.stderr };
+  return { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin, stdinIsTTY: process.stdin.isTTY === true };
 }
 
 /** The live stderr as a {@link WarnSink}: what a test passes where the composition passes `warnSinkOf(inv.io.stderr)`. */
@@ -70,7 +75,7 @@ export function liveProviderRuntime(): ProviderRuntime {
  * the live env, else the OS user — exactly what the CLI claims outside a worktree.
  */
 export function liveWriteActor(): string {
-  return resolveActorWithSource(undefined, process.env, () => userInfo().username).actor;
+  return resolveActorWithSource(undefined, process.env, liveOsUser()).actor;
 }
 
 /** The write context `createApp(dbPath, config, ambient, writeContext)` takes: the live process's claimed name, no run. */
