@@ -66,6 +66,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { findUnderMatchedPassRefusal } from "../../../src/adapters/cli/evidence-precheck.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -262,6 +263,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

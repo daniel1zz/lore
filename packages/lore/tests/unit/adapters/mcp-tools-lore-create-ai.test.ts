@@ -42,6 +42,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     // reason: SPEC-024 §9.2 — MCP surface is set at startup, before any tool call
     callerSurface: "mcp" as const,
     // reason: simplified resolveAiDefault for unit tests — mirrors mcp built-in (false)

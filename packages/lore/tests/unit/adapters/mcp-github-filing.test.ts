@@ -72,6 +72,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { githubIssueTaskSlug } from "../../../src/service/issue-task-shaping.js";
 import { readGithubIssueRef } from "../../../src/service/resolution-projector.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── GitHubIntakePort mocked wholesale — see this file's own header ────────
 
@@ -114,6 +115,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

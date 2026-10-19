@@ -51,10 +51,8 @@
  * Source: SPEC-035 §2, SPEC-079 G3
  */
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 
-import { join } from "path";
-import { z } from "zod";
 import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
@@ -62,50 +60,17 @@ import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg, resolveActo
 import { parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
-import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
+import type { AuditMiss } from "../../../service/audit-service.js";
+import { auditAnchorFilePath, readAuditAnchorFile, type AuditAnchorFile } from "../../../service/audit-verify-runner.js";
 import { invocationOf } from "../command-invocation.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { printLine } from "../output.js";
 
-// ─── SPEC-079 G3 — `.lore/audit-anchor.json` file contract ─────────────────
+// ─── SPEC-079 G3 — `.lore/audit-anchor.json` ───────────────────────────────
 //
-// This is a CLI/adapter-level file (services have no fs access) — written by
-// `lore audit anchor`, read by `lore audit --verify`. Zod-validated on read
-// since it's an external-facing file a user/script could hand-edit or a
-// stale/foreign version of the CLI could have written in an older shape.
-
-const auditAnchorFileSchema = z.object({
-  head_id: z.number(),
-  head_hash: z.string(),
-  entry_count: z.number(),
-  anchored_at: z.string(),
-});
-
-/** Shape of `.lore/audit-anchor.json` — see the module header for the contract. */
-type AuditAnchorFile = z.infer<typeof auditAnchorFileSchema>;
-
-function auditAnchorFilePath(corpusRoot: string): string {
-  return join(corpusRoot, ".lore", "audit-anchor.json");
-}
-
-/**
- * Reads and validates `.lore/audit-anchor.json`, if present. Never throws:
- * a missing file is `{ anchor: undefined }` (verify's anchor check reports
- * `"absent"`, per SPEC-079 G3 — never a silent pass); a present-but-malformed
- * file is `{ error: <message> }` so the CLI can fail loud rather than
- * silently treating a corrupted trust root as absent.
- */
-function readAuditAnchorFile(corpusRoot: string): { anchor?: AuditAnchorRef; error?: string } {
-  const path = auditAnchorFilePath(corpusRoot);
-  if (!existsSync(path)) return {};
-  try {
-    const parsed = auditAnchorFileSchema.parse(JSON.parse(readFileSync(path, "utf8")));
-    return { anchor: { head_id: parsed.head_id, head_hash: parsed.head_hash } };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return { error: `Malformed .lore/audit-anchor.json: ${message}` };
-  }
-}
+// The file contract (schema, path, reader) lives in service/audit-verify-runner.ts and is shared by this command
+// and the HTTP/MCP verify surfaces, so every surface reads the anchor the same way. This command writes it
+// (`lore audit anchor`) and reads it (`lore audit --verify`).
 
 /** Render `created_by`/`actor` for display — decodes AI judge identities (SPEC-034 §2). */
 function formatActor(actor: string): string {
@@ -258,11 +223,12 @@ export default defineLoreCommand({
           inv.io.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
           return exitCode(anchorRoot.error);
         }
-        const { anchor, error: anchorFileError } = readAuditAnchorFile(anchorRoot.value);
-        if (anchorFileError !== undefined) {
-          inv.io.stderr.write(`Error: ${anchorFileError}\n`);
+        const anchorRead = readAuditAnchorFile(anchorRoot.value);
+        if (!anchorRead.ok) {
+          inv.io.stderr.write(`Error: ${anchorRead.error.code === "VALIDATION_ERROR" ? anchorRead.error.message : formatErrorFor(inv, anchorRead.error)}\n`);
           return 4;
         }
+        const anchor = anchorRead.value;
 
         const result = await app.auditService.verify({
           ...(args.since !== undefined ? { since: args.since } : {}),

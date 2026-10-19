@@ -5,7 +5,8 @@
  * `prev_hash`/`entry_hash` columns: this service adds a query pass-through,
  * a versions⋈audit completeness oracle, a tamper-evident hash-chain walk,
  * and an external-anchor cross-check on top of `StoreInterface.queryAudit` /
- * `listAllVersions` / `listAuditChain`.
+ * `listVersionKeys` / `listAuditChain`. The HTTP and MCP servers run `verify` off their event loop through
+ * `audit-verify-runner.ts`; this class is what the worker (and the CLI) run, unchanged.
  *
  * Public surface:
  *   query(filters)        → thin delegation to store.queryAudit
@@ -51,7 +52,7 @@
  *   is excluded (SPEC-035 §2 lists it out of the anchor set) even though
  *   CorpusService.delete also stamps `details.version` on its audit entry.
  * @invariant The `since` watermark bounds BOTH sides of the join (versions rows via
- *   `listAllVersions(since)`, audit rows via `queryAudit({since})`) — pre-watermark
+ *   `listVersionKeys(since)`, audit rows via `queryAudit({since})`) — pre-watermark
  *   holes (pre-SPEC-035 TaskWorkflow silence, v1-migration imports) are never
  *   reported as misses (D5).
  *
@@ -391,7 +392,9 @@ export class AuditService {
   async verify(opts?: VerifyOpts): Promise<Result<AuditVerifyResult, LoreError>> {
     const since = opts?.since ?? this.verifySince;
 
-    const versionsResult = await this.store.listAllVersions(since);
+    // reason: the join uses four columns of a versions row; `listVersionKeys` reads only those (from a covering
+    // index), never the row's content/extra snapshot, so this step's cost does not grow with document size.
+    const versionsResult = await this.store.listVersionKeys(since);
     if (!versionsResult.ok) return versionsResult;
 
     const candidates = versionsResult.value.filter(

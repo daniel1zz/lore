@@ -46,6 +46,12 @@ export type { SearchHit };
  */
 export type { AuditChainEntry };
 
+/**
+ * The four columns of a versions row that {@link AuditService.verify}'s completeness join reads — the whole of
+ * {@link StoreInterface.listVersionKeys}'s row. Deliberately carries no `content`/`extra`/`status`/`title`.
+ */
+export type VersionKey = Pick<VersionRecord, "doc_id" | "version" | "action" | "created_at">;
+
 /** One (class, subject, version) triple — the unit the effective decision verdict is computed over. */
 export interface DecisionSubjectKey {
   readonly class: string;
@@ -1058,6 +1064,17 @@ export interface StoreInterface {
    * @see PLAN task D (SPEC-035) — audit surface
    */
   listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
+
+  /**
+   * The narrow twin of {@link listAllVersions} for {@link AuditService.verify}'s completeness join: only the four
+   * columns the join uses — `(doc_id, version, action, created_at)` — for every version row with
+   * `created_at >= since`, oldest first. A versions row stores its full `content` and `extra` snapshot, which the
+   * join never reads; this read never touches them, so its cost does not grow with how large the stored documents
+   * are. SQLite stores answer it from the covering index of migration-025.
+   *
+   * @param since - ISO 8601 inclusive lower bound; omit for every version row
+   */
+  listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>>;
 
   // ── Audit ──────────────────────────────────────────────────────────────
 

@@ -46,6 +46,7 @@ import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../../src/service/judgment-service.js";
 import { AuditService } from "../../../../src/service/audit-service.js";
+import { buildAuditVerifyRunner } from "../../../../src/service/audit-verify-runner.js";
 import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
@@ -97,6 +98,12 @@ async function makeTestServer(): Promise<TestContext> {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(docStore, new NoOpTelemetry()),
     auditService: new AuditService(docStore, { verifySince: FAR_PAST }),
+    // reason: this stub composes an in-memory-style App, so verify runs in-loop (the runner choice is by store kind);
+    // the anchor root has no `.lore/audit-anchor.json`, so the anchor reads as absent.
+    auditVerifyRunner: buildAuditVerifyRunner(
+      { kind: "memory", auditService: new AuditService(docStore, { verifySince: FAR_PAST }) },
+      { verifySince: FAR_PAST, anchorRoot: "/nonexistent-lore-anchor-root" },
+    ),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

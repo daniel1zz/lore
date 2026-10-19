@@ -217,6 +217,8 @@ function makeThrowawayApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    // reason: this corpus-integrity probe never verifies the audit chain; null-cast like its sibling services.
+    auditVerifyRunner: null as unknown as App["auditVerifyRunner"],
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry,

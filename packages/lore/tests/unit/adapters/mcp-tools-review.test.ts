@@ -56,6 +56,7 @@ import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AiDefaultSource, CreateDocInput, DocId, LoreError, ReviewJudgment } from "@lore/core";
 import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools-assess.test.ts) ──────────────────
 
@@ -110,6 +111,7 @@ function makeApp(
     specKindService: null as unknown as App["specKindService"],
     judgmentService,
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: opts.resolveAiDefault ?? ((_explicit?: boolean) => ({ ai: false, source: "env" as const })),
     telemetry: new NoOpTelemetry(),

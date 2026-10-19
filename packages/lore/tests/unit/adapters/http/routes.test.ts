@@ -74,6 +74,7 @@ import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../../src/service/judgment-service.js";
 import { AuditService } from "../../../../src/service/audit-service.js";
+import { buildAuditVerifyRunner } from "../../../../src/service/audit-verify-runner.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
@@ -121,6 +122,12 @@ function makeApp(): App {
     // hook also depends on a real judgmentService).
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    // reason: this stub composes an in-memory-style App, so verify runs in-loop (the runner choice is by store kind);
+    // the anchor root has no `.lore/audit-anchor.json`, so the anchor reads as absent.
+    auditVerifyRunner: buildAuditVerifyRunner(
+      { kind: "memory", auditService: new AuditService(store, { verifySince: FAR_PAST }) },
+      { verifySince: FAR_PAST, anchorRoot: "/nonexistent-lore-anchor-root" },
+    ),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

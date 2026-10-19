@@ -30,6 +30,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { DocRecord, UatVerdict } from "@lore/core";
 import { UatService } from "../../../src/service/uat-service.js";
 import { resolveDoc } from "../../../src/service/resolve.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ function makeApp(): App {
     // instance so calibration data lands in the same corpus the test observes.
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

@@ -52,6 +52,7 @@ import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
 import type { App } from "../../../src/app.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 const PROJECT_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -89,6 +90,7 @@ function makeRig(): Rig {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(store, telemetry),
     auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditVerifyRunner: inLoopAuditVerifyRunner(new AuditService(store, { verifySince: FAR_PAST })),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry,

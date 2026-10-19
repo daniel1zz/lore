@@ -78,6 +78,7 @@ import type { LoreConfig } from "@lore/core";
 // importing from a different path, re-declaring the function locally, or
 // widening to a namespace import; the point is this EXACT named export.
 import { buildRetiredFeedbackUpstreamError } from "../../../src/adapters/cli/report-issue-wiring.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools.test.ts's makeApp/getToolHandler) ─
 
@@ -106,6 +107,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

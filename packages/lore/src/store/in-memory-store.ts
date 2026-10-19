@@ -63,6 +63,7 @@ import type {
   RunEndState,
   RunLifecycle,
   RunProcessRecord,
+  VersionKey,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -1203,6 +1204,13 @@ export class InMemoryStore implements StoreInterface {
       .filter((v) => since === undefined || v.created_at >= since)
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
     return ok(matching.map((v) => ({ ...v })));
+  }
+
+  async listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>> {
+    const matching = this.versions
+      .filter((v) => since === undefined || v.created_at >= since)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return ok(matching.map(({ doc_id, version, action, created_at }) => ({ doc_id, version, action, created_at })));
   }
 
   // ── Audit ─────────────────────────────────────────────────────────────────

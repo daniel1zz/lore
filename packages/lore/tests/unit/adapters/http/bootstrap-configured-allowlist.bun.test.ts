@@ -65,6 +65,7 @@ import { TreeCheckService } from "../../../../src/service/tree-check-service.js"
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import { actedStore, liveIo } from "../../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,7 @@ async function makeTestServer(allowedOrigins?: readonly string[]): Promise<TestC
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),
