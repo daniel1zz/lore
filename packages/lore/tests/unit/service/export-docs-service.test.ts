@@ -61,6 +61,8 @@ function makeTempProjectDir(): string {
 }
 
 afterEach(() => {
+  fixtureOrdinalCounters.clear();
+  fixtureOrdinalById.clear();
   for (const dir of tmpDirs.splice(0)) {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -71,6 +73,27 @@ afterEach(() => {
 });
 
 // ─── DocRecord Factory ─────────────────────────────────────────────────────────
+
+/** Per-type default ordinals handed to fixtures that name none (reset in afterEach). */
+const fixtureOrdinalCounters = new Map<string, number>();
+
+/** Extra that makes a spec a never-numbered kind, so it exercises the legacy title/sequential allocator. */
+const LEGACY_ALLOCATOR_EXTRA = { spec_kind: "domain-overview" } as const;
+
+function resolveFixtureOrdinal(o: { type: DocRecord["type"]; extra?: Record<string, unknown> | undefined; ordinal?: number | null | undefined; id: string }): number | undefined {
+  if (typeof o.ordinal === "number") return o.ordinal;
+  if (!ORDINAL_REGISTRY_TYPES.has(o.type)) return undefined;
+  if (o.extra?.["spec_kind"] === "domain-overview") return undefined;
+  const key = `${o.id}`;
+  const cached = fixtureOrdinalById.get(key);
+  if (cached !== undefined) return cached;
+  const next = (fixtureOrdinalCounters.get(o.type) ?? 0) + 1;
+  fixtureOrdinalCounters.set(o.type, next);
+  fixtureOrdinalById.set(key, next);
+  return next;
+}
+const fixtureOrdinalById = new Map<string, number>();
+const ORDINAL_REGISTRY_TYPES = new Set<string>(["spec", "adr"]);
 
 /**
  * Build a complete DocRecord for insertion into InMemoryStore.
@@ -88,6 +111,7 @@ function makeDoc(
   },
 ): DocRecord {
   const now = "2024-01-15T10:00:00.000Z";
+  const fixtureOrdinal = resolveFixtureOrdinal(overrides);
   return {
     id: overrides.id,
     slug: overrides.slug as Slug,
@@ -105,11 +129,11 @@ function makeDoc(
     deleted_at: overrides.deleted_at ?? null,
     tags: overrides.tags ?? [],
     extra: overrides.extra ?? {},
-    // SPEC-084 T5 — ordinal is optional on DocRecord and omitted entirely (rather than
-    // spread as `undefined`) when the caller doesn't pass one, matching every pre-existing
-    // fixture in this file (which never set it and must keep exercising the pre-migration
-    // NULL-ordinal legacy fallback path unchanged).
-    ...(overrides.ordinal !== undefined ? { ordinal: overrides.ordinal } : {}),
+    // BR-1284 — a numbered-kind doc always carries its number before export sees it, so a fixture
+    // that names no ordinal gets the next per-type one (1, 2, ... in creation order, reset per
+    // test). A fixture exercising the legacy title/sequential allocator must be a kind that never
+    // gets a number (`LEGACY_ALLOCATOR_EXTRA`, a domain-overview spec) or a non-numbered type.
+    ...(fixtureOrdinal === undefined ? {} : { ordinal: fixtureOrdinal }),
   };
 }
 
@@ -1326,6 +1350,7 @@ describe("HAPPY — title-declared number is adopted for an unmapped doc (AC-A1-
     await insertDoc(store, makeDoc({
       id: docId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "SPEC-040 — Declared Number Feature",
       slug: "spec-declared-number-feature",
     }));
@@ -1352,6 +1377,7 @@ describe("BOUNDARY — two unmapped docs both title-claim the same number (AC-A1
     await insertDoc(store, makeDoc({
       id: firstDocId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "SPEC-040 — First Claimant",
       slug: "spec-first-claimant",
       updated_at: "2024-01-15T10:00:02.000Z",
@@ -1359,6 +1385,7 @@ describe("BOUNDARY — two unmapped docs both title-claim the same number (AC-A1
     await insertDoc(store, makeDoc({
       id: secondDocId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "SPEC-040 — Second Claimant",
       slug: "spec-second-claimant",
       updated_at: "2024-01-15T10:00:01.000Z",
@@ -1402,6 +1429,7 @@ describe("NEGATIVE — title-declared number already claimed in the index (AC-A1
     await insertDoc(store, makeDoc({
       id: docId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "SPEC-040 — Late Claimant",
       slug: "spec-late-claimant",
     }));
@@ -1441,6 +1469,7 @@ describe("BOUNDARY — sequential fallback skips a forward title-claimed number 
     await insertDoc(store, makeDoc({
       id: claimDocId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "SPEC-036 — Forward Claim",
       slug: "spec-forward-claim",
       updated_at: "2024-01-15T10:00:02.000Z",
@@ -1452,6 +1481,7 @@ describe("BOUNDARY — sequential fallback skips a forward title-claimed number 
     await insertDoc(store, makeDoc({
       id: sequentialDocId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "Plain Sequential Title",
       slug: "spec-plain-sequential-title",
       updated_at: "2024-01-15T10:00:01.000Z",
@@ -1477,6 +1507,7 @@ describe("BOUNDARY — title-declared number normalizes to canonical padded form
     await insertDoc(store, makeDoc({
       id: docId,
       type: "spec",
+      extra: LEGACY_ALLOCATOR_EXTRA,
       title: "SPEC-7 — Short Number",
       slug: "spec-short-number",
     }));
@@ -1597,7 +1628,6 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
     expect(fm["id"]).toBe("SPEC-084");
 
     // A doc with an allocated ordinal never hits the legacy fallback — no warning.
-    expect(result.value.ordinal_warnings).toHaveLength(0);
   });
 
   it("adr with ordinal=3 exports human_id ADR-003 (zero-padded) via the same column-derived branch", async () => {
@@ -1622,7 +1652,6 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
     const index = readExportIndex(projectDir);
     expect(index.mappings[docId]!.human_id).toBe("ADR-003");
     expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/adr\/ADR-003-/);
-    expect(result.value.ordinal_warnings).toHaveLength(0);
   });
 
   it("re-exporting an ordinal-derived doc twice converges (idempotent, skipped_clean second run)", async () => {
@@ -1652,67 +1681,11 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
     expect(second.value.created).toHaveLength(0);
     expect(second.value.skipped_clean).toHaveLength(1);
     expect(second.value.repaired).toHaveLength(0);
-    expect(second.value.ordinal_warnings).toHaveLength(0);
-  });
-});
-
-describe("NEGATIVE — numbered-type doc with a NULL ordinal falls back to the legacy path with a loud report warning (AC-084-6 T5-2)", () => {
-  it("spec with no ordinal column value gets the legacy zero-padded id AND a named ordinal_warnings entry", async () => {
-    const store = actedStore(new InMemoryStore());
-    const service = makeExportService(store);
-    const projectDir = makeTempProjectDir();
-
-    const docId = "01J0000000000000000000T5W1";
-    await insertDoc(store, makeDoc({
-      id: docId,
-      type: "spec",
-      title: "Unmigrated Legacy Spec",
-      slug: "spec-unmigrated-legacy-spec",
-      // ordinal deliberately omitted — simulates a pre-`lore migrate ordinals` doc.
-    }));
-
-    const result = await service.exportDocs({ projectDir, dryRun: false });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    const index = readExportIndex(projectDir);
-    // Legacy path still allocates — zero-padded, sequential — never blocked, never a
-    // fabricated ordinal-shaped id.
-    expect(index.mappings[docId]!.human_id).toBe("SPEC-001");
-
-    // But the gap is named loudly, not silently perpetuated.
-    expect(result.value.ordinal_warnings).toHaveLength(1);
-    expect(result.value.ordinal_warnings[0]).toContain(docId);
-    expect(result.value.ordinal_warnings[0]).toContain("Unmigrated Legacy Spec");
-    expect(result.value.ordinal_warnings[0]).toContain("lore migrate ordinals");
-  });
-
-  it("adr with no ordinal column value also warns (adr has no kind-exemption at all)", async () => {
-    const store = actedStore(new InMemoryStore());
-    const service = makeExportService(store);
-    const projectDir = makeTempProjectDir();
-
-    const docId = "01J0000000000000000000T5W2";
-    await insertDoc(store, makeDoc({
-      id: docId,
-      type: "adr",
-      title: "Unmigrated Legacy Decision",
-      slug: "adr-unmigrated-legacy-decision",
-      extra: { decision_status: "proposed" },
-    }));
-
-    const result = await service.exportDocs({ projectDir, dryRun: false });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    expect(result.value.ordinal_warnings).toHaveLength(1);
-    expect(result.value.ordinal_warnings[0]).toContain(docId);
-    expect(result.value.ordinal_warnings[0]).toContain("lore migrate ordinals");
   });
 });
 
 describe("BOUNDARY — a permanently kind-exempt numbered-type doc (domain-overview) never warns (AC-084-6 T5-3)", () => {
-  it("a domain-overview spec with a NULL ordinal takes the legacy path silently — no ordinal_warnings entry", async () => {
+  it("a domain-overview spec with a NULL ordinal takes the legacy path silently (BR-1284 keeps it exportable)", async () => {
     const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
@@ -1737,7 +1710,6 @@ describe("BOUNDARY — a permanently kind-exempt numbered-type doc (domain-overv
     expect(index.mappings[docId]!.human_id).toBe("SPEC-001");
 
     // No warning — this is a permanent, by-design NULL, not a migration gap.
-    expect(result.value.ordinal_warnings).toHaveLength(0);
   });
 });
 
@@ -1767,7 +1739,6 @@ describe("REGRESSION — a non-numbered type is byte-identical even if an ordina
     expect(index.mappings[docId]!.human_id).toBe("PLAN-001");
     expect(index.mappings[docId]!.human_id).not.toContain("999");
     expect(index.mappings[docId]!.file_path).not.toContain("999");
-    expect(result.value.ordinal_warnings).toHaveLength(0);
   });
 });
 
@@ -1830,7 +1801,6 @@ describe("STATE — an existing export-index mapping for a numbered doc reconcil
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.repaired).toHaveLength(0);
-    expect(second.value.ordinal_warnings).toHaveLength(0);
   });
 });
 

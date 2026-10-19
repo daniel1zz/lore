@@ -28,7 +28,7 @@
  * @invariant Probe-level dedup: `stat`/`listDir`/`readFile` are each called AT MOST
  *   ONCE per DISTINCT declared path, regardless of how many documents (or how many
  *   anchors on the SAME document) declare that path — a separate, later concern from
- *   `parseCodeAnchor`'s per-entry validation (D4, D1). The dedup spans BOTH scanned
+ *   the grammar's per-entry validation (D4, D1). The dedup spans BOTH scanned
  *   populations: a path anchored by a spec AND by a knowledge doc is probed once.
  * @invariant TWO populations are scanned and reported SEPARATELY (`specs_checked`,
  *   `knowledge_checked`), while `armed`/`consistent` are computed over their UNION —
@@ -60,7 +60,7 @@ import type { LoreError } from "@lore/core";
 import {
   computeDrift,
   normalizeCodeAnchorEntries,
-  parseCodeAnchor,
+  classifyCodeAnchor,
   type DriftInputEntry,
   collectAnchorProbes,
   type FsProbe,
@@ -115,10 +115,17 @@ export interface DriftCheckResult {
  */
 export const ANCHOR_SCANNED_DOC_TYPES: readonly DocType[] = ["spec", "knowledge"];
 
-/** One armed document: it declares ≥1 parseable `code_anchors` entry. */
+/** One stored `code_anchors` value the grammar rejects (BR-416): shown raw, with the reason it cannot be read. */
+interface UnreadableAnchor {
+  raw: string;
+  reason: string;
+}
+
+/** One armed document: it declares ≥1 `code_anchors` entry, readable or not. */
 interface ArmedDoc {
   doc: DocRecord;
   anchors: DriftInputEntry["anchor"][];
+  unreadable: UnreadableAnchor[];
 }
 
 const defaultNow = (): string => new Date().toISOString();
@@ -156,20 +163,35 @@ export class DriftCheckService {
     const armedByType = armedResult.value;
 
     const declared: DriftInputEntry[] = [];
+    const unreadableRows: DriftRow[] = [];
     const statusBreakdown: Record<string, number> = {};
     let armedTotal = 0;
     for (const [type, armedDocs] of armedByType) {
       armedTotal += armedDocs.length;
-      for (const { doc, anchors } of armedDocs) {
+      for (const { doc, anchors, unreadable } of armedDocs) {
         statusBreakdown[doc.status] = (statusBreakdown[doc.status] ?? 0) + 1;
         for (const anchor of anchors) {
           declared.push({ doc_id: doc.id, doc_slug: doc.slug, doc_type: type, doc_status: doc.status, anchor });
+        }
+        for (const { raw, reason } of unreadable) {
+          unreadableRows.push({
+            doc_id: doc.id,
+            doc_slug: doc.slug,
+            doc_type: type,
+            doc_status: doc.status,
+            anchor: raw,
+            kind: "anchor_unreadable",
+            detail: reason,
+          });
         }
       }
     }
 
     const probes = collectAnchorProbes(declared.map((entry) => entry.anchor), probe);
-    const { consistent, drifts } = computeDrift(declared, probes);
+    const computed = computeDrift(declared, probes);
+    // reason: BR-416 — an unreadable stored anchor is a finding of its own kind, never a skipped entry.
+    const drifts = [...computed.drifts, ...unreadableRows];
+    const consistent = drifts.length === 0;
 
     return ok({
       // reason: `armed` counts the UNION, derived from the scanned map rather than
@@ -266,11 +288,15 @@ export class DriftCheckService {
     if (!docResult.ok) return docResult;
     const doc = docResult.value;
 
-    const normalizedRemovalResult = normalizeCodeAnchorEntries(anchors);
-    if (!normalizedRemovalResult.ok) return normalizedRemovalResult;
-    const toRemove = new Set(normalizedRemovalResult.value);
-
     const existing = extractCodeAnchorStrings(doc);
+    // reason: an unreadable stored value (BR-416) cannot pass the grammar, yet the drift report tells the author
+    // to remove it — a candidate equal to a stored string verbatim is therefore removable without parsing.
+    const toRemove = new Set(anchors.filter((candidate) => existing.includes(candidate)));
+    const unmatched = anchors.filter((candidate) => !existing.includes(candidate));
+    const normalizedRemovalResult = normalizeCodeAnchorEntries(unmatched);
+    if (!normalizedRemovalResult.ok) return normalizedRemovalResult;
+    for (const normalized of normalizedRemovalResult.value) toRemove.add(normalized);
+
     const remaining = existing.filter((a) => !toRemove.has(a));
 
     return this.writeCodeAnchors(doc, remaining, "remove", now);
@@ -355,18 +381,19 @@ export class DriftCheckService {
 // ─── Module-scope Helpers ────────────────────────────────────────────────────
 
 /**
- * Narrows a fetched population to the ARMED subset — the docs that declare ≥1
- * parseable `code_anchors` entry. `store.findMany` already excludes soft-deleted
- * docs, so the armed population is non-deleted by construction.
+ * Narrows a fetched population to the ARMED subset — the docs that store ≥1 `code_anchors`
+ * entry, readable or not (an unreadable one is a finding, so it arms the doc, BR-416).
+ * `store.findMany` already excludes soft-deleted docs, so the armed population is
+ * non-deleted by construction.
  *
  * @param docs - Every non-deleted doc of one type, as returned by `store.findMany`
- * @returns One {@link ArmedDoc} per doc with at least one parseable anchor
+ * @returns One {@link ArmedDoc} per doc with at least one stored anchor value
  */
 function collectArmedDocs(docs: readonly DocRecord[]): ArmedDoc[] {
   const armed: ArmedDoc[] = [];
   for (const doc of docs) {
-    const anchors = extractParsedCodeAnchors(doc);
-    if (anchors.length > 0) armed.push({ doc, anchors });
+    const { anchors, unreadable } = extractStoredCodeAnchors(doc);
+    if (anchors.length > 0 || unreadable.length > 0) armed.push({ doc, anchors, unreadable });
   }
   return armed;
 }
@@ -382,18 +409,34 @@ function extractCodeAnchorStrings(doc: DocRecord): string[] {
 }
 
 /**
- * Extracts and PARSES a document's stored `code_anchors` into `ParsedCodeAnchor[]`,
- * silently skipping any entry that fails `parseCodeAnchor` — grammar is guaranteed
- * at every write seam (D6a), so a parse failure here means a hand-edited/legacy row;
- * this scan-time defensive skip is intentionally OUT of the six documented drift
- * kinds (grammar policing is a WRITE-time concern, not this read-only scan's job).
+ * Reads a document's stored `code_anchors` into the anchors the grammar accepts and the
+ * values it rejects. Nothing is dropped (BR-416): a rejected string, a non-string entry and
+ * a `code_anchors` that is not a list each come back as an {@link UnreadableAnchor}, so the
+ * drift scan reports them. Grammar is enforced at every write seam (D6a), but a hand-edited,
+ * imported or legacy row still reaches this read.
  */
-function extractParsedCodeAnchors(doc: DocRecord): DriftInputEntry["anchor"][] {
-  const raw = extractCodeAnchorStrings(doc);
-  const parsed: DriftInputEntry["anchor"][] = [];
-  for (const entry of raw) {
-    const result = parseCodeAnchor(entry);
-    if (result.ok) parsed.push(result.value);
+function extractStoredCodeAnchors(doc: DocRecord): {
+  anchors: DriftInputEntry["anchor"][];
+  unreadable: UnreadableAnchor[];
+} {
+  const stored = doc.extra["code_anchors"];
+  if (stored === undefined || stored === null) return { anchors: [], unreadable: [] };
+  if (!Array.isArray(stored)) {
+    return {
+      anchors: [],
+      unreadable: [{ raw: JSON.stringify(stored), reason: "code_anchors is not a list of anchor strings" }],
+    };
   }
-  return parsed;
+  const anchors: DriftInputEntry["anchor"][] = [];
+  const unreadable: UnreadableAnchor[] = [];
+  for (const entry of stored) {
+    if (typeof entry !== "string") {
+      unreadable.push({ raw: JSON.stringify(entry), reason: "stored entry is not a string" });
+      continue;
+    }
+    const classified = classifyCodeAnchor(entry);
+    if (classified.kind === "valid") anchors.push(classified.anchor);
+    else unreadable.push({ raw: entry, reason: classified.message });
+  }
+  return { anchors, unreadable };
 }

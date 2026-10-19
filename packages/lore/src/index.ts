@@ -23,6 +23,10 @@ if (process.argv.includes("--mcp-server")) {
   const { CliExit } = await import("./adapters/cli/cli-exit.js");
   try {
     const inv = await resolveEntryInvocation(process.argv.slice(2));
+    // reason: D22 — the MCP server reads and writes through the embedded replica when `sync.enabled`; its client is
+    // loaded here, before `loadLoreApp` builds the App (and before the per-call App `forWriteContext` rebuilds).
+    const { primeReplicaClientWhenSyncEnabled } = await import("./adapters/cli/replica-priming.js");
+    await primeReplicaClientWhenSyncEnabled(inv.io, inv);
     const { app } = loadLoreApp({ inv });
     await startMcpServer(app, () => loadProjectConfig(inv.io, inv), inv);
   } catch (error) {

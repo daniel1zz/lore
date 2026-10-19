@@ -23,13 +23,20 @@
  */
 
 import { computeDrift } from "./code-anchors.js";
-import type { AnchorProbe, DriftInputEntry, DriftKind, ParsedCodeAnchor } from "./code-anchors.js";
+import type { AnchorProbe, DriftInputEntry, DriftKind, ExportedNames, ParsedCodeAnchor } from "./code-anchors.js";
 
 /** Read-only filesystem port; paths are repo-relative, forward-slash, no trailing slash. */
 export interface FsProbe {
   stat(path: string): "file" | "dir" | "missing";
   readFile(path: string): string | null;
   listDir(path: string): string[] | null;
+  /**
+   * Decides which names `content` (the text of the repo-relative file `path`) exports, by parsing it
+   * (BR-417). Optional because the parser cannot live in this browser-safe package; a probe without
+   * it makes every symbol anchor "not measured" — never a guess. May follow re-exports through the
+   * probe's own `readFile`. Must not throw for unparseable input: it returns `notMeasured` instead.
+   */
+  readExportedNames?(path: string, content: string): ExportedNames;
 }
 
 /** package.json that governs every script reference (the repo root one). */
@@ -51,13 +58,14 @@ function describeCaught(caught: unknown): string {
  * @returns Probe results keyed by anchor path; a failed call sets `error` on that path.
  */
 export function collectAnchorProbes(anchors: readonly ProbedAnchor[], probe: FsProbe): Map<string, AnchorProbe> {
-  const descriptors = new Map<string, { needsListDir: boolean; needsContent: boolean }>();
+  const descriptors = new Map<string, { needsListDir: boolean; needsContent: boolean; needsExports: boolean }>();
   for (const anchor of anchors) {
-    const existing = descriptors.get(anchor.path) ?? { needsListDir: false, needsContent: false };
+    const existing = descriptors.get(anchor.path) ?? { needsListDir: false, needsContent: false, needsExports: false };
     if (anchor.isDir) existing.needsListDir = true;
     if (anchor.symbol !== undefined || anchor.title !== undefined || anchor.script !== undefined) {
       existing.needsContent = true;
     }
+    if (anchor.symbol !== undefined) existing.needsExports = true;
     descriptors.set(anchor.path, existing);
   }
 
@@ -89,6 +97,18 @@ export function collectAnchorProbes(anchors: readonly ProbedAnchor[], probe: FsP
         else result.content = content;
       } catch (caught) {
         result.error = describeCaught(caught);
+      }
+    }
+
+    if (result.content !== undefined && descriptor.needsExports) {
+      if (probe.readExportedNames === undefined) {
+        result.exported = { names: new Set(), notMeasured: "this probe has no export reader" };
+      } else {
+        try {
+          result.exported = probe.readExportedNames(path, result.content);
+        } catch (caught) {
+          result.error = describeCaught(caught);
+        }
       }
     }
     probes.set(path, result);
