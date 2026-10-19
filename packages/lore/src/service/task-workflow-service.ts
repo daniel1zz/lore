@@ -319,7 +319,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
+import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -906,13 +906,6 @@ export interface ReadyReport {
 
 const defaultNow = (): string => new Date().toISOString();
 
-/** Reads and validates task.extra.claim. Returns undefined when absent or malformed. */
-function readClaim(task: DocRecord): TaskClaim | undefined {
-  const raw = task.extra["claim"];
-  if (raw === undefined || raw === null) return undefined;
-  const parsed = taskClaimSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
-}
 
 /**
  * The stored lease as a {@link ClaimHolder} for core's `hasClaimConflict` (D6). `legacy` = the RAW stored claim
@@ -1098,13 +1091,13 @@ export function describeClaimRun(run: string | null | undefined): string {
  * treats-no-claim-at-all-as-a. This is the RAW presence check
  * `checkUncommittedAttestationWorktree` needs to tell "no claim was ever
  * taken" apart from "a claim exists but never recorded `--worktree`": both
- * states collapse to `readClaim(task)?.worktree === undefined`, which is
+ * states collapse to `readClaimRecord(task)?.worktree === undefined`, which is
  * exactly the proxy collapse that shipped the defect (a task with NO claim
  * at all was treated as if it were "a claim that declined to declare a
  * worktree", firing the Q3 opt-in-hole mismatch refusal on every unclaimed
  * task called from inside a git repo — the orchestrator's routine post-merge
  * re-verification path). Deliberately checks the RAW `extra.claim` field,
- * not `readClaim(task) !== undefined` — a malformed claim object still means
+ * not `readClaimRecord(task) !== undefined` — a malformed claim object still means
  * "a claim was recorded" for this narrow purpose (there IS something in
  * `extra.claim`, even if it fails schema validation), so this predicate must
  * not itself re-collapse malformed-claim into no-claim.
@@ -2038,7 +2031,7 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
 //
 //   ⛔ CORRECTED 2026-08-02 (task-the-uncommitted-worktree-guard-treats-no-
 //     claim-at-all-as-a) — the Q3 escalation above was ORIGINALLY keyed off
-//     `readClaim(task)?.worktree === undefined` alone, which is `true` for
+//     `readClaimRecord(task)?.worktree === undefined` alone, which is `true` for
 //     BOTH "a claim exists but recorded no worktree" (the intended Q3
 //     target) AND "there is no claim at all" (a task nobody has ever
 //     claimed, or one that was already released). That collapse fired the
@@ -2856,7 +2849,7 @@ export class TaskWorkflowService {
     // expires between evidence appends. `renewClaimForEvidence` reuses `nowIso`
     // captured above — NEVER a second `now()` invocation (would break the
     // STALE_VERSION sequential-CAS test recipe, which relies on single-fire).
-    const renewedClaim = renewClaimForEvidence(readClaim(task), actor, nowIso);
+    const renewedClaim = renewClaimForEvidence(readClaimRecord(task), actor, nowIso);
     const newExtra: Record<string, unknown> = {
       ...task.extra,
       verification_evidence: [...existing, parsedEntry.data],
@@ -2996,7 +2989,7 @@ export class TaskWorkflowService {
     const gateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
     if (!gateResult.ok) return gateResult;
 
-    const existingClaim = readClaim(task);
+    const existingClaim = readClaimRecord(task);
     const claimant = buildClaimParty(opts);
     let carryForward = false;
     let inheritedDirtyWorktree: string | undefined;
@@ -3286,7 +3279,7 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
-    const existingClaim = readClaim(task);
+    const existingClaim = readClaimRecord(task);
     if (existingClaim === undefined) {
       return err({
         code: "VALIDATION_ERROR",
@@ -3929,7 +3922,7 @@ export class TaskWorkflowService {
     if (missingOracle.value !== null) return err(missingOracle.value.error);
 
     const nowIso = now();
-    const claim = readClaim(task);
+    const claim = readClaimRecord(task);
     if (claim !== undefined) {
       // reason: BR-1056 — the holder is a RUN, not a name: two runs deriving the same name must not pass for
       // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
@@ -4049,7 +4042,7 @@ export class TaskWorkflowService {
     if (!recordedResult.ok) {
       range = notMeasured(`claim history unreadable: ${recordedResult.error.code}`);
     } else {
-      const currentWorktree = readClaim(task)?.worktree;
+      const currentWorktree = readClaimRecord(task)?.worktree;
       const recorded =
         recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
       if (recorded === undefined) {
@@ -4103,7 +4096,7 @@ export class TaskWorkflowService {
     const paths: string[] = [];
     for (const candidate of tasksResult.value) {
       if (candidate.status === "archived" || candidate.status === "deprecated") continue;
-      const worktree = readClaim(candidate)?.worktree;
+      const worktree = readClaimRecord(candidate)?.worktree;
       if (worktree !== undefined) paths.push(worktree);
     }
     return ok(buildActiveClaimedPathSet(this.requireWorktreeProbe(), paths));
@@ -4113,7 +4106,7 @@ export class TaskWorkflowService {
   private async readRecordedWorktrees(task: DocRecord): Promise<Result<RecordedWorktree[], LoreError>> {
     const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
     if (!auditResult.ok) return auditResult;
-    return ok(collectRecordedWorktrees(auditResult.value, readClaim(task)?.worktree));
+    return ok(collectRecordedWorktrees(auditResult.value, readClaimRecord(task)?.worktree));
   }
 
   private async recordWorktreeCleanupAudit(
@@ -4846,7 +4839,7 @@ export class TaskWorkflowService {
 
     for (const task of tasks) {
       const taskAnchors = extractFileAnchors(task);
-      const taskClaim = readClaim(task);
+      const taskClaim = extractHeldClaim(task);
 
       if (taskAnchors.length > 0) {
         for (const other of tasks) {
@@ -4942,7 +4935,7 @@ export class TaskWorkflowService {
     actionLabel: string,
     callerCwd: string | undefined,
   ): LoreError | null {
-    const claim = readClaim(task);
+    const claim = readClaimRecord(task);
     const worktree = claim?.worktree;
 
     if (worktree === undefined) {

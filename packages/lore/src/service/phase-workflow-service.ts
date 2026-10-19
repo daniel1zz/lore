@@ -112,7 +112,7 @@
  */
 
 import { z } from "zod";
-import { err, ok, hasClaimConflict, type Result, type RunId } from "@lore/core";
+import { err, ok, hasClaimConflict, type Result, type RunId, readClaimRecord, extractHeldClaim } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
@@ -244,13 +244,6 @@ export type {
 
 const defaultNow = (): string => new Date().toISOString();
 
-/** Reads and validates phase.extra.claim. Returns undefined when absent or malformed. */
-function readClaim(doc: DocRecord): TaskClaim | undefined {
-  const raw = doc.extra["claim"];
-  if (raw === undefined || raw === null) return undefined;
-  const parsed = taskClaimSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
-}
 
 /** Reads and validates phase.extra.verification_evidence. Returns [] when absent or malformed. */
 function readEvidence(doc: DocRecord): EvidenceEntry[] {
@@ -830,7 +823,7 @@ export class PhaseWorkflowService {
     // working session's TTL never falsely expires between evidence appends.
     // `renewClaimForEvidence` reuses `nowIso` captured above — NEVER a second `now()`
     // invocation (mirrors TaskWorkflowService's identical single-fire constraint).
-    const renewedClaim = renewClaimForEvidence(readClaim(phase), actor, nowIso);
+    const renewedClaim = renewClaimForEvidence(readClaimRecord(phase), actor, nowIso);
     const newExtra: Record<string, unknown> = {
       ...phase.extra,
       verification_evidence: [...existing, parsedEntry.data],
@@ -934,7 +927,7 @@ export class PhaseWorkflowService {
     const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId, opts.harnessRun ?? null);
     if (!gateResult.ok) return gateResult;
 
-    const existingClaim = readClaim(phase);
+    const existingClaim = readClaimRecord(phase);
     const claimant = buildClaimParty(opts);
     let carryForward = false;
 
@@ -1093,7 +1086,7 @@ export class PhaseWorkflowService {
     if (!phaseResult.ok) return phaseResult;
     const phase = phaseResult.value;
 
-    const existingClaim = readClaim(phase);
+    const existingClaim = readClaimRecord(phase);
     if (existingClaim === undefined) {
       return err({
         code: "VALIDATION_ERROR",
@@ -1193,7 +1186,7 @@ export class PhaseWorkflowService {
     }
 
     const nowIso = now();
-    const claim = readClaim(phase);
+    const claim = readClaimRecord(phase);
     if (claim !== undefined) {
       // reason: BR-1056/BR-1058 — same run-based holder check and run-aware staleness as the task path.
       const staleResult = await resolveEffectiveClaimStaleness(
@@ -1528,7 +1521,7 @@ export class PhaseWorkflowService {
     for (const phase of phaseChildren) {
       const acScope = readAcScope(phase);
       const checklist = readChecklist(phase);
-      const claim = readClaim(phase);
+      const claim = readClaimRecord(phase);
 
       const coverage = computeAcCoverage(criteria, [phase]);
       const completionResult = computePhaseCompletion({
@@ -1650,11 +1643,11 @@ export class PhaseWorkflowService {
     for (const doc of docs) {
       const docAnchors = extractFileAnchors(doc);
       if (docAnchors.length === 0) continue;
-      const docClaim = readClaim(doc);
+      const docClaim = extractHeldClaim(doc);
 
       for (const other of docs) {
         if (other.id === doc.id) continue;
-        const otherClaim = readClaim(other);
+        const otherClaim = extractHeldClaim(other);
         if (otherClaim === undefined) continue;
         if (staleByDoc.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
         // reason: BR-1056 — same holder means same RUN; a shared derived name alone is two holders.

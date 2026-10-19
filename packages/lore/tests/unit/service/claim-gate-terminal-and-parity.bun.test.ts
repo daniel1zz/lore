@@ -25,6 +25,8 @@ import { createApp } from "../../../src/app.js";
 import type { App } from "../../../src/app.js";
 import { extractHeldClaim } from "@lore/core";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
+import { CorpusWriteAuthority } from "../../../src/service/foreign-corpus-write-guard.js";
+import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { cleanupWorktrees, makeWorktree } from "../../integration/support/run-end-fixture.js";
 import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process.js";
@@ -218,5 +220,45 @@ describe("a terminal task holds no claim; gate and claim share one verdict", () 
     expect(extractHeldClaim({ ...live, status: "archived" })).toBeUndefined();
     expect(extractHeldClaim({ ...live, status: "deprecated" })).toBeUndefined();
     expect(extractHeldClaim({ ...live, extra: {} })).toBeUndefined();
+  });
+});
+
+describe("a terminal task's stored claim authorizes no corpus-scoped write (write guard)", () => {
+  const callerDir = tmpdir();
+  const baseline = { id: "bl-leaf", slug: "bl-leaf", type: "baseline", status: "approved", parent_id: null, extra: {} } as unknown as DocRecord;
+
+  function taskWithScopedClaim(status: string): DocRecord {
+    return {
+      id: "t-1",
+      slug: "scoped-task",
+      type: "task",
+      status,
+      parent_id: null,
+      extra: { claim: { by: "agent:holder", at: new Date().toISOString(), worktree: callerDir, corpus_scope: "bl-leaf" } },
+    } as unknown as DocRecord;
+  }
+
+  function authority(task: DocRecord): CorpusWriteAuthority {
+    const store = {
+      findMany: async () => ({ ok: true, value: [task] }),
+      find: async () => ({ ok: true, value: null }),
+      appendAuditEntry: async () => ({ ok: true, value: undefined }),
+    } as unknown as StoreInterface;
+    return new CorpusWriteAuthority(store, {
+      foreign: { provenance: "git_common_dir", enabled: true },
+      callerDir,
+      claimTtlMinutes: 120,
+    });
+  }
+
+  it("HAPPY control: a live task's fresh scoped claim grants the write", async () => {
+    const verdict = await authority(taskWithScopedClaim("active")).authorize([baseline], "rule-add", "agent:caller");
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.value?.task).toBe("scoped-task");
+  });
+
+  it("NEGATIVE: an archived task's stored claim does not grant the write; the foreign-write refusal stands", async () => {
+    const verdict = await authority(taskWithScopedClaim("archived")).authorize([baseline], "rule-add", "agent:caller");
+    expect(verdict.ok).toBe(false);
   });
 });

@@ -77,7 +77,7 @@ import {
   err,
   ok,
   extractValidity,
-  extractClaim,
+  extractHeldClaim,
   isInvalidated,
   validitySchema,
   type DocRecord,
@@ -573,7 +573,7 @@ export class ValidityService {
     // unreachable.
     const taskAlreadyTerminal: DocStatus | undefined =
       doc.type === "task" && TERMINAL_TASK_STATUSES.has(doc.status) ? doc.status : undefined;
-    const existingClaim = doc.type === "task" ? extractClaim(doc) : undefined;
+    const existingClaim = doc.type === "task" ? extractHeldClaim(doc) : undefined;
     const taskClaimHolder: string | undefined =
       existingClaim !== undefined && existingClaim.by !== opts.by ? existingClaim.by : undefined;
 

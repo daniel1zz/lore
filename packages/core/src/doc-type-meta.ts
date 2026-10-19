@@ -38,7 +38,7 @@
 import type { DocRecord, DocTypeMeta } from "./types.js";
 import { SPEC_KINDS, type SpecKind } from "./spec-kind.js";
 import { decisionStatusSchema, knowledgeSubTypeSchema, planExtraSchema } from "./schemas.js";
-import { extractClaim, extractEvidence, isClaimStale, tallyEvidenceResults } from "./task-workflow.js";
+import { readClaimRecord, extractEvidence, isClaimStale, tallyEvidenceResults } from "./task-workflow.js";
 
 /**
  * Narrows an unknown value to a valid {@link SpecKind} — `SPEC_KINDS` is the SSOT tuple.
@@ -124,7 +124,7 @@ export function deriveTypeMeta(
 
     case "task": {
       const evidence = extractEvidence(doc);
-      const claim = extractClaim(doc);
+      const claim = readClaimRecord(doc);
       const claimStale =
         claim !== undefined && opts?.claimTtlMinutes !== undefined
           ? isClaimStale(claim, new Date().toISOString(), opts.claimTtlMinutes)
