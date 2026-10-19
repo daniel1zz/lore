@@ -107,7 +107,8 @@ describe("lore outline is an unknown command", () => {
       const c = control();
       expect(c.exitCode).not.toBe(0);
       expect(r.exitCode).toBe(c.exitCode);
-      expect(r.stderr + r.stdout).not.toMatch(/retired/i);
+      expect(r.stderr + r.stdout).toContain("Unknown command `outline`");
+      expect(c.stderr + c.stdout).toContain("Unknown command `no-such-command-xyzzy`");
       expect(r.stderr + r.stdout).not.toContain("lore baseline add");
     });
   }

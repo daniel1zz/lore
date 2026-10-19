@@ -13,14 +13,6 @@
  *                      fallback), merging evidence/claims/anchors. Idempotent — a second run
  *                      performs zero new writes. Thin pipe over `PhaseMigrationService.migrateTasks`.
  *                      (SPEC-056 §Design Decisions D6/D6a, AC-P-5)
- *   prd-to-outline --prd <id-or-slug> [--section <key> (repeatable)] [--dry-run]
- *                      Relocates one or more `## `-level-2 sections of a root PRD's body into
- *                      dedicated `domain-overview` child specs, verbatim. Idempotent — a section
- *                      already migrated (or already fully covered by a pre-existing, invariant-
- *                      passing child doc) performs zero writes on re-run. `--dry-run` computes the
- *                      full per-section verdict report with zero writes. Thin pipe over
- *                      `OutlineMigrationService.migrateSection`, looped once per `--section`.
- *                      (SPEC-080 §Migration Plan Phase 1, AC-080-7)
  *   ordinals [--apply] One-shot SPEC-084 repair migration: backfills the store-allocated
  *                      `ordinal` column for every spec/adr doc from its title-declared number
  *                      (created_at priority, collisions get next-free), strips the now-redundant
@@ -42,6 +34,11 @@
  *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
  *                      pipe over `PlanOutlineExemptMigrationService`.
+ *   outline-sections [--apply] Remove the stored outline (`extra.outline`) from every PRD, now that the
+ *                      `lore outline` family is gone. Preview is the DEFAULT; `--apply` writes one version
+ *                      and one audit row per PRD (the previous version and the row's `details.removed` keep
+ *                      the outline); a second `--apply` writes nothing. Thin pipe over
+ *                      `OutlineSectionsRetireMigrationService`.
  */
 
 import { dirname } from "path";
@@ -52,7 +49,6 @@ import { resolveCorpus } from "../corpus-resolution.js";
 import { migrateConfigKeys } from "@lore/core/node";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
-import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
@@ -60,25 +56,17 @@ export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), or `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), or `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals | spec-parents | plan-outline-exempt | config-keys",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys",
       required: true,
     },
     from: {
       type: "string",
       description: "[v1 only] Source directory path containing v1 markdown files",
-    },
-    prd: {
-      type: "string",
-      description: "[prd-to-outline only] The root PRD's id or slug",
-    },
-    section: {
-      type: "string",
-      description: "[prd-to-outline only] Section key to migrate (repeatable; omit to migrate every domain section found in the PRD body)",
     },
     "dry-run": {
       type: "boolean",
@@ -86,7 +74,7 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt, config-keys] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys] Execute the migration (default is dry-run/preview-only)",
     },
     revert: {
       type: "boolean",
@@ -114,14 +102,14 @@ export default defineLoreCommand({
       args.version !== "phases" &&
       args.version !== "spec-kind" &&
       args.version !== "tasks-to-phases" &&
-      args.version !== "prd-to-outline" &&
+      args.version !== "outline-sections" &&
       args.version !== "ordinals" &&
       args.version !== "spec-parents" &&
       args.version !== "plan-outline-exempt" &&
       args.version !== "config-keys"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents, plan-outline-exempt, config-keys.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys.\n`,
       );
       exitCli(2);
     }
@@ -200,6 +188,51 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, `Plans ${apply ? "cleared" : "would clear"}: ${report.count}`);
         for (const row of report.rows) printLine(inv.io.stdout, `  ${row.slug}`);
         for (const e of report.errors) printLine(inv.io.stdout, `  error ${e}`);
+        if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+        return failed ? 4 : 0;
+      } finally {
+        app.close();
+      }
+    }
+
+    // ── outline-sections action ───────────────────────────────────────────
+    if (args.version === "outline-sections") {
+      const { app } = loadLoreApp({ inv });
+      try {
+        const service = app.outlineSectionsRetireMigrationService;
+        if (service === undefined) {
+          inv.io.stderr.write("Internal error: OutlineSectionsRetireMigrationService not wired on App\n");
+          return 1;
+        }
+        const apply = args.apply === true;
+        const result = apply ? await service.apply() : await service.preview();
+        if (!result.ok) {
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+          } else {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          }
+          return exitCode(result.error);
+        }
+        const report = result.value;
+        const failed = report.errors.length > 0;
+        if (args.json) {
+          printLine(
+            inv.io.stdout,
+            JSON.stringify(
+              { ok: !failed, data: { applied: apply, count: report.count, slugs: report.rows.map((r) => r.slug), errors: report.errors } },
+              null,
+              2,
+            ),
+          );
+          return failed ? 4 : 0;
+        }
+        printLine(inv.io.stdout, apply ? "Outline-sections migration complete" : "Outline-sections migration (preview)");
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `PRDs ${apply ? "cleared" : "would clear"}: ${report.count}`);
+        for (const row of report.rows) printLine(inv.io.stdout, `  ${row.slug}`);
+        for (const e of report.errors) printLine(inv.io.stdout, `  error ${e}`);
+        if (apply && report.count > 0) printLine(inv.io.stdout, "\nThe removed outline stays readable in each PRD's previous version (`lore log <prd>`, `lore diff <prd>`) and in the audit row (`details.removed`).");
         if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         return failed ? 4 : 0;
       } finally {
@@ -348,90 +381,6 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         }
         return report.errors.length > 0 ? 4 : 0;
-      } finally {
-        app.close();
-      }
-      return 0;
-    }
-
-    // ── prd-to-outline action ─────────────────────────────────────────────
-    if (args.version === "prd-to-outline") {
-      if (!args.prd) {
-        inv.io.stderr.write("Error: --prd <id-or-slug> is required for `migrate prd-to-outline`.\n");
-        exitCli(2);
-      }
-
-      const dryRun = args["dry-run"] ?? false;
-      const { app } = loadLoreApp({ inv });
-      try {
-        if (app.outlineMigrationService === undefined) {
-          inv.io.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
-          return 1;
-        }
-        const service = app.outlineMigrationService;
-
-        const prdResult = await app.corpusService.get(args.prd);
-        if (!prdResult.ok) {
-          inv.io.stderr.write(formatErrorFor(inv, prdResult.error) + "\n");
-          return exitCode(prdResult.error);
-        }
-        const prd = prdResult.value.doc;
-
-        // A section key may be declared 0, 1, or N times (citty collapses
-        // repeated `--section` occurrences into a string array; a single
-        // occurrence stays a bare string).
-        const requestedSections =
-          args.section === undefined ? [] : Array.isArray(args.section) ? args.section : [args.section];
-
-        if (requestedSections.length === 0) {
-          inv.io.stderr.write(
-            "Error: at least one --section <key> is required for `migrate prd-to-outline` (no auto-discovery — declare which sections to migrate).\n",
-          );
-          exitCli(2);
-        }
-
-        const verdicts: SectionMigrationVerdict[] = [];
-        let refused: { section: string; code: string; message: string; failed_invariants: string[] } | undefined;
-
-        for (const section of requestedSections) {
-          const result = await service.migrateSection(prd.id, section, { dryRun });
-          if (!result.ok) {
-            refused = {
-              section: result.error.section,
-              code: result.error.code,
-              message: result.error.message,
-              failed_invariants: result.error.failed_invariants,
-            };
-            break;
-          }
-          verdicts.push(result.value);
-        }
-
-        if (args.json) {
-          printLine(inv.io.stdout, JSON.stringify({ ok: refused === undefined, data: { verdicts, refused } }, null, 2));
-          return refused === undefined ? 0 : 4;
-        }
-
-        const label = dryRun ? "PRD→outline migration (dry-run)" : "PRD→outline migration";
-        printLine(inv.io.stdout, `${label} — ${prd.slug}`);
-        printLine(inv.io.stdout, "─".repeat(40));
-        for (const verdict of verdicts) {
-          const statusLabel = verdict.already_migrated ? "already migrated" : verdict.passed ? "migrated" : "FAILED";
-          printLine(inv.io.stdout, `[${statusLabel}] ${verdict.section} (writes: ${verdict.writes_performed})`);
-          if (verdict.failed_invariants.length > 0) {
-            printLine(inv.io.stdout, `  failed invariants: ${verdict.failed_invariants.join(", ")}`);
-          }
-        }
-        if (refused !== undefined) {
-          printLine(inv.io.stdout, `\nRefused on section '${refused.section}': ${refused.code} — ${refused.message}`);
-          if (refused.failed_invariants.length > 0) {
-            printLine(inv.io.stdout, `  failed invariants: ${refused.failed_invariants.join(", ")}`);
-          }
-        }
-        if (dryRun && refused === undefined) {
-          printLine(inv.io.stdout, "\nRe-run without --dry-run to apply changes.");
-        }
-        return refused === undefined ? 0 : 4;
       } finally {
         app.close();
       }

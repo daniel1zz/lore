@@ -3,7 +3,7 @@
  * AC-DCL-5 — NO MODULE WRITES AROUND THE WRITE PATH (spec-no-module-writes-around-the-write-path-the-remaining-17).
  *
  * Completes AC-DCL-3 (single-write-path.bun.test.ts): the 17 modules it had pinned as exceptions — task-workflow, phase-workflow,
- * review, outline-migration, drift-check, phase-checklist, plan-exemption, rule-change, spec-parent-migration, spec-kind, ac,
+ * review, outline-sections-retire, drift-check, phase-checklist, plan-exemption, rule-change, spec-parent-migration, spec-kind, ac,
  * issue-close-on-archive, judgment, state-binding, foreign-corpus-write-guard, baseline-adopt, app.ts — now write through
  * `CorpusService` and nothing else does. This file asserts, on throwaway corpora only (mkdtemp, never the repo's `.lore/`):
  *
@@ -38,7 +38,7 @@ import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { TaskWorkflowService } from "../../src/service/task-workflow-service.js";
 import { PhaseWorkflowService } from "../../src/service/phase-workflow-service.js";
 import { ReviewService } from "../../src/service/review-service.js";
-import { OutlineMigrationService } from "../../src/service/outline-migration-service.js";
+import { OutlineSectionsRetireMigrationService } from "../../src/service/outline-sections-retire-migration-service.js";
 import { DriftCheckService } from "../../src/service/drift-check-service.js";
 import { PhaseChecklistService } from "../../src/service/phase-checklist-service.js";
 import { PlanExemptionService } from "../../src/service/plan-exemption-service.js";
@@ -161,7 +161,7 @@ describe("AC-DCL-5 static scan — only corpus-service.ts and store/* call a sto
       ["ReviewService", /judgmentRequiredTypes,\n\s+corpusService,\n\s+\);/g],
       ["RuleChangeService", /new RuleChangeService\(store, recordLockService, corpusService\)/g],
       ["DriftCheckService", /new DriftCheckService\(store, corpusService\)/g],
-      ["OutlineMigrationService", /new OutlineMigrationService\(store, corpusService\)/g],
+      ["OutlineSectionsRetireMigrationService", /new OutlineSectionsRetireMigrationService\(store, corpusService\)/g],
       ["SpecParentMigrationService", /new SpecParentMigrationService\(store, corpusService\)/g],
       ["SpecKindService", /new SpecKindService\(store, corpusService\)/g],
       ["StateBindingService", /new StateBindingService\(store, corpusService\)/g],
@@ -263,7 +263,7 @@ interface Svc {
   readonly taskWorkflow: TaskWorkflowService;
   readonly phaseWorkflow: PhaseWorkflowService;
   readonly review: ReviewService;
-  readonly outlineMigration: OutlineMigrationService;
+  readonly outlineMigration: OutlineSectionsRetireMigrationService;
   readonly driftCheck: DriftCheckService;
   readonly phaseChecklist: PhaseChecklistService;
   readonly planExemption: PlanExemptionService;
@@ -285,7 +285,7 @@ function buildOwnSvc(store: StoreInterface, lock: RecordLockService, writer: Cor
     ),
     phaseWorkflow: new PhaseWorkflowService(store, telemetry, { claimTtlMinutes: 120 }, undefined, undefined, undefined, writer),
     review: new ReviewService(store, lock, undefined, undefined, undefined, undefined, writer),
-    outlineMigration: new OutlineMigrationService(store, writer),
+    outlineMigration: new OutlineSectionsRetireMigrationService(store, writer),
     driftCheck: new DriftCheckService(store, writer),
     phaseChecklist: new PhaseChecklistService(store, writer),
     planExemption: new PlanExemptionService(store, writer),
@@ -303,7 +303,7 @@ function svcOfApp(app: App): Svc {
     taskWorkflow: app.taskWorkflowService,
     phaseWorkflow: app.phaseWorkflowService!,
     review: app.reviewService,
-    outlineMigration: app.outlineMigrationService!,
+    outlineMigration: app.outlineSectionsRetireMigrationService!,
     driftCheck: app.driftCheckService!,
     phaseChecklist: app.phaseChecklistService!,
     planExemption: app.planExemptionService!,
@@ -500,15 +500,19 @@ const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    module: "outline-migration",
+    module: "outline-sections-retire",
     kind: "versioned",
     auditAction: "update",
     seed: async (w) => {
-      const prd = await seedRaw(w.raw, makeDoc("prd", slugFor("prd-outline"), { status: "approved", content: PRD_BODY }));
+      const prd = await seedRaw(w.raw, makeDoc("prd", slugFor("prd-outline"), { status: "approved", content: PRD_BODY, extra: { outline: [{ section: "s" }] } }));
       return {
         docIds: [prd.id],
-        createdSlugs: ["spec-domain-overview-feedback-loop"],
-        run: async () => failureText(await w.svc.outlineMigration.migrateSection(prd.id, "feedback-loop", { dryRun: false })),
+        run: async () => {
+          const applied = await w.svc.outlineMigration.apply();
+          if (!applied.ok) return JSON.stringify(applied.error);
+          // reason: `apply` collects a per-PRD failure into `errors` instead of failing the whole sweep.
+          return applied.value.errors.length > 0 ? applied.value.errors.join("; ") : undefined;
+        },
       };
     },
   },

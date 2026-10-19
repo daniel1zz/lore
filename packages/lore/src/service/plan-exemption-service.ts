@@ -27,7 +27,7 @@
  * @invariant READ-MERGE-WRITE, never wholesale replacement. `lore set` replaces
  *   `extra` in full, which is precisely why a dedicated writer is required —
  *   the same reasoning behind `lore anchor add` vs `lore set --anchor` and
- *   `lore outline exempt` vs a `prd_sync_exempt` patch. Every `extra` key this
+ *   the retired outline exemption verb vs a `prd_sync_exempt` patch. Every `extra` key this
  *   service does not own is carried through byte-identical.
  * @invariant An exemption with a blank/missing reason is REFUSED
  *   (`VALIDATION_ERROR`), never persisted as a bare flag. The gate treats a

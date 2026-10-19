@@ -4,7 +4,7 @@
  *
  * Module purpose: `commands/plan.ts` must refuse a blank `--reason` or an
  * off-taxonomy `--kind` as a CLI USAGE error (exit 2) BEFORE any store is
- * opened — mirroring `commands/outline.ts`'s `exempt` convention, where a
+ * opened — mirroring the earlier exemption writers' convention, where a
  * missing reason never reaches the service (which would surface it as
  * `VALIDATION_ERROR`, exit 4). These checks live here, not inline in the
  * command, for the same reason `create-task-validation.ts` and

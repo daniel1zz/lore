@@ -13,8 +13,8 @@
  *
  * Both accept `--json`. Thin pipe over `PlanExemptionService` — zero business
  * logic here (read-merge-write, taxonomy validation, audit shape all live in
- * the service; see its module header), exactly the split `commands/outline.ts`
- * uses over `PrdOutlineService`.
+ * the service; see its module header), the same split `commands/ac.ts` uses
+ * over `AcService`.
  *
  * Actor identity: the invoking run, via the SHARED
  * `utils.ts::resolveActor` (no `--by` flag). This command deliberately reads no env var of its
@@ -74,7 +74,7 @@ import type { ExitReport } from "../cli-exit.js";
 /**
  * `App.planExemptionService` is typed optional only to keep pre-existing
  * hand-built App test stubs compiling — the identical guard `commands/ac.ts`
- * and `commands/outline.ts` use. `loadLoreApp()` (this adapter's only App
+ * uses. `loadLoreApp()` (this adapter's only App
  * source) always returns a fully-wired App from `createApp`, so this assertion
  * never fires in the CLI.
  */

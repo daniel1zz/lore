@@ -14,6 +14,12 @@
  * @reads packages/lore/src/service/corpus-service.ts
  * @reads packages/lore/src/app.ts
  * @reads packages/lore/src/adapters/retirements.ts
+ * @reads packages/lore/src/adapters/cli/commands/outline.ts
+ * @reads packages/lore/src/service/prd-outline-service.ts
+ * @reads packages/lore/src/service/outline-migration-service.ts
+ * @reads packages/lore/src/adapters/cli/index.ts
+ * @reads packages/lore/src/adapters/cli/commands/migrate.ts
+ * @reads packages/core/src/outline.ts
  *
  * Runner: vitest + `InMemoryStore`. Every `it()` title carries `OL-n`.
  */
