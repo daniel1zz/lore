@@ -154,7 +154,7 @@ export interface IssueStatusRow {
  * Does the carrier's `extra.issues` name `(repoId, number)`? Reads `extra`
  * defensively: a malformed entry names nothing rather than throwing.
  */
-function namesIssue(doc: DocRecord, repoId: number, issueNumber: number): boolean {
+export function namesIssue(doc: DocRecord, repoId: number, issueNumber: number): boolean {
   const refs = (doc.extra as Record<string, unknown> | null | undefined)?.["issues"];
   if (!Array.isArray(refs)) return false;
   return refs.some(

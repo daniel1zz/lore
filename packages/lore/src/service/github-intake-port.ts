@@ -224,7 +224,7 @@ const LIST_PAGE_SIZE = 100;
  * `HTTP/` (no header block) is treated as a body with no `Link`, i.e. a
  * single page; real `gh api -i` always emits headers.
  */
-function splitHttpResponse(stdout: string): { body: string; linkHeader: string | undefined } {
+export function splitHttpResponse(stdout: string): { body: string; linkHeader: string | undefined } {
   if (!stdout.startsWith("HTTP/")) return { body: stdout, linkHeader: undefined };
   const boundary = /\r?\n\r?\n/.exec(stdout);
   if (boundary === null) return { body: "", linkHeader: undefined };
@@ -235,7 +235,7 @@ function splitHttpResponse(stdout: string): { body: string; linkHeader: string |
 }
 
 /** Page number of the `rel="next"` entry in a `Link` header value; `undefined` when there is none. */
-function parseNextPage(linkHeader: string | undefined): number | undefined {
+export function parseNextPage(linkHeader: string | undefined): number | undefined {
   if (linkHeader === undefined) return undefined;
   for (const part of linkHeader.split(/,\s*(?=<)/)) {
     if (!/rel="?next"?/.test(part)) continue;
