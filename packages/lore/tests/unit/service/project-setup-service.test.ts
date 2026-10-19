@@ -178,7 +178,9 @@ const tempDirs: string[] = [];
 function makeThrowawayGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "lore-project-setup-"));
   tempDirs.push(dir);
-  execSync("git init -q", { cwd: dir });
+  // main must have a commit (BR-1343: setup refuses an unborn main); the shared checkout stays on it until setup detaches it
+  execSync("git init -q -b main", { cwd: dir });
+  execSync("git -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m init", { cwd: dir });
   return dir;
 }
 

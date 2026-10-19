@@ -495,6 +495,10 @@ export const HOOK_ASSET_NAMES = [
   "reference-transaction",
 ] as const;
 
+/** One actionable upgrade line appended to every git-floor refusal (owner decision 2026-10-19: the 2.46 floor is hard, no fallback). */
+export const GIT_UPGRADE_HINT =
+  "Upgrade git to 2.46+ (Ubuntu: the git-core PPA; macOS: Xcode Command Line Tools or Homebrew; otherwise https://git-scm.com/downloads).";
+
 /** The oldest git that passes symref updates (`git checkout main`) to the `reference-transaction` hook: 2.46. */
 export const MIN_GIT_FOR_MAIN_REF_HOOK = { major: 2, minor: 46 } as const;
 
@@ -1272,20 +1276,23 @@ async function checkGitSupportsMainRefHook(deps: ProjectScaffoldFlowDeps, repoDi
     return {
       code: "VALIDATION_ERROR",
       field: "git",
-      message: `lore setup --project needs git >= ${needed} (the main-ref guard is a reference-transaction hook) but could not read the installed version from \`git --version\` (exit ${result.code}: ${(result.stdout + result.stderr).trim() || "no output"}).`,
+      message: `lore setup --project needs git >= ${needed} (the main-ref guard is a reference-transaction hook) but could not read the installed version from \`git --version\` (exit ${result.code}: ${(result.stdout + result.stderr).trim() || "no output"}). ${GIT_UPGRADE_HINT}`,
     };
   }
   if (version.major > major || (version.major === major && version.minor >= minor)) return undefined;
   return {
     code: "VALIDATION_ERROR",
     field: "git",
-    message: `lore setup --project refuses: ${version.raw} is older than git ${needed}, which the reference-transaction hook (the guard that keeps main moving only through lore integrate) needs. Upgrade git to ${needed} or newer and re-run.`,
+    message: `lore setup --project refuses: ${version.raw} is older than git ${needed}, which the reference-transaction hook (the guard that keeps main moving only through lore integrate) needs. ${GIT_UPGRADE_HINT} Then re-run. Nothing was changed.`,
     value: version.raw,
   };
 }
 
 /** A refusal naming the first commit to make when `refs/heads/main` does not resolve to a commit; `undefined` when it does. */
 async function checkMainHasCommit(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<LoreError | undefined> {
+  // reason: a directory outside any repository has no main to be unborn; the hooksPath step reports that case loudly
+  const inRepo = await deps.exec.run(["git", "rev-parse", "--git-dir"], repoDir);
+  if (inRepo.code !== 0) return undefined;
   const probe = await deps.exec.run(["git", "rev-parse", "--verify", "-q", "refs/heads/main^{commit}"], repoDir);
   if (probe.code === 0) return undefined;
   return {

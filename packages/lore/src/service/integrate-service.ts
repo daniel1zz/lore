@@ -32,7 +32,8 @@
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
  *   ledger's files, creation of one worktree directory, the lease).
  *
- * Before anything moves (after the request is validated, before the integration worktree exists):
+ * Before anything moves (after the request is validated and the branch resolves, before the integration worktree
+ * exists or any merge runs):
  *   - the main-ref guard must be in force (spec-no-working-copy-can-check-out-main-the-main-ref-guard, BR-1343): the
  *     `reference-transaction` hook in the ACTIVE hooks directory (`git rev-parse --git-path hooks`, so `core.hooksPath`
  *     is honoured) is byte-identical to the shipped asset (sha256 against EMBEDDED_ASSETS_MANIFEST) and executable, and
@@ -71,7 +72,7 @@ import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
 import type { LandingFact } from "./task-commit-range.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
-import { MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
+import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
 export const INTEGRATE_MAX_ATTEMPTS = 3;
@@ -306,13 +307,16 @@ export class IntegrateService {
           "workflow.integrate.floor_command is not set in .lore/config.yaml (or the file failed to parse): lore integrate will not advance main on a tree whose floor was never named",
       });
     }
-    const guarded = this.requireMainRefGuard();
-    if (!guarded.ok) return guarded;
     const fetched = this.fetchRemoteTracking(request.branch);
     if (!fetched.ok) return fetched;
     const tipResult = this.resolveCommit(request.branch);
     if (!tipResult.ok) return tipResult;
     const tip = tipResult.value;
+
+    // reason: after the argument resolves (a typo should say so, not blame the guard) and before the integration worktree
+    // exists or any merge runs: nothing below this line may start without the guard in force (BR-1273).
+    const guarded = this.requireMainRefGuard();
+    if (!guarded.ok) return guarded;
 
     const worktree = this.ensureWorktree(request.sessionId);
     if (!worktree.ok) return worktree;
@@ -487,10 +491,10 @@ export class IntegrateService {
     const versionLine = this.deps.readGitVersion !== undefined ? this.deps.readGitVersion() : git(projectRoot, ["--version"]).stdout;
     const version = parseGitVersion(versionLine);
     if (version === undefined) {
-      return refuse(`cannot read the git version (got ${JSON.stringify(versionLine.trim())}), so the main-ref guard cannot be proven to work; it needs git >= ${major}.${minor}.`);
+      return refuse(`cannot read the git version (got ${JSON.stringify(versionLine.trim())}), so the main-ref guard cannot be proven to work; it needs git >= ${major}.${minor}. ${GIT_UPGRADE_HINT}`);
     }
     if (version.major < major || (version.major === major && version.minor < minor)) {
-      return refuse(`${version.raw} is older than git ${major}.${minor}, the first git that reports 'git checkout main' to the reference-transaction hook. Upgrade git, then run 'lore setup --project'.`, version.raw);
+      return refuse(`${version.raw} is older than git ${major}.${minor}, the first git that reports 'git checkout main' to the reference-transaction hook. ${GIT_UPGRADE_HINT} Then run 'lore setup --project'.`, version.raw);
     }
     const located = git(projectRoot, ["rev-parse", "--path-format=absolute", "--git-path", "hooks"]);
     if (located.status !== 0) return err(gitFailure("locating the hooks directory", located));

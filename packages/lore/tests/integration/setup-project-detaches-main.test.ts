@@ -96,6 +96,7 @@ describe("AC-MG-3 setup refuses with nothing changed", () => {
     expect(setup.exitCode, setup.out).toBe(4);
     expect(setup.out).toContain("2.45.2");
     expect(setup.out).toContain("git 2.46");
+    expect(setup.out).toContain("Upgrade git to 2.46+");
     expect(fileDigests(fx.repo)).toEqual(before);
     expect(fx.headState()).toEqual(head);
   }, 120_000);

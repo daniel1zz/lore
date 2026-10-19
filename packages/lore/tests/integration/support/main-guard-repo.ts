@@ -32,11 +32,28 @@ export function makeTempRoot(prefix: string): string {
 }
 
 /**
- * Installs the shipped guard into `repo` the way `lore setup --project` leaves it, without running setup: copies the
- * asset to `<repo>/hooks/reference-transaction` (executable) and points `core.hooksPath` at that directory.
+ * `git init -b main` in `dir` plus one empty commit on main: the smallest repository `lore setup --project` accepts
+ * (BR-1343 refuses a main with no commit). The shared checkout is left on main, as a fresh clone leaves it.
  */
-export function installShippedGuard(repo: string): void {
-  const hooks = join(realpathSync(repo), "hooks");
+export function initRepoWithMainCommit(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  const steps: string[][] = [
+    ["init", "-q", "-b", "main"],
+    ["-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"],
+  ];
+  for (const args of steps) {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed (${r.status}): ${r.stderr}`);
+  }
+}
+
+/**
+ * Installs the shipped guard into `repo` the way `lore setup --project` leaves it, without running setup: copies the
+ * asset to `<hooksDir>/reference-transaction` (default `<repo>/hooks`; executable) and points `core.hooksPath` at it.
+ * Pass a `hooksDir` outside the working tree when the test runs `git add .` in the repo.
+ */
+export function installShippedGuard(repo: string, hooksDir?: string): void {
+  const hooks = hooksDir ?? join(realpathSync(repo), "hooks");
   mkdirSync(hooks, { recursive: true });
   const target = join(hooks, "reference-transaction");
   copyFileSync(SHIPPED_HOOK_PATH, target);

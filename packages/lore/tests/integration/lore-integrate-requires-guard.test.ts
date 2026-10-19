@@ -68,6 +68,8 @@ describe("AC-MG-2 integrate refuses a missing or stale guard", () => {
     const r = await fx.integrate(branch, "mg2-oldgit", { PATH: `${shim}:${process.env.PATH ?? ""}` });
     expectRefused(fx, r, before);
     expect(r.out).toContain("2.45.2");
+    expect(r.out).toContain("git 2.46");
+    expect(r.out).toContain("Upgrade git to 2.46+");
   }, 120_000);
 });
 
