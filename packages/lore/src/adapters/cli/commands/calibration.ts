@@ -29,6 +29,7 @@ import { DecisionService } from "../../../service/decision-service.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
+import { parseDocTypeFilter, refuseFilterValue } from "../filter-values.js";
 import { ok, type DocType, type LoreError, type Result } from "@lore/core";
 import { wrapStoreError } from "../../../store/store-shared.js";
 import { invocationOf } from "../command-invocation.js";
@@ -69,6 +70,14 @@ export default defineLoreCommand({
       return 2;
     }
 
+    // reason: AC-DCL-2 — validate --doc-type before the corpus opens (header promises exit 4).
+    let docTypeFilter: DocType | undefined;
+    if (typeof args["doc-type"] === "string") {
+      const parsedDocType = parseDocTypeFilter("--doc-type", args["doc-type"]);
+      if (!parsedDocType.ok) return refuseFilterValue(inv, parsedDocType.error);
+      docTypeFilter = parsedDocType.value;
+    }
+
     const { app, dbPath } = loadLoreApp({ inv });
     try {
       const autonomy = await collectAutonomyStats(dbPath, app.repoRoot, args.observe === true);
@@ -81,7 +90,7 @@ export default defineLoreCommand({
         return 0;
       }
       const filter: { doc_type?: DocType; prompt_version?: string } = {};
-      if (typeof args["doc-type"] === "string") filter.doc_type = args["doc-type"] as DocType;
+      if (docTypeFilter !== undefined) filter.doc_type = docTypeFilter;
       if (typeof args["prompt-version"] === "string") filter.prompt_version = args["prompt-version"];
 
       const result = await app.judgmentService.computeCalibrationStats(filter);
