@@ -34,9 +34,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import {
   computeIssueResolution,
-  checkResolutionPointer,
   isDanglingAdoption,
-  ADOPTED_RESOLUTION_POINTER,
   type ResolutionSourceDocLike,
   type ResolvesInEdgeLike,
 } from "../../../src/service/issue-resolution.js";
@@ -326,75 +324,13 @@ describe("AC-ICL-11 (P2): computeIssueResolution — recorded review rejection (
 // (enumerated in that spec's Scope section, deliberately not repeated here as
 // literal identifiers — AC-GI-9's oracle is a case-sensitive scan for exactly
 // those six strings across `packages/**`, this file included). There is no
-// quota left for `adopted` to free. `checkResolutionPointer`/
-// `isDanglingAdoption` below are pure functions unrelated to the cap and are
-// unaffected.
+// quota left for `adopted` to free. `isDanglingAdoption` below is a pure
+// function unrelated to the cap and is unaffected.
 
-describe("AC-DC-15: adopted-pointer-required — the owner pointer is required and must resolve to a live plan or task", () => {
-  const ISSUE_DOC_ID = "01ISSUEDOC0000000000000000";
-
-  it("adopted-pointer-required HAPPY: a pointer resolving to a live plan or task is accepted", () => {
-    expect(
-      checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "plan-x", { id: "01PLANX", type: "plan" }, ISSUE_DOC_ID),
-    ).toEqual({ ok: true });
-    expect(
-      checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "task-x", { id: "01TASKX", type: "task" }, ISSUE_DOC_ID),
-    ).toEqual({ ok: true });
-  });
-
-  it("adopted-pointer-required NEGATIVE (a): an ABSENT --adopted-by is refused as missing", () => {
-    expect(checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", undefined, ISSUE_DOC_ID)).toEqual({
-      ok: false,
-      reason: "missing",
-    });
-  });
-
-  it("adopted-pointer-required NEGATIVE (b): a --adopted-by that does not resolve to an existing doc is refused as unresolvable", () => {
-    expect(checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "no-such-doc", undefined, ISSUE_DOC_ID)).toEqual({
-      ok: false,
-      reason: "unresolvable",
-    });
-  });
-
-  it("adopted-pointer-required NEGATIVE (c): a --adopted-by resolving to a doc whose type is neither plan nor task is refused as wrong-type", () => {
-    for (const type of ["spec", "adr", "knowledge", "prd"]) {
-      expect(
-        checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "some-doc", { id: "01SOMEDOC", type }, ISSUE_DOC_ID),
-        `type "${type}" must be refused as wrong-type`,
-      ).toEqual({ ok: false, reason: "wrong-type" });
-    }
-  });
-
-  it("adopted-pointer-required BOUNDARY: a --adopted-by naming the report ITSELF is refused as self-reference, even though the type would otherwise be allowed", () => {
-    expect(
-      checkResolutionPointer(
-        ADOPTED_RESOLUTION_POINTER,
-        ISSUE_DOC_ID,
-        { id: ISSUE_DOC_ID, type: "task" },
-        ISSUE_DOC_ID,
-      ),
-    ).toEqual({ ok: false, reason: "self-reference" });
-  });
-
-  it("adopted-pointer-required STATE: refusal precedence is fixed — missing beats every other reason, unresolvable beats self-reference/wrong-type", () => {
-    // An empty pointerValue is refused as "missing" regardless of what
-    // resolvedTarget claims — a caller cannot skip the argv-level check by
-    // fabricating a resolved doc.
-    expect(
-      checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", { id: ISSUE_DOC_ID, type: "task" }, ISSUE_DOC_ID),
-    ).toEqual({ ok: false, reason: "missing" });
-  });
-
-  it("adopted-pointer-required REGRESSION: superseded/duplicate pointers (§M3, no type constraint) still accept any doc type — M7's wrong-type check does not leak onto them", () => {
-    const supersededByPointer = { flag: "--superseded-by", extra_key: "superseded_by", names: "the doc that supersedes this report" };
-    for (const type of ["spec", "adr", "knowledge", "prd", "plan", "task"]) {
-      expect(
-        checkResolutionPointer(supersededByPointer, "some-doc", { id: "01SOMEDOC", type }, ISSUE_DOC_ID),
-        `M3 pointer must accept type "${type}"`,
-      ).toEqual({ ok: true });
-    }
-  });
-});
+// ⛔ AC-DC-15 (the owner pointer of `adopted` must resolve to a live plan or task) is RETIRED with its subject:
+// the pointer check and `lore issue resolve --state adopted --adopted-by` were deleted by
+// spec-github-owns-issue-report-state-no-mirror-task-work-carries (GS-T6). Ownership is now a carrier task
+// (`lore issue adopt`, AC-GS-7); the `adopted` display status is derived, never written.
 
 describe("AC-DC-16: adopted-abandonment-count — a dangling adopted claim is counted, and the count names its members", () => {
   it("adopted-abandonment-count RED SEED (a): adopted + archived owner + no terminal resolution MUST be counted", () => {

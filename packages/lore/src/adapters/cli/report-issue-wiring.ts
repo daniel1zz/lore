@@ -364,7 +364,7 @@ export function classifyFeedbackUpstream(config: LoreConfig | undefined): Feedba
 
 /**
  * One live GitHub issue listing (D3's read half): the numeric repo id
- * `joinListing` keys on (`repo_id`, D5's rename-proof identity) plus the
+ * `joinIssueStatuses` keys on (`repo_id`, D5's rename-proof identity) plus the
  * batched issue list, both fetched by {@link resolveGithubIssueListing}.
  */
 export interface GithubIssueListing {
@@ -381,7 +381,7 @@ export interface GithubIssueListing {
  *
  * @param cfg - the GitHub-shaped `feedback.upstream` config
  * @returns `ok({issues, repoId})` — `repoId` is `verifyTarget()`'s numeric
- *   `id` (the join key `joinListing`/`readGithubIssueRef` both key on, never
+ *   `id` (the join key `joinIssueStatuses` and the carrier refs both key on, never
  *   the stored `owner/repo` string, D5); `issues` is `listIssues()`'s
  *   batched result — ONE `gh api` call regardless of listing size.
  *   `err(...)` on the first failing call: `verifyTarget()`'s auth/target

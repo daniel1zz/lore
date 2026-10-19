@@ -165,7 +165,7 @@ const GithubUserSchema = z.object({ login: z.string() }).passthrough();
 /**
  * `gh api repos/<repo>`'s response shape — only the numeric `id` is read
  * (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D1: the
- * rename-proof identity key `githubIssueTaskSlug`/`joinListing` join on,
+ * rename-proof identity key the carrier slug and `joinIssueStatuses` join on,
  * fetched here at ZERO extra network cost since `verifyTarget` already
  * makes this exact call). `.passthrough()`: the real payload carries dozens
  * more fields this module has no use for.

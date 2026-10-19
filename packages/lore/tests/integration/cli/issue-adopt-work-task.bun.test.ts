@@ -120,10 +120,13 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
   it(`${SPEC}#AC-GS-7 two concurrent spawned runs create exactly one task; both exit 0, exactly one says 'Already adopted'`, async () => {
     const slug = `task-issue-${STUB_REPO_ID}-6`;
     const before = await taskCount(fixture);
+    // The stub holds each run's first listing page until BOTH have asked for it: both have then read the carrier index
+    // (empty) and decided `create`, so the loser can only be saved by the DUPLICATE_SLUG arbiter, not by seeing the winner.
+    fixture.armListingBarrier();
     const [first, second] = await Promise.all([
       fixture.runSpawned(["issue", "adopt", "6", "--plan", livePlanSlug], "racer-a"),
       fixture.runSpawned(["issue", "adopt", "6", "--plan", livePlanSlug], "racer-b"),
-    ]);
+    ]).finally(() => fixture.disarmListingBarrier());
     expect(first.exitCode, first.stderr + first.stdout).toBe(0);
     expect(second.exitCode, second.stderr + second.stdout).toBe(0);
     expect([first, second].filter((run) => run.stdout.startsWith("Already adopted"))).toHaveLength(1);

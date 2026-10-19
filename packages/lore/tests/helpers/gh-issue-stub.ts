@@ -17,7 +17,7 @@
  */
 
 import { Database } from "bun:sqlite";
-import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -55,6 +55,10 @@ export interface IssueFixture {
   /** The calls that write (`-X POST|PATCH|DELETE`). */
   writes(): string[][];
   resetLog(): void;
+  /** While armed, the stub holds the first listing page until two processes have requested it (a forced race). */
+  armListingBarrier(): void;
+  /** Removes the barrier and its arrival markers. */
+  disarmListingBarrier(): void;
   /** Current stub-side facts of one issue. */
   stateOf(n: number): { state: string; reason: string | null; labels: string[]; comments: string[] };
   /** Row counts of the corpus tables. */
@@ -85,6 +89,12 @@ let m = path.match(/^repos\\/[^/]+\\/[^/]+\\/issues\\?.*page=(\\d+)/);
 if (m) {
   const page = Number(m[1]);
   if (page === 2 && fs.existsSync(D + "/fail-page-2")) net();
+  if (page === 1 && fs.existsSync(D + "/barrier-listing")) {
+    // Rendezvous: hold the first listing page until two processes have asked for it, so both have decided before either writes.
+    fs.writeFileSync(D + "/arrived-" + process.pid, "1");
+    const deadline = Date.now() + 20000;
+    while (fs.readdirSync(D).filter((f) => f.startsWith("arrived-")).length < 2 && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
   const nums = Object.keys(state.issues).map(Number).sort((a, b) => a - b);
   const slice = nums.slice((page - 1) * state.pageSize, page * state.pageSize);
   const more = page * state.pageSize < nums.length;
@@ -199,6 +209,11 @@ export async function makeIssueFixture(
     ghCalls,
     writes: () => ghCalls().filter((argv) => argv.some((a, i) => argv[i - 1] === "-X" && /^(POST|PATCH|DELETE)$/.test(a))),
     resetLog: () => writeFileSync(join(stubDir, "gh.log"), ""),
+    armListingBarrier: () => writeFileSync(join(stubDir, "barrier-listing"), "1"),
+    disarmListingBarrier: () => {
+      rmSync(join(stubDir, "barrier-listing"), { force: true });
+      for (const name of readdirSync(stubDir)) if (name.startsWith("arrived-")) rmSync(join(stubDir, name), { force: true });
+    },
     stateOf: (n) => {
       const entry = (JSON.parse(readFileSync(join(stubDir, "state.json"), "utf8")) as { issues: Record<string, { state: string; reason: string | null; labels: string[]; comments: string[] }> }).issues[String(n)];
       if (entry === undefined) throw new Error(`stub has no issue #${n}`);

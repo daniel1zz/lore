@@ -215,6 +215,15 @@ export default defineLoreCommand({
             planId = planDoc.id;
           }
 
+          // reason: the carrier index is read BEFORE the GitHub listing, so everything the decision depends on is
+          // fixed before the slow network call; two simultaneous adopters then both decide `create` from the same
+          // empty index and only the `DUPLICATE_SLUG` arbiter below separates them (the AC-GS-7 race test relies on it).
+          const carriers = await listCarrierDocs(app.corpusService);
+          if (!carriers.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, carriers.error) + "\n");
+            return exitCode(carriers.error);
+          }
+
           const listingResult = await resolveGithubIssueListing(inv.io, cfg, inv);
           if (!listingResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, listingResult.error) + "\n");
@@ -226,12 +235,6 @@ export default defineLoreCommand({
             const error = issueNotListedError(issueNumber, cfg.repo, issues.length);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
             return exitCode(error);
-          }
-
-          const carriers = await listCarrierDocs(app.corpusService);
-          if (!carriers.ok) {
-            inv.io.stderr.write(formatErrorFor(inv, carriers.error) + "\n");
-            return exitCode(carriers.error);
           }
 
           const decision = decideAdoption(issue, repoId, carriers.docs, nowIso);
