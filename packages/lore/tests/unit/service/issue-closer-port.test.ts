@@ -115,7 +115,19 @@ describe("AC-IC-3: GhIssueCloser.readIssue / commentIssue", () => {
     const { runner } = scriptedRunner(answerRead("closed", ["resolution:fixed", "bug"]));
 
     expect(await new GhIssueCloser(runner).readIssue(REF)).toEqual(
-      ok({ state: "closed", labels: ["resolution:fixed", "bug"] }),
+      ok({ state: "closed", stateReason: null, labels: ["resolution:fixed", "bug"] }),
+    );
+  });
+
+  it("HAPPY: readIssue carries GitHub's state_reason (the archive-time verdict check reads it)", async () => {
+    const { runner } = scriptedRunner((args) =>
+      args.length === 2 && args[1] === ISSUE_PATH
+        ? ok({ stdout: JSON.stringify({ state: "closed", state_reason: "not_planned", labels: [{ name: "resolution:rejected" }] }) })
+        : undefined,
+    );
+
+    expect(await new GhIssueCloser(runner).readIssue(REF)).toEqual(
+      ok({ state: "closed", stateReason: "not_planned", labels: ["resolution:rejected"] }),
     );
   });
 
