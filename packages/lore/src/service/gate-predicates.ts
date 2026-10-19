@@ -55,7 +55,7 @@
  *   conflicts or why.
  */
 
-import type { RuleOffence } from "./rule-state-service.js";
+import type { RuleOffence, UnknownReason } from "./rule-state-service.js";
 import {
   parentlessRefusalMessage,
   SPEC_KINDS,
@@ -1598,6 +1598,15 @@ export interface CitedRuleViolation {
   readonly state: RefusingRuleState;
   /** The citing inputs behind `state`, exactly as `RuleStateService.full()` reported them (never re-derived here). */
   readonly offences: readonly RuleOffence[];
+}
+
+/**
+ * One cited rule whose state is `unknown` and whose reason does NOT refuse the close (BR-984): reported, never
+ * silent. `git-unavailable` is never carried here, it refuses the close instead.
+ */
+export interface CitedRuleUnknown {
+  readonly rule_id: string;
+  readonly reason: Exclude<UnknownReason, "git-unavailable">;
 }
 
 /**

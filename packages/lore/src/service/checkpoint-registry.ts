@@ -123,6 +123,7 @@ import {
   attestationFloor,
   citedRuleStateClean,
   type CitedRuleViolation,
+  type CitedRuleUnknown,
   verifyReachability,
   attestationExemptKindValid,
   assessmentFreshness,
@@ -582,6 +583,11 @@ export interface GateContext {
    * ancestor) — `checkPlanClose` then pushes nothing for this predicate.
    */
   readonly citedRuleViolations?: readonly CitedRuleViolation[];
+  /**
+   * Cited rules whose state was `unknown` for a reason that does not refuse (BR-984), computed by the CALLER
+   * beside `citedRuleViolations`. Never affects the verdict; `GateEnforcer.enforce` prints one advisory line each.
+   */
+  readonly citedRuleUnknowns?: readonly CitedRuleUnknown[];
 
   // -- plan-close: check() + feed() (SPEC-106, assessment freshness) --
   /**
@@ -845,6 +851,39 @@ export function describeCheckpointVacuity(
     `${VACUOUS_CHECKPOINT_NOTICE_PREFIX}: checkpoint "${checkpoint}" returned no verdict — ` +
     `all ${inapplicable.length} predicate(s) reported notApplicable (${verdicts}). ` +
     `Nothing was measured, so this pass is not evidence of the checkpoint's invariant.`
+  );
+}
+
+/** Prefix of every line {@link describeCitedRuleUnknowns} returns (BR-984). */
+export const CITED_RULE_UNKNOWN_PREFIX = "cited rule state unknown";
+
+/** `extra` key a closed plan records its unmeasured cited rules under (BR-984). */
+export const PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD = "plan_close_unmeasured_cited_rules";
+
+/** Why each reportable unknown reason left a cited rule unmeasured, in plain words. */
+export const CITED_RULE_UNKNOWN_EXPLANATION: Readonly<Record<CitedRuleUnknown["reason"], string>> = {
+  "no-code-anchors": "the citing spec declares no code anchors, so staleness was not measured",
+  dirty: "the latest pass was recorded on a dirty worktree, so staleness was not measured",
+  "no-commit-recorded": "the latest pass recorded no commit, so staleness was not measured",
+  "not-ancestor": "the commit of the latest pass is not in this history, so staleness was not measured",
+};
+
+/**
+ * The advisory lines `plan-close` prints for cited rules whose state could not be measured (BR-984), on the same
+ * channel as {@link describeAssessmentFreshnessNotApplicable}: vacuously true must be distinguishable from true.
+ * Never refuses (a git failure refuses elsewhere, before this runs). Pure: reads only `ctx`.
+ *
+ * @param checkpoint - The checkpoint being enforced; only `"plan-close"` can produce lines.
+ * @param ctx - The same context `checkPlanClose` read.
+ * @returns One line per unmeasured cited rule; `[]` otherwise.
+ * @example
+ * describeCitedRuleUnknowns("plan-close", { citedRuleUnknowns: [{ rule_id: "BR-5", reason: "dirty" }] });
+ * // => ["cited rule state unknown: BR-5 (dirty: the latest pass was recorded on a dirty worktree, so staleness was not measured)"]
+ */
+export function describeCitedRuleUnknowns(checkpoint: GateCheckpoint, ctx: GateContext): string[] {
+  if (checkpoint !== "plan-close") return [];
+  return (ctx.citedRuleUnknowns ?? []).map(
+    (u) => `${CITED_RULE_UNKNOWN_PREFIX}: ${u.rule_id} (${u.reason}: ${CITED_RULE_UNKNOWN_EXPLANATION[u.reason]})`,
   );
 }
 
