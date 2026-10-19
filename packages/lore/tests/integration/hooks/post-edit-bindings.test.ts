@@ -20,7 +20,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -44,6 +44,13 @@ function mustSucceed(run: Run, label: string): Run {
   if (run.status !== 0) throw new Error(`${label} failed (exit ${run.status}): ${run.stderr}${run.stdout}`);
   return run;
 }
+
+const NODE_BINARY = mustSucceed(sh(tmpdir(), "which", ["node"]), "which node").stdout.trim();
+
+// A PATH holding git (the hook needs it) but no `lore`: a directory with only a git symlink.
+const gitOnlyDir = mkdtempSync(join(tmpdir(), "post-edit-bindings-git-"));
+symlinkSync(mustSucceed(sh(tmpdir(), "which", ["git"]), "which git").stdout.trim(), join(gitOnlyDir, "git"));
+const gitOnlyPath = gitOnlyDir;
 
 const root = mkdtempSync(join(tmpdir(), "post-edit-bindings-"));
 const shimDir = mkdtempSync(join(tmpdir(), "post-edit-bindings-shim-"));
@@ -81,10 +88,12 @@ mustSucceed(sh(root, "git", ["commit", "-qm", "init"]), "git commit");
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
   rmSync(shimDir, { recursive: true, force: true });
+  rmSync(gitOnlyDir, { recursive: true, force: true });
 });
 
 function runHook(payload: Record<string, unknown>, env: NodeJS.ProcessEnv = withShim): Run {
-  const r = spawnSync("node", [HOOK], {
+  // reason: an absolute interpreter path, so a test that blanks PATH (lore unavailable) still starts the hook.
+  const r = spawnSync(NODE_BINARY, [HOOK], {
     input: JSON.stringify({ hook_event_name: "PostToolUse", session_id: "S1", cwd: root, ...payload }),
     encoding: "utf8",
     env: { ...process.env, HOME: root, ...env },
@@ -197,11 +206,11 @@ describe("AC-BIND-4: post-edit-bindings hook", () => {
   }, CASE_TIMEOUT_MS);
 
   it("ERROR: lore unavailable is said on stderr, exits 0 and emits no block", () => {
-    const run = runHook({ tool_name: "Edit", tool_input: { file_path: widget(), old_string: "a", new_string: "b" } }, { PATH: "/nonexistent-bin" });
+    const run = runHook({ tool_name: "Edit", tool_input: { file_path: widget(), old_string: "a", new_string: "b" } }, { PATH: gitOnlyPath });
 
     expect(run.status).toBe(0);
     expect(run.stdout).toBe("");
-    expect(run.stderr).toContain("[post-edit-bindings]");
+    expect(run.stderr).toContain("[post-edit-bindings] `lore` not found on PATH");
   }, CASE_TIMEOUT_MS);
 
   it("STATE: the hook is read-only (the working tree is unchanged by it)", () => {
