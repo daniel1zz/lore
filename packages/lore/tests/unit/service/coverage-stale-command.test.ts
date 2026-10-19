@@ -126,6 +126,25 @@ describe("declared command not in this tree is reported, not a defect (task-root
     expect(b?.absent_commands.map((x) => x.command)).toEqual(["beta"]);
   }, 120_000);
 
+  it("a leaf declaring ONLY absent commands and owning no site is pending, not unmeasured: exit 0, measured_by absent", async () => {
+    const c = await buildMiniCorpus();
+    corpora.push(c);
+    await c.mapAllSites(c.leafA, "alpha");
+    await c.mapAllSites(c.leafB, "beta");
+    const added = await c.run(["baseline", "add", c.branch, "--node", "leaf", "--label", "lp", "--title", "BCR Leaf Pending"]);
+    const pending = (added.stdout.match(/Slug:\s+(\S+)/) ?? added.stdout.match(/Created baseline \w+ (\S+) \(/))?.[1] as string;
+    expect((await c.run(["baseline", "map", pending, "--command", "delta"])).exitCode).toBe(0);
+    const r = await c.run(["baseline", "coverage", c.root, "--json"]);
+    expect(r.stdout + r.stderr).not.toContain("command-unresolved");
+    expect(r.exitCode, r.stdout + r.stderr).toBe(0);
+    const data = (JSON.parse(r.stdout) as { data: { complete: boolean; leaves: { slug: string; ok: boolean; sites: number; measured_by: string; absent_commands: { command: string }[] }[] } }).data;
+    expect(data.complete).toBe(true);
+    expect(data.leaves.find((l) => l.slug === pending)).toMatchObject({ ok: true, sites: 0, measured_by: "absent" });
+    const human = await c.run(["baseline", "coverage", c.root]);
+    expect(human.stdout).toContain("all declared commands absent from this tree (pending or stale): delta");
+    expect(human.stdout).not.toContain("UNMEASURED");
+  }, 120_000);
+
   it("removing the declaration (the printed fix) clears the line: exit 0", async () => {
     const c = await withGammaDeclared();
     c.writeSource(`${MINI_CLI}/index.ts`, REGISTRY_AB);
