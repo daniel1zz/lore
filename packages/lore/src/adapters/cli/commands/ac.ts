@@ -76,9 +76,11 @@
  *                                   prose a consumer would have to re-parse.
  *   cite <spec> <id> <BR-n>... [--remove]
  *                                   Cite (or drop) baseline rule ids on one criterion
- *                                   (baseline slice 1 §C4, AC-BLS1-6). REPORT-ONLY: a
- *                                   dangling / deprecated / retired id is stored and printed
- *                                   as one stderr `Warning:` line per id, exit 0. Never
+ *                                   (baseline slice 1 §C4, AC-BLS1-6). A dangling /
+ *                                   deprecated / retired id is refused under gate mode
+ *                                   `enforce` on an armed branch; under `report`/`off` it is
+ *                                   stored and printed as one stderr `Warning:` line per id,
+ *                                   exit 0. Never
  *                                   demotes an approved spec; logs one version. `add`/`set`
  *                                   take `--cite BR-n` (repeatable; `set` REPLACES, `--cite ""`
  *                                   clears) with the same warnings. `add` prints a one-line
@@ -205,9 +207,18 @@ import type { CiteWarning } from "../../../service/ac-citations.js";
 // forbid editing — see {@link countBlockedDescendantTasks}.
 import { isPlanMember } from "../../../service/plan-membership.js";
 import { invocationOf } from "../command-invocation.js";
+import { demotionOf, formatDemotionLine, type Demotion } from "../../../service/demotion-notice.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
+
+/**
+ * What the citation gate does with a dangling or inactive cited id, stated once for `ac add`, `ac set`
+ * and `ac cite` help. reason: BR-86/BR-257 — the gate mode decides; the earlier wording claimed a warning
+ * only, which holds for `report`/`off` and misled every `enforce` user (#116).
+ */
+const CITE_GATE_HELP =
+  "a dangling or inactive id is refused under gate mode `enforce` on an armed branch, and stored with a warning under `report`/`off`";
 
 /**
  * `App.acService` is typed optional only to keep pre-existing hand-built App test
@@ -280,7 +291,7 @@ export default defineLoreCommand({
         cite: {
           type: "string",
           description:
-            "[repeatable] baseline rule id this AC cites, e.g. BR-12 — report-only: a dangling/inactive id is stored and warned",
+            `[repeatable] baseline rule id this AC cites, e.g. BR-12 — ${CITE_GATE_HELP}`,
         },
         "allow-missing-path": {
           type: "string",
@@ -467,7 +478,7 @@ export default defineLoreCommand({
       meta: {
         name: "cite",
         description:
-          "Cite (or --remove) baseline rule ids on one criterion — report-only, never demotes an approved spec",
+          `Cite (or --remove) baseline rule ids on one criterion — ${CITE_GATE_HELP}; never demotes an approved spec`,
       },
       args: {
         spec: {
@@ -713,7 +724,7 @@ export default defineLoreCommand({
         cite: {
           type: "string",
           description:
-            "[repeatable] REPLACE the cited baseline rule ids wholesale (mode-agnostic, report-only); pass '' to clear",
+            `[repeatable] REPLACE the cited baseline rule ids wholesale (mode-agnostic); ${CITE_GATE_HELP}; pass '' to clear`,
         },
         "allow-missing-path": {
           type: "string",
@@ -819,15 +830,16 @@ export default defineLoreCommand({
             return exitCode(result.error);
           }
 
-          await reportDemotionIfAny(inv.io, app, args.spec as string, beforeStatus);
+          const demoted = await reportDemotionIfAny(inv.io, app, args.spec as string, beforeStatus);
           if (patch.cites !== undefined) await reportCiteWarnings(inv, requireAcService(app), patch.cites, args.spec as string);
 
           if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value, ...(demoted !== undefined ? { demoted } : {}) } }, null, 2));
             return 0;
           }
 
           printLine(inv.io.stdout, `Updated acceptance criterion "${args.id as string}" on spec ${args.spec as string}`);
+          if (demoted !== undefined) printLine(inv.io.stdout, formatDemotionLine(demoted));
           if (correctionOpt !== undefined) printLine(inv.io.stdout, `  (correction recorded: ${correctionOpt.reason})`);
           renderCriteriaList(inv.io, { criteria: result.value, coverage: null, dangling: [] });
         } finally {
@@ -1220,11 +1232,13 @@ async function reportDemotionIfAny(io: CliIo,
   app: App,
   specIdOrSlug: string,
   beforeStatus: string | undefined,
-): Promise<void> {
-  if (beforeStatus !== "approved") return;
+): Promise<Demotion | undefined> {
+  if (beforeStatus !== "approved") return undefined;
 
   const afterResult = await app.corpusService.get(specIdOrSlug);
-  if (!afterResult.ok || afterResult.value.doc.status !== "draft") return;
+  if (!afterResult.ok) return undefined;
+  const demotion = demotionOf({ status: beforeStatus }, afterResult.value.doc);
+  if (demotion === undefined) return undefined;
 
   const blockedResult = await countBlockedDescendantTasks(app, afterResult.value.doc.id);
   const blastRadius = blockedResult.ok
@@ -1237,6 +1251,7 @@ async function reportDemotionIfAny(io: CliIo,
       `resolveStatusAfterContractEdit in @lore/core). It now blocks ${blastRadius} until the ` +
       "spec is re-approved.\n",
   );
+  return demotion;
 }
 
 /**
