@@ -16,7 +16,7 @@
  *        bun scripts/run-chain.ts --static [package.json]   (build + typecheck + every ^check: script = `bun run check:static`)
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,6 +48,19 @@ export type StepRunner = (step: string) => { exit: number; seconds: number };
 export function runChain(steps: readonly string[], run: StepRunner): StepResult[] {
   if (steps.length === 0) throw new Error("run-chain: no steps to run (refusing to report a pass over nothing)");
   return steps.map((step) => ({ step, ...run(step) }));
+}
+
+/** Env var naming a file that receives the machine-readable per-step timings (`lore integrate` reads it; never parse the table). */
+export const FLOOR_TIMINGS_ENV = "LORE_FLOOR_TIMINGS_FILE";
+
+/**
+ * Write `{ schema_version: 1, steps: [{ step, exit, seconds }] }` to the file named by `LORE_FLOOR_TIMINGS_FILE`;
+ * a no-op when the variable is unset or empty. Called after every chain so a failing floor still reports its timings.
+ */
+export function emitTimings(results: readonly StepResult[], env: Readonly<Record<string, string | undefined>> = process.env): void {
+  const file = env[FLOOR_TIMINGS_ENV];
+  if (file === undefined || file === "") return;
+  writeFileSync(file, `${JSON.stringify({ schema_version: 1, steps: results.map((r) => ({ step: r.step, exit: r.exit, seconds: r.seconds })) })}\n`);
 }
 
 /**
@@ -105,6 +118,7 @@ export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnS
   const { steps, labels } = deriveStaticSteps(scripts);
   const results = runChain(steps, run);
   console.log(renderTable(results, labels));
+  emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
 
@@ -128,6 +142,7 @@ export function runFloor(packageJsonPath: string, run: StepRunner = spawnStep): 
   if (scripts === undefined) throw new Error(`check:floor: ${packageJsonPath} has no scripts`);
   const results = runChain(deriveFloorSteps(scripts), run);
   console.log(renderTable(results));
+  emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
 
@@ -148,6 +163,7 @@ export function main(argv: readonly string[], run: StepRunner = spawnStep): numb
   const steps = argv.length === 0 ? DEFAULT_STEPS : argv;
   const results = runChain(steps, run);
   console.log(renderTable(results));
+  emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
 

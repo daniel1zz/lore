@@ -8,7 +8,12 @@
  * (`<main checkout>/.claude/worktrees/integrate-<session>`, created on first use), runs the project's post-merge floor
  * (`workflow.integrate.floor_command` in `.lore/config.yaml`, no default: absent is a refusal) and advances main by
  * `git update-ref refs/heads/main <new> <base>`. At most 3 attempts per call; every lost race is recorded in the
- * corpus directory (`integrate-losses/`) and listed by `lore status` until the branch lands.
+ * corpus directory (`integrate-losses/`) and listed by `lore status` until the branch lands. Every attempt (lost or not) also records its
+ * phase durations (merge, corpus snapshot, each floor step, CAS) and outcome in `integrate-attempts/<branch>.json` (last 20
+ * per branch, kept after landing) and prints one `integrate: attempt N/3 phases: ...` line; `lore status` shows each
+ * starving branch's loss count and median attempt duration. The floor's per-step timings come from the machine-readable
+ * file named by `LORE_FLOOR_TIMINGS_FILE` that scripts/run-chain.ts writes; a floor command that writes none is recorded
+ * as one step named `floor (no per-step timings emitted)`.
  *
  * The caller's session: `--session <id>` else `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID`; none is a refusal.
  *
@@ -30,7 +35,10 @@
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
 import { spawnSync } from "node:child_process";
-import { dirname, resolve as resolvePath } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { z } from "zod";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
@@ -38,6 +46,7 @@ import { resolveCallerSession } from "../caller-session.js";
 import { exitCode, formatError } from "../utils.js";
 import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-snapshot.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
+import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
 import {
   IntegrateService,
   integrateExitCode,
@@ -58,12 +67,39 @@ function gitRunnerFor(ambient: AmbientEnv): IntegrateGit {
   };
 }
 
-/** Floor runner: `sh -c <command>` in the integration worktree; output is stdout+stderr as one string. */
+/** The env var naming the file a floor command (scripts/run-chain.ts) writes its machine-readable per-step timings to. */
+const FLOOR_TIMINGS_ENV = "LORE_FLOOR_TIMINGS_FILE";
+
+/** The shape scripts/run-chain.ts writes to `LORE_FLOOR_TIMINGS_FILE` (the one contract; prose is never parsed). */
+const FloorTimingsFileSchema = z
+  .object({ schema_version: z.literal(1), steps: z.array(z.object({ step: z.string().min(1), exit: z.number().int(), seconds: z.number().nonnegative() })) })
+  .strict();
+
+/**
+ * Floor runner: `sh -c <command>` in the integration worktree; output is stdout+stderr as one string. The command gets
+ * a private timings file path in `LORE_FLOOR_TIMINGS_FILE`; when it wrote one, its steps are returned. No file (a custom
+ * floor_command) = `steps` absent, which the service records as one named step. A file that exists but is malformed is
+ * a thrown failure of the floor's contract, not a silent "no timings".
+ */
 function floorRunnerFor(ambient: AmbientEnv): FloorRunner {
   return (command, cwd) => {
-    const result = spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", env: { ...ambient }, maxBuffer: 256 * 1024 * 1024 });
-    const output = `${result.stdout ?? ""}${result.stderr ?? ""}${result.error !== undefined ? `\n${result.error.message}` : ""}`;
-    return { status: result.status ?? 1, output };
+    const scratch = mkdtempSync(join(tmpdir(), "lore-floor-timings-"));
+    const timingsFile = join(scratch, "timings.json");
+    try {
+      const result = spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", env: { ...ambient, [FLOOR_TIMINGS_ENV]: timingsFile }, maxBuffer: 256 * 1024 * 1024 });
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}${result.error !== undefined ? `\n${result.error.message}` : ""}`;
+      let raw: string | undefined;
+      try {
+        raw = readFileSync(timingsFile, "utf8");
+      } catch {
+        raw = undefined; // reason: ENOENT is the normal "floor emitted no timings" case; the service names it as one step
+      }
+      if (raw === undefined) return { status: result.status ?? 1, output };
+      const parsed = FloorTimingsFileSchema.parse(JSON.parse(raw));
+      return { status: result.status ?? 1, output, steps: parsed.steps.map((s) => ({ step: s.step, exit: s.exit, ms: Math.round(s.seconds * 1000) })) };
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   };
 }
 
@@ -164,6 +200,7 @@ export default defineLoreCommand({
           remove: (worktree) => removeCorpusSnapshot(worktree),
         },
         ledger: new IntegrateLossLedger(corpusDir),
+        attempts: new IntegrateAttemptLedger(corpusDir),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
         log: (line) => inv.io.stdout.write(`${line}\n`),

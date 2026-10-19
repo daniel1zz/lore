@@ -202,3 +202,26 @@ describe("check:floor (deriveFloorSteps)", () => {
     expect(deriveFloorSteps(real)).toEqual(["bun run build", "bun run typecheck", ...expected.map((n) => `bun run ${n}`)]);
   });
 });
+
+describe("machine-readable per-step timings (LORE_FLOOR_TIMINGS_FILE)", () => {
+  it("REAL SPAWN: with the env set, run-chain writes {schema_version:1, steps:[{step, exit, seconds}]} in step order, failures included", () => {
+    const dir = mkdtempSync(join(tmpdir(), "run-chain-timings-"));
+    try {
+      const file = join(dir, "timings.json");
+      const r = spawnSync("bun", ["scripts/run-chain.ts", "exit 0", "exit 3"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, LORE_FLOOR_TIMINGS_FILE: file } });
+      expect(r.status).toBe(1);
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { schema_version: number; steps: { step: string; exit: number; seconds: number }[] };
+      expect(parsed.schema_version).toBe(1);
+      expect(parsed.steps.map((s) => [s.step, s.exit])).toEqual([["exit 0", 0], ["exit 3", 3]]);
+      for (const s of parsed.steps) expect(typeof s.seconds).toBe("number");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("REAL SPAWN: with the env empty the table is unchanged and nothing is written", () => {
+    const r = spawnSync("bun", ["scripts/run-chain.ts", "exit 0"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, LORE_FLOOR_TIMINGS_FILE: "" } });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("all 1 steps passed");
+  });
+});
