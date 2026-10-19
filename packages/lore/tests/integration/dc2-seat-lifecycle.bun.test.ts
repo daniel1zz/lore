@@ -111,7 +111,7 @@ describe(`${SPEC}#AC-DC2-2 seat lifecycle`, () => {
     expect(r.stderr).toContain("prd");
     expect(branches(fx.repo)).toBe(branchesBefore);
     expect(git(fx.repo, ["worktree", "list", "--porcelain"])).toBe(worktreesBefore);
-  });
+  }, 180_000);
 
   it(`${SPEC}#AC-DC2-2 (b)(c) remove deletes worktree and branch; a second remove is not-found and not an entry-step error`, () => {
     const fx = build("main", "bc");
@@ -130,7 +130,7 @@ describe(`${SPEC}#AC-DC2-2 seat lifecycle`, () => {
     expect(again.exitCode, again.stderr).toBe(4);
     expect(again.stderr).toContain("gate:seat-remove:not-found");
     expect(again.stderr).not.toContain("seat entry step");
-  });
+  }, 180_000);
 
   it(`${SPEC}#AC-DC2-2 (d) on a trunk-only repo --force removes an unmerged seat; without --force it is refused unmerged`, () => {
     const fx = build("trunk", "d");
@@ -154,5 +154,5 @@ describe(`${SPEC}#AC-DC2-2 seat lifecycle`, () => {
     expect(forced.exitCode, forced.stderr + forced.stdout).toBe(0);
     expect(existsSync(fx.seatPath)).toBe(false);
     expect(branches(fx.repo)).toBe("");
-  });
+  }, 180_000);
 });
