@@ -148,12 +148,22 @@ function parsePort(io: CliIo, rawValue: string | undefined, flagName: string, fa
  * Build the SPEC-078 D2/D7 multi-project mount registry when the machine-scope config
  * declares `dashboard.projects`; `undefined` otherwise (the common single-project case —
  * both topologies' `startHttpServer` call treats an omitted `mountRegistry` as completely
- * inert). `loadGlobalConfig` failures (malformed YAML, etc.) degrade to "no registry"
- * rather than aborting the whole `lore dashboard` run.
+ * inert). `loadGlobalConfig` failures (malformed YAML, unreadable file) degrade to "no registry"
+ * rather than aborting the whole `lore dashboard` run, but are WARNED on stderr with the cause.
  */
 async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> | undefined> {
-  const globalConfigResult = loadGlobalConfig(resolveGlobalConfigPath(inv.env, inv.paths.home));
-  const registeredProjects = globalConfigResult.ok ? (globalConfigResult.value.dashboard?.projects ?? []) : [];
+  const globalConfigPath = resolveGlobalConfigPath(inv.env, inv.paths.home);
+  const globalConfigResult = loadGlobalConfig(globalConfigPath);
+  if (!globalConfigResult.ok) {
+    // reason: an unreadable/malformed machine config must be REPORTED, never silently read as "no
+    // projects declared" (spec-defect-clusters-round-2-part-d D29, BR-868). The run still serves.
+    const cause =
+      "message" in globalConfigResult.error ? globalConfigResult.error.message : globalConfigResult.error.code;
+    inv.io.stderr.write(`Warning: global config ${globalConfigPath ?? "(unresolved)"} ignored: ${cause}\n`);
+    inv.io.stdout.write(`\n[dashboard] Multi-project registry: no extra projects were mounted (global config ignored).\n`);
+    return undefined;
+  }
+  const registeredProjects = globalConfigResult.value.dashboard?.projects ?? [];
   if (registeredProjects.length === 0) return undefined;
 
   const mountRegistry = createMountRegistry<App>();
@@ -174,20 +184,51 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
   return mountRegistry;
 }
 
+/** Minimal child-process surface {@link openBrowser} needs: an `error` event emitter that can be detached. */
+export interface BrowserOpenerChild {
+  on(event: "error", listener: (err: Error) => void): unknown;
+  unref?(): void;
+}
+
+/** Test seam of {@link openBrowser}: the spawn function and the platform name. */
+export interface BrowserOpenerDeps {
+  readonly spawnOpener: (cmd: string, args: string[], options: { cwd: string; detached: boolean; stdio: "ignore" }) => BrowserOpenerChild;
+  readonly platform: NodeJS.Platform;
+}
+
+const REAL_BROWSER_OPENER_DEPS: BrowserOpenerDeps = {
+  spawnOpener: (cmd, args, options) => spawn(cmd, args, options),
+  platform: process.platform,
+};
+
 /**
  * Open the given URL in the system default browser.
  * Failure is non-fatal — prints the URL to stdout so the user can open it manually.
+ * A missing opener binary fails ASYNCHRONOUSLY (`error` event, ENOENT), not by throwing, so the
+ * `error` listener below is load-bearing: an unhandled `error` event would kill the server.
+ * On win32 `start` is a cmd.exe builtin, so the command is `cmd /c start "" <url>`.
  *
+ * @param io - CLI streams the fallback line is written to.
+ * @param cwd - Working directory of the opener child.
  * @param url - URL to open.
+ * @param deps - Spawn/platform seam (defaults to the real ones).
  */
-function openBrowser(io: CliIo, cwd: string, url: string): void {
-  const platform = process.platform;
-  const cmd =
-    platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
-  try {
-    spawn(cmd, [url], { cwd, detached: true, stdio: "ignore" });
-  } catch {
+export function openBrowser(io: CliIo, cwd: string, url: string, deps: BrowserOpenerDeps = REAL_BROWSER_OPENER_DEPS): void {
+  const [cmd, args]: [string, string[]] =
+    deps.platform === "darwin"
+      ? ["open", [url]]
+      : deps.platform === "win32"
+        ? ["cmd", ["/c", "start", '""', url]]
+        : ["xdg-open", [url]];
+  const reportFailure = (): void => {
     io.stdout.write(`Could not open browser automatically. Visit: ${url}\n`);
+  };
+  try {
+    const child = deps.spawnOpener(cmd, args, { cwd, detached: true, stdio: "ignore" });
+    child.on("error", reportFailure);
+    child.unref?.();
+  } catch {
+    reportFailure();
   }
 }
 
