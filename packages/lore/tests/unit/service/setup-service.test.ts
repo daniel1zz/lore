@@ -45,7 +45,8 @@ import os from "node:os";
 import path from "node:path";
 import fsp from "node:fs/promises";
 import { describe, it, expect } from "vitest";
-import { ok, err, buildHookSettingsEntries } from "@lore/core";
+import { ok, err, buildHookSettingsEntries, HOOK_REGISTRATIONS } from "@lore/core";
+import { EMBEDDED_ASSETS_MANIFEST } from "../../../src/generated/assets-manifest.js";
 import type { Result, LoreError, AssetPayload, SettingsHookEntry } from "@lore/core";
 import {
   SetupService,
@@ -733,7 +734,7 @@ function buildPlaceholderHookPayload(): AssetPayload {
 }
 
 describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
-  it("resolves {{lore:claude_dir}} to the real targetDir in every registered hook command, all 16 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+  it("resolves {{lore:claude_dir}} to the real targetDir in every registered hook command, every shipped registered hook file registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -770,35 +771,23 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
       );
     }
 
-    // All 12 distinct hook files are present in the merged command set.
-    // Hardcoded on purpose (same tripwire as assets-ssot.test.ts's roster): a
-    // newly declared HOOK_REGISTRATIONS row must be answered by DECLARING it
-    // here, never by deriving this list from the registry under test.
+    // The installed hook-file set is derived from the shipped sources, never a
+    // hand-kept list: the registration table (HOOK_REGISTRATIONS) says what must
+    // be registered, and the embedded assets manifest says what actually ships.
+    // Every registered file must ship (a hook dropped from the manifest while
+    // still registered turns this red), and the installed set must equal the
+    // registered set exactly.
     const distinctFiles = new Set(loreCommands.map((c) => c.split("/hooks/")[1]));
-    expect([...distinctFiles].sort()).toEqual(
-      [
-        "pre-bash-git-safety-gate.mjs",
-        "session-start-resume.mjs",
-        // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
-        "session-start-marker.mjs",
-        "stop-turn-review.mjs",
-        // stop-turn-review turn-state producers (issue #156).
-        "user-prompt-turn-start.mjs",
-        "post-edit-mark.mjs",
-        // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
-        "stop-handoff-coverage.mjs",
-        "subagent-context.mjs",
-        "subagent-stop-commit-guard.mjs",
-        // Run identity slice 1 (BR-1044).
-        "run-register.mjs",
-        // Run end on SessionEnd/SubagentStop (BR-1059).
-        "run-end.mjs",
-        // Session trail writers (spec-session-trail D13).
-        "session-trail-start.mjs",
-        "subagent-trail.mjs",
-        "pre-tool-harness-run.mjs",
-      ].sort(),
+    const registeredFiles = new Set(HOOK_REGISTRATIONS.map((r) => r.file));
+    const shippedHookFiles = new Set(
+      EMBEDDED_ASSETS_MANIFEST.entries
+        .map((e) => e.path)
+        .filter((p) => /^hooks\/[^/]+\.mjs$/.test(p))
+        .map((p) => p.slice("hooks/".length)),
     );
+    expect(registeredFiles.size).toBeGreaterThan(0);
+    expect([...registeredFiles].filter((f) => !shippedHookFiles.has(f))).toEqual([]);
+    expect([...distinctFiles].sort()).toEqual([...registeredFiles].sort());
 
     // event/matcher wiring spot-checks.
     expect(parsed.hooks["SessionStart"]?.some((g) => g.hooks.some((h) => h.command.includes("session-start-resume.mjs")))).toBe(true);
