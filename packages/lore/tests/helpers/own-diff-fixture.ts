@@ -177,6 +177,18 @@ export class OwnDiffFixture {
     this.mustLore(["claim", task, "--worktree", branch], this.sessionEnvOf(branch));
   }
 
+  /** The environment of the session that claimed `task` (its own session id; the ambient one stays stripped). */
+  holderEnvOf(task: string): Record<string, string> {
+    const branch = this.branchOfTask.get(task);
+    if (branch === undefined) throw new Error(`task ${task} was never claimed through the fixture`);
+    return this.sessionEnvOf(branch);
+  }
+
+  /** Releases `task` as the session that claimed it; the claim record stays in the audit history, the branch is untouched. */
+  release(task: string): void {
+    this.mustLore(["release", task], this.holderEnvOf(task));
+  }
+
   private sessionEnvOf(branch: string): Record<string, string> {
     return { CLAUDE_CODE_SESSION_ID: this.sessionIdOf(branch) };
   }
