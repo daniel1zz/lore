@@ -83,8 +83,10 @@ import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
-import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
+import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
+import { primeReplicaClientForProject } from "../replica-priming.js";
+import { formatError } from "../utils.js";
 import { ambientOfInvocation, createApp } from "../../../app.js";
 import type { App } from "../../../app.js";
 import { startHttpServer } from "../../http/index.js";
@@ -145,6 +147,31 @@ function parsePort(io: CliIo, rawValue: string | undefined, flagName: string, fa
 }
 
 /**
+ * Builds the App of one registered dashboard project, through the same store selection as every other route
+ * (spec-defect-clusters-round-2-part-c-criterion-data-demotion D22): a project whose `.lore/config.yaml` has
+ * `sync.enabled: true` is opened through the embedded replica; any other project stays a plain local corpus, built
+ * with no config exactly as before.
+ *
+ * @param inv - the dashboard run's Invocation
+ * @param registryDbPath - the project's `.lore/lore.db`
+ * @returns the project's App
+ * @throws Error naming the setting or remote address when the sync-enabled project cannot open its replica (the mount
+ *   registry records it as that entry's `error` diagnosis; the project is never served from its local file)
+ */
+export async function mountRegisteredProject(inv: Invocation, registryDbPath: string): Promise<App> {
+  await primeReplicaClientForProject(registryDbPath, inv.io);
+  const projectConfig = loadConfig(dirname(dirname(registryDbPath)), () => {});
+  // reason: a project without sync keeps the no-config construction it always had; only a sync-enabled project
+  // needs its config to select the replica. A config that does not parse is reported by `loadLoreApp` for the
+  // run's own corpus; here it is read only for the sync switch.
+  const syncConfig = projectConfig.ok && projectConfig.value.sync?.enabled === true ? projectConfig.value : undefined;
+  const built = createApp(registryDbPath, syncConfig, ambientOfInvocation(inv), { identity: inv.identity });
+  if ("corpusService" in built) return built;
+  if (!built.ok) throw new Error(formatError(built.error));
+  return built.value;
+}
+
+/**
  * Build the SPEC-078 D2/D7 multi-project mount registry when the machine-scope config
  * declares `dashboard.projects`; `undefined` otherwise (the common single-project case —
  * both topologies' `startHttpServer` call treats an omitted `mountRegistry` as completely
@@ -169,10 +196,7 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
   const mountRegistry = createMountRegistry<App>();
   await mountRegistry.init(
     { projects: registeredProjects },
-    // reason: registered projects are always plain local SQLite corpora (no `sync`
-    // config passed) — `createApp(dbPath)`'s single-arg overload always returns a
-    // bare `App`, never `Result<App>` (see `app.ts`'s overload pair).
-    { createApp: async (registryDbPath: string) => createApp(registryDbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity }) },
+    { createApp: (registryDbPath: string) => mountRegisteredProject(inv, registryDbPath) },
   );
 
   inv.io.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);

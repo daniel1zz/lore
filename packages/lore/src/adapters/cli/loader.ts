@@ -440,8 +440,8 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     rawConfig = undefined;
   }
 
-  // Strip sync section — reason: prevents createApp returning Result<App>.
-  // Corpus-level commands never need TursoStore; they use local SQLiteStore + telemetry only.
+  // The config handed back to callers and read by the guards below carries no `sync` section: they read
+  // telemetry/workflow/ai settings, never the remote. The App itself is built from the FULL `rawConfig` (D22).
   let telemetryOnlyConfig: (LoreConfig & { sync?: never }) | undefined;
   if (rawConfig !== undefined) {
     const { sync: _sync, ...configWithoutSync } = rawConfig;
@@ -497,7 +497,10 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // reason: the identity of the Invocation the entry resolved wraps the store inside createApp
     // (spec-run-identity-slice-1 D3). The verified identity is the store's fact (`ensureVerifiedIdentity(store)`), so
     // there is no `onVerified` write-back into a process slot.
-    appOrResult = createAppWithWriteContext(dbPath, telemetryOnlyConfig, ambient, { identity: composedInvocation.identity });
+    // reason: D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) — the FULL config goes to the
+    // composition root: with `sync.enabled` the store is the embedded replica, and a missing address/token or an
+    // unreachable remote comes back as the error Result handled below (exit 1), never as the local file.
+    appOrResult = createAppWithWriteContext(dbPath, rawConfig, ambient, { identity: composedInvocation.identity });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     printLine(composedInvocation.io.stderr, `Error: Storage failure: ${message}`); // CLI surface

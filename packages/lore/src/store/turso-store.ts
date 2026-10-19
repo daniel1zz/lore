@@ -213,6 +213,20 @@ export function loadLibsqlClientModule(): Promise<typeof import("@libsql/client"
 // function — it pre-resolves the client via `loadLibsqlClientModule()` above
 // and passes it in as `injectedClient`, so it never touches this fallback.
 let cachedLibsqlModuleSync: typeof import("@libsql/client") | null = null;
+
+/**
+ * Resolves `@libsql/client` through the literal-specifier dynamic `import()` and hands the module to the
+ * synchronous construction path below, so a SYNCHRONOUS `new TursoStore(...)` works from the compiled binary too
+ * (spec-defect-clusters-round-2-part-c-criterion-data-demotion D22). This is how `createApp`'s Turso branch stays
+ * synchronous without `createRequire`: an entry that is about to open a sync-enabled corpus awaits this once,
+ * before `createApp`. A project with `sync.enabled` off never calls it, so the native load stays lazy.
+ *
+ * @returns resolves once the module is cached; rejects when `@libsql/client` cannot be loaded
+ */
+export async function primeLibsqlClientForSyncConstruction(): Promise<void> {
+  if (cachedLibsqlModuleSync === null) cachedLibsqlModuleSync = await loadLibsqlClientModule();
+}
+
 function loadLibsqlClientModuleSync(): typeof import("@libsql/client") {
   if (cachedLibsqlModuleSync === null) {
     const req = createRequire(import.meta.url);
