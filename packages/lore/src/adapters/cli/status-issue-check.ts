@@ -1,110 +1,131 @@
 /**
- * `computeIssueCheck` — the detector behind `lore status --check-issues`
- * (spec-issue-closure-loop-computed-resolution-agent-reachable D5, as amended by
- * spec-archiving-the-work-that-resolves-a-defect-report-closes D6).
+ * `computeIssueCheck` — the counts behind `lore status --check-issues`
+ * (spec-github-owns-issue-report-state-no-mirror-task-work-carries D8, AC-GS-4, AC-GS-9).
  *
- * Vitest-safe sibling of `commands/status.ts` (see `adapters/cli/CLAUDE.md`): imports only service
- * types, so `tests/unit/adapters/status-check-issues.test.ts` drives it over an InMemoryStore-backed
- * `CorpusService` without loading `bun:sqlite`.
+ * Counts are per ISSUE, taken from the live join (`joinIssueStatuses`: GitHub listing x carriers), never per
+ * carrier and never from a stored status — the corpus stores none. The `IssueStatus` each count reads is the
+ * ONE `deriveIssueStatus` verdict, so a count cannot disagree with `lore issues`:
  *
- * Flags ONE shape — a stale open report (computed `open`, no `resolves` edge, `reported_at` at least
- * `staleAfterDays` old, INCLUSIVE boundary, mirroring `staleness.ts`'s `age_days === min_age_days`
- * precedent). The former shape (a) "unclosed escalation" (computed `fixed` while the issue task is not
- * archived) is RETIRED: since archiving the resolving work closes the GitHub issue, the computed
- * resolution plus the closed issue ARE the record, so flagging every such report would be permanent
- * noise (D6). A report whose computed resolution is `fixed` is therefore never flagged.
+ *   closed_unverified_count   status `closed (unverified)`   closed on GitHub, no archived carrier
+ *   adopted_abandoned_count   status `adopted (abandoned)`   open, every carrier dead (deprecated/invalidated)
+ *   close_pending_count       status `fixed (close pending)` open, an archived carrier exists
+ *   closed_no_verdict_count   status `closed (no verdict)`   closed not_planned without a resolution:* label
+ *   unknown_ref_count         carriers naming a number absent from the live listing
  *
- * REPORT-ONLY: every call is a read (`listFull` / `get`) — never a write.
+ * ⛔ `stale_open_count` (D8) is NOT produced here: the listing row carries no `created_at`
+ * (`GithubListedIssue`, `github-intake-port.ts`), so the age rule has no input. Reported as a gap in GS-T8's
+ * hand-off rather than faked from the corpus.
  *
- * `resolvesInEdges`/`sourceDocs` come from `get(issueId).navigation.related` filtered to `resolves`:
- * `CorpusService.link`'s write-time D1b validation makes every such entry on an issue task an IN-edge.
+ * Each count is `members.length` of the same list `--enumerate <field>` prints (sorted `#<n>`), so
+ * `count === enumerate().length` holds by construction (AC-FR-5).
  *
- * Side-effect class: IO (store reads only).
+ * Vitest-safe sibling of `commands/status.ts` (see `adapters/cli/CLAUDE.md`): type-only service imports, no
+ * `bun:sqlite`, no `gh`. The caller fetches the listing; this module only reads and counts.
+ *
+ * Side-effect class: pure (`computeIssueCheck`), store reads (`listCarrierDocs`).
  */
 
 import { ok } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import type { DocRecord, IssueStatus, LoreError, Result } from "@lore/core";
 
 import type { CorpusService } from "../../service/corpus-service.js";
-import {
-  computeIssueResolution,
-  hasIssueReport,
-  type ResolutionSourceDocLike,
-  type ResolvesInEdgeLike,
-} from "../../service/issue-resolution.js";
+import type { IssueStatusRow } from "../../service/github-issue-listing.js";
 
-/** One issue task flagged as a "stale open report". */
-export interface StaleOpenReport {
-  id: string;
-  slug: string;
-  title: string;
-  reported_at: string;
-  age_days: number;
+/** A carrier doc as the status check reads it: only `extra.issues` matters here. */
+export type CarrierDoc = DocRecord;
+
+/** The count fields `--check-issues` reports and `--enumerate` can list. */
+export const ISSUE_CHECK_FIELDS = [
+  "closed_unverified_count",
+  "adopted_abandoned_count",
+  "close_pending_count",
+  "closed_no_verdict_count",
+  "unknown_ref_count",
+] as const;
+export type IssueCheckField = (typeof ISSUE_CHECK_FIELDS)[number];
+
+/** The derived status each status-keyed count reads (`unknown_ref_count` is keyed on carriers, not a status). */
+const STATUS_OF_FIELD: Readonly<Record<Exclude<IssueCheckField, "unknown_ref_count">, IssueStatus>> = {
+  closed_unverified_count: "closed (unverified)",
+  adopted_abandoned_count: "adopted (abandoned)",
+  close_pending_count: "fixed (close pending)",
+  closed_no_verdict_count: "closed (no verdict)",
+};
+
+/** What plain `lore status` reports: it did not contact GitHub, so it carries no count. */
+export interface IssuesNotChecked {
+  checked: false;
 }
 
-/** `--check-issues` result payload — mirrors the other check sections' `{checked, consistent, ...}` shape. */
-export interface IssueCheckPayload {
-  checked: number;
-  consistent: boolean;
-  stale_open: StaleOpenReport[];
+/** `--check-issues` result payload. */
+export type IssueCheckPayload = { checked: true } & Record<IssueCheckField, number> & {
+    /** The `#<n>` members behind each count, sorted by issue number. */
+    members: Record<IssueCheckField, string[]>;
+  };
+
+const byNumber = (a: number, b: number): number => a - b;
+const label = (n: number): string => `#${n}`;
+
+/** Every `(repo_id, number)` a carrier's `extra.issues` names, read defensively (malformed entries name nothing). */
+function namedRefs(doc: CarrierDoc): Array<{ repoId: number; number: number }> {
+  const refs = (doc.extra as Record<string, unknown> | null | undefined)?.["issues"];
+  if (!Array.isArray(refs)) return [];
+  const out: Array<{ repoId: number; number: number }> = [];
+  for (const ref of refs) {
+    if (typeof ref !== "object" || ref === null) continue;
+    const { repo_id, number } = ref as Record<string, unknown>;
+    if (typeof repo_id === "number" && typeof number === "number") out.push({ repoId: repo_id, number });
+  }
+  return out;
 }
 
 /**
- * Defensive `extra.issue_report.reported_at` reader. A malformed/legacy `extra`, or an `issue_report`
- * missing/mistyped `reported_at`, degrades to `undefined` rather than throwing.
+ * @param rows - the live join, exactly one row per listed issue
+ * @param carriers - every task and plan with `extra.issues` (archived and dead ones included)
+ * @param repoId - the configured repository's numeric id (the join key's first half)
+ * @returns the five counts with their sorted `#<n>` members
  */
-function readReportedAt(extra: unknown): string | undefined {
-  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
-  const issueReport = (extra as Record<string, unknown>)["issue_report"];
-  if (issueReport === null || typeof issueReport !== "object" || Array.isArray(issueReport)) return undefined;
-  const reportedAt = (issueReport as Record<string, unknown>)["reported_at"];
-  return typeof reportedAt === "string" ? reportedAt : undefined;
-}
-
-/**
- * @param corpus - read access (`listFull`, `get`) to the corpus
- * @param staleAfterDays - resolved `feedback.stale_after_days`
- * @param nowMs - clock seam (defaults to `Date.now()`)
- * @returns `ok(payload)`; `err` only on an underlying store read failure
- */
-export async function computeIssueCheck(
-  corpus: Pick<CorpusService, "listFull" | "get">,
-  staleAfterDays: number,
-  nowMs: number = Date.now(),
-): Promise<Result<IssueCheckPayload, LoreError>> {
-  const tasksResult = await corpus.listFull({ type: "task" });
-  if (!tasksResult.ok) return tasksResult;
-
-  const issueTasks = tasksResult.value.docs.filter((doc) => hasIssueReport(doc.extra));
-  const staleOpen: StaleOpenReport[] = [];
-
-  for (const issueTask of issueTasks) {
-    const getResult = await corpus.get(issueTask.id);
-    if (!getResult.ok) return getResult;
-
-    const resolvesRelated = getResult.value.navigation.related.filter((related) => related.link_type === "resolves");
-    const resolvesInEdges: ResolvesInEdgeLike[] = resolvesRelated.map((related) => ({ from_id: related.id }));
-    const sourceDocs: ResolutionSourceDocLike[] = resolvesRelated.map((related) => ({
-      id: related.id,
-      status: related.status,
-    }));
-
-    const resolution = computeIssueResolution({ extra: issueTask.extra }, resolvesInEdges, sourceDocs);
-    if (resolution !== "open") continue;
-
-    const reportedAt = readReportedAt(issueTask.extra);
-    if (reportedAt === undefined) continue;
-    const ageDays = Math.floor((nowMs - new Date(reportedAt).getTime()) / 86_400_000);
-    if (Number.isFinite(ageDays) && ageDays >= staleAfterDays) {
-      staleOpen.push({
-        id: issueTask.id,
-        slug: issueTask.slug,
-        title: issueTask.title,
-        reported_at: reportedAt,
-        age_days: ageDays,
-      });
-    }
+export function computeIssueCheck(
+  rows: readonly IssueStatusRow[],
+  carriers: readonly CarrierDoc[],
+  repoId: number,
+): IssueCheckPayload {
+  const members = {} as Record<IssueCheckField, string[]>;
+  for (const field of ISSUE_CHECK_FIELDS) {
+    if (field === "unknown_ref_count") continue;
+    const wanted = STATUS_OF_FIELD[field];
+    members[field] = rows
+      .filter((row) => row.status === wanted)
+      .map((row) => row.issue.number)
+      .sort(byNumber)
+      .map(label);
   }
 
-  return ok({ checked: issueTasks.length, consistent: staleOpen.length === 0, stale_open: staleOpen });
+  const listed = new Set(rows.map((row) => row.issue.number));
+  const unknown = new Set<number>();
+  for (const doc of carriers) {
+    for (const ref of namedRefs(doc)) {
+      if (ref.repoId === repoId && !listed.has(ref.number)) unknown.add(ref.number);
+    }
+  }
+  members["unknown_ref_count"] = [...unknown].sort(byNumber).map(label);
+
+  const counts = {} as Record<IssueCheckField, number>;
+  for (const field of ISSUE_CHECK_FIELDS) counts[field] = members[field].length;
+  return { checked: true, ...counts, members };
+}
+
+/** Every task and plan whose `extra.issues` is an array — the carrier index `joinIssueStatuses` expects. */
+export async function listCarrierDocs(
+  corpus: Pick<CorpusService, "listFull">,
+): Promise<Result<CarrierDoc[], LoreError>> {
+  const carriers: CarrierDoc[] = [];
+  for (const type of ["task", "plan"] as const) {
+    const listed = await corpus.listFull({ type });
+    if (!listed.ok) return listed;
+    carriers.push(
+      ...listed.value.docs.filter((doc) => Array.isArray((doc.extra as Record<string, unknown> | null | undefined)?.["issues"])),
+    );
+  }
+  return ok(carriers);
 }
