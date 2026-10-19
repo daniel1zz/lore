@@ -33,6 +33,7 @@ import { defineLoreCommand } from "../cli-exit.js";
 import { resolveDetailBase } from "../decision-detail-lines.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
+import { parseDocTypeFilter, parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
 import { collectAuditItems, collectPendingDecisions, renderAuditItems, renderPendingDecisions } from "../pending-decisions-render.js";
 import { withValidityStatus } from "../../../service/validity-service.js";
@@ -88,6 +89,18 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    // reason: AC-DCL-2 — filter values are validated BEFORE the corpus opens; an unknown value
+    // used to reach the store and render an empty queue with exit 0.
+    let typeFilter: DocType | undefined;
+    if (args.type !== undefined) {
+      const parsedType = parseDocTypeFilter("--type", args.type);
+      if (!parsedType.ok) return refuseFilterValue(inv, parsedType.error);
+      typeFilter = parsedType.value;
+    }
+    if (args.since !== undefined) {
+      const parsedSince = parseSinceFilter("--since", args.since);
+      if (!parsedSince.ok) return refuseFilterValue(inv, parsedSince.error);
+    }
     const { app, dbPath } = loadLoreApp({ inv });
     const { repoRoot } = app;
     try {
@@ -111,7 +124,7 @@ export default defineLoreCommand({
 
       const filters: Record<string, unknown> = {};
       if (args.author !== undefined) filters["author"] = args.author;
-      if (args.type !== undefined) filters["type"] = args.type as DocType;
+      if (typeFilter !== undefined) filters["type"] = typeFilter;
       if (args.since !== undefined) filters["since"] = args.since;
       if (args["include-invalid"] === true) filters["include_invalid"] = true;
       if (args.all === true) filters["all"] = true;

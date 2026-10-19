@@ -59,6 +59,7 @@ import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg, resolveActor } from "../utils.js";
+import { parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
@@ -167,6 +168,11 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    // reason: AC-DCL-2 — an unreadable --since is refused before any corpus access.
+    if (args.since !== undefined) {
+      const parsedSince = parseSinceFilter("--since", args.since);
+      if (!parsedSince.ok) return refuseFilterValue(inv, parsedSince.error);
+    }
     const { app } = loadLoreApp({ inv });
     try {
       // ── arm branch (positional value "arm", same dispatch as "anchor") ──

@@ -144,6 +144,7 @@ import {
   relativeTime,
 } from "../utils.js";
 import { LIST_GOVERNED_BY_CONFLICT } from "../cli-refusal-messages.js";
+import { parseDocStatusFilter, parseDocTypeFilter, parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { isPlanMember } from "../../../service/plan-membership.js";
 import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
 import {
@@ -327,6 +328,24 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    // reason: AC-DCL-2 — enumerated and date filters are validated before the corpus opens;
+    // an unknown --type/--status or unreadable --since used to list nothing with exit 0.
+    let typeFilter: DocType | undefined;
+    if (args.type !== undefined) {
+      const parsedType = parseDocTypeFilter("--type", args.type);
+      if (!parsedType.ok) return refuseFilterValue(inv, parsedType.error);
+      typeFilter = parsedType.value;
+    }
+    let statusFilter: DocStatus | undefined;
+    if (args.status !== undefined) {
+      const parsedStatus = parseDocStatusFilter("--status", args.status);
+      if (!parsedStatus.ok) return refuseFilterValue(inv, parsedStatus.error);
+      statusFilter = parsedStatus.value;
+    }
+    if (args.since !== undefined) {
+      const parsedSince = parseSinceFilter("--since", args.since);
+      if (!parsedSince.ok) return refuseFilterValue(inv, parsedSince.error);
+    }
     const { app } = loadLoreApp({ inv });
     try {
       // reason: ONE wall-clock read for the whole command — every validity verdict,
@@ -473,9 +492,9 @@ export default defineLoreCommand({
       }
 
       const filters: Record<string, unknown> = {};
-      if (args.type !== undefined) filters["type"] = args.type as DocType;
+      if (typeFilter !== undefined) filters["type"] = typeFilter;
       if (subTypeResolution.sub_type !== undefined) filters["sub_type"] = subTypeResolution.sub_type;
-      if (args.status !== undefined) filters["status"] = args.status as DocStatus;
+      if (statusFilter !== undefined) filters["status"] = statusFilter;
       if (args.author !== undefined) filters["created_by"] = args.author;
       if (args.since !== undefined) filters["since"] = args.since;
       if (args.tag !== undefined) filters["tags"] = [args.tag];
