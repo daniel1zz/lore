@@ -139,7 +139,16 @@ async function createPlanWithTasks(
         extra: {
           plan_id: planResult.value.id,
           verification_evidence: [
-            { oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice" },
+            // reason: DCL-1 (b) — `set --status archived` applies the `lore done` floors, so the seeded pass is runner-attested.
+            {
+              oracle: "tsc",
+              command: "bun run typecheck",
+              result: "pass",
+              recorded_at: "2026-07-01T00:00:00.000Z",
+              recorded_by: "alice",
+              capture_source: "runner",
+              attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+            },
           ],
         },
       } as CreateDocInput);

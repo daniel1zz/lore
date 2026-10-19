@@ -275,9 +275,14 @@ function buildPlanTerminalityDriftCorpus(): { plan: string; task: string } {
   const plan = createDoc("plan", ["--parent", spec]);
   const task = createDoc("task", ["--parent", plan, "--plan-id", plan]);
 
-  const archiveResult = runLore(["set", task, "--status", "archived"], tmpDir);
-  if (archiveResult.exitCode !== 0) {
-    throw new Error(`archiving fixture task failed: ${archiveResult.stderr}`);
+  // reason: DCL-1 (b) — `set --status archived` now applies the `lore done` floors, and a non-git fixture corpus
+  // can never hold a state-bound attested pass. `deprecated` is the other terminal status (same plan-terminality
+  // reading) and is not floor-gated, so the fixture reaches "every child task terminal" through it.
+  for (const status of ["approved", "deprecated"]) {
+    const stepResult = runLore(["set", task, "--status", status], tmpDir);
+    if (stepResult.exitCode !== 0) {
+      throw new Error(`making fixture task terminal failed at ${status}: ${stepResult.stderr}`);
+    }
   }
 
   return { plan, task };

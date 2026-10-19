@@ -18,6 +18,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -37,7 +38,9 @@ interface CliResult {
 function lore(args: string[], opts: { run?: string; cwd?: string } = {}): CliResult {
   const env: Record<string, string | undefined> = {
     ...process.env,
-    HOME: dir,
+    // reason: DCL-1 (b) — the archived task below needs a state-bound attested pass, which needs a CLEAN git tree:
+    // HOME (bun's cache) must lie outside the fixture repository.
+    HOME: FIXTURE_HOME_OUTSIDE_REPO,
     CLAUDECODE: "1",
     CLAUDE_STATE_BASE_OVERRIDE: stateBase,
     CLAUDE_CODE_SESSION_ID: "scope-author",
@@ -72,10 +75,13 @@ function claimedTask(agent: string, anchors: string[], after: "release" | "archi
     must(["create", "task", "--title", `Scope task ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])]).stdout,
   );
   const run = `${MAIN_RUN}:${agent}`;
-  must(["claim", slug], { run });
+  // reason: the fixture is a git repository now (see beforeAll), where a claim must record its worktree.
+  must(["claim", slug, "--worktree", dir], { run });
   if (after === "release") must(["release", slug], { run });
   if (after === "archive") {
     must(["release", slug], { run });
+    // `set --status archived` applies the `lore done` floors (DCL-1 (b)): a runner-captured pass first.
+    must(["evidence", slug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
     must(["set", slug, "--status", "archived"]);
   }
   return slug;
@@ -134,6 +140,8 @@ function review(cwd?: string): { result: CliResult; findings: Finding[] } {
 beforeAll(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "trail-review-scope-")));
   stateBase = join(dir, "state");
+  makeCleanTreeRepo(dir);
+  appendFileSync(join(dir, ".git", "info", "exclude"), "state/\n");
   must(["init"]);
   appendFileSync(join(dir, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
   const prd = slugOf(must(["create", "prd", "--title", "Scope PRD", "--content", "root", "--no-ai"]).stdout);
