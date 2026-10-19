@@ -1,0 +1,112 @@
+/**
+ * @spec_ref spec-refusal-sites-declare-their-rule-in-code-baseline-leaf  AC-RIC-1 (BR-1344)
+ *
+ * Throwaway TS root with one refusal site of each declaration form, driven through the real CLI verb
+ * `lore baseline sites probe --json` (in-process, never the repo's own `.lore/`):
+ *   1. a refusal literal carrying `rule: "BR-1"`,
+ *   2. a rule-taking helper call (`validationError(..., "BR-2")`) inside `err(...)`,
+ *   3. an interface method tagged `@lore-site BR-3`, called from the command,
+ *   4. a refusal with no declaration (unmapped),
+ *   5. a refusal carrying two rules (literal BR-4 + statement tag BR-5): a conflict naming both.
+ *
+ * SIMPLEST GREEN-BUT-BROKEN CASE (asserted): a census that reads only object-literal err() arguments passes site 1; sites 2 and
+ * 3 must report their rules too, so every form is asserted by its own exact (rule, state) pair.
+ *
+ * Dimensions: HAPPY (each form reports its rule), NEGATIVE (undeclared -> unmapped), BOUNDARY (two rules -> conflict, both named),
+ * REGRESSION (the helper's own pass-through literal is not a second site; the site list is exactly the five).
+ */
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { buildMiniCorpus, MINI_CLI, type MiniCorpus } from "../helpers/coverage-mini-corpus.js";
+
+vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
+
+const REFUSAL = `export const err = (e: { code: string; rule?: string }) => ({ ok: false as const, code: e.code });\n`;
+
+const HELPERS = `export function validationError(field: string, message: string, value?: unknown, rule?: string) {
+  return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}), ...(rule !== undefined ? { rule } : {}) };
+}
+`;
+
+const PORT = `export interface Port {
+  /**
+   * Persist the record.
+   * @lore-site BR-3
+   */
+  save(): void;
+}
+`;
+
+const PROBE = `import { err } from "../lib/refusal.js";
+import { validationError } from "../lib/helpers.js";
+import type { Port } from "../lib/port.js";
+export default {
+  run(port: Port, mode: string) {
+    if (mode === "a") return err({ code: "LITERAL_REFUSAL", rule: "BR-1" });
+    if (mode === "b") return err(validationError("name", "bad name", undefined, "BR-2"));
+    if (mode === "c") port.save();
+    if (mode === "d") return err({ code: "BARE_REFUSAL" });
+    if (mode === "e") {
+      /** @lore-site BR-5 */
+      return err({ code: "DOUBLE_REFUSAL", rule: "BR-4" });
+    }
+    return undefined;
+  },
+};
+`;
+
+interface SiteRow {
+  readonly key: string;
+  readonly code?: string;
+  readonly dynamic: boolean;
+  readonly line: number;
+  readonly status: string;
+  readonly rule: string | null;
+  readonly rules: string[];
+}
+
+let c: MiniCorpus;
+let sites: SiteRow[] = [];
+
+beforeAll(async () => {
+  c = await buildMiniCorpus();
+  c.writeSource(`${MINI_CLI}/lib/refusal.ts`, REFUSAL);
+  c.writeSource(`${MINI_CLI}/lib/helpers.ts`, HELPERS);
+  c.writeSource(`${MINI_CLI}/lib/port.ts`, PORT);
+  c.writeSource(`${MINI_CLI}/commands/probe.ts`, PROBE);
+  const r = await c.run(["baseline", "sites", "probe", "--json"]);
+  expect(r.exitCode, r.stderr + r.stdout).toBe(0);
+  sites = (JSON.parse(r.stdout) as { data: { sites: SiteRow[] } }).data.sites;
+});
+
+afterAll(() => c?.dispose());
+
+const byCode = (code: string): SiteRow | undefined => sites.find((s) => s.code === code);
+
+describe("AC-RIC-1 — the census reads every declaration form from the tree", () => {
+  it("(1) a refusal literal reports the rule it carries", () => {
+    expect(byCode("LITERAL_REFUSAL")).toMatchObject({ status: "declared", rule: "BR-1", rules: ["BR-1"] });
+  });
+
+  it("(2) a rule-taking helper call reports the rule passed at the call", () => {
+    expect(byCode("VALIDATION_ERROR")).toMatchObject({ status: "declared", rule: "BR-2", rules: ["BR-2"] });
+  });
+
+  it("(3) an interface method tagged '@lore-site BR-3' reports that rule at its declaration", () => {
+    const port = sites.find((s) => s.key.endsWith("lib/port.ts#Port#save"));
+    expect(port).toMatchObject({ dynamic: true, status: "declared", rule: "BR-3", rules: ["BR-3"] });
+    expect(port?.line).toBe(PORT.split("\n").findIndex((l) => l.includes("save(): void")) + 1);
+  });
+
+  it("(4) a refusal that declares nothing is unmapped", () => {
+    expect(byCode("BARE_REFUSAL")).toMatchObject({ status: "unmapped", rule: null, rules: [] });
+  });
+
+  it("(5) a refusal carrying two rules is a conflict naming both", () => {
+    expect(byCode("DOUBLE_REFUSAL")).toMatchObject({ status: "conflict", rule: null, rules: ["BR-4", "BR-5"] });
+  });
+
+  it("(6) the list is exactly the five sites: the helper's pass-through literal is not a site of its own", () => {
+    expect(sites).toHaveLength(5);
+    expect(sites.filter((s) => s.code === "VALIDATION_ERROR")).toHaveLength(1);
+  });
+});
