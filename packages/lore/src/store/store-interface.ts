@@ -558,6 +558,25 @@ export interface StoreInterface {
     ordinal: number,
   ): Promise<Result<DocRecord, LoreError>>;
 
+  /**
+   * {@link assignOrdinalForRepair} in ONE transaction with the version row and the audit row it owes
+   * (spec-no-module-writes-around-the-write-path D3): a failure of the version or audit insert rolls the
+   * ordinal write back, so the doc keeps its previous ordinal and version. A same-value repeat is the same
+   * idempotent no-op as the bare method (nothing written, the doc returned unchanged). `version.version` must
+   * be the stored version + 1, else `STALE_VERSION` and nothing is written.
+   *
+   * @param id - Doc id to assign an ordinal to.
+   * @param ordinal - The EXACT target value.
+   * @param version - The post-assignment version snapshot (`doc.version + 1`).
+   * @param audit - The audit entry of the assignment.
+   */
+  assignOrdinalForRepairWithProvenance(
+    id: DocId,
+    ordinal: number,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>>;
+
   /** Find doc by ULID. Returns null (not error) if not found. */
   find(id: DocId): Promise<Result<DocRecord | null, LoreError>>;
 

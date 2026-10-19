@@ -55,7 +55,7 @@
  *   conflicts or why.
  */
 
-import type { RuleOffence } from "./rule-state-service.js";
+import type { RuleOffence, UnknownReason } from "./rule-state-service.js";
 import {
   parentlessRefusalMessage,
   SPEC_KINDS,
@@ -1601,8 +1601,17 @@ export interface CitedRuleViolation {
 }
 
 /**
+ * One cited rule whose state is `unknown` and whose reason does NOT refuse the close (BR-984): reported, never
+ * silent. `git-unavailable` is never carried here, it refuses the close instead.
+ */
+export interface CitedRuleUnknown {
+  readonly rule_id: string;
+  readonly reason: Exclude<UnknownReason, "git-unavailable">;
+}
+
+/**
  * `plan-close`'s rule-state predicate (BR-984; replaces the retired domain-document-edit proxy
- * `prdOutlineSynced`). Default-OFF behind `workflow.gates."plan-close".prd_sync.enabled` (resolved
+ * `prdOutlineSynced`). Default-OFF behind `workflow.gates."plan-close".cited_rule_check.enabled` (resolved
  * by the CALLER). Pure: no store, no IO, no config. The CALLER (`CorpusService.set`) resolves the
  * rules the closing plan's spec criteria cite, reads their state through `RuleStateService.full()`,
  * and passes ONLY the offending ones here.

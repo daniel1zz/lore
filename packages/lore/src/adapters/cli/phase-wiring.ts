@@ -111,8 +111,9 @@ export function buildPhaseServices(
     // test stayed green — hence its own distribution oracle,
     // `tests/integration/phase-claim-session-parity.bun.test.ts`.
     env,
+    corpusService,
   );
-  const phaseChecklistService = new PhaseChecklistService(store);
+  const phaseChecklistService = new PhaseChecklistService(store, corpusService);
   const phaseMigrationService = new PhaseMigrationService(store, corpusService);
   return { phaseWorkflowService, phaseChecklistService, phaseMigrationService };
 }

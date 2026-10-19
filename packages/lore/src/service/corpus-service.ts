@@ -40,8 +40,6 @@ import {
   SPEC_KINDS,
   buildTaskAttestationInfos,
   deriveDeclaredScopeCoverage,
-  extractPrdSyncExempt,
-  prdSyncExemptEqual,
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
   SELF_DECLARED_ORDINAL_TITLE_REFUSAL,
@@ -86,6 +84,7 @@ import { ownProposedRules } from "./rule-changes.js";
 import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
+  ProposedRuleWrite,
   ProvenanceWriteExtras,
   RuleLeafPatch,
   SearchHit,
@@ -107,8 +106,9 @@ import {
   describeCheckpointVacuity,
   isNonPlanParentError,
   PLAN_CLOSE_VACUITY_NOTICE_FIELD,
+  PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD,
 } from "./checkpoint-registry.js";
-import { attestationExemptKindValid, type CitedRuleViolation } from "./gate-predicates.js";
+import { attestationExemptKindValid, type CitedRuleUnknown, type CitedRuleViolation } from "./gate-predicates.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
@@ -135,7 +135,9 @@ import {
 } from "./validity-service.js";
 import {
   checkForeignCorpusWrite,
+  CorpusWriteAuthority,
   foreignCorpusWriteRefusalError,
+  type CorpusWriteAuthorityContext,
   type ForeignCorpusWriteContext,
 } from "./foreign-corpus-write-guard.js";
 
@@ -745,18 +747,6 @@ export interface CorpusStatus {
    * Empty when nothing is invalidated (never omitted — always a fact, not absent data).
    */
   invalidated_feeding_source_warnings: string[];
-  /**
-   * SPEC-080 §C4 — every ACTIVE plan currently carrying a valid
-   * `extra.prd_sync_exempt` (`extractPrdSyncExempt` returning non-`undefined`),
-   * pointer-only (slug — never the exemption's `reason`/`by`/`at`, mirroring
-   * `invalidated_feeding_source_warnings`'s pointer-not-dump shape). Closes the
-   * SPEC-069 `attestation_exempt` field's documented invisibility gap (zero
-   * status/doctor/dashboard surfacing) — that miss is not repeated here.
-   * Follows the EXACT same convention `invalidated_feeding_source_warnings`
-   * already established: empty when nothing is exempt (never omitted — always
-   * a fact, not absent data).
-   */
-  exempt_plans: Array<{ slug: string }>;
 }
 
 /**
@@ -833,6 +823,22 @@ export interface DocWriteRequest {
   readonly extras?: ProvenanceWriteExtras;
   /** Timestamp seam; default now. */
   readonly now?: string;
+  /**
+   * `true` when the CALLER holds a declared-intent fact that authorizes a write into a foreign (linked-worktree
+   * resolved) corpus: a claim lease that names a worktree (task/phase lifecycle writes), or a `CorpusWriteAuthority`
+   * grant already taken for this very write (baseline-scoped authoring). Absent = no intent = refused on a foreign
+   * crossing, which is what every non-lifecycle write wants.
+   */
+  readonly foreignIntent?: boolean;
+  /**
+   * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
+   * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
+   * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
+   * is the unchanged one, and no version row (a second row at the same version cannot exist). The two steps are not
+   * one transaction — the store has no primitive that updates a doc and audits without a version row — which is
+   * exactly how the reject path wrote them before AC-DCL-5.
+   */
+  readonly versioning?: "bump" | "keep";
 }
 
 /** Outcome of {@link CorpusService.writeDoc}: `written: false` means the patch changed nothing and NOTHING was written. */
@@ -849,6 +855,57 @@ export interface DocInsertRequest {
   readonly auditDetails?: Readonly<Record<string, unknown>>;
   readonly auditSessionId?: string;
   readonly by?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
+}
+
+/**
+ * One audit row with no version bump (a judgment, a state-binding skip, an issue-close step, an adoption record,
+ * a foreign-corpus decision), as {@link CorpusService.appendAudit} takes it.
+ */
+export interface AuditAppendRequest {
+  readonly action: string;
+  readonly sessionId: string;
+  readonly docId?: DocId;
+  /** Operation-specific `details`; written verbatim (an audit-only row carries no `version` join key). */
+  readonly details?: Readonly<Record<string, unknown>>;
+  /** Explicit actor; absent = the store write context's claimed name. */
+  readonly by?: string;
+  /** Timestamp seam; default now. */
+  readonly timestamp?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
+  /**
+   * `"refuse"` (default): a foreign crossing without intent is refused like any other write.
+   * `"record"`: this row IS the record of a foreign-corpus decision that was already taken (the scoped
+   * authorization the guard just granted) — refusing the record of an authorization would be circular, so the
+   * refusal predicate is not applied. The row still names the caller and the run.
+   */
+  readonly foreign?: "refuse" | "record";
+}
+
+/** A parent re-pointing (a hierarchy migration), as {@link CorpusService.setDocParent} takes it. */
+export interface DocParentRequest {
+  readonly docId: DocId;
+  /** The new parent, or `null` to clear it (which also removes the doc's `parent` link edge). */
+  readonly parentId: DocId | null;
+  readonly auditAction: string;
+  readonly auditSessionId: string;
+  readonly auditDetails?: Readonly<Record<string, unknown>>;
+  readonly by?: string;
+}
+
+/** A registry-reserved `proposed` rule id written into a spec's change set, as {@link CorpusService.reserveProposedRule} takes it. */
+export interface ProposedRuleReserveRequest {
+  /** The spec write (CAS base, builder of the new `extra`, owner leaf, optional status, change summary). */
+  readonly write: ProposedRuleWrite;
+  /** Id family; the change set is business-only today. */
+  readonly family: RuleIdPrefix;
+  /** Operation-specific audit `details`; the route adds `rule_id`, `version` and `new_version`. */
+  readonly auditDetails: Readonly<Record<string, unknown>>;
+  readonly by?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
 }
 
 /** A store-owned rule move, as {@link CorpusService.moveRule} takes it. */
@@ -880,7 +937,7 @@ export interface RuleAllocateRequest {
  */
 export type DocWritePort = Pick<
   CorpusService,
-  "writeDoc" | "insertDoc" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
+  "writeDoc" | "insertDoc" | "assertWritable" | "reserveProposedRule" | "setDocParent" | "appendAudit" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
 >;
 
 /** The post-patch value of one patched field of `doc`. */
@@ -1140,13 +1197,60 @@ export class CorpusService {
    * @returns `undefined` when the write may proceed; a ready-to-return
    *   `err(...)` `Result` when it must be refused.
    */
-  private refuseIfForeignCorpusWrite<T>(): Result<T, LoreError> | undefined {
-    const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, false);
-    return verdict.allowed ? undefined : err(foreignCorpusWriteRefusalError(verdict));
+  private async refuseIfForeignCorpusWrite<T>(
+    intentDeclared = false,
+    targets: readonly DocRecord[] = [],
+  ): Promise<Result<T, LoreError> | undefined> {
+    const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
+    if (verdict.allowed) return undefined;
+    // reason: claim-scoped corpus authoring (spec-baseline-slice-2 §C8, issue #39) — a worktree implementer whose fresh
+    // claim lease declares a `corpus_scope` covering every baseline target may write there. The decision is the
+    // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
+    // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
+    if (this.corpusWriteAuthority !== undefined) {
+      const decided = await this.corpusWriteAuthority.decide(targets);
+      return decided.ok ? undefined : err(decided.error);
+    }
+    return err(foreignCorpusWriteRefusalError(verdict));
   }
 
+  /**
+   * Arms the claim-scoped corpus-write authority the write route consults before refusing a foreign-corpus write
+   * (see {@link refuseIfForeignCorpusWrite}). Called once per CLI process by `adapters/cli/loader.ts`, next to
+   * {@link setForeignCorpusWriteContext}. Unarmed (every bare construction) ⇒ the route refuses every foreign write.
+   */
+  setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
+    this.corpusWriteAuthority = new CorpusWriteAuthority(this.store, context, this);
+  }
+
+  private corpusWriteAuthority: CorpusWriteAuthority | undefined;
 
   // ── The one write route ────────────────────────────────────────────────────
+
+  /** {@link writeDoc}'s `versioning: "keep"` leg: CAS-guarded doc update, then the audit row; no version row. */
+  private async writeDocKeepingVersion(
+    request: DocWriteRequest,
+    actor: string,
+    now: string,
+  ): Promise<Result<DocWriteOutcome, LoreError>> {
+    const { doc, patch } = request;
+    const updated = await this.store.update(
+      doc.id,
+      { ...definedOnly(patch), updated_at: now },
+      { expected_version: doc.version },
+    );
+    if (!updated.ok) return updated;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor,
+      session_id: request.auditSessionId ?? doc.id,
+      action: request.auditAction,
+      doc_id: doc.id,
+      details: { ...request.auditDetails, version: doc.version },
+    });
+    if (!audited.ok) return audited;
+    return ok({ doc: updated.value, written: true });
+  }
 
   /**
    * THE write route for changing an existing document (spec-defect-clusters-round-1 D3). In order: the
@@ -1161,7 +1265,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
@@ -1178,6 +1282,7 @@ export class CorpusService {
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
     const now = request.now ?? new Date().toISOString();
+    if (request.versioning === "keep") return this.writeDocKeepingVersion(request, actor.value, now);
     const newVersion = doc.version + 1;
     const after: DocRecord = { ...doc, ...definedOnly(patch), version: newVersion, updated_at: now };
     const versionRecord: VersionRecord = {
@@ -1222,7 +1327,7 @@ export class CorpusService {
    * @param request - See {@link DocInsertRequest}.
    */
   async insertDoc(request: DocInsertRequest): Promise<Result<DocRecord, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocRecord>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1251,15 +1356,102 @@ export class CorpusService {
   }
 
   /**
-   * Route for the ordinal repair-assignment (`StoreInterface.assignOrdinalForRepair`): foreign-corpus
-   * refusal, the store's own atomic ordinal write, then the version row and audit row that write never
-   * produced. A repeat call at the same ordinal is a no-op that writes nothing.
+   * Route for reserving a `proposed` rule id inside a spec's change set: foreign-corpus refusal, the store's ONE
+   * transaction (allocate the id, CAS-update the spec, write its version row — stamped with the invocation's run,
+   * register the id as `proposed`), then the audit row as the calling actor.
    *
-   * ⛔ NOT one transaction: the ordinal column write is a store primitive (`update` cannot set `ordinal`), so
-   * a failure of the version/audit step after it leaves the ordinal assigned and is returned as the error.
-   * The migration re-run converges (the same-value repeat is a no-op) but does not backfill the missing rows.
+   * @param request - See {@link ProposedRuleReserveRequest}.
+   */
+  async reserveProposedRule(
+    request: ProposedRuleReserveRequest,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(request.foreignIntent === true);
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const reserved = await this.store.reserveProposedRuleAndUpdateSpec(request.write, actor.value, request.family);
+    if (!reserved.ok) return reserved;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      actor: actor.value,
+      session_id: reserved.value.doc.id,
+      action: "update",
+      doc_id: reserved.value.doc.id,
+      details: {
+        ...request.auditDetails,
+        rule_id: reserved.value.ruleId,
+        version: reserved.value.doc.version,
+        new_version: reserved.value.doc.version,
+      },
+    });
+    if (!audited.ok) return audited;
+    return reserved;
+  }
+
+  /**
+   * The foreign-corpus refusal alone, for a caller whose operation writes something this route does not carry
+   * (a judgment row) BEFORE the routed write: asking first keeps a refused call from leaving that earlier row behind.
    *
-   * @param doc - The doc as read (its `version` decides whether the store call changed anything).
+   * @param foreignIntent - See {@link DocWriteRequest.foreignIntent}.
+   * @returns `ok` when a write into this corpus is allowed; the `gate:corpus-write:foreign-provenance` refusal otherwise.
+   */
+  async assertWritable(foreignIntent = false): Promise<Result<void, LoreError>> {
+    return (await this.refuseIfForeignCorpusWrite<void>(foreignIntent)) ?? ok(undefined);
+  }
+
+  /**
+   * THE write route for re-pointing a doc's parent (a hierarchy migration): foreign-corpus refusal, then the
+   * store's ONE transaction (`setDocParentWithProvenance`: the parent write, the `parent` link-edge removal on a
+   * clear, the audit row) naming the calling actor. The migration's audit row is its record: it bumps no version.
+   *
+   * @param request - See {@link DocParentRequest}.
+   */
+  async setDocParent(request: DocParentRequest): Promise<Result<DocRecord, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>();
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    return this.store.setDocParentWithProvenance(request.docId, request.parentId, {
+      timestamp: new Date().toISOString(),
+      actor: actor.value,
+      session_id: request.auditSessionId,
+      action: request.auditAction,
+      doc_id: request.docId,
+      ...(request.auditDetails !== undefined ? { details: { ...request.auditDetails } } : {}),
+    });
+  }
+
+  /**
+   * THE write route for an audit row that bumps no version (a judgment, a state-binding skip, an issue-close step,
+   * an adoption record, a foreign-corpus decision): foreign-corpus refusal (unless `request.foreign` is
+   * `"record"`), then ONE audit append naming the calling actor; the store's write context stamps the run.
+   *
+   * @param request - See {@link AuditAppendRequest}.
+   */
+  async appendAudit(request: AuditAppendRequest): Promise<Result<void, LoreError>> {
+    if (request.foreign !== "record") {
+      const refusal = await this.refuseIfForeignCorpusWrite<void>(request.foreignIntent === true);
+      if (refusal !== undefined) return refusal;
+    }
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    return this.store.appendAuditEntry({
+      timestamp: request.timestamp ?? new Date().toISOString(),
+      actor: actor.value,
+      session_id: request.sessionId,
+      action: request.action,
+      ...(request.docId !== undefined ? { doc_id: request.docId } : {}),
+      ...(request.details !== undefined ? { details: { ...request.details } } : {}),
+    });
+  }
+
+  /**
+   * Route for the ordinal repair-assignment: foreign-corpus refusal, then the store's ONE transaction
+   * (`assignOrdinalForRepairWithProvenance`) carrying the ordinal write, the version row and the audit row, both
+   * naming the calling actor. All three land or none do: a failure of the version or audit insert leaves the doc
+   * on its previous ordinal and version. A repeat call at the same ordinal is a no-op that writes nothing.
+   *
+   * @param doc - The doc as read (its `version` is the CAS base: the new version is `doc.version + 1`).
    * @param ordinal - The target ordinal, computed by the caller to be free.
    */
   async assignOrdinalForRepair(
@@ -1268,39 +1460,38 @@ export class CorpusService {
     by?: string,
     now: string = new Date().toISOString(),
   ): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(by);
     if (!actor.ok) return actor;
-    const assigned = await this.store.assignOrdinalForRepair(doc.id, ordinal);
+    const newVersion = doc.version + 1;
+    const assigned = await this.store.assignOrdinalForRepairWithProvenance(
+      doc.id,
+      ordinal,
+      {
+        doc_id: doc.id,
+        version: newVersion,
+        content: doc.content,
+        extra: doc.extra,
+        status: doc.status,
+        title: doc.title,
+        action: "update",
+        created_at: now,
+        created_by: actor.value,
+        change_summary: `Ordinal ${ordinal} assigned (ordinal migration)`,
+        slug: doc.slug,
+      },
+      {
+        timestamp: now,
+        actor: actor.value,
+        session_id: `ordinal-migration-${doc.id}`,
+        action: "ordinal-backfill",
+        doc_id: doc.id,
+        details: { new_ordinal: ordinal, version: newVersion, new_version: newVersion },
+      },
+    );
     if (!assigned.ok) return assigned;
-    const after = assigned.value;
-    if (after.version === doc.version) return ok({ doc: after, written: false });
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: after.id,
-      version: after.version,
-      content: after.content,
-      extra: after.extra,
-      status: after.status,
-      title: after.title,
-      action: "update",
-      created_at: now,
-      created_by: actor.value,
-      change_summary: `Ordinal ${ordinal} assigned (ordinal migration)`,
-      slug: after.slug,
-    });
-    if (!versionResult.ok) return versionResult;
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: actor.value,
-      session_id: `ordinal-migration-${after.id}`,
-      action: "ordinal-backfill",
-      doc_id: after.id,
-      details: { new_ordinal: ordinal, version: after.version, new_version: after.version },
-    });
-    if (!auditResult.ok) return auditResult;
-    return ok({ doc: after, written: true });
+    return ok({ doc: assigned.value, written: assigned.value.version !== doc.version });
   }
 
   /**
@@ -1311,7 +1502,13 @@ export class CorpusService {
    * @param request - See {@link RuleMoveRequest}.
    */
   async moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>();
+    const moveTargets: DocRecord[] = [];
+    for (const id of [request.from.id, request.to.id]) {
+      const found = await this.store.find(id);
+      if (!found.ok) return found;
+      if (found.value !== null) moveTargets.push(found.value);
+    }
+    const refusal = await this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>(false, moveTargets);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1339,7 +1536,7 @@ export class CorpusService {
    * @param request - See {@link RuleAllocateRequest}.
    */
   async allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const refusal = this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>();
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(false, [request.leaf]);
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1639,7 +1836,7 @@ export class CorpusService {
     // it without reading §D5 first is a spec change wearing a refactor's
     // clothes.
     if (opts?.allowHandoff !== true && opts?.allowUat !== true) {
-      const refusal = this.refuseIfForeignCorpusWrite<CreateDocResult>();
+      const refusal = await this.refuseIfForeignCorpusWrite<CreateDocResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -2626,7 +2823,7 @@ export class CorpusService {
   ): Promise<Result<CorpusSetResult, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<CorpusSetResult>();
+      const refusal = await this.refuseIfForeignCorpusWrite<CorpusSetResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -3097,28 +3294,6 @@ export class CorpusService {
       }
     }
 
-    // plan.extra.prd_sync_exempt guard (SPEC-080 C4; the writer `lore outline exempt` was retired by
-    // BR-985, the field is now inert history that must not be silently dropped) — mirrors
-    // extra.validity's D10 shape immediately above, not the phases/claim/
-    // verification_evidence "drop-only" shape: a patch whose extra.prd_sync_exempt
-    // DIFFERS from the plan's CURRENT one — added where none existed, changed to a
-    // different value, OR dropped — is rejected outright. A patch that RESTATES
-    // the current exemption verbatim (or that never mentions the key at all, on a
-    // plan with no exemption) is a no-op by this check and proceeds normally.
-    if (existing.type === "plan" && parsedPatch.data.extra !== undefined) {
-      const incomingExempt = extractPrdSyncExempt({ extra: parsedPatch.data.extra });
-      const currentExempt = extractPrdSyncExempt(existing);
-      if (!prdSyncExemptEqual(incomingExempt, currentExempt)) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "extra.prd_sync_exempt",
-          message:
-            "extra.prd_sync_exempt cannot be changed via `lore set` — the outline exemption is retired (BR-985); plan-close now reads cited rule state",
-          value: parsedPatch.data.extra["prd_sync_exempt"],
-        });
-      }
-    }
-
     // Gate `spec-promote` on a spec's draft→approved TRANSITION reached via `set`
     // (retro follow-up item 8, defense-in-depth) — `set` is a SECOND write path
     // (besides `ReviewService.approve`) that can push a spec straight to "approved"
@@ -3193,7 +3368,7 @@ export class CorpusService {
     //     warning §Scope M3 / §Design Decisions D3 — a missing/invalid kind does NOT
     //     satisfy the floor, `attestationFloor` still runs as if not exempt).
     //   - `citedRuleStateClean` (BR-984, OPT-IN via a DEFAULT-OFF config knob):
-    //     evaluated only when `GateEnforcer.isPrdSyncEnabled()` is true and a rule-state
+    //     evaluated only when `GateEnforcer.isCitedRuleCheckEnabled()` is true and a rule-state
     //     service is wired — see the dedicated block below.
     //   - `assessmentFreshness` (SPEC-106, OPT-OUT): evaluated for EVERY closing plan
     //     unless it declares `extra.assessment_freshness_exempt: true` PLUS a
@@ -3248,7 +3423,7 @@ export class CorpusService {
       const attestationExemptKind =
         typeof attestationExemptKindRaw === "string" ? attestationExemptKindRaw : undefined;
       const exemptKindValid = attestationExemptKindValid(attestationExempt, attestationExemptKind).ok;
-      const prdSyncEnabled = this.gateEnforcer.isPrdSyncEnabled();
+      const citedRuleCheckEnabled = this.gateEnforcer.isCitedRuleCheckEnabled();
       // reason: SPEC-106 §Design Decisions D4 — mirrors `attestationExempt`'s
       // flag-plus-non-empty-reason resolution EXACTLY (a bare
       // `assessment_freshness_exempt: true` with no reason is NOT exempt); there
@@ -3262,6 +3437,7 @@ export class CorpusService {
 
       // reason: AC-FR-8/D7 — see corpus-service.ts's spec-create gate block's
       // identical note; `existing.id` is the RESOLVED plan's real id, never its slug.
+      let citedRuleUnknowns: CitedRuleUnknown[] = [];
       let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug, targetDocId: existing.id };
 
       if (requiresUat) {
@@ -3292,7 +3468,7 @@ export class CorpusService {
       // still needs its tasks' evidence counts for the feeding pack's
       // offending-task diagnostics.
       const needsBundle =
-        !attestationExempt || !exemptKindValid || (prdSyncEnabled && this.ruleStateService !== undefined);
+        !attestationExempt || !exemptKindValid || (citedRuleCheckEnabled && this.ruleStateService !== undefined);
       const bundleResult = needsBundle ? await this.getPlanBundle(existing.id) : undefined;
       if (bundleResult !== undefined && !bundleResult.ok) return bundleResult;
 
@@ -3373,16 +3549,21 @@ export class CorpusService {
         };
       }
 
-      planCloseCtx = { ...planCloseCtx, prdSyncEnabled };
+      planCloseCtx = { ...planCloseCtx, citedRuleCheckEnabled };
       // reason: BR-984 — the cited-rule-state predicate. `bundle.spec` is undefined for a PRD-parented or
       // unparented plan (getPlanBundle's own contract): nothing is cited, so `citedRuleViolations` stays
       // unset and `checkPlanClose` pushes nothing. Knob off (default) never reads rule state at all.
-      if (prdSyncEnabled && this.ruleStateService !== undefined) {
+      if (citedRuleCheckEnabled && this.ruleStateService !== undefined) {
         const spec = bundleResult!.value.spec;
         if (spec !== undefined) {
           const violationsResult = await this.resolveCitedRuleViolations(spec);
           if (!violationsResult.ok) return violationsResult;
-          planCloseCtx = { ...planCloseCtx, citedRuleViolations: violationsResult.value };
+          citedRuleUnknowns = violationsResult.value.unknowns;
+          planCloseCtx = {
+            ...planCloseCtx,
+            citedRuleViolations: violationsResult.value.violations,
+            citedRuleUnknowns,
+          };
         }
       }
 
@@ -3433,6 +3614,13 @@ export class CorpusService {
       );
       if (planCloseVacuityNotice !== null) {
         docPatch.extra = { ...effectiveExtra, [PLAN_CLOSE_VACUITY_NOTICE_FIELD]: planCloseVacuityNotice };
+      }
+      // reason: BR-984 - the closed plan records which cited rules were unmeasured, so the report is not stderr-only.
+      if (citedRuleUnknowns.length > 0) {
+        docPatch.extra = {
+          ...(docPatch.extra ?? effectiveExtra),
+          [PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD]: citedRuleUnknowns.map((u) => ({ rule_id: u.rule_id, reason: u.reason })),
+        };
       }
     }
 
@@ -3964,7 +4152,7 @@ export class CorpusService {
     // checked BEFORE the confirm gate, since a foreign write is refused
     // regardless of confirmation state.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
+      const refusal = await this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -4584,11 +4772,14 @@ export class CorpusService {
    *   rule-state service is wired, or when every cited rule is fine; `err` when the spec's stored
    *   criteria are unreadable or rule state could not be computed.
    */
-  private async resolveCitedRuleViolations(spec: DocRecord): Promise<Result<CitedRuleViolation[], LoreError>> {
+  private async resolveCitedRuleViolations(
+    spec: DocRecord,
+  ): Promise<Result<{ violations: CitedRuleViolation[]; unknowns: CitedRuleUnknown[] }, LoreError>> {
+    const none = { violations: [], unknowns: [] };
     const ruleState = this.ruleStateService;
-    if (ruleState === undefined) return ok([]);
+    if (ruleState === undefined) return ok(none);
     const raw = spec.extra["acceptance_criteria"];
-    if (raw === undefined) return ok([]);
+    if (raw === undefined) return ok(none);
     const parsed = specAcceptanceCriteriaSchema.safeParse(raw);
     if (!parsed.success) {
       return err({
@@ -4598,17 +4789,33 @@ export class CorpusService {
       });
     }
     const cited = new Set(parsed.data.flatMap((criterion) => criterion.cites ?? []));
-    if (cited.size === 0) return ok([]);
+    if (cited.size === 0) return ok(none);
     const full = await ruleState.full();
     if (!full.ok) return full;
     const violations: CitedRuleViolation[] = [];
+    const unknowns: CitedRuleUnknown[] = [];
+    const unmeasurable: string[] = [];
     for (const rule of full.value.rules) {
       if (!cited.has(rule.rule_id)) continue;
       if (rule.state === "contradicted" || rule.state === "stale") {
         violations.push({ rule_id: rule.rule_id, state: rule.state, offences: rule.offences });
+      } else if (rule.state === "unknown" && rule.unknown_reason !== undefined) {
+        // reason: BR-984 - git-unavailable is a failed measurement and refuses; the other reasons are facts about
+        // the recorded evidence or the spec's own choice (no anchors) and are reported, not refused.
+        if (rule.unknown_reason === "git-unavailable") unmeasurable.push(rule.rule_id);
+        else unknowns.push({ rule_id: rule.rule_id, reason: rule.unknown_reason });
       }
     }
-    return ok(violations);
+    if (unmeasurable.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message:
+          `plan-close cannot close ${spec.slug}: the state of cited rule(s) ${unmeasurable.join(", ")} could not be measured ` +
+          `(git-unavailable: git did not answer for HEAD or the citing pass's commit). Restore git access, then close again.`,
+        field: "gate:plan-close:cited-rule-measurement",
+      });
+    }
+    return ok({ violations, unknowns });
   }
 
   /**
@@ -5271,7 +5478,7 @@ export class CorpusService {
   ): Promise<Result<LinkRecord, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<LinkRecord>();
+      const refusal = await this.refuseIfForeignCorpusWrite<LinkRecord>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -5407,7 +5614,7 @@ export class CorpusService {
   ): Promise<Result<void, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<void>();
+      const refusal = await this.refuseIfForeignCorpusWrite<void>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -5628,14 +5835,6 @@ export class CorpusService {
       }
     }
 
-    // SPEC-080 §C4 — exempt-plans surfacing (see CorpusStatus.exempt_plans's own
-    // JSDoc for why this exists). Pointer-only; sourced via the SAME
-    // `extractPrdSyncExempt` (`@lore/core`) the plan-close gate itself consults —
-    // never a second hand-rolled `extra.prd_sync_exempt` shape check.
-    const exemptPlans = activeDocs
-      .filter((d) => d.type === "plan" && extractPrdSyncExempt(d) !== undefined)
-      .map((d) => ({ slug: d.slug }));
-
     return ok({
       total_docs: liveDocs.length,
       invalid_docs: invalidDocs,
@@ -5644,7 +5843,6 @@ export class CorpusService {
       last_updated: lastUpdated,
       db_size_bytes: dbSizeResult.value,
       invalidated_feeding_source_warnings: invalidatedFeedingSourceWarnings,
-      exempt_plans: exemptPlans,
     });
   }
 

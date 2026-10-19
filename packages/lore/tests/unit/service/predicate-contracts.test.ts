@@ -143,7 +143,7 @@ describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", ()
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
       planClaimedAcCoverage: [],
-      prdSyncEnabled: true,
+      citedRuleCheckEnabled: true,
       citedRuleViolations: [
         { rule_id: "BR-5", state: "stale", offences: [] },
         { rule_id: "BR-9", state: "contradicted", offences: [] },

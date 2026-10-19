@@ -123,6 +123,7 @@ import {
   attestationFloor,
   citedRuleStateClean,
   type CitedRuleViolation,
+  type CitedRuleUnknown,
   verifyReachability,
   attestationExemptKindValid,
   assessmentFreshness,
@@ -567,13 +568,13 @@ export interface GateContext {
   // -- plan-close: check() + feed() (BR-984, cited-rule state) --
   /**
    * Whether the cited-rule-state predicate (`citedRuleStateClean`) is enabled at all
-   * (`workflow.gates."plan-close".prd_sync.enabled`, resolved by the CALLER via
-   * `GateEnforcer.isPrdSyncEnabled` — module invariant: no config access here).
+   * (`workflow.gates."plan-close".cited_rule_check.enabled`, resolved by the CALLER via
+   * `GateEnforcer.isCitedRuleCheckEnabled` — module invariant: no config access here).
    * DEFAULT-OFF, the opposite polarity of every other per-predicate knob on this
    * checkpoint — `undefined`/`false` means the predicate never runs, regardless of
    * `citedRuleViolations`.
    */
-  readonly prdSyncEnabled?: boolean;
+  readonly citedRuleCheckEnabled?: boolean;
   /**
    * Pre-computed by the CALLER (`CorpusService.set`) from `RuleStateService.full()`: the rules cited
    * by the closing plan's spec criteria whose state is `contradicted`, or `stale` with no attested
@@ -582,6 +583,11 @@ export interface GateContext {
    * ancestor) — `checkPlanClose` then pushes nothing for this predicate.
    */
   readonly citedRuleViolations?: readonly CitedRuleViolation[];
+  /**
+   * Cited rules whose state was `unknown` for a reason that does not refuse (BR-984), computed by the CALLER
+   * beside `citedRuleViolations`. Never affects the verdict; `GateEnforcer.enforce` prints one advisory line each.
+   */
+  readonly citedRuleUnknowns?: readonly CitedRuleUnknown[];
 
   // -- plan-close: check() + feed() (SPEC-106, assessment freshness) --
   /**
@@ -846,6 +852,75 @@ export function describeCheckpointVacuity(
     `all ${inapplicable.length} predicate(s) reported notApplicable (${verdicts}). ` +
     `Nothing was measured, so this pass is not evidence of the checkpoint's invariant.`
   );
+}
+
+/** Prefix of every line {@link describeCitedRuleUnknowns} returns (BR-984). */
+export const CITED_RULE_UNKNOWN_PREFIX = "cited rule state unknown";
+
+/** `extra` key a closed plan records its unmeasured cited rules under (BR-984). */
+export const PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD = "plan_close_unmeasured_cited_rules";
+
+/** Why each reportable unknown reason left a cited rule unmeasured, in plain words. */
+export const CITED_RULE_UNKNOWN_EXPLANATION: Readonly<Record<CitedRuleUnknown["reason"], string>> = {
+  "no-code-anchors": "the citing spec declares no code anchors, so staleness was not measured",
+  dirty: "the latest pass was recorded on a dirty worktree, so staleness was not measured",
+  "no-commit-recorded": "the latest pass recorded no commit, so staleness was not measured",
+  "not-ancestor": "the commit of the latest pass is not in this history, so staleness was not measured",
+};
+
+/**
+ * The advisory lines `plan-close` prints for cited rules whose state could not be measured (BR-984), on the same
+ * channel as {@link describeAssessmentFreshnessNotApplicable}: vacuously true must be distinguishable from true.
+ * Never refuses (a git failure refuses elsewhere, before this runs). Pure: reads only `ctx`.
+ *
+ * @param checkpoint - The checkpoint being enforced; only `"plan-close"` can produce lines.
+ * @param ctx - The same context `checkPlanClose` read.
+ * @returns One line per unmeasured cited rule; `[]` otherwise.
+ * @example
+ * describeCitedRuleUnknowns("plan-close", { citedRuleUnknowns: [{ rule_id: "BR-5", reason: "dirty" }] });
+ * // => ["cited rule state unknown: BR-5 (dirty: the latest pass was recorded on a dirty worktree, so staleness was not measured)"]
+ */
+export function describeCitedRuleUnknowns(checkpoint: GateCheckpoint, ctx: GateContext): string[] {
+  if (checkpoint !== "plan-close") return [];
+  return (ctx.citedRuleUnknowns ?? []).map(
+    (u) => `${CITED_RULE_UNKNOWN_PREFIX}: ${u.rule_id} (${u.reason}: ${CITED_RULE_UNKNOWN_EXPLANATION[u.reason]})`,
+  );
+}
+
+/** Prefix shared by both lines {@link describeAssessmentFreshnessNotApplicable} can return (BR-225). */
+export const ASSESSMENT_FRESHNESS_NOT_APPLICABLE_PREFIX = "assessment freshness not applicable";
+
+/**
+ * The line `plan-close` prints when its assessment-freshness condition had nothing to compare
+ * (BL-D4, baseline-close-a-plan BR-225): a never-assessed plan, or an assessed plan with no task
+ * evidence/completion after it. Without this line that condition passes with no trace whenever any
+ * OTHER condition measured something, because {@link describeCheckpointVacuity} only speaks when
+ * EVERY condition was inapplicable — "vacuously true" must be distinguishable from "true".
+ *
+ * Decision: a plan is never REFUSED for lacking an assessment (BR-225: having none "is not checked");
+ * the close succeeds and says so. Pure: reads only `ctx`.
+ *
+ * @param checkpoint - The checkpoint being enforced; only `"plan-close"` can produce a line.
+ * @param ctx - The same context `checkPlanClose` read.
+ * @returns The line, or `null` when the condition was measured, exempted, or the checkpoint is another.
+ * @example
+ * describeAssessmentFreshnessNotApplicable("plan-close", {}); // => "assessment freshness not applicable: no assessment linked"
+ * @example
+ * describeAssessmentFreshnessNotApplicable("plan-close", { assessmentFreshnessExempt: true }); // => null
+ */
+export function describeAssessmentFreshnessNotApplicable(
+  checkpoint: GateCheckpoint,
+  ctx: GateContext,
+): string | null {
+  if (checkpoint !== "plan-close") return null;
+  if (ctx.assessmentFreshnessExempt === true) return null;
+  if (ctx.newestAssessmentAt === undefined) {
+    return `${ASSESSMENT_FRESHNESS_NOT_APPLICABLE_PREFIX}: no assessment linked`;
+  }
+  if (ctx.newestTaskActivityAt === undefined) {
+    return `${ASSESSMENT_FRESHNESS_NOT_APPLICABLE_PREFIX}: no task evidence or completion since the assessment`;
+  }
+  return null;
 }
 
 /**
@@ -1499,7 +1574,7 @@ const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
  *     by THIS predicate's own failure, independent of whatever
  *     `attestationFloor` itself concludes from the evidence.
  *   - `citedRuleStateClean` — OPT-IN, default-OFF (BR-984): only runs when
- *     `ctx.prdSyncEnabled === true` AND `ctx.citedRuleViolations !== undefined` (the
+ *     `ctx.citedRuleCheckEnabled === true` AND `ctx.citedRuleViolations !== undefined` (the
  *     latter is the caller's own "rule state was consulted for a spec-tier
  *     ancestor" signal — absent when no rule-state service is wired or the plan
  *     has no spec ancestor).
@@ -1603,7 +1678,7 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
       results.push({ notApplicable: true, reason: "referent-absent", referent: "planClaimedAcCoverage" });
     }
   }
-  if (ctx.prdSyncEnabled === true && ctx.citedRuleViolations !== undefined) {
+  if (ctx.citedRuleCheckEnabled === true && ctx.citedRuleViolations !== undefined) {
     results.push(citedRuleStateClean(ctx.citedRuleViolations));
   }
   if (ctx.assessmentFreshnessExempt !== true) {

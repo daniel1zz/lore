@@ -392,7 +392,11 @@ function decideRule(
         ...origin,
       });
     } else if (v.kind === "verified") verified = true;
-    else unknownReason ??= v.reason;
+    else if (v.reason === "git-unavailable") {
+      // reason: BR-984 refuses a close on git-unavailable (a failed measurement) but only reports the other
+      // reasons, so a git failure must not be masked by an earlier-seen reportable reason (first-wins would).
+      unknownReason = v.reason;
+    } else unknownReason ??= v.reason;
   }
   if (contradictedOffences.length > 0) return { state: "contradicted", offences: contradictedOffences };
   if (staleOffences.length > 0) return { state: "stale", offences: staleOffences };

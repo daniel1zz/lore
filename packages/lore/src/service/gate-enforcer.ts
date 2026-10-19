@@ -108,7 +108,7 @@ import {
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
-  resolvePrdSyncGateEnabled,
+  resolveCitedRuleCheckGateEnabled,
   resolveVerificationProfile,
   resolveAttestationMinRatio,
   SCOPE_UNDECLARED_REASON,
@@ -123,6 +123,8 @@ import type { OsUser, PlanBundle } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
+  describeAssessmentFreshnessNotApplicable,
+  describeCitedRuleUnknowns,
   describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
@@ -646,6 +648,13 @@ export class GateEnforcer {
     // `lore set --status archived` shows it without altering stdout or the exit
     // code — an observation, never an outcome, exactly like `recordSkip`.
     this.warnVacuousCheckpoint(checkpoint, results);
+    // reason: BL-D4 / BR-225 — the per-conjunct complement of the all-inapplicable notice above:
+    // an unassessed plan whose other conditions measured would otherwise close with no mention
+    // that assessment freshness was never checked. Never blocks (same channel, same contract).
+    const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
+    if (freshnessLine !== null) this.warnSink(freshnessLine);
+    // reason: BR-984 - a cited rule whose state was unknown (reportable reason) closes with a line, never silently.
+    for (const unknownLine of describeCitedRuleUnknowns(checkpoint, ctx)) this.warnSink(unknownLine);
     if (!isCheckpointBlocked(results)) {
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — the ONE thing that, before this task, left NO trace
@@ -1050,23 +1059,23 @@ export class GateEnforcer {
 
   /**
    * Whether `plan-close`'s `citedRuleStateClean` (BR-984) sub-predicate specifically is
-   * enabled (`workflow.gates."plan-close".prd_sync.enabled`, SPEC-080 §C4) —
+   * enabled (`workflow.gates."plan-close".cited_rule_check.enabled`, SPEC-080 §C4) —
    * NARROWER than `isEnabled("plan-close")`, which governs the WHOLE
-   * checkpoint. A caller building `GateContext.prdSyncEnabled`
+   * checkpoint. A caller building `GateContext.citedRuleCheckEnabled`
    * (`CorpusService.set`) consults this, not `isEnabled`.
    *
    * DELIBERATELY THE OPPOSITE DEFAULT of `isTaskClaimAnchorOverlapEnabled` /
    * `isAcQuantifiableEnabled` / `isOracleCoverageEnabled` / `isRequiresUatEnabled`
    * above — those all default ENABLED (an explicit `false` turns them off);
    * this one defaults DISABLED (an explicit `true` turns it on), per
-   * `resolvePrdSyncGateEnabled`'s own JSDoc.
+   * `resolveCitedRuleCheckGateEnabled`'s own JSDoc.
    *
    * @returns `true` iff the sub-key is explicitly enabled; `false` otherwise.
    * @example
-   * enforcer.isPrdSyncEnabled(); // => false unless config explicitly enables it
+   * enforcer.isCitedRuleCheckEnabled(); // => false unless config explicitly enables it
    */
-  isPrdSyncEnabled(): boolean {
-    return resolvePrdSyncGateEnabled(this.config);
+  isCitedRuleCheckEnabled(): boolean {
+    return resolveCitedRuleCheckGateEnabled(this.config);
   }
 
   /**

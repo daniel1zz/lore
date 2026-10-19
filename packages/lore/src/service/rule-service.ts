@@ -215,7 +215,7 @@ export class RuleService {
    * from now on. Called once per CLI process by the composition root.
    */
   setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
-    this.writeAuthority = new CorpusWriteAuthority(this.store, context);
+    this.writeAuthority = new CorpusWriteAuthority(this.store, context, this.writer);
   }
 
   /**

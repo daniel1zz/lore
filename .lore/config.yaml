@@ -62,13 +62,12 @@ workflow:
     # acCountMeetsFloor). No required_oracles: no oracle-coverage floor either.
     domain-overview:
       min_acs: 0
-  # SPEC-080 Phase 3 ARMED 2026-07-26 after 5 observed clean plan-closes
-  # (SPEC-080/059/053/054/055; arming threshold was 2). plan-close now runs
-  # the prd-outline content-diff sync predicate; exemption via the dedicated
-  # verb (extra.prd_sync_exempt), surfaced by `lore status`.
+  # plan-close cited-rule check (BR-984) ARMED. Armed 2026-07-26 as the prd-outline sync switch
+  # (SPEC-080 Phase 3); that predicate is retired and the switch was renamed for what it now
+  # switches, `cited_rule_check` (BL-D3, was `prd_sync`).
   gates:
     plan-close:
-      prd_sync:
+      cited_rule_check:
         enabled: true
     # Citation gate (SPEC-157 C4) ARMED 2026-10-09 on all 12 baseline branches after the fast-mode
     # exit passed (knowledge-fast-mode-re-assessment-after-remediation-ac-bls2-13). A NEW or REVISED

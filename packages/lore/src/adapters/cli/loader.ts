@@ -55,7 +55,7 @@
 
 import { dirname } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -74,7 +74,7 @@ import {
   resolveGlobalConfigPath,
 } from "@lore/core/node";
 import { ambientOfInvocation, createAppWithWriteContext, type App, type AppAmbient } from "../../app.js";
-import { findLoreDbPath, formatErrorFor, exitCode } from "./utils.js";
+import { findLoreDbPath, formatError, formatErrorFor, exitCode } from "./utils.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { resolveCorpus, type CorpusLocator } from "./corpus-resolution.js";
 import {
@@ -333,7 +333,11 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
 export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig | undefined {
   const dbPath = findLoreDbPath(io, locator);
   const configResult = resolveProjectConfigResult(dbPath, io);
-  if (!configResult.ok) return undefined;
+  if (!configResult.ok) {
+    // reason: the retired-name refusal must not read as "no config" in silence (every gate would run unconfigured).
+    if (isPrdSyncRenameError(configResult.error)) printLine(io.stderr, formatError(configResult.error)); // CLI surface
+    return undefined;
+  }
   const { sync: _sync, ...configWithoutSync } = configResult.value;
   return configWithoutSync as LoreConfig;
 }
@@ -416,7 +420,9 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
     rawConfig = configResult.value;
-  } else if (isAiConfigValidationError(configResult.error)) {
+  } else if (isAiConfigValidationError(configResult.error) || isPrdSyncRenameError(configResult.error)) {
+    // BL-D3: a config still naming `prd_sync` that this checkout may not rewrite (or that carries both names) fails
+    // loud here for the same reason an invalid `ai` block does — the fallback below would run every gate unconfigured.
     // SPEC-030 AC-HJ-3: an invalid `ai` block MUST fail loud — silently falling back to
     // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
@@ -552,6 +558,9 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     callerDir: ambient.cwd,
     claimTtlMinutes: resolveClaimTtlMinutes(telemetryOnlyConfig),
   };
+  // reason: the write route itself consults the same authority before refusing a foreign write (task-skill-fix-the-
+  // one-write-route-honours-claim-scoped-corpus), so a scoped lease that authorized a baseline write is honoured by it.
+  app.corpusService.setCorpusWriteContext(corpusWriteAuthority);
   app.ruleService?.setCorpusWriteContext(corpusWriteAuthority);
   app.ruleChangeService?.setCorpusWriteContext(corpusWriteAuthority);
   app.acService?.setCorpusWriteContext(corpusWriteAuthority);
