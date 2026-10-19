@@ -1,94 +1,101 @@
 /**
- * `runIssuesSync` — the render + exit-code half of `lore issues --sync [--apply] [--json]`
- * (spec-archiving-the-work-that-resolves-a-defect-report-closes D3, Public Interface).
+ * `runIssuesSync` — the render + exit-code half of `lore issues --sync [--json]`, the PUSH-ONLY repair
+ * (spec-github-owns-issue-report-state-no-mirror-task-work-carries D5, AC-GS-16).
+ *
+ * `--sync` repairs GitHub from the carriers: it closes every `fixed (close pending)` issue, converges a fixed
+ * issue's `resolution:fixed` label, and strips `resolution:*` labels an open issue must not carry. It reads the
+ * corpus (the carriers) and writes nothing to it but `issue_close_failed` audit rows.
  *
  * Kept beside `commands/issues.ts` rather than inside it (the vitest-safe sibling split documented in
  * `adapters/cli/CLAUDE.md`): this module imports only the service types and `utils.ts`, so
- * `tests/unit/adapters/issues-sync.test.ts` drives it with a recording fake closer and no `bun:sqlite`.
+ * `tests/unit/adapters/issues-sync.test.ts` drives it with a recording fake driver and no `bun:sqlite`.
  *
- * Exit codes: 0 — no drift, or every apply succeeded (and without `--apply`, always 0 once the drift was
- * read); 1 — any apply failed, any report's GitHub state could not be read, or no GitHub closer is
- * configured; a store fault maps through `exitCode`. Without `--apply` nothing is written.
+ * Exit codes: 0 — every repair succeeded, or nothing needed repair; the FAILING call's own kind otherwise
+ * (`exitCode(error)`: 8 auth, 9 transport, 10 rate limit, 4 validation, ...) — the first failure in change order
+ * decides; 4 when no GitHub closer is configured; a store fault maps through `exitCode`.
  *
- * Side-effect class: IO (stdout / stderr, and `--apply` writes through the step's closer).
+ * ⛔ `clean` is printed only on a path that already holds a COMPLETE listing: the caller fetches the listing
+ * first and a failed listing exits before this module runs, so an empty plan can never mean "could not look".
+ *
+ * Side-effect class: IO (stdout / stderr, and GitHub writes through the driver's closer).
  */
 
-import type { IssueCloseOnArchive, IssueSyncOutcome } from "../../service/issue-close-on-archive.js";
+import type { IssueCloseOnArchive, IssueSyncListing, IssueSyncOutcome } from "../../service/issue-close-on-archive.js";
 import { exitCode, formatErrorFor } from "./utils.js";
 import type { Invocation } from "@lore/core";
 import { printLine } from "./output.js";
 
 /** Minimal shape of the step this module drives — keeps the unit test free of a real store. */
-export type IssueSyncDriver = Pick<IssueCloseOnArchive, "planSync" | "applySync">;
+export type IssueSyncDriver = Pick<IssueCloseOnArchive, "applySync">;
 
 /**
  * @param inv - the command's Invocation (the error line names its exact retry command)
  * @param driver - the App's post-archive step (`app.issueClose`)
- * @param opts - `apply`: repair drift (otherwise report only); `json`: machine-readable stdout
+ * @param listing - the COMPLETE live listing the caller already fetched
+ * @param opts - `json`: machine-readable stdout
  * @returns the process exit code the caller should set
  */
 export async function runIssuesSync(
   inv: Invocation,
   driver: IssueSyncDriver | undefined,
-  opts: { apply: boolean; json: boolean },
+  listing: IssueSyncListing,
+  opts: { json: boolean },
 ): Promise<number> {
   if (driver === undefined) {
     inv.io.stderr.write("Error: this App has no issue-sync step wired.\n");
     return 1;
   }
-  const outcome: IssueSyncOutcome = opts.apply ? await driver.applySync() : await driver.planSync();
+  const outcome: IssueSyncOutcome = await driver.applySync(listing);
 
   if (outcome.kind === "not_configured") {
     inv.io.stderr.write("Error: GitHub not configured — set feedback.upstream.repo in .lore/config.yaml, then re-run\n");
-    return 1;
+    return 4;
   }
   if (outcome.kind === "store_error") {
     inv.io.stderr.write(formatErrorFor(inv, outcome.error) + "\n");
     return exitCode(outcome.error);
   }
 
-  const { plan, applied } = outcome;
-  const applyFailed = (applied ?? []).some((entry) => entry.error !== undefined);
-  const failed = applyFailed || plan.unreadable.length > 0;
+  const applied = outcome.applied ?? [];
+  const firstFailure = applied.find((entry) => entry.failure !== undefined)?.failure;
 
   if (opts.json) {
     printLine(inv.io.stdout,  // CLI surface
       JSON.stringify(
         {
-          ok: !failed,
+          ok: firstFailure === undefined,
           data: {
-            drift: plan.drift,
-            ...(applied !== undefined ? { applied } : {}),
-            ...(plan.unreadable.length > 0 ? { unreadable: plan.unreadable } : {}),
+            clean: outcome.plan.changes.length === 0,
+            changes: outcome.plan.changes,
+            applied: applied.map((entry) => ({
+              number: entry.number,
+              action: entry.action,
+              lines: entry.lines,
+              ...(entry.failure !== undefined ? { failed: true } : {}),
+            })),
           },
         },
         null,
         2,
       ),
     );
-    return failed ? 1 : 0;
+    return firstFailure === undefined ? 0 : exitCode(firstFailure);
   }
 
-  if (plan.drift.length === 0 && plan.unreadable.length === 0) {
-    printLine(inv.io.stdout, "sync: clean — no GitHub issue drift found."); // CLI surface
+  if (outcome.plan.changes.length === 0) {
+    printLine(inv.io.stdout, "sync: clean — the complete listing showed nothing to repair."); // CLI surface
     return 0;
   }
-  if (plan.drift.length > 0) {
-    printLine(inv.io.stdout, `sync: ${plan.drift.length} issue(s) drifted${applied === undefined ? " (run with --apply to repair)" : ""}:`); // CLI surface
-    for (const entry of plan.drift) {
-      const facts = [`${entry.computed}`, `github ${entry.github_state}`, entry.missing_label ? "label missing" : "label ok"];
-      printLine(inv.io.stdout, `  #${entry.number} ${entry.slug} — ${facts.join(", ")}`); // CLI surface
+  printLine(inv.io.stdout, `sync: ${outcome.plan.changes.length} issue(s) repaired or attempted:`); // CLI surface
+  for (const entry of applied) {
+    for (const line of entry.lines) {
+      if (entry.failure === undefined) printLine(inv.io.stdout, `  ${line}`); // CLI surface
+      else inv.io.stderr.write(`  ${line}\n`);
     }
   }
-  for (const entry of applied ?? []) {
-    if (entry.error === undefined) {
-      printLine(inv.io.stdout, `  #${entry.number}: repaired (closed=${entry.closed}, labelled=${entry.labelled})`); // CLI surface
-    } else {
-      inv.io.stderr.write(`  #${entry.number}: repair FAILED — ${entry.error}\n`);
-    }
+  if (firstFailure !== undefined) {
+    inv.io.stderr.write(formatErrorFor(inv, firstFailure) + "\n");
+    return exitCode(firstFailure);
   }
-  for (const entry of plan.unreadable) {
-    inv.io.stderr.write(`  #${entry.number} ${entry.slug}: could not read GitHub state — ${entry.error}\n`);
-  }
-  return failed ? 1 : 0;
+  return 0;
 }

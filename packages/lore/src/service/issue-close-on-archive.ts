@@ -1,8 +1,8 @@
 /**
  * `IssueCloseOnArchive` — the ONE post-archive step that closes every GitHub issue a just-archived
  * CARRIER names in `extra.issues` (a task archived by `lore done`, a plan archived by `lore archive` /
- * `lore set --status archived`), plus the legacy `lore issues --sync` drift repair, which a later task
- * of the same plan rewrites (spec-github-owns-issue-report-state-no-mirror-task-work-carries, AC-GS-8).
+ * `lore set --status archived`), plus the PUSH-ONLY `lore issues --sync` repair that closes whatever an archive
+ * left open (spec-github-owns-issue-report-state-no-mirror-task-work-carries, AC-GS-8, AC-GS-16).
  *
  * Public surface:
  *   - `ArchiveIssueClosePort` — the optional port `CorpusService` and `TaskWorkflowService` each hold
@@ -11,6 +11,7 @@
  *     already committed ("post-commit: the archive is never rolled back").
  *   - `IssueCloseItem` — one reportable line (`stream` says stdout vs stderr).
  *   - `IssueCloseOnArchive` — the implementation: `onArchived`, `planSync`, `applySync`.
+ *   - `IssueSyncListing` / `IssueSyncOutcome` — the complete live listing `--sync` is handed, and what it found and did.
  *   - `ISSUE_CLOSE_FAILED_AUDIT_ACTION` — the audit action written on every failed GitHub call.
  *
  * Invariants:
@@ -23,19 +24,23 @@
  *   - Close, comment and label are three independent calls; a comment or label failure never undoes
  *     the close. An already-closed (completed) issue gets no second comment.
  *   - The repo written to is the configured upstream; a carrier names only `repo_id`.
- *   - The corpus is read-only here except for `issue_close_failed` audit rows.
+ *   - The corpus is read-only here except for `issue_close_failed` audit rows: `--sync` repairs GitHub from the
+ *     carriers and never writes a document, version or link.
+ *   - `planSync`/`applySync` take the COMPLETE listing as an argument; a listing that failed never reaches them,
+ *     so an empty plan means "nothing to do" and never "could not look".
  *
  * Side-effect class: IO (store reads, audit append, GitHub via the injected `IssueCloser`).
  *
  * Source: spec-github-owns-issue-report-state-no-mirror-task-work-carries, AC-GS-8.
  */
 
-import { TERMINAL_ISSUE_RESOLUTIONS, computeIssueResolution, hasIssueReport } from "./issue-resolution.js";
 import type { GithubIssueSnapshot, IssueCloser } from "./issue-closer-port.js";
-import { labelToResolution, readGithubIssueRef, resolutionToLabel } from "./resolution-projector.js";
+import type { GithubListedIssue } from "./github-intake-port.js";
+import { joinIssueStatuses } from "./github-issue-listing.js";
+import { labelToResolution, resolutionToLabel } from "./resolution-projector.js";
 import type { GithubIssueRef } from "./resolution-projector.js";
-import { issueRefSchema, ok } from "@lore/core";
-import type { DocRecord, IssueRef, IssueResolution, LoreError, Result } from "@lore/core";
+import { isInvalidated, issueRefSchema } from "@lore/core";
+import type { DocRecord, IssueRef, IssueResolution, LoreError } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
@@ -59,6 +64,8 @@ export interface IssueCloseItem {
   readonly number?: number;
   readonly message: string;
   readonly stream: "stdout" | "stderr";
+  /** The failing call's error, present on every failure kind; `--sync` maps it to its exit code. */
+  readonly error?: LoreError;
 }
 
 /** The port a service calls right after an archive commit. */
@@ -71,36 +78,42 @@ export interface ArchiveIssueClosePort {
   onArchived(doc: DocRecord, actor: string): Promise<IssueCloseItem[]>;
 }
 
-/** One `lore issues --sync` drift row (spec Public Interface). */
-export interface IssueDriftEntry {
-  readonly number: number;
-  readonly slug: string;
-  readonly computed: IssueResolution;
-  readonly github_state: "open" | "closed";
-  readonly missing_label: boolean;
-  /** Present (true) only when the report's own task was archived through `lore done` (D3) — it is closed, not just labelled. */
-  readonly completed_via_done?: true;
+/** The complete live listing `--sync` reads: every issue (PRs excluded) and the repository's numeric id. */
+export interface IssueSyncListing {
+  readonly issues: readonly GithubListedIssue[];
+  readonly repoId: number;
 }
 
-/** One `--sync --apply` outcome. `closed` = THIS apply closed it; `labelled` = the label is now present. */
+/** What one planned repair does to one issue. */
+export type IssueSyncAction =
+  /** An open issue an archived carrier fixed: close it as completed, comment, converge `resolution:fixed`. */
+  | "close"
+  /** A closed issue an archived carrier fixed whose labels are not exactly `resolution:fixed`. */
+  | "label_fixed"
+  /** An open issue carrying `resolution:*` labels it must not have (retired or stray verdict). */
+  | "strip_labels";
+
+/** One planned repair. */
+export interface IssueSyncChange {
+  readonly number: number;
+  readonly action: IssueSyncAction;
+  /** Slug of the archived carrier that fixed the issue; `undefined` for `strip_labels`. */
+  readonly carrierSlug?: string;
+  /** Labels `strip_labels` removes; empty for the other actions. */
+  readonly removeLabels: readonly string[];
+}
+
+/** One applied repair: the lines to print and, when a call failed, that call's error. */
 export interface IssueSyncApplied {
   readonly number: number;
-  readonly closed: boolean;
-  readonly labelled: boolean;
-  readonly error?: string;
-}
-
-/** A report whose GitHub state could not be read — reported, never skipped silently. */
-export interface IssueSyncUnreadable {
-  readonly number: number;
-  readonly slug: string;
-  readonly error: string;
+  readonly action: IssueSyncAction;
+  readonly lines: readonly string[];
+  readonly failure?: LoreError;
 }
 
 /** What {@link IssueCloseOnArchive.planSync} found. */
 export interface IssueSyncPlan {
-  readonly drift: readonly IssueDriftEntry[];
-  readonly unreadable: readonly IssueSyncUnreadable[];
+  readonly changes: readonly IssueSyncChange[];
 }
 
 /** Result of {@link IssueCloseOnArchive.planSync} / {@link IssueCloseOnArchive.applySync}. */
@@ -108,6 +121,12 @@ export type IssueSyncOutcome =
   | { readonly kind: "not_configured"; readonly message: string }
   | { readonly kind: "store_error"; readonly error: LoreError }
   | { readonly kind: "planned"; readonly plan: IssueSyncPlan; readonly applied?: readonly IssueSyncApplied[] };
+
+/** The actor `--sync` writes failure audit rows as. */
+const SYNC_ACTOR = "lore issues --sync";
+
+/** Prefix of every verdict label; the corpus never reads state from one, `--sync` only removes strays. */
+const RESOLUTION_LABEL_PREFIX = "resolution:";
 
 const NOT_CONFIGURED_MESSAGE =
   "GitHub not configured — run lore issues --sync after configuring feedback.upstream";
@@ -152,15 +171,6 @@ function readCarrierIssueRefs(doc: DocRecord): readonly IssueRef[] {
 
 function describeError(error: LoreError): string {
   return "message" in error ? error.message : error.code;
-}
-
-/** A report plus the facts D1/D3 need to judge it. */
-interface ReportFacts {
-  readonly task: DocRecord;
-  readonly computed: IssueResolution;
-  readonly hasArchivedSource: boolean;
-  /** The archived-or-active resolving sources, in link order. */
-  readonly sources: readonly DocRecord[];
 }
 
 /** See the module header. */
@@ -230,6 +240,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
           number: ref.issueNumber,
           message: `issue #${ref.issueNumber}: could not read GitHub state: ${reason} — run lore issues --sync${audited}`,
           stream: "stderr",
+          error: snapshot.error,
         });
         continue;
       }
@@ -249,148 +260,91 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
   }
 
   /**
-   * Finds every drifted report (D3 a/b) without writing anything.
+   * Plans the repairs a COMPLETE live listing calls for, without writing anything.
    *
-   * @returns `not_configured` when no closer is wired; `planned` otherwise
+   * @param listing - the complete listing (a failed listing never gets here)
+   * @returns `not_configured` when no closer is wired; `store_error` when the carriers cannot be read; `planned` otherwise
    */
-  async planSync(): Promise<IssueSyncOutcome> {
+  async planSync(listing: IssueSyncListing): Promise<IssueSyncOutcome> {
     if (this.closer === undefined) return { kind: "not_configured", message: NOT_CONFIGURED_MESSAGE };
-    const reports = await this.store.findMany({ type: "task" });
-    if (!reports.ok) return { kind: "store_error", error: reports.error };
-
-    const drift: IssueDriftEntry[] = [];
-    const unreadable: IssueSyncUnreadable[] = [];
-    for (const task of reports.value) {
-      if (!hasIssueReport(task.extra)) continue;
-      const ref = readGithubIssueRef(task.extra);
-      if (ref === undefined) continue;
-      const facts = await this.readReportFacts(task.id);
-      if (!facts.ok) return { kind: "store_error", error: facts.error };
-      if (facts.facts === null) continue;
-      const { computed, hasArchivedSource } = facts.facts;
-      let completedViaDone = false;
-      if (computed === "closed") {
-        const completion = await this.wasCompletedThroughDone(task);
-        if (!completion.ok) return { kind: "store_error", error: completion.error };
-        completedViaDone = completion.value;
-      }
-      const wantsClose = (computed === "fixed" && hasArchivedSource) || completedViaDone;
-      const wantsLabelOnly = computed !== "fixed" && TERMINAL_ISSUE_RESOLUTIONS.has(computed);
-      if (!wantsClose && !wantsLabelOnly) continue;
-
-      const effective = this.effectiveRef(ref);
-      const snapshot = await this.closer.readIssue(effective);
-      if (!snapshot.ok) {
-        unreadable.push({ number: ref.issueNumber, slug: task.slug, error: describeError(snapshot.error) });
-        continue;
-      }
-      const missingLabel = !snapshot.value.labels.includes(resolutionToLabel(computed));
-      const listed = wantsClose ? snapshot.value.state === "open" || missingLabel : missingLabel;
-      if (!listed) continue;
-      drift.push({
-        number: ref.issueNumber,
-        slug: task.slug,
-        computed,
-        github_state: snapshot.value.state,
-        missing_label: missingLabel,
-        ...(completedViaDone ? { completed_via_done: true as const } : {}),
-      });
-    }
-    return { kind: "planned", plan: { drift, unreadable } };
+    const planned = await this.planChanges(listing);
+    if (!planned.ok) return { kind: "store_error", error: planned.error };
+    return { kind: "planned", plan: { changes: planned.changes.map((entry) => entry.change) } };
   }
 
   /**
-   * {@link planSync}, then repairs each drift entry: a `fixed` report is closed (if open) and labelled;
-   * every other terminal state is ONLY labelled — never closed (BR-537 / Q2 is a separate product
-   * decision). Failures land in `applied[].error` and the audit log; they never abort the loop.
+   * {@link planSync}, then pushes each change to GitHub. A failing call is recorded on its
+   * `applied` entry (and audited when a carrier names it) and never aborts the loop.
    */
-  async applySync(): Promise<IssueSyncOutcome> {
-    const planned = await this.planSync();
-    if (planned.kind !== "planned" || this.closer === undefined) return planned;
+  async applySync(listing: IssueSyncListing): Promise<IssueSyncOutcome> {
+    if (this.closer === undefined) return { kind: "not_configured", message: NOT_CONFIGURED_MESSAGE };
+    if (this.upstreamRepo === undefined) return { kind: "not_configured", message: NOT_CONFIGURED_MESSAGE };
     const closer = this.closer;
-    const reports = await this.store.findMany({ type: "task" });
-    if (!reports.ok) return { kind: "store_error", error: reports.error };
-    const bySlug = new Map(reports.value.map((task) => [task.slug, task]));
+    const planned = await this.planChanges(listing);
+    if (!planned.ok) return { kind: "store_error", error: planned.error };
 
     const applied: IssueSyncApplied[] = [];
-    for (const entry of planned.plan.drift) {
-      const task = bySlug.get(entry.slug);
-      const rawRef = task === undefined ? undefined : readGithubIssueRef(task.extra);
-      if (task === undefined || rawRef === undefined) {
-        applied.push({ number: entry.number, closed: false, labelled: false, error: "report vanished during sync" });
-        continue;
-      }
-      const ref = this.effectiveRef(rawRef);
-      let closed = false;
-      let error: string | undefined;
-      if ((entry.computed === "fixed" || entry.completed_via_done === true) && entry.github_state === "open") {
-        const closeResult = await closer.closeIssue(ref);
-        if (closeResult.ok) {
-          closed = !closeResult.value.alreadyClosed;
+    for (const { change, carrier } of planned.changes) {
+      const ref: GithubIssueRef = { repo: this.upstreamRepo, issueNumber: change.number, repo_id: listing.repoId };
+      if (change.action === "close" && carrier !== undefined) {
+        const items = await this.closeOne(closer, ref, carrier, SYNC_ACTOR);
+        const failure = items.find((item) => item.error !== undefined)?.error;
+        applied.push({ number: change.number, action: change.action, lines: items.map((item) => item.message), ...(failure !== undefined ? { failure } : {}) });
+      } else if (change.action === "label_fixed" && carrier !== undefined) {
+        const labelled = await closer.labelIssue(ref, resolutionToLabel("fixed"));
+        if (labelled.ok) {
+          applied.push({ number: change.number, action: change.action, lines: [`issue #${change.number}: converged to resolution:fixed (fixed by ${carrier.slug})`] });
         } else {
-          error = `close failed: ${describeError(closeResult.error)}`;
-          await this.auditFailure(task, "close", entry.number, describeError(closeResult.error), "lore issues --sync");
+          const audited = await this.auditFailureForDoc(carrier, SYNC_ACTOR, "label", change.number, describeError(labelled.error));
+          applied.push({ number: change.number, action: change.action, lines: [`issue #${change.number}: label FAILED: ${describeError(labelled.error)}${audited}`], failure: labelled.error });
         }
+      } else {
+        const removed = await closer.removeLabels(ref, change.removeLabels);
+        applied.push(
+          removed.ok
+            ? { number: change.number, action: change.action, lines: [`issue #${change.number}: removed stray label(s) ${change.removeLabels.join(", ")}`] }
+            : { number: change.number, action: change.action, lines: [`issue #${change.number}: label removal FAILED: ${describeError(removed.error)}`], failure: removed.error },
+        );
       }
-      let labelled = !entry.missing_label;
-      if (error === undefined && entry.missing_label) {
-        const labelResult = await closer.labelIssue(ref, resolutionToLabel(entry.computed));
-        if (labelResult.ok) {
-          labelled = true;
-        } else {
-          error = `label failed: ${describeError(labelResult.error)}`;
-          await this.auditFailure(task, "label", entry.number, describeError(labelResult.error), "lore issues --sync");
-        }
-      }
-      applied.push({ number: entry.number, closed, labelled, ...(error !== undefined ? { error } : {}) });
     }
-    return { kind: "planned", plan: planned.plan, applied };
+    return { kind: "planned", plan: { changes: planned.changes.map((entry) => entry.change) }, applied };
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
 
-  /** D3 — true iff the done walk's own audit row shows `lore done` archived this task. */
-  private async wasCompletedThroughDone(task: DocRecord): Promise<Result<boolean, LoreError>> {
-    if (task.status !== "archived") return ok(false);
-    const rows = await this.store.queryAudit({ doc_id: task.id, action: "update" });
-    if (!rows.ok) return rows;
-    return ok(rows.value.some((row) => row.details?.["done"] === true && row.details?.["status_to"] === "archived"));
-  }
-
-  /** The configured repo wins over the stored one (rename-proof); the stored ref supplies the number. */
-  private effectiveRef(ref: GithubIssueRef): GithubIssueRef {
-    return this.upstreamRepo === undefined ? ref : { ...ref, repo: this.upstreamRepo };
-  }
-
-  /** Loads one report + its resolving sources and computes its resolution (same call shape as `lore issues`). */
-  private async readReportFacts(
-    reportId: string,
-  ): Promise<{ ok: true; facts: ReportFacts | null } | { ok: false; error: LoreError }> {
-    const found = await this.store.find(reportId);
-    if (!found.ok) return { ok: false, error: found.error };
-    const task = found.value;
-    if (task === null || !hasIssueReport(task.extra)) return { ok: true, facts: null };
-
-    const inbound = await this.store.findLinks(task.id, "in");
-    if (!inbound.ok) return { ok: false, error: inbound.error };
-    const edges = inbound.value.filter((link) => link.link_type === "resolves");
-    const sourcesById = await this.store.findByIds(edges.map((edge) => edge.from_id));
-    if (!sourcesById.ok) return { ok: false, error: sourcesById.error };
-    const sources = [...sourcesById.value.values()];
-    const computed = computeIssueResolution(
-      task,
-      edges.map((edge) => ({ from_id: edge.from_id })),
-      sources.map((source) => ({ id: source.id, status: source.status })),
-    );
-    return {
-      ok: true,
-      facts: {
-        task,
-        computed,
-        hasArchivedSource: sources.some((source) => source.status === "archived"),
-        sources,
-      },
-    };
+  /**
+   * Joins the listing against the carriers (tasks and plans naming an issue, archived ones included) and
+   * decides one change per issue that needs one. Pure over its two inputs apart from the store read.
+   */
+  private async planChanges(
+    listing: IssueSyncListing,
+  ): Promise<{ ok: true; changes: ReadonlyArray<{ change: IssueSyncChange; carrier?: DocRecord }> } | { ok: false; error: LoreError }> {
+    const carriers: DocRecord[] = [];
+    for (const type of ["task", "plan"] as const) {
+      const found = await this.store.findMany({ type });
+      if (!found.ok) return { ok: false, error: found.error };
+      carriers.push(...found.value.filter((doc) => readCarrierIssueRefs(doc).length > 0));
+    }
+    const nowIso = this.now();
+    const rows = joinIssueStatuses(listing.issues, carriers, listing.repoId, nowIso);
+    const changes: Array<{ change: IssueSyncChange; carrier?: DocRecord }> = [];
+    for (const row of rows) {
+      const number = row.issue.number;
+      const resolutionLabels = (row.issue.labels ?? []).filter((label) => label.startsWith(RESOLUTION_LABEL_PREFIX));
+      const fixer = carriers
+        .filter((doc) => doc.status === "archived" && !isInvalidated(doc, nowIso))
+        .filter((doc) => readCarrierIssueRefs(doc).some((ref) => ref.repo_id === listing.repoId && ref.number === number))
+        .sort((a, b) => a.slug.localeCompare(b.slug))[0];
+      if (row.status === "fixed (close pending)" && fixer !== undefined) {
+        changes.push({ change: { number, action: "close", carrierSlug: fixer.slug, removeLabels: [] }, carrier: fixer });
+      } else if (row.status === "fixed" && fixer !== undefined) {
+        const exact = resolutionLabels.length === 1 && resolutionLabels[0] === resolutionToLabel("fixed");
+        if (!exact) changes.push({ change: { number, action: "label_fixed", carrierSlug: fixer.slug, removeLabels: [] }, carrier: fixer });
+      } else if (row.issue.state !== "closed" && resolutionLabels.length > 0) {
+        changes.push({ change: { number, action: "strip_labels", removeLabels: resolutionLabels } });
+      }
+    }
+    return { ok: true, changes };
   }
 
   /** Close, comment, label — three independent calls (D2). */
@@ -413,6 +367,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
         number,
         message: `issue #${number}: close FAILED: ${reason} — run lore issues --sync${audited}`,
         stream: "stderr",
+        error: closeResult.error,
       });
       return items;
     }
@@ -441,6 +396,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
           number,
           message: `issue #${number}: closed, but the comment FAILED: ${reason}${audited}`,
           stream: "stderr",
+          error: commentResult.error,
         });
       }
     }
@@ -454,6 +410,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
         number,
         message: `issue #${number}: closed, but the ${label} label FAILED: ${reason} — run lore issues --sync${audited}`,
         stream: "stderr",
+        error: labelResult.error,
       });
     }
     return items;
@@ -475,22 +432,5 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
       details: { issue: number, step, error: reason, source: doc.slug },
     });
     return written.ok ? "" : ` (audit row NOT written: ${describeError(written.error)})`;
-  }
-
-  private async auditFailure(
-    task: DocRecord,
-    step: "close" | "comment" | "label",
-    number: number,
-    reason: string,
-    source: string,
-  ): Promise<void> {
-    await this.writer.appendAudit({
-      timestamp: this.now(),
-      by: "lore issues --sync",
-      sessionId: task.id,
-      action: ISSUE_CLOSE_FAILED_AUDIT_ACTION,
-      docId: task.id,
-      details: { issue: number, step, error: reason, source },
-    });
   }
 }
