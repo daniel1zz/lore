@@ -59,12 +59,9 @@
  *     write/delete the `FsWritePort` has no atomic primitive, so the race is narrowed to one
  *     read-to-write gap, not eliminated. Prune needs `FsWritePort.deleteFile`; a port without it
  *     makes a refresh that must prune fail loud (VALIDATION_ERROR), never skip.
- *   - Adoption (AC-STR-6): `runContextRefresh` honours `deps.budgets.adoption`
- *     only through `runMemoryFileChecks` (it applies adoption). enforce -> a
- *     `section_*` finding is in `.deterministic` and refuses the write naming
- *     its kind + section (message of each finding); warn (or absent) ->
- *     `.deterministic` is empty, the file is written, and the `downgraded`
- *     advisories are returned on `ContextRefreshReport.downgraded`.
+ *   - Limits are always enforced: a `section_*` (or ceiling) finding from `runMemoryFileChecks` is in
+ *     `.deterministic` and refuses the write naming its kind + section (message of each finding). There is
+ *     no adoption mode that downgrades it (retired by task-memory-file-limits-are-always-enforced-the-warn-adoption).
  *   - `runContextInit` NEVER calls any AI provider either — `opts.narrative`
  *     is an ALREADY-RESOLVED string (or absent). Resolving whether to call
  *     AI, and rendering the narrative-compression prompt if so, is the CLI
@@ -147,7 +144,6 @@
 import { createHash } from "node:crypto";
 import { err, ok, resolveContextConfig, resolveMemoryFileBudgets } from "@lore/core";
 import type { ContextConfigLayer, Fragment, FsWritePort, LoreError, MemoryFileBudgets, OutletId, Result } from "@lore/core";
-import type { AdvisoryFinding } from "../service/claude-md-findings.js";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { loadFragmentDocuments, prefetchReferenceProbe } from "../service/code-reference-index.js";
@@ -185,12 +181,20 @@ const SPEC_DISCOVERY_POINTER_SECTION_ID = "spec-discovery-pointer";
  * Minimal Z2 placeholder narrative written on a fresh `context init` when no
  * `opts.narrative` was resolved (D3: "skeleton" fallback) — deliberately
  * short and self-describing, never a hostage to AI availability.
+ *
+ * reason: it carries the three required root sections the managed zone does not supply (What This Is, Commands,
+ * Architecture), in contract order ahead of the managed zone's Module Index and Finding Live Project State. Limits
+ * are always enforced, so a skeleton without them would make the very next `lore context refresh` refuse the file
+ * `context init` just wrote.
  */
 const SKELETON_NARRATIVE =
   "# Project Discipline\n\n" +
   "_(placeholder — describe this project's standing rules, prohibitions, and thresholds here.\n" +
   "The sections below this point are lore-managed: they regenerate automatically via\n" +
-  "`lore context refresh` and should not be hand-edited.)_\n";
+  "`lore context refresh` and should not be hand-edited.)_\n\n" +
+  "## What This Is\n\n_(placeholder — one paragraph: what this project is and who it serves.)_\n\n" +
+  "## Commands\n\n_(placeholder — the commands to build, test and run.)_\n\n" +
+  "## Architecture\n\n_(placeholder — the layers and where to find them.)_\n";
 
 // ─── Public shapes ──────────────────────────────────────────────────────────
 
@@ -355,14 +359,6 @@ export interface ContextRefreshReport {
   rules: RulesFileOutcome[];
   /** One entry per lore skill folder considered (selected or pruned); empty without fragment deps. */
   skills: SkillDirOutcome[];
-  /**
-   * Advisory `downgraded` findings from adoption=warn (spec-claude-md-root-
-   * section-structure-check-and-adoption-mode D2, AC-STR-6): deterministic
-   * findings that WOULD have refused this write under enforce, each carrying
-   * `downgraded_kind` (e.g. `section_missing`). Always present; empty when the
-   * candidate conforms or adoption=enforce (where such findings refuse instead).
-   */
-  downgraded: AdvisoryFinding[];
 }
 
 // ─── Rendering (facts -> ManagedSection[]) ──────────────────────────────────
@@ -885,7 +881,6 @@ export async function runContextRefresh(
   // ── Z1 candidate (project scope only; user scope never touches a CLAUDE.md) ──
   let claudeMdWrite: { content: string; readBytes: string } | null = null;
   let sectionOutcomes: SpliceResult["perSection"] = [];
-  let downgraded: AdvisoryFinding[] = [];
   let claudeMdRefusalMessage: string | null = null;
   let checkFindings: ContextRefreshCheckFinding[] = [];
   let migratedLegacyBlocks: string[] = [];
@@ -922,9 +917,7 @@ export async function runContextRefresh(
       // status --check-claude-md` runs (`runMemoryFileChecks`), never a second
       // inline size check and never a direct call into the underlying capacity
       // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
-      // before any write. Only `.deterministic` gates the write. `.advisory` never
-      // refuses; only its `kind: "downgraded"` entries are surfaced (the
-      // `downgraded:` field of the `ok(...)` return below), the rest dropped
+      // before any write. Only `.deterministic` gates the write; `.advisory` never refuses and is dropped
       // (`docExists` is an inert stand-in; see the module header).
       // The candidate's code references (and every fragment's) resolve against the repository the
       // port is rooted at, through the same resolver `lore status --check-claude-md` uses.
@@ -934,7 +927,7 @@ export async function runContextRefresh(
         { path: CLAUDE_MD_PATH, content: finalContent },
         ...fragmentsResult.value,
       ]);
-      const { deterministic: findings, advisory } = runMemoryFileChecks(
+      const { deterministic: findings } = runMemoryFileChecks(
         [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
         budgets,
         { probe: referenceProbe, referenceDocuments: fragmentsResult.value, docExists: () => true },
@@ -947,21 +940,7 @@ export async function runContextRefresh(
           `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
           findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; ");
       } else {
-        downgraded = advisory.filter((finding) => finding.kind === "downgraded");
         claudeMdWrite = { content: finalContent, readBytes: existing };
-        // reason: adoption=warn downgrades EVERY deterministic finding to advisory, ceiling breaches included; --check
-        // answers "is the root file within its ceiling?", so it re-reads those downgraded ceiling breaches (never the
-        // section findings, which stay advisory under warn) instead of reporting a false pass.
-        const downgradedCeilings = downgraded.filter(
-          (finding) => finding.downgraded_kind === "max_lines" || finding.downgraded_kind === "max_bytes",
-        );
-        if (checkMode && downgradedCeilings.length > 0) {
-          checkFindings = downgradedCeilings.map((finding) => ({
-            kind: finding.downgraded_kind ?? "ceiling",
-            message: finding.message,
-          }));
-          claudeMdRefusalMessage = downgradedCeilings.map((finding) => finding.message).join("; ");
-        }
       }
       claudeMdChanged = finalContent !== existing;
       if (claudeMdChanged) differing.push(CLAUDE_MD_PATH);
@@ -1002,7 +981,6 @@ export async function runContextRefresh(
       check: { differing, findings: checkFindings, modulesWithoutMemoryFile },
       rules: ruleActions.map((action) => action.outcome),
       skills: skillActions.map((action) => action.outcome),
-      downgraded,
     });
   }
 
@@ -1067,6 +1045,5 @@ export async function runContextRefresh(
     check: null,
     rules: ruleActions.map((action) => action.outcome),
     skills: skillActions.map((action) => action.outcome),
-    downgraded,
   });
 }

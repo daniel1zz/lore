@@ -605,6 +605,65 @@ export default defineLoreCommand({
       },
     }),
 
+    supersede: defineLoreCommand({
+      meta: {
+        name: "supersede",
+        description:
+          "Mark a criterion superseded by another spec's criterion: verify skips it, it becomes immutable, the spec is not demoted",
+      },
+      args: {
+        spec: { type: "positional", description: "Spec document ID or slug", required: true },
+        id: { type: "positional", description: "Criterion id to supersede", required: true },
+        by: {
+          type: "string",
+          description: "REQUIRED: the superseding criterion as <spec>:<AC-ID> (spec id or slug)",
+        },
+        reason: { type: "string", description: "REQUIRED: why the criterion is superseded (non-empty)" },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run(context): Promise<number> {
+        const { args } = context;
+        const inv = invocationOf(context);
+        // argv-decidable: exit 2 before the app loads or anything is written.
+        const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+        if (reason === "") {
+          inv.io.stderr.write('Error: lore ac supersede requires a non-empty --reason "<why>".\n');
+          return 2;
+        }
+        const byRaw = typeof args.by === "string" ? args.by : "";
+        const sep = byRaw.lastIndexOf(":");
+        if (sep <= 0 || sep === byRaw.length - 1) {
+          inv.io.stderr.write("Error: lore ac supersede requires --by <spec>:<AC-ID>.\n");
+          return 2;
+        }
+        const { app } = loadLoreApp({ inv });
+        try {
+          const result = await requireAcService(app).supersedeCriterion(
+            args.spec as string,
+            args.id as string,
+            { spec: byRaw.slice(0, sep), ac: byRaw.slice(sep + 1) },
+            reason,
+            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
+          );
+          if (!result.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
+          }
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            return 0;
+          }
+          printLine(
+            inv.io.stdout,
+            `Superseded acceptance criterion "${args.id as string}" on spec ${args.spec as string} by ${byRaw} (spec status unchanged)`,
+          );
+        } finally {
+          app.close();
+        }
+        return 0;
+      },
+    }),
+
     set: defineLoreCommand({
       meta: {
         name: "set",
@@ -1245,8 +1304,12 @@ function renderCriteriaList(io: CliIo, result: AcListResult): void {
     const retiredOracle = retiredOracleMarker(result.coverage, criterion.id);
     const otherCommand = otherCommandMarker(result.coverage, criterion.id);
     const oracleFiles = oracleFileMarkers(result.coverage, criterion.id);
-    printLine(io.stdout, 
-      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}${oracleFiles}`,
+    const supersededNote =
+      criterion.superseded_by !== undefined
+        ? ` [superseded by ${criterion.superseded_by.spec}:${criterion.superseded_by.ac}: ${criterion.superseded_by.reason}]`
+        : "";
+    printLine(io.stdout,
+      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}${oracleFiles}${supersededNote}`,
     );
   }
   if (result.dangling.length > 0) {

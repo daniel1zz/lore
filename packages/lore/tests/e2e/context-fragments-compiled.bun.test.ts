@@ -767,8 +767,6 @@ describe("AC-CF-22 rules files are written even when the CLAUDE.md ceiling admis
     const sb = makeSandbox();
     const handWritten = `# Hand written, no Z1 markers\n\n${Array.from({ length: 400 }, (_, i) => `rule line ${i}`).join("\n")}\n`;
     writeFileSync(projectClaudeMd(sb), handWritten, "utf8");
-    // adoption defaults to warn (downgrades the ceiling to advisory); enforce makes the ceiling refuse, as in this repo.
-    appendProjectConfig(sb, "context:\n  memory_files:\n    adoption: enforce\n");
 
     const r = lore(sb, "context", "refresh");
 

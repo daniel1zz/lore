@@ -1,31 +1,21 @@
 /**
  * @spec_ref AC-STR-6
  *
- * RED suite: `lore context` write gate honours adoption mode
- * (spec-claude-md-root-section-structure-check-and-adoption-mode, AC-STR-6,
- * task task-skill-test-lore-context-write-gate-honours-adoption-red).
+ * The `lore context` write gate refuses a nonconforming root file ALWAYS: the adoption mode that once downgraded the
+ * refusal to a written file plus an advisory `downgraded` finding is retired
+ * (task-memory-file-limits-are-always-enforced-the-warn-adoption; spec
+ * spec-claude-md-root-section-structure-check-and-adoption-mode AC-STR-6, whose warn half is superseded by BR-887).
  *
- * Spec statements encoded here (written before reading the implementation of
- * the new behaviour):
- *   - adoption `enforce` + root CLAUDE.md candidate missing a required H2
- *     -> the flow returns an error naming `section_missing` (and the section),
- *     and the target file bytes are UNCHANGED.
- *   - adoption `warn` + same input -> the file IS written and the result
- *     reports the finding as an advisory `downgraded` finding whose
- *     `downgraded_kind` is `section_missing`.
- *   - adoption key absent (defaults) -> behaves as `warn`.
+ *   - root CLAUDE.md candidate missing a required H2 -> the flow returns an error naming `section_missing`
+ *     (and the section), and the target file bytes are UNCHANGED, with budgets resolved from schema defaults, with
+ *     no budgets supplied at all, and with explicit budgets alike.
+ *   - a conforming candidate is still written (the gate is not a blanket refusal) and reports nothing downgraded.
  *
- * The gate is `runContextRefresh` (the only context verb that runs pre-write
- * admission). Adoption mode travels in the resolved `MemoryFileBudgets`
- * (`context.memory_files.adoption`, resolved by `resolveMemoryFileBudgets`).
- * The spec does not fix the property name on the flow's report, so the
- * "reports downgraded" assertions search the serialized report for the
- * `downgraded_kind` pair instead of pinning a field path (spec gap, flagged).
+ * The gate is `runContextRefresh` (the only context verb that runs pre-write admission).
  */
 
 import { describe, expect, it } from "vitest";
 import { InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
-import type { MemoryFileBudgets } from "@lore/core";
 import { runContextRefresh } from "../../../src/flows/context-flow.js";
 
 /** The five required root H2 sections, in contract order (spec Public Interface). */
@@ -36,11 +26,9 @@ function rootFile(sections: readonly string[]): string {
   return `${sections.map((s) => `## ${s}\n\nBody text for ${s}.\n`).join("\n")}`;
 }
 
-/** Resolved budgets with an explicit adoption mode (explicit enforce: absent key means warn). */
-function budgetsWith(adoption: "enforce" | "warn"): MemoryFileBudgets {
-  const defaults = resolveMemoryFileBudgets(undefined);
-  // The `adoption` field does not exist on today's type; the cast is the point of the RED test.
-  return { ...defaults, adoption } as unknown as MemoryFileBudgets;
+/** Budgets as every project now resolves them: the schema defaults, with no adoption setting to choose. */
+function budgetsWith(): ReturnType<typeof resolveMemoryFileBudgets> {
+  return resolveMemoryFileBudgets(undefined);
 }
 
 const without = (name: string): string[] => ALL_SECTIONS.filter((s) => s !== name);
@@ -52,11 +40,11 @@ const without = (name: string): string[] => ALL_SECTIONS.filter((s) => s !== nam
  */
 const HAND_WRITTEN_SECTIONS = ALL_SECTIONS.filter((s) => s !== "Module Index" && s !== "Finding Live Project State");
 
-describe("lore context write gate honours adoption (AC-STR-6)", () => {
-  describe("adoption enforce", () => {
+describe("lore context write gate always refuses a nonconforming root file (AC-STR-6, BR-887)", () => {
+  describe("explicit schema-default budgets", () => {
     it("NEGATIVE: refuses a candidate missing '## Commands' with an error naming section_missing", async () => {
       const fs = new InMemoryFsPort({ "CLAUDE.md": rootFile(without("Commands")) });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
+      const result = await runContextRefresh({ fs, budgets: budgetsWith() }, "");
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(JSON.stringify(result.error)).toContain("section_missing");
@@ -64,7 +52,7 @@ describe("lore context write gate honours adoption (AC-STR-6)", () => {
 
     it("NEGATIVE: the refusal names the missing section ('Commands')", async () => {
       const fs = new InMemoryFsPort({ "CLAUDE.md": rootFile(without("Commands")) });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
+      const result = await runContextRefresh({ fs, budgets: budgetsWith() }, "");
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(JSON.stringify(result.error)).toContain("Commands");
@@ -73,14 +61,14 @@ describe("lore context write gate honours adoption (AC-STR-6)", () => {
     it("STATE: a refused write leaves the target file bytes unchanged", async () => {
       const original = rootFile(without("Commands"));
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
-      await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
+      await runContextRefresh({ fs, budgets: budgetsWith() }, "");
       expect(await fs.readFile("CLAUDE.md")).toBe(original);
     });
 
     it("NEGATIVE: a different missing section ('Architecture') is named, not a hardcoded 'Commands'", async () => {
       const original = rootFile(without("Architecture"));
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
+      const result = await runContextRefresh({ fs, budgets: budgetsWith() }, "");
       expect(result.ok).toBe(false);
       if (result.ok) return;
       const text = JSON.stringify(result.error);
@@ -93,7 +81,7 @@ describe("lore context write gate honours adoption (AC-STR-6)", () => {
       const swapped = ["What This Is", "Architecture", "Commands", "Module Index", "Finding Live Project State"];
       const original = rootFile(swapped);
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
+      const result = await runContextRefresh({ fs, budgets: budgetsWith() }, "");
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(JSON.stringify(result.error)).toContain("section_order");
@@ -103,59 +91,39 @@ describe("lore context write gate honours adoption (AC-STR-6)", () => {
     it("CONTROL: a fully conforming candidate is still written under enforce (the gate is not a blanket refusal)", async () => {
       const original = rootFile(HAND_WRITTEN_SECTIONS);
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
+      const result = await runContextRefresh({ fs, budgets: budgetsWith() }, "");
       expect(result.ok).toBe(true);
       expect(await fs.readFile("CLAUDE.md")).not.toBe(original);
     });
   });
 
-  describe("adoption warn", () => {
-    it("HAPPY: the same non-conforming input is written (file bytes change: managed zone added)", async () => {
-      const original = rootFile(without("Commands"));
-      const fs = new InMemoryFsPort({ "CLAUDE.md": original });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("warn") }, "");
-      expect(result.ok).toBe(true);
-      const after = await fs.readFile("CLAUDE.md");
-      expect(after).not.toBe(original);
-      expect(after).toContain("Body text for Architecture.");
-    });
-
-    it("HAPPY: the result reports an advisory downgraded finding with downgraded_kind section_missing", async () => {
-      const fs = new InMemoryFsPort({ "CLAUDE.md": rootFile(without("Commands")) });
-      const result = await runContextRefresh({ fs, budgets: budgetsWith("warn") }, "");
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      const serialized = JSON.stringify(result.value);
-      expect(serialized).toContain('"downgraded_kind":"section_missing"');
-    });
-
-    it("HAPPY: a conforming file reports no downgraded finding in warn mode", async () => {
-      const conforming = new InMemoryFsPort({ "CLAUDE.md": rootFile(HAND_WRITTEN_SECTIONS) });
-      const okResult = await runContextRefresh({ fs: conforming, budgets: budgetsWith("warn") }, "");
-      expect(okResult.ok).toBe(true);
-      if (!okResult.ok) return;
-      expect(JSON.stringify(okResult.value)).not.toContain("downgraded_kind");
-    });
-  });
-
-  describe("adoption absent (defaults)", () => {
-    it("STATE: schema-default budgets (no adoption key supplied) behave as warn: written, reported downgraded", async () => {
+  describe("no adoption mode to choose", () => {
+    it("REGRESSION: schema-default budgets refuse the same input the retired default `warn` wrote (falsifier: today's warn default)", async () => {
       const original = rootFile(without("Commands"));
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
       const result = await runContextRefresh({ fs, budgets: resolveMemoryFileBudgets(undefined) }, "");
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(await fs.readFile("CLAUDE.md")).not.toBe(original);
-      expect(JSON.stringify(result.value)).toContain('"downgraded_kind":"section_missing"');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(JSON.stringify(result.error)).toContain("section_missing");
+      expect(await fs.readFile("CLAUDE.md")).toBe(original);
     });
 
-    it("STATE: deps without any budgets (flow's own default resolution) behave as warn", async () => {
+    it("REGRESSION: deps without any budgets (the flow's own default resolution) refuse it too", async () => {
       const original = rootFile(without("Commands"));
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
       const result = await runContextRefresh({ fs }, "");
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(JSON.stringify(result.value)).toContain('"downgraded_kind":"section_missing"');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(JSON.stringify(result.error)).toContain("section_missing");
+      expect(await fs.readFile("CLAUDE.md")).toBe(original);
+    });
+
+    it("HAPPY: a conforming file reports nothing downgraded and the report carries no downgraded field", async () => {
+      const conforming = new InMemoryFsPort({ "CLAUDE.md": rootFile(HAND_WRITTEN_SECTIONS) });
+      const okResult = await runContextRefresh({ fs: conforming }, "");
+      expect(okResult.ok).toBe(true);
+      if (!okResult.ok) return;
+      expect(JSON.stringify(okResult.value)).not.toContain("downgraded");
     });
   });
 });
