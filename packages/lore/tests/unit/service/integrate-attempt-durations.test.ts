@@ -111,7 +111,7 @@ describe("integrate records per-attempt phase durations", () => {
     // the landing cleared the loss entry, the cost record stays (cost data exists even when nothing is lost)
     expect(existsSync(join(corpusDir, "integrate-losses", "feature.json"))).toBe(false);
     expect(existsSync(file)).toBe(true);
-  });
+  }, 30_000); // measured 570 ms idle; real git spawns starve under load, so a 30 s budget
 
   it("a failing floor that emits no per-step timings is recorded as ONE named step; later phases are null, never 0", async () => {
     sh(repo, ["checkout", "-q", "-b", "feature2", "main"]);
@@ -149,7 +149,7 @@ describe("integrate records per-attempt phase durations", () => {
         total_ms: 900,
       },
     ]);
-  });
+  }, 30_000); // measured 355 ms idle; same budget as the case above
 
   it("a floor step list of one named step round-trips (the no-timings fallback is never silently missing)", () => {
     const dir = mkdtempSync(join(root, "ledger-"));
