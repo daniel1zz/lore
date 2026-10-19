@@ -12,13 +12,13 @@ import { resolveCodeReferences, type FsProbe } from "@lore/core";
 import { extractCodeReferences } from "../../../src/service/claude-md-admission.js";
 
 /** One unresolved reference in the shape the legacy suites assert on. */
-export interface UnresolvedReference {
+export type UnresolvedReference = {
   kind: "reference_unresolved";
   drift_kind: string;
   path: string;
   reference: string;
   message: string;
-}
+};
 
 /**
  * @param content - Memory file text.
