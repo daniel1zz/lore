@@ -7,9 +7,25 @@
 import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
-import { formatTable } from "../utils.js";
+import { exitCode, formatError, formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+
+/** Exit code for a usage error (a missing `--name`), the same code the other commands' flag contradictions end with. */
+const USAGE_EXIT = 2;
+
+/**
+ * Both subcommands take the agent name as `--name`. It is declared optional to citty (which would end a missing
+ * one with exit 1 and silently drop a positional) so a missing `--name`, including `revoke dup`, is a usage error
+ * with exit 2 and a message naming the flag.
+ *
+ * @returns the name, or `null` after writing the usage error to stderr
+ */
+function requireNameFlag(name: string | undefined, subcommand: string, stderr: { write(chunk: string): unknown }): string | null {
+  if (name !== undefined && name !== "") return name;
+  stderr.write(`Error: lore agent ${subcommand} needs --name <name> (the name is a flag, not a positional).\n`);
+  return null;
+}
 
 const agentCreate = defineLoreCommand({
   meta: {
@@ -20,7 +36,6 @@ const agentCreate = defineLoreCommand({
     name: {
       type: "string",
       description: "Agent name (unique identifier)",
-      required: true,
     },
     owner: {
       type: "string",
@@ -35,19 +50,19 @@ const agentCreate = defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    const name = requireNameFlag(args.name, "create", inv.io.stderr);
+    if (name === null) return USAGE_EXIT;
     const { app } = loadLoreApp({ inv });
     try {
-      const result = await app.apiKeyStore.create(args.name, args.owner ?? "admin");
+      const result = await app.apiKeyStore.create(name, args.owner ?? "admin");
 
       if (!result.ok) {
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }));
         } else {
-          inv.io.stderr.write(`Error: ${result.error.code} — ${
-            "message" in result.error ? result.error.message : JSON.stringify(result.error)
-          }\n`);
+          inv.io.stderr.write(`${formatError(result.error)}\n`);
         }
-        return 1;
+        return exitCode(result.error);
       }
 
       const { rawKey, record } = result.value;
@@ -134,9 +149,8 @@ const agentRevoke = defineLoreCommand({
   },
   args: {
     name: {
-      type: "positional",
+      type: "string",
       description: "Agent name to revoke",
-      required: true,
     },
     json: {
       type: "boolean",
@@ -146,25 +160,27 @@ const agentRevoke = defineLoreCommand({
   run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
+    const name = requireNameFlag(args.name, "revoke", inv.io.stderr);
+    if (name === null) return USAGE_EXIT;
     const { app } = loadLoreApp({ inv });
     try {
-      const result = app.apiKeyStore.revoke(args.name);
+      const result = app.apiKeyStore.revoke(name);
 
       if (!result.ok) {
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }));
         } else {
-          inv.io.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
+          inv.io.stderr.write(`${formatError(result.error)}\n`);
         }
-        return 1;
+        return exitCode(result.error);
       }
 
       if (args.json) {
-        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: args.name, revoked: true } }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name, revoked: true } }));
         return 0;
       }
 
-      printLine(inv.io.stdout, `Agent '${args.name}' API key revoked.`);
+      printLine(inv.io.stdout, `Agent '${name}' API key revoked.`);
     } finally {
       app.close();
     }

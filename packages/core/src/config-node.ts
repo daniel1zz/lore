@@ -269,7 +269,8 @@ export function resolveGlobalConfigPath(env: ConfigEnv, home: string): string | 
  * Load GlobalLoreConfig from the XDG-resolved path (or a provided path override).
  *
  * Behaviour:
- *   - No file exists at any XDG candidate → ok({})  (missing is NOT an error)
+ *   - No file exists at any XDG candidate (or it vanishes before the read) → ok({})  (missing is NOT an error)
+ *   - File exists but cannot be read (EACCES, EISDIR, ...) → err(VALIDATION_ERROR, field "file")
  *   - Empty or null YAML file → ok({})
  *   - Malformed YAML → err(VALIDATION_ERROR)
  *   - Unknown top-level keys (incl. project/sync/telemetry) → err(VALIDATION_ERROR)
@@ -299,10 +300,19 @@ export function loadGlobalConfig(
   let raw: string;
   try {
     raw = readFileSync(resolvedPath, "utf8");
-  } catch (_e) {
-    // reason: file may disappear between resolveGlobalConfigPath and read (TOCTOU).
-    // Treat as missing — still not an error.
-    return ok({});
+  } catch (e) {
+    // reason: file may disappear between resolveGlobalConfigPath and read (TOCTOU) — ONLY that
+    // (ENOENT) is "missing", still not an error. Any other failure (EACCES from chmod 000, EISDIR, ...)
+    // is an UNREADABLE config the caller must be able to report, never silently treated as absent
+    // (spec-defect-clusters-round-2-part-d D29, BR-868).
+    const errno = (e as NodeJS.ErrnoException).code;
+    if (errno === "ENOENT") return ok({});
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "file",
+      message: `Cannot read global config: ${e instanceof Error ? e.message : String(e)}`,
+      value: resolvedPath,
+    } satisfies LoreError);
   }
 
   // Empty file → ok({}) — treat same as missing

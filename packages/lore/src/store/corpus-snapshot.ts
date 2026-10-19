@@ -9,6 +9,9 @@
  * Invariants:
  *   - The database is copied with SQLite's `VACUUM INTO` from a READ-ONLY handle: a consistent image even while other
  *     sessions write the WAL-mode live file. A raw file copy is never used.
+ *   - The image is staged as `lore.db.staging` and renamed to `lore.db`; every leftover of an interrupted earlier run
+ *     (`lore.db`, `-wal`, `-shm`, `-journal`, staging) is removed first. Safe because the integration lease gives one run
+ *     at a time the worktree.
  *   - The live corpus is never written (read-only handle; nothing flows back from the snapshot).
  *   - Only `config.yaml` is carried besides the database, and only when the destination lacks it (a tracked one is
  *     already checked out at the merged tree's version). No caches, keys, ledgers or exports are copied.
@@ -17,7 +20,7 @@
  * Side-effect class: IO (reads the live db, writes/removes files under the destination `.lore/`).
  */
 import { Database } from "bun:sqlite";
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 
@@ -29,7 +32,8 @@ export interface CorpusSnapshot {
   readonly takenAt: string;
 }
 
-const DB_FILES = ["lore.db", "lore.db-wal", "lore.db-shm"] as const;
+/** Every file a snapshot (or an interrupted one) can leave: the db, its WAL/shm/rollback journal and the staging file. */
+const DB_FILES = ["lore.db", "lore.db-wal", "lore.db-shm", "lore.db-journal", "lore.db.staging", "lore.db.staging-journal"] as const;
 const CONFIG_FILE = "config.yaml";
 /** Wait for a concurrent writer's lock instead of failing at once (native SQLite busy handler, same as the store). */
 const BUSY_TIMEOUT_MS = 30_000;
@@ -58,7 +62,10 @@ export function takeCorpusSnapshot(sourceCorpusDir: string, destRoot: string): R
     mkdirSync(corpusDir, { recursive: true });
     source = new Database(sourceDb, { readonly: true });
     source.run(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-    source.run("VACUUM INTO ?", [join(corpusDir, "lore.db")]);
+    // crash-safe: the image is written under a staging name and renamed over lore.db, so an interrupted run never leaves a half-written lore.db
+    const staging = join(corpusDir, "lore.db.staging");
+    source.run("VACUUM INTO ?", [staging]);
+    renameSync(staging, join(corpusDir, "lore.db"));
     const sourceConfig = join(sourceCorpusDir, CONFIG_FILE);
     if (existsSync(sourceConfig) && !existsSync(join(corpusDir, CONFIG_FILE))) copyFileSync(sourceConfig, join(corpusDir, CONFIG_FILE));
     return ok({ corpusDir, takenAt: new Date().toISOString() });

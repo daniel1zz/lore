@@ -223,12 +223,25 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
 
   it("a write that produces several rows (lore done walks several lifecycle steps) still prints exactly one warning", () => {
     const t6 = newTask(dir, "Unattested multi-row done");
-    mustLore(["claim", t6], dir, NAME_ENV);
-    mustLore(["evidence", t6, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row"], dir, NAME_ENV);
-    const r = lore(["--harness-run", GHOST_A, "done", t6, "--override-attestation", "unattested fixture: no runner-attested pass exists for this throwaway task"], dir, NAME_ENV);
-    expect(r.exitCode).toBe(0);
+    // Runner-produced rows (`--capture` spawns the command and checks its exit code). The runner only accepts a
+    // red whose output carries a real test-runner summary, so the fixture runs two real `bun test` files: one
+    // that fails (clears the no-new-tests floor) and one that passes (clears the attested-pass floor).
+    // The floors stay armed; the fixture earns `done` instead of overriding it.
+    writeFileSync(join(dir, "red.fixture.test.ts"), 'import { expect, test } from "bun:test";\ntest("red fixture", () => expect(1).toBe(2));\n');
+    writeFileSync(join(dir, "green.fixture.test.ts"), 'import { expect, test } from "bun:test";\ntest("green fixture", () => expect(1).toBe(1));\n');
+    // `evidence --result pass` refuses a claim with no recorded worktree and a worktree with uncommitted changes,
+    // so the claim names the fixture repo and the two fixture test files are committed first.
+    // The corpus (.lore/) and the fake HOME state (Library/) live inside the fixture repo; ignore them.
+    writeFileSync(join(dir, ".gitignore"), ".lore/\nLibrary/\n");
+    execFileSync("git", ["add", ".gitignore", "red.fixture.test.ts", "green.fixture.test.ts"], { cwd: dir });
+    execFileSync("git", ["commit", "-q", "-m", "fixture tests"], { cwd: dir });
+    mustLore(["claim", t6, "--worktree", dir], dir, NAME_ENV);
+    mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./red.fixture.test.ts 2>&1", "--result", "expected-fail", "--capture"], dir, NAME_ENV);
+    mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./green.fixture.test.ts 2>&1", "--result", "pass", "--capture"], dir, NAME_ENV);
+    const r = lore(["--harness-run", GHOST_A, "done", t6], dir, NAME_ENV);
+    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     expect(warningLinesNaming(r.stderr, GHOST_A)).toHaveLength(1);
-  });
+  }, 120_000);
 
   it("the registered-run control: a registered id is stamped and draws no warning", async () => {
     await registerRun(dir, REGISTERED);

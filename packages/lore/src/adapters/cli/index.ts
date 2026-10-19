@@ -192,7 +192,6 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // run (spec-run-identity-slice-1 D2/D5/D10) — `run register|show|attest-input`; see
     // commands/run.ts's module header.
     run: () => import("./commands/run.js"),
-    outline: () => import("./commands/outline.js"),
     seat: () => import("./commands/seat.js"),
     "report-issue": () => import("./commands/report-issue.js"),
     // issue / issues (spec-issue-closure-loop-computed-resolution-agent-reachable

@@ -105,7 +105,7 @@
  * Source: SPEC-038 §4, §6, §7 D4; spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6
  */
 
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, findModeForeignDetail, modeForeignDetailMessage, type ModeForeignDetail, type Result } from "@lore/core";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { LoreError } from "@lore/core";
 import {
@@ -874,24 +874,15 @@ export class AcService {
     // in a fixed order (oracle, command, rubric, note) so a caller passing more
     // than one wrong flag at once still gets a single deterministic message.
     const mode = target.verify.mode;
-    if (patch.oracle !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--oracle", mode));
-    }
-    if (patch.command !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--command", mode));
-    }
-    if (patch.timeout_ms !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--timeout-ms", mode));
-    }
-    if (patch.falsifier !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--falsifier-*", mode));
-    }
-    if (patch.rubric !== undefined && mode !== "ai") {
-      return err(modeMismatchError(acId, "--rubric", mode));
-    }
-    if (patch.note !== undefined && mode !== "human") {
-      return err(modeMismatchError(acId, "--note", mode));
-    }
+    const foreign = findModeForeignDetail(mode, {
+      oracle: patch.oracle !== undefined,
+      command: patch.command !== undefined,
+      timeout_ms: patch.timeout_ms !== undefined,
+      falsifier: patch.falsifier !== undefined,
+      rubric: patch.rubric !== undefined,
+      note: patch.note !== undefined,
+    });
+    if (foreign !== undefined) return err(modeMismatchError(acId, foreign, mode));
 
     const verifyCandidate = buildVerifyCandidate(target.verify, patch);
     const nextOracleGeneration = resolveNextOracleGeneration(target, verifyCandidate);
@@ -1210,7 +1201,8 @@ function codeAnchorsOf(spec: DocRecord): string[] {
   return Array.isArray(anchors) ? (anchors as unknown[]).filter((a): a is string => typeof a === "string") : [];
 }
 
-function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
+/** Pure. A spec's well-formed criteria (`[]` when unparseable). Exported so `scripts/check-ac-oracle-ownership-corpus.ts` shares the rule (SSOT). */
+export function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
   const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
   return parsed.success ? parsed.data : [];
 }
@@ -1296,7 +1288,8 @@ function checkDeclaredPathExistence(
  * would be silently DROPPED on the very next `safeParse`, which is exactly
  * the untracked-silent-fallback shape D8 exists to prevent.
  */
-function extractAllowMissingPathDeclarations(spec: DocRecord): AllowMissingPathDeclaration[] {
+/** Pure. Exported for the same SSOT reason as {@link extractCriteria}. */
+export function extractAllowMissingPathDeclarations(spec: DocRecord): AllowMissingPathDeclaration[] {
   const raw = spec.extra["allow_missing_path_declarations"];
   if (!Array.isArray(raw)) return [];
   const declarations: AllowMissingPathDeclaration[] = [];
@@ -1431,20 +1424,13 @@ function resolveNextOracleGeneration(
  * D5a: this is decidable only against the RESOLVED document's declared mode, never
  * from argv alone.
  */
-function modeMismatchError(acId: string, flag: string, actualMode: AcVerifyMode): LoreError {
+function modeMismatchError(acId: string, found: ModeForeignDetail, actualMode: AcVerifyMode): LoreError {
   return {
     code: "VALIDATION_ERROR",
     field: "verify",
-    message: `${flag} only applies to a "${modeFieldName(flag)}"-mode criterion — "${acId}" is mode "${actualMode}"`,
-    value: { ac_id: acId, flag, mode: actualMode },
+    message: modeForeignDetailMessage(acId, found, actualMode),
+    value: { ac_id: acId, flag: found.flag, mode: actualMode },
   };
-}
-
-/** The verify mode a given mode-specific flag belongs to (for modeMismatchError's message). */
-function modeFieldName(flag: string): AcVerifyMode {
-  if (flag === "--oracle" || flag === "--command" || flag === "--timeout-ms" || flag === "--falsifier-*") return "script";
-  if (flag === "--rubric") return "ai";
-  return "human";
 }
 
 /**

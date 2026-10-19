@@ -13,6 +13,7 @@ function harness(remote: GitOutcome) {
   };
   const service = new IntegrateService({
     git,
+    lease: { acquire: unused },
     corpus: { take: unused, remove: unused },
     runFloor: unused,
     ledger: {} as IntegrateDeps["ledger"],

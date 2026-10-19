@@ -92,8 +92,10 @@ export interface Site {
   readonly symbol: string;
   /** The error code; absent exactly when `dynamic` is true. */
   readonly code?: string;
-  /** True when the census could not measure the site (registry call, interface call or non-literal code). */
+  /** True when the census could not measure the site (registry call, interface call, non-literal code, a depth cut or an unmodelled binding). */
   readonly dynamic: boolean;
+  /** `depth-bound` exactly when the walk stopped at {@link MAX_CALL_DEPTH} inside `symbol`: everything the cut callee reaches is NOT listed. */
+  readonly kind?: "depth-bound";
 }
 
 /** How a refusal's `field` shows in its key: nothing, the literal, or a per-(file,symbol,code) ordinal. */
@@ -590,7 +592,10 @@ interface BoundFunctions {
 
 /** Whole-walk state: visited set, collected sites, and the per-file symbol index. */
 class CensusWalker {
-  private readonly visited = new Set<TS.Node>();
+  /** Every function body walked, with the SHALLOWEST depth it was reached at (a deeper first visit must not hide a shallow one). */
+  private readonly visited = new Map<TS.Node, number>();
+  /** Calls whose callee the walk did not follow because of {@link MAX_CALL_DEPTH}; a later shallower visit of the same call retracts its cut. */
+  private readonly depthCuts = new Map<TS.Node, { site: Site; bootstrap: boolean }>();
   private readonly sites = new Map<string, Site>();
   private readonly bootstrapSites = new Map<string, Site>();
   private readonly index = new Map<TS.SourceFile, Map<string, FunctionLike[]>>();
@@ -647,11 +652,16 @@ class CensusWalker {
   }
 
   result(): Site[] {
-    return CensusWalker.sortedByKey(this.mergedSites(this.sites, false));
+    return CensusWalker.sortedByKey(this.withDepthCuts(this.mergedSites(this.sites, false), false));
   }
 
   bootstrapResult(): Site[] {
-    return CensusWalker.sortedByKey(this.mergedSites(this.bootstrapSites, true));
+    return CensusWalker.sortedByKey(this.withDepthCuts(this.mergedSites(this.bootstrapSites, true), true));
+  }
+
+  private withDepthCuts(merged: Map<string, Site>, bootstrap: boolean): Map<string, Site> {
+    for (const cut of this.depthCuts.values()) if (cut.bootstrap === bootstrap && !merged.has(cut.site.key)) merged.set(cut.site.key, cut.site);
+    return merged;
   }
 
   /** Ready-keyed sites plus the pending coded sites of one sink, keys finalised (ordinals by source position). */
@@ -694,7 +704,7 @@ class CensusWalker {
   }
 
   reachedSymbols(): string[] {
-    const names = [...this.visited].map((fn) => {
+    const names = [...this.visited.keys()].map((fn) => {
       const rel = path.relative(this.rootDir, fn.getSourceFile().fileName).split(path.sep).join("/");
       return `${rel}#${this.enclosingSymbolName(fn)}`;
     });
@@ -886,8 +896,11 @@ class CensusWalker {
 
   /** Walk one function body, recording sites and recursing into statically resolvable callees. */
   visit(fn: FunctionLike, depth: number): void {
-    if (this.visited.has(fn) || fn.body === undefined) return;
-    this.visited.add(fn);
+    const seenAt = this.visited.get(fn);
+    if ((seenAt !== undefined && seenAt <= depth) || fn.body === undefined) return;
+    // reason: keyed on the shallowest depth - a body first walked at the depth bound had its callees cut, so a later
+    // shallower reach must walk it again (idempotent: sites are keyed) or the cut would hide the shallow path's sites.
+    this.visited.set(fn, depth);
     const scan = (node: TS.Node): void => {
       if (this.ts.isCallExpression(node)) this.handleCall(node, depth);
       else if (this.ts.isObjectLiteralExpression(node)) this.handleTypedLiteral(node);
@@ -897,6 +910,7 @@ class CensusWalker {
   }
 
   private handleCall(call: TS.CallExpression, depth: number): void {
+    this.depthCuts.delete(call);
     const callee = this.unwrap(call.expression);
     if (this.ts.isIdentifier(callee) && ERR_CALLEES.includes(callee.text)) {
       this.recordFailureCall(call, callee.text);
@@ -910,7 +924,7 @@ class CensusWalker {
     if (dispatch !== undefined) {
       if (this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) return;
       const injected: BoundFunctions = this.ts.isPropertyAccessExpression(callee) ? this.implementationsBehindReceiver(callee) : { fns: [], opaque: true };
-      if (depth < MAX_CALL_DEPTH) for (const fn of injected.fns) this.visit(fn, depth + 1);
+      this.followOrCut(call, injected.fns, depth);
       if (injected.fns.length !== 1 || injected.opaque) this.addInterfaceSite(dispatch);
       return;
     }
@@ -919,8 +933,23 @@ class CensusWalker {
       this.handleInjectedCall(call, callee, depth);
       return;
     }
-    if (depth >= MAX_CALL_DEPTH) return;
-    for (const target of targets) this.visit(target, depth + 1);
+    this.followOrCut(call, targets, depth);
+  }
+
+  /** Follow `fns` one level deeper, or - at {@link MAX_CALL_DEPTH} - record a `depth-bound` not_measured site naming the function where the walk stopped. */
+  private followOrCut(call: TS.CallExpression, fns: readonly FunctionLike[], depth: number): void {
+    if (fns.length === 0) return;
+    if (depth < MAX_CALL_DEPTH) {
+      for (const fn of fns) this.visit(fn, depth + 1);
+      return;
+    }
+    // reason: a callee already walked elsewhere (at any depth) is not lost by this cut - only an unvisited body is.
+    if (fns.every((fn) => this.visited.has(fn))) return;
+    const file = call.getSourceFile();
+    const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
+    const symbol = this.enclosingSymbolName(call);
+    const key = `${rel}#${symbol}#depth-bound`;
+    this.depthCuts.set(call, { site: { key, file: rel, symbol, dynamic: true, kind: "depth-bound" }, bootstrap: this.isNonBusinessSymbol(symbol, file) });
   }
 
   // ── dependency injection (#104) ──────────────────────────────────────────────
@@ -950,7 +979,7 @@ class CensusWalker {
     if (type.getCallSignatures().length === 0 && (type.flags & ts.TypeFlags.Any) === 0) return;
     if (this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) return;
     const resolved = this.functionsBoundTo(decls, new Set(), 0);
-    if (depth < MAX_CALL_DEPTH) for (const fn of resolved.fns) this.visit(fn, depth + 1);
+    this.followOrCut(call, resolved.fns, depth);
     if (resolved.fns.length !== 1 || resolved.opaque) this.addSite(call, undefined, `dynamic:${this.label(callee)}`);
   }
 
@@ -1122,14 +1151,71 @@ class CensusWalker {
     const propertyName = this.propertyName(decl.name);
     if (propertyName === undefined) return { values: [], opaque: true };
     const values: BoundValue[] = [];
+    let opaque = false;
     if (ts.isPropertyDeclaration(decl) && decl.initializer !== undefined) values.push({ expr: decl.initializer, shorthand: false });
     for (const prop of this.objectMembersNamed(propertyName)) {
-      if (!ts.isObjectLiteralExpression(prop.parent) || !this.isBoundTo(prop.parent, propertyName, decl)) continue;
+      if (!ts.isObjectLiteralExpression(prop.parent)) continue;
+      if (!this.isBoundTo(prop.parent, propertyName, decl)) {
+        // reason: an object literal with no contextual type that carries this member name may still be bound to the
+        // property later (cast, return through an untyped helper); it is not enumerable, so the binding set is not closed.
+        if (this.checker.getContextualType(prop.parent) === undefined) opaque = true;
+        continue;
+      }
       if (ts.isPropertyAssignment(prop)) values.push({ expr: prop.initializer, shorthand: false });
       else if (ts.isShorthandPropertyAssignment(prop)) values.push({ expr: prop.name, shorthand: true });
       else values.push({ expr: prop, shorthand: false });
     }
-    return { values, opaque: false };
+    // reason: `deps.fn = other` after construction binds the property too; the value is enumerable, so it is followed.
+    for (const assignment of this.assignmentsTo(propertyName)) {
+      const target = this.checker.getSymbolAtLocation(assignment.left.name);
+      if ((this.dealias(target)?.declarations ?? []).includes(decl)) values.push({ expr: assignment.right, shorthand: false });
+    }
+    // reason: a spread into a literal typed with this property carries members the census cannot enumerate.
+    if (this.spreadLiteralsDeclaring(propertyName, decl).length > 0) opaque = true;
+    return { values, opaque };
+  }
+
+  private assignmentIndex: Map<string, Array<TS.BinaryExpression & { left: TS.PropertyAccessExpression }>> | undefined;
+
+  /** `<expr>.name = value` assignments across every followable file (syntactic index, built once). */
+  private assignmentsTo(name: string): Array<TS.BinaryExpression & { left: TS.PropertyAccessExpression }> {
+    if (this.assignmentIndex === undefined) {
+      const ts = this.ts;
+      const index = new Map<string, Array<TS.BinaryExpression & { left: TS.PropertyAccessExpression }>>();
+      for (const file of this.program.getSourceFiles()) {
+        if (!this.isFollowable(file)) continue;
+        const scan = (node: TS.Node): void => {
+          if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(node.left)) {
+            const key = node.left.name.text;
+            index.set(key, [...(index.get(key) ?? []), node as TS.BinaryExpression & { left: TS.PropertyAccessExpression }]);
+          }
+          ts.forEachChild(node, scan);
+        };
+        scan(file);
+      }
+      this.assignmentIndex = index;
+    }
+    return this.assignmentIndex.get(name) ?? [];
+  }
+
+  private spreadLiterals: TS.ObjectLiteralExpression[] | undefined;
+
+  /** Object literals containing a spread whose contextual type declares `decl` as member `name`. */
+  private spreadLiteralsDeclaring(name: string, decl: TS.Declaration): TS.ObjectLiteralExpression[] {
+    if (this.spreadLiterals === undefined) {
+      const ts = this.ts;
+      const found: TS.ObjectLiteralExpression[] = [];
+      for (const file of this.program.getSourceFiles()) {
+        if (!this.isFollowable(file)) continue;
+        const scan = (node: TS.Node): void => {
+          if (ts.isObjectLiteralExpression(node) && node.properties.some((p) => ts.isSpreadAssignment(p))) found.push(node);
+          ts.forEachChild(node, scan);
+        };
+        scan(file);
+      }
+      this.spreadLiterals = found;
+    }
+    return this.spreadLiterals.filter((literal) => this.isBoundTo(literal, name, decl));
   }
 
   /** True when the object literal's contextual type declares `name` as the very member `decl`. */
