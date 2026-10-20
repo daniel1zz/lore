@@ -192,12 +192,12 @@ describe("lore audit --verify — REGRESSION", () => {
     const approveResult = runLore(["approve", slug], tmpDir);
     expect(approveResult.exitCode).toBe(0);
 
-    const result = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z", "--json"], tmpDir);
+    const result = runLore(["audit", "--verify", "--json"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
       ok: boolean;
-      data?: { clean: boolean; misses: unknown[]; since: string };
+      data?: { clean: boolean; misses: unknown[]; audited: number; reconstructed: number };
     };
     expect(parsed.ok).toBe(true);
     expect(parsed.data?.clean).toBe(true);
@@ -207,7 +207,7 @@ describe("lore audit --verify — REGRESSION", () => {
   it("the non-JSON message reports the corpus as complete", () => {
     createPrd("Verify Clean Human PRD");
 
-    const result = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z"], tmpDir);
+    const result = runLore(["audit", "--verify"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toLowerCase()).toContain("complete");

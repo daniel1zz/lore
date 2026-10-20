@@ -14,7 +14,7 @@
  *   with nothing touched. A pass hands `outside_anchors` (own-change paths no task of the branch anchors) to the landing record.
  * Public surface: IntegrateService.integrate, LandingRecorder, OwnDiffJudge, IntegrateOutcome, integrateExitCode, IntegrateRequest,
  *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
- *   integrationWorktreePath.
+ *   integrationWorktreePath, SchemaMigration, runSchemaMigration, describeSchemaMigration.
  * Invariants:
  *   - Main moves ONLY by the CAS of an attempt whose merge passed the floor; every other outcome leaves main
  *     untouched and the integration worktree reset to the main it saw (nothing half-done: a conflict aborts the merge
@@ -52,9 +52,22 @@
  * the CAS, and the marker is set ONLY on that CAS `update-ref`.
  *
  * The floor's corpus (INT-T12): just before the floor runs, `deps.corpus.take` writes a consistent snapshot (VACUUM INTO)
- * of the shared corpus into `<integration worktree>/.lore/`, so a branch whose binary needs a newer schema migrates the
- * snapshot instead of tripping the foreign-schema guard on the live corpus; `remove` deletes it right after the floor.
- * One line `integrate: floor runs against a corpus snapshot taken <iso ts>` is logged per attempt.
+ * of the shared corpus into `<integration worktree>/.lore/`; `remove` deletes it right after the floor. One line
+ * `integrate: floor runs against a corpus snapshot taken <iso ts>` is logged per attempt. Since 5f0259a1 NO command
+ * upgrades a corpus implicitly (an older corpus is refused, exit 4; only `lore migrate schema` upgrades), so the snapshot
+ * is never migrated by merely opening it. Two explicit steps run the project's `workflow.integrate.migrate_command` (the
+ * BRANCH binary's `lore migrate schema`, `--json` appended; see `runSchemaMigration`):
+ *   - `IntegrateService.landOn`, right after `corpus.take` and before the floor, runs it in the integration worktree, so it
+ *     migrates the SNAPSHOT (cwd owns `.lore/lore.db`) and never the live corpus. A failure ends the attempt as outcome
+ *     `snapshot_migrate_failed` (exit 1): the snapshot is removed, the worktree reset, main untouched, the output names the
+ *     snapshot directory and carries the migrate output;
+ *   - `IntegrateService.migrateLiveCorpus`, after the CAS, the landing record, the shared-view refresh and the
+ *     post-refresh rebuild (so the binary it runs is main's), runs the same command once in the shared checkout under the
+ *     integration lease and reports `schema: <from> -> <to>` or `schema: already current`. Only when the view was
+ *     `refreshed` and the rebuild did not fail (otherwise the binary is not main's: `skipped`, naming the command to rerun).
+ *     A failure is outcome field `schema.state = failed` (exit 1): it names the corpus and the exact command to rerun,
+ *     and never un-lands main. `already_integrated` runs it too (idempotent), so a re-run after a failed migrate repairs.
+ * Unset `migrate_command` = both steps are skipped and reported as such, never silently.
  *
  * After the shared view is `refreshed` (INT-T11), `workflow.integrate.post_refresh_command` (this repo: `bun run
  * build`) runs in the shared checkout so its build artifacts (dist/lore, which ~/.local/bin/lore links to) match main.
@@ -72,6 +85,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
+import { z } from "zod";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
 import type { OwnDiffVerdict } from "./own-diff-judgment.js";
@@ -208,9 +222,25 @@ export interface IntegrateRequest {
   readonly floorCommand: string | undefined;
   /** `workflow.integrate.post_refresh_command`; `undefined` = not configured (the rebuild is reported skipped). */
   readonly postRefreshCommand?: string | undefined;
+  /** `workflow.integrate.migrate_command`: the branch binary's `lore migrate schema` (see the file header); `undefined` = not configured (both migrate steps are reported skipped). */
+  readonly migrateCommand?: string | undefined;
   /** Merge commit message; default `merge(<branch>): <tip subject>`. */
   readonly message?: string;
 }
+
+/**
+ * Result of one `lore migrate schema` run (the integrate steps of the file header): `migrated` (from -> to), `current`
+ * (already at `version`), `failed` (exit status + output tail, the `corpus` it was run against and the exact `command`
+ * to rerun), `skipped` (`reason`).
+ */
+export type SchemaMigration =
+  | { readonly state: "migrated"; readonly from: number; readonly to: number }
+  | { readonly state: "current"; readonly version: number }
+  | { readonly state: "failed"; readonly exit_status: number; readonly output_tail: string; readonly corpus: string; readonly command: string }
+  | { readonly state: "skipped"; readonly reason: string };
+
+/** The `--json` report of `lore migrate schema` (src/adapters/cli/migrate-schema.ts): the only fields read. */
+const MigrateSchemaReportSchema = z.object({ ok: z.literal(true), data: z.object({ upgraded: z.boolean(), from: z.number().int(), to: z.number().int() }) });
 
 /**
  * What happened to the shared checkout's read-only view of main after main moved (INT-T6): `refreshed` = it now sits at
@@ -232,8 +262,9 @@ export type SharedViewRebuild =
   | { readonly state: "skipped"; readonly reason: string };
 
 export type IntegrateOutcome =
-  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
-  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
+  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
+  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
+  | { readonly kind: "snapshot_migrate_failed"; readonly branch: string; readonly attempts: number; readonly snapshot: string; readonly exit_status: number; readonly output_tail: string; readonly command: string }
   | { readonly kind: "floor_failed"; readonly branch: string; readonly attempts: number; readonly exit_status: number; readonly output_tail: string }
   | { readonly kind: "conflict"; readonly branch: string; readonly paths: readonly string[] }
   | { readonly kind: "busy"; readonly branch: string; readonly worktree: string; readonly holder: LeaseHolder | undefined }
@@ -252,8 +283,10 @@ export function integrateExitCode(outcome: IntegrateOutcome): number {
   switch (outcome.kind) {
     case "landed":
     case "already_integrated":
-      return 0;
+      // a failed live migrate leaves main landed but the corpus behind: loud (exit 1), and the re-run is an idempotent repair
+      return outcome.schema.state === "failed" ? 1 : 0;
     case "floor_failed":
+    case "snapshot_migrate_failed":
       return 1;
     case "conflict":
       return 4;
@@ -381,7 +414,8 @@ export class IntegrateService {
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
-        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
+        const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
+        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand) });
       }
       log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
       const attemptStart = clock();
@@ -406,6 +440,23 @@ export class IntegrateService {
       const snapshotMs = clock() - snapshotStart;
       if (!snapshot.ok) return snapshot;
       log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
+      if (request.migrateCommand !== undefined && request.migrateCommand.trim() !== "") {
+        // reason: since 5f0259a1 opening an older corpus refuses; the branch binary must upgrade the SNAPSHOT explicitly (cwd = the
+        // integration worktree, whose own .lore/lore.db is the snapshot) before the floor opens it. Never run against the live corpus.
+        const snapshotDir = join(wt, ".lore");
+        const migrated = runSchemaMigration(this.deps.runFloor, request.migrateCommand, wt, snapshotDir);
+        if (migrated.state === "failed") {
+          const dropped = this.deps.corpus.remove(wt);
+          if (!dropped.ok) return dropped;
+          const back = this.resetWorktree(wt, base.value);
+          if (!back.ok) return back;
+          finish({ outcome: "snapshot_migrate_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: null, cas_ms: null });
+          return ok({ kind: "snapshot_migrate_failed", branch: request.branch, attempts: attempt, snapshot: snapshotDir, exit_status: migrated.exit_status, output_tail: migrated.output_tail, command: migrated.command });
+        }
+        log(`integrate: snapshot ${describeSchemaMigration(migrated)}`);
+      } else {
+        log("integrate: snapshot migrate skipped (workflow.integrate.migrate_command is not set)");
+      }
       const floorStart = clock();
       const floor = this.deps.runFloor(floorCommand, wt);
       const floorTotalMs = clock() - floorStart;
@@ -435,7 +486,8 @@ export class IntegrateService {
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
+        const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
+        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand) });
       }
 
       const now = this.resolveCommit(TARGET_REF);
@@ -591,6 +643,21 @@ export class IntegrateService {
   }
 
   /**
+   * Upgrades the LIVE corpus once, after the landing's refresh and rebuild, by running `migrate_command` in the shared
+   * checkout (which owns the corpus). Never fails the integration and never un-lands main: every non-migration is
+   * reported (`skipped` with its reason, `failed` with the corpus and the exact command to rerun). Runs only when the
+   * binary the command resolves is main's: the view was `refreshed` and the rebuild did not fail.
+   */
+  private migrateLiveCorpus(view: SharedViewRefresh, rebuild: SharedViewRebuild, command: string | undefined): SchemaMigration {
+    if (command === undefined || command.trim() === "") return { state: "skipped", reason: "workflow.integrate.migrate_command is not set" };
+    const { projectRoot, runFloor, log } = this.deps;
+    if (view.state !== "refreshed") return { state: "skipped", reason: `the shared checkout view is ${view.state}, so its binary is not main's; run \`${command}\` in ${projectRoot} once it is` };
+    if (rebuild.state === "rebuild_failed") return { state: "skipped", reason: `the shared checkout rebuild failed, so its binary is not main's; rebuild, then run \`${command}\` in ${projectRoot}` };
+    log(`integrate: migrating the live corpus in ${projectRoot}: ${command}`);
+    return runSchemaMigration(runFloor, command, projectRoot, join(projectRoot, ".lore"));
+  }
+
+  /**
    * Runs the project's post-refresh command in the shared checkout when its view is `refreshed`. Never fails the
    * integration: every non-rebuild is reported. A build that leaves tracked changes is reported with the paths.
    */
@@ -681,5 +748,46 @@ export class IntegrateService {
     const lines = out.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
     if (out.status !== 0 || lines.length === 0) return [`${short(now)} (main is not a descendant of ${short(base)})`];
     return lines.reverse().map((l) => `${short(l.slice(0, 40))}${l.slice(40)}`);
+  }
+}
+
+/**
+ * Runs `<command> --json` in `cwd` through the injected runner and reads the report. A non-zero exit, or an exit 0
+ * whose output carries no readable `--json` report (a migrate whose result cannot be named must not read as success),
+ * is `failed`.
+ *
+ * @param runner - the injected shell runner (the floor runner)
+ * @param command - `workflow.integrate.migrate_command`, the full `lore migrate schema` command line
+ * @param cwd - the directory whose corpus is migrated (the integration worktree for the snapshot, the shared checkout for the live corpus)
+ * @param corpus - the `.lore/` directory the run is expected to touch, named in a failure
+ */
+export function runSchemaMigration(runner: FloorRunner, command: string, cwd: string, corpus: string): SchemaMigration {
+  const full = `${command} --json`;
+  const ran = runner(full, cwd);
+  const tail = ran.output.slice(-FLOOR_TAIL_CHARS);
+  if (ran.status !== 0) return { state: "failed", exit_status: ran.status, output_tail: tail, corpus, command: full };
+  const block = /\{\s*"ok"[\s\S]*\}\s*$/.exec(ran.output);
+  let report: z.infer<typeof MigrateSchemaReportSchema> | undefined;
+  try {
+    const parsed = block === null ? undefined : MigrateSchemaReportSchema.safeParse(JSON.parse(block[0]));
+    report = parsed?.success === true ? parsed.data : undefined;
+  } catch {
+    report = undefined; // reason: unreadable output is returned as a failed migration below, never swallowed
+  }
+  if (report === undefined) return { state: "failed", exit_status: 0, output_tail: `exited 0 but printed no readable --json report:\n${tail}`, corpus, command: full };
+  return report.data.upgraded ? { state: "migrated", from: report.data.from, to: report.data.to } : { state: "current", version: report.data.to };
+}
+
+/** One line for a migration result: `schema: <from> -> <to>`, `schema: already current`, or the skip/failure in words. */
+export function describeSchemaMigration(migration: SchemaMigration): string {
+  switch (migration.state) {
+    case "migrated":
+      return `schema: ${migration.from} -> ${migration.to}`;
+    case "current":
+      return "schema: already current";
+    case "skipped":
+      return `schema: skipped (${migration.reason})`;
+    case "failed":
+      return `schema: migrate failed (exit ${migration.exit_status}) on ${migration.corpus}`;
   }
 }

@@ -17,8 +17,8 @@ import {
   RETIRED_ADOPTION_MESSAGE,
 } from "../src/index.js";
 
-const WITH = "# top\nproject:\n  name: x\ncontext:\n  memory_files:\n    root:\n      max_lines: 200\n    adoption: warn # why\naudit:\n  verify_since: \"2026-07-06T12:02:00Z\"\n";
-const WITHOUT = "# top\nproject:\n  name: x\ncontext:\n  memory_files:\n    root:\n      max_lines: 200\naudit:\n  verify_since: \"2026-07-06T12:02:00Z\"\n";
+const WITH = "# top\nproject:\n  name: x\ncontext:\n  memory_files:\n    root:\n      max_lines: 200\n    adoption: warn # why\nverify:\n  default_timeout_ms: 900000\n";
+const WITHOUT = "# top\nproject:\n  name: x\ncontext:\n  memory_files:\n    root:\n      max_lines: 200\nverify:\n  default_timeout_ms: 900000\n";
 
 describe("loadConfigFromString refuses the retired adoption setting", () => {
   it("NEGATIVE: both values are refused with the exact message naming the migrate action", () => {
