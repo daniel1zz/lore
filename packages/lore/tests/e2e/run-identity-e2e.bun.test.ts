@@ -224,13 +224,15 @@ describe("AC-RID-18: run-register hook registers distinct runs against the built
     for (const id of [RUN_1, RUN_2]) {
       const data = JSON.parse(lore(["run", "show", id, "--json"]).stdout).data;
       expect(data.kind).toBe("subagent");
-      // reason: BR-1027 reads "Each main session and each helper agent it starts is a distinct run. A helper's run records the
-      // run that started it. Two helpers started by the same session are never the same run." `RunService.register` records the
-      // parent the CALLER supplied (`--parent`), else null ("unknown"), and its invariant says it is "never guessed, so a helper
-      // started by another helper is not recorded as the main run's child (BR-1027, D24)". The SubagentStart payload run-register.mjs
-      // forwards carries no parent, so a hook-registered helper has null; the explicit `--parent` link is pinned in
-      // integration/cli/run-register.bun.test.ts (AC-RID-1).
+      // reason: BR-1027 reads "Each main session and each helper agent it starts is a distinct run. A helper's run belongs to the
+      // session it runs in: its id is cc:<session>:<agent>. Which run started a helper is recorded only when the caller supplies it;
+      // the agent integration never guesses it, because the harness does not report the starter. Two helpers started by the same
+      // session are never the same run." The SubagentStart payload run-register.mjs forwards carries no starter, so a hook-registered
+      // helper has parent null; the explicit `--parent` link is pinned in integration/cli/run-register.bun.test.ts (AC-RID-1).
       expect(data.parentRunId).toBeNull();
+      // session membership: the helper's run id is cc:<session>:<agent>
+      expect(id.startsWith(`cc:${SESSION}:`)).toBe(true);
+      expect(data.id.startsWith(`cc:${SESSION}:`)).toBe(true);
       expect(data.agentType).toBe(AGENT_TYPE);
     }
   });
