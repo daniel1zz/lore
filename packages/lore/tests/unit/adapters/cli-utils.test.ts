@@ -6,12 +6,7 @@
  * (task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
-import { userInfo } from "os";
-import { mkdtempSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, it, expect } from "vitest";
 import {
   exitCode,
   formatError,
@@ -22,12 +17,10 @@ import {
   parsePositiveIntArg,
   relativeTime,
   resolveActor,
-  resolveActorWithSource,
-  resetActorFallbackWarningForTests,
 } from "../../../src/adapters/cli/utils.js";
-import type { LoreError } from "@lore/core";
+import { UnknownPartyError, unresolvedIdentity } from "@lore/core/node";
+import type { LoreError, RunId } from "@lore/core";
 import type { TreeNode } from "../../../src/service/corpus-service.js";
-import { liveInvocation, liveIo } from "../../live-invocation.js";
 
 // ─── exitCode ──────────────────────────────────────────────────────────────
 
@@ -636,273 +629,43 @@ describe("parsePositiveIntArg", () => {
   });
 });
 
-// ─── resolveActorWithSource + resolveActor OS-fallback advisory (retro
-// `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
-// AC-AUDIT-ACTOR-1) ─────────────────────────────────────────────────────────
+// ─── resolveActor: the invocation's known-party name (BR-1055) ─────────────────
 
-/**
- * SPEC-104 makes `resolveActorWithSource`'s (and, via
- * `resolveActorWithIdentitySource`, `resolveActor`'s) default `cwd` load-
- * bearing: an ambient cwd sitting inside a linked git worktree — this repo's
- * OWN standard subagent-dispatch pattern — now correctly resolves
- * `agent:<branch>` (`worktree-derived`) instead of falling through to the
- * OS-fallback tier these os-fallback assertions expect. Every os-fallback
- * case below pins cwd to a fixture with a real `.git` DIRECTORY (a "main
- * checkout" shape, per `detectWorktreeDerivedActor`'s own contract, which
- * treats a `.git` directory as "not a linked worktree") — never relies on
- * the ambient test-process cwd (`knowledge-spec-104-fallout-changed-tests-ts-porcelain-path-bug`).
- */
-function makeNonWorktreeCwdFixture(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lore-cli-utils-non-worktree-"));
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  execFileSync("git", ["config", "user.email", "cli-utils-fixture@example.com"], { cwd: dir });
-  execFileSync("git", ["config", "user.name", "CLI Utils Fixture"], { cwd: dir });
-  return dir;
-}
-
-describe("resolveActorWithSource", () => {
-  const OS_USERNAME = userInfo().username;
-  const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
-  const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
-  const ORIGINAL_CLAUDE_SESSION_ID = process.env["CLAUDE_SESSION_ID"];
-  let nonWorktreeCwd: string;
-
-  beforeAll(() => {
-    nonWorktreeCwd = makeNonWorktreeCwdFixture();
+describe("resolveActor", () => {
+  it("returns an agent run's name (agent:session-<8>) for a run identity", () => {
+    expect(resolveActor({ identity: { harnessRun: "cc:3de02220-5d69-4b5a-ac23-d66e14c0261b" as RunId, claimed: "agent:session-3de02220", claimedSource: "run" } })).toBe(
+      "agent:session-3de02220",
+    );
   });
 
-  afterAll(() => {
-    rmSync(nonWorktreeCwd, { recursive: true, force: true });
+  it("returns the person's name for a human-session identity", () => {
+    expect(resolveActor({ identity: { harnessRun: "human:0123456789abcdef" as RunId, claimed: "dana", claimedSource: "human" } })).toBe("dana");
   });
 
-  // Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
-  // session tier resolves ahead of os-fallback — clear both session vars before
-  // every test in THIS describe block (scoped, not file-level) so the os-fallback
-  // cases below still exercise os-fallback, then restore whatever the ambient
-  // shell actually had so other describe blocks in this file are unaffected.
-  beforeEach(() => {
-    delete process.env["CLAUDE_CODE_SESSION_ID"];
-    delete process.env["CLAUDE_SESSION_ID"];
-  });
-
-  afterEach(() => {
-    if (ORIGINAL_LORE_ACTOR === undefined) {
-      delete process.env["LORE_ACTOR"];
-    } else {
-      process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
-    }
-    if (ORIGINAL_CLAUDE_CODE_SESSION_ID === undefined) {
-      delete process.env["CLAUDE_CODE_SESSION_ID"];
-    } else {
-      process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_CLAUDE_CODE_SESSION_ID;
-    }
-    if (ORIGINAL_CLAUDE_SESSION_ID === undefined) {
-      delete process.env["CLAUDE_SESSION_ID"];
-    } else {
-      process.env["CLAUDE_SESSION_ID"] = ORIGINAL_CLAUDE_SESSION_ID;
+  it("THROWS UnknownPartyError naming both remedies when the identity has no known party (never a substitute name)", () => {
+    const identity = unresolvedIdentity("no party here: lore session start --human <name> / lore setup");
+    expect(() => resolveActor({ identity })).toThrow(UnknownPartyError);
+    try {
+      resolveActor({ identity });
+    } catch (error) {
+      expect((error as UnknownPartyError).loreError.code).toBe("VALIDATION_ERROR");
+      expect((error as UnknownPartyError).message).toContain("lore session start --human");
+      expect((error as UnknownPartyError).message).toContain("lore setup");
     }
   });
 
-  describe("HAPPY", () => {
-    it("returns {source: explicit} when --by is passed", () => {
-      delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource("alice", process.env, process.cwd(), liveInvocation().user)).toEqual({ actor: "alice", source: "explicit" });
-    });
-
-    it("ignores $LORE_ACTOR when --by is not passed (BR-1055), resolving to OS username", () => {
-      process.env["LORE_ACTOR"] = "agent:bob";
-      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd, liveInvocation().user)).toEqual({
-        actor: OS_USERNAME,
-        source: "os-fallback",
-      });
-    });
-
-    it("returns {source: os-fallback, actor: OS username} when neither is provided", () => {
-      delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd, liveInvocation().user)).toEqual({
-        actor: OS_USERNAME,
-        source: "os-fallback",
-      });
-    });
-  });
-
-  describe("BOUNDARY", () => {
-    it("treats a whitespace-only --by as absent, falling through past a set $LORE_ACTOR", () => {
-      process.env["LORE_ACTOR"] = "agent:carol";
-      expect(resolveActorWithSource("   ", process.env, nonWorktreeCwd, liveInvocation().user)).toEqual({
-        actor: OS_USERNAME,
-        source: "os-fallback",
-      });
-    });
-
-    it("treats a whitespace-only $LORE_ACTOR as absent, falling through to OS username", () => {
-      process.env["LORE_ACTOR"] = "   ";
-      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd, liveInvocation().user)).toEqual({
-        actor: OS_USERNAME,
-        source: "os-fallback",
-      });
-    });
-  });
-
-  describe("STATE — $LORE_ACTOR set/unset within the test", () => {
-    it("prefers explicit --by even when $LORE_ACTOR is also set", () => {
-      process.env["LORE_ACTOR"] = "agent:dave";
-      expect(resolveActorWithSource("erin", process.env, process.cwd(), liveInvocation().user)).toEqual({ actor: "erin", source: "explicit" });
-    });
-
-    it("resolves identically whether $LORE_ACTOR is set or deleted mid-test", () => {
-      process.env["LORE_ACTOR"] = "agent:frank";
-      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd, liveInvocation().user).source).toBe("os-fallback");
-      delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd, liveInvocation().user)).toEqual({
-        actor: OS_USERNAME,
-        source: "os-fallback",
-      });
-    });
-  });
-
-  describe("REGRESSION — resolveActor's returned string matches resolveActorWithSource(...).actor", () => {
-    it("explicit --by", () => {
-      delete process.env["LORE_ACTOR"];
-      resetActorFallbackWarningForTests();
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(liveIo(), "grace", process.env, process.cwd(), liveInvocation().user)).toBe(resolveActorWithSource("grace", process.env, process.cwd(), liveInvocation().user).actor);
-      stderrSpy.mockRestore();
-    });
-
-    it("$LORE_ACTOR set is ignored by both", () => {
-      process.env["LORE_ACTOR"] = "agent:heidi";
-      resetActorFallbackWarningForTests();
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user)).toBe(resolveActorWithSource(undefined, process.env, process.cwd(), liveInvocation().user).actor);
-      expect(resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user)).not.toBe("agent:heidi");
-      stderrSpy.mockRestore();
-    });
-
-    it("OS-username fallback", () => {
-      delete process.env["LORE_ACTOR"];
-      resetActorFallbackWarningForTests();
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user)).toBe(resolveActorWithSource(undefined, process.env, process.cwd(), liveInvocation().user).actor);
-      stderrSpy.mockRestore();
-    });
-  });
-});
-
-function spyOnStderrWrite() {
-  return vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-}
-
-describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)", () => {
-  const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
-  const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
-  const ORIGINAL_CLAUDE_SESSION_ID = process.env["CLAUDE_SESSION_ID"];
-  let stderrSpy: ReturnType<typeof spyOnStderrWrite>;
-  // `resolveActor` (unlike `resolveActorWithSource`) has no `cwd` parameter —
-  // it always reads `process.cwd()` via `resolveActorWithIdentitySource`'s
-  // default. Every os-fallback assertion in this block needs the SAME
-  // non-worktree-cwd guarantee `makeNonWorktreeCwdFixture` gives
-  // `resolveActorWithSource` above, so this describe chdir's the real
-  // process cwd into that fixture for its duration (restored in `afterEach`,
-  // mirroring `actor-worktree-derivation.bun.test.ts`'s own
-  // chdir/restore-in-afterEach pattern for its `claim` command test).
-  let nonWorktreeCwd: string;
-  let originalCwd: string;
-
-  beforeAll(() => {
-    nonWorktreeCwd = makeNonWorktreeCwdFixture();
-  });
-
-  afterAll(() => {
-    rmSync(nonWorktreeCwd, { recursive: true, force: true });
-  });
-
-  beforeEach(() => {
-    originalCwd = process.cwd();
-    process.chdir(nonWorktreeCwd);
-    resetActorFallbackWarningForTests();
-    stderrSpy = spyOnStderrWrite();
-    // Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
-    // session tier resolves ahead of os-fallback — clear both session vars before
-    // every test in THIS describe block (scoped, not file-level) so the
-    // os-fallback cases below still exercise os-fallback.
-    delete process.env["CLAUDE_CODE_SESSION_ID"];
-    delete process.env["CLAUDE_SESSION_ID"];
-  });
-
-  afterEach(() => {
-    stderrSpy.mockRestore();
-    process.chdir(originalCwd);
-    if (ORIGINAL_LORE_ACTOR === undefined) {
-      delete process.env["LORE_ACTOR"];
-    } else {
-      process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
-    }
-    if (ORIGINAL_CLAUDE_CODE_SESSION_ID === undefined) {
-      delete process.env["CLAUDE_CODE_SESSION_ID"];
-    } else {
-      process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_CLAUDE_CODE_SESSION_ID;
-    }
-    if (ORIGINAL_CLAUDE_SESSION_ID === undefined) {
-      delete process.env["CLAUDE_SESSION_ID"];
-    } else {
-      process.env["CLAUDE_SESSION_ID"] = ORIGINAL_CLAUDE_SESSION_ID;
+  it("does not read the process: $LORE_ACTOR, the session id and the computer user cannot supply a name", () => {
+    const saved = { LORE_ACTOR: process.env["LORE_ACTOR"], CLAUDE_CODE_SESSION_ID: process.env["CLAUDE_CODE_SESSION_ID"] };
+    process.env["LORE_ACTOR"] = "agent:bob";
+    process.env["CLAUDE_CODE_SESSION_ID"] = "3de02220-5d69-4b5a-ac23-d66e14c0261b";
+    try {
+      expect(() => resolveActor({ identity: unresolvedIdentity("none") })).toThrow(UnknownPartyError);
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
   });
 
-  // ── Precise-signal proof: these two cases are the load-bearing ones. A
-  // naive "always warn unless the value has an agent:/ai: prefix" implementation
-  // passes every other case in this file but FAILS both of these — a human
-  // passing --by daniel or exporting LORE_ACTOR=daniel made a deliberate,
-  // traceable choice and must get ZERO advisory lines. (Verified red-before-green:
-  // temporarily swapping resolveActor for that naive rule turned both cases
-  // below red — 2 failing / rest passing — before reverting to the
-  // fallback-only signal implemented here.)
-  it("PRECISE SIGNAL: an explicit --by human-looking name emits 0 stderr lines", () => {
-    delete process.env["LORE_ACTOR"];
-    const actor = resolveActor(liveIo(), "daniel", process.env, process.cwd(), liveInvocation().user);
-    expect(actor).toBe("daniel");
-    expect(stderrSpy).not.toHaveBeenCalled();
-  });
-
-  it("PRECISE SIGNAL: a set $LORE_ACTOR no longer silences the advisory (it is not read)", () => {
-    process.env["LORE_ACTOR"] = "daniel";
-    const actor = resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
-    expect(actor).not.toBe("daniel");
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("OS-fallback (no --by, no $LORE_ACTOR) emits exactly 1 stderr line matching /OS username/", () => {
-    delete process.env["LORE_ACTOR"];
-    const actor = resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
-    expect(actor).toBe(userInfo().username);
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
-    const [firstCallArg] = stderrSpy.mock.calls[0] as [string];
-    expect(firstCallArg).toMatch(/OS username/);
-  });
-
-  it("once-per-process guard: a SECOND OS-fallback call in the same process writes 0 additional lines", () => {
-    delete process.env["LORE_ACTOR"];
-    resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
-    stderrSpy.mockClear();
-    resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
-    expect(stderrSpy).not.toHaveBeenCalled();
-  });
-
-  it("the guard resets when resetActorFallbackWarningForTests() is called (test-only escape)", () => {
-    delete process.env["LORE_ACTOR"];
-    resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
-    stderrSpy.mockClear();
-    resetActorFallbackWarningForTests();
-    resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("explicit --by still returns the unchanged actor value alongside 0 advisory lines", () => {
-    process.env["LORE_ACTOR"] = "agent:ignored-because-explicit-wins";
-    expect(resolveActor(liveIo(), "alice", process.env, process.cwd(), liveInvocation().user)).toBe("alice");
-    expect(stderrSpy).not.toHaveBeenCalled();
-  });
 });

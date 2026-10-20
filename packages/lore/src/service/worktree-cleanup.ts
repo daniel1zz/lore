@@ -73,10 +73,12 @@ export interface WorktreeGitProbe {
   /** `git worktree list --porcelain`, run from `cwd` (any worktree of the repo). Entry 0 is the main checkout. */
   listWorktrees(cwd: string): ProbeResult<readonly ListedWorktree[]>;
   /** Any tracked or untracked change in the worktree at `path`. */
+  /** @lore-site BR-1219 */
   isDirty(path: string): ProbeResult<boolean>;
   /** `git rev-list --count <range>` run in `cwd`. */
   countCommits(cwd: string, range: string): ProbeResult<number>;
   /** The integration branch (`main`, else `master`) a worktree must be merged into, resolved in `cwd`. */
+  /** @lore-site BR-1219 */
   integrationBranch(cwd: string): ProbeResult<string>;
   /** `git rev-parse HEAD` in `path`. */
   headSha(path: string): ProbeResult<string>;
@@ -87,11 +89,13 @@ export interface WorktreeGitProbe {
   /** Plain `git branch -d <branch>` run from `repoRoot`. */
   deleteBranch(repoRoot: string, branch: string): ProbeResult<true>;
   /** `git status --ignored --porcelain` in `path`: every IGNORED path (as git printed it, `!! ` prefix stripped). */
+  /** @lore-site BR-1235 */
   ignoredPaths(path: string): ProbeResult<readonly string[]>;
   /**
    * Whether the ignored path `relPath` of worktree `path` is byte-identical to the same path in the main checkout
    * (the first entry of `git worktree list`). Optional: an absent method proves nothing, so the path stays listed.
    */
+  /** @lore-site BR-1235 */
   ignoredPathIdenticalToMain?(path: string, relPath: string): ProbeResult<boolean>;
   /**
    * Whether the repo-relative `path` is a file of the tree at `ref` (`ls-tree --full-tree`), run in `cwd`.
@@ -99,13 +103,16 @@ export interface WorktreeGitProbe {
    */
   pathExistsAtRef?(cwd: string, ref: string, path: string): ProbeResult<boolean>;
   /** The owner marker of the falsifier scratch worktree at `path`: `null` when the marker file is absent. */
+  /** @lore-site BR-1236 */
   scratchOwner(path: string): ProbeResult<{ readonly pid: number } | null>;
   /** Whether process `pid` exists (signal 0). A pid that cannot be probed counts as alive (keep wins). */
+  /** @lore-site BR-1236 */
   isPidAlive(pid: number): boolean;
   /**
    * `git worktree remove --force <path>` from `repoRoot`, then removal of the scratch parent directory. ONLY for a
    * falsifier scratch worktree (see {@link isFalsifierScratchPath}); refuses any other path.
    */
+  /** @lore-site BR-1236 */
   removeScratchWorktree(repoRoot: string, path: string): ProbeResult<true>;
 }
 

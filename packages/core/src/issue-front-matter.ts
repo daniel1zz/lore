@@ -1,14 +1,15 @@
 /**
  * `frontMatterCodec` — serialises the closed six-field issue-report metadata
  * set into a delimited block at the head of a GitHub issue body, parses it
- * back, and redacts the two identity leaks measured in the reporting wiring
+ * back, and redacts the identity leak measured in the reporting wiring
  * (spec-the-defect-channel-reaches-no-machine-but-its-own-github, Risk R1):
  * an absolute `$HOME`-rooted corpus path (`report-issue-wiring.ts:225`
- * builds `` `${basename(root)} (${root})` ``, the raw root) and the actor
- * os-fallback tier (`actor-resolution-node.ts:114`, `os.userInfo().username`).
- * Both would land in a PUBLIC GitHub issue, and GitHub caches edits, so the
+ * builds `` `${basename(root)} (${root})` ``, the raw root).
+ * It would land in a PUBLIC GitHub issue, and GitHub caches edits, so the
  * disclosure is irreversible — redaction happens HERE, before any text
- * reaches a `gh` invocation, never downstream.
+ * reaches a `gh` invocation, never downstream. The actor needs no redaction:
+ * it is always a known party's own name (a run's session name, a registered
+ * human's or key's name), never the computer user name.
  *
  * Public surface:
  *   - `IssueFrontMatterFields` / `issueFrontMatterFieldsSchema` — the closed
@@ -21,7 +22,7 @@
  *   - `parseIssueBody(body)` — the inverse: `ParsedIssueBody`, an EXPLICIT
  *     `{present: false}` when no front-matter block exists, never a
  *     silently-empty record.
- *   - `RawReporterIdentity` / `ReporterActorSource` / `RedactedReporterIdentity`
+ *   - `RawReporterIdentity` / `RedactedReporterIdentity`
  *     / `redactReporterIdentity(raw)` — the redaction step itself.
  *   - `MalformedIssueFrontMatterError` — thrown when a front-matter block IS
  *     present (both delimiters found) but its content is not valid JSON
@@ -30,7 +31,7 @@
  *
  * Invariants:
  *   - PURE. `redactReporterIdentity` takes every identity fact
- *     (`corpusRoot`, `home`, `rootPrdId`, `actor`, `actorSource`) as
+ *     (`corpusRoot`, `home`, `rootPrdId`, `actor`) as
  *     PARAMETERS — it never calls `os.homedir()` / `os.userInfo()` /
  *     `process.env.HOME` itself. That is also why this module imports no
  *     Node builtin at module scope: `@lore/core`'s default barrel is
@@ -46,10 +47,6 @@
  *     4). A delimiter search that tolerated multi-line YAML (this package's
  *     own `frontmatter.ts::splitFrontmatter`) would be exactly the wrong
  *     tool here for that reason — reused deliberately nowhere in this file.
- *   - The os-fallback actor tier is DROPPED entirely (the redacted identity
- *     carries no `actor` key at all), never replaced with a redacted
- *     placeholder — there is no safe partial form of a bare OS username.
- *     Every other tier (`explicit`, `env`, `session`) is retained verbatim.
  *   - `reporter_corpus` never carries the raw `home` prefix: when `corpusRoot`
  *     is rooted under the seeded `home`, that prefix is replaced with `~`;
  *     otherwise (no known-sensitive prefix to strip) it falls back to the
@@ -156,9 +153,8 @@ export class MalformedIssueFrontMatterError extends Error {
  *   consumer-authority content per the spec's Per-Field Authority table).
  *   Passed through byte-for-byte; this function performs no scanning or
  *   redaction of it.
- * @param actor - the reporter's actor string, or `undefined` when the
- *   os-fallback tier already dropped it (see {@link redactReporterIdentity}).
- *   `undefined` renders NO attribution line at all — never a placeholder.
+ * @param actor - the reporter's actor string, or `undefined` for a body with
+ *   no known reporter. `undefined` renders NO attribution line at all — never a placeholder.
  * @returns the full issue body: `---\n<json>\n---\n\n<description>` plus,
  *   when `actor` is defined, a trailing `\n\nReported by: <actor>` line.
  * @example
@@ -230,16 +226,6 @@ export function parseIssueBody(body: string): ParsedIssueBody {
 // ─── Identity redaction ─────────────────────────────────────────────────────
 
 /**
- * Which precedence tier produced {@link RawReporterIdentity.actor} — the
- * same four-tier vocabulary `actor-resolution-node.ts::ActorSource` resolves
- * at runtime, redeclared independently here (rather than imported) so this
- * module stays decoupled from that Node-touching file: `@lore/core`'s
- * default barrel must not grow even a type-only dependency edge toward a
- * module gated behind `@lore/core/node`.
- */
-export type ReporterActorSource = "explicit" | "env" | "session" | "os-fallback";
-
-/**
  * Identity facts as resolved by the CALLER, before any redaction. Every
  * field here is a plain value passed in — this module never reads
  * `process.env`, `os.homedir()`, or `os.userInfo()` itself (spec Review
@@ -253,10 +239,8 @@ export interface RawReporterIdentity {
   readonly home: string;
   /** The reporting corpus's root-PRD id — safe to publish as-is. */
   readonly rootPrdId: string;
-  /** The resolved actor string for the tier named by `actorSource`. */
+  /** The resolved actor name of the known party that files the report. */
   readonly actor: string;
-  /** Which precedence tier produced `actor`. */
-  readonly actorSource: ReporterActorSource;
 }
 
 /**
@@ -268,37 +252,30 @@ export interface RedactedReporterIdentity {
   readonly reporter_corpus: string;
   /** `rootPrdId`, unredacted — already safe to publish as-is. */
   readonly reporter_root_prd: string;
-  /** `actor`, unless `actorSource` was `"os-fallback"`, in which case this is `undefined` — DROPPED, not redacted-in-place. */
-  readonly actor: string | undefined;
+  /** `actor`, verbatim: a known party's own name is already safe to publish. */
+  readonly actor: string;
 }
 
 /**
- * Redact the two identity leaks measured in the reporting wiring (module
+ * Redact the identity leak measured in the reporting wiring (module
  * header, Risk R1): strip the raw home-directory prefix from the corpus
- * path, and drop the os-fallback actor tier entirely.
+ * path. The actor is kept verbatim.
  *
  * @param raw - identity facts resolved by the caller.
  * @returns the redacted identity — `reporter_corpus` never contains `raw.home`
- *   or the full `raw.corpusRoot`; `actor` is `undefined` iff
- *   `raw.actorSource === "os-fallback"`.
+ *   or the full `raw.corpusRoot`.
  * @example
  *   redactReporterIdentity({
  *     corpusRoot: "/Users/alice/my-corpus", home: "/Users/alice",
- *     rootPrdId: "prd-x", actor: "alice", actorSource: "explicit",
+ *     rootPrdId: "prd-x", actor: "alice",
  *   })
  *   // => { reporter_corpus: "~/my-corpus", reporter_root_prd: "prd-x", actor: "alice" }
- * @example
- *   redactReporterIdentity({
- *     corpusRoot: "/Users/alice/my-corpus", home: "/Users/alice",
- *     rootPrdId: "prd-x", actor: "alice", actorSource: "os-fallback",
- *   })
- *   // => { reporter_corpus: "~/my-corpus", reporter_root_prd: "prd-x", actor: undefined }
  */
 export function redactReporterIdentity(raw: RawReporterIdentity): RedactedReporterIdentity {
   return {
     reporter_corpus: redactHomePrefix(raw.corpusRoot, raw.home),
     reporter_root_prd: raw.rootPrdId,
-    actor: raw.actorSource === "os-fallback" ? undefined : raw.actor,
+    actor: raw.actor,
   };
 }
 

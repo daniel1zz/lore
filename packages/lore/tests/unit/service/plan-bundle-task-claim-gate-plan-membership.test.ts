@@ -78,9 +78,8 @@ async function createTask(
 }
 
 /** Builds a `task-claim` GateContext isolated to ONLY `noAnchorOverlap`
- *  (`actorIdentityEnabled: false`, `hasSpecParent` left unset) — the predicate this
- *  fix's consequence lands on; `actorIdentityGuard`/`upstreamApproved` are orthogonal
- *  concerns this test does not exercise. */
+ *  (`hasSpecParent` left unset) — the predicate this fix's consequence lands on;
+ *  `upstreamApproved` is an orthogonal concern this test does not exercise. */
 function anchorOnlyCtx(
   candidateBy: string,
   candidateTask: DocRecord,
@@ -88,10 +87,7 @@ function anchorOnlyCtx(
   nowIso: string,
   ttlMinutes: number,
 ): GateContext {
-  return {
-    ...buildAnchorGateContext(candidateBy, candidateTask, siblingTasks, nowIso, ttlMinutes),
-    actorIdentityEnabled: false,
-  };
+  return buildAnchorGateContext(candidateBy, candidateTask, siblingTasks, nowIso, ttlMinutes);
 }
 
 const NOW = "2026-08-03T00:00:00.000Z";

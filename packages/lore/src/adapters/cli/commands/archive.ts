@@ -147,7 +147,7 @@ export default defineLoreCommand({
     }
 
     // --apply
-    const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+    const by = resolveActor(inv);
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.

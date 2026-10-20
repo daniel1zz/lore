@@ -26,6 +26,7 @@ import { collectRecordedRanges, readMeasuredCommitRange } from "../../../src/ser
 import { deriveCommitSetForPlan } from "../../../src/adapters/cli/assess-commit-derivation.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -125,7 +126,7 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     );
     if (!ev.ok) throw new Error("evidence");
 
-    const claim = await svc.claim(taskId, { by: "alice", worktree: "agent-branch-x" });
+    const claim = await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "agent-branch-x" });
     expect(claim.ok).toBe(true);
     const c1 = commit(repo, "a.txt", "feat: a");
     const c2 = commit(repo, "b.txt", "feat: b");
@@ -136,7 +137,7 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     const recorded = await svc.recordLanding({ branch: "agent-branch-x", branch_head: c2, main_before: base, main_after: mergeSha, landing_commit: mergeSha });
     expect(recorded.ok && recorded.value).toEqual([created.value.slug]);
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     const range = readMeasuredCommitRange(done.value.task.extra);
@@ -158,7 +159,7 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     const base = commit(repo, "seed.txt", "seed");
     const { svc, taskId } = await makeArchivableTask(repo);
 
-    const claim = await svc.claim(taskId, { by: "alice", worktree: repo });
+    const claim = await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo });
     expect(claim.ok).toBe(true);
     commit(repo, "a.txt", "feat: a");
     const head = commit(repo, "b.txt", "feat: b");
@@ -166,7 +167,7 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     const recorded = await svc.recordLanding({ branch: "main", branch_head: head, main_before: base, main_after: head, landing_commit: head });
     expect(recorded.ok).toBe(true);
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(done.value.task.status).toBe("archived");
@@ -179,10 +180,10 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     run(repo, "init", "-q", "-b", "main");
     commit(repo, "seed.txt", "seed");
     const { svc, taskId } = await makeArchivableTask(repo);
-    expect((await svc.claim(taskId, { by: "alice", worktree: repo })).ok).toBe(true);
+    expect((await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo })).ok).toBe(true);
     commit(repo, "a.txt", "feat: a");
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
 
     expect(done.ok).toBe(false);
     expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
@@ -191,7 +192,7 @@ describe("lore done records extra.commit_range (issue #180)", () => {
   it("BOUNDARY: a task never claimed with a worktree records not-measured with a reason, and still archives", async () => {
     const { svc, taskId } = await makeArchivableTask();
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(done.value.task.status).toBe("archived");

@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CommandDef } from "citty";
-import type { Invocation } from "@lore/core";
+import type { Invocation, RunId } from "@lore/core";
 import { buildMain, COMMAND_LOADERS, CommandTreeWithoutInvocationError } from "../../../src/adapters/cli/index";
 import { runCli } from "../../../src/adapters/cli/run-cli";
 
@@ -73,10 +73,9 @@ function makeInvocation(argv: readonly string[]): Invocation {
       tmpDir: "/nonexistent/iv-5-tmp",
     }),
     host: "iv-5-host",
-    user: { ok: true as const, name: "iv-5-user" },
     execPath: "/nonexistent/lore",
     isCompiled: false,
-    identity: Object.freeze({ harnessRun: null, claimed: "agent:iv-5-test", claimedSource: "flag" as const }),
+    identity: Object.freeze({ harnessRun: "cc:iv-5-test-session" as RunId, claimed: "agent:iv-5-test", claimedSource: "run" as const }),
     io: Object.freeze({ stdout: sink, stderr: sink, stdin: Readable.from([]), stdinIsTTY: false }),
   });
 }

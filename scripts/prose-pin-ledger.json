@@ -11,6 +11,24 @@
       "literal_fingerprint": "a spec takes no parent",
       "consumer": "the agent whose `lore create spec` is denied: the spec-create gate rule text (packages/lore/src/adapters/cli/commands/gate.ts), echoed in assets/skills/lore-design/SKILL.md",
       "reason": "Runtime gate sentence that agents act on (BR-2: a spec has no parent); the test asserts the emitted denial text, which merely also occurs in shipped skill prose. Not a pin of the skill's wording."
+    },
+    {
+      "file": "packages/lore/tests/unit/context/issue-channel-guidance.test.ts",
+      "literal_fingerprint": "this project's own issue tracker",
+      "consumer": "the agent reading the close-phase guidance (assets/context/corpus-workflow-4-close.md, rendered to .claude/rules/lore-corpus-workflow-close.md)",
+      "reason": "AC-IGH-1 asserts this exact wording by spec (BR-1153 modify): the route for non-lore-defect problems must name the project's own issue tracker, not lore's upstream."
+    },
+    {
+      "file": "packages/lore/tests/unit/context/issue-channel-guidance.test.ts",
+      "literal_fingerprint": "file it as an issue",
+      "consumer": "the agent reading the close-phase guidance and this repo's CLAUDE.md Dogfooding section",
+      "reason": "AC-IGH-1 and AC-IGH-2 assert this exact wording by spec (BR-1153 modify): the guidance is about this wording."
+    },
+    {
+      "file": "packages/lore/tests/unit/context/issue-channel-guidance.test.ts",
+      "literal_fingerprint": "a task names the issues it resolves",
+      "consumer": "the agent reading the close-phase guidance and this repo's CLAUDE.md Dogfooding section",
+      "reason": "AC-IGH-1 and AC-IGH-2 assert this exact wording by spec (BR-1153 modify): the guidance is about this wording."
     }
   ]
 }

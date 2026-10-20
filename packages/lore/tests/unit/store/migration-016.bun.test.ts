@@ -210,7 +210,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   it("STATE: LATEST_SCHEMA_VERSION is 22 and opening a schema-15 file lands on user_version 22", async () => {
     await seedSchema15();
     const store = actedStore(new SQLiteStore(path, { migrate: true }));
-    expect(LATEST_SCHEMA_VERSION).toBe(LATEST_SCHEMA_VERSION);
+    expect(LATEST_SCHEMA_VERSION).toBe(28);
     expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     store.close();
   });
@@ -466,13 +466,14 @@ for (const sc of STORES) {
       expect(v[0]!.harness_run ?? null).toBeNull();
     });
 
-    it("NEGATIVE: an unattested context (harnessRun null) stamps NULL, never a guessed run", async () => {
+    it("NEGATIVE: a context with no run (harnessRun null) is REFUSED and writes nothing — never stamped NULL, never a guessed run (BR-1351)", async () => {
       const wrap = await loadWithWriteContext();
-      await wrap(store, { identity: identity(null) }).appendAuditEntry(makeAudit(DOC_1));
+      const refused = await wrap(store, { identity: identity(null) }).appendAuditEntry(makeAudit(DOC_1));
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      expect(refused.error.code).toBe("VALIDATION_ERROR");
       const rows = await store.queryAudit({ doc_id: DOC_1 });
-      const a = (rows.ok ? rows.value : []) as Array<AuditEntry & { harness_run?: string | null }>;
-      expect(a.length).toBe(1);
-      expect(a[0]!.harness_run ?? null).toBeNull();
+      expect((rows.ok ? rows.value : []).length).toBe(0);
     });
 
     it("NEGATIVE: the wrapper overrides nothing on the underlying store — a later unwrapped write is still NULL", async () => {

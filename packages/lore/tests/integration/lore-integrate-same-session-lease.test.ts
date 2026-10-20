@@ -17,6 +17,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installShippedGuard } from "./support/main-guard-repo.js";
+import { claimBranchTask } from "../helpers/claim-branch-task.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -108,6 +109,11 @@ class Fixture {
     this.git(["add", `${name}.txt`]);
     this.git(["commit", "-q", "-m", `work on ${name}`]);
     this.git(["checkout", "-q", "--detach", "main"]);
+    // BR-1348: integrate refuses a branch no task belongs to
+    claimBranchTask((args) => {
+      const r = sh(this.repo, "bun", ["run", INDEX_TS, ...args], this.env("claim"));
+      return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
+    }, this.repo, name);
     return name;
   }
 

@@ -10,9 +10,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { applyMigration026, MIGRATION_026_STEPS, MigrationFailedError } from "../../../src/store/migrations/migration-026.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 let dir = "";
 let dbPath = "";

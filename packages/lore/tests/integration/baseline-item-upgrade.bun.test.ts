@@ -19,32 +19,25 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { SQLiteStore } from "../../src/store/sqlite-store";
 import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version";
+import { createPartyCorpus, type PartyCorpus } from "../helpers/known-party-corpus";
 
-const PKG_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
-const CLI_ENTRY = join(PKG_ROOT, "src", "index.ts");
 const TEST_TIMEOUT_MS = 90_000;
 const BEHIND = LATEST_SCHEMA_VERSION - 1;
 const NOW = "2026-10-01T00:00:00.000Z";
+/** The agent run that drives `lore migrate schema` (a known party; the conversion is attributed to it). */
+const MIGRATOR = { kind: "run", run: "cc:baseline-items-upgrade" } as const;
 
-let sandbox = "";
-let corpusDir = "";
+let corpus: PartyCorpus;
 let dbPath = "";
 
-function runLore(args: string[], cwd: string) {
-  const proc = Bun.spawnSync(["bun", "run", CLI_ENTRY, ...args], {
-    cwd,
-    stdin: "ignore",
-    timeout: 60_000,
-    killSignal: "SIGKILL",
-    env: { ...process.env, HOME: sandbox, CLAUDECODE: "1", EDITOR: "true" },
-  });
-  return { out: proc.stdout.toString() + proc.stderr.toString(), exitCode: proc.exitCode ?? -1 };
+/** `lore <args>` in the throwaway corpus as the migrating run; `out` is stdout + stderr. */
+function runLore(args: string[]) {
+  const run = corpus.lore(args, MIGRATOR);
+  return { out: run.stdout + run.stderr, exitCode: run.exitCode };
 }
 
 function rule(id: string, statement: string) {
@@ -168,23 +161,18 @@ function buildBehindCorpus(withCorruptNode: boolean) {
 }
 
 beforeAll(() => {
-  sandbox = realpathSync(mkdtempSync(join(tmpdir(), "lore-baseline-items-upgrade-")));
-  corpusDir = join(sandbox, "corpus");
-  mkdirSync(corpusDir);
-  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: corpusDir, stdio: "pipe" });
-  expect(runLore(["init"], corpusDir).exitCode).toBe(0);
-  dbPath = join(corpusDir, ".lore", "lore.db");
-  expect(sandbox.startsWith(PKG_ROOT)).toBe(false);
+  corpus = createPartyCorpus("baseline-items-upgrade");
+  dbPath = join(corpus.dir, ".lore", "lore.db");
 }, TEST_TIMEOUT_MS);
 
 afterAll(() => {
-  if (sandbox !== "") rmSync(sandbox, { recursive: true, force: true });
+  corpus.cleanup();
 });
 
 describe("AC-BIA-7: the schema upgrade converts baseline nodes to items once", () => {
   it("NEGATIVE: a corrupt baseline extra fails the upgrade loudly and leaves the corpus behind", () => {
     buildBehindCorpus(true);
-    const res = runLore(["migrate", "schema"], corpusDir);
+    const res = runLore(["migrate", "schema"]);
     expect(res.exitCode).not.toBe(0);
     expect(res.out).toContain("leaf-corrupt");
     expect(userVersion(dbPath)).toBe(BEHIND);
@@ -197,7 +185,7 @@ describe("AC-BIA-7: the schema upgrade converts baseline nodes to items once", (
     beforeAll(() => {
       buildBehindCorpus(false);
       before = dumpState(dbPath);
-      const res = runLore(["migrate", "schema"], corpusDir);
+      const res = runLore(["migrate", "schema"]);
       expect(res.exitCode, res.out).toBe(0);
       afterFirst = dumpState(dbPath);
     }, TEST_TIMEOUT_MS);
@@ -257,7 +245,7 @@ describe("AC-BIA-7: the schema upgrade converts baseline nodes to items once", (
           prev_hash: string | null;
           entry_hash: string | null;
         }[];
-        const migrated = rows.filter((r) => r.action === "migrate-schema-027");
+        const migrated = rows.filter((r) => r.action === "migrate-schema-028");
         expect(migrated.map((r) => r.doc_id).sort()).toEqual(["01DRAFTPASTLEAF000000000BB", "01NEVERAPPROVEDLEAF00000CC"]);
         expect(rows.some((r) => r.doc_id === "01APPROVEDLEAF0000000000AA")).toBe(false);
         for (const row of migrated) expect(row.actor).toBe(rows.find((r) => r.action === "migrate_schema")?.actor);
@@ -294,7 +282,7 @@ describe("AC-BIA-7: the schema upgrade converts baseline nodes to items once", (
     });
 
     it("STATE: a second run changes nothing", () => {
-      const res = runLore(["migrate", "schema"], corpusDir);
+      const res = runLore(["migrate", "schema"]);
       expect(res.exitCode, res.out).toBe(0);
       expect(dumpState(dbPath)).toBe(afterFirst);
     }, TEST_TIMEOUT_MS);

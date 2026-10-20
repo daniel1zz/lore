@@ -21,6 +21,8 @@
  */
 import { basename } from "node:path";
 import {
+  deriveHumanRunId,
+  derivePartyRunId,
   deriveRunId,
   err,
   extractHeldClaim,
@@ -137,6 +139,11 @@ export interface RegisterRunInput {
   readonly process?: RunProcessRecord;
 }
 
+/** Input of {@link RunService.registerParty}: a person (with their session token's hash) or an HTTP key / login by name. */
+export type RegisterPartyRunInput =
+  | { readonly harness: "human"; readonly name: string; readonly tokenHash: string }
+  | { readonly harness: "api-key" | "dashboard"; readonly name: string };
+
 function validationError(field: string, message: string, value?: unknown): LoreError {
   return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}) };
 }
@@ -175,9 +182,11 @@ export class RunService {
    */
   async register(input: RegisterRunInput): Promise<Result<RunRecord, LoreError>> {
     if (input.agentId === undefined && input.agentType !== undefined) {
+      /** @lore-site BR-1217 */
       return err(validationError("agent-type", "--agent-type requires --agent-id", input.agentType));
     }
     if (input.agentId !== undefined && (input.agentType === undefined || input.agentType === "")) {
+      /** @lore-site BR-1217 */
       return err(validationError("agent-type", "a subagent run requires --agent-type", input.agentType));
     }
 
@@ -192,6 +201,7 @@ export class RunService {
       parentRunId = (input.parentRunId ?? null) as RunId | null;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
+      /** @lore-site BR-1217 */
       return err(validationError("harness", message, input.harness));
     }
 
@@ -234,6 +244,49 @@ export class RunService {
   }
 
   /**
+   * Register the run of a known party that is not an agent integration (spec end state 4): a human session
+   * (`harness: "human"`, derived from its token's hash), an HTTP bearer key (`api-key`) or a dashboard login
+   * (`dashboard`). First registration wins and an ended run is reopened, exactly like {@link RunService.register}, so
+   * every later write by the same key or login reuses the same run. The party's name is stored as `agent_ref`.
+   *
+   * @returns ok(the stored record); VALIDATION_ERROR for a blank name, a malformed token hash or a malformed record.
+   */
+  async registerParty(input: RegisterPartyRunInput): Promise<Result<RunRecord, LoreError>> {
+    let id: RunId;
+    try {
+      id = input.harness === "human" ? deriveHumanRunId(input.tokenHash) : derivePartyRunId(input.harness, input.name);
+    } catch (cause) {
+      return err(validationError("name", cause instanceof Error ? cause.message : String(cause), input.name));
+    }
+    const candidate = {
+      id,
+      kind: "main",
+      harness: input.harness,
+      // reason: for a human the registry keeps ONLY the token's hash (BR-1350); a key or login is known by its name.
+      sessionRef: input.harness === "human" ? input.tokenHash : input.name,
+      agentRef: input.name,
+      agentType: null,
+      parentRunId: null,
+      branch: null,
+      composition: { schemaVersion: 1, fragments: [] },
+      registeredAt: this.now().toISOString(),
+    };
+    const parsed = runRecordSchema.safeParse(candidate);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+      return err(validationError("run", `invalid run record: ${issues}`));
+    }
+    const inserted = await this.store.insertRun(parsed.data as RunRecord);
+    if (!inserted.ok) return inserted;
+    const reopened = await this.store.reopenRun(id);
+    if (!reopened.ok) return reopened;
+    const stored = await this.store.getRun(id);
+    if (!stored.ok) return stored;
+    if (stored.value === null) return err(validationError("run", `run ${id} was inserted but cannot be read back`, id));
+    return ok(stored.value);
+  }
+
+  /**
    * End a run: stamp `ended_at` / `end_reason` (first end wins), then release its clean claims and mark the
    * ones with uncommitted changes `orphaned_dirty` (BR-1057).
    *
@@ -242,6 +295,7 @@ export class RunService {
    */
   async end(runId: string, reason: string): Promise<Result<RunEndResult, LoreError>> {
     if (runId === "") return err(validationError("run-id", "a run id is required", runId));
+    /** @lore-site BR-1215 */
     if (reason.trim() === "") return err(validationError("reason", "--reason is required", reason));
     if (this.claims === undefined) {
       return err(validationError("claims", "RunService was built without a claim port; cannot end a run's claims"));
@@ -265,6 +319,7 @@ export class RunService {
    *   STORE_ERROR from the store or a non-ENOENT realpath failure.
    */
   async occupancy(input: OccupancyInput): Promise<Result<RunOccupancy, LoreError>> {
+    /** @lore-site BR-1216 */
     if (input.worktree === "") return err(validationError("worktree", "a worktree path is required", input.worktree));
     if (this.realpathPort === undefined) {
       return err(validationError("realpath", "RunService was built without a realpath port; cannot compare worktrees"));
@@ -429,6 +484,7 @@ export class RunService {
     if (runId === "") return err(validationError("run-id", "a run id is required", runId));
     const known = await this.store.getRun(runId as RunId);
     if (!known.ok) return known;
+    /** @lore-site BR-1150 */
     if (known.value === null) return err(validationError("run-id", `run ${runId} is not registered`, runId));
     const claimed = await this.claimedTasks(runId);
     if (!claimed.ok) return claimed;
@@ -439,7 +495,7 @@ export class RunService {
   async show(id: string): Promise<Result<RunRecord, LoreError>> {
     const found = await this.store.getRun(id as RunId);
     if (!found.ok) return found;
-    if (found.value === null) return err({ code: "DOC_NOT_FOUND", id });
+    if (found.value === null) return err({ code: "DOC_NOT_FOUND", id, rule: "BR-1038" });
     return ok(found.value);
   }
 }

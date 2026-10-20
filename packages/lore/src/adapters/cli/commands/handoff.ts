@@ -1085,7 +1085,7 @@ export default defineLoreCommand({
 
       const parsed = parseHandoffJsonFile(raw, {
         // reason: the writer is the invoking run alone — a payload-supplied `by` is overridden, never trusted.
-        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
       });
       if (!parsed.ok) {
@@ -1116,7 +1116,7 @@ export default defineLoreCommand({
       }
 
       const assembled = assembleHandoffInput({
-        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
         files: normalizeRepeatable(args.file),
         decisions: normalizeRepeatable(args.decision),

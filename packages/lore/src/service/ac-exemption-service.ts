@@ -15,7 +15,7 @@
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation C4 "Exemptions" (AC-BLS2-10).
  */
 
-import { err, ok, specAcceptanceCriteriaSchema } from "@lore/core";
+import { err, ok, specAcceptanceCriteriaSchema, validationError } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import type { AcExemptionRow, StoreInterface } from "../store/store-interface.js";
 import { createHash } from "node:crypto";
@@ -63,10 +63,6 @@ export interface AcExemptionCounts {
   ratio: number;
 }
 
-function validationError(field: string, message: string, value?: unknown): LoreError {
-  return { code: "VALIDATION_ERROR", field, message, value } as LoreError;
-}
-
 function viewOf(row: AcExemptionRow, nowIso: string, satisfied: ReadonlySet<string>): AcExemptionView {
   return {
     specId: row.doc_id,
@@ -108,28 +104,28 @@ export class AcExemptionService {
   async grant(input: GrantAcExemptionInput): Promise<Result<AcExemptionRow, LoreError>> {
     // reason: inputs arrive from CLI/JSON as possibly-undefined despite the type; a missing one must fail loud here.
     const reason = typeof input.reason === "string" ? input.reason.trim() : "";
-    if (reason === "") return err(validationError("reason", "An exemption needs a non-blank --reason."));
+    if (reason === "") return err(validationError("reason", "An exemption needs a non-blank --reason.", undefined, "BR-971"));
     const by = typeof input.by === "string" ? input.by.trim() : "";
-    if (by === "") return err(validationError("by", "An exemption needs a named grantor (--by)."));
+    if (by === "") return err(validationError("by", "An exemption needs a named grantor (--by).", undefined, "BR-971"));
     if (typeof input.expiresAt !== "string" || input.expiresAt.trim() === "") {
-      return err(validationError("expires_at", "An exemption needs an expiry (--expires <ISO date>)."));
+      return err(validationError("expires_at", "An exemption needs an expiry (--expires <ISO date>).", undefined, "BR-971"));
     }
     const expiresMs = Date.parse(input.expiresAt);
     if (Number.isNaN(expiresMs)) {
-      return err(validationError("expires_at", `Expiry "${input.expiresAt}" is not a parseable ISO date.`, input.expiresAt));
+      return err(validationError("expires_at", `Expiry "${input.expiresAt}" is not a parseable ISO date.`, input.expiresAt, "BR-971"));
     }
     const now = this.clock();
     if (expiresMs <= now.getTime()) {
-      return err(validationError("expires_at", `Expiry "${input.expiresAt}" is not in the future.`, input.expiresAt));
+      return err(validationError("expires_at", `Expiry "${input.expiresAt}" is not in the future.`, input.expiresAt, "BR-971"));
     }
 
     const spec = await resolveDoc(this.store, input.specIdOrSlug);
     if (!spec.ok) return spec;
     if (spec.value.type !== "spec") {
-      return err(validationError("type", `Expected a spec document; got type '${spec.value.type}'`, spec.value.type));
+      return err(validationError("type", `Expected a spec document; got type '${spec.value.type}'`, spec.value.type, "BR-971"));
     }
     if (!criteriaOf(spec.value).some((c) => c.id === input.acId)) {
-      return err(validationError("ac_id", `Spec ${spec.value.slug} declares no criterion "${input.acId}".`, input.acId));
+      return err(validationError("ac_id", `Spec ${spec.value.slug} declares no criterion "${input.acId}".`, input.acId, "BR-971"));
     }
 
     // reason: AC-AU-7 — granting an exemption is DECIDED (class ac-exempt), not self-granted; after every input check,

@@ -190,6 +190,7 @@ function unsupportedTargetTypeError(docType: string): LoreError {
     field: "type",
     message: `Expected one of these document types: ${accepted}; got type '${docType}'`,
     value: docType,
+    rule: "BR-62",
   };
 }
 
@@ -242,7 +243,7 @@ export default defineLoreCommand({
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+            const by = resolveActor(inv);
             const result = await app.taskWorkflowService.addAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
@@ -329,7 +330,7 @@ export default defineLoreCommand({
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+            const by = resolveActor(inv);
             const result = await app.taskWorkflowService.removeAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
@@ -427,7 +428,7 @@ export default defineLoreCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const result = await declareEditPath(buildEditScopeDeps(app), {
             workingCopy: args.worktree as string,
             task: args.target as string,

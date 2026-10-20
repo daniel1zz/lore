@@ -28,7 +28,7 @@ const ISO_8601_PATTERN = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)
 export const SINCE_ACCEPTED_FORMAT = "ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)";
 
 function refuse(field: string, value: string, message: string): Result<never, LoreError> {
-  return err({ code: "VALIDATION_ERROR", field, message, value });
+  return err({ code: "VALIDATION_ERROR", field, message, value, rule: "BR-1289" });
 }
 
 function parseEnumFilter<T extends string>(

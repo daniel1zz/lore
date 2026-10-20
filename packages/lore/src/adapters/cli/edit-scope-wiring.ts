@@ -103,8 +103,8 @@ export function buildEditScopeDeps(app: App): EditScopeDeps {
       const listed = await app.corpusService.listFull({ type: "task" });
       return listed.ok ? { ok: true, value: listed.value.docs } : listed;
     },
-    buildSiblingContext: (by, candidate, siblings, nowIso, sessionId) =>
-      app.taskWorkflowService.buildAnchorGateContext(by, candidate, siblings, nowIso, sessionId),
+    buildSiblingContext: (by, candidate, siblings, nowIso) =>
+      app.taskWorkflowService.buildAnchorGateContext(by, candidate, siblings, nowIso),
     addAnchors: (slug, anchors, opts) => app.taskWorkflowService.addAnchors(slug, anchors, opts),
     ignoreProbe: spawnGitCheckIgnore,
     touchedFiles: touchedFilesOf,

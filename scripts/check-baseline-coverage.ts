@@ -13,8 +13,8 @@
  *
  * Output: one line per undeclared command with its `lore baseline map` fix line, then a summary line, so the tail of a failing
  * floor names the commands. Exit codes: 0 every runnable command is declared, 1 at least one is not, 2 the check itself could not
- * run (no root, unparsable output) — never a silent pass. The step never reads a site_map value, so leftover free-text
- * entries cannot fail it (only the full `lore baseline coverage` report exits 2 on one).
+ * run (no root, unparsable output) — never a silent pass. The step runs `--commands-only`: it never runs the site census, so a
+ * refusal site's declared rule (or the lack of one) cannot fail it.
  *
  * Side-effect class: IO (spawns `lore`, prints).
  */

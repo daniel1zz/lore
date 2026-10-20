@@ -10,11 +10,18 @@
  *     composite (`insertWithProvenance`, `insertWithAllocatedOrdinalAndProvenance`, `updateWithProvenance`
  *     — including `extras.also_audit` —, `softDeleteWithProvenance`, `addLinkWithProvenance`,
  *     `setDocParentWithProvenance`). Stamping OVERWRITES any value the caller put on the record: the run
- *     comes from the carrier, never from a service building the row. A null `harnessRun` stamps NULL.
- *   - The NAME SOURCE (D11, BR-1032) is stored on the audit row as `details.name_source`
- *     (`flag|env|mcp|session|worktree|os`) — no schema change. It is stamped only when the row's `actor`
+ *     comes from the carrier, never from a service building the row.
+ *   - ⛔ A stamped write whose identity has no known party (no run, no name) is REFUSED before the underlying store
+ *     is called: `VALIDATION_ERROR` naming `lore session start --human <name>` and `lore setup` (BR-1351). Nothing
+ *     is written, so no row is ever "unattested".
+ *   - The NAME SOURCE (BR-1032) is stored on the audit row as `details.name_source`
+ *     (`run|human|api-key|dashboard`) — no schema change. It is stamped only when the row's `actor`
  *     equals `ctx.identity.claimed`: a row written under a different actor (an explicit per-call name)
  *     must not inherit a source that describes another name. Renders read it back from `details`.
+ *   - ⛔ A doc write whose patch carries `extra.claim` is REFUSED unless that claim names the run that took it
+ *     (`harness_run`, BR-1352): `VALIDATION_ERROR` on `extra.claim.harness_run`, nothing written. A lease is held by
+ *     a run and compared by run only (BR-1040), so a lease with no run would belong to nobody. The schema upgrade
+ *     (`lore migrate schema`) expires the leases written before runs existed, so no stored lease lacks one.
  *   - Rule-registry writes (`allocateRuleAndUpdateLeaf`, `moveRule`) build their version row INSIDE the
  *     store, so the run is carried in as a parameter (`harnessRun` / `RuleLeafPatch.harness_run`).
  *   - {@link readWriteContext} lets a service that must DECIDE an author when its caller gave none
@@ -30,8 +37,9 @@
  * Side-effect class: pure wrapper (no I/O of its own).
  */
 
-import { ok, type LoreError, type Result } from "@lore/core";
-import { OsUserLookupError } from "@lore/core/node";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { err, ok, type LoreError, type Result } from "@lore/core";
+import { refusalNamingHowToBecomeKnown, UnknownPartyError } from "@lore/core/node";
 import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
@@ -61,6 +69,8 @@ interface StampedArgs {
   readonly extras?: number;
   /** Positions of `RuleLeafPatch` arguments whose `harness_run` is stamped. */
   readonly patches?: readonly number[];
+  /** Position of the doc patch whose `extra.claim` (when present) must name a run (BR-1352). */
+  readonly patch?: number;
   /** Position of a trailing `harnessRun: string | null` parameter that receives the run. */
   readonly harnessRunArg?: number;
 }
@@ -70,7 +80,7 @@ const STAMPED: Readonly<Record<string, StampedArgs>> = {
   insertVersion: { version: 0 },
   insertWithProvenance: { version: 1, audit: 2 },
   insertWithAllocatedOrdinalAndProvenance: { version: 1, audit: 2 },
-  updateWithProvenance: { version: 3, audit: 4, extras: 5 },
+  updateWithProvenance: { version: 3, audit: 4, extras: 5, patch: 1 },
   assignOrdinalForRepairWithProvenance: { version: 2, audit: 3 },
   softDeleteWithProvenance: { version: 1, audit: 2 },
   addLinkWithProvenance: { audit: 1 },
@@ -82,6 +92,59 @@ const STAMPED: Readonly<Record<string, StampedArgs>> = {
 
 /** Contexts of the stores {@link withWriteContext} returned (WeakMap: no change to `StoreInterface`). */
 const CONTEXT_BY_STORE = new WeakMap<object, StampingContext>();
+
+/**
+ * The identity of the ONE request an HTTP server is answering. A server process is one long-lived App serving many
+ * callers (a bearer key, a dashboard login), so a write's party is a per-request fact, never the server's own
+ * identity (BR-1055): the HTTP adapter registers the key's or the login's run and runs the request inside
+ * {@link runWithRequestIdentity}; every stamped write below reads it first.
+ */
+const REQUEST_IDENTITY = new AsyncLocalStorage<StampingContext["identity"]>();
+
+/**
+ * Run `body` with `identity` as the write party of every store write made inside it (same async call tree).
+ * The caller guarantees the identity's run is registered (HTTP registers it just before).
+ */
+export function runWithRequestIdentity<T>(identity: StampingContext["identity"], body: () => T): T {
+  return REQUEST_IDENTITY.run(identity, body);
+}
+
+/** The identity a write is made under right now: the request's, when one is running, else the context's own. */
+function effectiveIdentity(ctx: StampingContext): StampingContext["identity"] {
+  return REQUEST_IDENTITY.getStore() ?? ctx.identity;
+}
+
+/** The refusal text of a write whose identity has no known party (BR-1351): names how to become one. */
+function unknownPartyMessage(identity: StampingContext["identity"]): string {
+  return identity.unresolvedReason ?? refusalNamingHowToBecomeKnown("This write has no attested agent run and no open human session.");
+}
+
+/** The refusal of a write whose identity has no known party; VALIDATION_ERROR -> exit 4, nothing written. */
+function refusalOfUnknownParty(identity: StampingContext["identity"]): LoreError {
+  return new UnknownPartyError(unknownPartyMessage(identity)).loreError;
+}
+
+/**
+ * The refusal of a doc patch whose `extra.claim` names no run (BR-1352); `undefined` when the patch carries no claim
+ * or its claim names one. Pure.
+ */
+export function refusalOfClaimWithoutRun(patch: unknown): LoreError | undefined {
+  const extra = (patch as { extra?: unknown } | undefined)?.extra;
+  if (typeof extra !== "object" || extra === null) return undefined;
+  const claim = (extra as Record<string, unknown>)["claim"];
+  if (claim === undefined || claim === null) return undefined;
+  const run = typeof claim === "object" ? (claim as Record<string, unknown>)["harness_run"] : undefined;
+  if (typeof run === "string" && run !== "") return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: "extra.claim.harness_run",
+    message:
+      "A claim must name the run that took it (BR-1352): a lease belongs to a run and is compared by run only, so a claim " +
+      "with no run would belong to nobody. Nothing was written. Claim from an agent run the integration registered " +
+      "(`lore setup`) or from an open human session (`lore session start --human <name>`).",
+    value: run ?? null,
+  };
+}
 
 /** The {@link StampingContext} a store was wrapped with, or `undefined` for an unwrapped store. */
 export function readWriteContext(store: StoreInterface): StampingContext | undefined {
@@ -99,7 +162,7 @@ export function readWriteContext(store: StoreInterface): StampingContext | undef
  * @returns the same `store`
  */
 export function declareWriteActorForTests<T extends StoreInterface>(store: T, claimed: string): T {
-  CONTEXT_BY_STORE.set(store, { identity: { harnessRun: null, claimed, claimedSource: "os" } });
+  CONTEXT_BY_STORE.set(store, { identity: { harnessRun: null, claimed, claimedSource: "human" } });
   return store;
 }
 
@@ -123,18 +186,33 @@ export class WriteActorUnresolvedError extends Error {
 /**
  * The author of a write: the explicit `by` when given, else the claimed name of the store's write context
  * (the invocation identity). ⛔ Fails loud ({@link WriteActorUnresolvedError}) when neither exists, and
- * ({@link OsUserLookupError}) when the identity is unresolved — never reads the process.
+ * ({@link UnknownPartyError}) when the identity has no known party — never reads the process.
  * ⛔ Every service that writes an audit row MUST resolve its actor here, never by an independent
- * `resolveActorWithSource` call: a second resolution can disagree with the invocation's name (gate rows once
+ * resolution: a second resolution can disagree with the invocation's name (gate rows once
  * read the OS user next to a `--by` claim).
  */
 export function resolveWriteActorFor(store: StoreInterface, by?: string): string {
   if (by !== undefined && by.trim() !== "") return by;
-  const identity = readWriteContext(store)?.identity;
-  if (identity === undefined) throw new WriteActorUnresolvedError();
-  // reason: the entry recorded "no name" as a value so reads proceed; THIS is the point a write needs an actor.
-  if (identity.claimed === null) throw new OsUserLookupError(identity.unresolvedReason ?? "the invocation has no resolved name");
+  const context = readWriteContext(store);
+  if (context === undefined) throw new WriteActorUnresolvedError();
+  const identity = effectiveIdentity(context);
+  // reason: the entry recorded "no known party" as a value so reads proceed; THIS is the point a write needs an actor.
+  if (identity.claimed === null) throw new UnknownPartyError(unknownPartyMessage(identity));
   return identity.claimed;
+}
+
+/**
+ * The known party's name for a READ-side observability row (a trace of `lore get` / `lore search`), or `undefined`
+ * when the store's context has NO known party. Reads are never refused for identity (BR-1351), so the caller skips
+ * the advisory trace row instead of failing.
+ *
+ * @throws {WriteActorUnresolvedError} when the store has no write context at all: that is a wiring defect, never
+ *   "no party", and stays loud exactly as {@link resolveWriteActorFor} does.
+ */
+export function findTraceActorFor(store: StoreInterface): string | undefined {
+  const context = readWriteContext(store);
+  if (context === undefined) throw new WriteActorUnresolvedError();
+  return effectiveIdentity(context).claimed ?? undefined;
 }
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {
@@ -157,18 +235,28 @@ export function withWriteContext(store: StoreInterface, ctx: StampingContext): S
       const spec = typeof prop === "string" ? STAMPED[prop] : undefined;
       if (spec === undefined) return bound;
       return (...args: unknown[]) => {
-        // reason: read per call (not once at wrap time) so `withVerifiedWriteContext` can downgrade an unknown
-        // run to null after its one-time registry lookup without rebuilding the proxy.
-        const stamp: Stamp = { harness_run: ctx.identity.harnessRun };
+        // reason: read per call (not once at wrap time): `withVerifiedWriteContext` replaces `ctx.identity` after its
+        // one-time registry lookup, and an HTTP request runs under its own identity (`runWithRequestIdentity`).
+        const identity = effectiveIdentity(ctx);
+        // reason: BR-1351 — a write with no known party is refused HERE, the one chokepoint every stamped write
+        // passes, before the underlying store sees it, so nothing is written (no version, no audit row).
+        if (identity.claimed === null || identity.harnessRun === null) return Promise.resolve(err(refusalOfUnknownParty(identity)));
+        if (spec.patch !== undefined) {
+          // reason: BR-1352 — refused here, before the underlying store is called, so a claim with no run writes nothing.
+          const claimRefusal = refusalOfClaimWithoutRun(args[spec.patch]);
+          if (claimRefusal !== undefined) return Promise.resolve(err(claimRefusal));
+        }
+        const stamp: Stamp = { harness_run: identity.harnessRun };
+        const callCtx: StampingContext = { identity };
         const next = [...args];
         if (spec.version !== undefined) next[spec.version] = stampRecord(args[spec.version] as VersionRecord, stamp);
-        if (spec.audit !== undefined) next[spec.audit] = stampAudit(args[spec.audit] as AuditEntry, stamp, ctx);
+        if (spec.audit !== undefined) next[spec.audit] = stampAudit(args[spec.audit] as AuditEntry, stamp, callCtx);
         if (spec.extras !== undefined) {
           const extras = args[spec.extras] as ProvenanceWriteExtras | undefined;
           if (extras?.also_audit !== undefined || extras?.also_update !== undefined) {
             next[spec.extras] = {
               ...extras,
-              ...(extras.also_audit !== undefined ? { also_audit: extras.also_audit.map((a) => stampAudit(a, stamp, ctx)) } : {}),
+              ...(extras.also_audit !== undefined ? { also_audit: extras.also_audit.map((a) => stampAudit(a, stamp, callCtx)) } : {}),
               // reason: BR-1307 — a companion doc write carries its own version and audit rows; they are
               // attributed to the run exactly like the primary write's.
               ...(extras.also_update !== undefined
@@ -176,7 +264,7 @@ export function withWriteContext(store: StoreInterface, ctx: StampingContext): S
                     also_update: extras.also_update.map((c) => ({
                       ...c,
                       version: stampRecord(c.version, stamp),
-                      audit: stampAudit(c.audit, stamp, ctx),
+                      audit: stampAudit(c.audit, stamp, callCtx),
                     })),
                   }
                 : {}),
@@ -195,16 +283,13 @@ export function withWriteContext(store: StoreInterface, ctx: StampingContext): S
   return wrapped;
 }
 
-/** Sink for the one-per-write-context warning about an unregistered `--harness-run` id (CLI: stderr). */
-export type UnknownRunWarn = (line: string) => void;
-
 /** Per wrapped store: resolves (once) to the VERIFIED identity — same object the stamps are read from. */
 const VERIFIERS = new WeakMap<object, () => Promise<Result<InvocationIdentity, LoreError>>>();
 
 /**
  * The verified invocation identity of a store wrapped by {@link withVerifiedWriteContext}: runs the one-time
- * run lookup if it has not happened yet (no second warning) and returns the identity the store stamps rows
- * with — `harnessRun` null when the claimed run is unregistered. `ok(undefined)` for an unwrapped store.
+ * run lookup if it has not happened yet and returns the identity the store stamps rows with; an unregistered run is
+ * an error (BR-1351), never a downgrade. `ok(undefined)` for an unwrapped store.
  */
 export function ensureVerifiedIdentity(store: StoreInterface): Promise<Result<InvocationIdentity | undefined, LoreError>> {
   const verifier = VERIFIERS.get(store);
@@ -212,24 +297,28 @@ export function ensureVerifiedIdentity(store: StoreInterface): Promise<Result<In
 }
 
 /**
- * {@link withWriteContext} plus the D7 run check via {@link verifyInvocationIdentity}: the claimed run is
- * verified ONCE (first stamped write, or an explicit {@link ensureVerifiedIdentity}), and the stamps are read
- * from the verified value. An unregistered id → `harness_run` NULL, name and source kept, one `warn` line. A
- * failing lookup is returned as the write's own error (no silent downgrade). Non-stamped methods are not delayed.
+ * {@link withWriteContext} plus the run check via {@link verifyInvocationIdentity}: the claimed run is verified
+ * ONCE (first stamped write, or an explicit {@link ensureVerifiedIdentity}) and a run the registry does not know
+ * refuses the write (exit 4) — never recorded unattested. A failing lookup is returned as the write's own error.
+ * Non-stamped methods are not delayed. A write made inside {@link runWithRequestIdentity} (HTTP) is made under that
+ * request's already-registered party and does not wait on the server process's own identity.
  *
  * @param onVerified - Called once with the verified identity (the CLI uses it to replace its process slot).
  */
 export function withVerifiedWriteContext(
   store: StoreInterface,
   identity: InvocationIdentity,
-  warn: UnknownRunWarn,
+  // reason: the unregistered-run WARNING is retired (an unregistered run is refused, BR-1351), so this sink is never
+  // written to. The parameter stays only because `app.ts` — held by another task's live claim when this change
+  // landed — still passes it positionally at its two call sites; drop it with that call-site edit.
+  _retiredWarn: (line: string) => void,
   onVerified?: (verified: InvocationIdentity) => void,
 ): StoreInterface {
   const live: { identity: InvocationIdentity } = { identity };
   const inner = withWriteContext(store, live);
   let verified: Promise<Result<InvocationIdentity, LoreError>> | undefined;
   const verifyOnce = (): Promise<Result<InvocationIdentity, LoreError>> => {
-    verified ??= verifyInvocationIdentity(store, identity, warn).then((result) => {
+    verified ??= verifyInvocationIdentity(store, identity).then((result) => {
       if (result.ok) {
         live.identity = result.value;
         onVerified?.(result.value);
@@ -243,8 +332,10 @@ export function withVerifiedWriteContext(
       const value: unknown = Reflect.get(target, prop, target);
       if (typeof value !== "function" || typeof prop !== "string" || STAMPED[prop] === undefined) return value;
       return async (...args: unknown[]) => {
-        const check = await verifyOnce();
-        if (!check.ok) return check;
+        if (REQUEST_IDENTITY.getStore() === undefined) {
+          const check = await verifyOnce();
+          if (!check.ok) return check;
+        }
         return (value as (...a: unknown[]) => unknown)(...args);
       };
     },

@@ -84,7 +84,7 @@ export function buildBaselineDeclarationPort(repoRoot: string): BaselineDeclarat
         return ok(await measureAbsentDeclarations(rootDir, leaves));
       } catch (cause) {
         if (!(cause instanceof SiteCensusError)) throw cause;
-        return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message });
+        return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message, rule: "BR-1309" });
       }
     },
   };
@@ -105,7 +105,7 @@ export function buildMainTreePort(repoRoot: string): MainTreePort {
       return ok(await measure(rootDir));
     } catch (cause) {
       if (!(cause instanceof SiteCensusError)) throw cause;
-      return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: `cannot measure main's tree, refusing the command drop: ${cause.message}` });
+      return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: `cannot measure main's tree, refusing the command drop: ${cause.message}`, rule: "BR-1317" });
     }
   };
   return {

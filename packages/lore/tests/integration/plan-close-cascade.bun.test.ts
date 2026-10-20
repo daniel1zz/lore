@@ -56,6 +56,7 @@ import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
 import type { VerifiedEvidenceInput } from "../../src/service/task-workflow-service.js";
 import type { PlanCloseCascadeResult } from "../../src/service/corpus-service.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 let tmpDir: string;
 
@@ -211,7 +212,7 @@ describe("plan-close cascade (R1) — NEGATIVE", () => {
       const plan = await makeApprovedPlan(app);
       const freshTask = await makeTask(app, plan, "Fresh-claimed task");
 
-      const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder" });
+      const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
       expect(claimResult.ok).toBe(true);
 
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
@@ -292,7 +293,7 @@ describe("plan-close cascade (R1) — REGRESSION (audit chain integrity)", () =>
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
 
-      const verifyResult = await app.auditService.verify({ since: "2020-01-01T00:00:00.000Z" });
+      const verifyResult = await app.auditService.verify();
       expect(verifyResult.ok).toBe(true);
       if (verifyResult.ok) {
         expect(verifyResult.value.clean).toBe(true);
@@ -324,7 +325,7 @@ async function seedFloorFixture(app: App): Promise<FloorFixture> {
   if (!declared.ok) throw new Error(`declareRedFirst failed: ${JSON.stringify(declared.error)}`);
   await giveAttestedPass(app, t3);
   const t4 = await makeTask(app, plan, "T4 fresh claim");
-  const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder" });
+  const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
   if (!claimed.ok) throw new Error(`claim failed: ${JSON.stringify(claimed.error)}`);
   const handoffResult = await app.sessionService!.writeHandoff({
     by: "tester",
@@ -426,7 +427,7 @@ describe("plan-close cascade floors (AC-AP-4, BR-1072)", () => {
         const auditBefore = await app.auditService.query({ doc_id: task.id });
         if (!auditBefore.ok) throw new Error("audit failed");
 
-        const done = await app.taskWorkflowService.done(task.id, { by: "agent:closer" });
+        const done = await app.taskWorkflowService.done(task.id, { by: "agent:closer", harnessRun: runOfName("agent:closer") });
         expect(done.ok, `lore done must refuse ${task.slug}`).toBe(false);
         if (done.ok) continue;
         // `details.floor` is added to the refusal by the paired implement task (spec D5); the union has no `details` member.

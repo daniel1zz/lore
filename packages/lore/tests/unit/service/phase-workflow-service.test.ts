@@ -115,6 +115,7 @@ import type {
 import { NoOpTelemetry } from "@lore/core";
 import type { DocRecord, DocType, Result, LoreError, Telemetry } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/ ->
 // src/service/phase-workflow-service.js (does not exist yet)
@@ -227,7 +228,7 @@ describe("PhaseWorkflowService — HAPPY: claim/evidence/release/ready round-tri
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makePhaseRecord());
 
-    const claimed = await service.claim("phase-one", { by: "agent:p1" });
+    const claimed = await service.claim("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(claimed.ok).toBe(true);
     if (!claimed.ok) return;
     expect(claimed.value.extra["claim"]).toMatchObject({ by: "agent:p1" });
@@ -243,7 +244,7 @@ describe("PhaseWorkflowService — HAPPY: claim/evidence/release/ready round-tri
     if (!evidenced.ok) return;
     expect(Array.isArray(evidenced.value.extra["verification_evidence"])).toBe(true);
 
-    const released = await service.release("phase-one", { by: "agent:p1" });
+    const released = await service.release("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(released.ok).toBe(true);
     if (!released.ok) return;
     expect(released.value.extra["claim"]).toBeUndefined();
@@ -265,10 +266,10 @@ describe("PhaseWorkflowService — NEGATIVE: claim conflicts", () => {
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makePhaseRecord());
 
-    const first = await service.claim("phase-one", { by: "agent:p1" });
+    const first = await service.claim("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(first.ok).toBe(true);
 
-    const second = await service.claim("phase-one", { by: "agent:p2" });
+    const second = await service.claim("phase-one", { by: "agent:p2", harnessRun: runOfName("agent:p2") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("CLAIM_CONFLICT");
@@ -283,9 +284,9 @@ describe("PhaseWorkflowService — BOUNDARY: claim TTL staleness", () => {
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makePhaseRecord());
 
-    await service.claim("phase-one", { by: "agent:p1" }, () => "2026-07-19T09:00:00.000Z");
+    await service.claim("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") }, () => "2026-07-19T09:00:00.000Z");
 
-    const atBoundary = await service.claim("phase-one", { by: "agent:p2" }, () => "2026-07-19T10:00:00.000Z");
+    const atBoundary = await service.claim("phase-one", { by: "agent:p2", harnessRun: runOfName("agent:p2") }, () => "2026-07-19T10:00:00.000Z");
     expect(atBoundary.ok).toBe(false); // exactly 60 minutes — still fresh (strict > staleness)
 
     const pastBoundary = await service.claim(
@@ -302,7 +303,7 @@ describe("PhaseWorkflowService — BOUNDARY: claim TTL staleness", () => {
 describe("PhaseWorkflowService — ERROR: unresolvable target", () => {
   it("claiming a non-existent id returns DOC_NOT_FOUND, not a throw", async () => {
     const { service } = makeServices();
-    const result = await service.claim("01HNOPE00000000000000000A", { by: "agent:p1" });
+    const result = await service.claim("01HNOPE00000000000000000A", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("DOC_NOT_FOUND");
@@ -372,7 +373,7 @@ describe("PhaseWorkflowService — REGRESSION §3: legacy task doc read toleranc
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makeLegacyTaskRecord());
 
-    const result = await service.claim("task-legacy", { by: "agent:p1" });
+    const result = await service.claim("task-legacy", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -400,7 +401,7 @@ describe("PhaseWorkflowService — REGRESSION §3: legacy task doc read toleranc
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makeLegacyTaskRecord());
 
-    const result = await service.release("task-legacy", { by: "agent:p1" });
+    const result = await service.release("task-legacy", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -525,10 +526,10 @@ describe("PhaseWorkflowService — REGRESSION §5: anchor-overlap gate field 'ga
       }),
     );
 
-    const first = await service.claim("phase-one", { by: "agent:p1" });
+    const first = await service.claim("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(first.ok).toBe(true);
 
-    const second = await service.claim("phase-two", { by: "agent:p2" });
+    const second = await service.claim("phase-two", { by: "agent:p2", harnessRun: runOfName("agent:p2") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("VALIDATION_ERROR");
@@ -557,7 +558,7 @@ describe("PhaseWorkflowService — HAPPY: done() walks a released phase doc to a
       capture_source: "self-report",
     });
 
-    const doneResult = await service.done("phase-one", { by: "agent:p1" });
+    const doneResult = await service.done("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.already_done).toBe(false);
@@ -577,7 +578,7 @@ describe("PhaseWorkflowService — NEGATIVE: done() refuses without passing evid
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makePhaseRecord());
 
-    const doneResult = await service.done("phase-one", { by: "agent:p1" });
+    const doneResult = await service.done("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -595,9 +596,9 @@ describe("PhaseWorkflowService — NEGATIVE: done() refuses without passing evid
       recorded_by: "agent:p1",
       capture_source: "self-report",
     });
-    await service.claim("phase-one", { by: "agent:p2" });
+    await service.claim("phase-one", { by: "agent:p2", harnessRun: runOfName("agent:p2") });
 
-    const doneResult = await service.done("phase-one", { by: "agent:p1" });
+    const doneResult = await service.done("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -614,9 +615,9 @@ describe("PhaseWorkflowService — NEGATIVE: done() refuses without passing evid
       recorded_by: "agent:p1",
       capture_source: "self-report",
     });
-    await service.done("phase-one", { by: "agent:p1" });
+    await service.done("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
 
-    const second = await service.done("phase-one", { by: "agent:p1" });
+    const second = await service.done("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.already_done).toBe(true);

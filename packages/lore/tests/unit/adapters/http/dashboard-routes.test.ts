@@ -31,7 +31,8 @@ import { OutlineService } from "../../../../src/service/outline-service.js";
 import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../../src/service/judgment-service.js";
-import { NoOpTelemetry } from "@lore/core";
+import { NoOpTelemetry, derivePartyRunId } from "@lore/core";
+import { runWithRequestIdentity } from "../../../../src/store/write-context-store.js";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleDashboardRoute } from "../../../../src/adapters/http/dashboard-routes.js";
@@ -739,13 +740,12 @@ describe("regression — DELETE /api/dashboard/docs/:id without ?confirm=true is
 
 // ─── Author attribution (adr-dashboard-cookie-session-writes-attribute-author-via) ─────
 //
-// Cookie-session writes must attribute `doc.created_by` (and the new version
-// snapshot's `created_by`) via the SAME resolveActor chain the CLI uses
-// (session tier > worktree > OS username; `$LORE_ACTOR` is never read, BR-1055), never the literal "system" and
-// never the static "dashboard-local"/"admin" bootstrap-key identity. The session
-// tier (`CLAUDE_CODE_SESSION_ID`) is injected/restored around each test for a deterministic
-// assertion, and a decoy `$LORE_ACTOR` is set to prove it is ignored — mirrors
-// `audit-actor-fidelity.test.ts`'s ambient-env isolation pattern.
+// Cookie-session writes attribute `doc.created_by` (and the new version snapshot's `created_by`) to the PERSON of
+// the request, a known party under a `dashboard` run (spec-every-write-is-made-by-a-known-party-an-attested-agent-run,
+// BR-1055 / BR-1352), never the literal "system", never the static "dashboard-local"/"admin" bootstrap-key identity,
+// and never the serve process's own session or `$LORE_ACTOR`. The server hands each request's party to the store
+// through `runWithRequestIdentity` (the production path registers the run first: tests/unit/adapters/http/http-write-identity.test.ts);
+// a decoy session id and `$LORE_ACTOR` are set here to prove the process environment is not what names the author.
 //
 // Six-dimension coverage: HAPPY / REGRESSION (bearer path unaffected — dashboard
 // routes 403 bearer callers before ever reaching CorpusService, see the existing
@@ -755,7 +755,11 @@ describe("regression — DELETE /api/dashboard/docs/:id without ?confirm=true is
 describe("author attribution — cookie-session writes resolve via the actor chain, never 'system'", () => {
   const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
   const ORIGINAL_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
-  const SESSION_ACTOR = "agent:session-d4a5b0a1";
+  /** The author a cookie request of `name` is recorded as: the person's name, whatever the process environment says. */
+  const SESSION_ACTOR = COOKIE_ACTOR.name;
+  /** Run `body` as the request of the logged-in person `name` (a `dashboard` party with a run of its own). */
+  const asCookiePerson = <T>(name: string, body: () => Promise<T>): Promise<T> =>
+    runWithRequestIdentity({ harnessRun: derivePartyRunId("dashboard", name), claimed: name, claimedSource: "dashboard" }, body);
 
   beforeEach(() => {
     process.env["CLAUDE_CODE_SESSION_ID"] = "d4a5b0a1-1111-2222-3333-444444444444";
@@ -771,10 +775,10 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     else process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_SESSION_ID;
   });
 
-  it("POST /api/dashboard/docs records doc.created_by as the resolved session actor (never $LORE_ACTOR), not 'system'", async () => {
+  it("POST /api/dashboard/docs records doc.created_by as the request's person (never $LORE_ACTOR or the process session), not 'system'", async () => {
     const req = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Attributed Doc" });
     const url = makeUrl("/api/dashboard/docs");
-    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+    const res = await asCookiePerson(COOKIE_ACTOR.name, () => handleDashboardRoute(req, url, app, COOKIE_ACTOR));
     expect(res!.status).toBe(201);
     const body = await parseRes(res!);
     const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
@@ -783,13 +787,14 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     expect(doc.created_by).not.toBe("system");
     // The static bootstrap-key identity must never leak through either.
     expect(doc.created_by).not.toBe("admin");
-    expect(doc.created_by).not.toBe(COOKIE_ACTOR.name);
+    expect(doc.created_by).not.toBe("agent:decoy-lore-actor-must-be-ignored");
+    expect(doc.created_by).not.toContain("d4a5b0a1");
   });
 
   it("the create's version-1 snapshot also carries the resolved actor, not 'system'", async () => {
     const req = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Attributed Version Doc" });
     const url = makeUrl("/api/dashboard/docs");
-    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+    const res = await asCookiePerson(COOKIE_ACTOR.name, () => handleDashboardRoute(req, url, app, COOKIE_ACTOR));
     const body = await parseRes(res!);
     const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
 
@@ -803,7 +808,7 @@ describe("author attribution — cookie-session writes resolve via the actor cha
 
     const req = jsonReq("PATCH", `/api/dashboard/docs/${id}`, { content: "Edited content" });
     const url = makeUrl(`/api/dashboard/docs/${id}`);
-    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+    const res = await asCookiePerson(COOKIE_ACTOR.name, () => handleDashboardRoute(req, url, app, COOKIE_ACTOR));
     expect(res!.status).toBe(200);
 
     const logResult = await app.versionService.log(id);
@@ -814,20 +819,18 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     expect(latestVersion?.created_by).not.toBe("system");
   });
 
-  it("an app composed under a different session resolves that session's actor (the actor is read once per composition, never per write)", async () => {
+  it("two people on ONE server are two authors: the person is read per request, never once per composition", async () => {
     const req1 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "First Attributed Doc" });
-    const res1 = await handleDashboardRoute(req1, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
+    const res1 = await asCookiePerson("dana", () => handleDashboardRoute(req1, makeUrl("/api/dashboard/docs"), app, { ...COOKIE_ACTOR, name: "dana" }));
     const body1 = await parseRes(res1!);
     const doc1 = (body1.data as Record<string, unknown>).doc as Record<string, unknown>;
-    expect(doc1.created_by).toBe(SESSION_ACTOR);
+    expect(doc1.created_by).toBe("dana");
 
-    process.env["CLAUDE_CODE_SESSION_ID"] = "5ec0ad5e-1111-2222-3333-444444444444";
-    app = makeApp();
     const req2 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Second Attributed Doc" });
-    const res2 = await handleDashboardRoute(req2, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
+    const res2 = await asCookiePerson("lee", () => handleDashboardRoute(req2, makeUrl("/api/dashboard/docs"), app, { ...COOKIE_ACTOR, name: "lee" }));
     const body2 = await parseRes(res2!);
     const doc2 = (body2.data as Record<string, unknown>).doc as Record<string, unknown>;
-    expect(doc2.created_by).toBe("agent:session-5ec0ad5e");
+    expect(doc2.created_by).toBe("lee");
     expect(doc2.created_by).not.toBe(doc1.created_by);
   });
 });

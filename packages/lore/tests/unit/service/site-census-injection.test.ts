@@ -191,7 +191,6 @@ export function runCmd(n: number, useA: boolean) {
         sites: trace.sites,
         bootstrap: trace.bootstrap,
         unresolvedImports: trace.unresolvedImports,
-        siteMap: Object.fromEntries(trace.sites.filter((s) => !s.dynamic).map((s) => [s.key, ["non-business:fixture"]])),
         liveRuleIds: [],
       });
       expect({ ok: cov.ok, notMeasuredInSvc: cov.notMeasured.filter((k) => k.startsWith("svc.ts#Svc.go#dynamic:")).length }).toEqual({

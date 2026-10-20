@@ -57,6 +57,7 @@ import type {
   AcceptanceCriterion,
 } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
 
@@ -223,7 +224,7 @@ describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     expect(claimResult.value.extra["claim"]).toMatchObject({ by: "alice" });
@@ -237,7 +238,7 @@ describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1
     expect((evidenceArr as unknown[]).length).toBe(1);
     expect(evidenceResult.value.version).toBe(3);
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
     expect(releaseResult.value.extra["claim"]).toBeUndefined();
@@ -372,10 +373,10 @@ describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const first = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const first = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskId, { by: "bob" });
+    const second = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("CLAIM_CONFLICT");
@@ -389,8 +390,8 @@ describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const second = await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const second = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(second.ok).toBe(true);
   });
 });
@@ -408,7 +409,7 @@ describe("NEGATIVE — claim --worktree empty or whitespace-only rejected (AC-WH
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "" });
     expect(claimResult.ok).toBe(false);
     if (claimResult.ok) return;
     expect(claimResult.error.code).toBe("VALIDATION_ERROR");
@@ -427,7 +428,7 @@ describe("NEGATIVE — claim --worktree empty or whitespace-only rejected (AC-WH
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "   \t  " });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "   \t  " });
     expect(claimResult.ok).toBe(false);
     if (claimResult.ok) return;
     expect(claimResult.error.code).toBe("VALIDATION_ERROR");
@@ -446,7 +447,7 @@ describe("NEGATIVE — claim --worktree empty or whitespace-only rejected (AC-WH
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const claim = claimResult.value.extra["claim"] as Record<string, unknown>;
@@ -459,7 +460,7 @@ describe("NEGATIVE — claim --worktree empty or whitespace-only rejected (AC-WH
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "feature-branch" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "feature-branch" });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const claim = claimResult.value.extra["claim"] as Record<string, unknown>;
@@ -473,8 +474,8 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const release = await taskWorkflowService.release(taskId, { by: "bob" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const release = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(release.ok).toBe(false);
     if (release.ok) return;
     expect(release.error.code).toBe("CLAIM_CONFLICT");
@@ -482,7 +483,7 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     expect(release.error.holder).toBe("alice");
 
     // Claim must still be held by alice — the rejected release must not have mutated it.
-    const claimAgain = await taskWorkflowService.claim(taskId, { by: "bob" });
+    const claimAgain = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(claimAgain.ok).toBe(false); // still CLAIM_CONFLICT — proves claim wasn't cleared
   });
 
@@ -491,8 +492,8 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const release = await taskWorkflowService.release(taskId, { by: "bob", force: true, reason: "stale worker" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const release = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob"), force: true, reason: "stale worker" });
     expect(release.ok).toBe(true);
     if (!release.ok) return;
     expect(release.value.extra["claim"]).toBeUndefined();
@@ -513,8 +514,8 @@ describe("NEGATIVE — steal succeeds and records the previous holder in history
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", steal: true });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), steal: true });
     expect(stolen.ok).toBe(true);
     if (!stolen.ok) return;
     expect(stolen.value.extra["claim"]).toMatchObject({ by: "bob" });
@@ -589,10 +590,10 @@ describe("BOUNDARY — TTL boundary via injected now (AC-WF-4)", () => {
     const taskId = await createTask(corpusService, planId);
 
     const claimedAt = "2026-07-02T08:00:00.000Z";
-    await taskWorkflowService.claim(taskId, { by: "alice" }, () => claimedAt);
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => claimedAt);
 
     const exactlyAtTtl = "2026-07-02T10:00:00.000Z"; // exactly 120 minutes later
-    const attempt = await taskWorkflowService.claim(taskId, { by: "bob" }, () => exactlyAtTtl);
+    const attempt = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, () => exactlyAtTtl);
     expect(attempt.ok).toBe(false);
     if (attempt.ok) return;
     expect(attempt.error.code).toBe("CLAIM_CONFLICT");
@@ -604,10 +605,10 @@ describe("BOUNDARY — TTL boundary via injected now (AC-WF-4)", () => {
     const taskId = await createTask(corpusService, planId);
 
     const claimedAt = "2026-07-02T08:00:00.000Z";
-    await taskWorkflowService.claim(taskId, { by: "alice" }, () => claimedAt);
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => claimedAt);
 
     const pastTtl = "2026-07-02T10:01:00.000Z"; // 121 minutes later
-    const attempt = await taskWorkflowService.claim(taskId, { by: "bob" }, () => pastTtl);
+    const attempt = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, () => pastTtl);
     expect(attempt.ok).toBe(true);
     if (!attempt.ok) return;
     expect(attempt.value.extra["claim"]).toMatchObject({ by: "bob" });
@@ -676,7 +677,7 @@ describe("ERROR — STALE_VERSION via sequential-CAS recipe (SPEC-025 §7, not P
       return "2026-07-02T10:00:00.000Z";
     };
 
-    const result = await taskWorkflowService.claim(taskId, { by: "alice" }, now);
+    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, now);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("STALE_VERSION");
@@ -692,7 +693,7 @@ describe("STATE — claim → stale transition via now injection (AC-WF-4, D10)"
     const taskId = await createTask(corpusService, planId);
 
     const claimedAt = "2026-07-02T08:00:00.000Z";
-    await taskWorkflowService.claim(taskId, { by: "alice" }, () => claimedAt);
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => claimedAt);
 
     const freshReport = await taskWorkflowService.ready(planId, () => "2026-07-02T09:00:00.000Z"); // 60 min later
     expect(freshReport.ok).toBe(true);
@@ -910,7 +911,7 @@ describe("REGRESSION — existing phase validation untouched by claim/evidence w
     await phaseService.addPhase(planId, "Foundation");
     const taskId = await createTask(corpusService, planId, "Phased Task", { phase: "Foundation" });
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     expect(claimResult.value.extra["phase"]).toBe("Foundation");
@@ -936,7 +937,7 @@ describe("REGRESSION — telemetry emits exactly one event per successful write,
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", source: "cli" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), source: "cli" });
     expect(telemetry.events).toHaveLength(1);
     expect(telemetry.last?.method).toBe("task.claimed");
     expect(telemetry.last?.ok).toBe(true);
@@ -946,7 +947,7 @@ describe("REGRESSION — telemetry emits exactly one event per successful write,
     expect(telemetry.events).toHaveLength(2);
     expect(telemetry.last?.method).toBe("task.evidence_added");
 
-    await taskWorkflowService.release(taskId, { by: "alice", source: "cli" });
+    await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice"), source: "cli" });
     expect(telemetry.events).toHaveLength(3);
     expect(telemetry.last?.method).toBe("task.released");
   });
@@ -956,10 +957,10 @@ describe("REGRESSION — telemetry emits exactly one event per successful write,
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     const countAfterFirstClaim = telemetry.events.length;
 
-    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob" });
+    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(conflicting.ok).toBe(false);
     expect(telemetry.events.length).toBe(countAfterFirstClaim); // no new event
   });
@@ -1648,12 +1649,12 @@ describe("HAPPY — done() walks a released task to archived, one audit row per 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.already_done).toBe(false);
@@ -1693,7 +1694,7 @@ describe("HAPPY — done() walks a released task to archived, one audit row per 
 
     await taskWorkflowService.addEvidence(blockerId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(blockerId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    const doneResult = await taskWorkflowService.done(blockerId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(blockerId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
 
     const after = await taskWorkflowService.ready(planId);
@@ -1712,7 +1713,7 @@ describe("HAPPY — done() walks a released task to archived, one audit row per 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.transitions).toEqual(["active", "archived"]);
@@ -1730,7 +1731,7 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -1752,7 +1753,7 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     );
     expect(written.ok).toBe(true);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -1774,7 +1775,7 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     );
     expect(written.ok).toBe(true);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -1800,7 +1801,7 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     );
     expect(w2.ok).toBe(true);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -1815,9 +1816,9 @@ describe("NEGATIVE — done() refuses under a fresh foreign claim (AC-WH-3)", ()
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    await taskWorkflowService.claim(taskId, { by: "bob" });
+    await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -1837,9 +1838,9 @@ describe("NEGATIVE — done() refuses under a fresh foreign claim (AC-WH-3)", ()
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 
@@ -1851,11 +1852,11 @@ describe("NEGATIVE — done() refuses under a fresh foreign claim (AC-WH-3)", ()
     const t0 = () => "2026-07-27T10:00:00.000Z";
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }), t0);
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), t0());
-    await taskWorkflowService.claim(taskId, { by: "bob" }, t0);
+    await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, t0);
 
     // 5 minutes later — well past the 1-minute TTL, so bob's claim is stale.
     const tLater = () => "2026-07-27T10:05:00.000Z";
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" }, tLater);
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") }, tLater);
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -1868,12 +1869,12 @@ describe("STATE — done() is an idempotent no-op once terminal (AC-WH-3)", () =
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    const first = await taskWorkflowService.done(taskId, { by: "alice" });
+    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     const versionAfterFirst = first.value.task.version;
 
-    const second = await taskWorkflowService.done(taskId, { by: "alice" });
+    const second = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.already_done).toBe(true);
@@ -1890,7 +1891,7 @@ describe("STATE — done() is an idempotent no-op once terminal (AC-WH-3)", () =
     await corpusService.set(taskId, { status: "approved" });
     await corpusService.set(taskId, { status: "deprecated" });
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.already_done).toBe(true);
@@ -1908,7 +1909,7 @@ describe("REGRESSION — done() telemetry emits exactly one task.done event per 
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
     telemetry.events.length = 0;
 
-    await taskWorkflowService.done(taskId, { by: "alice", source: "cli" });
+    await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), source: "cli" });
     expect(telemetry.events).toHaveLength(1);
     expect(telemetry.last?.method).toBe("task.done");
     expect(telemetry.last?.meta).toMatchObject({ already_done: false, source: "cli" });
@@ -1920,7 +1921,7 @@ describe("REGRESSION — done() telemetry emits exactly one task.done event per 
     const taskId = await createTask(corpusService, planId);
     telemetry.events.length = 0;
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     expect(telemetry.events).toHaveLength(0);
   });
@@ -1949,7 +1950,7 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.already_done).toBe(false);
@@ -1968,7 +1969,7 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -1986,7 +1987,7 @@ describe("NEGATIVE — done() refuses a red_first task holding only result:pass 
     if (!before.ok) return;
     const slug = before.value.doc.slug;
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2013,7 +2014,7 @@ describe("BOUNDARY — the pre-existing result:pass floor and the new red-first 
     );
     expect(written.ok).toBe(true);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2043,7 +2044,7 @@ describe("ERROR — a malformed extra.red_first value degrades to 'not declared'
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -2057,7 +2058,7 @@ describe("STATE — a task that never declares red_first is completely unaffecte
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 
@@ -2069,7 +2070,7 @@ describe("STATE — a task that never declares red_first is completely unaffecte
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -2082,7 +2083,7 @@ describe("REGRESSION — pre-existing done() behavior over legacy (no red_first 
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
@@ -2158,7 +2159,7 @@ describe("STATE — declareRedFirst never touches claim/verification_evidence (A
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
 
     const before = await corpusService.get(taskId);
@@ -2190,7 +2191,7 @@ describe("REGRESSION — declareRedFirst + a red row together satisfy done()'s n
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -2228,7 +2229,7 @@ describe("HAPPY — done() accepts a test-file anchor with a genuine unfiltered 
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
@@ -2252,7 +2253,7 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2286,7 +2287,7 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2307,7 +2308,7 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2329,7 +2330,7 @@ describe("BOUNDARY — a directory-scoped anchor names no specific file, so it n
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -2343,7 +2344,7 @@ describe("STATE — a task with no test-file anchors at all is completely unaffe
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 
@@ -2357,7 +2358,7 @@ describe("STATE — a task with no test-file anchors at all is completely unaffe
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -2374,7 +2375,7 @@ describe("ERROR — a malformed extra.file_anchors value degrades to 'no anchors
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
   });
 });
@@ -2399,7 +2400,7 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
       }),
     );
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2438,7 +2439,7 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2475,7 +2476,7 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2537,7 +2538,7 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2587,7 +2588,7 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2615,7 +2616,7 @@ describe("HAPPY — done() accepts a task whose ONLY evidence is a runner-attest
 
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
@@ -2630,7 +2631,7 @@ describe("NEGATIVE — done() refuses a self-reported-only pass, naming both rep
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2661,7 +2662,7 @@ describe("NEGATIVE — done() refuses a self-reported-only pass, naming both rep
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: "   " });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "   " });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2687,7 +2688,7 @@ describe("BOUNDARY — an ATTESTED non-pass result never satisfies the floor (AC
       "2026-07-27T09:00:00.000Z",
     );
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2717,7 +2718,7 @@ describe("BOUNDARY — an ATTESTED non-pass result never satisfies the floor (AC
       "2026-07-27T09:00:00.000Z",
     );
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(false);
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
@@ -2733,7 +2734,7 @@ describe("STATE — the escape hatch archives AND writes the reason verbatim to 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
 
     const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: REASON });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: REASON });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
@@ -2762,7 +2763,7 @@ describe("REGRESSION — the escape hatch never taints a normal attested archive
 
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
 
     const auditResult = await store.queryAudit({ doc_id: taskId });
@@ -2782,14 +2783,14 @@ describe("REGRESSION — idempotency on an already-terminal task never regresses
     const taskId = await createTask(corpusService, planId);
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-    const first = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: "one-off manual check" });
+    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "one-off manual check" });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     const versionAfterFirst = first.value.task.version;
 
     // Second call carries NO overrideReason at all — the idempotent short-circuit
     // must fire before any evidence/attestation re-check, so this must still succeed.
-    const second = await taskWorkflowService.done(taskId, { by: "alice" });
+    const second = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.already_done).toBe(true);
@@ -2803,11 +2804,11 @@ describe("REGRESSION — idempotency on an already-terminal task never regresses
     const taskId = await createTask(corpusService, planId);
 
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    const first = await taskWorkflowService.done(taskId, { by: "alice" });
+    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
 
-    const second = await taskWorkflowService.done(taskId, { by: "alice" });
+    const second = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.already_done).toBe(true);

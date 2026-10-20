@@ -454,7 +454,7 @@ export default defineLoreCommand({
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
-            by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+            by: resolveActor(inv),
           });
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -518,7 +518,7 @@ export default defineLoreCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
+            { by: resolveActor(inv) },
           );
 
           if (!result.ok) {
@@ -590,7 +590,7 @@ export default defineLoreCommand({
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
-            by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+            by: resolveActor(inv),
           });
 
           if (!result.ok) {
@@ -654,7 +654,7 @@ export default defineLoreCommand({
             args.id as string,
             { spec: byRaw.slice(0, sep), ac: byRaw.slice(sep + 1) },
             reason,
-            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
+            { by: resolveActor(inv) },
           );
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -1062,7 +1062,7 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
 function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string, inv: Invocation): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
-    by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+    by: resolveActor(inv),
     pathContext: {
       fileExists: existsSync,
       cwd: inv.cwd,

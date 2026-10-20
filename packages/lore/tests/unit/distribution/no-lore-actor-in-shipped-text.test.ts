@@ -121,74 +121,43 @@ describe("AC-ROI-8 positive counterpart: recovery texts name the agent-integrati
 
   const sibling = { slug: "task-one", title: "Task One", by: "agent:t1", at: "2026-07-11T09:00:00.000Z", stale: false, anchors: ["src/a/"] };
 
-  it("AC-ROI-8: the foreign-actor anchor-overlap hint stays free of any removed flag", () => {
-    const text = feedFor({ candidateBy: "agent:t2", candidateAnchors: ["src/a"], siblingClaims: [sibling], hasSpecParent: false });
+  it("AC-ROI-8: the foreign-run anchor-overlap hint stays free of any removed flag", () => {
+    const text = feedFor({
+      candidateBy: "agent:t2",
+      candidateRun: "cc:bbbb2222",
+      candidateAnchors: ["src/a"],
+      siblingClaims: [{ ...sibling, harness_run: "cc:aaaa1111" }],
+      hasSpecParent: false,
+    });
     expect(text).toContain("task-one");
     expect(text).not.toContain("--by");
     expect(text).not.toContain("LORE_ACTOR");
   });
 
-  it("AC-ROI-8: the session-not-measured anchor-overlap hint names the agent integration (`lore setup`)", () => {
-    const text = feedFor({ candidateBy: "agent:t1", candidateAnchors: ["src/a"], siblingClaims: [sibling], hasSpecParent: false });
-    expect(text).toContain("NOT MEASURED");
-    expect(text).toContain("lore setup");
-    expect(text).toContain("agent integration");
-    expect(text).not.toContain("--by");
-  });
-
-  it("AC-ROI-8: the foreign-session anchor-overlap hint names the agent integration (`lore setup`)", () => {
+  it("AC-ROI-8: the foreign-run anchor-overlap hint names the agent integration (`lore setup`)", () => {
     const text = feedFor({
       candidateBy: "agent:t1",
+      candidateRun: "cc:aaaa1111",
       candidateAnchors: ["src/a"],
-      candidateSessionId: "aaaa1111",
-      siblingClaims: [{ ...sibling, session_id: "bbbb2222" }],
+      siblingClaims: [{ ...sibling, harness_run: "cc:bbbb2222" }],
       hasSpecParent: false,
     });
-    expect(text).toContain("DIFFERENT session");
-    expect(text).toContain("lore setup");
-    expect(text).not.toContain("--by");
-    expect(text).not.toContain("LORE_ACTOR");
-  });
-
-  it("AC-ROI-8: the actor-identity collision hint names the agent integration (`lore setup`)", () => {
-    const text = feedFor({
-      candidateBy: "zheng",
-      candidateIdentitySource: "os-fallback",
-      candidateWorktree: "/wt/a",
-      candidateMachine: "m1",
-      candidateAnchors: [],
-      siblingClaims: [{ ...sibling, by: "zheng", worktree: "/wt/b", machine: "m1", anchors: [] }],
-      hasSpecParent: false,
-    });
-    expect(text).toContain("Conflicting task: task-one");
+    expect(text).toContain("DIFFERENT run");
     expect(text).toContain("lore setup");
     expect(text).toContain("agent integration");
     expect(text).not.toContain("--by");
     expect(text).not.toContain("LORE_ACTOR");
   });
 
-  describe("OS-fallback warning", () => {
-    const scratch: string[] = [];
-    afterEach(() => {
-      vi.restoreAllMocks();
-      for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
-    });
-
-    it("AC-ROI-8: the OS-username warning names `lore setup` and the attested run", async () => {
-      const cwd = mkdtempSync(join(tmpdir(), "no-lore-actor-"));
-      scratch.push(cwd);
-      const written: string[] = [];
-      vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
-        written.push(String(chunk));
-        return true;
-      });
-      const { resolveActorWithIdentitySource } = await import("../../../src/adapters/cli/utils.js");
-      const resolved = resolveActorWithIdentitySource(liveIo(), undefined, {}, cwd, liveInvocation().user);
-      expect(resolved.source).toBe("os-fallback");
-      const warning = written.join("");
-      expect(warning).toContain("lore setup");
-      expect(warning).toContain("attested run");
-      expect(warning).not.toContain("LORE_ACTOR");
+  describe("no-known-party refusal", () => {
+    it("AC-ROI-8: the refusal names `lore setup` (the agent integration), `lore session start --human` and the attested run", async () => {
+      const { refusalNamingHowToBecomeKnown } = await import("@lore/core/node");
+      const refusal = refusalNamingHowToBecomeKnown("This write has no attested agent run and no open human session in this checkout.");
+      expect(refusal).toContain("lore setup");
+      expect(refusal).toContain("lore session start --human");
+      expect(refusal).toContain("attested run");
+      expect(refusal).not.toContain("LORE_ACTOR");
+      expect(refusal).not.toContain("--by");
     });
   });
 });

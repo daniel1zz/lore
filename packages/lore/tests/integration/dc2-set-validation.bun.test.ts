@@ -20,7 +20,7 @@
  * @spec_ref spec-defect-clusters-round-2-part-a-sessions-seats-setup-init#AC-DC2-8
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext, liveIo } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -79,7 +79,8 @@ function runLore(args: string[]): { stdout: string; stderr: string; exitCode: nu
 async function callMcp(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> {
   const tool = tools[name];
   if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-  const res = await tool.handler(args, {});
+  // reason: an MCP write names its known party (`harness_run`, BR-1351); the live test run is registered by the app shim.
+  const res = await tool.handler({ harness_run: LIVE_TEST_RUN, ...args }, {});
   const first = res.content[0];
   if (first === undefined || first.type !== "text") throw new Error("expected text content");
   return { isError: res.isError === true, text: first.text };

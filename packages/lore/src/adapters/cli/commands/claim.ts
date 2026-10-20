@@ -56,9 +56,8 @@
 import { invocationOf } from "../command-invocation.js";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { taskClaimSchema } from "@lore/core";
-import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatErrorFor, resolveActorWithIdentitySource } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { printLine } from "../output.js";
 import { refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
@@ -105,16 +104,15 @@ export default defineLoreCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      // reason: the run is verified ONCE against the registry (unregistered -> null + one warning); the decision
-      // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
+      // reason: the run is verified ONCE against the registry (an unregistered run is refused, exit 4); the decision
+      // below and the stamped rows then agree (BR-1351, spec-run-identity-slice-1 D7).
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         printLine(inv.io.stderr, formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
         exitCli(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const resolvedActor = resolveActorWithIdentitySource(inv.io, undefined, inv.env, inv.cwd, inv.user);
-      const by = resolvedActor.actor;
+      const by = resolveActor(inv);
       const machine = typeof args.machine === "string" ? args.machine : inv.host;
       const claimOpts = {
         by,
@@ -125,23 +123,6 @@ export default defineLoreCommand({
         machine,
         ...(typeof args.worktree === "string" ? { worktree: args.worktree } : {}),
         ...(typeof args["corpus-scope"] === "string" ? { corpusScope: args["corpus-scope"] } : {}),
-        // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-        // AC-IDENTITY-REJECT — threads the resolved tier into the task-claim
-        // gate's collision-signature test (`TaskWorkflowService.enforceClaimGate`);
-        // every other CLI verb keeps using plain `resolveActor` unchanged.
-        //
-        // SPEC-104 adds a fifth resolution tier, `"worktree-derived"`, to
-        // utils.ts's own (wider) `ActorSource` — `@lore/core/node`'s
-        // `ActorSource` (the type `ClaimOpts.identitySource` is declared
-        // against, in `task-workflow-service.ts`) is intentionally left
-        // unwidened: this task's declared file anchors are `utils.ts` +
-        // `commands/claim.ts` only, and widening a shared core type is a
-        // separate, out-of-anchor concern. The cast below is functionally
-        // inert: `gate-predicates.ts::actorIdentityGuard` only ever compares
-        // `candidateIdentitySource` against the `"os-fallback"` literal —
-        // every OTHER string (including `"worktree-derived"`) is already an
-        // automatic pass, identical to `"explicit"`/`"env"`/`"session"` today.
-        identitySource: resolvedActor.source as ActorSource,
         steal: args.steal === true,
         source: app.callerSurface,
       };

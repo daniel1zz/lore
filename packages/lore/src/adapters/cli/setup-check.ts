@@ -316,6 +316,7 @@ function readInstalledManifest(targetDir: string): Result<SetupManifest | null, 
     return err({
       code: "STORE_ERROR",
       message: `lore setup --check: cannot read the setup manifest at "${manifestPath}": ${describeCaught(cause)}`,
+      rule: "BR-848",
     });
   }
 
@@ -328,6 +329,7 @@ function readInstalledManifest(targetDir: string): Result<SetupManifest | null, 
       field: "manifest",
       message: `lore setup --check: malformed JSON at "${manifestPath}": ${describeCaught(cause)}`,
       value: manifestPath,
+      rule: "BR-847",
     });
   }
 
@@ -338,6 +340,7 @@ function readInstalledManifest(targetDir: string): Result<SetupManifest | null, 
       field: "manifest",
       message: `lore setup --check: manifest at "${manifestPath}" failed schema validation: ${parsed.error.message}`,
       value: manifestPath,
+      rule: "BR-847",
     });
   }
   return ok(parsed.data);

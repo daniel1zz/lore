@@ -45,6 +45,7 @@ import { ANCHOR_OVERLAP_FIELD, type SiblingClaimInfo } from "../../../src/servic
 import { deriveSessions } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -212,39 +213,32 @@ describe("checkpointRegistry['task-claim'] — noAnchorOverlap (pure, SPEC-042 D
   });
 
   // STATE — same-actor overlap in a PROVEN same session → pass.
-  // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main retired
-  // the bare same-`by` exemption — `by` is a proxy two concurrently-live sessions
-  // legitimately share (this project mandates `LORE_ACTOR=agent:main-orchestrator`
-  // for every main-checkout run), so the exemption now requires the CAPTURED
-  // session instance on both sides. The original intent of this case ("one actor
-  // working two tasks does not block itself") is preserved by supplying that fact;
-  // the case immediately below pins what happens when it is absent, so this pair
-  // cannot both pass under a blanket-permit OR a blanket-refuse regression.
-  it("a sibling claim held by the SAME actor in the SAME measured session never blocks", () => {
+  // reason: BR-1056 — the holder is a RUN, never a name: `by` is a proxy that two concurrently-live runs legitimately
+  // share, so only the SAME run clears an overlap. One actor working two tasks from one run does not block itself.
+  it("a sibling claim held by the SAME run never blocks", () => {
     const ctx: GateContext = {
       candidateBy: "agent:t1",
-      candidateSessionId: "3de02220",
+      candidateRun: "cc:3de02220",
       candidateAnchors: ["src/a"],
-      siblingClaims: [{ ...overlappingSibling, session_id: "3de02220" }], // also by agent:t1
+      siblingClaims: [{ ...overlappingSibling, harness_run: "cc:3de02220" }], // also by agent:t1
       hasSpecParent: false,
     };
     expect(isCheckpointBlocked(def.check(ctx))).toBe(false);
   });
 
-  // STATE — same actor, session instance UNMEASURED (the legacy claim-record shape)
-  // → refused with the explicit not-measured reason, never permitted.
-  it("a sibling claim held by the SAME actor with NO recorded session is refused as not-measured", () => {
+  // STATE — same name, a DIFFERENT run (two sessions deriving one display name) → refused as a foreign run.
+  it("a sibling claim under the SAME name but another run is refused", () => {
     const ctx: GateContext = {
       candidateBy: "agent:t1",
-      candidateSessionId: "3de02220",
+      candidateRun: "cc:3de02220",
       candidateAnchors: ["src/a"],
-      siblingClaims: [overlappingSibling], // same actor, no session_id recorded
+      siblingClaims: [{ ...overlappingSibling, harness_run: "cc:7ab19c04" }],
       hasSpecParent: false,
     };
     const failures = selectFailures(def.check(ctx));
     expect(isCheckpointBlocked(def.check(ctx))).toBe(true);
     expect(failures[0]?.field).toBe(ANCHOR_OVERLAP_FIELD);
-    expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP_SESSION_UNMEASURED");
+    expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP");
   });
 
   // REGRESSION — AC-S3-3: plan with NO spec ancestor + fresh foreign overlap → still blocked
@@ -311,10 +305,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a/"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1" });
+    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2" });
+    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("VALIDATION_ERROR");
@@ -329,10 +323,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskAId = await createTask(corpusService, planAId, "Plan A Task", ["src/a"]);
     const taskBId = await createTask(corpusService, planBId, "Plan B Task", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskAId, { by: "agent:t1" });
+    const first = await taskWorkflowService.claim(taskAId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskBId, { by: "agent:t2" });
+    const second = await taskWorkflowService.claim(taskBId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(true);
   });
 
@@ -342,7 +336,7 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const planId = await createUnapprovedAncestorPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Solo Task"); // no anchors
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1" });
+    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect((result.error as { field?: string }).field).toBe("gate:task-claim");
@@ -354,7 +348,7 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const planId = await createApprovedAncestorPlan(corpusService, store);
     const taskId = await createTask(corpusService, planId, "Solo Task", ["src/a"]);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1" });
+    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
   });
 
@@ -372,10 +366,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1" });
+    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2" });
+    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(true); // anchor_overlap disabled — overlap no longer blocks
   });
 
@@ -386,10 +380,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a/"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1" });
+    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const steal = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", steal: true });
+    const steal = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), steal: true });
     expect(steal.ok).toBe(false);
     if (steal.ok) return;
     expect((steal.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
@@ -402,14 +396,14 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a/"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1" });
-    const blocked = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2" });
+    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const blocked = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(blocked.ok).toBe(false);
 
-    const release = await taskWorkflowService.release(taskOneId, { by: "agent:t1" });
+    const release = await taskWorkflowService.release(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(release.ok).toBe(true);
 
-    const retry = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2" });
+    const retry = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(retry.ok).toBe(true);
   });
 
@@ -423,14 +417,14 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
 
     const first = await taskWorkflowService.claim(
       taskId,
-      { by: "agent:t1", machine: "hostA", worktree: "/w1", branch: "wt-a" },
+      { by: "agent:t1", harnessRun: runOfName("agent:t1"), machine: "hostA", worktree: "/w1", branch: "wt-a" },
       () => "2026-07-11T09:00:00.000Z",
     );
     expect(first.ok).toBe(true);
 
     const refresh = await taskWorkflowService.claim(
       taskId,
-      { by: "agent:t1" }, // no fields re-passed
+      { by: "agent:t1", harnessRun: runOfName("agent:t1") }, // no fields re-passed
       () => "2026-07-11T09:30:00.000Z",
     );
     expect(refresh.ok).toBe(true);

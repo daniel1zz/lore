@@ -321,7 +321,6 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { AuditEntry, LoreError } from "@lore/core";
-import type { ActorSource } from "@lore/core/node";
 import {
   evidenceEntrySchema,
   taskClaimSchema,
@@ -379,6 +378,7 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 import type { StampOutcome } from "./git-state-stamp.js";
 import { loadStampBindingContext, readRecordedCorpusRev } from "./stamp-binding-reader.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
@@ -404,7 +404,7 @@ import {
   type TaskLanding,
 } from "./task-commit-range.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
-import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
+import type { SiblingClaimInfo } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import { AC_REF_NOT_ON_PARENT_SPEC, AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "./ac-ref-messages.js";
@@ -459,19 +459,6 @@ export interface ClaimOpts {
    * per call — never carried forward on a refresh.
    */
   corpusScope?: string;
-  /**
-   * How `by` was resolved (spec claim-time-actor-identity-guard-zero-evidence-
-   * release-advis, AC-IDENTITY-REJECT) — CLI: `resolveActorWithIdentitySource`'s
-   * SPEC-071 session tier > worktree tier > OS-username-fallback
-   * chain (`ActorSource`, `@lore/core/node`); MCP: `actorSourceOfName` of the
-   * call's name source (`adapters/mcp/call-scope.ts`). `undefined` (a caller
-   * that never resolved/threaded one — e.g. a hand-built test `ClaimOpts`)
-   * behaves identically to any non-`"os-fallback"` value: `actorIdentityGuard`
-   * (`gate-predicates.ts`) is a vacuous pass. GATE-CONTEXT-ONLY — never
-   * persisted onto the written `TaskClaim` (spec §Scope: "OUT: storing
-   * identity source on the doc").
-   */
-  identitySource?: ActorSource;
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
@@ -662,7 +649,7 @@ function doneFloorRefusal(
 ): Result<{ refusal: DoneFloorRefusal }, never> {
   // reason: DCL-1 — the rule's name is part of the TEXT too (`done`/`set` print only the message), so a reader
   // and a test can name the refusing floor without parsing `details`.
-  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor } } } });
+  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor }, rule: "BR-1292" } } });
 }
 
 export interface DoneResult {
@@ -848,17 +835,6 @@ export interface AnchorConflict {
   task_slug: string;
   holder: string;
   paths: string[];
-  /**
-   * Present ONLY when `holder` equals the conflicting task's OWN claim holder —
-   * i.e. the two claims share an actor string and the conflict rests on the
-   * SESSION dimension (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
-   * `"different-session"` = two measured, provably different sessions;
-   * `"not-measured"` = at least one side recorded no session id, so this advisory
-   * reports an overlap it could NOT clear rather than staying silent (the gate
-   * refuses the same claim). ABSENT for an ordinary foreign-actor conflict, so
-   * every pre-existing consumer sees a byte-identical entry.
-   */
-  session_verdict?: SessionComparison;
 }
 
 /**
@@ -945,20 +921,17 @@ const defaultNow = (): string => new Date().toISOString();
 
 
 /**
- * The stored lease as a {@link ClaimHolder} for core's `hasClaimConflict` (D6). `legacy` = the RAW stored claim
- * has no `harness_run` KEY at all (written before runs existed, BR-1042) — read from the raw value because
- * the parsed claim cannot tell an absent key from `null` (unattested).
+ * The stored lease as a {@link ClaimHolder} for core's `hasClaimConflict` (D6): its name and the run that took it
+ * (`null` for a lease written before runs existed, which belongs to no run).
  *
  * @param stale - Staleness the caller wants judged: claim paths pass the real staleness; release passes `false`
  *   (a stale holder still releases by its own identity — staleness only unlocks TAKEOVER by a claim).
  */
-export function buildClaimHolder(doc: DocRecord, claim: TaskClaim, stale: boolean): ClaimHolder {
-  const raw = doc.extra["claim"] as Record<string, unknown>;
-  const legacy = !Object.hasOwn(raw, "harness_run");
-  return { by: claim.by, harnessRun: (claim.harness_run ?? null) as RunId | null, legacy, stale };
+export function buildClaimHolder(claim: TaskClaim, stale: boolean): ClaimHolder {
+  return { by: claim.by, harnessRun: (claim.harness_run ?? null) as RunId | null, stale };
 }
 
-/** The acting party of a claim/release: its name and the run it explicitly carries (null = unattested). */
+/** The acting party of a claim/release: its name and the run it acts as (null = no run was resolved). */
 export function buildClaimParty(opts: { by: string; harnessRun?: RunId | null }): ClaimParty {
   return { by: opts.by, harnessRun: opts.harnessRun ?? null };
 }
@@ -979,7 +952,7 @@ function applyEffectiveClaimStaleness(
   });
 }
 
-/** `CLAIM_CONFLICT` naming the holder, the holding run (absent for a legacy claim) and the claim's age (BR-1040/BR-1043). */
+/** `CLAIM_CONFLICT` naming the holder, the holding run (`null` for a lease with no run) and the claim's age (BR-1040/BR-1043). */
 export function buildClaimConflictError(
   docId: string,
   claim: TaskClaim,
@@ -991,7 +964,7 @@ export function buildClaimConflictError(
     id: docId,
     holder: claim.by,
     age_minutes: ageMinutesBetween(nowIso, claim.at),
-    ...(holder.legacy ? {} : { holder_run: holder.harnessRun }),
+    holder_run: holder.harnessRun,
   };
 }
 
@@ -1105,20 +1078,19 @@ export async function buildEffectiveAnchorGateContext(
   siblings: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
-  candidateSessionId?: string,
 ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
   return applyEffectiveSiblingStaleness(
     store,
-    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes, candidateSessionId),
+    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes),
     siblings,
     nowIso,
     ttlMinutes,
   );
 }
 
-/** History wording for the run on a claim/release: the run id, or `unattested`. */
+/** History wording for the run on a claim/release: the run id, or `none` for a lease or caller with no run. */
 export function describeClaimRun(run: string | null | undefined): string {
-  return run ?? "unattested";
+  return run ?? "none";
 }
 
 /**
@@ -1593,6 +1565,7 @@ export function rejectBlankClaimWorktree(worktree: string | undefined): Result<v
       field: "worktree",
       message: "--worktree must not be empty or whitespace-only",
       value: worktree,
+      rule: "BR-136",
     });
   }
   return ok(undefined);
@@ -1781,6 +1754,7 @@ export function rejectMissingNonPassOutputTail(
       "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
       "MCP: output_tail).",
     value: outputTail,
+    rule: "BR-149",
   });
 }
 
@@ -1887,6 +1861,7 @@ export function rejectMissingPassOutputTail(
       "accepts), or use --oracle manual for a check with nothing capturable (still needs a " +
       "genuine non-empty --output-tail/--output-tail-file describing exactly what was checked).",
     value: outputTail,
+    rule: "BR-150",
   });
 }
 
@@ -1944,6 +1919,7 @@ export function rejectCallerGitStamp(entry: EvidenceInput): LoreError | undefine
         field,
         message: `${field} is measured by the verify runner from git (not a valid evidence input field)`,
         value: inCapture ? (captured as Record<string, unknown>)[field] : raw[field],
+        rule: "BR-148",
       };
     }
   }
@@ -2045,6 +2021,7 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
       `trimmed command shorter than 3 characters is rejected unless it is one of the ` +
       `allowlisted short commands (${allowlist})`,
     value: command,
+    rule: "BR-161",
   });
 }
 
@@ -3106,7 +3083,7 @@ export class TaskWorkflowService {
     // the exact same "now", within one claim() call.
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
+    const gateResult = await this.enforceClaimGate(task, opts, nowIso);
     if (!gateResult.ok) return gateResult;
 
     const holderResult = await this.refuseWhileWorkingCopyHoldsUnlandedTask(task, opts);
@@ -3125,7 +3102,7 @@ export class TaskWorkflowService {
       const stale = staleResult.value;
       // reason: spec-run-identity-slice-1 D6 / invariant I2 — the ONE conflict predicate lives in core
       // (`hasClaimConflict`); both claim paths call it, never `existingClaim.by === opts.by`.
-      const holder = buildClaimHolder(task, existingClaim, stale);
+      const holder = buildClaimHolder(existingClaim, stale);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
         return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
@@ -3175,8 +3152,7 @@ export class TaskWorkflowService {
         // §Opt-in). `buildTaskClaim` never carries it forward.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
         ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
-        // reason: BR-1040/BR-1042 — a new claim ALWAYS stores the key (null when unattested); only a legacy
-        // claim lacks it, and a legacy claim is never written here without being replaced by this one.
+        // reason: BR-1040 — the claim always names the run that took it; the store refuses one that does not (BR-1352).
         harness_run: claimant.harnessRun,
       },
       carryForward,
@@ -3187,11 +3163,10 @@ export class TaskWorkflowService {
         : builtClaim;
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
-    const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
+    const previousHolderRun = existingClaim === undefined ? undefined : (existingClaim.harness_run ?? null);
     const takeoverNote =
-      existingClaim !== undefined &&
-      (existingClaim.by !== opts.by || (previousHolderRun !== undefined && (previousHolderRun ?? null) !== claimant.harnessRun))
-        ? ` (previous holder: ${existingClaim.by}${previousHolderRun === undefined ? "" : `, run ${describeClaimRun(previousHolderRun)}`}; claiming run ${describeClaimRun(claimant.harnessRun)})`
+      existingClaim !== undefined && previousHolderRun !== claimant.harnessRun
+        ? ` (previous holder: ${existingClaim.by}, run ${describeClaimRun(previousHolderRun)}; claiming run ${describeClaimRun(claimant.harnessRun)})`
         : claimant.harnessRun !== null
           ? ` (run ${claimant.harnessRun})`
           : "";
@@ -3254,7 +3229,7 @@ export class TaskWorkflowService {
     // caller observing success) — documented, not eliminated: closing it fully would
     // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
     // 不引入 daemon/锁表/mutex 行").
-    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
+    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -3418,9 +3393,8 @@ export class TaskWorkflowService {
     const nowIso = now();
     const releaser = buildClaimParty(opts);
     // reason: BR-1043 — stale=false: a stale holder still releases by its own identity; staleness only
-    // unlocks takeover by a CLAIM. Only a `refresh` verdict (same run, or by-name for a legacy / fully
-    // unattested pair) is the holder.
-    const holder = buildClaimHolder(task, existingClaim, false);
+    // unlocks takeover by a CLAIM. Only a `refresh` verdict (the SAME run) is the holder; a name is never one.
+    const holder = buildClaimHolder(existingClaim, false);
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
       return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
@@ -3439,7 +3413,7 @@ export class TaskWorkflowService {
     const newExtra: Record<string, unknown> = { ...task.extra };
     delete newExtra["claim"];
 
-    const heldRunNote = holder.legacy ? "" : `, run ${describeClaimRun(holder.harnessRun)}`;
+    const heldRunNote = `, run ${describeClaimRun(holder.harnessRun)}`;
     const forcedNote = !isHolder
       ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
       : "";
@@ -3451,7 +3425,7 @@ export class TaskWorkflowService {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
-      ...(holder.legacy ? {} : { previous_run: holder.harnessRun }),
+      previous_run: holder.harnessRun,
       harness_run: releaser.harnessRun,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
@@ -4239,9 +4213,9 @@ export class TaskWorkflowService {
       // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
       const staleResult = await this.isClaimEffectivelyStale(claim, nowIso, new Map());
       if (!staleResult.ok) return staleResult;
-      const holder = buildClaimHolder(task, claim, staleResult.value);
+      const holder = buildClaimHolder(claim, staleResult.value);
       if (hasClaimConflict(holder, buildClaimParty(opts)).kind === "conflict") {
-        const runNote = holder.legacy ? "" : ` (run ${describeClaimRun(holder.harnessRun)})`;
+        const runNote = ` (run ${describeClaimRun(holder.harnessRun)})`;
         return err({
           code: "VALIDATION_ERROR",
           field: "extra.claim",
@@ -4349,17 +4323,9 @@ export class TaskWorkflowService {
    * protocol) and `branch` (auto-captured), plus the current claim's. `lore integrate <branch>` matches on these.
    */
   private static claimedNames(auditRows: readonly AuditEntry[], task: DocRecord): string[] {
-    const names = new Set<string>();
-    for (const row of auditRows) {
-      for (const key of ["worktree", "branch"] as const) {
-        const value = row.details?.[key];
-        if (typeof value === "string" && value.trim() !== "") names.add(value);
-      }
-    }
-    const current = readClaimRecord(task);
-    if (current?.worktree !== undefined) names.add(current.worktree);
-    if (current?.branch !== undefined) names.add(current.branch);
-    return [...names];
+    // reason: one derivation shared with `lore integrate`'s own-diff judgment (branch-membership.ts), so a landing and the
+    // judgment that preceded it agree on whose branch it is.
+    return claimedNamesOf(auditRows, task);
   }
 
   /**
@@ -4418,7 +4384,8 @@ export class TaskWorkflowService {
 
   /**
    * Records a landing (`extra.landing`) on every task not archived or deprecated whose claim, current or historical
-   * (claim audit), recorded `landing.branch` (or a working copy on it), through the one write route
+   * (claim audit), recorded `landing.branch` (or a working copy on it), or that belongs to a plan whose declared
+   * integration branch is `landing.branch` (BR-1348), through the one write route
    * (`writer.writeDoc`). Called by `lore integrate` after main moved, and when the branch is found already integrated.
    * Idempotent: a task already holding a landing of the same branch head is reported, not rewritten. Every task is attempted; the first
    * write failure is returned after the rest were tried.
@@ -4431,6 +4398,9 @@ export class TaskWorkflowService {
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
     if (!auditResult.ok) return auditResult;
+    const plansResult = await this.store.findMany({ type: "plan" });
+    if (!plansResult.ok) return plansResult;
+    const integrationBranches = planIntegrationBranches(plansResult.value);
     const nowIso = now();
     const slugs: string[] = [];
     let firstFailure: LoreError | undefined;
@@ -4438,7 +4408,12 @@ export class TaskWorkflowService {
       // reason: BR-1336 — a finished task is never rewritten by a later landing of a branch it once claimed.
       if (task.status === "archived" || task.status === "deprecated") continue;
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
-      if (!(await this.landingCandidateNames(rows, task)).includes(landing.branch)) continue;
+      // reason: BR-1348 — the tasks of a branch are those claimed on it AND every task of a plan whose declared
+      // integration branch it is (the own-diff judgment at integrate judged the branch against exactly these).
+      const ofBranch =
+        isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ||
+        (await this.landingCandidateNames(rows, task)).includes(landing.branch);
+      if (!ofBranch) continue;
       const existing = readTaskLanding(task.extra);
       // reason: BR-1336 — "holds no landing for that head": a task already carrying a landing of this branch head is
       // reported, not rewritten (an already-integrated re-run must not replace the real merge commit's record).
@@ -5377,17 +5352,13 @@ export class TaskWorkflowService {
    * `SessionService.bootstrap`'s corpus-wide scope).
    *
    * `anchor_conflicts`: for each task declaring ≥1 anchor, every OTHER task in
-   * `tasks` holding a FRESH claim in a DIFFERENT SESSION (a different actor, or
-   * the same actor in a provably-different / unmeasurable session — see
-   * `compareClaimSessions`) whose anchors overlap.
+   * `tasks` holding a FRESH claim by a DIFFERENT RUN whose anchors overlap. A lease or
+   * claimant with no run is nobody's, so it is reported too.
    *
-   * The session dimension is here, and not just in the gate, because this report
+   * The run comparison is here, and not just in the gate, because this report
    * and the `task-claim` gate must never disagree: an advisory that printed "no
    * conflicts" while `lore claim` refused the very same pair would train
-   * operators to distrust the refusal
-   * (task-two-concurrent-orchestrators-both-resolve-to-agent-main). It reuses
-   * `compareClaimSessions` (`gate-predicates.ts`) rather than re-comparing the
-   * ids inline, so the two surfaces share ONE definition of "same session".
+   * operators to distrust the refusal.
    *
    * `anchorless`: the SET of task slugs that hold a FRESH claim, declare NO
    * anchors themselves, while at least one OTHER task in `tasks` declares
@@ -5413,23 +5384,14 @@ export class TaskWorkflowService {
           if (otherClaim === undefined) continue;
           if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
           // reason: BR-1056 — same holder means same RUN. Two runs that share a derived name are TWO holders and
-          // stay reported; only legacy / both-unattested claims fall back to the name (`hasClaimConflict`).
+          // stay reported; a lease or claim with no run is nobody's and stays reported too.
           const sameHolder =
             taskClaim !== undefined &&
             hasClaimConflict(
-              buildClaimHolder(other, otherClaim, false),
+              buildClaimHolder(otherClaim, false),
               buildClaimParty({ by: taskClaim.by, harnessRun: (taskClaim.harness_run ?? null) as RunId | null }),
             ).kind === "refresh";
-          if (sameHolder && taskClaim !== undefined && (taskClaim.harness_run ?? null) !== null) continue;
-          const sameActor = sameHolder;
-          const sessionVerdict = sameActor
-            ? compareClaimSessions(taskClaim.session_id, otherClaim.session_id)
-            : undefined;
-          // reason: a shared actor string alone no longer clears the overlap —
-          // only a PROVEN shared session does. `sameActor` with a
-          // different/unmeasured session is reported, matching what the
-          // `task-claim` gate would refuse for the same pair.
-          if (sessionVerdict === "same-session") continue;
+          if (sameHolder) continue;
           const otherAnchors = extractFileAnchors(other);
           if (otherAnchors.length === 0) continue;
           const overlap = anchorsOverlap(taskAnchors, otherAnchors);
@@ -5438,7 +5400,6 @@ export class TaskWorkflowService {
               task_slug: task.slug,
               holder: otherClaim.by,
               paths: overlap.pairs.map(([a]) => a),
-              ...(sessionVerdict !== undefined ? { session_verdict: sessionVerdict } : {}),
             });
           }
         }
@@ -5656,25 +5617,15 @@ export class TaskWorkflowService {
    * `gate` dependency (see constructor JSDoc).
    *
    * @param task - The task `claim()` is about to write a lease onto.
-   * @param opts - The FULL `claim()` opts — `.by` feeds `noAnchorOverlap`'s
-   *   "different actor" test; `.identitySource`/`.worktree`/`.machine` (spec
-   *   claim-time-actor-identity-guard-zero-evidence-release-advis, AC-
-   *   IDENTITY-REJECT) feed `actorIdentityGuard`'s collision-signature test —
-   *   all read straight from `opts`, no extra IO.
+   * @param opts - The FULL `claim()` opts — `.harnessRun` feeds `noAnchorOverlap`'s
+   *   "different run" test, read straight from `opts`, no extra IO.
    * @param nowIso - The SAME "now" `_claimImpl` resolved before calling this
    *   (D5 seam pinning) — drives sibling claim staleness, never re-resolved here.
-   * @param candidateSessionId - The session instance `_claimImpl` captured for
-   *   this claim (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
-   *   Threaded rather than re-captured so the PRE-write check, the claim record
-   *   actually written, and the POST-write TOCTOU re-check all reason about ONE
-   *   captured value — a second capture could disagree with the persisted claim.
-   *   `undefined` ⇒ not measured, which makes a same-actor overlap a refusal.
    */
   private async enforceClaimGate(
     task: DocRecord,
     opts: ClaimOpts,
     nowIso: string,
-    candidateSessionId: string | undefined,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -5693,7 +5644,7 @@ export class TaskWorkflowService {
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso, candidateSessionId);
+      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
@@ -5702,11 +5653,11 @@ export class TaskWorkflowService {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateSessionId);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
       } else {
-        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateSessionId);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
       }
@@ -5716,7 +5667,6 @@ export class TaskWorkflowService {
       ...ctx,
       targetIdOrSlug: task.slug,
       anchorOverlapEnabled: this.gate.enforcer.isTaskClaimAnchorOverlapEnabled(),
-      actorIdentityEnabled: this.gate.enforcer.isTaskClaimActorIdentityEnabled(),
       // reason: `exactOptionalPropertyTypes` — `GateContext`'s optional string
       // fields reject an EXPLICIT `undefined` value on a present key, so an
       // omitted `opts.*` field must omit the ctx key entirely rather than
@@ -5724,9 +5674,6 @@ export class TaskWorkflowService {
       // `...(x !== undefined ? {y: x} : {})` pattern elsewhere).
       // reason: BR-1056 — the gate's overlap test compares holders by RUN; passed explicitly, never ambient.
       candidateRun: opts.harnessRun ?? null,
-      ...(opts.identitySource !== undefined ? { candidateIdentitySource: opts.identitySource } : {}),
-      ...(opts.worktree !== undefined ? { candidateWorktree: opts.worktree } : {}),
-      ...(opts.machine !== undefined ? { candidateMachine: opts.machine } : {}),
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — `task.id` is the RESOLVED task doc's real id, threaded
       // ONLY for `GateEnforcer.enforce`'s own `gate_passed` audit `doc_id` (never
@@ -5744,9 +5691,8 @@ export class TaskWorkflowService {
     task: DocRecord,
     siblings: readonly DocRecord[],
     nowIso: string,
-    candidateSessionId?: string,
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
-    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateSessionId);
+    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes);
   }
 
   /**

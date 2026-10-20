@@ -764,6 +764,7 @@ async function collectCodeAnchorSpecMembers(
         `code_anchor_specs: this command's anchored-spec member list holds ${members.length} spec(s) but the shared ` +
         `flows/drift-flow.ts::countArmedSpecs counted ${sharedCountResult.value} over the SAME ${specs.length} live ` +
         `spec(s) — one of the two call sites has bypassed the shared isSpecAnchored predicate; reconcile before trusting either number.`,
+      rule: "BR-444",
     });
   }
 
@@ -1166,6 +1167,7 @@ export default defineLoreCommand({
             field: "enumerate",
             message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
             value: args.enumerate,
+            rule: "BR-443",
           };
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           return exitCode(error);
@@ -2162,8 +2164,8 @@ export default defineLoreCommand({
           `claims/evidence/handoffs carry an attested run (share ${attributionShare.share})`,
       );
       printLine(inv.io.stdout, 
-        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, session ${identitySources.session}, ` +
-          `worktree ${identitySources.worktree}, os ${identitySources.os}, other ${identitySources.other}`,
+        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, human ${identitySources.human}, ` +
+          `api-key ${identitySources.api_key}, dashboard ${identitySources.dashboard}, other ${identitySources.other}`,
       );
       printLine(inv.io.stdout, 
         `Orphaned-dirty claims: ${orphanedDirty.count}` +

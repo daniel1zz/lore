@@ -29,6 +29,7 @@ import { RunReapService, type ReapReport } from "../../src/service/run-reap-serv
 import { createRealProcessTablePort, type ProcessTablePort } from "../../src/adapters/process-table-port.js";
 import { ok } from "@lore/core";
 import { actedStore } from "../live-invocation.js";
+import { testRunIdFor } from "../helpers/test-run-identity.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -180,6 +181,12 @@ function makeFixture(): Fixture {
   const init = lore(["init"]);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   const dbPath = join(corpus, ".lore", "lore.db");
+  // reason: every `lore` start here runs as the test's own agent run, registered in this corpus (BR-1351) as a legacy run with
+  // no recorded process, which would be counted by every sweep below. The registry under test holds only the runs a test
+  // registers, so that ambient run is ended first (an ended run still writes: only a missing registration refuses one).
+  const ambientRun = testRunIdFor([], { ...process.env, HOME: corpus });
+  const ended = lore(["run", "end", ambientRun, "--reason", "fixture-ambient"]);
+  if (ended.exitCode !== 0) throw new Error(`ending the ambient test run failed: ${ended.stderr}`);
 
   const fixture: Fixture = {
     corpus,
@@ -274,7 +281,7 @@ describe("AC-AU-5 registration records the process (migration 021)", () => {
     const fixture = makeFixture();
     const r = fixture.lore(["run", "register", "--harness", "claude-code", "--session", "bad-pid", "--harness-pid", "abc"]);
     expect(r.exitCode).toBe(2);
-    expect(fixture.db((db) => (db.query("SELECT COUNT(*) AS n FROM runs").get() as { n: number }).n)).toBe(0);
+    expect(fixture.db((db) => (db.query("SELECT COUNT(*) AS n FROM runs WHERE COALESCE(end_reason, '') <> 'fixture-ambient'").get() as { n: number }).n)).toBe(0);
   });
 
   it("a pid that is not alive registers the run (exit 0) with a null pair and says so", async () => {
@@ -520,7 +527,7 @@ describe("AC-AU-5 lore run reap", () => {
     expect(first.report.legacy).toMatchObject({ run_ids: ["cc:legacy-1", "cc:legacy-2"], verdict: "escalate", already_pending: false });
     expect(first.report.runs).toEqual([]);
     expect(decisionRows(fixture, "run-end-stale")).toEqual([{ subject_id: "legacy-runs-without-recorded-pid", verdict: "escalate", channel: "machine" }]);
-    expect(fixture.db((db) => (db.query("SELECT COUNT(*) AS n FROM runs WHERE ended_at IS NOT NULL").get() as { n: number }).n)).toBe(0);
+    expect(fixture.db((db) => (db.query("SELECT COUNT(*) AS n FROM runs WHERE ended_at IS NOT NULL AND end_reason <> 'fixture-ambient'").get() as { n: number }).n)).toBe(0);
 
     const second = fixture.reap({ apply: true });
     expect(second.exitCode).toBe(0);

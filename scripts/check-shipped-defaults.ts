@@ -197,13 +197,12 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
     rationale: "The command that rebuilds the shared checkout's build artifacts after lore integrate refreshed its view (this repo: bun run build) is the project's own build; it has no meaningful shipped default and integrate reports 'skipped' when it is absent.",
   },
   {
-    key: "project.author",
-    rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
+    key: "workflow.integrate.migrate_command",
+    rationale: "The command line of the project's own `lore migrate schema` (this repo: bun run packages/lore/src/index.ts migrate schema) that lore integrate runs on the floor's corpus snapshot and then on the live corpus names a project-specific binary location; it has no meaningful shipped default and integrate reports 'skipped' when it is absent.",
   },
   {
-    key: "audit.verify_since",
-    rationale:
-      "Names the audit hash-chain watermark for THIS corpus's own history; a shared default would misdate every other corpus's chain.",
+    key: "project.author",
+    rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
   },
   {
     key: "feedback.upstream",
@@ -257,7 +256,6 @@ export const ZOD_DEFAULTABLE_SECTIONS: readonly string[] = [
   "defaults",
   "ai",
   "workflow",
-  "audit",
   "feedback",
   "verify",
   "setup",

@@ -19,13 +19,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DOC_TYPE_ROLE_MAP, type DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
-import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
 import { MIGRATION_015_SQL } from "../../../src/store/migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "../../../src/store/migrations/migration-018.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 let counter = 0;
 function doc(type: "spec" | "baseline", label: string, extra: Record<string, unknown>, status: DocRecord["status"] = "draft"): DocRecord {

@@ -32,6 +32,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { saveConfig } from "@lore/core/node";
 import { sessionEnvFor } from "../../helpers/session-actor";
+import { DEFAULT_TEST_RUN, registerTestRun } from "../../helpers/test-run-identity";
 
 setDefaultTimeout(300_000);
 
@@ -214,7 +215,10 @@ describe("the write itself refuses what the g1-g4 hooks refused — MCP tool (er
   for (const c of CASES) {
     it(`${c.name}: tool error, names ${c.names}, writes nothing`, async () => {
       const before = snapshot(fixture.dir);
-      const call = c.mcp(fixture);
+      const planned = c.mcp(fixture);
+      // reason: an MCP write names its run (BR-1351); the gate under test is what must refuse, not the identity check
+      registerTestRun(fixture.dir, DEFAULT_TEST_RUN);
+      const call = { ...planned, arguments: { harness_run: DEFAULT_TEST_RUN, ...planned.arguments } };
       const result = await withMcp(fixture.dir, (client) => client.callTool(call));
       expect(result.isError).toBe(true);
       expect(textOf(result)).toContain(c.names);
@@ -229,7 +233,7 @@ describe("control: the same surfaces still accept a legal write (a refusal above
     const result = await withMcp(fixture.dir, (client) =>
       client.callTool({
         name: "lore_create",
-        arguments: { type: "spec", title: "Control MCP Spec", content: SKELETON, extra: { spec_kind: "tech" } },
+        arguments: { harness_run: DEFAULT_TEST_RUN, type: "spec", title: "Control MCP Spec", content: SKELETON, extra: { spec_kind: "tech" } },
       }),
     );
     expect(result.isError ?? false).toBe(false);

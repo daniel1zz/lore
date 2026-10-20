@@ -35,7 +35,7 @@ export default defineLoreCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.undelete(args.id, {
-        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv),
       });
 
       if (!result.ok) {

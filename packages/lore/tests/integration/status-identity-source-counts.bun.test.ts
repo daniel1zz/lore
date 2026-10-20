@@ -5,11 +5,12 @@
  * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-10
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 8; BR-1039 (`baseline-attribute-work-to-a-run`).
  *
- * Shape under test: `data.identity_sources { window_days, run, session, worktree, os, other }` and
- * `data.orphaned_dirty { count, oldest_age_minutes }`.
- *   - `run`      = the write carries an attested `harness_run` (it wins over the claimed name's source);
- *   - `session` / `worktree` / `os` = an unattested write whose audit row recorded that `details.name_source`;
- *   - `other`    = an unattested write with no recorded source (internal writers, pre-source rows) or a retired one.
+ * Shape under test: `data.identity_sources { window_days, run, human, api_key, dashboard, other }` and
+ * `data.orphaned_dirty { count, oldest_age_minutes }` (spec-every-write-is-made-by-a-known-party-an-attested-agent-run
+ * end state 6: no write is "unattested", the buckets are the four known parties).
+ *   - `run` / `human` / `api_key` / `dashboard` = the audit row's recorded `details.name_source`;
+ *   - `other` = a row with no recorded source and no run (internal writers, rows written before sources existed) or a
+ *     retired source.
  *
  * Method: the corpus is built by the REAL CLI (`lore init`, claims, `lore run end` on dirty worktrees), so it
  * already holds audit rows of its own. The test therefore reads the report BEFORE seeding and asserts the DELTA
@@ -36,9 +37,9 @@ setDefaultTimeout(300_000);
 interface IdentitySources {
   window_days: number;
   run: number;
-  session: number;
-  worktree: number;
-  os: number;
+  human: number;
+  api_key: number;
+  dashboard: number;
   other: number;
 }
 interface OrphanedDirty {
@@ -100,36 +101,37 @@ async function seedWrites(rows: readonly { identity: SeedIdentity; atMs: number 
   }
 }
 
-const ident = (claimedSource: string, harnessRun: string | null = null): SeedIdentity => ({
-  harnessRun,
-  claimed: `agent:seed-${claimedSource}`,
+/** A known party of the given source: every write has a run (BR-1351), named as production names it. */
+const ident = (claimedSource: "run" | "human" | "api-key" | "dashboard", tag = "a"): SeedIdentity => ({
+  harnessRun:
+    claimedSource === "run" ? `cc:src-run-${tag}` : claimedSource === "human" ? `human:${tag.padEnd(16, "0")}` : `${claimedSource}:seed-${tag}`,
+  claimed: claimedSource === "run" ? `agent:session-src-run-${tag}`.slice(0, 22) : `seed-${claimedSource}`,
   claimedSource,
 });
 
-describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-10 lore status identity sources and orphaned_dirty claims", () => {
-  it("HAPPY: reports a count per identity source (run, session, worktree, os) for writes in the window", async () => {
+describe("spec-every-write-is-made-by-a-known-party-an-attested-agent-run#end-state-6 lore status identity sources and orphaned_dirty claims", () => {
+  it("HAPPY: reports a count per identity source (run, human, api-key, dashboard) for writes in the window", async () => {
     const before = sourcesOf(statusData());
     const now = Date.now();
     await seedWrites([
-      // run: attested rows win over the claimed name's source (a `session`-named write that carries a run is `run`).
-      { identity: ident("session", "cc:src-run-a"), atMs: now - 1 * DAY },
-      { identity: ident("os", "cc:src-run-b"), atMs: now - 2 * DAY },
-      // session x3, worktree x1, os x4 — distinct counts so a swapped bucket fails.
-      ...[1, 2, 3].map((i) => ({ identity: ident("session"), atMs: now - i * 3_600_000 })),
-      { identity: ident("worktree"), atMs: now - 5 * 3_600_000 },
-      ...[1, 2, 3, 4].map((i) => ({ identity: ident("os"), atMs: now - i * 7_200_000 })),
+      // run x2, human x3, api-key x1, dashboard x4 — distinct counts so a swapped bucket fails.
+      { identity: ident("run", "a"), atMs: now - 1 * DAY },
+      { identity: ident("run", "b"), atMs: now - 2 * DAY },
+      ...[1, 2, 3].map((i) => ({ identity: ident("human"), atMs: now - i * 3_600_000 })),
+      { identity: ident("api-key"), atMs: now - 5 * 3_600_000 },
+      ...[1, 2, 3, 4].map((i) => ({ identity: ident("dashboard"), atMs: now - i * 7_200_000 })),
       // outside the 14-day window: never counted, whatever the source.
-      { identity: ident("session", "cc:src-run-old"), atMs: now - 15 * DAY },
-      { identity: ident("os"), atMs: now - 20 * DAY },
+      { identity: ident("run", "old"), atMs: now - 15 * DAY },
+      { identity: ident("human", "old"), atMs: now - 20 * DAY },
     ]);
 
     const after = sourcesOf(statusData());
 
     expect(after.window_days).toBe(14);
     expect(after.run - before.run).toBe(2);
-    expect(after.session - before.session).toBe(3);
-    expect(after.worktree - before.worktree).toBe(1);
-    expect(after.os - before.os).toBe(4);
+    expect(after.human - before.human).toBe(3);
+    expect(after.api_key - before.api_key).toBe(1);
+    expect(after.dashboard - before.dashboard).toBe(4);
     expect(after.other - before.other).toBe(0);
   });
 
@@ -153,9 +155,9 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-10 lore 
 
     expect(after.other - before.other).toBe(1);
     expect(after.run - before.run).toBe(0);
-    expect(after.session - before.session).toBe(0);
-    expect(after.worktree - before.worktree).toBe(0);
-    expect(after.os - before.os).toBe(0);
+    expect(after.human - before.human).toBe(0);
+    expect(after.api_key - before.api_key).toBe(0);
+    expect(after.dashboard - before.dashboard).toBe(0);
   });
 
   it("BOUNDARY: with no orphaned_dirty claim the report is count 0 and oldest_age_minutes null", () => {

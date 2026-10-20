@@ -586,6 +586,7 @@ export class CorpusWriteAuthority {
       corpusWriteTargetKindOf(targets),
       targets.map((t) => t.slug),
     );
+    /** @lore-site BR-802 */
     if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return ok(grant.value);
   }

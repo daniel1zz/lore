@@ -161,6 +161,7 @@ export function normalizeQueryPath(raw: string): Result<string, LoreError> {
       field: "path",
       message: `"${raw}" is not a repo-relative path`,
       value: raw,
+      rule: "BR-1295",
     });
   }
   return ok(first.replace(/\/$/, ""));
@@ -202,7 +203,7 @@ export async function loadFragmentDocuments(
       const path = `${dir}/${name}`;
       const content = await port.readFile(path);
       if (content === null) {
-        return err({ code: "VALIDATION_ERROR", field: path, message: `${path}: fragment file could not be read`, value: path });
+        return err({ code: "VALIDATION_ERROR", field: path, message: `${path}: fragment file could not be read`, value: path, rule: "BR-1296" });
       }
       documents.push({ path, content });
     }

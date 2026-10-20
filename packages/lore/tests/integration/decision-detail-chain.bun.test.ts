@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version.js";
 import { MIGRATION_020_SQL } from "../../src/store/migrations/migration-020.js";
 import { MIGRATION_023_SQL } from "../../src/store/migrations/migration-023.js";
 import {
@@ -136,7 +137,7 @@ describe("decision detail chain", () => {
         expect(appended.ok && renderDecisionDetailSummary(appended.value)).toBe("Loosen the governed autonomy thresholds: stash-drop.threshold: 0.8 -> 0.5");
         const after = await store.listDecisionLog();
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 3 });
-        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(27);
+        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       } finally {
         store.close();
       }

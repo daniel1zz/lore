@@ -194,6 +194,7 @@ export class JudgmentService {
         code: "VALIDATION_ERROR",
         field: issue ? issue.path.join(".") || "(root)" : "(root)",
         message: issue?.message ?? "invalid review judgment",
+        rule: "BR-263",
       });
     }
 

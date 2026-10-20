@@ -199,7 +199,7 @@ export type BaselinePending = z.infer<typeof baselinePendingSchema>;
 
 /**
  * `extra` of a `baseline` doc.
- * @invariant `rules`, `site_map`, `commands` present only when `node === "leaf"`; `glossary` only on root|branch;
+ * @invariant `rules`, `commands` present only when `node === "leaf"`; `glossary` only on root|branch;
  *   rule ids unique within the leaf.
  */
 export const baselineExtraSchema = z
@@ -211,8 +211,6 @@ export const baselineExtraSchema = z
     rules: z.array(baselineRuleSchema).optional(),
     depends_on: z.array(z.string().min(1)).optional(),
     glossary: z.array(glossaryEntrySchema).optional(),
-    /** Leaf only: census site key -> unretired rule ids (`BR-n`) of the leaf. Written only by `lore baseline map`. */
-    site_map: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
     /** Leaf only: CLI command names (e.g. `ac add`) whose census this leaf answers for. Written only by `lore baseline map --command`. */
     commands: z.array(z.string().min(1)).optional(),
     /**
@@ -232,14 +230,12 @@ export const baselineExtraSchema = z
         });
       }
     }
-    for (const key of ["site_map", "commands"] as const) {
-      if (extra[key] !== undefined && extra.node !== "leaf") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${key} is allowed only on node=leaf (got node=${extra.node})`,
-          path: [key],
-        });
-      }
+    if (extra.commands !== undefined && extra.node !== "leaf") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `commands is allowed only on node=leaf (got node=${extra.node})`,
+        path: ["commands"],
+      });
     }
     if (!isNodeOfTree(extra.tree, extra.node)) {
       const kinds = extra.tree === "architecture" ? ARCHITECTURE_NODE_KINDS : BUSINESS_NODE_KINDS;

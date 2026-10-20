@@ -261,6 +261,7 @@ function cyclicComponents(nodes: Set<string>, edges: Edges): string[][] {
       counter += 1;
       stack.push(n);
       onStack.add(n);
+      /** @lore-site BR-681 */
       work.push({ node: n, iter: (edges.get(n) ?? new Set<string>())[Symbol.iterator]() });
     };
     enter(root);

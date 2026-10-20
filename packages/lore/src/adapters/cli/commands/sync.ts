@@ -44,6 +44,7 @@ export async function performPush(
   // before the native load `createClient` triggers (THIRD) — never a raw
   // dlopen trace.
   const tmpdirError = probeTmpdirUsability(env);
+  /** @lore-site BR-931 */
   if (tmpdirError !== null) return err(tmpdirError);
 
   const { createClient } = await loadLibsqlClientModule();
@@ -69,6 +70,7 @@ export async function performPull(
   // reason: same ordering as performPush above — credential validation
   // already ran in the caller, TMPDIR probe here, native load only after.
   const tmpdirError = probeTmpdirUsability(env);
+  /** @lore-site BR-939 */
   if (tmpdirError !== null) return err(tmpdirError);
 
   const tursoConfig = { localPath, remoteUrl, authToken };

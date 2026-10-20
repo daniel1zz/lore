@@ -185,11 +185,11 @@ describe("AC-ST-11 lore handoff changed files from the session trail", () => {
     expect(h.handoff.changed_files).toEqual([{ path: "x.ts", sources: [], named_by_author: true }]);
   });
 
-  it("AC-ST-11 an unusable run id reads not measured and records no trail file", () => {
-    // A run that was never registered verifies to unattested, so the trail of session S is not read.
-    const h = recorded(lore(["handoff", "--next", "continue", "--json"], "cc:never-registered"));
-    expect(h.content).toContain("changed files: not measured");
-    expect(h.handoff.changed_files).toEqual([]);
+  it("AC-ST-11 an unregistered run id is REFUSED (exit 4, nothing written), so no trail file is read or recorded", () => {
+    // A run the registry never saw is refused (BR-1351); it is no longer downgraded to an unattested handoff.
+    const r = lore(["handoff", "--next", "continue", "--json"], "cc:never-registered");
+    expect(r.exitCode).toBe(4);
+    expect(r.stderr).toContain("cc:never-registered");
   });
 
   it("AC-ST-11 a removed part and an unmeasured turn render as removed and unmeasured, never as no change", () => {

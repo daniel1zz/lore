@@ -104,7 +104,6 @@ import {
   ok,
   resolveGateEnabled,
   resolveAnchorOverlapGateEnabled,
-  resolveActorIdentityGateEnabled,
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
@@ -119,8 +118,8 @@ import {
   type SpecKind,
   type VerificationProfile,
 } from "@lore/core";
-import type { OsUser, PlanBundle } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import type { PlanBundle } from "@lore/core";
+import { WriteActorUnresolvedError } from "../store/write-context-store.js";
 import {
   checkpointRegistry,
   describeAssessmentFreshnessNotApplicable,
@@ -530,12 +529,6 @@ export interface GateDependencies {
 /**
  * Service-layer gate checkpoint runner. See module header for the full rationale.
  */
-/** The OS-user value of the port-less actor fallback: a gate row's actor is never guessed from the machine. */
-const GATE_NO_OS_USER: OsUser = {
-  ok: false,
-  reason: "GateEnforcer has no resolveActorPort and its env names no session — wire `resolveActorPort` (app.ts does) to record gate rows",
-};
-
 export class GateEnforcer {
   /**
    * @param config - The project's resolved `LoreConfig`, or `undefined` when no
@@ -580,10 +573,14 @@ export class GateEnforcer {
     private readonly warnSink: WarnSink = discardWarnings,
   ) {}
 
+  /**
+   * The actor of a gate row: the wired port's name (the invocation's known party). ⛔ A gate row's actor is never
+   * guessed from the environment or the machine: a bare enforcer without the port cannot name one, which is a wiring
+   * defect (`app.ts` always wires it) reported as {@link WriteActorUnresolvedError}.
+   */
   private resolveActor(): string {
-    return this.resolveActorPort !== undefined
-      ? this.resolveActorPort()
-      : resolveActorWithSource(undefined, this.env, GATE_NO_OS_USER).actor;
+    if (this.resolveActorPort === undefined) throw new WriteActorUnresolvedError();
+    return this.resolveActorPort();
   }
 
   /**
@@ -652,6 +649,7 @@ export class GateEnforcer {
     // an unassessed plan whose other conditions measured would otherwise close with no mention
     // that assessment freshness was never checked. Never blocks (same channel, same contract).
     const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
+    /** @lore-site BR-1303 */
     if (freshnessLine !== null) this.warnSink(freshnessLine);
     // reason: BR-984 - a cited rule whose state was unknown (reportable reason) closes with a line, never silently.
     for (const unknownLine of describeCitedRuleUnknowns(checkpoint, ctx)) this.warnSink(unknownLine);
@@ -946,6 +944,7 @@ export class GateEnforcer {
   ): void {
     const notice = describeCheckpointVacuity(checkpoint, results);
     if (notice === null) return;
+    /** @lore-site BR-227 */
     this.warnSink(notice);
   }
 
@@ -984,23 +983,6 @@ export class GateEnforcer {
    */
   isTaskClaimAnchorOverlapEnabled(): boolean {
     return resolveAnchorOverlapGateEnabled(this.config);
-  }
-
-  /**
-   * Whether `task-claim`'s claim-time actor-identity-collision guard
-   * specifically is enabled (`workflow.gates."task-claim".actor_identity
-   * .enabled`, spec claim-time-actor-identity-guard-zero-evidence-release-
-   * advis AC-IDENTITY-ESCAPE) — NARROWER than `isEnabled("task-claim")`,
-   * which governs the WHOLE checkpoint. A caller building `GateContext.
-   * actorIdentityEnabled` (`TaskWorkflowService.enforceClaimGate`) consults
-   * this, not `isEnabled`. Mirrors `isTaskClaimAnchorOverlapEnabled`'s shape.
-   *
-   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
-   * @example
-   * enforcer.isTaskClaimActorIdentityEnabled(); // => false when config disables it
-   */
-  isTaskClaimActorIdentityEnabled(): boolean {
-    return resolveActorIdentityGateEnabled(this.config);
   }
 
   /**

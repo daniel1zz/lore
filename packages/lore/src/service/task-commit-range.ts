@@ -62,6 +62,12 @@ export const taskLandingSchema = z.object({
   main_before: z.string().min(1),
   main_after: z.string().min(1),
   landing_commit: z.string().min(1),
+  /**
+   * The landed footprint: the branch's own-change paths that none of its tasks' anchors covered (and no other live claim
+   * held), measured by `lore integrate`'s own-diff judgment (BR-1346). Absent on a landing recorded before it existed or
+   * where the own change was not measured (an already-integrated re-run); `[]` means everything was anchored.
+   */
+  outside_anchors: z.array(z.string().min(1)).optional(),
   recorded_at: z.string().min(1),
 });
 

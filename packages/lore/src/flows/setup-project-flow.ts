@@ -208,12 +208,16 @@ import type { ManagedSection, SpliceResult } from "../service/context-projection
  */
 export interface ProjectFsPort {
   /** True if `path` exists (file OR directory). Never throws. */
+  /** @lore-site BR-830 */
   exists(path: string): boolean;
   /** Reads `path` as a utf-8 string. Returns `null` when missing/unreadable. Never throws. */
+  /** @lore-site BR-830 */
   readFile(path: string): string | null;
   /** Writes `content` to `path`, creating/overwriting it, with POSIX mode `mode`. MAY throw. */
+  /** @lore-site BR-830 */
   writeFile(path: string, content: string, mode: number): void;
   /** Creates `path` as a directory, recursively, idempotently. MAY throw. */
+  /** @lore-site BR-830 */
   mkdir(path: string): void;
   /**
    * OPTIONAL (SPEC-060 D1/D2) — copies the file currently at `src`'s CURRENT
@@ -225,6 +229,7 @@ export interface ProjectFsPort {
    * method needs to tolerate — `runManifestWriteSeam` only ever calls this
    * for a path it already confirmed exists).
    */
+  /** @lore-site BR-836 */
   backup?(src: string, destDir: string): void;
   /**
    * OPTIONAL (SPEC-060 D1/D2) — removes the file or directory (recursively)
@@ -237,6 +242,7 @@ export interface ProjectFsPort {
    * than follow it. Required so `tsc` — not a remembered list of call sites —
    * enumerates every caller that forgot it.
    */
+  /** @lore-site BR-843 */
   remove?(path: string, opts: { boundary: string }): void;
 }
 
@@ -251,6 +257,7 @@ export interface ProjectFsPort {
  */
 export interface ExecPort {
   /** Runs `argv` with cwd `cwd`; resolves with the exit code and captured output. */
+  /** @lore-site BR-837 */
   run(argv: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }>;
 }
 
@@ -278,6 +285,7 @@ export type InitCorpus = (repoDir: string) => Promise<Result<void, LoreError>>;
  */
 export interface ProjectAssetSource {
   /** Reads asset `name`'s content. `err(VALIDATION_ERROR)` for an unknown/unreadable name — never throws. */
+  /** @lore-site BR-830 */
   readAsset(name: string): Promise<Result<string, LoreError>>;
 }
 
@@ -295,6 +303,7 @@ export interface ProjectSkillAsset {
  * @returns `err` when the skill tree is missing/unreadable or empty — never throws, never an empty `ok`.
  */
 export interface ProjectSkillAssetSource {
+  /** @lore-site BR-986 */
   listSkillAssets(): Result<ProjectSkillAsset[], LoreError>;
 }
 
@@ -1277,6 +1286,7 @@ async function checkGitSupportsMainRefHook(deps: ProjectScaffoldFlowDeps, repoDi
       code: "VALIDATION_ERROR",
       field: "git",
       message: `lore setup --project needs git >= ${needed} (the main-ref guard is a reference-transaction hook) but could not read the installed version from \`git --version\` (exit ${result.code}: ${(result.stdout + result.stderr).trim() || "no output"}). ${GIT_UPGRADE_HINT}`,
+      rule: "BR-1281",
     };
   }
   if (version.major > major || (version.major === major && version.minor >= minor)) return undefined;
@@ -1285,6 +1295,7 @@ async function checkGitSupportsMainRefHook(deps: ProjectScaffoldFlowDeps, repoDi
     field: "git",
     message: `lore setup --project refuses: ${version.raw} is older than git ${needed}, which the reference-transaction hook (the guard that keeps main moving only through lore integrate) needs. ${GIT_UPGRADE_HINT} Then re-run. Nothing was changed.`,
     value: version.raw,
+    rule: "BR-1281",
   };
 }
 
@@ -1379,21 +1390,22 @@ export function recordInProjectLedger(
       field: "manifest",
       message: `no project install ledger at "${ledgerPath}" — a change that cannot be recorded for uninstall is not made`,
       value: ledgerPath,
+      rule: "BR-834",
     });
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (cause) {
-    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" is not valid JSON: ${toMessage(cause)}`, value: ledgerPath });
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" is not valid JSON: ${toMessage(cause)}`, value: ledgerPath, rule: "BR-834" });
   }
   const current = setupManifestSchema.safeParse(parsed);
   if (!current.success) {
-    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" failed schema validation: ${current.error.message}`, value: ledgerPath });
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" failed schema validation: ${current.error.message}`, value: ledgerPath, rule: "BR-834" });
   }
   const next = setupManifestSchema.safeParse(update(current.data));
   if (!next.success) {
-    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `updated project install ledger failed schema validation: ${next.error.message}`, value: ledgerPath });
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `updated project install ledger failed schema validation: ${next.error.message}`, value: ledgerPath, rule: "BR-834" });
   }
   const nextRaw = `${JSON.stringify(next.data, null, 2)}\n`;
   // reason: a re-run that changes nothing must write nothing (BR idempotent re-run: zero writer calls).
@@ -1582,6 +1594,7 @@ export async function scaffoldProject(
   // reason: checked BEFORE any write — the main-ref hook is part of the scaffold and git < 2.46 never shows it a checkout
   // of main, so a scaffold that installed everything else would leave main unguarded while looking set up (BR-1343).
   const gitVersionRefusal = await checkGitSupportsMainRefHook(deps, repoDir);
+  /** @lore-site BR-1281 */
   if (gitVersionRefusal !== undefined) return err(gitVersionRefusal);
   // reason: an unborn main has nothing to detach at, and its first commit would leave the shared checkout on main
   // with the guard already refusing every way off it; refuse up front so nothing is half-installed (BR-1343).

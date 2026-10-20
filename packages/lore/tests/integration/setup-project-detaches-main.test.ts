@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { GuardRepo, makeTempRoot, oldGitShim } from "./support/main-guard-repo.js";
+import { DEFAULT_TEST_RUN, registerTestRun } from "../helpers/test-run-identity.js";
 
 let root = "";
 
@@ -87,6 +88,9 @@ describe("AC-MG-3 setup detaches every checkout of main", () => {
 describe("AC-MG-3 setup refuses with nothing changed", () => {
   it("AC-MG-3 git reported as 2.45.2: exit 4 naming '2.45.2' and 'git 2.46', no file changed", () => {
     const fx = new GuardRepo(root);
+    // reason: the run registers its agent run in the corpus on its first spawn there (BR-1351); doing it before the snapshot keeps
+    // that one-time registry write out of the "no file changed" comparison.
+    registerTestRun(fx.repo, DEFAULT_TEST_RUN);
     const before = fileDigests(fx.repo);
     const head = fx.headState();
     const shim = oldGitShim(root, "2.45.2");
