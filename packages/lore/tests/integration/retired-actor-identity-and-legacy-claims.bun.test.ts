@@ -292,6 +292,9 @@ describe("AC-HID-4: the schema upgrade expires the claims that name no run", () 
     for (const row of releases) expect(row.details["reason"]).toBe("expired_pre_run_claim");
     // The version row keeps who held the expired lease: the history says what was expired, never silence.
     expect(corpus.versionRowsOf(legacy).at(-1)?.created_by).toBeDefined();
+    // ...and the upgrade's own rows name the RUN that ran it, not just a name.
+    expect(corpus.versionRowsOf(legacy).at(-1)?.harness_run).toBe(AGENT_RUN.run);
+    for (const row of corpus.auditRows().filter((r) => r.action === "release" || r.action === "migrate_schema")) expect(row.harness_run).toBe(AGENT_RUN.run);
   });
 
   it("STATE: a second `migrate schema` changes nothing", () => {

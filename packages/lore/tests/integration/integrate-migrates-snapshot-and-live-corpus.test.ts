@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { claimBranchTask } from "../helpers/claim-branch-task.js";
+import { scrubIdentityEnv } from "../helpers/test-run-identity.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -64,6 +65,7 @@ if (verb === "stageOlder") {
 }
 else if (verb === "getVersion") { const db = new Database(arg, { readonly: true }); console.log(db.query("PRAGMA user_version").get().user_version); db.close(); }
 else if (verb === "auditCount") { const db = new Database(arg, { readonly: true }); console.log(db.query("SELECT count(*) AS n FROM audit WHERE action = 'migrate_schema'").get().n); db.close(); }
+else if (verb === "migrateRuns") { const db = new Database(arg, { readonly: true }); console.log(JSON.stringify(db.query("SELECT harness_run FROM audit WHERE action = 'migrate_schema' ORDER BY id").all().map((r) => r.harness_run))); db.close(); }
 else if (verb === "marker") { const db = new Database(arg); db.run("CREATE TABLE floor_marker (x TEXT)"); db.run("INSERT INTO floor_marker VALUES ('written by the floor')"); db.close(); }
 else if (verb === "hasMarker") { const db = new Database(arg, { readonly: true }); console.log(db.query("SELECT count(*) AS n FROM sqlite_master WHERE name = 'floor_marker'").get().n); db.close(); }
 else { console.error("unknown verb " + verb); process.exit(2); }
@@ -182,6 +184,13 @@ class Fixture {
     });
   }
 
+  /** `lore integrate` as a spawn with NO known party: no run flag, no identity variable, and the spawn rewrite opted out of injecting one. */
+  integrateAsNobody(branch: string, session: string): RunResult {
+    const env: Record<string, string | undefined> = { ...scrubIdentityEnv(process.env), HOME: this.repo, EDITOR: "true", LORE_TEST_IDENTITY: "none" };
+    const proc = Bun.spawnSync(["bun", "run", INDEX_TS, "integrate", branch, "--session", session], { cwd: this.repo, env });
+    return { out: `${proc.stdout.toString()}${proc.stderr.toString()}`, exitCode: proc.exitCode ?? 1 };
+  }
+
   integrationWorktree(session: string): string {
     return join(this.repo, ".claude", "worktrees", `integrate-${session}`);
   }
@@ -262,5 +271,30 @@ describe("integrate migrates the floor's snapshot and then the live corpus, only
     expect(r.out).toContain(`on ${join(fx.repo, ".lore")};`);
     expect(r.out).toContain(`sh ${fx.wrapperPath} fail-live migrate schema`);
     expect(r.out).toMatch(/main stays landed/);
+  }, 240_000);
+
+  it("IDENT-1 the migrate child runs as the CALLER's party: its migrate_schema audit row names the caller's run", async () => {
+    const fx = new Fixture("behind");
+    const branch = fx.makeBranch("child-attributed");
+
+    const r = await fx.integrate(branch, "sess-run");
+
+    expect(r.exitCode, r.out).toBe(0);
+    // the live step's child ran `... migrate schema --json --harness-run <caller's run>`; the run is the caller's own session run
+    expect(JSON.parse(fx.dbTool(["migrateRuns", fx.sharedDb()]))).toEqual(["cc:sess-run"]);
+  }, 240_000);
+
+  it("IDENT-2 a caller with no known party is refused (exit 4) before anything moves: main, worktrees and the corpus are unchanged", () => {
+    const fx = new Fixture("behind");
+    const branch = fx.makeBranch("nobody-integrates");
+    const before = fx.git(["rev-parse", "main"]);
+
+    const r = fx.integrateAsNobody(branch, "sess-nobody");
+
+    expect(r.exitCode, r.out).toBe(4);
+    expect(r.out).toContain("no attested agent run");
+    expect(fx.git(["rev-parse", "main"])).toBe(before);
+    expect(existsSync(fx.integrationWorktree("sess-nobody"))).toBe(false);
+    expect(fx.dbTool(["auditCount", fx.sharedDb()])).toBe("0");
   }, 240_000);
 });
