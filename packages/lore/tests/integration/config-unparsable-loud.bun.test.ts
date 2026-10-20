@@ -89,6 +89,10 @@ function breakWithDuplicateWorkflowKey(): void {
 describe("an unparsable project config is refused loudly (BR-926)", () => {
   it("lore list exits 4, names .lore/config.yaml and the duplicate key, and writes nothing", () => {
     breakWithDuplicateWorkflowKey();
+    // reason: the test spawn shim registers the invoking test run in the corpus's registry before every spawn (a known
+    // party, BR-1351), which grows lore.db once. A spawn that never reads the config does that registration first, so the
+    // snapshot below measures only what the refused `lore list` itself changes.
+    expect(runLore(["--version"], dir).exitCode).toBe(0);
     const before = snapshotTree(join(dir, ".lore"));
 
     const result = runLore(["list"], dir);
