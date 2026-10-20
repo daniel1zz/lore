@@ -3,7 +3,7 @@
  * The dashboard e2e harness writes as a KNOWN PARTY (BR-1351): it opens a human session in its throwaway checkout and
  * spawns `lore` with no agent harness marker (GitHub #317). This drives the REAL `lore` entry in a mkdtemp corpus.
  *
- * The WRITES under test are started with `Bun.spawnSync`, which the test run's spawn rewrite
+ * The WRITES under test are started through `/bin/sh -c`, a shell-string start which the test run's spawn rewrite
  * (scripts/test-known-party-spawn.ts) never touches, so no agent run is injected and a write succeeds ONLY through
  * the human session. (`startHumanSession` itself uses `node:child_process`, which the rewrite does touch; the session
  * binding it makes is what the later writes prove.)
@@ -16,6 +16,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -28,14 +29,11 @@ const LORE: readonly [string, ...string[]] = ["bun", ENTRY];
 
 /** One un-rewritten `lore` run; returns its exit status and stderr. */
 function lore(args: string[], cwd: string, env: NodeJS.ProcessEnv): { status: number; stderr: string } {
-  // reason: `LORE_TEST_IDENTITY=none` opts this start out of the spawn rewrite, which also patches `Bun.spawnSync`.
-  const proc = Bun.spawnSync(["bun", ENTRY, ...args], {
-    cwd,
-    env: { ...env, LORE_TEST_IDENTITY: "none" } as Record<string, string>,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return { status: proc.exitCode ?? -1, stderr: proc.stderr.toString() };
+  // reason: a shell-string start is never rewritten by the test run's spawn shim, so no agent run is injected.
+  const quoted = [ENTRY, ...args].map((token) => `'${token.replaceAll("'", "'\\''")}'`).join(" ");
+  const proc = spawnSync("/bin/sh", ["-c", `bun ${quoted}`], { cwd, env, encoding: "utf8" });
+  if (proc.status === null) throw new Error(`lore ${args.join(" ")} did not exit: ${String(proc.error)}`);
+  return { status: proc.status, stderr: proc.stderr };
 }
 
 const CREATE = ["create", "prd", "--title", "Known party probe", "--content", "probe", "--json"];
