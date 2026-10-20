@@ -17,7 +17,6 @@
  *     for the SAME barrel-isolation reason as the other two (pinyin-pro is
  *     ~931KB unpacked, must stay unreachable from the browser bundle), even
  *     though this one performs no filesystem IO of its own.
- *   - ActorSource (actor-resolution-node.ts) — a type only; the precedence chain is gone (BR-1055).
  *   - resolveInvocationIdentity / RunIdentityArgumentError / UnknownPartyError / HumanSessionBinding
  *     (run-identity-node.ts, spec-every-write-is-made-by-a-known-party-an-attested-agent-run) —
  *     per-invocation known party: an attested agent run or the checkout's human session, else the refusal.
@@ -41,7 +40,6 @@
 export * from "./config-node.js";
 export * from "./telemetry-node.js";
 export * from "./slugify-node.js";
-export * from "./actor-resolution-node.js";
 export * from "./run-identity-node.js";
 export * from "./invocation-node.js";
 // Session trail (spec-session-trail-a-session-local-record-of-what-each-run-4): schemas,

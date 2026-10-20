@@ -54,6 +54,7 @@ import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { MIGRATION_026_SQL, MigrationFailedError } from "./migrations/migration-026.js";
+import { MIGRATION_028_SQL } from "./migrations/migration-028.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -838,6 +839,11 @@ export class TursoStore implements StoreInterface {
           // corpus stays at 25; the step is unknown here (one script), so say so rather than guess.
           throw new MigrationFailedError(26, "executeMultiple (single transaction)", this.localPath, error);
         }
+      }
+
+      if (currentVersion < 28) {
+        // reason: migration-028 only moves user_version (see migration-028.ts).
+        await this.client.executeMultiple(MIGRATION_028_SQL);
       }
     })();
 

@@ -361,11 +361,8 @@ export default defineLoreCommand({
               .filter((tag) => tag.length > 0)
           : [];
 
-      // reason: filing is attributed to the invocation's known party (BR-1055); with none it is refused (exit 4). The
-      // reporter-identity redaction still speaks the older source labels: an agent run's name is session-derived,
-      // every other party's name is its own explicit name (never `os-fallback`, so it is never dropped as untraceable).
+      // reason: filing is attributed to the invocation's known party (BR-1055); with none it is refused (exit 4).
       const actor = resolveActor(inv);
-      const actorSource = inv.identity.claimedSource === "run" ? "session" : "explicit";
       const reproCommand = args["repro-command"];
 
       const githubResult = await fileGithubIssue(
@@ -384,7 +381,6 @@ export default defineLoreCommand({
           consumerCorpusRoot: corpusRoot,
           corpusService: app.corpusService,
           actor,
-          actorSource,
           home: inv.paths.home,
           env: inv.env,
         },

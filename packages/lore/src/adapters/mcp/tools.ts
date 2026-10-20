@@ -204,7 +204,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
 import { runWithAuditSurface } from "../../store/audit-surface.js";
 import { assertRegisteredToolsMatchNames, type LoreMcpToolName } from "./tool-names.js";
-import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
+import { McpCallScope, requireCallIdentity } from "./call-scope.js";
 import type { Invocation, LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent, CAPTURE_TAIL_CHARS } from "@lore/core";
@@ -2217,11 +2217,6 @@ export function registerTools(
       ...(args.machine !== undefined ? { machine: args.machine } : {}),
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
       ...(args.corpus_scope !== undefined ? { corpusScope: args.corpus_scope } : {}),
-      // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-      // AC-IDENTITY-REJECT — the real source of the name: the tier the server's own name
-      // chain resolved it from — so an OS-user fallback name is still the
-      // "os-fallback" tier `actorIdentityGuard` reacts to.
-      identitySource: actorSourceOfName(callIdentity.claimedSource),
       steal: args.steal === true,
       // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
       // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
@@ -3449,14 +3444,11 @@ export function registerTools(
         }
 
         // The actor is the call identity's resolved name (no MCP caller names itself —
-        // BR-1055) and
-        // its source is that name's REAL source, mirroring how the CLI resolves its own
-        // `actorSource` before threading it through `GithubFilingContext.actor`.
+        // BR-1055), threaded through `GithubFilingContext.actor`.
         // This module does NO actor resolution of its own (report-issue-
         // wiring.ts's own header) — never build the actor from anything else here.
-        const callIdentity = requireCallIdentity(scope);
+        requireCallIdentity(scope);
         const actor = args.by;
-        const actorSource = actorSourceOfName(callIdentity.claimedSource);
 
         const fileResult = await fileGithubIssue(
           {
@@ -3477,7 +3469,6 @@ export function registerTools(
             consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
             corpusService: app.corpusService,
             actor,
-            actorSource,
             home: inv.paths.home,
             env: inv.env,
           },

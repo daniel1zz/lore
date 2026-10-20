@@ -15,6 +15,8 @@
  *   - An upgrade (not `--dry-run`) is refused when this checkout reaches the corpus through another one (a linked
  *     worktree on the main checkout's corpus): run it from the checkout that owns the corpus.
  *   - A corpus at user_version 0 is a new file (not an upgrade): nothing is pending and nothing is written.
+ *   - An upgrade ends by expiring every claim lease that names no run (written before claims compared runs, BR-1352),
+ *     one version row and one audit row each, through the one write route; the report names the count.
  * Side-effect class: IO (reads the corpus version; upgrades the corpus and appends one audit row unless nothing is
  * pending or `--dry-run`).
  */
@@ -25,6 +27,7 @@ import { printLine } from "./output.js";
 import { findLoreDbPath, formatErrorFor, resolveActor } from "./utils.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import { bareDocWriter } from "../../service/corpus-service.js";
+import { expireRunlessClaims } from "../../service/legacy-claim-expiry.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { probeSchemaVersion } from "../../store/schema-probe.js";
 import { isSchemaBehind, pendingMigrationVersions } from "../../store/schema-behind.js";
@@ -107,19 +110,27 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
   }
   try {
     const durationMs = Date.now() - startedAt;
-    // The schema is current once the store opened, so the audit row rides the one write route (bare writer: this
+    // The schema is current once the store opened, so every write below rides the one write route (bare writer: this
     // command never builds the app, which refuses the very corpus it repairs).
-    const audited = await bareDocWriter(store).appendAudit({
+    const writer = bareDocWriter(store);
+    // reason: BR-1352 — leases written before claims compared runs name no run; they are expired once, here, so no stored
+    // lease belongs to nobody. A failure fails the command loud; documents expired before it stay expired, a re-run continues.
+    const expiry = await expireRunlessClaims(store, writer, actor, new Date().toISOString());
+    if (!expiry.ok) {
+      return fail(inv, options, `the corpus is now at schema ${LATEST_SCHEMA_VERSION} but expiring the claims that name no run failed: ${formatErrorFor(inv, expiry.error)}`);
+    }
+    const audited = await writer.appendAudit({
       by: actor,
       sessionId: MIGRATE_SCHEMA_AUDIT_SESSION_ID,
       action: "migrate_schema",
-      details: { from, to: LATEST_SCHEMA_VERSION, duration_ms: durationMs, working_copy: inv.cwd, corpus: dbPath },
+      details: { from, to: LATEST_SCHEMA_VERSION, duration_ms: durationMs, working_copy: inv.cwd, corpus: dbPath, expired_claims: expiry.value.length },
     });
     if (!audited.ok) {
       return fail(inv, options, `the corpus is now at schema ${LATEST_SCHEMA_VERSION} but the audit row could not be written: ${formatErrorFor(inv, audited.error)}`);
     }
-    report(inv, options, { upgraded: true, pending, from, to: LATEST_SCHEMA_VERSION, duration_ms: durationMs, actor, corpus: dbPath }, [
+    report(inv, options, { upgraded: true, pending, from, to: LATEST_SCHEMA_VERSION, duration_ms: durationMs, actor, corpus: dbPath, expired_claims: expiry.value }, [
       `Schema migrated: ${from} -> ${LATEST_SCHEMA_VERSION} in ${durationMs} ms (${pending.join(", ")}) by ${actor}.`,
+      ...expiry.value.map((claim) => `Expired claim on ${claim.slug} held by ${claim.holder}: it named no run.`),
     ]);
     return 0;
   } finally {

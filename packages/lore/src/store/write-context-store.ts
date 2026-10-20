@@ -18,6 +18,10 @@
  *     (`run|human|api-key|dashboard`) — no schema change. It is stamped only when the row's `actor`
  *     equals `ctx.identity.claimed`: a row written under a different actor (an explicit per-call name)
  *     must not inherit a source that describes another name. Renders read it back from `details`.
+ *   - ⛔ A doc write whose patch carries `extra.claim` is REFUSED unless that claim names the run that took it
+ *     (`harness_run`, BR-1352): `VALIDATION_ERROR` on `extra.claim.harness_run`, nothing written. A lease is held by
+ *     a run and compared by run only (BR-1040), so a lease with no run would belong to nobody. The schema upgrade
+ *     (`lore migrate schema`) expires the leases written before runs existed, so no stored lease lacks one.
  *   - Rule-registry writes (`allocateRuleAndUpdateLeaf`, `moveRule`) build their version row INSIDE the
  *     store, so the run is carried in as a parameter (`harnessRun` / `RuleLeafPatch.harness_run`).
  *   - {@link readWriteContext} lets a service that must DECIDE an author when its caller gave none
@@ -65,6 +69,8 @@ interface StampedArgs {
   readonly extras?: number;
   /** Positions of `RuleLeafPatch` arguments whose `harness_run` is stamped. */
   readonly patches?: readonly number[];
+  /** Position of the doc patch whose `extra.claim` (when present) must name a run (BR-1352). */
+  readonly patch?: number;
   /** Position of a trailing `harnessRun: string | null` parameter that receives the run. */
   readonly harnessRunArg?: number;
 }
@@ -74,7 +80,7 @@ const STAMPED: Readonly<Record<string, StampedArgs>> = {
   insertVersion: { version: 0 },
   insertWithProvenance: { version: 1, audit: 2 },
   insertWithAllocatedOrdinalAndProvenance: { version: 1, audit: 2 },
-  updateWithProvenance: { version: 3, audit: 4, extras: 5 },
+  updateWithProvenance: { version: 3, audit: 4, extras: 5, patch: 1 },
   assignOrdinalForRepairWithProvenance: { version: 2, audit: 3 },
   softDeleteWithProvenance: { version: 1, audit: 2 },
   addLinkWithProvenance: { audit: 1 },
@@ -116,6 +122,28 @@ function unknownPartyMessage(identity: StampingContext["identity"]): string {
 /** The refusal of a write whose identity has no known party; VALIDATION_ERROR -> exit 4, nothing written. */
 function refusalOfUnknownParty(identity: StampingContext["identity"]): LoreError {
   return new UnknownPartyError(unknownPartyMessage(identity)).loreError;
+}
+
+/**
+ * The refusal of a doc patch whose `extra.claim` names no run (BR-1352); `undefined` when the patch carries no claim
+ * or its claim names one. Pure.
+ */
+export function refusalOfClaimWithoutRun(patch: unknown): LoreError | undefined {
+  const extra = (patch as { extra?: unknown } | undefined)?.extra;
+  if (typeof extra !== "object" || extra === null) return undefined;
+  const claim = (extra as Record<string, unknown>)["claim"];
+  if (claim === undefined || claim === null) return undefined;
+  const run = typeof claim === "object" ? (claim as Record<string, unknown>)["harness_run"] : undefined;
+  if (typeof run === "string" && run !== "") return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: "extra.claim.harness_run",
+    message:
+      "A claim must name the run that took it (BR-1352): a lease belongs to a run and is compared by run only, so a claim " +
+      "with no run would belong to nobody. Nothing was written. Claim from an agent run the integration registered " +
+      "(`lore setup`) or from an open human session (`lore session start --human <name>`).",
+    value: run ?? null,
+  };
 }
 
 /** The {@link StampingContext} a store was wrapped with, or `undefined` for an unwrapped store. */
@@ -213,6 +241,11 @@ export function withWriteContext(store: StoreInterface, ctx: StampingContext): S
         // reason: BR-1351 — a write with no known party is refused HERE, the one chokepoint every stamped write
         // passes, before the underlying store sees it, so nothing is written (no version, no audit row).
         if (identity.claimed === null || identity.harnessRun === null) return Promise.resolve(err(refusalOfUnknownParty(identity)));
+        if (spec.patch !== undefined) {
+          // reason: BR-1352 — refused here, before the underlying store is called, so a claim with no run writes nothing.
+          const claimRefusal = refusalOfClaimWithoutRun(args[spec.patch]);
+          if (claimRefusal !== undefined) return Promise.resolve(err(claimRefusal));
+        }
         const stamp: Stamp = { harness_run: identity.harnessRun };
         const callCtx: StampingContext = { identity };
         const next = [...args];

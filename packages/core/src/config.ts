@@ -271,16 +271,6 @@ export const GateCheckpointConfigSchema = z
      */
     anchor_overlap: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
-     * `task-claim`-ONLY sub-predicate override (spec claim-time-actor-identity-
-     * guard-zero-evidence-release-advis, AC-IDENTITY-ESCAPE) — `false` disables
-     * JUST the claim-time actor-identity-collision guard, leaving anchor-overlap
-     * and upstream-approval (and every other checkpoint's own `enabled` key)
-     * untouched. Inert on `spec-create`/`spec-promote`/`plan-promote` (no
-     * checkpoint reads it there) — same narrower-blast-radius shape as
-     * `anchor_overlap` above.
-     */
-    actor_identity: z.object({ enabled: z.boolean().optional() }).strict().optional(),
-    /**
      * `spec-create`/`spec-promote` sub-predicate override (AC-Quantifiability Gate
      * spec §Design) — `false` disables JUST the `acQuantifiable` predicate on the
      * checkpoint it's nested under, leaving that checkpoint's other predicates
@@ -337,7 +327,7 @@ export const GateCheckpointConfigSchema = z
      *
      * Absence of the whole config, the `workflow` section, the `gates` map, the
      * `"corpus-write"` entry, or the nested `foreign_corpus_write` key ALL mean
-     * "enabled" (same default polarity as `anchor_overlap`/`actor_identity`/
+     * "enabled" (same default polarity as `anchor_overlap`/
      * `ac_quantifiable`/`oracle_coverage`/`requires_uat` — the OPPOSITE of
      * `prd_sync`'s default-OFF) — AC-CP-4(a): a bare `lore init` project is
      * already covered with zero config edits. Only an EXPLICIT
@@ -1618,30 +1608,6 @@ export function resolveAnchorOverlapGateEnabled(config: LoreConfig | undefined):
 }
 
 /**
- * Resolve whether `task-claim`'s claim-time actor-identity-collision guard
- * specifically is enabled, per `workflow.gates."task-claim".actor_identity
- * .enabled` (spec claim-time-actor-identity-guard-zero-evidence-release-advis,
- * AC-IDENTITY-ESCAPE). Narrower than {@link resolveGateEnabled}`(config,
- * "task-claim")`, which governs the WHOLE checkpoint (actor-identity, anchor-
- * overlap, AND upstream-approval together). Absence of the whole config, the
- * `workflow` section, the `gates` map, the `task-claim` entry, or the nested
- * `actor_identity` key ALL mean "enabled" — only an EXPLICIT `actor_identity
- * .enabled: false` disables just this predicate (mirrors {@link
- * resolveAnchorOverlapGateEnabled}'s single-checkpoint shape exactly).
- *
- * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `false` iff `workflow.gates."task-claim".actor_identity.enabled === false`; `true` otherwise
- * @example
- *   resolveActorIdentityGateEnabled(undefined) // => true
- *   resolveActorIdentityGateEnabled({
- *     project, workflow: { gates: { "task-claim": { actor_identity: { enabled: false } } } },
- *   }) // => false
- */
-export function resolveActorIdentityGateEnabled(config: LoreConfig | undefined): boolean {
-  return config?.workflow?.gates?.["task-claim"]?.actor_identity?.enabled !== false;
-}
-
-/**
  * Resolve whether `checkpoint`'s `acQuantifiable` sub-predicate specifically is
  * enabled, per `workflow.gates.<checkpoint>.ac_quantifiable.enabled` (AC-Quantifiability
  * Gate spec §Design). Narrower than {@link resolveGateEnabled}`(config, checkpoint)`,
@@ -2738,6 +2704,87 @@ export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAd
   const before = yamlText.slice(lineStart, keyRange[0]);
   const after = yamlText.slice(contentEnd, newline === -1 ? yamlText.length : newline).trim();
   // A flow-style mapping puts other keys on the same line; only a trailing `# comment` may share it.
+  if (before.trim() !== "" || (after !== "" && !after.startsWith("#"))) {
+    return handEdit("shares its line with other settings, so it cannot be removed line-wise");
+  }
+  return ok({ text: yamlText.slice(0, lineStart) + yamlText.slice(lineEnd), value });
+}
+
+/** The `LoreError.field` of the retired `task-claim` gate setting that `lore migrate config-keys` removes. */
+export const RETIRED_ACTOR_IDENTITY_FIELD = 'workflow.gates."task-claim".actor_identity';
+
+/** What {@link removeRetiredActorIdentityGate} computed for a config text. */
+export interface RetiredActorIdentityRemoval {
+  /** The config text without the setting: every other byte is identical to the input. */
+  readonly text: string;
+  /** The value the removed setting carried (for example `{ enabled: false }`). */
+  readonly value: unknown;
+}
+
+/**
+ * PURE computation of the removal of `workflow.gates."task-claim".actor_identity` from a config text. The setting
+ * switched the retired claim-time same-name guard; claims now compare runs only (BR-1040), so there is nothing left for
+ * it to switch and the strict config schema refuses the key. The setting's own lines are cut out, and so is every parent
+ * mapping (`task-claim`, `gates`, `workflow`) that the cut leaves empty. Every other byte is identical.
+ * Writing the result is `lore migrate config-keys --apply`'s job: no loader ever writes a config file.
+ *
+ * @param yamlText - the raw config file text
+ * @returns `ok(undefined)` when the setting is absent; `ok({text, value})` when present; `err(VALIDATION_ERROR)` when
+ *   the YAML is malformed or the setting shares a line with other keys (flow style), which cannot be cut out without
+ *   rewriting them: the operator deletes it by hand (nothing is written).
+ * @example
+ *   removeRetiredActorIdentityGate('workflow:\n  gates:\n    "task-claim":\n      actor_identity:\n        enabled: false\n');
+ *   // => ok({ text: "", value: { enabled: false } })
+ */
+export function removeRetiredActorIdentityGate(yamlText: string): Result<RetiredActorIdentityRemoval | undefined, LoreError> {
+  const doc = yaml.parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText } satisfies LoreError);
+  }
+  const chain = ["workflow", "gates", "task-claim"] as const;
+  const maps: yaml.YAMLMap[] = [];
+  for (let depth = 1; depth <= chain.length; depth += 1) {
+    const node = doc.getIn(chain.slice(0, depth), true);
+    if (!yaml.isMap(node)) return ok(undefined);
+    maps.push(node);
+  }
+  const taskClaim = maps[maps.length - 1]!;
+  const pair = taskClaim.items.find((item) => yaml.isScalar(item.key) && item.key.value === "actor_identity");
+  if (pair === undefined) return ok(undefined);
+  const value = doc.getIn([...chain, "actor_identity"]);
+
+  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty parent mapping.
+  let cutPair = pair;
+  let level = maps.length;
+  while (level > 0 && maps[level - 1]!.items.length === 1) {
+    const parent = level === 1 ? doc.contents : maps[level - 2];
+    if (!yaml.isMap(parent)) break;
+    const parentPair = parent.items.find((item) => item.value === maps[level - 1]);
+    if (parentPair === undefined) break;
+    cutPair = parentPair;
+    level -= 1;
+  }
+
+  const handEdit = (reason: string): Result<never, LoreError> =>
+    err({
+      code: "VALIDATION_ERROR",
+      field: RETIRED_ACTOR_IDENTITY_FIELD,
+      message: `${RETIRED_ACTOR_IDENTITY_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
+      value: yamlText,
+    } satisfies LoreError);
+  const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
+  const settingKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
+  const settingValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
+  if (keyRange === undefined || keyRange === null || settingKeyRange === undefined || settingKeyRange === null) {
+    return handEdit("has no source position, so it cannot be removed in place");
+  }
+  // The cut ends where the setting's own content ends (it is the last content inside any escalated parent).
+  const contentEnd = settingValueRange === undefined || settingValueRange === null ? settingKeyRange[1] : settingValueRange[1];
+  const lineStart = yamlText.lastIndexOf("\n", keyRange[0] - 1) + 1;
+  const newline = yamlText.indexOf("\n", contentEnd);
+  const lineEnd = newline === -1 ? yamlText.length : newline + 1;
+  const before = yamlText.slice(lineStart, keyRange[0]);
+  const after = yamlText.slice(contentEnd, newline === -1 ? yamlText.length : newline).trim();
   if (before.trim() !== "" || (after !== "" && !after.startsWith("#"))) {
     return handEdit("shares its line with other settings, so it cannot be removed line-wise");
   }

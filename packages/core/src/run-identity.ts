@@ -196,17 +196,21 @@ export function derivePartyRunId(harness: "api-key" | "dashboard", name: string)
 }
 
 // ---------------------------------------------------------------------------
-// Claim conflict predicate (D6, BR-1040 / BR-1042)
+// Claim conflict predicate (D6, BR-1040 / BR-1043 / BR-1056)
 // ---------------------------------------------------------------------------
 
+/** The acting party of a claim or release: its display name and the RUN it acts as (null = no run was resolved). */
 export interface ClaimParty {
   by: string;
   harnessRun: RunId | null;
 }
 
-/** `legacy` = the stored claim has no `harness_run` key at all (written before migration 016). */
+/**
+ * The stored lease as the predicate sees it. `harnessRun` is `null` only for a claim written before runs existed
+ * (the schema upgrade expires those once, so a store at the current schema holds none); such a lease belongs to no
+ * run and therefore conflicts with everyone.
+ */
 export interface ClaimHolder extends ClaimParty {
-  legacy: boolean;
   stale: boolean;
 }
 
@@ -221,16 +225,14 @@ export type ClaimDecision =
   | { kind: "conflict"; holder: string; holderRun: RunId | null };
 
 /**
- * Decide a claim against an existing holder.
- * Stale holder -> takeover. Legacy holder, or both sides unattested -> compare
- * by name (same name refreshes). Otherwise compare by run: same run refreshes;
- * different runs, or exactly one side unattested, conflict.
+ * Decide a claim against an existing holder, by RUN ONLY (BR-1040). A stale holder is taken over. Otherwise the same
+ * run refreshes; every other case conflicts, including two parties that carry the same display name, and a claimant
+ * or holder with no run at all (a missing run is never "equal" to another missing run: name equality is not identity).
  */
 export function hasClaimConflict(holder: ClaimHolder, claimant: ClaimParty): ClaimDecision {
   if (holder.stale) return { kind: "takeover" };
-  const compareByName = holder.legacy || (holder.harnessRun === null && claimant.harnessRun === null);
-  const same = compareByName ? holder.by === claimant.by : holder.harnessRun === claimant.harnessRun;
-  if (same) return { kind: "refresh" };
+  const sameRun = holder.harnessRun !== null && claimant.harnessRun !== null && holder.harnessRun === claimant.harnessRun;
+  if (sameRun) return { kind: "refresh" };
   return { kind: "conflict", holder: holder.by, holderRun: holder.harnessRun };
 }
 

@@ -201,7 +201,6 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "../../../service/checkpoint-registry.js";
-import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import {
   runDeterministicChecks,
   resolveGateEnabled,
@@ -936,21 +935,6 @@ async function runTaskClaimGate(
   const checkpoint = requireCheckpoint("task-claim");
   const nowIso = new Date().toISOString();
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
-  // reason: anchor-overlap PARITY with the real claim (this function's own header
-  // invariant) — `TaskWorkflowService.claim` captures the session instance from
-  // `process.env` and feeds it to `noAnchorOverlap`
-  // (task-two-concurrent-orchestrators-both-resolve-to-agent-main). Without this
-  // read, the dry-run would evaluate the SAME pair as "session not measured" and
-  // print a refusal the real claim does not produce — a pre-flight that
-  // contradicts the command it previews is worse than no pre-flight. An unusable
-  // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
-  const sessionIdResult = resolveClaimSessionId(inv.env);
-  if (!sessionIdResult.ok) {
-    inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
-    return exitCode(sessionIdResult.error);
-  }
-  const candidateSessionId = sessionIdResult.value;
-
   // reason: BR-1056 — parity with the real claim: its overlap test compares holders by the claimant's VERIFIED
   // run, so the dry-run reads the same invocation identity (unregistered -> null + one warning).
   const verifiedIdentity = await app.verifiedInvocationIdentity?.();
@@ -975,7 +959,7 @@ async function runTaskClaimGate(
   // early-return path.
   let ctx: GateContext;
   if (task.parent_id === null) {
-    const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, [], nowIso, candidateSessionId);
+    const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, [], nowIso);
     if (!anchorCtx.ok) {
       inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
       return exitCode(anchorCtx.error);
@@ -1013,7 +997,7 @@ async function runTaskClaimGate(
         inv.io.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
         return exitCode(siblingsResult.error);
       }
-      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateSessionId);
+      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, siblingsResult.value, nowIso);
       if (!anchorCtx.ok) {
         inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
         return exitCode(anchorCtx.error);
@@ -1026,7 +1010,7 @@ async function runTaskClaimGate(
         anchorOverlapEnabled,
       };
     } else {
-      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateSessionId);
+      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso);
       if (!anchorCtx.ok) {
         inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
         return exitCode(anchorCtx.error);
@@ -1115,17 +1099,14 @@ async function runPhaseClaimGate(
   const checkpoint = requireCheckpoint("phase-claim");
   const nowIso = new Date().toISOString();
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
-  // reason: anchor-overlap PARITY with the real phase claim (this function's own header
-  // paragraph) — `PhaseWorkflowService.claim` captures the session instance from
-  // `process.env` and feeds it to `noAnchorOverlap`
-  // (task-phaseworkflowservice-claim-captures-no-session-id-so-every). Identical read,
-  // identical surfacing of an unusable id, as `runTaskClaimGate` above.
-  const sessionIdResult = resolveClaimSessionId(inv.env);
-  if (!sessionIdResult.ok) {
-    inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
-    return exitCode(sessionIdResult.error);
+  // reason: BR-1056 — parity with the real phase claim: its overlap test compares holders by the claimant's
+  // VERIFIED run, so the dry-run reads the same invocation identity as `runTaskClaimGate` above.
+  const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+  if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
+    return exitCode(verifiedIdentity.error);
   }
-  const candidateSessionId = sessionIdResult.value;
+  const candidateRun = verifiedIdentity?.value?.harnessRun ?? null;
 
   // reason: mirrors runTaskClaimGate's identical null-parent_id edge case (a phase's
   // parent_id is schema-required to be its plan — a null here can only happen on a
@@ -1133,7 +1114,7 @@ async function runPhaseClaimGate(
   // rationale of the synthetic "no spec parent, no siblings" context.
   let ctx: GateContext;
   if (phase.parent_id === null) {
-    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, [], nowIso, candidateSessionId);
+    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, [], nowIso);
     if (!anchorCtx.ok) {
       inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
       return exitCode(anchorCtx.error);
@@ -1142,6 +1123,7 @@ async function runPhaseClaimGate(
       ...buildUpstreamSpecContext(undefined),
       ...anchorCtx.value,
       targetIdOrSlug: phaseIdOrSlug,
+      candidateRun,
       anchorOverlapEnabled,
     };
   } else {
@@ -1150,7 +1132,7 @@ async function runPhaseClaimGate(
       inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
       return exitCode(bundleResult.error);
     }
-    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, candidateSessionId);
+    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso);
     if (!anchorCtx.ok) {
       inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
       return exitCode(anchorCtx.error);
@@ -1159,6 +1141,7 @@ async function runPhaseClaimGate(
       ...buildUpstreamSpecContext(bundleResult.value.spec),
       ...anchorCtx.value,
       targetIdOrSlug: phaseIdOrSlug,
+      candidateRun,
       anchorOverlapEnabled,
     };
   }

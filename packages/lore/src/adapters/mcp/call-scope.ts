@@ -26,7 +26,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
-import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
+import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity } from "@lore/core/node";
 import type { App } from "../../app.js";
 
 /** What the running call exposes to its handler. */
@@ -81,15 +81,6 @@ export function requireCallIdentity(scope: McpCallScope): ResolvedInvocationIden
   // reason: these callers (claim/release/report_issue) record an actor, so THEY are where a call with no known party fails.
   if (context.identity.claimed === null) throw new UnknownPartyError(context.identity.unresolvedReason);
   return context.identity;
-}
-
-/**
- * Map a name source onto the retired same-name guard's actor-source labels (`ClaimOpts.identitySource`,
- * `ReporterActorSource`): an agent run's name is session-derived, every other party's name is its own explicit name.
- * Never `os-fallback`, so the guard never reacts. Deleted together with the guard.
- */
-export function actorSourceOfName(source: NameSource): ActorSource {
-  return source === "run" ? "session" : "explicit";
 }
 
 /** Service keys of App that tool handlers read through the live view. */
