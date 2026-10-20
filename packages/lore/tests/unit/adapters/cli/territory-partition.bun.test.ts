@@ -140,6 +140,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-mine"],
         task_slugs: ["t-mine"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
       {
         by: "agent:peer",
@@ -148,6 +149,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-peer"],
         task_slugs: ["t-peer"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -168,6 +170,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-nosess"],
         task_slugs: ["t-legacy"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -192,6 +195,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-mine"],
         task_slugs: ["t-mine"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
       {
         by: "agent:peer",
@@ -200,6 +204,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-peer"],
         task_slugs: ["t-peer"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
       {
         by: "agent:orphan",
@@ -207,6 +212,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["orphan-branch"],
         task_slugs: ["t-orphan"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -233,6 +239,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-gone"],
         task_slugs: ["t-gone"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -259,6 +266,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: [],
         task_slugs: ["t-mixed-mine"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
       {
         by: "agent:peer3",
@@ -267,6 +275,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: [],
         task_slugs: ["t-mixed-peer"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -287,6 +296,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["feature-peer"],
         task_slugs: ["t-peer"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -310,6 +320,7 @@ describe("partitionTerritory (AC-OWN-1)", () => {
         branches: ["ghost-branch"],
         task_slugs: ["t-ghost"],
         newest_at: "2026-08-12T10:00:00.000Z",
+        message_address: null,
       },
     ];
 
@@ -372,7 +383,7 @@ function findEntry(partition: TerritoryPartition, predicate: (e: TerritoryEntry)
 }
 
 function branchSession(by: string, sessionId: string, branch: string): ReadySession {
-  return { by, session_id: sessionId, branches: [branch], task_slugs: [`t-${branch}`], newest_at: "2026-08-13T10:00:00.000Z" };
+  return { by, session_id: sessionId, branches: [branch], task_slugs: [`t-${branch}`], newest_at: "2026-08-13T10:00:00.000Z", message_address: null };
 }
 
 // ─── Local branch discovery (AC-OWN-1 remediation, task-lore-territory-s-
@@ -786,6 +797,7 @@ describe("partitionTerritory — unmerged_commits (spec-multi-session-concurrenc
         branches: ["peer-worktree-branch"],
         task_slugs: ["t-peer-wt"],
         newest_at: "2026-08-13T10:00:00.000Z",
+        message_address: null,
       },
     ];
 

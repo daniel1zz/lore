@@ -167,7 +167,10 @@ export function formatSessionLine(session: ReadySession): string {
   // would be indistinguishable from a truthful single-session report, which is how
   // an orchestrator came to treat this list as proof it was alone.
   const session_id = ` session:${session.session_id ?? "(not measured)"}`;
-  return `  - ${session.by}${location}${session_id}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
+  // reason: BR-1363 — the address is printed on every line, `none` included, so a reader can tell "no address
+  // recorded" from a build that does not report one.
+  const address = ` address:${session.message_address ?? "none"}`;
+  return `  - ${session.by}${location}${session_id}${address}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
 }
 
 /** Render one anchor-conflict advisory line: the task, the holder of the overlapping claim and the overlapping paths. */

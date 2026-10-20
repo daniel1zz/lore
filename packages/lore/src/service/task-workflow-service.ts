@@ -406,6 +406,7 @@ import {
 } from "./task-commit-range.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import type { SiblingClaimInfo } from "./gate-predicates.js";
+import { resolveMessageAddressByRun } from "./holder-message-address.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import { AC_REF_NOT_ON_PARENT_SPEC, AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "./ac-ref-messages.js";
@@ -5281,6 +5282,9 @@ export class TaskWorkflowService {
       staleByTask.value,
     );
 
+    const addressByRun = await resolveMessageAddressByRun(this.store, tasks);
+    if (!addressByRun.ok) return addressByRun;
+
     const { anchorConflicts, anchorlessSlugs } = this.computeAnchorAdvisories(tasks, nowIso, staleByTask.value);
     const recordsWithAnchorless = records.map((r) =>
       anchorlessSlugs.has(r.task.slug) ? { ...r, anchorless: true } : r,
@@ -5289,7 +5293,7 @@ export class TaskWorkflowService {
     return ok({
       records: recordsWithAnchorless,
       counts: computeReadyCounts(recordsWithAnchorless),
-      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value),
+      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value, addressByRun.value),
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
     });
