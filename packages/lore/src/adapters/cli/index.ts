@@ -176,9 +176,6 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // dedicated writer for a task's `extra.red_first`; see commands/red-first.ts's
     // module header.
     "red-first": () => import("./commands/red-first.js"),
-    // park (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1354) —
-    // dedicated writer for a task's `extra.parked`; see commands/park.ts's module header.
-    park: () => import("./commands/park.js"),
     // refs (spec-prose-about-code-is-bound-to-what-it-describes-one D2) — read verb over the
     // one reverse index of code references; see commands/refs.ts's module header.
     refs: () => import("./commands/refs.js"),

@@ -2,15 +2,16 @@
 // @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-landing-does-the-bookkeeping-claims-start-from-main-parked  AC-LB-2;
- *   business rule BR-1354 (parking releases a hold), BR-1346 (a change held by another live claim is refused).
+ *   business rules BR-1354 (a refusal for a held path names the holder's state), BR-1346 (a change held by another live
+ *   claim is refused).
  *
  * Throwaway repo + corpus, real `lore` subprocesses (helpers/own-diff-fixture.ts, main-ref guard installed, floor
  * command `true`, each fixture claim under its own CLAUDE_CODE_SESSION_ID with the ambient one stripped).
  *
- * Coverage: (1) NEGATIVE an unlanded branch of a released task holds its anchor: exit 4, BR-1346, the path, the holder
- * and `unlanded branch` with the branch's last commit time; (2) HAPPY `lore park` exits 0 and the same integrate lands;
- * REGRESSION (simplest green-but-broken) parking deletes neither the branch nor the task's anchors; (3) STATE a
- * parked task that is claimed again holds again, as a `held claim`; (4) BOUNDARY `lore park` without `--reason` exits 2.
+ * Coverage: (1) NEGATIVE task U holds a claim on src/x.ts; branch X changes it: exit 4, BR-1346, the path, U, the claim's
+ * holder H and the claim's age in minutes. SIMPLEST GREEN-BUT-BROKEN CASE (asserted): a refusal naming only the slug
+ * passes the exit-code check, so H and the age are asserted; (2) STATE the holder named is the one in the current claim
+ * record (U released and claimed again by a new session names that session).
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
@@ -24,7 +25,7 @@ afterEach(() => {
   fx = undefined;
 });
 
-/** Main holds src/x.ts; task U (anchor src/x.ts) was claimed on unlanded branch-y and released; branch-x (task T) changes src/x.ts. */
+/** Main holds src/x.ts; task U (anchor src/x.ts) holds a claim on branch-y; branch-x (task T) changes src/x.ts. */
 function setup(): { fx: OwnDiffFixture; taskT: string; taskU: string } {
   const f = new OwnDiffFixture();
   fx = f;
@@ -32,19 +33,17 @@ function setup(): { fx: OwnDiffFixture; taskT: string; taskU: string } {
   f.makeBranch("branch-y", { "y.txt": "y\n" });
   const taskU = f.createTask("U", ["src/x.ts"]);
   f.claim(taskU, "branch-y");
-  f.release(taskU);
+  // T anchors another file: its change to src/x.ts is outside its anchors, so only U's hold is in question
   f.makeBranch("branch-x", { "src/x.ts": "export const x = 2;\n" });
-  // T anchors another file: its change to src/x.ts is outside its anchors, so only U's hold is in question (and T never
-  // blocks U's second claim at the claim gate)
   const taskT = f.createTask("T", ["src/t.ts"]);
   f.claim(taskT, "branch-x");
   return { fx: f, taskT, taskU };
 }
 
-describe("AC-LB-2 — parked work releases its hold", () => {
-  it("(1) the unlanded branch of a released task holds its anchor: exit 4, BR-1346, names U and the branch's last commit time", () => {
+describe("AC-LB-2 — a refusal for a held path names the holder and the claim's age", () => {
+  it("(1) exit 4 naming BR-1346, src/x.ts, U, the claim's holder H and its age in minutes", () => {
     const { fx: f, taskU } = setup();
-    const lastCommit = f.git(["log", "-1", "--format=%cI", "branch-y"]);
+    const holder = (f.extraOf(taskU)["claim"] as { by: string }).by;
 
     const refused = f.integrate("branch-x");
 
@@ -52,58 +51,23 @@ describe("AC-LB-2 — parked work releases its hold", () => {
     expect(refused.stderr).toContain("BR-1346");
     expect(refused.stderr).toContain("src/x.ts");
     expect(refused.stderr).toContain(taskU);
-    expect(refused.stderr).toContain("unlanded branch");
-    expect(refused.stderr).toContain("branch-y");
-    expect(refused.stderr).toContain(lastCommit);
+    expect(refused.stderr).toContain("held claim");
+    // simplest green-but-broken: a refusal naming only the slug
+    expect(holder).toMatch(/^agent:session-/);
+    expect(refused.stderr).toContain(holder);
+    expect(refused.stderr).toMatch(/\(\d+ minutes old\)/);
   }, 300_000);
 
-  it("(2) lore park exits 0 and the same integrate lands; parking deletes neither the branch nor the anchors", () => {
+  it("(2) the named holder follows the claim record: a second holder is named after the claim moves", () => {
     const { fx: f, taskU } = setup();
-    const yTip = f.git(["rev-parse", "branch-y"]);
-
-    const parked = f.lore(["park", taskU, "--reason", "r"]);
-
-    expect(parked.exitCode, parked.text).toBe(0);
-    const extra = f.extraOf(taskU);
-    expect(extra["parked"]).toMatchObject({ reason: "r" });
-    expect(typeof (extra["parked"] as { at: unknown }).at).toBe("string");
-    expect(typeof (extra["parked"] as { by: unknown }).by).toBe("string");
-    // simplest green-but-broken: a park that removed the hold by deleting the branch or the anchors
-    expect(f.git(["rev-parse", "branch-y"])).toBe(yTip);
-    expect(extra["file_anchors"]).toEqual(["src/x.ts"]);
-
-    const landed = f.integrate("branch-x");
-
-    expect(landed.exitCode, landed.text).toBe(0);
-    expect(f.git(["rev-parse", "branch-y"])).toBe(yTip);
-    expect(f.extraOf(taskU)["file_anchors"]).toEqual(["src/x.ts"]);
-  }, 300_000);
-
-  it("(3) a parked task claimed again holds again, as a held claim", () => {
-    const { fx: f, taskU } = setup();
-    expect(f.lore(["park", taskU, "--reason", "r"]).exitCode).toBe(0);
+    f.release(taskU);
     f.claim(taskU, "branch-y");
+    const holder = (f.extraOf(taskU)["claim"] as { by: string }).by;
 
     const refused = f.integrate("branch-x");
 
     expect(refused.exitCode, refused.text).toBe(4);
-    expect(refused.stderr).toContain("BR-1346");
-    expect(refused.stderr).toContain(taskU);
-    expect(refused.stderr).toContain("held claim");
-  }, 300_000);
-
-  it("(4) lore park without --reason exits 2 and parks nothing; a non-task exits 4, an unknown slug 3", () => {
-    const { fx: f, taskU } = setup();
-
-    const missing = f.lore(["park", taskU]);
-    const blank = f.lore(["park", taskU, "--reason", "  "]);
-    const notTask = f.lore(["park", f.defaultPlan, "--reason", "r"]);
-    const unknown = f.lore(["park", "task-does-not-exist", "--reason", "r"]);
-
-    expect(missing.exitCode, missing.text).toBe(2);
-    expect(blank.exitCode, blank.text).toBe(2);
-    expect(notTask.exitCode, notTask.text).toBe(4);
-    expect(unknown.exitCode, unknown.text).toBe(3);
-    expect(f.extraOf(taskU)["parked"]).toBeUndefined();
+    expect(refused.stderr).toContain(holder);
+    expect(refused.stderr).toMatch(/held claim by \S+ since \S+ \(\d+ minutes old\)/);
   }, 300_000);
 });

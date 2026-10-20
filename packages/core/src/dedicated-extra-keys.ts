@@ -40,8 +40,6 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
     { key: "site_map", writer: "lore baseline map" },
     { key: "commands", writer: "lore baseline map --command" },
   ],
-  // reason: BR-1354 — `extra.parked` is writer-owned; a wholesale `lore set` must not park or unpark a task.
-  task: [{ key: "parked", writer: "lore park" }],
   spec: [{ key: "rule_changes", writer: "lore rule propose" }],
   // reason: DC2-8 — a recorded UAT verdict is writer-owned evidence; `lore set` replaces `extra`
   // wholesale, so without this entry a `lore_set` could flip `extra.uat.verdict` on every route.

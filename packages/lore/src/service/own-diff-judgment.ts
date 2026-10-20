@@ -13,9 +13,8 @@
  *   - BR-1355 the own change deletes a path some live spec or knowledge doc anchors (`code_anchors`): refused, naming
  *     each doc and anchor. A RENAME is not a deletion: the verdict carries it as `renames`, and the landing rewrites the
  *     docs' anchors after main moved ({@link OwnDiffRename}).
- * A parked task's unlanded branch holds nothing (BR-1354, `extra.parked`); a held claim holds whether parked or not.
- * Each BR-1346 line names the holder's state: a held claim (holder, since when, age) or an unlanded branch (its last
- * commit time).
+ * Each BR-1346 line names the holder's state (BR-1354): the holding task, a held claim's holder and its age in minutes,
+ * or an unlanded branch with its last commit time.
  * A change outside the branch's own tasks' anchors that no other live claim holds is NOT refused: it is returned as
  * `outside_anchors` and recorded on the landing, so what landed is always visible.
  *
@@ -32,7 +31,7 @@
  *     file is judged as a whole file.
  *   - A file whose symbols cannot be determined (not scannable, no declaration) is a change to the WHOLE file: fail closed.
  *   - Another LIVE claim = an unarchived task that is not a task of the branch, carries no landing, and either holds a
- *     claim (`extractHeldClaim`) or is NOT parked and has a claim recorded on a branch that still exists and is not on main.
+ *     claim (`extractHeldClaim`) or has a claim recorded on a branch that still exists and is not on main.
  */
 import {
   anchorsOverlap,
@@ -85,8 +84,6 @@ export interface AnchoredTask {
 export interface OtherTask extends AnchoredTask {
   /** The task carries a held claim (`extractHeldClaim`): who holds it and since when. Absent = no held claim. */
   readonly heldClaim?: { readonly by: string; readonly at: string };
-  /** The task is parked (`extra.parked`, BR-1354): its unlanded branch holds nothing. A held claim still holds. */
-  readonly parked: boolean;
   /** Branch names its claims recorded (worktree paths already resolved to the branch checked out there). */
   readonly claimedBranches: readonly string[];
 }
@@ -161,7 +158,6 @@ export class BranchOwnershipReader {
         slug: task.slug,
         anchors,
         ...(held !== undefined ? { heldClaim: { by: held.by, at: held.at } } : {}),
-        parked: isParked(task),
         claimedBranches: names,
       });
     }
@@ -178,17 +174,6 @@ export class BranchOwnershipReader {
     }
     return [...names];
   }
-}
-
-/**
- * Whether `task` carries a well-formed `extra.parked` ({at, by, reason}, BR-1354). A malformed value is NOT a park:
- * an unreadable record must never silently release a hold.
- */
-function isParked(task: DocRecord): boolean {
-  const raw = task.extra?.["parked"];
-  if (typeof raw !== "object" || raw === null) return false;
-  const record = raw as Record<string, unknown>;
-  return typeof record["at"] === "string" && typeof record["by"] === "string" && typeof record["reason"] === "string";
 }
 
 /** The own-change paths no task of the branch anchors: recorded on the landing. */
@@ -227,13 +212,10 @@ interface ChangedFile {
   readonly kind: "A" | "D" | "M";
 }
 
-/** `3d`, `5h`, `12m` (rounded down; under a minute is `0m`); an unparseable time is `unknown age`. */
-function describeAge(ms: number): string {
+/** A claim's age in whole minutes (`12 minutes`), rounded down; an unparseable or future time is `unknown age`. */
+function describeAgeInMinutes(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "unknown age";
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes >= 1440) return `${Math.floor(minutes / 1440)}d`;
-  if (minutes >= 60) return `${Math.floor(minutes / 60)}h`;
-  return `${minutes}m`;
+  return `${Math.floor(ms / 60_000)} minutes`;
 }
 
 function refusal(message: string): LoreError {
@@ -303,7 +285,7 @@ export class OwnDiffJudgment {
       problems.push(
         `${OWN_DIFF_RULE_COLLISION}: the own change of ${branch} is held by another live claim:\n` +
           collisions.map((c) => `  ${c.label}  held by ${c.holder} (anchor ${c.anchor}): ${c.state}`).join("\n") +
-          `\n  Wait for that task to land or be released, move the change to another branch, or park the holder's work (lore park <task> --reason "<why>") when it is set aside.`,
+          `\n  Wait for that task to land or be released or move the change to another branch.`,
       );
     }
     const anchoredDeletes = await this.anchoredDeletesOf(changed, renames);
@@ -389,9 +371,9 @@ export class OwnDiffJudgment {
   }
 
   /**
-   * The holders that are LIVE, each with its state worded for the refusal: a held claim (holder, since when, age; a
-   * parked task with a held claim still holds), or an UNPARKED task with a claimed branch that exists and has not
-   * reached main (that branch and its last commit time). A parked task's unlanded branch holds nothing (BR-1354).
+   * The holders that are LIVE, each with its state worded for the refusal (BR-1354): a held claim (its holder, since
+   * when, and its age in minutes), or a task with a claimed branch that exists and has not reached main (that branch and
+   * its last commit time).
    */
   private liveOthers(branch: string, others: readonly OtherTask[]): Result<LiveHolder[], LoreError> {
     const { git, projectRoot } = this.deps;
@@ -399,10 +381,9 @@ export class OwnDiffJudgment {
     const live: LiveHolder[] = [];
     for (const task of others) {
       if (task.heldClaim !== undefined) {
-        live.push({ task, state: `held claim by ${task.heldClaim.by} since ${task.heldClaim.at} (${describeAge(now - Date.parse(task.heldClaim.at))} old)` });
+        live.push({ task, state: `held claim by ${task.heldClaim.by} since ${task.heldClaim.at} (${describeAgeInMinutes(now - Date.parse(task.heldClaim.at))} old)` });
         continue;
       }
-      if (task.parked) continue;
       for (const name of task.claimedBranches) {
         if (name === branch || name.startsWith("/")) continue;
         const exists = git(projectRoot, ["rev-parse", "--verify", "-q", `${name}^{commit}`]);
