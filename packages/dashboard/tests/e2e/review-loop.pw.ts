@@ -140,22 +140,16 @@ test.describe("SPEC-033 dashboard feedback-loop", () => {
     // Create a child doc parented under the PRD (ChildrenOf's query is
     // `parent_id: doc.id`, no type filter, so any child type qualifies).
     //
-    // Seeded out-of-band via `page.request.post` rather than driving
-    // NewDocModal's UI form — that form has no content field (SPEC-022), and the
-    // service-layer spec-create gate (`hasSkeleton` predicate) now denies a
-    // content-less spec as MISSING_SKELETON. This test's own subject is
-    // ChildrenOf's resolution of "any child type", not the create-modal flow
-    // (covered separately by write-flow.pw.ts) — so seeding a gate-conformant
-    // spec directly is the faithful fix, not a workaround around the gate
-    // (task-fix-pre-existing-dashboard-e2e-regression-browse-ux-spec).
+    // reason: the child is a `plan` — a spec takes no parent (BR-2), so it can never be a
+    // PRD's child; a plan may be (PARENT_TYPE_CONTRACT). This test's subject is ChildrenOf's
+    // resolution of "any child type", not the child's type (GitHub #321).
     const childTitle = `E2E Review-Loop Child ${runId}`;
     const childRes = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
       headers: { "Content-Type": "application/json" },
       data: {
-        type: "spec",
+        type: "plan",
         title: childTitle,
         parent_id: prdId,
-        content: "## Overview\n\nE2E review-loop fixture spec.\n\n## Scope\n\nHome ChildrenOf rendering only.\n\n## Acceptance Criteria\n\n- N/A (fixture doc, not a real spec).\n",
       },
     });
     expect(childRes.ok()).toBe(true);

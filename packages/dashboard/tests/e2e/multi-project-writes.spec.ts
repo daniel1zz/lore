@@ -61,7 +61,6 @@ test.describe("SPEC-078 multi-project write-surface equivalence", () => {
       data: {
         type: "spec",
         title: `E2E Gate-Denied Spec ${fixture.runId}`,
-        parent_id: fixture.seed.a.prdId,
         // No "## " heading anywhere — the spec-create gate's hasSkeleton predicate
         // must reject this (MISSING_SKELETON).
         content: "no heading here, just plain prose",
@@ -85,7 +84,6 @@ test.describe("SPEC-078 multi-project write-surface equivalence", () => {
       data: {
         type: "spec",
         title: specTitle,
-        parent_id: fixture.seed.b.prdId,
         content:
           "## Overview\n\nE2E multi-project write-surface fixture spec (project B).\n\n## Scope\n\nGate-armed write equivalence only.\n\n## Acceptance Criteria\n\n- N/A (fixture doc, not a real spec).\n",
       },

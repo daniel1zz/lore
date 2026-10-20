@@ -8,7 +8,7 @@
  * doesn't expose (tags aren't settable via NewDocModal's form (SPEC-022), but
  * the write endpoint accepts them per `createDocInputSchema`).
  *
- * 1. Breadcrumb: PRD -> spec -> plan -> task (a 3-ancestor chain), then verify
+ * 1. Breadcrumb: PRD -> plan -> knowledge -> knowledge (a 3-ancestor chain), then verify
  *    the detail page's breadcrumb renders the full chain and each crumb
  *    navigates (AC-36-3), plus a Home-crumb roundtrip.
  * 2. Library filters: seed docs with distinct tags, apply type + status + tag
@@ -69,66 +69,65 @@ test.describe("SPEC-036 dashboard browsing UX", () => {
 
   test.describe("breadcrumb", () => {
     let prdId = "";
-    let specId = "";
     let planId = "";
-    let taskId = "";
+    let noteId = "";
+    let leafId = "";
     const prdTitle = `E2E Breadcrumb Root PRD ${runId}`;
-    const specTitle = `E2E Breadcrumb Spec ${runId}`;
     const planTitle = `E2E Breadcrumb Plan ${runId}`;
-    const taskTitle = `E2E Breadcrumb Task ${runId}`;
+    const noteTitle = `E2E Breadcrumb Note ${runId}`;
+    const leafTitle = `E2E Breadcrumb Leaf ${runId}`;
 
-    test("seed: PRD -> spec -> plan -> task chain", async () => {
+    // reason: a spec takes no parent (BR-2) and a task's parent must be a plan, so the
+    // 3-ancestor chain is PRD -> plan -> knowledge -> knowledge (a knowledge doc may sit
+    // under a plan or another knowledge doc). Same depth, so the AC-36-4 no-ellipsis
+    // boundary still holds. See GitHub #321.
+    test("seed: PRD -> plan -> knowledge -> knowledge chain", async () => {
       const prd = await createDoc(page, { type: "prd", title: prdTitle });
       prdId = prd.id;
 
-      // Gate-conformant skeleton (service-layer spec-create gate, `hasSkeleton`
-      // predicate) — a spec created with no `content` is denied MISSING_SKELETON;
-      // any single `## ` heading satisfies the predicate, but the full three-heading
-      // shape mirrors what a real authored spec looks like (task-fix-pre-existing-
-      // dashboard-e2e-regression-browse-ux-spec).
-      const spec = await createDoc(page, {
-        type: "spec",
-        title: specTitle,
-        parent_id: prdId,
-        content: "## Overview\n\nE2E breadcrumb fixture spec.\n\n## Scope\n\nBreadcrumb navigation only.\n\n## Acceptance Criteria\n\n- N/A (fixture doc, not a real spec).\n",
-      });
-      specId = spec.id;
-
-      const plan = await createDoc(page, { type: "plan", title: planTitle, parent_id: specId });
+      const plan = await createDoc(page, { type: "plan", title: planTitle, parent_id: prdId });
       planId = plan.id;
 
-      const task = await createDoc(page, {
-        type: "task",
-        title: taskTitle,
+      const note = await createDoc(page, {
+        type: "knowledge",
+        title: noteTitle,
         parent_id: planId,
-        extra: { plan_id: planId },
+        extra: { sub_type: "reference" },
       });
-      taskId = task.id;
+      noteId = note.id;
 
-      expect([prdId, specId, planId, taskId].every((id) => id.length > 0)).toBe(true);
+      const leaf = await createDoc(page, {
+        type: "knowledge",
+        title: leafTitle,
+        parent_id: noteId,
+        extra: { sub_type: "reference" },
+      });
+      leafId = leaf.id;
+
+      expect([prdId, planId, noteId, leafId].every((id) => id.length > 0)).toBe(true);
     });
 
-    test("renders the full 3-ancestor chain on the task detail page and navigates on ancestor click", async () => {
-      await page.goto(`/docs/${taskId}`);
-      await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+    test("renders the full 3-ancestor chain on the leaf detail page and navigates on ancestor click", async () => {
+      await page.goto(`/docs/${leafId}`);
+      await expect(page.getByRole("heading", { name: leafTitle })).toBeVisible();
 
       const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
       await expect(breadcrumb).toBeVisible();
       await expect(breadcrumb.getByText(prdTitle)).toBeVisible();
-      await expect(breadcrumb.getByText(specTitle)).toBeVisible();
       await expect(breadcrumb.getByText(planTitle)).toBeVisible();
+      await expect(breadcrumb.getByText(noteTitle)).toBeVisible();
       // No overflow ellipsis at exactly 3 ancestors (AC-36-4 boundary).
       await expect(breadcrumb.getByText("…")).not.toBeVisible();
       // Current title renders as plain text (aria-current), not a link.
-      await expect(page.locator('[aria-current="page"]', { hasText: taskTitle })).toBeVisible();
+      await expect(page.locator('[aria-current="page"]', { hasText: leafTitle })).toBeVisible();
 
-      await breadcrumb.getByText(specTitle).click();
-      await expect(page).toHaveURL(new RegExp(`/docs/${specId}$`));
-      await expect(page.getByRole("heading", { name: specTitle })).toBeVisible();
+      await breadcrumb.getByText(planTitle).click();
+      await expect(page).toHaveURL(new RegExp(`/docs/${planId}$`));
+      await expect(page.getByRole("heading", { name: planTitle })).toBeVisible();
     });
 
     test("Home crumb navigates to the resolved living PRD at /", async () => {
-      await page.goto(`/docs/${taskId}`);
+      await page.goto(`/docs/${leafId}`);
       await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("button", { name: "Home" }).click();
       await expect(page).toHaveURL("http://localhost:5173/");
     });

@@ -94,14 +94,22 @@ test.describe("SPEC-031 dashboard read flow", () => {
     const pageErrors: string[] = [];
     page.on("pageerror", (err) => pageErrors.push(err.message));
 
-    const rootRow = page.getByText(prdTitle, { exact: true });
+    // reason: the tree's default root is the OLDEST live PRD (`pickStrategyDocument`), and the
+    // other e2e files share this corpus and may have created an older PRD first, so the root
+    // is read from the API instead of assumed to be this file's `prdTitle` (GitHub #321).
+    const treeResponse = await page.request.get("http://localhost:8787/api/tree");
+    expect(treeResponse.ok()).toBe(true);
+    const treeBody = (await treeResponse.json()) as { ok: boolean; data: { doc: { title: string } } };
+    const rootTitle = treeBody.data.doc.title;
+
+    const rootRow = page.getByText(rootTitle, { exact: true });
     await expect(rootRow).toBeVisible();
     // Type badge renders from `node.doc.type`, not a flattened `node.type`.
     await expect(page.getByText("prd", { exact: true }).first()).toBeVisible();
 
     await rootRow.click();
     await expect(page).toHaveURL(/\/docs\/[^/]+$/);
-    await expect(page.getByRole("heading", { name: prdTitle })).toBeVisible();
+    await expect(page.getByRole("heading", { name: rootTitle })).toBeVisible();
 
     expect(pageErrors).toEqual([]);
   });

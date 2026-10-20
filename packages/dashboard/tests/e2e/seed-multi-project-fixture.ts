@@ -24,6 +24,7 @@ import { GateEnforcer } from "../../../lore/src/service/gate-enforcer.js";
 import { declareWriteActorForTests } from "../../../lore/src/store/write-context-store.js";
 import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
+import { RuleService } from "../../../lore/src/service/rule-service.js";
 import { formatJudgeActor, type CreateDocInput, type LoreError, type Result, type ReviewJudgment } from "@lore/core";
 import { ulid } from "ulidx";
 
@@ -108,12 +109,41 @@ async function main(): Promise<void> {
   // runs against it here; it exists purely for the UI-driven approve+edit exercise.
   const storeA = declareWriteActorForTests(new SQLiteStore(dbPathA), "e2e-seed");
   const corpusA = new CorpusService(storeA, new RecordLockService(storeA, new GateEnforcer(undefined)));
+  // reason: a spec takes no parent (BR-2) and belongs to the product tree through its criteria's rule
+  // citations; approving one needs a criterion citing a LIVE rule (BR-1007). So project A gets a minimal
+  // business baseline (root -> branch -> leaf) carrying one live rule for the spec's criterion to cite
+  // (GitHub #321). Built through the same ungated bare services as the spec itself.
+  const createBaselineNode = async (label: string, node: "root" | "branch" | "leaf", parentId: string): Promise<string> => {
+    const created = await unwrap(
+      corpusA.create({
+        type: "baseline",
+        title: `E2E Baseline ${label} ${runId}`,
+        content: `## ${label}\n\nE2E multi-project fixture baseline node.\n`,
+        parent_id: parentId,
+        extra: { node, label },
+      } as CreateDocInput),
+      `create baseline ${label}`,
+    );
+    return created.id;
+  };
+  const baselineRootId = await createBaselineNode("Root", "root", seedA.prdId);
+  const baselineBranchId = await createBaselineNode("Branch", "branch", baselineRootId);
+  const baselineLeafId = await createBaselineNode("Leaf", "leaf", baselineBranchId);
+  const ruleService = new RuleService(storeA, corpusA.create.bind(corpusA), corpusA);
+  const addedRule = await unwrap(
+    ruleService.addRule(baselineLeafId, {
+      statement: "The e2e fixture spec is approved only through the dashboard approve route",
+      confidence: "established",
+      enforced_by: "guaranteed",
+      examples: ["Approving the fixture spec in project A leaves project B unchanged"],
+    }),
+    "add fixture rule",
+  );
   const draftSpecTitle = `E2E Approve Target A ${runId}`;
   const draftSpec = await unwrap(
     corpusA.create({
       type: "spec",
       title: draftSpecTitle,
-      parent_id: seedA.prdId,
       content:
         "## Overview\n\nE2E multi-project isolation fixture spec (project A).\n\n## Scope\n\nApprove + edit isolation only.\n\n## Acceptance Criteria\n\n- N/A (fixture doc, not a real spec).\n",
       // reason: `ReviewService.approve`'s `spec-promote` gate (defense-in-depth,
@@ -129,6 +159,7 @@ async function main(): Promise<void> {
             id: "AC-1",
             statement: "fixture doc — always-passing placeholder criterion",
             verify: { mode: "script", oracle: "test", command: "true" },
+            cites: [addedRule.ruleId],
           },
         ],
       },
