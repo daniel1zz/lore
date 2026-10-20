@@ -17,8 +17,6 @@
  *
  * MOCK RISK: none — the session file is written by the production writer into a throwaway state dir, its run is
  * registered through the production `registerParty`.
- *
- * @spec_ref AC-HID-6
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
