@@ -6,6 +6,10 @@
  * Public surface:
  *   run(opts) → preview (default) or apply; returns the versions it would reconstruct / did reconstruct.
  *
+ * @invariant THE BOUNDARY IS THE DATA: "predates the audit writers" means recorded before the created_at of the
+ *   EARLIEST audit entry that names a version (`details.version`, the join key; backfill entries never count). An
+ *   entry without it cannot satisfy any version, so it cannot be the line. No config key and no built-in date is read.
+ *   An audit trail with no such entry has no boundary, so nothing is reconstructed.
  * @invariant IDEMPOTENT: the versions it reconstructs are exactly {@link reconcileVersions}'s misses older than the
  *   boundary; once a backfill entry exists for a version it is no longer a miss, so a second apply writes nothing.
  * @invariant A version at/after the boundary with no audit entry is a genuine miss: it is never reconstructed and
@@ -23,10 +27,11 @@ import { AUDIT_BACKFILL_ACTION, reconcileVersions, type AuditMiss } from "./audi
 /** Why every backfill entry says its version has no original entry. */
 export const AUDIT_BACKFILL_REASON = "version predates the audit writers: no audit entry was ever written for it";
 
+/** Where the boundary comes from, named by every report. */
+export const AUDIT_BACKFILL_BOUNDARY_SOURCE = "earliest audit entry";
+
 /** Inputs of one {@link AuditBackfillService.run}. */
 export interface AuditBackfillOptions {
-  /** ISO 8601: versions recorded strictly before it predate the audit writers. */
-  readonly boundary: string;
   /** `false` previews (writes nothing); `true` appends the entries. */
   readonly apply: boolean;
   /** Who runs the upgrade (the audit actor of every entry). */
@@ -39,7 +44,10 @@ export interface AuditBackfillOptions {
 
 /** What one run found (and, with `apply`, wrote). */
 export interface AuditBackfillReport {
-  readonly boundary: string;
+  /** The created_at of the earliest audit entry; `null` when the audit trail is empty (nothing can be derived). */
+  readonly boundary: string | null;
+  /** Always {@link AUDIT_BACKFILL_BOUNDARY_SOURCE}: named so a preview says where the boundary came from. */
+  readonly boundarySource: typeof AUDIT_BACKFILL_BOUNDARY_SOURCE;
   readonly run: string;
   readonly applied: boolean;
   /** The versions reconstructed (apply) or that would be (preview), oldest first. */
@@ -60,7 +68,18 @@ export class AuditBackfillService {
     const audit = await this.store.queryAudit({});
     if (!audit.ok) return audit;
 
-    const reconstructed = reconcileVersions(versions.value, audit.value).misses.filter((miss) => miss.created_at < opts.boundary);
+    // reason: the boundary is the first ORIGINAL entry the versions-to-audit join can use, i.e. one that names a
+    // version (`details.version`). Earlier entries (a corpus's first audit rows predate the version key) cannot satisfy
+    // any version, so they must not draw the line; backfill entries carry the upgrade's own time and never count.
+    let boundary: string | null = null;
+    for (const entry of audit.value) {
+      if (entry.action === AUDIT_BACKFILL_ACTION) continue;
+      if (typeof entry.details?.["version"] !== "number") continue;
+      if (boundary === null || entry.timestamp < boundary) boundary = entry.timestamp;
+    }
+    const misses = reconcileVersions(versions.value, audit.value).misses;
+    const earliest = boundary;
+    const reconstructed = earliest === null ? [] : misses.filter((miss) => miss.created_at < earliest);
     if (opts.apply) {
       for (const miss of reconstructed) {
         const appended = await this.store.appendAuditEntry({
@@ -81,6 +100,6 @@ export class AuditBackfillService {
         if (!appended.ok) return err(appended.error);
       }
     }
-    return ok({ boundary: opts.boundary, run: opts.run, applied: opts.apply, reconstructed });
+    return ok({ boundary, boundarySource: AUDIT_BACKFILL_BOUNDARY_SOURCE, run: opts.run, applied: opts.apply, reconstructed });
   }
 }

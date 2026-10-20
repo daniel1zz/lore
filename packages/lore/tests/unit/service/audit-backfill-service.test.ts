@@ -2,7 +2,8 @@
  * Six-dimension tests for AuditBackfillService (task-audit-verification-checks-every-version-pre-writer-history,
  * task-audit-backfill-takes-its-boundary-from-the-data-versions). InMemoryStore — no file I/O.
  *
- * The boundary is derived from the data: the created_at of the EARLIEST audit entry (the audit writers' first write).
+ * The boundary is derived from the data: the created_at of the EARLIEST audit entry that names a version (the first
+ * entry the versions-to-audit join can use; an earlier entry without `details.version` cannot satisfy any version).
  *
  *   HAPPY:      a version before the earliest audit entry with no entry is reconstructed; verify() then passes and counts it
  *   NEGATIVE:   a version after the earliest entry with no entry is NOT reconstructed and stays missing
@@ -101,6 +102,18 @@ describe("AuditBackfillService", () => {
     expect(applied.value.boundary).toBeNull();
     expect(applied.value.reconstructed).toEqual([]);
     expect(await auditCount(store)).toBe(0);
+  });
+
+  it("BOUNDARY: only an entry that names a version can be the boundary — an earlier entry without one cannot be joined to a version", async () => {
+    const store = await corpusWithTrailFrom();
+    await store.appendAuditEntry({ timestamp: "2026-06-28T05:50:02.104Z", actor: "agent:early", session_id: "s", action: "create", doc_id: "EARLY", details: {} });
+    await store.insertVersion(version("DOC1", 1, "2026-07-01T00:00:00.000Z", "create"));
+
+    const preview = await new AuditBackfillService(store).run({ ...OPTS, apply: false });
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    expect(preview.value.boundary).toBe(FIRST_ENTRY_AT);
+    expect(preview.value.reconstructed.map((m) => m.doc_id)).toEqual(["DOC1"]);
   });
 
   it("BOUNDARY: backfill entries never move the boundary — a later run derives the same one", async () => {

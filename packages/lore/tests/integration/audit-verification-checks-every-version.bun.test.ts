@@ -159,7 +159,9 @@ describe("lore migrate audit-backfill (AC b)", () => {
   it("BOUNDARY: the boundary is the earliest audit entry — the preview names it and its source; a version after it with no entry is NOT reconstructed and stays missing", () => {
     seedUnauditedVersion(900, "2026-01-01T00:00:00.000Z");
     seedUnauditedVersion(901, "2099-01-01T00:00:00.000Z");
-    const earliest = withDb((db) => (db.query("SELECT MIN(timestamp) AS t FROM audit").get() as { t: string }).t);
+    const earliest = withDb(
+      (db) => (db.query("SELECT MIN(timestamp) AS t FROM audit WHERE json_extract(details, '$.version') IS NOT NULL").get() as { t: string }).t,
+    );
 
     const preview = runLore(["migrate", "audit-backfill"], dir);
     expect(preview.exitCode, preview.stderr).toBe(0);
