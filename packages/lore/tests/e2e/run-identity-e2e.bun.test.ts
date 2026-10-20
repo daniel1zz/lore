@@ -220,11 +220,17 @@ describe("AC-RID-18: run-register hook registers distinct runs against the built
     expect(new Set([MAIN_RUN, RUN_1, RUN_2]).size).toBe(3);
   });
 
-  it("both subagent runs show parent cc:<session> via `lore run show --json`", () => {
+  it("both subagent runs register as subagents with parent null: the hook is told no parent, and a parent is recorded only when the caller supplies one", () => {
     for (const id of [RUN_1, RUN_2]) {
       const data = JSON.parse(lore(["run", "show", id, "--json"]).stdout).data;
       expect(data.kind).toBe("subagent");
-      expect(data.parentRunId).toBe(MAIN_RUN);
+      // reason: BR-1027 reads "Each main session and each helper agent it starts is a distinct run. A helper's run records the
+      // run that started it. Two helpers started by the same session are never the same run." `RunService.register` records the
+      // parent the CALLER supplied (`--parent`), else null ("unknown"), and its invariant says it is "never guessed, so a helper
+      // started by another helper is not recorded as the main run's child (BR-1027, D24)". The SubagentStart payload run-register.mjs
+      // forwards carries no parent, so a hook-registered helper has null; the explicit `--parent` link is pinned in
+      // integration/cli/run-register.bun.test.ts (AC-RID-1).
+      expect(data.parentRunId).toBeNull();
       expect(data.agentType).toBe(AGENT_TYPE);
     }
   });
