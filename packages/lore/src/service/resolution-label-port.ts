@@ -148,6 +148,7 @@ export class GhResolutionLabelPort implements ResolutionLabelPort {
    */
   async setLabel(ref: GithubIssueRef, label: string): Promise<Result<void, LoreError>> {
     const listResult = await this.runner.run(["api", issueLabelsPath(ref)]);
+    /** @lore-site BR-534 */
     if (!listResult.ok) return err(listResult.error);
 
     const parsed = GithubLabelListSchema.safeParse(parseJsonSafely(listResult.value.stdout));
@@ -157,6 +158,7 @@ export class GhResolutionLabelPort implements ResolutionLabelPort {
         field: "gh_labels_response",
         message: `gh returned a labels payload this module could not parse: ${parsed.error.message}`,
         value: listResult.value.stdout,
+        rule: "BR-534",
       });
     }
 
@@ -167,6 +169,7 @@ export class GhResolutionLabelPort implements ResolutionLabelPort {
 
     for (const stale of staleSiblings) {
       const deleteResult = await this.runner.run(["api", issueLabelPath(ref, stale), "-X", "DELETE"]);
+      /** @lore-site BR-534 */
       if (!deleteResult.ok) return err(deleteResult.error);
     }
 
@@ -180,6 +183,7 @@ export class GhResolutionLabelPort implements ResolutionLabelPort {
       "-f",
       `labels[]=${label}`,
     ]);
+    /** @lore-site BR-534 */
     if (!addResult.ok) return err(addResult.error);
     return ok(undefined);
   }

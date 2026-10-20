@@ -21,7 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, storeError, type LoreError, type Result } from "@lore/core";
 
 /** Directory name of the ledger inside the corpus directory. */
 export const INTEGRATE_LOSS_DIR = "integrate-losses";
@@ -45,10 +45,6 @@ const IntegrateLossEntrySchema = z
 
 /** One starving branch. */
 export type IntegrateLossEntry = z.infer<typeof IntegrateLossEntrySchema>;
-
-function storeError(message: string, cause: unknown): LoreError {
-  return { code: "STORE_ERROR", message, ...(cause instanceof Error ? { cause } : {}) };
-}
 
 export class IntegrateLossLedger {
   /**

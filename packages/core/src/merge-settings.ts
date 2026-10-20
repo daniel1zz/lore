@@ -241,6 +241,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
         field: "existingRaw",
         message: `existing settings.json is not valid JSON: ${(cause as Error).message}`,
         value: existingRaw.slice(0, 200),
+        rule: "BR-820",
       });
     }
     if (!isPlainObject(candidate)) {
@@ -249,6 +250,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
         field: "existingRaw",
         message: "existing settings.json must parse to a JSON object at the top level",
         value: candidate,
+        rule: "BR-820",
       });
     }
     parsed = candidate;
@@ -269,6 +271,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
       field: "hooks",
       message: "existing settings.json 'hooks' key must be a JSON object",
       value: rawHooks,
+      rule: "BR-820",
     });
   }
 
@@ -289,6 +292,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
         field: `hooks.${eventKey}`,
         message: `existing settings.json 'hooks.${eventKey}' must be an array`,
         value: groups,
+        rule: "BR-820",
       });
     }
 
@@ -300,6 +304,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
           field: `hooks.${eventKey}`,
           message: `existing settings.json 'hooks.${eventKey}' entries must be objects`,
           value: group,
+          rule: "BR-820",
         });
       }
       const groupHooks = group["hooks"];
@@ -309,6 +314,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
           field: `hooks.${eventKey}`,
           message: `existing settings.json 'hooks.${eventKey}[].hooks' must be an array`,
           value: groupHooks,
+          rule: "BR-820",
         });
       }
       const filteredHooks = groupHooks.filter((hook) => {

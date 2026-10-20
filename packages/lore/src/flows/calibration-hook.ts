@@ -179,6 +179,7 @@ function warnCalibrationFailure(
   // this module lives outside adapters/cli, because it is a pure formatting function with
   // no CLI-only side effects (no process.exit, no stdout write).
   const message = `${verb}, but calibration record failed: ${formatError(error)}`;
+  /** @lore-site BR-288 */
   deps.warn(`warning: ${message}`);
 
   const event: TelemetryEvent = {

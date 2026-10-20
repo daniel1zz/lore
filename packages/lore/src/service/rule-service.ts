@@ -13,7 +13,7 @@
  *   addNode(parent, input, opts?)          → DocRecord        (new baseline node of either tree)
  *   setLabel(node, label, opts?)           → DocRecord
  *   setDependsOn(leaf, change, opts?)      → DocRecord
- *   setSiteMap(leaf, change, opts?)        → DocRecord   (`extra.site_map` + `extra.commands`, leaf only)
+ *   setCommands(leaf, change, opts?)       → DocRecord   (`extra.commands`, leaf only)
  *   glossaryAdd(node, entry, opts?)        → DocRecord
  *   glossaryRemove(node, term, opts?)      → DocRecord
  *   listBaselineTree(root?)                → BaselineTreeEntry[]   (read-only, depth-first)
@@ -41,7 +41,7 @@
  */
 
 import { isDeepStrictEqual } from "node:util";
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, validationError, type Result } from "@lore/core";
 import type { LoreError, DocRecord, DocStatus } from "@lore/core";
 import {
   ANY_RULE_ID_PATTERN,
@@ -158,22 +158,11 @@ export interface BaselineTreeEntry {
 
 // ─── Errors (value constructors) ─────────────────────────────────────────────
 
-function validationError(field: string, message: string, value?: unknown): LoreError {
-  return value === undefined
-    ? { code: "VALIDATION_ERROR", field, message }
-    : { code: "VALIDATION_ERROR", field, message, value };
-}
-
 /** Result of one mutation attempt against a fresh read: the new extra, or a refusal. */
 type Mutation = Result<{ extra: Record<string, unknown>; summary: string; details: Record<string, unknown> }, LoreError>;
 
-/**
- * One `lore baseline map` edit of a leaf's completeness-census state.
- * `sites` SETS (replaces) each key's mapping; entries are unretired rule ids of THIS leaf.
- */
-export interface SiteMapChange {
-  sites?: Record<string, string[]>;
-  removeSites?: string[];
+/** One `lore baseline map` edit of the commands a leaf answers for (a site's rule is declared in code, BR-1344). */
+export interface CommandsChange {
   addCommands?: string[];
   removeCommands?: string[];
 }
@@ -290,7 +279,7 @@ export class RuleService {
       const issue = candidate.error.issues[0];
       return err(validationError(
         issue ? `rule.${issue.path.join(".")}` : "rule",
-        issue ? issue.message : "invalid rule",
+        issue ? issue.message : "invalid rule", undefined, "BR-623",
       ));
     }
     const target = await this.resolveBaselineDoc(leaf);
@@ -300,7 +289,7 @@ export class RuleService {
       return err(validationError(
         "node",
         `rules live only on a business leaf, an architecture standard or an architecture debt-registry (got tree=${String(target.value.extra["tree"] ?? "business")} node=${String(target.value.extra["node"])})`,
-        target.value.extra["node"],
+        target.value.extra["node"], "BR-1002",
       ));
     }
     const exceptions = await this.checkCurrentExceptions(candidate.data.current_exceptions);
@@ -327,7 +316,7 @@ export class RuleService {
       const shape = baselineExtraSchema.safeParse(withRule(`${family}-${PREVALIDATION_NUMBER}`));
       if (!shape.success) {
         const issue = shape.error.issues[0];
-        return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid leaf extra"));
+        return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid leaf extra", undefined, "BR-632"));
       }
       // reason: AC-DCL-3 — allocation goes through the one write route (foreign-corpus refusal, the store's
       // one transaction, then the audit row as the calling actor).
@@ -338,6 +327,7 @@ export class RuleService {
       }
       return ok({ ...allocated.value, ...(demoted !== undefined ? { demoted } : {}) });
     }
+    /** @lore-site BR-631 */
     return err(lastStale ?? staleExhausted(leafId));
   }
 
@@ -402,7 +392,7 @@ export class RuleService {
         ));
       }
       if (dest.value.id === sourceLeaf.id) {
-        return err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.moveTo));
+        return err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.moveTo, "BR-646"));
       }
       if (!authorized) {
         const gate = await this.authorizeCorpusWrite([sourceLeaf, dest.value], "rule-move", opts?.by);
@@ -473,18 +463,18 @@ export class RuleService {
   ): Promise<Result<DocRecord, LoreError>> {
     const node = baselineNodeSchema.safeParse(input.node);
     if (!node.success) {
-      return err(validationError("node", `node must be one of ${baselineNodeSchema.options.join("|")} (got '${String(input.node)}')`, input.node));
+      return err(validationError("node", `node must be one of ${baselineNodeSchema.options.join("|")} (got '${String(input.node)}')`, input.node, "BR-979"));
     }
     if (input.tree !== undefined) {
       const tree = baselineTreeSchema.safeParse(input.tree);
       if (!tree.success) {
-        return err(validationError("tree", `tree must be one of ${baselineTreeSchema.options.join("|")} (got '${String(input.tree)}')`, input.tree));
+        return err(validationError("tree", `tree must be one of ${baselineTreeSchema.options.join("|")} (got '${String(input.tree)}')`, input.tree, "BR-613"));
       }
     }
     if (!isNodeOfTree(input.tree, node.data)) {
-      return err(validationError("node", `node=${node.data} does not belong to tree=${input.tree ?? "business"}`, input.node));
+      return err(validationError("node", `node=${node.data} does not belong to tree=${input.tree ?? "business"}`, input.node, "BR-979"));
     }
-    if (!baselineLabelSchema.safeParse(input.label).success) return err(validationError("label", "label must not be empty"));
+    if (!baselineLabelSchema.safeParse(input.label).success) return err(validationError("label", "label must not be empty", undefined, "BR-613"));
     const parentDoc = await resolveDoc(this.store, parent);
     if (!parentDoc.ok) return parentDoc;
     const parentNode = parentDoc.value.type === "baseline" ? parentDoc.value.extra["node"] : undefined;
@@ -497,7 +487,7 @@ export class RuleService {
         ...(typeof parentTree === "string" ? { tree: parentTree } : {}),
       },
     );
-    if (!verdict.ok) return err(validationError("parent", verdict.reason, parent));
+    if (!verdict.ok) return err(validationError("parent", verdict.reason, parent, "BR-612"));
     const created = await this.createDoc(
       {
         type: "baseline",
@@ -515,7 +505,7 @@ export class RuleService {
 
   /** Set a node's display label (`extra.label`). */
   async setLabel(node: string, label: string, opts?: { by?: string }): Promise<Result<DocRecord, LoreError>> {
-    if (label.trim() === "") return err(validationError("label", "label must not be empty"));
+    if (label.trim() === "") return err(validationError("label", "label must not be empty", undefined, "BR-616"));
     const target = await this.resolveBaselineDoc(node);
     if (!target.ok) return target;
     const gate = await this.authorizeCorpusWrite([target.value], "label-set", opts?.by);
@@ -539,7 +529,7 @@ export class RuleService {
     const add = change.add ?? [];
     const remove = change.remove ?? [];
     if (add.length === 0 && remove.length === 0) {
-      return err(validationError("depends_on", "nothing to change: pass at least one add or remove rule id"));
+      return err(validationError("depends_on", "nothing to change: pass at least one add or remove rule id", undefined, "BR-651"));
     }
     const target = await this.resolveBaselineDoc(leaf, "leaf");
     if (!target.ok) return target;
@@ -547,7 +537,7 @@ export class RuleService {
     if (!gate.ok) return gate;
     for (const id of [...add, ...remove]) {
       if (!BASELINE_RULE_ID_PATTERN.test(id)) {
-        return err(validationError("depends_on", `'${id}' is not a rule id (BR-<n>)`, id));
+        return err(validationError("depends_on", `'${id}' is not a rule id (BR-<n>)`, id, "BR-651"));
       }
     }
     const registry = await this.store.listRuleRegistry();
@@ -557,13 +547,13 @@ export class RuleService {
     const known = collectKnownRuleIds(docs.value, registry.value);
     const unknown = add.filter((id) => !known.has(id));
     if (unknown.length > 0) {
-      return err(validationError("depends_on", `rule id(s) that exist nowhere in the baseline tree or registry: ${unknown.join(", ")}`, unknown));
+      return err(validationError("depends_on", `rule id(s) that exist nowhere in the baseline tree or registry: ${unknown.join(", ")}`, unknown, "BR-650"));
     }
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const current = dependsOnOf(doc);
       const absent = remove.filter((id) => !current.includes(id));
       if (absent.length > 0) {
-        return err(validationError("depends_on", `cannot remove, not present: ${absent.join(", ")}`, absent));
+        return err(validationError("depends_on", `cannot remove, not present: ${absent.join(", ")}`, absent, "BR-651"));
       }
       const next = [...new Set([...current.filter((id) => !remove.includes(id)), ...add])];
       return ok({
@@ -575,85 +565,52 @@ export class RuleService {
   }
 
   /**
-   * Edit a leaf's `site_map` (census site key -> unretired rule ids of the leaf) and its
-   * `commands` list — the ONLY writer of both keys (`lore baseline map`).
+   * Edit a leaf's `commands` list — the ONLY writer of that key (`lore baseline map`).
    *
-   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a site with no rule (BR-655), a value
-   *   that is not an unretired rule of this leaf (BR-654), removing something absent, or dropping a command main still has.
+   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a blank command, removing a command that
+   *   is not declared, or dropping a command main still has.
    */
-  async setSiteMap(
+  async setCommands(
     leaf: string,
-    change: SiteMapChange,
+    change: CommandsChange,
     opts?: { by?: string },
   ): Promise<Result<DocRecord, LoreError>> {
-    const sites = change.sites ?? {};
-    const removeSites = change.removeSites ?? [];
     const addCommands = (change.addCommands ?? []).map((c) => c.trim());
     const removeCommands = (change.removeCommands ?? []).map((c) => c.trim());
-    if (Object.keys(sites).length + removeSites.length + addCommands.length + removeCommands.length === 0) {
-      return err(validationError("site_map", "nothing to change: pass at least one site mapping, removal or command"));
+    if (addCommands.length + removeCommands.length === 0) {
+      return err(validationError("commands", "nothing to change: pass at least one command to add or remove"));
     }
     if ([...addCommands, ...removeCommands].some((c) => c.length === 0)) {
-      return err(validationError("commands", "a command name must not be blank"));
+      return err(validationError("commands", "a command name must not be blank", undefined, "BR-656"));
     }
     const target = await this.resolveBaselineDoc(leaf, "leaf");
     if (!target.ok) return target;
     const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by);
     if (!gate.ok) return gate;
     // reason: dropping a command declaration leaves the command undeclared for every other branch, so it waits until main's
-    // registry no longer has it (BR-1316/BR-1317). A site mapping is traceability and is removable at any time (ADR
-    // adr-a-structural-gate-refuses-only-what-an-excuse-cannot, decision 5).
+    // registry no longer has it (BR-1316/BR-1317).
     if (this.mainTree !== undefined) {
       const declared = commandsOf(target.value);
       const commandsGone = await refuseLiveCommandRemoval(this.mainTree, target.value, removeCommands.filter((c) => declared.includes(c)));
       if (!commandsGone.ok) return commandsGone;
     }
-    // A command add/remove changes what the census measures, so it re-opens approval; a site-only change does not.
-    const keepsApproval = addCommands.length + removeCommands.length === 0;
+    // A command add/remove changes what the census measures, so it re-opens approval (the default of retryWrite).
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const unretiredRuleIds = new Set(rulesOf(doc).filter((r) => r.lifecycle !== "retired").map((r) => r.id));
-      // All-or-nothing: judge EVERY row and report every refusal in one VALIDATION_ERROR, so a many-row call is
-      // fixed in one pass and nothing is written unless all rows hold.
-      const problems: { value: string; message: string }[] = [];
-      for (const [site, entries] of Object.entries(sites)) {
-        if (site.trim().length === 0 || entries.length === 0) {
-          problems.push({ value: site, message: `site '${site}' needs a non-empty key and at least one rule id of this leaf (BR-655)` });
-          continue;
-        }
-        for (const entry of entries) {
-          if (!unretiredRuleIds.has(entry)) {
-            problems.push({ value: entry, message: `'${entry}' for site '${site}' is not an unretired rule of this leaf (BR-654: a site maps to unretired BR-n ids of its own leaf only)` });
-          }
-        }
-      }
-      if (problems.length === 1) return err(validationError("site_map", problems[0]!.message, problems[0]!.value));
-      if (problems.length > 1) {
-        return err(validationError("site_map", `${problems.length} site rows refused, nothing written: ${problems.map((p) => p.message).join("; ")}`, problems.map((p) => p.value)));
-      }
-      const currentMap = siteMapOf(doc);
-      const absentSites = removeSites.filter((k) => !(k in currentMap));
-      if (absentSites.length > 0) {
-        return err(validationError("site_map", `cannot remove, not mapped: ${absentSites.join(", ")}`, absentSites));
-      }
       const currentCommands = commandsOf(doc);
       const absentCommands = removeCommands.filter((c) => !currentCommands.includes(c));
       if (absentCommands.length > 0) {
-        return err(validationError("commands", `cannot remove, not present: ${absentCommands.join(", ")}`, absentCommands));
+        return err(validationError("commands", `cannot remove, not present: ${absentCommands.join(", ")}`, absentCommands, "BR-656"));
       }
-      const nextMap: Record<string, string[]> = { ...currentMap, ...sites };
-      for (const key of removeSites) delete nextMap[key];
       const nextCommands = [...new Set([...currentCommands.filter((c) => !removeCommands.includes(c)), ...addCommands])];
       const extra: Record<string, unknown> = { ...doc.extra };
-      if (Object.keys(nextMap).length > 0) extra["site_map"] = nextMap;
-      else delete extra["site_map"];
       if (nextCommands.length > 0) extra["commands"] = nextCommands;
       else delete extra["commands"];
       return ok({
         extra,
-        summary: `site_map set ${Object.keys(sites).length} removed ${removeSites.length}; commands +${addCommands.length} -${removeCommands.length}`,
-        details: { operation: "baseline-map", sites: Object.keys(sites), removeSites, addCommands, removeCommands },
+        summary: `commands +${addCommands.length} -${removeCommands.length}`,
+        details: { operation: "baseline-map", addCommands, removeCommands },
       });
-    }, keepsApproval);
+    });
   }
 
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
@@ -665,7 +622,7 @@ export class RuleService {
     const parsed = glossaryEntrySchema.safeParse(entry);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      return err(validationError(issue ? `glossary.${issue.path.join(".")}` : "glossary", issue ? issue.message : "invalid glossary entry"));
+      return err(validationError(issue ? `glossary.${issue.path.join(".")}` : "glossary", issue ? issue.message : "invalid glossary entry", undefined, "BR-621"));
     }
     const target = await this.resolveBaselineDoc(node, ["root", "branch"]);
     if (!target.ok) return target;
@@ -674,7 +631,7 @@ export class RuleService {
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const current = glossaryOf(doc);
       if (current.some((g) => g.term === parsed.data.term)) {
-        return err(validationError("glossary.term", `term '${parsed.data.term}' already defined`, parsed.data.term));
+        return err(validationError("glossary.term", `term '${parsed.data.term}' already defined`, parsed.data.term, "BR-620"));
       }
       return ok({
         extra: { ...doc.extra, glossary: [...current, parsed.data] },
@@ -693,7 +650,7 @@ export class RuleService {
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const current = glossaryOf(doc);
       if (!current.some((g) => g.term === term)) {
-        return err(validationError("glossary.term", `term '${term}' is not defined on this node`, term));
+        return err(validationError("glossary.term", `term '${term}' is not defined on this node`, term, "BR-622"));
       }
       return ok({
         extra: { ...doc.extra, glossary: current.filter((g) => g.term !== term) },
@@ -799,7 +756,7 @@ export class RuleService {
         return err(validationError(
           "current_exceptions",
           `${id} is not a live AD-<n> debt entry (a standard's current exceptions name existing, live debt entries only)`,
-          id,
+          id, "BR-1002",
         ));
       }
     }
@@ -829,9 +786,9 @@ export class RuleService {
     const docs = await this.listBaselineDocs();
     if (!docs.ok) return docs;
     const sourceLeaf = docs.value.find((d) => rulesOf(d).some((r) => r.id === ruleId));
-    if (sourceLeaf === undefined) return err({ code: "DOC_NOT_FOUND", id: ruleId });
+    if (sourceLeaf === undefined) return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-637" });
     const current = rulesOf(sourceLeaf).find((r) => r.id === ruleId);
-    if (current === undefined) return err({ code: "DOC_NOT_FOUND", id: ruleId });
+    if (current === undefined) return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-637" });
     const registry = await this.store.listRuleRegistry();
     if (!registry.ok) return registry;
     const row = registry.value.find((r) => r.id === ruleId);
@@ -839,6 +796,7 @@ export class RuleService {
       return err({
         code: "STORE_ERROR",
         message: `rule registry maps ${ruleId} to leaf ${row.leaf_doc_id} but leaf ${sourceLeaf.slug} carries it — registry and leaf diverged`,
+        rule: "BR-640",
       });
     }
     return ok({ sourceLeaf, current, registered: row !== undefined });
@@ -957,6 +915,7 @@ function staleExhausted(id: string): LoreError {
   return {
     code: "STORE_ERROR",
     message: `CAS re-apply budget (${MAX_CAS_REAPPLIES}) exhausted for ${id} without a recorded STALE_VERSION`,
+    rule: "BR-631",
   };
 }
 
@@ -969,11 +928,6 @@ function rulesOf(doc: DocRecord): BaselineRule[] {
 function dependsOnOf(doc: DocRecord): string[] {
   const raw = doc.extra["depends_on"];
   return Array.isArray(raw) ? (raw as string[]) : [];
-}
-
-function siteMapOf(doc: DocRecord): Record<string, string[]> {
-  const raw = doc.extra["site_map"];
-  return raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, string[]>) : {};
 }
 
 function commandsOf(doc: DocRecord): string[] {
@@ -991,7 +945,7 @@ const SETTABLE_RULE_FIELDS = ["statement", "confidence", "enforced_by", "example
 /** Patch-level refusals that need no stored state. */
 function validateSetRulePatch(patch: SetRulePatch): Result<void, LoreError> {
   if (!SETTABLE_RULE_FIELDS.some((field) => patch[field] !== undefined)) {
-    return err(validationError("patch", "nothing to change: pass at least one of statement, confidence, enforced_by, examples, lifecycle, note, moveTo, current_reality, target_rule, current_exceptions, migration"));
+    return err(validationError("patch", "nothing to change: pass at least one of statement, confidence, enforced_by, examples, lifecycle, note, moveTo, current_reality, target_rule, current_exceptions, migration", undefined, "BR-637"));
   }
   // reason: D4 of spec-a-spec-carries-its-rule-changes-the-baseline-takes-them — a snapshot rule is true or it is
   // not; "still true, going away" belongs to the change set that will retire it. Refused HERE (before any read)
@@ -1002,14 +956,14 @@ function validateSetRulePatch(patch: SetRulePatch): Result<void, LoreError> {
       "no rule enters the 'deprecated' lifecycle: a rule is either true of the product or it is not. " +
         "Retire a rule that is no longer true (lore rule set <id> --lifecycle retired --note <why>), or, for a rule " +
         "that is going away with a spec, record it in that spec's change set (lore rule propose <spec> retire <id> --note <why>)",
-      patch.lifecycle,
+      patch.lifecycle, "BR-641",
     ));
   }
   if (patch.lifecycle === "retired" && (patch.note === undefined || patch.note.trim() === "")) {
-    return err(validationError("note", "lifecycle=retired requires --note (stored as retired_note)"));
+    return err(validationError("note", "lifecycle=retired requires --note (stored as retired_note)", undefined, "BR-642"));
   }
   if (patch.note !== undefined && patch.lifecycle !== "retired") {
-    return err(validationError("note", "note is the retirement note and is valid only with lifecycle=retired"));
+    return err(validationError("note", "note is the retirement note and is valid only with lifecycle=retired", undefined, "BR-642"));
   }
   return ok(undefined);
 }
@@ -1020,7 +974,7 @@ function applyRulePatch(current: BaselineRule, patch: SetRulePatch): Result<Base
     return err(validationError(
       "lifecycle",
       `rule ${current.id} cannot move ${current.lifecycle} -> ${patch.lifecycle}; lifecycle is forward-only and only ever ends in retired (live -> retired, deprecated -> retired)`,
-      patch.lifecycle,
+      patch.lifecycle, "BR-641",
     ));
   }
   const next = {
@@ -1039,7 +993,7 @@ function applyRulePatch(current: BaselineRule, patch: SetRulePatch): Result<Base
   const parsed = baselineRuleSchema.safeParse(next);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    return err(validationError(issue ? `rule.${issue.path.join(".")}` : "rule", issue ? issue.message : "invalid rule"));
+    return err(validationError(issue ? `rule.${issue.path.join(".")}` : "rule", issue ? issue.message : "invalid rule", undefined, "BR-638"));
   }
   return ok(parsed.data);
 }
@@ -1058,7 +1012,7 @@ function replaceRule(
 ): Mutation {
   const rules = rulesOf(doc);
   if (!rules.some((r) => r.id === ruleId)) {
-    return err({ code: "STORE_ERROR", message: `rule ${ruleId} disappeared from ${doc.slug} between read and write` });
+    return err({ code: "STORE_ERROR", message: `rule ${ruleId} disappeared from ${doc.slug} between read and write`, rule: "BR-640" });
   }
   return ok({
     extra: { ...doc.extra, rules: rules.map((r) => (r.id === ruleId ? next : r)) },

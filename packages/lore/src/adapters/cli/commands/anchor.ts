@@ -190,6 +190,7 @@ function unsupportedTargetTypeError(docType: string): LoreError {
     field: "type",
     message: `Expected one of these document types: ${accepted}; got type '${docType}'`,
     value: docType,
+    rule: "BR-62",
   };
 }
 

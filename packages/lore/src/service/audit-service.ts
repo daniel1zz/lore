@@ -454,6 +454,7 @@ export class AuditService {
         code: "VALIDATION_ERROR",
         field: "audit_chain",
         message: "Cannot anchor: the audit table is empty — nothing to pin a trust root to.",
+        rule: "BR-479",
       });
     }
 
@@ -466,6 +467,7 @@ export class AuditService {
         code: "VALIDATION_ERROR",
         field: "audit_chain",
         message: `Cannot anchor: chain head (audit row id ${head.id}) has no entry_hash — run \`lore audit --verify\` to locate the break first.`,
+        rule: "BR-479",
       });
     }
 

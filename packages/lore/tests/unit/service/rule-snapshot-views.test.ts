@@ -16,6 +16,7 @@
 import { describe, it, expect } from "vitest";
 import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import { computeLeafCoverage } from "../../../src/service/leaf-coverage.js";
+import { ruleStatusIndexOf } from "../../../src/service/site-declarations.js";
 import { makeSpec, makeWorld, reload, scriptCriterion, type World } from "./rule-change-world.js";
 
 const PROPOSED_TEXT = "A zebra-striped rule that is only proposed";
@@ -65,15 +66,16 @@ describe("snapshot views list only live rules (AC-CS-4)", () => {
     );
   });
 
-  it("NEGATIVE: baseline coverage counts a site mapped only to a proposed id as a gap", async () => {
+  it("NEGATIVE: baseline coverage never maps a site that declares a proposed id: it is an unknown declaration", async () => {
     const world = await makeWorld();
     const spec = await makeSpec(world, "Spec A");
     const id = await proposeZebra(world, spec.slug);
     const leaf = await reload(world, world.leafId);
     const liveRuleIds = (leaf.extra["rules"] as Array<{ id: string; lifecycle: string }>).filter((r) => r.lifecycle === "live").map((r) => r.id);
-    const site = { key: "a.ts#f#X", dynamic: false } as never;
-    const verdict = computeLeafCoverage({ sites: [site], siteMap: { "a.ts#f#X": [id] }, liveRuleIds });
-    expect(verdict.gaps).toEqual(["a.ts#f#X"]);
+    const site = { key: "a.ts#f#X", file: "a.ts", line: 1, column: 1, dynamic: false, rules: [id] } as never;
+    const verdict = computeLeafCoverage({ sites: [site], liveRuleIds, statusOf: ruleStatusIndexOf([leaf]) });
+    expect(verdict.mapped).toEqual([]);
+    expect(verdict.invalid).toEqual([expect.objectContaining({ key: "a.ts#f#X", rule: id, status: "unknown" })]);
   });
 
   it("BOUNDARY: a retired rule is hidden from find unless tombstones are asked for, and stays readable by id", async () => {

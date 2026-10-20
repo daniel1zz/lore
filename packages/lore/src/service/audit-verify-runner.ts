@@ -89,7 +89,7 @@ export function readAuditAnchorFile(corpusRoot: string): Result<AuditAnchorRef |
     return ok({ head_id: parsed.head_id, head_hash: parsed.head_hash });
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    return err({ code: "VALIDATION_ERROR", field: ANCHOR_FILE_LABEL, message: `Malformed ${ANCHOR_FILE_LABEL}: ${detail}` });
+    return err({ code: "VALIDATION_ERROR", field: ANCHOR_FILE_LABEL, message: `Malformed ${ANCHOR_FILE_LABEL}: ${detail}`, rule: "BR-1293" });
   }
 }
 

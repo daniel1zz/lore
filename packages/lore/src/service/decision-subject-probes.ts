@@ -21,14 +21,17 @@ import type { SubjectExistence, SubjectExistenceProbes } from "./pending-decisio
 /** What every probe needs; each port returns null when it could not measure. */
 export interface SubjectProbePorts {
   /** Paths of `git worktree list`, or null when the listing failed. */
+  /** @lore-site BR-1283 */
   listWorktreePaths(): readonly string[] | null;
   /** Canonical path (symlinks resolved); the input when unresolvable. */
+  /** @lore-site BR-1283 */
   realPath(path: string): string;
   /** Shas of `git stash list`, or null when the listing failed. */
   listStashShas(): readonly string[] | null;
   /** One pid right now; `null` = no such process. */
   inspectProcess(pid: number): Promise<{ readonly zombie: boolean; readonly startTime: string | null } | null>;
   /** true = the run has ended, false = still open, null = unknown run or unreadable. */
+  /** @lore-site BR-1283 */
   runEnded(runId: string): Promise<boolean | null>;
 }
 

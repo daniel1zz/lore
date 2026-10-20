@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { runLoreInProcess } from "./run-lore-in-process";
@@ -33,9 +33,11 @@ export interface MiniCorpus {
   writeSource(rel: string, content: string): void;
   /** Census site keys of a registry command (`lore baseline sites <command> --json`). */
   sitesOf(command: string): Promise<string[]>;
-  /** Map one site to the leaf's own rule (a site map takes BR-n ids only; leaves A and B each carry one rule from build time). */
+  /** The rule id each fixture leaf (A and B) carries from build time. */
+  readonly ruleOf: ReadonlyMap<string, string>;
+  /** Declare the leaf's own rule at one coded census site, in the site's source file (`rule: "BR-n"` on the refusal literal). */
   mapSite(leaf: string, siteKey: string): Promise<void>;
-  /** Account for every census site of `command` on `leaf`. */
+  /** Declare the leaf's own rule at every coded census site of `command` (a site's rule lives in code, never in the corpus). */
   mapAllSites(leaf: string, command: string): Promise<void>;
   dispose(): void;
 }
@@ -109,8 +111,14 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
   };
   const mapSite = async (leaf: string, siteKey: string): Promise<void> => {
     const rule = ruleOf.get(leaf);
-    if (rule === undefined) throw new Error(`mapSite: leaf ${leaf} has no fixture rule; map the site with its own rule instead`);
-    await must(["baseline", "map", leaf, "--site", siteKey, "--rule", rule]);
+    if (rule === undefined) throw new Error(`mapSite: leaf ${leaf} has no fixture rule`);
+    const [file, , code] = siteKey.split("#");
+    if (file === undefined || code === undefined) throw new Error(`mapSite: not a coded site key: ${siteKey}`);
+    const path = join(dir, file);
+    const before = readFileSync(path, "utf8");
+    const literal = `{ code: "${code}" }`;
+    if (!before.includes(literal)) throw new Error(`mapSite: ${file} has no refusal literal ${literal}`);
+    writeFileSync(path, before.replace(literal, `{ code: "${code}", rule: "${rule}" }`));
   };
   return {
     dir,
@@ -118,6 +126,7 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
     branch,
     leafA,
     leafB,
+    ruleOf,
     run,
     writeSource,
     sitesOf,

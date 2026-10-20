@@ -687,6 +687,7 @@ export class SetupService {
         await this.writer.removeDirIfEmpty(dir);
       }
     } catch (cause) {
+      /** @lore-site BR-824 */
       return err(describeWriterFailure("install", cause, { committedBackups, committedWrites, committedRemovals }));
     }
 
@@ -823,6 +824,7 @@ export class SetupService {
             `lore setup install: all ${committedWrites.length} planned asset write(s) succeeded, but writing ` +
             `the manifest at "${manifestPath}" failed: ${reason}. The install is NOT yet authoritative — re-run to retry.`,
           ...(cause instanceof Error ? { cause } : {}),
+          rule: "BR-824",
         });
       }
     }
@@ -920,6 +922,7 @@ export class SetupService {
         field: "manifest",
         message: `no setup manifest found at "${manifestPath}" — nothing to uninstall`,
         value: manifestPath,
+        rule: "BR-841",
       });
     }
 
@@ -960,6 +963,7 @@ export class SetupService {
         await this.writer.removeDirIfEmpty(dir);
       }
     } catch (cause) {
+      /** @lore-site BR-842 */
       return err(describeWriterFailure("uninstall", cause, { restoredPaths, removedPaths }));
     }
 
@@ -982,6 +986,7 @@ export class SetupService {
           `lore setup uninstall: file/mcp reversal completed, but removing the manifest at "${manifestPath}" ` +
           `failed: ${reason}. Re-run --uninstall to retry manifest removal.`,
         ...(cause instanceof Error ? { cause } : {}),
+        rule: "BR-842",
       });
     }
 
@@ -1020,6 +1025,7 @@ function describeWriterFailure(
       `lore setup ${phase} aborted mid-run: ${reason}. Committed before failure — ${parts}. ` +
       `The manifest was NOT ${phase === "install" ? "written" : "removed"} — this run's changes are NOT yet authoritative.`,
     ...(cause instanceof Error ? { cause } : {}),
+    rule: "BR-824",
   };
 }
 
@@ -1097,6 +1103,7 @@ async function resolvePayload(
           field: `asset:${file.path}`,
           message: `settings-hook asset "${file.path}" content is not a valid JSON hook-entry array: ${describeCaught(cause)}`,
           value: file.content.slice(0, 200),
+          rule: "BR-825",
         });
       }
 
@@ -1261,6 +1268,7 @@ function parseManifestRaw(manifestRaw: string | null): Result<SetupManifest | nu
       field: "manifest",
       message: `existing setup manifest is not valid JSON: ${describeCaught(cause)}`,
       value: manifestRaw.slice(0, 200),
+      rule: "BR-821",
     });
   }
 
@@ -1271,6 +1279,7 @@ function parseManifestRaw(manifestRaw: string | null): Result<SetupManifest | nu
       field: "manifest",
       message: `existing setup manifest failed schema validation: ${parsed.error.message}`,
       value: parsedJson,
+      rule: "BR-821",
     });
   }
 

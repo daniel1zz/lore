@@ -349,7 +349,7 @@ export class IntegrateService {
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
     if (request.sessionId.trim() === "") {
-      return err({ code: "VALIDATION_ERROR", field: "session", message: "lore integrate needs the caller's session id: pass --session <id> or set CLAUDE_CODE_SESSION_ID" });
+      return err({ code: "VALIDATION_ERROR", field: "session", message: "lore integrate needs the caller's session id: pass --session <id> or set CLAUDE_CODE_SESSION_ID", rule: "BR-1272" });
     }
     if (request.floorCommand === undefined || request.floorCommand.trim() === "") {
       return err({
@@ -357,6 +357,7 @@ export class IntegrateService {
         field: "workflow.integrate.floor_command",
         message:
           "workflow.integrate.floor_command is not set in .lore/config.yaml (or the file failed to parse): lore integrate will not advance main on a tree whose floor was never named",
+        rule: "BR-1272",
       });
     }
     const migrating = request.migrateCommand !== undefined && request.migrateCommand.trim() !== "";
@@ -399,6 +400,7 @@ export class IntegrateService {
     try {
       return await this.landOn(request, request.floorCommand, tip, wt, footprint.value);
     } finally {
+      /** @lore-site BR-1312 */
       granted.value.release();
     }
   }
@@ -477,6 +479,7 @@ export class IntegrateService {
         log("integrate: snapshot migrate skipped (workflow.integrate.migrate_command is not set)");
       }
       const floorStart = clock();
+      /** @lore-site BR-1275 */
       const floor = this.deps.runFloor(floorCommand, wt);
       const floorTotalMs = clock() - floorStart;
       const floorTimings = {
@@ -582,7 +585,9 @@ export class IntegrateService {
     const slash = rev.indexOf("/");
     if (slash <= 0) return ok(undefined);
     const candidate = rev.slice(0, slash);
+    /** @lore-site BR-1277 */
     const remotes = this.deps.git(this.deps.projectRoot, ["remote"]);
+    /** @lore-site BR-1290 */
     if (remotes.status !== 0) return err(gitFailure("git remote", remotes));
     return ok(remotes.stdout.split("\n").map((r) => r.trim()).includes(candidate) ? candidate : undefined);
   }
@@ -594,6 +599,7 @@ export class IntegrateService {
     const remote = found.value;
     if (remote === undefined) return ok(undefined);
     this.deps.log(`integrate: fetching ${remote}`);
+    /** @lore-site BR-1277 */
     const out = this.deps.git(this.deps.projectRoot, ["fetch", "-q", remote]);
     return out.status === 0 ? ok(undefined) : err(gitFailure(`git fetch ${remote}`, out));
   }
@@ -702,6 +708,7 @@ export class IntegrateService {
       ["REVERT_HEAD", "revert"],
     ];
     for (const [name, label] of states) {
+      /** @lore-site BR-1273 */
       const located = this.deps.git(checkout, ["rev-parse", "--path-format=absolute", "--git-path", name]);
       if (located.status === 0 && existsSync(located.stdout.trim())) return label;
     }
@@ -710,9 +717,10 @@ export class IntegrateService {
 
   /** `rev` as a full commit sha, or a refusal naming the rev. */
   private resolveCommit(rev: string): Result<string, LoreError> {
+    /** @lore-site BR-1272 */
     const out = this.deps.git(this.deps.projectRoot, ["rev-parse", "--verify", "-q", `${rev}^{commit}`]);
     if (out.status !== 0 || out.stdout.trim() === "") {
-      return err({ code: "VALIDATION_ERROR", field: "branch", message: `integrate: ${rev} does not name a commit in this repository`, value: rev });
+      return err({ code: "VALIDATION_ERROR", field: "branch", message: `integrate: ${rev} does not name a commit in this repository`, value: rev, rule: "BR-1272" });
     }
     return ok(out.stdout.trim());
   }
@@ -733,7 +741,7 @@ export class IntegrateService {
     const canonical = onDisk ? realpathSync(path) : path;
     if (onDisk) {
       if (known.some((k) => k === path || k === canonical)) return ok(path);
-      return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id` });
+      return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id`, rule: "BR-1278" });
     }
     // registered-but-deleted (a cleaned-up directory): drop the stale registration before adding again
     if (known.includes(path)) git(projectRoot, ["worktree", "prune"]);
@@ -753,6 +761,7 @@ export class IntegrateService {
 
   /** A merge that exited non-zero: unmerged paths mean a conflict (abort + reset, exit 4); anything else is an error. */
   private afterFailedMerge(branch: string, wt: string, base: string, merged: GitOutcome): Result<IntegrateOutcome, LoreError> {
+    /** @lore-site BR-1246 */
     const unmerged = this.deps.git(wt, ["diff", "--name-only", "--diff-filter=U"]);
     const paths = unmerged.stdout.split("\n").map((p) => p.trim()).filter((p) => p !== "");
     const reset = this.resetWorktree(wt, base);
@@ -763,6 +772,7 @@ export class IntegrateService {
 
   /** `<sha12> <subject>` of each first-parent commit that took main from `base` to `now`. */
   private describeMoves(base: string, now: string): string[] {
+    /** @lore-site BR-1245 */
     const out = this.deps.git(this.deps.projectRoot, ["log", "--first-parent", "--format=%H %s", `${base}..${now}`]);
     const lines = out.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
     if (out.status !== 0 || lines.length === 0) return [`${short(now)} (main is not a descendant of ${short(base)})`];

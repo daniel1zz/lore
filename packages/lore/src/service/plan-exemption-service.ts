@@ -166,6 +166,7 @@ export class PlanExemptionService {
           `attestation_exempt_kind must be one of: ` +
           `${attestationExemptKindSchema.options.join(", ")} (got '${String(opts.kind)}')`,
         value: opts.kind,
+        rule: "BR-1198",
       });
     }
 
@@ -252,6 +253,7 @@ export class PlanExemptionService {
         field: INTEGRATION_BRANCH_FIELD,
         message: `integration branch must be a plain branch name like 'gs-integration' (got '${String(opts.branch)}')`,
         value: opts.branch,
+        rule: "BR-1313",
       });
     }
     const at = new Date().toISOString();

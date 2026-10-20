@@ -208,6 +208,7 @@ export default defineLoreCommand({
                 field: "enumerate",
                 message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
                 value: args.enumerate,
+                rule: "BR-485",
               };
               inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
               return exitCode(error);
