@@ -1,5 +1,6 @@
 // @reads .claude/**
 // @reads .lore-bootstrap/**
+// @reads service/baseline-items.ts
 // @reads adapters/cli/replica-priming.ts
 // @reads adapters/cli/migrate-schema.ts
 // @reads .lore/**

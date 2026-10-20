@@ -20,6 +20,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { runFidelity, TEST_SOURCE_MAX_CHARS } from "../../../src/service/fidelity-sample.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 const SEEN_SOURCE = "it('SEEN-MARKER the rule holds', () => { expect(rule()).toBe(true); });";
@@ -55,6 +56,7 @@ async function world(commands: string[]): Promise<InMemoryStore> {
   const leaf = await mustCreate(corpus, { type: "baseline", title: "L", content: "l", parent_id: branch.id, extra: { node: "leaf", label: "Leaf" } } as CreateDocInput);
   const added = await rules.addRule(leaf.id, { statement: "the rule claim", confidence: "established", enforced_by: "guaranteed", examples: ["ex"] }, { by: "fixture" });
   if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
+  await approvePending(store, leaf.id); // a direct add is a pending add: the fidelity pool counts live (approved) rules
   const spec = await mustCreate(corpus, { type: "spec", title: "S", content: "body" } as CreateDocInput);
   for (let i = 0; i < commands.length; i += 1) {
     const r = await ac.addCriterion(spec.id, {
