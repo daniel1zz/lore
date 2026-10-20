@@ -16,9 +16,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Database } from "bun:sqlite";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { scrubIdentityEnv } from "../helpers/test-run-identity.js";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
@@ -188,7 +189,7 @@ describe("lore migrate audit-backfill (AC b)", () => {
   }, 120_000);
 
   it("REGRESSION: a retired cut-off still in the config is NOT the boundary — the data is (a cut-off before the old version would have skipped it)", () => {
-    writeFileSync(configPath(), `${base}\naudit:\n  verify_since: "2020-01-01T00:00:00Z"\n`);
+    patchLoreConfig(dir, `${base}\naudit:\n  verify_since: "2020-01-01T00:00:00Z"\n`, { replace: true });
     seedUnauditedVersion(900, "2026-01-01T00:00:00.000Z");
 
     const applied = runLore(["migrate", "audit-backfill", "--apply"], dir);
@@ -224,7 +225,7 @@ describe("lore migrate audit-backfill (AC b)", () => {
 
   it("STATE: --apply removes only the retired config setting (every other byte kept)", () => {
     const old = `# keep me\n${base}\naudit:\n  verify_since: "2026-07-06T12:02:00Z" # old\n`;
-    writeFileSync(configPath(), old);
+    patchLoreConfig(dir, old, { replace: true });
 
     expect(runLore(["migrate", "audit-backfill", "--apply"], dir).exitCode).toBe(0);
 
@@ -236,7 +237,7 @@ describe("lore migrate audit-backfill (AC b)", () => {
 describe("a config still setting the cut-off is refused by every command (AC c)", () => {
   it("NEGATIVE: status, list, bootstrap and audit --verify each exit 4 with the exact text and write nothing", () => {
     const text = `${base}\naudit:\n  verify_since: "2026-07-06T12:02:00Z"\n`;
-    writeFileSync(configPath(), text);
+    patchLoreConfig(dir, text, { replace: true });
     for (const args of [["status"], ["list"], ["bootstrap"], ["audit", "--verify"]]) {
       const r = runLore(args, dir);
       expect(r.exitCode, args.join(" ")).toBe(4);
