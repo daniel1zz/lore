@@ -26,7 +26,8 @@ import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version";
 import { createPartyCorpus, type PartyCorpus } from "../helpers/known-party-corpus";
 
 const TEST_TIMEOUT_MS = 90_000;
-const BEHIND = LATEST_SCHEMA_VERSION - 1;
+// reason: this fixture exercises migration 028 itself, so it stops at 27 (LATEST - 1 moved to 28 with migration 029).
+const BEHIND = 27;
 const NOW = "2026-10-01T00:00:00.000Z";
 /** The agent run that drives `lore migrate schema` (a known party; the conversion is attributed to it). */
 const MIGRATOR = { kind: "run", run: "cc:baseline-items-upgrade" } as const;

@@ -156,6 +156,7 @@ import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { applyMigration026 } from "./migrations/migration-026.js";
 import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
 import { applyMigration028 } from "./migrations/migration-028.js";
+import { applyMigration029 } from "./migrations/migration-029.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -829,6 +830,12 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-028 converts every baseline node to approved + pending items (BR-1341) in ONE transaction;
       // a node it cannot convert rolls the whole step back, throws MigrationFailedError naming it, and leaves schema 27.
       applyMigration028(this.db, this.corpusPath, this.migrationActor);
+    }
+
+    if (currentVersion < 29 && 29 <= ceiling) {
+      // reason: migration-029 promotes pending rule revisions that a landed spec change set accounts for (#323) in ONE
+      // transaction; a failure rolls back, throws MigrationFailedError naming the node, and leaves schema 28.
+      applyMigration029(this.db, this.corpusPath, this.migrationActor);
     }
   }
 

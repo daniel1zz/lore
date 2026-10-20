@@ -136,6 +136,9 @@ const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<st
     // reason: BR-1341 — schema 28 converts each baseline node to approved + pending items as a real write
     // (version row action "update"); `MIGRATION_028_AUDIT_ACTION` in store/migrations/migration-028.ts.
     "migrate-schema-028",
+    // reason: #323 — schema 29 promotes landed-change pending revisions as a real write (version row action "update");
+    // `MIGRATION_029_AUDIT_ACTION` in store/migrations/migration-029.ts.
+    "migrate-schema-029",
   ]),
   approve: new Set(["approve", AUDIT_BACKFILL_ACTION]),
   reject: new Set(["reject", AUDIT_BACKFILL_ACTION]),
