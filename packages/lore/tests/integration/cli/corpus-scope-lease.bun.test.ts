@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * RED test for claim-scoped corpus authoring (Baseline slice 2a, component C8).
  *
@@ -35,6 +36,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
 setDefaultTimeout(180_000);
 
@@ -333,6 +335,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
       /BR-\d+/,
     )?.[0];
     expect(ruleId).toBeDefined();
+    approveFixtureNodes(fx.repo, [fx.leafX1]); // a direct add is a pending add: the rule is citable once its leaf is approved
     const cite = runLore(["ac", "cite", fx.spec, "AC-CSL-1", ruleId!], wt);
     expect(cite.stderr).not.toContain(FOREIGN_TOKEN);
     expect(cite.exitCode).toBe(0);

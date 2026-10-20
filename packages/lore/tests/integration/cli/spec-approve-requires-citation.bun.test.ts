@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * End-to-end test of the spec approval citation requirement (Baseline slice 3b, AC-BLS3B-2),
  * driven through the real CLI against a throwaway corpus.
@@ -20,6 +21,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dropLoreConfigKey } from "../../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,6 +93,7 @@ function addRule(statement: string): string {
   );
   const id = out.stdout.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${out.stdout}`);
+  approveFixtureNodes(dir, "all"); // a direct add is a pending add: live (citable) only once approved
   return id;
 }
 
@@ -141,6 +144,7 @@ describe("AC-BLS3B-2: a spec needs a citing criterion to be approved", () => {
     const spec = newSpec("SAC Retired Cite Spec");
     mustRun(["ac", "cite", spec, AC_ID, retiredRule], dir);
     mustRun(["rule", "set", retiredRule, "--lifecycle", "retired", "--note", "superseded for the test"], dir);
+    approveFixtureNodes(dir, "all"); // the retirement is a pending revision until approved
     const before = docOf(spec, dir);
     const r = approve(spec);
     expect(r.exitCode).toBe(4);

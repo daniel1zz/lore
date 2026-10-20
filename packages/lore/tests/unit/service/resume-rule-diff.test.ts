@@ -40,6 +40,8 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
+import { pendingCountOf } from "../../../src/service/baseline-pending.js";
 import { actedStore } from "../../live-invocation.js";
 
 interface RuleChange { rule_id: string; kind: "statement" | "confidence" | "lifecycle"; old: string; new: string }
@@ -97,12 +99,21 @@ async function addRule(leaf: DocRecord, statement: string): Promise<string> {
     { by: "agent:test" },
   );
   if (!r.ok) throw new Error(`addRule failed: ${JSON.stringify(r.error)}`);
+  await approveEverything(); // a direct add is a pending add: the diff reads approved rules
   return r.value.ruleId;
 }
 
 async function setRule(id: string, patch: Parameters<RuleService["setRule"]>[1]): Promise<void> {
   const r = await rules.setRule(id, patch, { by: "agent:test" });
   if (!r.ok) throw new Error(`setRule ${id} failed: ${JSON.stringify(r.error)}`);
+  await approveEverything(); // a revision is pending until approved; the diff reads approved rules
+}
+
+/** Approve every pending revision of every baseline node (the test's subject is the diff of APPROVED rules). */
+async function approveEverything(): Promise<void> {
+  const nodes = await store.findMany({ type: "baseline" });
+  if (!nodes.ok) throw new Error("baseline read failed");
+  for (const node of nodes.value) if (pendingCountOf(node.extra) > 0) await approvePending(store, node.id);
 }
 
 /**

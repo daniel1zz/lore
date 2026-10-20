@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * AC-FR-8 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make,
  * spec-falsifiability-reachability-a-feedable-checkpoint-an) — for EVERY

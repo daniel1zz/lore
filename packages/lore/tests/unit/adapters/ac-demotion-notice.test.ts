@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * AC-GV-4 (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2) —
  * `lore ac add`/`lore ac set` PRINT the approved->draft demotion `commands/ac.ts:50`

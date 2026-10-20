@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * Architecture tree on the CLI + MCP surfaces (Baseline slice 3a, AC-BLS3-1 / BR-979), over a throwaway corpus.
  *
@@ -36,6 +37,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { LoreBaselineAddSchema, LoreRuleAddSchema, LoreRuleSetSchema, registerTools } from "../../../src/adapters/mcp/tools.js";
 
 setDefaultTimeout(300_000);
@@ -152,6 +154,8 @@ describe("lore rule add on architecture nodes", () => {
     const r = runLore(["rule", "add", debtRegistry, "--statement", "Legacy throw in X", ...RULE], dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("Added AD-1");
+    // a direct add is a pending add; a standard's exception must name an APPROVED live debt entry, so approve the registry
+    approveFixtureNodes(dir, "all");
   });
 
   it("allocates AS-1 on a standard with the four parts stored", () => {

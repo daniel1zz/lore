@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * `lore get` Implements / Implemented by views, computed from citations (Baseline slice 3b, AC-BLS3B-4 / BR-1008),
  * over a throwaway corpus (an `mkdtemp` outside the repo; the repo's own `.lore/` is never touched).
@@ -26,6 +27,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
 setDefaultTimeout(300_000);
 
@@ -128,6 +130,7 @@ beforeAll(() => {
   brA = ruleIdOf(mustRun(["rule", "add", leaf1, "--statement", "Rule A holds", ...RULE]).stdout);
   brB = ruleIdOf(mustRun(["rule", "add", leaf1, "--statement", "Rule B holds", ...RULE]).stdout);
   asA = ruleIdOf(mustRun(["rule", "add", standard, "--statement", "Standard A holds", ...RULE]).stdout);
+  approveFixtureNodes(dir, "all"); // direct adds are pending adds and new nodes are born draft: approve the fixture tree
 
   specA = slugOf(mustRun(["create", "spec", "--title", "IV Spec A", "--content", "x", "--no-ai"]).stdout);
   specB = slugOf(mustRun(["create", "spec", "--title", "IV Spec B", "--content", "x", "--no-ai"]).stdout);

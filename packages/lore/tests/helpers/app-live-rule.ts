@@ -44,7 +44,29 @@ async function ensureLeaf(app: App): Promise<{ leafSlug: string; ruleId: string 
     examples: ["example one"],
   });
   if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
+  // reason: a direct add is a PENDING add and a new node is born draft (BR-626/BR-1339): the rule is live only once approved.
+  // An approval promotes what a review saw, so the fixture records an approving review judgment, then approves — the same
+  // two steps `lore review` and `lore approve` take, with no AI call.
+  for (const slug of [root, branch, leafSlug]) await reviewAndApprove(app, slug);
   return { leafSlug, ruleId: added.value.ruleId };
+}
+
+async function reviewAndApprove(app: App, slug: string): Promise<void> {
+  const shown = await app.corpusService.get(slug);
+  if (!shown.ok) throw new Error(`get ${slug} failed: ${JSON.stringify(shown.error)}`);
+  const recorded = await app.judgmentService.record({
+    doc_id: shown.value.doc.id,
+    doc_version: shown.value.doc.version,
+    decision: "approve",
+    confidence: 0.9,
+    reasons: [{ dimension: "completeness", finding: "fixture review" }],
+    checks: [],
+    blocking_questions: [],
+    judge: { provider: "fixture", model: "n/a", prompt_version: "v6" },
+  });
+  if (!recorded.ok) throw new Error(`recording a review of ${slug} failed: ${JSON.stringify(recorded.error)}`);
+  const approved = await app.reviewService.approve(slug);
+  if (!approved.ok) throw new Error(`approving ${slug} failed: ${JSON.stringify(approved.error)}`);
 }
 
 /**

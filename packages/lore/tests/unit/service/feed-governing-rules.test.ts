@@ -60,6 +60,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
@@ -148,6 +149,7 @@ async function addRules(leaf: DocRecord, prefix: string, count: number): Promise
     if (!r.ok) throw new Error(`addRule failed: ${JSON.stringify(r.error)}`);
     out.push({ id: r.value.ruleId, statement });
   }
+  await approvePending(store, leaf.id); // a direct add is a pending add: it governs only once approved
   return out;
 }
 

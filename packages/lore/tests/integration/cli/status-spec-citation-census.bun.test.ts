@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * `lore status` spec citation census (Baseline slice 3b, AC-BLS3B-3 / BR-1011), over a throwaway corpus
  * (an `mkdtemp` outside the repo; the repo's own `.lore/` is never touched).
@@ -28,6 +29,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
 setDefaultTimeout(600_000);
 
@@ -136,6 +138,7 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
     const live = ruleIdOf(must(["rule", "add", leaf, "--statement", "Live rule holds", ...RULE]).stdout);
     const dying = ruleIdOf(must(["rule", "add", leaf, "--statement", "Dying rule holds", ...RULE]).stdout);
     must(["rule", "set", dying, "--lifecycle", "retired", "--note", "superseded in the fixture"]);
+    approveFixtureNodes(dir, "all"); // direct writes are pending revisions and new nodes are born draft: approve the fixture tree
 
     const makeSpec = (key: string, title: string, parent: string | null): string => {
       // reason: a spec is created parentless (BR-1007); the one parented spec P is seeded as legacy state directly.
