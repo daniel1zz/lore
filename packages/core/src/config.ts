@@ -749,13 +749,6 @@ const WorkflowConfigSchema = z
 /** Task execution workflow config section. Source: SPEC-025 §3 D2; `gates` added for gate on/off overrides. */
 export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
 
-/**
- * The cut-off `lore migrate audit-backfill` uses when a config never set `audit.verify_since`: the SPEC-035 deploy
- * date, the day the audit writers went live. It defines which history PREDATES the writers (and so may be recorded
- * as reconstructed); verification itself never reads a date.
- */
-export const AUDIT_WRITERS_LIVE_FROM = "2026-07-06T00:00:00Z";
-
 // ─── Trace Section Schema ───────────────────────────────────────────────────
 
 /**
