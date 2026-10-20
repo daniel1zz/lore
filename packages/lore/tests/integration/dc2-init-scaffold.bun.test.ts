@@ -1,10 +1,10 @@
 // @spawns packages/lore/src/index.ts
 /**
- * @spec_ref spec-defect-clusters-round-2-part-a-sessions-seats-setup-init
- *           D5, spec-defect-clusters-round-2-part-a-sessions-seats-setup-init#AC-DC2-5
+ * @spec_ref spec-defect-clusters-round-2-part-a-sessions-seats-setup-init D5 (items a-c, AC-DC2-5)
+ *           spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes#AC-WSR-1
  *
  * `lore init` is one atomic scaffold: built in a sibling temp directory, renamed into place, and it seeds
- * the settings template and the write-spec rule document (BR-807, BR-810, BR-587).
+ * the settings template and writes no corpus document (BR-807, BR-810, BR-587).
  *
  * Every case runs PLAIN `lore init` (never `setup --project`, which already seeded the template and would
  * make (c) green by accident) in a throwaway git repo (HOME/XDG in temp dirs; never the repo's `.lore/`).
@@ -16,8 +16,7 @@
  *   REGRESSION: (b) the ignore list is exactly the four entries; after setup --project --check the cache
  *               file exists on disk yet git does not list it
  *   HAPPY:      (c) config.yaml carries workflow.verification_profiles; status does not say "not configured"
- *   HAPPY:      (d) exactly one approved skill doc, one version, one audit entry; the refused gate pack has a
- *               non-empty `## Rule` section and never names a dev-repo script
+ *   STATE:      (d) after init: no document, no audit entry, `lore status --check-tree` exits 0
  */
 
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -28,7 +27,7 @@ import { join } from "node:path";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
-const SPEC = "spec-defect-clusters-round-2-part-a-sessions-seats-setup-init";
+const SPEC = "spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes";
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 
@@ -87,8 +86,8 @@ afterAll(() => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
 });
 
-describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
-  it(`${SPEC}#AC-DC2-5 (a) a failed init leaves no .lore and a second plain init succeeds`, () => {
+describe(`${SPEC}#AC-WSR-1 lore init is one atomic scaffold`, () => {
+  it(`${SPEC}#AC-WSR-1 (a) a failed init leaves no .lore and a second plain init succeeds`, () => {
     const { repo, home } = makeRepo();
 
     const failed = runInitWithZeroFileLimit(repo, home);
@@ -103,14 +102,14 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(existsSync(join(repo, ".lore", "lore.db"))).toBe(true);
   });
 
-  it(`${SPEC}#AC-DC2-5 (a) a second init in an initialised directory is still refused with exit 1`, () => {
+  it(`${SPEC}#AC-WSR-1 (a) a second init in an initialised directory is still refused with exit 1`, () => {
     const { repo, home } = makeInitialisedRepo();
     const again = runLore(["init"], repo, home);
     expect(again.exitCode).toBe(1);
     expect(again.stderr).toContain("already initialised");
   });
 
-  it(`${SPEC}#AC-DC2-5 (b) the ignore list is exactly the db files plus the check cache, and git never lists the cache`, { timeout: 120_000 }, () => {
+  it(`${SPEC}#AC-WSR-1 (b) the ignore list is exactly the db files plus the check cache, and git never lists the cache`, { timeout: 120_000 }, () => {
     const { repo, home } = makeInitialisedRepo();
 
     const lines = readFileSync(join(repo, ".lore", ".gitignore"), "utf8")
@@ -133,7 +132,7 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(porcelain).toContain(".lore/config.yaml");
   });
 
-  it(`${SPEC}#AC-DC2-5 (c) plain init seeds the settings template`, () => {
+  it(`${SPEC}#AC-WSR-1 (c) plain init seeds the settings template`, () => {
     const { repo, home } = makeInitialisedRepo();
     const config = readFileSync(join(repo, ".lore", "config.yaml"), "utf8");
     expect(config).toContain("verification_profiles");
@@ -145,58 +144,20 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(status.stdout).not.toContain("Verification profiles: not configured");
   });
 
-  it(`${SPEC}#AC-DC2-5 (d) plain init seeds exactly one approved write-spec rule document`, { timeout: 120_000 }, () => {
+  it(`${SPEC}#AC-WSR-1 (d) right after init the corpus holds no document, no audit entry, and the tree check passes`, { timeout: 120_000 }, () => {
     const { repo, home } = makeInitialisedRepo();
 
-    const list = runLore(["list", "--type", "knowledge", "--json"], repo, home);
-    expect(list.exitCode).toBe(0);
-    const docs = (JSON.parse(list.stdout) as { data: { docs: Array<{ slug: string; status: string }> } }).data.docs;
-    expect(docs).toHaveLength(1);
-    const slug = docs[0]!.slug;
-    expect(docs[0]!.status).toBe("approved");
+    const list = runLore(["list", "--json"], repo, home);
+    expect(list.exitCode, list.stderr).toBe(0);
+    const listed = (JSON.parse(list.stdout) as { data: { docs: unknown[]; total?: number } }).data;
+    expect(listed.docs).toHaveLength(0);
 
-    const got = runLore(["get", slug, "--json"], repo, home);
-    const doc = (JSON.parse(got.stdout) as { data: { doc: { extra: { sub_type?: string; skill?: { applies_to?: string } }; version: number } } }).data.doc;
-    expect(doc.extra.sub_type).toBe("skill");
-    expect(doc.extra.skill?.applies_to).toBe("spec");
-    expect(doc.version).toBe(1);
+    const audit = runLore(["audit", "--json"], repo, home);
+    expect(audit.exitCode, audit.stdout + audit.stderr).toBe(0);
+    const trail = (JSON.parse(audit.stdout) as { data: { entries?: unknown[] } }).data;
+    expect(trail.entries ?? []).toHaveLength(0);
 
-    const log = runLore(["log", slug, "--json"], repo, home);
-    expect((JSON.parse(log.stdout) as { data: { entries: unknown[] } }).data.entries).toHaveLength(1);
-
-    const audit = runLore(["audit", slug, "--json"], repo, home);
-    expect(audit.exitCode, audit.stderr).toBe(0);
-    const trail = JSON.parse(audit.stdout) as { data: { entries?: unknown[] } };
-    expect(trail.data.entries).toHaveLength(1);
-  });
-
-  it(`${SPEC}#AC-DC2-5 (d) a refused spec-create pack carries the rule text and never a dev-repo script`, () => {
-    const { repo, home } = makeInitialisedRepo();
-    // A spec with a parent is refused by the gate's parent rule.
-    const candidate = JSON.stringify({ type: "spec", title: "Candidate", parent_id: "01HZZZZZZZZZZZZZZZZZZZZZZZ", content: "no skeleton" });
-    const gate = runLore(["gate", "spec-create", "--input-json", candidate], repo, home);
-    const output = gate.stdout + gate.stderr;
-    expect(gate.exitCode, output).not.toBe(0);
-    const ruleSection = output.split("## Rule")[1];
-    expect(ruleSection, output).toBeDefined();
-    expect(ruleSection!.trim().length).toBeGreaterThan(0);
-    expect(ruleSection).toContain("Overview");
-    expect(output).not.toContain("bun scripts/");
-  });
-
-  it(`${SPEC}#AC-DC2-5 (d) with no rule document the pack names only product commands`, { timeout: 120_000 }, () => {
-    const { repo, home } = makeInitialisedRepo();
-    const list = runLore(["list", "--type", "knowledge", "--json"], repo, home);
-    const slug = (JSON.parse(list.stdout) as { data: { docs: Array<{ slug: string }> } }).data.docs[0]!.slug;
-    const archived = runLore(["set", slug, "--status", "archived"], repo, home);
-    expect(archived.exitCode, archived.stdout + archived.stderr).toBe(0);
-
-    const candidate = JSON.stringify({ type: "spec", title: "Candidate", parent_id: "01HZZZZZZZZZZZZZZZZZZZZZZZ", content: "no skeleton" });
-    const gate = runLore(["gate", "spec-create", "--input-json", candidate], repo, home);
-    const output = gate.stdout + gate.stderr;
-    expect(output).toContain("## Rule");
-    expect(output).toContain("No approved rule doc found");
-    expect(output).toContain("lore init");
-    expect(output).not.toContain("bun scripts/");
+    const tree = runLore(["status", "--check-tree"], repo, home);
+    expect(tree.exitCode, tree.stdout + tree.stderr).toBe(0);
   });
 });
