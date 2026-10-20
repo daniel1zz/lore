@@ -11,7 +11,9 @@
  *     overlapping locations, and stores nothing;
  *   - a release by the other run without force is refused (naming the holder run) and keeps the lease; with force it
  *     releases;
- *   - the SAME run claiming again refreshes the lease and never conflicts with itself (also across overlapping anchors).
+ *   - the SAME run claiming again refreshes the lease and never conflicts with itself (also across overlapping anchors);
+ *   - a lease that names no run (written before runs were compared) belongs to nobody: a claimant carrying the holder's
+ *     very NAME is refused, and only `--force` releases it.
  *
  * Why the same-name pair is two AGENT runs: a checkout holds at most ONE open human session (a second `session start`
  * is refused), so two live people never share a corpus under one name; two agent sessions whose ids share their first
@@ -33,6 +35,7 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
+import { nameOfAgentRun, type RunId } from "@lore/core";
 import { createPartyCorpus, type LoreRun, type PartyCorpus } from "../helpers/known-party-corpus.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
@@ -57,6 +60,19 @@ function claimOf(corpus: PartyCorpus, slug: string): StoredClaim | undefined {
     const row = db.query("SELECT extra FROM docs WHERE slug = ?").get(slug) as { extra: string } | null;
     if (row === null) throw new Error(`no doc ${slug}`);
     return (JSON.parse(row.extra) as { claim?: StoredClaim }).claim;
+  } finally {
+    db.close();
+  }
+}
+
+/** Rewrites the stored lease of `slug` to the shape every claim had before runs were compared: a name and a time, no run. */
+function seedRunlessLease(corpus: PartyCorpus, slug: string, by: string): void {
+  const db = new Database(join(corpus.dir, ".lore", "lore.db"));
+  try {
+    const row = db.query("SELECT extra FROM docs WHERE slug = ?").get(slug) as { extra: string };
+    const extra = JSON.parse(row.extra) as Record<string, unknown>;
+    extra["claim"] = { by, at: new Date().toISOString() };
+    db.query("UPDATE docs SET extra = ? WHERE slug = ?").run(JSON.stringify(extra), slug);
   } finally {
     db.close();
   }
@@ -146,6 +162,35 @@ describe("AC-HID-3: claims compare runs, never names", () => {
       const otherTask = newTask("Second run, same name");
       expect(claim(corpus, otherTask, { kind: "run", run: RUN_TWO }).exitCode).toBe(0);
       expect(claimOf(corpus, otherTask)?.by).toBe(stored?.by);
+    });
+  });
+
+  describe("a lease that names no run", () => {
+    it("belongs to nobody: a claimant carrying the holder's very NAME is refused, naming the holder, and the lease is untouched", () => {
+      const task = newTask("Run-less lease, same name");
+      const name = nameOfAgentRun(RUN_ONE as RunId);
+      seedRunlessLease(corpus, task, name);
+
+      const refused = claim(corpus, task, { kind: "run", run: RUN_ONE });
+
+      expect(refused.exitCode).toBe(CLAIM_CONFLICT_EXIT);
+      expect(refused.stderr).toContain(name);
+      expect(claimOf(corpus, task)).toMatchObject({ by: name });
+      expect(claimOf(corpus, task)).not.toHaveProperty("harness_run");
+    });
+
+    it("is released by no name: the holder's same-name run needs --force, and --force releases it", () => {
+      const task = newTask("Run-less lease, release");
+      const name = nameOfAgentRun(RUN_ONE as RunId);
+      seedRunlessLease(corpus, task, name);
+
+      const refused = corpus.lore(["release", task], { kind: "run", run: RUN_ONE });
+      expect(refused.exitCode).toBe(CLAIM_CONFLICT_EXIT);
+      expect(claimOf(corpus, task)).toBeDefined();
+
+      const forced = corpus.lore(["release", task, "--force"], { kind: "run", run: RUN_ONE });
+      expect(forced.exitCode).toBe(0);
+      expect(claimOf(corpus, task)).toBeUndefined();
     });
   });
 

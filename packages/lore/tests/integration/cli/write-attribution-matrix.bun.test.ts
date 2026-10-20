@@ -48,7 +48,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { NoOpTelemetry } from "@lore/core";
-import type { AuditEntry, CreateDocInput, VersionRecord } from "@lore/core";
+import type { AuditEntry, CreateDocInput, RunId, VersionRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
@@ -212,6 +212,8 @@ interface Fixture {
   /** Same services built over the (possibly decorated) store under test. */
   readonly w: Svc;
   readonly by: string;
+  /** The run the fixture's identity carries: a claim names the run that took it, and a release or done is the holder's own (BR-1040). */
+  readonly run: RunId;
   readonly ids: Record<string, string>;
 }
 
@@ -286,7 +288,7 @@ const KINDS: readonly WriteKind[] = [
     writesVersion: true,
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     act: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by })) as never, "claim");
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim");
     },
   },
   {
@@ -295,10 +297,10 @@ const KINDS: readonly WriteKind[] = [
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     // The claim is placed by the SAME identity through the store under test, so the measured write is the holder's own release.
     prepare: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by })) as never, "claim before release");
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim before release");
     },
     act: async (f) => {
-      must((await f.w.twf.release(f.ids["task"] as string, { by: f.by })) as never, "release");
+      must((await f.w.twf.release(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "release");
     },
   },
   {
@@ -375,12 +377,13 @@ const KINDS: readonly WriteKind[] = [
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     // The holder (same identity, through the store under test) finishes its own task.
     prepare: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by })) as never, "claim before done");
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim before done");
     },
     act: async (f) => {
       must(
         (await f.w.twf.done(f.ids["task"] as string, {
           by: f.by,
+          harnessRun: f.run,
           overrideReason: "attribution matrix fixture: no runner-attested pass exists for this throwaway task",
           noNewTestsReason: "attribution matrix fixture: throwaway task with no new tests",
         } as never)) as never,
@@ -405,7 +408,7 @@ async function runKind(
       await registerRun(handle.store, identity);
       target = await decorate(handle.store, identity);
     }
-    const f: Fixture = { s: raw, w: services(target), by: identity.claimed, ids };
+    const f: Fixture = { s: raw, w: services(target), by: identity.claimed, run: identity.harnessRun as RunId, ids };
     if (kind.prepare !== undefined) await kind.prepare(f);
     return await capture(handle.store, () => kind.act(f));
   } finally {
