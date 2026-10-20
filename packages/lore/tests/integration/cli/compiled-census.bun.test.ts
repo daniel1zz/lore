@@ -129,18 +129,12 @@ describe("compiled dist/lore: lore baseline coverage (specification branch leaf)
     expect(r.stdout).toContain(sites[0]!.key);
   });
 
-  it("every census site mapped -> coverage exits 0 with at least one site counted", async () => {
-    mustRun(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-1"], repo);
-    for (const s of sites.slice(1)) {
-      mustRun(["baseline", "map", leaf, "--site", s.key, "--rule", "BR-1"], repo);
-      // reason: each mustRun blocks the worker's event loop; under load this loop exceeds 60 s, and vitest's
-      // worker->main RPC ("onTaskUpdate") times out after 60 s of an unserviced loop (unhandled error, exit 1).
-      // Yielding once per iteration lets the reply be processed (TG-23).
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const r = runLore(["baseline", "coverage", leaf], repo);
+  it("the leaf's census counts every reached site (report only, exit 0); declarations are read from the tree by the compiled binary", () => {
+    const r = runLore(["baseline", "coverage", leaf, "--json"], repo);
     expect(r.stderr + r.stdout).not.toContain("typescript-unavailable");
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/fully mapped - [1-9]\d* site\(s\)/);
+    const report = (JSON.parse(r.stdout) as { data: { leaves: { sites: number; measured_by: string }[] } }).data.leaves[0]!;
+    expect(report.measured_by).toBe("commands");
+    expect(report.sites).toBe(sites.length);
   });
 });

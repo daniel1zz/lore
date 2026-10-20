@@ -116,15 +116,15 @@ describe("declared command not in this tree is reported, not a defect (task-root
     expect(human.stdout).toContain("gap ");
   }, 120_000);
 
-  it("a leaf whose ONLY declared command is absent is measured as if command-less (by its owned sites), not failed", async () => {
+  it("a leaf whose ONLY declared command is absent is pending, not failed: no live command reaches the site that declares its rule", async () => {
     const c = await withGammaDeclared();
-    // beta leaves the registry: leaf B declares only beta, so it is all-absent; its mapped site is what it owns.
+    // beta leaves the registry: leaf B declares only beta, so it is all-absent; the code site declaring its rule is no longer reached (BR-1344).
     c.writeSource(`${MINI_CLI}/index.ts`, REGISTRY_AB.replace('  beta: () => import("./commands/beta.js"),\n', '  gamma: () => import("./commands/gamma.js"),\n'));
     const r = await c.run(["baseline", "coverage", c.root, "--json"]);
     expect(r.exitCode, r.stdout + r.stderr).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { leaves: { slug: string; ok: boolean; sites: number; measured_by: string; absent_commands: { command: string }[] }[] } }).data;
     const b = data.leaves.find((l) => l.slug === c.leafB);
-    expect(b).toMatchObject({ ok: true, sites: 1, measured_by: "owned_sites" });
+    expect(b).toMatchObject({ ok: true, sites: 0, measured_by: "absent" });
     expect(b?.absent_commands.map((x) => x.command)).toEqual(["beta"]);
   }, 120_000);
 

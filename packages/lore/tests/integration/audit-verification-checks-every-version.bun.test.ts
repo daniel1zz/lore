@@ -155,6 +155,13 @@ describe("lore migrate audit-backfill (AC b)", () => {
     expect(details["reconstructed"]).toBe(true);
     expect(details["reason"]).toEqual(expect.stringContaining("predates the audit writers"));
     expect(details["run"]).toBe(entry.session_id);
+    // the entry is a write made by the caller: it carries the caller's run, the same one the fixture's own `lore create` row carries
+    const runs = withDb((db) => ({
+      backfill: (db.query("SELECT harness_run FROM audit WHERE action = 'audit-backfill'").get() as { harness_run: string | null }).harness_run,
+      caller: (db.query("SELECT harness_run FROM audit WHERE action = 'create' AND harness_run IS NOT NULL ORDER BY id DESC LIMIT 1").get() as { harness_run: string | null } | null)?.harness_run ?? null,
+    }));
+    expect(runs.backfill).not.toBeNull();
+    expect(runs.backfill).toBe(runs.caller);
   });
 
   it("BOUNDARY: the boundary is the earliest audit entry — the preview names it and its source; a version after it with no entry is NOT reconstructed and stays missing", () => {

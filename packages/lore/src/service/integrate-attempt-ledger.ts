@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, storeError, type LoreError, type Result } from "@lore/core";
 
 /** Directory name of the attempt ledger inside the corpus directory. */
 export const ATTEMPT_LEDGER_DIR = "integrate-attempts";
@@ -68,10 +68,6 @@ export function medianMs(values: readonly number[]): number | null {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? (sorted[mid] as number) : Math.round(((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2);
-}
-
-function storeError(message: string, cause: unknown): LoreError {
-  return { code: "STORE_ERROR", message, ...(cause instanceof Error ? { cause } : {}) };
 }
 
 export class IntegrateAttemptLedger {

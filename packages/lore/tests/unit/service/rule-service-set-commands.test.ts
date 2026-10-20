@@ -1,13 +1,14 @@
-// @layer service-rule-set-site-map AC-BLS2-5
+// @layer service-rule-set-commands AC-BLS2-5
 /**
- * RuleService.setSiteMap (baseline slice 2a, AC-BLS2-5): the only writer of a leaf's
- * `extra.site_map` and `extra.commands`.
+ * RuleService.setCommands (baseline slice 2a, AC-BLS2-5; the site-map half retired by BR-1344): the only writer of a leaf's
+ * `extra.commands`.
  *
- * Spec-level expectations asserted here:
+ * Expectations asserted here:
  *   - one successful call = exactly ONE new doc version and exactly ONE new audit row;
  *   - a write based on a stale version is refused (CAS) and changes nothing;
- *   - two concurrent callers never lose each other's mapping (both land, version +2);
- *   - an unknown rule id / blank reason / removing something absent is refused and writes nothing.
+ *   - two concurrent callers never lose each other's command (both land, version +2);
+ *   - removing a command that is not declared, a blank command, an empty change and a non-leaf target are refused and write nothing;
+ *   - the leaf never gains a `site_map` key: a site's rule is declared in code.
  *
  * InMemoryStore (no bun:sqlite) — MOCK RISK: hides SQLite transaction behaviour; the CLI e2e in
  * tests/integration/cli/baseline-coverage.bun.test.ts covers the real store.
@@ -71,83 +72,65 @@ beforeEach(async () => {
   leaf = await fresh(created.id);
 });
 
-describe("RuleService.setSiteMap", () => {
+describe("RuleService.setCommands", () => {
   it("one call writes exactly one version and exactly one audit row", async () => {
     const v0 = leaf.version;
     const a0 = await auditRows(leaf.id);
-    const res = await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["BR-1"] }, addCommands: ["ac add"] }, { by: "t" });
+    const res = await svc.setCommands(leaf.id, { addCommands: ["ac add", "ac rm"] }, { by: "t" });
     expect(res.ok).toBe(true);
     const after = await fresh(leaf.id);
     expect(after.version).toBe(v0 + 1);
     expect((await auditRows(leaf.id)) - a0).toBe(1);
   });
 
-  it("stores the site map and commands under extra, different inputs giving different maps", async () => {
-    await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["BR-1"] }, addCommands: ["ac add"] }, { by: "t" });
-    await svc.setSiteMap(leaf.id, { sites: { "b.ts#g#Y": ["BR-1"] }, addCommands: ["rule add"] }, { by: "t" });
+  it("stores the commands under extra, different inputs giving different lists, and never writes a site map", async () => {
+    await svc.setCommands(leaf.id, { addCommands: ["ac add"] }, { by: "t" });
+    await svc.setCommands(leaf.id, { addCommands: ["rule add"], removeCommands: ["ac add"] }, { by: "t" });
     const after = await fresh(leaf.id);
-    expect(after.extra["site_map"]).toEqual({ "a.ts#f#X": ["BR-1"], "b.ts#g#Y": ["BR-1"] });
-    expect(after.extra["commands"]).toEqual(["ac add", "rule add"]);
+    expect(after.extra["commands"]).toEqual(["rule add"]);
+    expect(Object.keys(after.extra).some((key) => key.startsWith("site"))).toBe(false);
   });
 
   it("a write based on a stale version is refused by the store and changes nothing", async () => {
     const staleVersion = leaf.version;
-    await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["BR-1"] } }, { by: "t" });
+    await svc.setCommands(leaf.id, { addCommands: ["ac add"] }, { by: "t" });
     const current = await fresh(leaf.id);
-    const stale = await store.update(
-      leaf.id,
-      { extra: { ...leaf.extra, site_map: { "z.ts#z#Z": ["BR-1"] } } },
-      { expected_version: staleVersion },
-    );
+    const stale = await store.update(leaf.id, { extra: { ...leaf.extra, commands: ["z"] } }, { expected_version: staleVersion });
     expect(stale.ok).toBe(false);
     expect((await fresh(leaf.id)).version).toBe(current.version);
-    expect((await fresh(leaf.id)).extra["site_map"]).toEqual({ "a.ts#f#X": ["BR-1"] });
+    expect((await fresh(leaf.id)).extra["commands"]).toEqual(["ac add"]);
   });
 
   it("two concurrent callers both land: no lost update, version advances by 2", async () => {
     const v0 = leaf.version;
     const [r1, r2] = await Promise.all([
-      svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["BR-1"] } }, { by: "t1" }),
-      svc.setSiteMap(leaf.id, { sites: { "b.ts#g#Y": ["BR-1"] } }, { by: "t2" }),
+      svc.setCommands(leaf.id, { addCommands: ["ac add"] }, { by: "t1" }),
+      svc.setCommands(leaf.id, { addCommands: ["rule add"] }, { by: "t2" }),
     ]);
     expect(r1.ok && r2.ok).toBe(true);
     const after = await fresh(leaf.id);
-    expect(Object.keys(after.extra["site_map"] as Record<string, unknown>).sort()).toEqual(["a.ts#f#X", "b.ts#g#Y"]);
+    expect([...(after.extra["commands"] as string[])].sort()).toEqual(["ac add", "rule add"]);
     expect(after.version).toBe(v0 + 2);
   });
 
-  it("refuses a rule id the leaf does not carry and writes nothing", async () => {
+  it("refuses removing a command that was never declared, writing nothing", async () => {
     const v0 = leaf.version;
-    const a0 = await auditRows(leaf.id);
-    const res = await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["BR-9999"] } }, { by: "t" });
+    const res = await svc.setCommands(leaf.id, { removeCommands: ["never declared"] }, { by: "t" });
     expect(res.ok).toBe(false);
-    expect((await fresh(leaf.id)).version).toBe(v0);
-    expect(await auditRows(leaf.id)).toBe(a0);
-  });
-
-  it("refuses free text and a site with no rule, writing nothing", async () => {
-    const v0 = leaf.version;
-    for (const entries of [["non-business:plumbing"], ["non-business:   "], []]) {
-      const res = await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": entries } }, { by: "t" });
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.error.code).toBe("VALIDATION_ERROR");
-    }
+    if (!res.ok) expect(res.error.code).toBe("VALIDATION_ERROR");
     expect((await fresh(leaf.id)).version).toBe(v0);
   });
 
-  it("refuses removing a site that was never mapped", async () => {
-    const res = await svc.setSiteMap(leaf.id, { removeSites: ["never.ts#x#Y"] }, { by: "t" });
-    expect(res.ok).toBe(false);
-  });
-
-  it("refuses an empty change", async () => {
-    const res = await svc.setSiteMap(leaf.id, {}, { by: "t" });
-    expect(res.ok).toBe(false);
+  it("refuses a blank command and an empty change", async () => {
+    const blank = await svc.setCommands(leaf.id, { addCommands: ["   "] }, { by: "t" });
+    expect(blank.ok).toBe(false);
+    const empty = await svc.setCommands(leaf.id, {}, { by: "t" });
+    expect(empty.ok).toBe(false);
   });
 
   it("refuses a non-leaf target", async () => {
     const branch = await fresh(leaf.parent_id as string);
-    const res = await svc.setSiteMap(branch.id, { addCommands: ["ac add"] }, { by: "t" });
+    const res = await svc.setCommands(branch.id, { addCommands: ["ac add"] }, { by: "t" });
     expect(res.ok).toBe(false);
   });
 });

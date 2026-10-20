@@ -64,6 +64,7 @@ export interface OverrideDecisionPort {
    * @returns err(VALIDATION_ERROR, field "autonomy") on escalate (message carries the pending id and the
    *   `lore decide <id>` line) or refuse; any store error from the decision log, unchanged.
    */
+  /** @lore-site BR-1286 */
   requireAuto(request: OverrideRequest): Promise<Result<void, LoreError>>;
 }
 
@@ -98,7 +99,7 @@ export async function requireOverrideAuto(port: OverrideDecisionPort | undefined
 }
 
 function refused(summary: string, message: string, value: unknown): LoreError {
-  return { code: "VALIDATION_ERROR", field: "autonomy", message: `Override not granted: ${summary}.\n${message}`, value };
+  return { code: "VALIDATION_ERROR", field: "autonomy", message: `Override not granted: ${summary}.\n${message}`, value, rule: "BR-1286" };
 }
 
 /** The port over a DecisionService (or any object with its `decide`/`listPending`). */
@@ -111,6 +112,7 @@ export function createOverrideDecisionPort(decisions: Pick<DecisionService, "dec
       if (effective.verdict === "auto") return ok(undefined);
       const reasons = decision.reasons.join("; ");
       if (effective.verdict === "refuse") {
+        /** @lore-site BR-1286 */
         return err(
           refused(
             request.summary,
@@ -127,6 +129,7 @@ export function createOverrideDecisionPort(decisions: Pick<DecisionService, "dec
       if (open === undefined) {
         return err({ code: "STORE_ERROR", message: `override ${request.classId} escalated (record ${decided.value.record_id}) but has no pending decision` });
       }
+      /** @lore-site BR-1286 */
       return err(
         refused(
           request.summary,

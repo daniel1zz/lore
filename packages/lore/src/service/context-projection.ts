@@ -463,6 +463,7 @@ function buildRebuiltZone(existing: string, zone: ZoneLocation, next: ManagedSec
           "the lore-managed zone carries no fingerprint (written by an older lore, whose format this lore no longer reads). " +
           `Repair: delete the zone — every line from "${CLAUDE_MD_MARKER_START}" through "${CLAUDE_MD_MARKER_END}" — then re-run \`lore context refresh\` ` +
           "(or `lore setup --project`), which writes a fresh fingerprinted zone; hand-written text outside the markers is kept.",
+        rule: "BR-881",
       });
     }
     return parsed;

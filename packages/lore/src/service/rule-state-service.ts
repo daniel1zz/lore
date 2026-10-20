@@ -473,6 +473,7 @@ export class RuleStateService {
           field: "rule",
           message: `rule '${opts.rule}' is not held by any live business leaf or architecture standard`,
           value: opts.rule,
+          rule: "BR-673",
         });
       }
     }

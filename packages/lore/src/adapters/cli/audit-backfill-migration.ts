@@ -34,6 +34,9 @@ import { UnknownPartyError } from "@lore/core/node";
 import { AuditBackfillService, type AuditBackfillReport } from "../../service/audit-backfill-service.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
+import { withVerifiedWriteContext } from "../../store/write-context-store.js";
+import { bareDocWriter } from "../../service/corpus-service.js";
+import { printLine } from "./output.js";
 import { resolveActor } from "./utils.js";
 
 /** What the migration found and did. */
@@ -84,7 +87,10 @@ export async function runAuditBackfillMigration(input: AuditBackfillMigrationInp
     store = input.apply ? new SQLiteStore(input.dbPath) : new SQLiteStore(input.dbPath, { readonly: true });
 
     const nowIso = new Date().toISOString();
-    const backfill = await new AuditBackfillService(store).run({
+    // reason: the reconstructed entries are writes made by the invocation's known party: they ride the one write route under
+    // the caller's VERIFIED run (an unregistered run stamps NULL with one warning), like `lore migrate schema`'s own rows.
+    const writer = bareDocWriter(withVerifiedWriteContext(store, input.inv.identity, (line) => printLine(input.inv.io.stderr, line)));
+    const backfill = await new AuditBackfillService(store, writer).run({
       apply: input.apply,
       actor,
       run: `audit-backfill-${nowIso}`,

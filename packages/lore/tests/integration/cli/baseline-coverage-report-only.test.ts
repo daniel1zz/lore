@@ -3,19 +3,18 @@
 // @reads assets/project/lore-config-template.yaml
 /**
  * AC-BCG-1 (spec-baseline-coverage-refuses-only-undeclared-commands-a-site): `lore baseline coverage <root>` refuses ONLY a
- * runnable command no leaf declares. Unmapped census sites are report output (exit 0, with their count), and a stored
- * site_map value that is not a BR-n id is corrupt data (exit 2, naming leaf, site and value).
+ * runnable command no leaf declares. Unmapped census sites are report output (exit 0, with their count); a declaration naming
+ * a dead rule is reported too (see coverage-invalid-declaration.test.ts).
  *
  * Fixture: the throwaway mini lore checkout of coverage-mini-corpus (two registry commands, each declared by one leaf, NO site
  * mapped). Never touches the repo's .lore/. Dimensions: HAPPY (control, exit 0 with the count), NEGATIVE (undeclared command
- * -> 1; non-BR value -> 2), BOUNDARY (unmapped alone is never exit 1), STATE (declaring the command clears the 1),
+ * -> 1; unmapped alone -> 0), BOUNDARY (unmapped alone is never exit 1), STATE (declaring the command clears the 1),
  * REGRESSION (the pre-change verdict was exit 1 for the unmapped sites).
  *
  * @spec_ref spec-baseline-coverage-refuses-only-undeclared-commands-a-site#AC-BCG-1
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
-import { seedSiteMapValue } from "../../helpers/seed-site-map-value";
 
 const corpora: MiniCorpus[] = [];
 afterEach(() => {
@@ -82,17 +81,5 @@ describe("AC-BCG-1 coverage is report-only for sites", () => {
     const refused = await c.run(["baseline", "coverage", c.root, "--commands-only"]);
     expect(refused.exitCode, refused.stdout + refused.stderr).toBe(1);
     expect(refused.stdout).toContain("undeclared   gamma add");
-  }, 120_000);
-
-  it("a leaf storing a non-BR value exits exactly 2 naming the leaf, the site and the value", async () => {
-    const c = await unmappedCorpus();
-    const [site] = await c.sitesOf("alpha");
-    // reason: the write verb admits BR-n ids only, so the corrupt value is seeded straight into the throwaway corpus's db.
-    seedSiteMapValue(c, c.leafA, site as string, "non-business:x");
-    const r = await c.run(["baseline", "coverage", c.root]);
-    expect(r.exitCode, r.stdout + r.stderr).toBe(2);
-    expect(r.stderr).toContain(c.leafA);
-    expect(r.stderr).toContain(site as string);
-    expect(r.stderr).toContain("non-business:x");
   }, 120_000);
 });

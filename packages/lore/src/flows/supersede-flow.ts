@@ -180,6 +180,7 @@ export async function createWithSupersedes(
         `'lore create ${targetType} ...' + 'lore invalidate <old> --superseded-by <new>' ` +
         `flow instead (see 'lore invalidate --help').`,
       value: targetType,
+      rule: "BR-710",
     });
   }
 

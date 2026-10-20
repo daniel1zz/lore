@@ -33,6 +33,7 @@ import {
   ok,
   registryOf,
   seedGovernedThresholds,
+  storeError,
   type GovernedThresholds,
   type LoreError,
   type OperationClassRegistry,
@@ -174,10 +175,6 @@ export type ProposeOutcome =
 
 const writeFactsSchema = z.object({ content_hash: z.string().regex(/^[0-9a-f]{64}$/) }).passthrough();
 
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
-}
-
 function integrityKey(version: string) {
   return { class: THRESHOLD_INTEGRITY_CLASS, subject_id: THRESHOLD_SUBJECT_ID, subject_version: version };
 }
@@ -249,7 +246,7 @@ export class AutonomyThresholdService {
    */
   async propose(next: GovernedThresholds, decisions: ThresholdDecisionPort): Promise<Result<ProposeOutcome, LoreError>> {
     const checked = governedThresholdsSchema.safeParse(next);
-    if (!checked.success) return err({ code: "VALIDATION_ERROR", field: "record", message: checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
+    if (!checked.success) return err({ code: "VALIDATION_ERROR", field: "record", message: checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), rule: "BR-1260" });
     const seeded = await this.ensureSeeded();
     if (!seeded.ok) return seeded;
     const current = seeded.value;

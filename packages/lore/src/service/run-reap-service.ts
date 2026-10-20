@@ -46,6 +46,7 @@ import { isAbsolute } from "node:path";
 import {
   err,
   ok,
+  storeError,
   type AutonomyFacts,
   type LoreError,
   type OperationClassRegistry,
@@ -181,10 +182,6 @@ interface RunView {
   readonly run: RunLifecycle;
   readonly liveness: RunLiveness;
   readonly roots: readonly string[];
-}
-
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
 }
 
 const floorToSecond = (iso: string): number => Math.floor(Date.parse(iso) / 1000) * 1000;

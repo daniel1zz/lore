@@ -552,6 +552,7 @@ export class AcService {
         field: "cites",
         message: "lore ac cite requires at least one rule id (BR-<n>)",
         value: ruleIds,
+        rule: "BR-242",
       });
     }
     const specResult = await this.resolveSpec(specIdOrSlug);
@@ -570,6 +571,7 @@ export class AcService {
             ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
             : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
         value: acId,
+        rule: "BR-91",
       });
     }
     const target = existing[index] as AcceptanceCriterion;
@@ -596,6 +598,7 @@ export class AcService {
         field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
         message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
         value: ruleIds,
+        rule: "BR-85",
       });
     }
 
@@ -745,6 +748,7 @@ export class AcService {
         field: "acceptance_criteria[].id",
         message: `Acceptance criterion "${acId}" does not exist on this spec`,
         value: acId,
+        rule: "BR-45",
       });
     }
 
@@ -765,6 +769,7 @@ export class AcService {
             `Cannot remove "${acId}" — task "${referencingTask.slug}" has evidence referencing it. ` +
             "Pass --force to remove anyway (existing evidence keeps its ac_ref and becomes dangling).",
           value: acId,
+          rule: "BR-46",
         });
       }
     }
@@ -830,6 +835,7 @@ export class AcService {
           "lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, " +
           "--note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code",
         value: patch,
+        rule: "BR-29",
       });
     }
 
@@ -840,6 +846,7 @@ export class AcService {
     // D15 — a superseded criterion is immutable, correction or not; decided before the record lock so the
     // refusal names "superseded".
     const supersededSet = supersededRefusal(extractCriteria(spec).find((c) => c.id === acId));
+    /** @lore-site BR-1330 */
     if (supersededSet !== undefined) return err(supersededSet);
 
     // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write. For a locked spec the
@@ -856,6 +863,7 @@ export class AcService {
           field: "correction.reason",
           message: "a correction needs a non-empty reason (--correction \"<why this is a fix, not a change>\")",
           value: correction.reason,
+          rule: "BR-1069",
         });
       }
       const lock = await this.recordLock.resolve(spec);
@@ -879,6 +887,7 @@ export class AcService {
             ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
             : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
         value: acId,
+        rule: "BR-30",
       });
     }
     const target = existing[index] as AcceptanceCriterion;
@@ -1016,6 +1025,7 @@ export class AcService {
         field: "reason",
         message: "lore ac supersede needs a non-empty --reason",
         value: reason,
+        rule: "BR-1330",
       });
     }
     const specResult = await this.resolveSpec(specIdOrSlug);
@@ -1023,9 +1033,11 @@ export class AcService {
     const spec = specResult.value;
     const existing = extractCriteria(spec);
     const index = existing.findIndex((c) => c.id === acId);
+    /** @lore-site BR-1330 */
     if (index === -1) return err(unknownCriterionError(existing, acId));
     const target = existing[index] as AcceptanceCriterion;
     const already = supersededRefusal(target);
+    /** @lore-site BR-1330 */
     if (already !== undefined) return err(already);
 
     const superseding = await this.resolveSpec(by.spec);
@@ -1036,6 +1048,7 @@ export class AcService {
         field: "by",
         message: `Acceptance criterion "${acId}" cannot supersede itself`,
         value: `${by.spec}:${by.ac}`,
+        rule: "BR-1330",
       });
     }
     const replacement = extractCriteria(superseding.value).find((c) => c.id === by.ac);
@@ -1045,6 +1058,7 @@ export class AcService {
         field: "by",
         message: `Superseding criterion "${by.ac}" is not declared on spec "${superseding.value.slug}"`,
         value: by.ac,
+        rule: "BR-1330",
       });
     }
 
@@ -1068,6 +1082,7 @@ export class AcService {
         field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
         message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
         value: marked,
+        rule: "BR-1330",
       });
     }
     const written = await this.writeCriteria(spec, parsed.data, "supersede", {
@@ -1320,6 +1335,7 @@ function supersededRefusal(criterion: AcceptanceCriterion | undefined): LoreErro
       `Acceptance criterion "${criterion.id}" is superseded by ${marker.spec}:${marker.ac} (${marker.reason}) ` +
       "and is immutable — it cannot be edited, removed, cited or superseded again",
     value: criterion.id,
+    rule: "BR-1330",
   };
 }
 
@@ -1334,6 +1350,7 @@ function unknownCriterionError(existing: readonly AcceptanceCriterion[], acId: s
         ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
         : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
     value: acId,
+    rule: "BR-1330",
   };
 }
 

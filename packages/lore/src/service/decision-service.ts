@@ -31,7 +31,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2, AC-AU-3;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
  */
-import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
+import { decide, err, ok, validationError, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
 import {
   AutonomyCalibrationService,
   classConfidence,
@@ -105,10 +105,6 @@ export interface DecisionServiceDeps {
   readonly subjectProbes?: SubjectExistenceProbes;
   /** Reversal probes: when present, every decide() first sweeps new outcomes of earlier auto decisions. */
   readonly reversalProbes?: readonly ReversalProbe[];
-}
-
-function validationError(field: string, message: string): LoreError {
-  return { code: "VALIDATION_ERROR", field, message };
 }
 
 /** Which queue a {@link DecisionReadView} belongs to: a blocking open decision, or a non-blocking audit item. */
@@ -570,14 +566,14 @@ export class DecisionService {
     proof: HumanChannelProof,
   ): Promise<Result<DecisionLogRow, LoreError>> {
     if (!isIssuedHumanChannelProof(proof)) {
-      return err(validationError("proof", "a human-tty record needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)"));
+      return err(validationError("proof", "a human-tty record needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)", undefined, "BR-1249"));
     }
     const rows = await this.deps.store.listDecisionLog();
     if (!rows.ok) return rows;
     const pending = derivePendingDecisions(rows.value);
     if (!pending.ok) return pending;
     const target = pending.value.find((p) => p.id === pendingId);
-    if (target === undefined) return err(validationError("id", `decision ${pendingId} is not pending`));
+    if (target === undefined) return err(validationError("id", `decision ${pendingId} is not pending`, undefined, "BR-1252"));
     const verdict = answer === "accept" ? "auto" : "refuse";
     const head = decisionChainHead(rows.value);
     const input: DecisionRecordInput = {

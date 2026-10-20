@@ -23,8 +23,10 @@ import type { LoreError, Result } from "@lore/core";
 
 /** Minimal file port. `read` returns null ONLY for a missing file; other failures throw. */
 export interface ClaudeSettingsFs {
+  /** @lore-site BR-827 */
   read(path: string): string | null;
   /** Creates parent directories as needed. May throw on a genuine IO failure. */
+  /** @lore-site BR-827 */
   write(path: string, content: string): void;
 }
 
@@ -43,6 +45,7 @@ export function resolveLanguageName(code: string, layer: LanguageLayer): Result<
       field: "context.language",
       message: `${layer} context.language "${code}" is not a known code (known: ${Object.keys(LANGUAGE_NAMES).join(", ")})`,
       value: code,
+      rule: "BR-828",
     });
   }
   return ok((LANGUAGE_NAMES as Readonly<Record<string, string>>)[code] as string);
@@ -79,6 +82,7 @@ export class ClaudeSettingsPort {
         field: "settings",
         message: `${path} is not valid JSON, refusing to overwrite it: ${cause instanceof Error ? cause.message : String(cause)}`,
         value: path,
+        rule: "BR-827",
       });
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -87,6 +91,7 @@ export class ClaudeSettingsPort {
         field: "settings",
         message: `${path} must hold a JSON object at its root, refusing to overwrite it`,
         value: path,
+        rule: "BR-827",
       });
     }
 

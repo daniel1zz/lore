@@ -59,24 +59,9 @@ function runRecorded(c: MiniCorpus, args: string[]): { status: number; out: stri
   return { status: r.status ?? -1, out: `${r.stdout}${r.stderr}`, censusCalls };
 }
 
-/**
- * Store `value` as the only site_map entry of `site` on `leaf`, straight into the throwaway corpus (the write verb refuses free
- * text once its own task lands, so the fixture never goes through it). A bun subprocess, because bun:sqlite is not loadable here.
- */
-function seedSiteMapValue(c: MiniCorpus, leaf: string, site: string, value: string): void {
-  const code = `
-    import { Database } from "bun:sqlite";
-    const [dbPath, slug, site, value] = process.argv.slice(1);
-    const db = new Database(dbPath);
-    const row = db.query("SELECT extra FROM docs WHERE slug = ?").get(slug);
-    if (!row) throw new Error("no doc " + slug);
-    const extra = JSON.parse(row.extra);
-    extra.site_map = { ...(extra.site_map ?? {}), [site]: [value] };
-    db.query("UPDATE docs SET extra = ? WHERE slug = ?").run(JSON.stringify(extra), slug);
-    db.close();
-  `;
-  const r = spawnSync("bun", ["-e", code, join(c.dir, ".lore", "lore.db"), leaf, site, value], { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`seeding failed: ${r.stderr}${r.stdout}`);
+/** Declare a rule id that no baseline node holds at alpha's refusal site, in the tree itself (BR-1344). */
+function declareUnknownRuleAtAlpha(c: MiniCorpus): void {
+  c.writeSource(`${MINI_CLI}/lib/shared.ts`, `import { err } from "./result.js";\nexport function checkShared() {\n  return err({ code: "ALPHA_BAD", rule: "BR-99999" });\n}\n`);
 }
 
 describe("AC-BCG-2 the floor step gates undeclared commands only", () => {
@@ -106,23 +91,22 @@ describe("AC-BCG-2 the floor step gates undeclared commands only", () => {
     expect(r.out).toContain("fix: lore baseline map <leaf> --command gamma");
   }, 180_000);
 
-  it("a leaf storing a non-BR site_map value does not fail the step: exit exactly 0 when every command is declared, census never run", async () => {
+  it("a site declaring an unknown rule does not fail the step: exit exactly 0 when every command is declared, census never run", async () => {
     const c = await mini();
-    const [site] = await c.sitesOf("alpha");
-    seedSiteMapValue(c, c.leafA, site as string, "non-business: seeded excuse");
-    // the full report still exits 2 (corrupt data), proving the seed is really stored and read
+    declareUnknownRuleAtAlpha(c);
+    // the full report names the invalid declaration and stays report-only, proving the declaration is really read
     const full = runRecorded(c, ["run", LORE_ENTRY, "baseline", "coverage", c.root]);
-    expect(full.status, full.out).toBe(2);
+    expect(full.status, full.out).toBe(0);
+    expect(full.out).toContain("BR-99999");
     const r = runRecorded(c, [STEP]);
     expect(r.status, r.out).toBe(0);
     expect(r.censusCalls).toEqual([]);
-    expect(r.out).not.toContain("seeded excuse");
+    expect(r.out).not.toContain("BR-99999");
   }, 180_000);
 
-  it("with that non-BR value stored, an undeclared command still exits exactly 1 naming it", async () => {
+  it("with that unknown declaration in the tree, an undeclared command still exits exactly 1 naming it", async () => {
     const c = await mini();
-    const [site] = await c.sitesOf("alpha");
-    seedSiteMapValue(c, c.leafA, site as string, "non-business: seeded excuse");
+    declareUnknownRuleAtAlpha(c);
     registerGamma(c);
     const r = runRecorded(c, [STEP]);
     expect(r.status, r.out).toBe(1);

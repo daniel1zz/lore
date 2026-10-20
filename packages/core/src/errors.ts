@@ -4,8 +4,23 @@
  * Source: SPEC-001 §5
  */
 
+/**
+ * A permanent business-rule id (`BR-<n>`): the rule a refusal enforces. Declared where the refusal is written (the `rule`
+ * member below, a rule-taking helper's argument, or an `@lore-site BR-<n>` tag), never in the corpus; the site census reads
+ * it from the tree it judges (spec-refusal-sites-declare-their-rule-in-code-baseline-leaf, BR-1344).
+ */
+export type RuleId = `BR-${number}`;
+
+/** Member every refusal may carry: the rule it enforces. Absent = the site is `unmapped` in the census. */
+// reason: a `type` alias (not an interface) so every LoreError member keeps its implicit index signature: callers assign errors to
+// `{ [k: string]: unknown; code: string }` shapes, which an interface in the intersection would break.
+export type RuleDeclared = {
+  rule?: RuleId;
+};
+
 /** Discriminated union of all service-layer errors; the variants below are the SSOT for the code list. */
-export type LoreError =
+export type LoreError = RuleDeclared &
+  (
   | {
       code: "DOC_NOT_FOUND";
       id: string;
@@ -237,7 +252,8 @@ export type LoreError =
       violations: AcCiteViolation[];
       /** Present on every refusal the service raises; absent only on the store's bare in-transaction refusal. */
       feeding_pack?: AcCiteFeedingPack;
-    };
+    }
+  );
 
 /** Why one criterion fails the citation gate; `rule_id` names the offending id when it cites one. */
 export interface AcCiteViolation {
@@ -269,4 +285,35 @@ export function ok<T>(value: T): Result<T, never> {
 /** Wrap an error in a Result. */
 export function err<E extends LoreError>(error: E): Result<never, E> {
   return { ok: false, error };
+}
+
+/** The `VALIDATION_ERROR` member of {@link LoreError}. */
+export type ValidationLoreError = Extract<LoreError, { code: "VALIDATION_ERROR" }>;
+
+/** The `STORE_ERROR` member of {@link LoreError}. */
+export type StoreLoreError = Extract<LoreError, { code: "STORE_ERROR" }>;
+
+/**
+ * The one `VALIDATION_ERROR` constructor. `rule` is the business rule the refusal enforces; the site census reads it from the
+ * call's last argument, so `err(validationError("f", "m", undefined, "BR-1"))` declares BR-1 at that call (BR-1344).
+ *
+ * @param field - the refused input's name.
+ * @param message - what is wrong and how to fix it.
+ * @param value - the offending value; the key is omitted when `undefined`.
+ * @param rule - the rule this refusal enforces; omitted = undeclared (reported `unmapped`).
+ * @example
+ * return err(validationError("slug", "slug is taken", slug, "BR-12"));
+ */
+export function validationError(field: string, message: string, value?: unknown, rule?: RuleId): ValidationLoreError {
+  return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}), ...(rule !== undefined ? { rule } : {}) };
+}
+
+/**
+ * The one `STORE_ERROR` constructor; `cause` is kept only when it is an `Error`. `rule` as in {@link validationError}.
+ *
+ * @example
+ * return err(storeError("write failed", cause, "BR-30"));
+ */
+export function storeError(message: string, cause?: unknown, rule?: RuleId): StoreLoreError {
+  return { code: "STORE_ERROR", message, ...(cause instanceof Error ? { cause } : {}), ...(rule !== undefined ? { rule } : {}) };
 }

@@ -22,7 +22,7 @@
  * Side-effect class: IO through the injected FsWritePort (at most one selection-file write per change).
  */
 import { createHash } from "node:crypto";
-import { err, ok, type Fragment, type FragmentDelivery, type FsWritePort, type LoreError, type Result } from "@lore/core";
+import { err, ok, validationError, type Fragment, type FragmentDelivery, type FsWritePort, type LoreError, type Result } from "@lore/core";
 import { discoverFragments, type FragmentRoots } from "../service/context-fragments/discover.js";
 import {
   addToDisable,
@@ -82,17 +82,13 @@ function hashFileBytes(content: string | null): string {
   return content === null ? "absent" : `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
 }
 
-function validationError(field: string, message: string): SelectionFlowError {
-  return { code: "VALIDATION_ERROR", field, message };
-}
-
 /** Discover each layer separately: ownership checks need un-merged fragments (discoverFragments merges by id). */
 async function discoverUnmerged(deps: SelectionFlowDeps): Promise<Result<Fragment[], SelectionFlowError>> {
   const all: Fragment[] = [];
   for (const layer of LAYERS) {
     const roots: FragmentRoots = { [layer]: deps.roots[layer] };
     const found = await discoverFragments(deps.fs, roots);
-    if (!found.ok) return err(validationError("fragments", found.error.message));
+    if (!found.ok) return err(validationError("fragments", found.error.message, undefined, "BR-900"));
     all.push(...found.value);
   }
   return ok(all);
@@ -107,6 +103,7 @@ async function readSelection(
   const bytes = await deps.fs.readFile(path);
   if (bytes === null) return ok({ bytes, selection: emptySelection() });
   const parsed = parseSelection(bytes, path);
+  /** @lore-site BR-1062 */
   if (!parsed.ok) return err(parsed.error);
   return ok({ bytes, selection: parsed.value });
 }
@@ -123,7 +120,7 @@ export async function runSelectionList(deps: SelectionFlowDeps): Promise<Result<
   const user = await readSelection(deps, "user");
   if (!user.ok) return user;
   const discovered = await discoverFragments(deps.fs, deps.roots);
-  if (!discovered.ok) return err(validationError("fragments", discovered.error.message));
+  if (!discovered.ok) return err(validationError("fragments", discovered.error.message, undefined, "BR-900"));
 
   const disabled = new Set([...project.value.selection.disable, ...user.value.selection.disable]);
   const entries = discovered.value.map(
@@ -160,6 +157,7 @@ export async function runSelectionChange(
     input.action === "remove"
       ? addToDisable(current.value.selection, input.id, input.scope, fragments.value)
       : removeFromDisable(current.value.selection, input.id, fragments.value);
+  /** @lore-site BR-1063 */
   if (!next.ok) return err(next.error);
 
   const content = serializeSelection(next.value);
@@ -173,12 +171,14 @@ export async function runSelectionChange(
       code: "CONFLICT",
       path,
       message: `refusing to write ${path} — it changed after it was read (another writer interleaved); nothing was written. Re-run the command.`,
+      rule: "BR-1063",
     });
   }
   const written = await deps.fs.writeFile(path, content);
   if (!written.ok) {
     // reason: the rooted port refuses with VALIDATION_ERROR (BR-1177); any other code is a port-contract breach, surfaced as one.
     const refusal = written.error;
+    /** @lore-site BR-1177 */
     return err(refusal.code === "VALIDATION_ERROR" ? refusal : validationError("path", `write of ${path} failed: ${refusal.code}`));
   }
   return ok(outcome);
