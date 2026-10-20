@@ -192,6 +192,11 @@ function gitFailure(what: string, outcome: OwnDiffGitOutcome): LoreError {
   return { code: "STORE_ERROR", message: `integrate: judging the own diff failed: ${what} (git exit ${outcome.status}): ${(outcome.stderr || outcome.stdout).trim()}` };
 }
 
+/** A claimed holder after directory anchors were narrowed; `unmeasured` = its branch could not be read, so it holds whole directories. */
+interface LiveHolder extends OtherTask {
+  readonly unmeasured?: boolean;
+}
+
 /** One violation of BR-1346: `label` is what the refusal names, `holder` the task, `anchor` the anchor that holds it. */
 interface Collision {
   readonly label: string;
@@ -291,12 +296,12 @@ export class OwnDiffJudgment {
    * A claimed holder's directory anchor (trailing `/`) holds only the files the holder's claimed branch changed
    * (`merge-base(main, holderBranch)..holderBranch`), per the `lore anchor add` contract, never the whole directory.
    * File and symbol anchors pass through unchanged. A holder with a directory anchor whose branch cannot be measured
-   * (no branch recorded, or it no longer exists) is an `err` naming the task: guessing either way would be silent.
+   * (no branch recorded, or it no longer exists) keeps the whole directory and is flagged `unmeasured`.
    * (The claim-time gate, `gate-predicates.ts`, still treats a directory anchor as the whole directory.)
    */
-  private narrowDirectoryAnchors(branch: string, holders: readonly OtherTask[]): Result<OtherTask[], LoreError> {
+  private narrowDirectoryAnchors(branch: string, holders: readonly OtherTask[]): Result<LiveHolder[], LoreError> {
     const { git, projectRoot } = this.deps;
-    const narrowed: OtherTask[] = [];
+    const narrowed: LiveHolder[] = [];
     for (const task of holders) {
       const dirs = task.anchors.filter((a) => a.endsWith("/"));
       if (dirs.length === 0) {
@@ -316,11 +321,10 @@ export class OwnDiffJudgment {
         break;
       }
       if (changed === undefined) {
-        return err(
-          refusal(
-            `integrate: refused ${branch}: ${task.slug} holds directory anchor ${dirs.join(", ")} but its claimed branch cannot be measured (recorded: ${task.claimedBranches.join(", ") || "none"}); nothing was landed. Release or re-claim ${task.slug} on an existing branch.`,
-          ),
-        );
+        // reason: an unmeasurable branch fails closed (holds the whole directory), and the refusal names it unmeasured
+        // (spec-at-integrate-an-unlanded-change-holds-a-path-only-while, end state 4); never a guess that it holds nothing.
+        narrowed.push({ ...task, unmeasured: true });
+        continue;
       }
       const touched = changed;
       const anchors = task.anchors.flatMap((a) => (a.endsWith("/") ? touched.filter((p) => p.startsWith(a)) : [a]));
@@ -370,13 +374,13 @@ export class OwnDiffJudgment {
   }
 
   /** Every (changed file or symbol, live holder) pair whose anchors overlap; names the finest thing held. */
-  private collisionsOf(live: readonly OtherTask[], candidates: ReadonlyMap<string, readonly string[]>): Collision[] {
+  private collisionsOf(live: readonly LiveHolder[], candidates: ReadonlyMap<string, readonly string[]>): Collision[] {
     const found = new Map<string, Collision>();
     for (const [path, spellings] of candidates) {
       for (const task of live) {
         for (const [mine, theirs] of anchorsOverlap([...spellings], [...task.anchors]).pairs) {
           const label = splitFileAnchor(theirs).symbol !== undefined ? mine : path;
-          found.set(`${label}\0${task.slug}`, { label, holder: task.slug, anchor: theirs });
+          found.set(`${label}\0${task.slug}`, { label, holder: task.slug, anchor: task.unmeasured === true ? `${theirs}; holder's branch unmeasured, holds the whole directory` : theirs });
         }
       }
     }

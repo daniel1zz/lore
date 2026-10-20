@@ -140,4 +140,42 @@ describe("BR-1346 — a released holder never blocks another branch's landing", 
     if (!verdict.ok) return;
     expect(verdict.value.unlanded_overlaps).toEqual([{ task: "released-holder", branch: "other-b", paths: ["src/shared.ts"] }]);
   }, 300_000);
+
+  it("(4) a claimed holder whose branch cannot be measured holds the whole directory and is named unmeasured", async () => {
+    const f = new OwnDiffFixture();
+    fx = f;
+    f.commitOnMain({ "src/shared.ts": shared(1, 1) }, "base");
+    f.makeBranch("mine-b", { "src/shared.ts": shared(5, 1) });
+    const tip = f.git(["rev-parse", "mine-b"]);
+    const judgment = new OwnDiffJudgment({
+      git: (cwd, args) => {
+        try {
+          return { status: 0, stdout: execFileSync("git", [...args], { cwd, env: ownDiffFixtureEnv(), stdio: ["ignore", "pipe", "pipe"] }).toString(), stderr: "" };
+        } catch (e) {
+          const x = e as { status?: number; stdout?: Buffer; stderr?: Buffer };
+          return { status: x.status ?? 1, stdout: x.stdout?.toString() ?? "", stderr: x.stderr?.toString() ?? "" };
+        }
+      },
+      projectRoot: f.dir,
+      ownership: {
+        read: async () => ({
+          ok: true as const,
+          value: {
+            own: [{ slug: "mine", anchors: ["src/other.ts"] }],
+            others: [{ slug: "ghost-holder", anchors: ["src/"], held: true, claimedBranches: ["no-such-branch"] }],
+          },
+        }),
+      },
+      loadCoChangeRules: () => ({ measured: true, rules: [] }),
+      matchesGlob: () => false,
+    });
+
+    const verdict = await judgment.judge("mine-b", tip);
+
+    expect(verdict.ok).toBe(false);
+    if (verdict.ok) return;
+    expect(JSON.stringify(verdict.error)).toContain("ghost-holder");
+    expect(JSON.stringify(verdict.error)).toContain("unmeasured");
+    expect(JSON.stringify(verdict.error)).toContain("src/shared.ts");
+  }, 300_000);
 });
