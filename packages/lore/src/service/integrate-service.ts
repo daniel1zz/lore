@@ -227,7 +227,7 @@ export interface IntegrateRequest {
   /**
    * The CALLER's attested run: the party the migrate child of both migrate steps runs as (`--harness-run <run>` is appended
    * to `migrate_command`), so its `migrate_schema` audit row names the caller and the child is not refused as a run-less
-   * write inside an agent harness. Required whenever `migrateCommand` is set; absent then = integrate is refused before
+   * write. Required whenever `migrateCommand` is set; absent (or not a plain run id) then = integrate is refused before
    * anything moves.
    */
   readonly harnessRun?: string | undefined;
@@ -368,7 +368,7 @@ export class IntegrateService {
         field: "identity",
         message:
           "lore integrate runs workflow.integrate.migrate_command as the caller's party, and this invocation has no attested agent run " +
-          "to hand it: nothing was integrated. Run it from an agent run the integration registered (`lore setup`).",
+          "(or its run id is not a plain run id) to hand it: nothing was integrated. Run it from an agent run the integration registered (`lore setup`).",
       });
     }
     // reason: first of every git side effect. BR-1273 refuses "before anything moves, with nothing changed", and a fetch
@@ -770,15 +770,10 @@ export class IntegrateService {
   }
 }
 
-/** A run id safe to put on a shell command line: the registry's `cc:<session>[:<agent>]` / `human:<hash>` shapes, never a free string. */
-function isChildRunId(run: string | undefined): run is string {
-  return run !== undefined && /^[A-Za-z0-9][A-Za-z0-9:._-]*$/.test(run);
-}
-
 /**
  * Runs `<command> --json --harness-run <run>` in `cwd` through the injected runner and reads the report. The child is a write
- * made by the caller's party, so it carries the caller's attested run (see {@link IntegrateRequest.harnessRun}); a run that is not a
- * plain run id is `failed` without spawning anything. A non-zero exit, or an exit 0
+ * made by the caller's party, so it carries the caller's attested run (see {@link IntegrateRequest.harnessRun}); a run that is
+ * not a plain run id is `failed` without spawning anything. A non-zero exit, or an exit 0
  * whose output carries no readable `--json` report (a migrate whose result cannot be named must not read as success),
  * is `failed`.
  *
@@ -806,6 +801,11 @@ export function runSchemaMigration(runner: FloorRunner, command: string, cwd: st
   }
   if (report === undefined) return { state: "failed", exit_status: 0, output_tail: `exited 0 but printed no readable --json report:\n${tail}`, corpus, command: full };
   return report.data.upgraded ? { state: "migrated", from: report.data.from, to: report.data.to } : { state: "current", version: report.data.to };
+}
+
+/** A run id safe to put on a shell command line: the registry's `cc:<session>[:<agent>]` / `human:<hash>` shapes, never a free string. */
+function isChildRunId(run: string | undefined): run is string {
+  return run !== undefined && /^[A-Za-z0-9][A-Za-z0-9:._-]*$/.test(run);
 }
 
 /** One line for a migration result: `schema: <from> -> <to>`, `schema: already current`, or the skip/failure in words. */

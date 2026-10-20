@@ -236,8 +236,8 @@ export default defineLoreCommand({
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
-      // reason: the migrate child of integrate runs as the CALLER's party (BR-1055), so the caller must have one: the VERIFIED
-      // run of this invocation (unregistered -> refused), resolved before anything moves.
+      // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
+      // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);

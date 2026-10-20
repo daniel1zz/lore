@@ -27,7 +27,7 @@ import { printLine } from "./output.js";
 import { findLoreDbPath, formatErrorFor, resolveActor } from "./utils.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import { bareDocWriter } from "../../service/corpus-service.js";
-import { withWriteContext } from "../../store/write-context-store.js";
+import { withVerifiedWriteContext } from "../../store/write-context-store.js";
 import { expireRunlessClaims } from "../../service/legacy-claim-expiry.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { probeSchemaVersion } from "../../store/schema-probe.js";
@@ -114,8 +114,9 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
     // The schema is current once the store opened, so every write below rides the one write route (bare writer: this
     // command never builds the app, which refuses the very corpus it repairs).
     // reason: the upgrade is a write made by the invocation's known party: its audit row and the expiry's version rows name the
-    // caller's RUN (BR-1032), not just a name. `resolveActor` above already refused an invocation with no party.
-    const writer = bareDocWriter(withWriteContext(store, { identity: inv.identity }));
+    // caller's VERIFIED run (an unregistered run stamps NULL with one warning), which is how `lore integrate`'s migrate child
+    // carries the caller. `resolveActor` above already refused an invocation with no party.
+    const writer = bareDocWriter(withVerifiedWriteContext(store, inv.identity, (line) => printLine(inv.io.stderr, line)));
     // reason: BR-1352 — leases written before claims compared runs name no run; they are expired once, here, so no stored
     // lease belongs to nobody. A failure fails the command loud; documents expired before it stay expired, a re-run continues.
     const expiry = await expireRunlessClaims(store, writer, actor, new Date().toISOString());
