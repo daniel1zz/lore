@@ -9,14 +9,12 @@
  *   initCorpusAt(repoDir, ambient, opts) — ONE atomic scaffold (BR-807/BR-810,
  *     spec-defect-clusters-round-2-part-a-sessions-seats-setup-init D5): the whole
  *     corpus (`.gitignore` from {@link LORE_DIR_GITIGNORE_ENTRIES}, `config.yaml` via
- *     `saveConfig` merged with the shipped config template, a migrated SQLite DB, the
- *     approved write-spec rule document, and the caller's `onDatabaseReady` step) is
+ *     `saveConfig` merged with the shipped config template, a migrated SQLite DB, and the
+ *     caller's `onDatabaseReady` step; NO corpus document, version or audit entry, BR-807) is
  *     built in a sibling temp directory and renamed into place only when complete. A
  *     failure at any step removes the temp directory and leaves NO `.lore`, so the next
  *     attempt runs as on a fresh directory.
  *   LORE_DIR_GITIGNORE_ENTRIES — the SSOT ignore list for `.lore/.gitignore`.
- *   WRITE_SPEC_RULE_TITLE / WRITE_SPEC_RULE_SLUG / WRITE_SPEC_RULE_SKILL_EXTRA — identity
- *     of the seeded rule document (also consumed by `scripts/seed-write-spec-rule.ts`).
  *
  * Invariants:
  *   - Does NOT check whether `.lore` already exists — that idempotency check is the
@@ -35,29 +33,26 @@
  *     never `Result<App>` — the `Result`-returning overload only triggers when a second
  *     `config` argument names an unknown `ai.provider`, which never applies to a fresh
  *     corpus.
- *   - `opts.configTemplateYaml` / `opts.writeSpecRuleContent` are OPTIONAL — this module
- *     never reads `assets/` itself (asset-root resolution is an ADAPTER concern, per
- *     `setup-args.ts`'s own module doc); the caller passes the raw text. A malformed
+ *   - `opts.configTemplateYaml` is OPTIONAL — this module never reads `assets/` itself
+ *     (asset-root resolution is an ADAPTER concern, per `setup-args.ts`'s own module
+ *     doc); the caller passes the raw text. A malformed
  *     (but present) config overlay is a LOUD stderr warning, never a fatal failure (D1's
  *     "a corrupted shipped asset must not brick corpus creation").
  *
- * Side-effect class: IO (fs writes + SQLite migration run + one store insert)
+ * Side-effect class: IO (fs writes + SQLite migration run)
  * Source: SPEC-046 §Design, task AC-046-E; SPEC-058 §Design Decisions D6; BR-807, BR-810,
  *   BR-587 (spec-defect-clusters-round-2-part-a-sessions-seats-setup-init D5).
  */
 
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ulid } from "ulidx";
 
-import { canonicaliseBody, DOC_TYPE_ROLE_MAP, err, ok } from "@lore/core";
-import type { AuditEntry, DocId, DocRecord, LoreConfig, LoreError, Result, Slug, VersionRecord } from "@lore/core";
+import { err, ok } from "@lore/core";
+import type { LoreConfig, LoreError, Result } from "@lore/core";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
 import { createApp, type App, type AppAmbient } from "../app.js";
-import { SQLiteStore } from "../store/sqlite-store.js";
-import { insertInitSeedDoc } from "../store/init-seed.js";
 import { describeConfigTemplateError, mergeConfigWithOverlay, parseConfigTemplateOverlay } from "./config-template.js";
 
 /**
@@ -73,15 +68,6 @@ export const LORE_DIR_GITIGNORE_ENTRIES: readonly string[] = [
   ".lore-project-check.json",
 ];
 
-/** Title of the seeded write-spec rule document — the idempotency key `scripts/seed-write-spec-rule.ts` also uses. */
-export const WRITE_SPEC_RULE_TITLE = "Write-spec rules (gate feeding source)";
-
-/** Slug of the seeded write-spec rule document. */
-export const WRITE_SPEC_RULE_SLUG = "knowledge-write-spec-rules-gate-feeding-source";
-
-/** `extra` of the seeded rule document: a `skill` the `spec-create` gate discovers by `applies_to`. */
-export const WRITE_SPEC_RULE_SKILL_EXTRA = { sub_type: "skill" as const, skill: { applies_to: "spec" } };
-
 /** Optional overrides for {@link initCorpusAt}. */
 export interface InitCorpusOptions {
   /** Project display name recorded in `config.yaml`; defaults to `repoDir`'s basename. */
@@ -95,14 +81,6 @@ export interface InitCorpusOptions {
    * present-but-malformed, both leave `config.yaml` as the bare `project:` block.
    */
   configTemplateYaml?: string;
-  /**
-   * Markdown body of the write-spec rule document (`assets/governance/write-spec-rule.md`), read by the
-   * adapter. When present the corpus is seeded with ONE approved `knowledge/skill` document holding it
-   * (one version, one audit entry); `actor` is then required. Omitted → no rule document is seeded.
-   */
-  writeSpecRuleContent?: string;
-  /** Resolved acting identity recorded on the seeded rule document's version and audit entry. */
-  actor?: string;
   /**
    * Runs against the finished-but-still-temporary corpus (an `App` over the temp database) BEFORE it is
    * moved into place; an `err` aborts the scaffold exactly like any other step (nothing is left behind).
@@ -217,11 +195,6 @@ async function buildCorpus(
     return err(storeFailure(`initCorpusAt: failed to initialize the SQLite DB at "${dbPath}"`, cause));
   }
 
-  if (opts.writeSpecRuleContent !== undefined) {
-    const seeded = await seedWriteSpecRuleDoc(dbPath, opts.writeSpecRuleContent, opts.actor);
-    if (!seeded.ok) return seeded;
-  }
-
   if (opts.onDatabaseReady !== undefined) {
     let app: App;
     try {
@@ -237,68 +210,4 @@ async function buildCorpus(
   }
 
   return ok(undefined);
-}
-
-/**
- * Inserts the write-spec rule document as ONE approved `knowledge/skill` doc with exactly one version and one
- * audit entry (a single atomic `insertWithProvenance`). `create` + `set(approved)` would write two versions, and
- * the service layer offers no approved-at-create door for a skill doc, so the seed goes through the store-layer door
- * `store/init-seed.ts` (store writes live only under `store/*` and `service/corpus-service.ts`).
- */
-async function seedWriteSpecRuleDoc(
-  dbPath: string,
-  content: string,
-  actor: string | undefined,
-): Promise<Result<void, LoreError>> {
-  if (actor === undefined || actor === "") {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "actor",
-      message: "initCorpusAt: seeding the write-spec rule document requires the acting identity",
-      value: actor,
-    });
-  }
-  const id = ulid() as DocId;
-  const now = new Date().toISOString();
-  const doc: DocRecord = {
-    id,
-    slug: WRITE_SPEC_RULE_SLUG as Slug,
-    type: "knowledge",
-    role: DOC_TYPE_ROLE_MAP["knowledge"],
-    title: WRITE_SPEC_RULE_TITLE,
-    status: "approved",
-    priority: "medium",
-    content: canonicaliseBody(content),
-    parent_id: null,
-    created_at: now,
-    updated_at: now,
-    created_by: actor,
-    version: 1,
-    deleted_at: null,
-    tags: [],
-    extra: { ...WRITE_SPEC_RULE_SKILL_EXTRA },
-    ordinal: null,
-  };
-  const version: VersionRecord = {
-    doc_id: id,
-    version: 1,
-    content: doc.content,
-    extra: doc.extra,
-    status: doc.status,
-    title: doc.title,
-    action: "create",
-    created_at: now,
-    created_by: actor,
-    slug: doc.slug,
-  };
-  const audit: AuditEntry = {
-    timestamp: now,
-    actor,
-    session_id: id,
-    action: "create",
-    doc_id: id,
-    details: { type: doc.type, slug: doc.slug, version: 1, auto: "init-seed" },
-  };
-
-  return insertInitSeedDoc(dbPath, doc, version, audit);
 }

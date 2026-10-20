@@ -65,10 +65,6 @@ function buildFixture(label: string, sections: readonly string[]): string {
   if (git.exitCode !== 0) throw new Error(`git init failed: ${git.stderr.toString()}`);
   const init = runLore(["init", "--name", "fixture", "--author", "fixture"], dir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.combined}`);
-  // TEMPORARY (pending the product decision on the seed's place in the tree): the seeded parentless knowledge doc reads
-  // as a tree orphan, so the fixture soft-deletes it to keep its baseline clean.
-  const dropped = runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
-  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.combined}`);
   const prd = runLore(["create", "prd", "--title", "Fixture Root", "--content", "Root PRD for the structure trip fixture.", "--no-ai"], dir);
   if (prd.exitCode !== 0) throw new Error(`lore create prd failed: ${prd.combined}`);
   writeFileSync(join(dir, "lore.tree.yaml"), "version: 1\nroot:\n  type: prd\n  children: []\n");
@@ -85,8 +81,8 @@ beforeAll(() => {
   if (!existsSync(DIST_BINARY)) throw new Error("dist/lore missing");
   copyFileSync(DIST_BINARY, join(realBinDir, "lore"));
   chmodSync(join(realBinDir, "lore"), 0o755);
-  // reason: a compiled `lore init` reads the config template and the write-spec rule from `<binary dir>/../assets` (DC2-5),
-  // as an installed package ships them beside the binary; the copy sits in a temp dir, so the repo's assets are linked in.
+  // reason: a compiled `lore init` reads the config template from `<binary dir>/../assets` (DC2-5),
+  // as an installed package ships it beside the binary; the copy sits in a temp dir, so the repo's assets are linked in.
   symlinkSync(join(REPO_ROOT, "assets"), join(tempRoot, "assets"));
 }, 300_000);
 

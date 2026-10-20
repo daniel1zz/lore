@@ -292,10 +292,6 @@ describe("gate-feeding fresh-install both-ends probe", () => {
         // against `freshDir`, mirroring the SAME `existsSync(controlDbPath)`
         // check END 2 already applies to its own corpus below.
         expect(existsSync(join(freshDir, ".lore", "lore.db"))).toBe(true);
-        // BR-807: `lore init` now seeds the approved write-spec rule doc itself. This end measures the
-        // compiled-in fallback, so archive that doc first (the control end keeps it).
-        const archiveSeeded = runLore(["set", "knowledge-write-spec-rules-gate-feeding-source", "--status", "archived"], freshDir);
-        expect(archiveSeeded.exitCode, archiveSeeded.stdout + archiveSeeded.stderr).toBe(0);
 
         const prdResult = runLore(
           ["create", "prd", "--title", "Fresh Root PRD", "--content", "# Fresh Root\n\nBody.", "--json"],

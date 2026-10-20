@@ -34,10 +34,6 @@ import { join } from "node:path";
 import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
 import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import type { LoreError } from "@lore/core";
-import {
-  WRITE_SPEC_RULE_SKILL_EXTRA,
-  WRITE_SPEC_RULE_TITLE as INIT_WRITE_SPEC_RULE_TITLE,
-} from "../packages/lore/src/flows/init-corpus.js";
 
 /** Operations `seedWriteSpecRule` may fail at — see {@link SeedWriteSpecRuleError}. */
 type SeedOperation = "list" | "create" | "approve" | "upgrade";
@@ -60,12 +56,13 @@ export class SeedWriteSpecRuleError extends Error {
   }
 }
 
-/** Title uniquely identifying the seeded doc — idempotency lookup key (see `seedWriteSpecRule`). Shared with `lore init`. */
-export const WRITE_SPEC_RULE_TITLE = INIT_WRITE_SPEC_RULE_TITLE;
+/** Title uniquely identifying the seeded doc — idempotency lookup key (see `seedWriteSpecRule`). */
+export const WRITE_SPEC_RULE_TITLE = "Write-spec rules (gate feeding source)";
 
 /**
- * Markdown body of the seeded doc — read from the shipped asset `assets/governance/write-spec-rule.md`, the SSOT
- * `lore init` seeds from too, so the script and a fresh corpus never carry two diverging rule texts.
+ * Markdown body of the seeded doc — read from the shipped asset `assets/governance/write-spec-rule.md`, the SSOT the
+ * binary's gate feeds from when a corpus has no rule doc of its own (BR-1359), so this repo's own corpus doc and the
+ * shipped fallback never carry two diverging rule texts.
  */
 export const WRITE_SPEC_RULE_CONTENT = readFileSync(
   join(import.meta.dirname, "..", "assets", "governance", "write-spec-rule.md"),
@@ -89,7 +86,7 @@ export interface SeedResult {
 }
 
 /** `extra` shape written on both the create path and the in-place upgrade path. */
-const SKILL_EXTRA = WRITE_SPEC_RULE_SKILL_EXTRA;
+const SKILL_EXTRA = { sub_type: "skill" as const, skill: { applies_to: "spec" } };
 
 /**
  * Ensures the write-spec-rule `sub_type: "skill"` doc exists and is `approved`:

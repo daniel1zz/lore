@@ -59,13 +59,14 @@ export const RETIREMENTS: readonly Retirement[] = [
     still_shipped: true,
   },
   {
-    // reason: the rule document is a corpus SEED, not a machine-install file — `lore init` reads it off the binary's own
-    // assets root and writes it into the new corpus (DC2-5), so `lore setup` must neither write nor manifest-track it.
+    // reason: the write-spec rule is binary-read, not a machine-install file — `lore gate spec-create` reads it off the
+    // binary's own assets root when a corpus has no rule doc of its own (BR-1359), so `lore setup` must neither write
+    // nor manifest-track it, and `lore init` writes no document for it (BR-807).
     id: "install-governance-write-spec-rule",
     kind: "install-asset",
     target: "governance/write-spec-rule.md",
-    replacement: "lore init (seeds the approved write-spec rule document into the corpus)",
-    spec_ref: "spec-defect-clusters-round-2-part-a-sessions-seats-setup-init AC-DC2-5",
+    replacement: "lore gate spec-create (reads the write-spec rule shipped with the binary)",
+    spec_ref: "spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes BR-1359",
     still_shipped: true,
   },
   {

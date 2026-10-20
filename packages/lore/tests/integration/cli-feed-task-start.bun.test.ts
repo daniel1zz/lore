@@ -109,10 +109,6 @@ async function initCorpus(dir: string): Promise<void> {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
-  // reason: `lore init` seeds the approved write-spec rule document (DC2-5); this suite's cases govern a spec by a skill
-  // doc it creates itself (and one asserts the no-skill note), so the seed is soft-deleted (a deleted doc governs nothing).
-  const dropped = await runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
-  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
 }
 
 function parseSlug(stdout: string): string {

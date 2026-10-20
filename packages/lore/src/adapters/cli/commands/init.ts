@@ -2,8 +2,8 @@
  * lore init — create the `.lore/` corpus as ONE atomic scaffold.
  *
  * BR-807 / BR-810 (spec-defect-clusters-round-2-part-a-sessions-seats-setup-init D5): the corpus
- * (ignore list, `config.yaml` seeded from the shipped template, migrated SQLite DB, the approved
- * write-spec rule document, and the state-binding arm) is built in a sibling temp directory by
+ * (ignore list, `config.yaml` seeded from the shipped template, migrated SQLite DB, and the
+ * state-binding arm) is built in a sibling temp directory by
  * `flows/init-corpus.ts::initCorpusAt` and renamed into place only when complete. Any failing step
  * exits 1 and leaves no `.lore`, so a retry runs as on a fresh directory.
  *
@@ -11,6 +11,10 @@
  * note protected fixtures which `appendFileSync` a second top-level `workflow:` block onto a freshly
  * initialised `config.yaml`. The user's decision (BR-807 as modified) is that a fresh corpus carries
  * the template; such fixtures must merge their overrides instead of appending.
+ *
+ * It writes no corpus document, version or audit entry (BR-807): the write-spec rule the spec-create gate feeds
+ * ships with the binary (`assets/governance/write-spec-rule.md`, read by `lore gate`, BR-1359), so a fresh corpus
+ * passes `lore status --check-tree`.
  *
  * Side-effect class: IO (fs writes, SQLite, one rename).
  */
@@ -32,9 +36,8 @@ import { resolveAssetsRoot } from "../setup-args.js";
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
 
-/** Shipped asset names `lore init` seeds from (paths relative to the resolved `assets/` root). */
+/** Shipped asset `lore init` seeds the settings from (path relative to the resolved `assets/` root). */
 const CONFIG_TEMPLATE_ASSET = join("project", "lore-config-template.yaml");
-const WRITE_SPEC_RULE_ASSET = join("governance", "write-spec-rule.md");
 
 /** Reads one shipped asset; a missing or unreadable asset is a loud `STORE_ERROR` (never a silent skip). */
 function readShippedAsset(assetsRoot: string, relativePath: string): Result<string, LoreError> {
@@ -92,8 +95,6 @@ export default defineLoreCommand({
     const assetsRoot = resolveAssetsRoot({ repoRoot: REPO_ROOT, isCompiled: inv.isCompiled, execPath: inv.execPath });
     const template = readShippedAsset(assetsRoot, CONFIG_TEMPLATE_ASSET);
     if (!template.ok) return fail(formatErrorFor(inv, template.error));
-    const ruleDoc = readShippedAsset(assetsRoot, WRITE_SPEC_RULE_ASSET);
-    if (!ruleDoc.ok) return fail(formatErrorFor(inv, ruleDoc.error));
 
     // reason: SPEC-143 AC-CT-3 — a fresh corpus is armed at init: nothing predates the cutoff, so
     // the R13 impact report is zero rows by construction, and both write paths (`lore verify`,
@@ -113,8 +114,6 @@ export default defineLoreCommand({
       name: projectName,
       author: args.author,
       configTemplateYaml: template.value,
-      writeSpecRuleContent: ruleDoc.value,
-      actor,
       onDatabaseReady: async (app) => {
         if (!insideGit) return ok(undefined);
         const stateBinding = app.stateBindingService;

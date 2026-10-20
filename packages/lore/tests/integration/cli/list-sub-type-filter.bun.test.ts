@@ -107,10 +107,6 @@ interface ListPayload {
 function initCorpus(dir: string): void {
   const result = runLore(["init"], dir);
   if (result.exitCode !== 0) throw new Error(`lore init failed: ${result.stderr}`);
-  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); this suite lists knowledge docs it
-  // created itself, so the seed is soft-deleted (a deleted doc is not listed).
-  const dropped = runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
-  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
 }
 
 function createRootPrd(dir: string): string {

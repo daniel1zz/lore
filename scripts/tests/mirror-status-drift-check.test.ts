@@ -144,9 +144,6 @@ function seedExportedMirror(): Seeded {
   const dir = mkdtempSync(join(tmpdir(), "lore-mirror-status-"));
   tmpDirs.push(dir);
   execFileSync("bun", [LORE_ENTRY, "init", "--author", "mirror-status-test"], { cwd: dir, stdio: "pipe" });
-  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the fixture population is exactly
-  // "1 knowledge doc", so the seed is soft-deleted (a deleted doc is not mirrored).
-  execFileSync("bun", [LORE_ENTRY, "delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], { cwd: dir, stdio: "pipe" });
   const { id, slug } = createKnowledge(dir, "Status Drift Probe");
   const dbPath = join(dir, ".lore", "lore.db");
   const driverPath = writeDriver(dir);

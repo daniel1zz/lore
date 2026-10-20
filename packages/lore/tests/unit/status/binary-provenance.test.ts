@@ -129,8 +129,8 @@ beforeAll(() => {
   }
 
   tempRoot = mkdtempSync(join(tmpdir(), "lore-bfi1-"));
-  // reason: a compiled `lore init` reads the config template and the write-spec rule from `<binary dir>/../assets`
-  // (DC2-5), as an installed package ships them beside the binary; the variant binary sits in `<tempRoot>/bin`, so
+  // reason: a compiled `lore init` reads the config template from `<binary dir>/../assets`
+  // (DC2-5), as an installed package ships it beside the binary; the variant binary sits in `<tempRoot>/bin`, so
   // `<tempRoot>/assets` links the repo's assets in.
   mkdirSync(join(tempRoot, "bin"), { recursive: true });
   symlinkSync(join(REPO_ROOT, "assets"), join(tempRoot, "assets"));

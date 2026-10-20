@@ -115,9 +115,6 @@ function canonicalRow(slug: string): Record<string, unknown> {
 beforeAll(() => {
   seeded = makeFixtureDir("seeded");
   runLoreIn(seeded, ["init", "--author", "list-buffer-test"]);
-  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the row count asserted below is
-  // the probes' own, so the seed is soft-deleted (a deleted doc is not listed).
-  runLoreIn(seeded, ["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"]);
   for (let i = 1; i <= SEEDED_ROWS; i++) {
     runLoreIn(seeded, [
       "create", "knowledge", "--sub-type", "reference", "--title", `Buffer Probe ${i}`,

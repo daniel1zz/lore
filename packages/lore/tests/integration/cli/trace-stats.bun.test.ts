@@ -73,10 +73,6 @@ function initCorpus(dir: string): void {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
-  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5) that no one has read; the
-  // never-read count asserted here is this suite's own documents, so the seed is soft-deleted.
-  const dropped = runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
-  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
 }
 
 function writeConfig(projectDir: string, yamlBody: string): void {

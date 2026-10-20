@@ -341,32 +341,24 @@ describe("lore gate spec-create — AC-Quantifiability Gate CLI parity", () => {
   });
 });
 
-// ─── Suite: rule doc not seeded — feeding pack degrades to a placeholder ────
+// ─── Suite: no project rule doc — feeding pack falls back to the rule shipped with the binary (BR-1359) ────
 
-describe("lore gate spec-create: no seeded rule doc", () => {
+describe("lore gate spec-create: no project rule doc", () => {
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTempDir("no-rule-doc");
     initCorpus(tmpDir);
-    // `lore init` seeds the rule document (BR-807); archive it so this suite measures the NO-rule-doc path.
-    const archived = runLore(["set", "knowledge-write-spec-rules-gate-feeding-source", "--status", "archived"], tmpDir);
-    if (archived.exitCode !== 0) {
-      throw new Error(`could not archive the seeded rule doc: ${archived.stdout}${archived.stderr}`);
-    }
   });
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("BOUNDARY: still exits 4 with missing reasons even when no approved rule doc exists", () => {
+  it("BOUNDARY: still exits 4 with missing reasons, and the pack names the shipped rule as its source", () => {
     const result = runGate(tmpDir, { type: "spec", title: "x", parent_id: "some-parent", content: "no headings" });
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("MISSING_SKELETON");
-    expect(result.stdout).toContain("[source:");
-    // BR-587: the placeholder names only commands the product ships, never a dev-repo script.
-    expect(result.stdout).toContain("No approved rule doc found");
-    expect(result.stdout).toContain("lore init");
+    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md, trust: team-authored]");
     expect(result.stdout).not.toContain("bun scripts/");
   });
 });

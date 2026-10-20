@@ -276,9 +276,6 @@ function mirrorFixture(): MirrorFixture {
   const root = mkdtempSync(join(tmpdir(), "lore-mirror-export-"));
   assertInsideTmp(root);
   loreIn(root, ["init", "--author", "mirror-export-test"]);
-  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the fixture holds exactly one doc
-  // of each of the six types, so the seed is soft-deleted (a deleted doc is not mirrored).
-  loreIn(root, ["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"]);
   createDoc(root, ["prd", "--title", "Fixture Prd", "--content", "p"]);
   const specSlug = createDoc(root, ["spec", "--title", "Fixture Spec", "--content", SPEC_SKELETON]);
   createDoc(root, ["adr", "--title", "Fixture Adr", "--decision-status", "accepted", "--content", "d"]);

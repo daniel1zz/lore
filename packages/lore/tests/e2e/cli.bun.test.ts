@@ -63,9 +63,6 @@ writeFileSync(
   { mode: 0o755 },
 );
 
-/** `lore init` seeds ONE approved knowledge document (the write-spec rule, DC2-5): every fresh corpus starts with it. */
-const INIT_SEEDED_DOCS = 1;
-
 /**
  * Run `bun run src/index.ts ...args` in `cwd`.
  * HOME is overridden to `cwd` to isolate global config files.
@@ -414,12 +411,12 @@ describe("Scenario 4: discovery (list + search)", () => {
     cleanupDir(tmpDir);
   });
 
-  it("HAPPY: list returns all 3 documents plus the init-seeded rule document", () => {
+  it("HAPPY: list returns all 3 documents", () => {
     const result = runLore(["list", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{ docs: unknown[]; total: number }>(result);
-    // prd + spec + plan = 3 (knowledge/adr require extra fields, plan does not), plus what `lore init` seeded
-    expect(json.data!.total).toBe(3 + INIT_SEEDED_DOCS);
+    // prd + spec + plan = 3 (knowledge/adr require extra fields, plan does not)
+    expect(json.data!.total).toBe(3);
   });
 
   it("HAPPY: list --type spec returns only spec documents (AC-E2E-001.05)", () => {
@@ -469,14 +466,12 @@ describe("Scenario 4: discovery (list + search)", () => {
     expect(result.stdout).toContain("No results");
   });
 
-  it("BOUNDARY: list on a freshly initialised corpus shows only the init-seeded rule document", () => {
+  it("BOUNDARY: list on empty corpus shows 'No documents found'", () => {
     const emptyDir = makeTempDir("empty-list");
     runLore(["init"], emptyDir);
     const result = runLore(["list"], emptyDir);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).not.toContain("No documents found");
-    expect(result.stdout).toContain("Write-spec rules");
-    expect(result.stdout).toContain(`${INIT_SEEDED_DOCS} document`);
+    expect(result.stdout).toContain("No documents found");
     cleanupDir(emptyDir);
   });
 
@@ -699,7 +694,7 @@ describe("Scenario 8: JSON output composability", () => {
       last_updated: string;
     }>(result);
     expect(json.ok).toBe(true);
-    expect(json.data!.total_docs).toBe(2 + INIT_SEEDED_DOCS);
+    expect(json.data!.total_docs).toBe(2);
     expect(json.data!.by_type["prd"]).toBe(1);
     // plan is the second type (knowledge/adr require extra fields)
     expect(json.data!.by_type["plan"]).toBe(1);
@@ -761,11 +756,11 @@ describe("Scenario 9: status command", () => {
     cleanupDir(tmpDir);
   });
 
-  it("HAPPY: status on fresh project shows only the init-seeded document", () => {
+  it("HAPPY: status on fresh project shows 0 documents", () => {
     const result = runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{ total_docs: number }>(result);
-    expect(json.data!.total_docs).toBe(INIT_SEEDED_DOCS);
+    expect(json.data!.total_docs).toBe(0);
   });
 
   it("HAPPY: status after creating docs reflects count by type (AC-E2E-001.10)", () => {
@@ -776,7 +771,7 @@ describe("Scenario 9: status command", () => {
     const result = runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{ total_docs: number; by_type: Record<string, number> }>(result);
-    expect(json.data!.total_docs).toBe(2 + INIT_SEEDED_DOCS);
+    expect(json.data!.total_docs).toBe(2);
     expect(json.data!.by_type["prd"]).toBe(1);
     expect(json.data!.by_type["plan"]).toBe(1);
   });

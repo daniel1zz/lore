@@ -78,10 +78,6 @@ function parseJsonSlug(stdout: string): string {
 async function initCorpus(tmpDir: string): Promise<void> {
   const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`lore init failed: ${result.stderr}`);
-  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the staleness probes asserted here
-  // are over this suite's own documents, so the seed is soft-deleted (a deleted doc is not probed).
-  const dropped = await runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], tmpDir);
-  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
 }
 
 async function createKnowledge(tmpDir: string, title: string): Promise<string> {

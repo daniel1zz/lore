@@ -52,9 +52,6 @@ const slugOf = (stdout: string): string => (JSON.parse(stdout) as { data: { slug
 
 const tmpDir = mkdtempSync(join(tmpdir(), "lore-list-omitted-invalid-"));
 runOrThrow(["init"], tmpDir, "lore init");
-// reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the totals asserted below are this
-// suite's own documents, so the seed is soft-deleted (a deleted doc is not listed).
-runOrThrow(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], tmpDir, "drop the init seed");
 patchLoreConfig(
   tmpDir,
   ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"),

@@ -176,8 +176,8 @@ beforeAll(() => {
   mkdirSync(realBinDir, { recursive: true });
   copyFileSync(DIST_BINARY, join(realBinDir, "lore"));
   chmodSync(join(realBinDir, "lore"), 0o755);
-  // reason: a compiled `lore init` reads the config template and the write-spec rule from `<binary dir>/../assets` (DC2-5),
-  // as an installed package ships them beside the binary; the copy sits in a temp dir, so the repo's assets are linked in.
+  // reason: a compiled `lore init` reads the config template from `<binary dir>/../assets` (DC2-5),
+  // as an installed package ships it beside the binary; the copy sits in a temp dir, so the repo's assets are linked in.
   symlinkSync(join(REPO_ROOT, "assets"), join(tempRoot, "assets"));
 
   // ── dev-stale fixture: a clone whose HEAD has moved past the build commit ──

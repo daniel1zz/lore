@@ -105,10 +105,7 @@ beforeAll(() => {
     ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"),
   );
   copyFileSync(join(REPO_ROOT, "lore.tree.yaml"), join(dir, "lore.tree.yaml"));
-  // reason: `lore init` seeds one parentless approved knowledge doc (the write-spec rule, DC2-5); the tree check reads
-  // it as an orphan, and this fixture's only orphan must be its own control, so the seed is soft-deleted.
-  mustRun(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"]);
-  prdSlug =slugOf(mustRun(["create", "prd", "--title", "Consumers PRD", "--content", "# Health\n\n<HealthStats />", "--no-ai"]).stdout);
+  prdSlug = slugOf(mustRun(["create", "prd", "--title", "Consumers PRD", "--content", "# Health\n\n<HealthStats />", "--no-ai"]).stdout);
   for (const title of ["Parentless Alpha", "Parentless Beta"]) {
     specSlugs.push(slugOf(mustRun(["create", "spec", "--title", title, "--content", SKELETON, "--no-ai"]).stdout));
   }

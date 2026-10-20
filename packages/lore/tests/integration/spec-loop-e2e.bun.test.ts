@@ -394,17 +394,15 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
     expect(step6.stdout).toContain("1 acceptance criteria");
   });
 
-  // ── ERROR: feeding pack still reports Missing: reasons even with no seeded rule doc ──
-  it("ERROR: gate spec-create still exits 4 with Missing: reasons when the rule doc was never seeded", async () => {
-    // Deliberately skip seedWriteSpecRule — the candidate names a parent, so the deterministic
-    // gate has no way to pass regardless of the rule doc's presence.
+  // ── ERROR: feeding pack still reports Missing: reasons with no project rule doc ──
+  it("ERROR: gate spec-create still exits 4 with Missing: reasons when the corpus has no rule doc of its own", async () => {
+    // The candidate names a parent, so the deterministic gate has no way to pass regardless of the rule doc.
     const result = await runGateSpecCreate(parentedPayload("some-parent"));
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("Missing:");
     expect(result.stdout).toContain("a spec takes no parent");
-    // BR-587: the placeholder names only commands the product ships (`lore init`), never a dev-repo script.
-    expect(result.stdout.toLowerCase()).toContain("no approved rule doc found");
-    expect(result.stdout.toLowerCase()).toContain("lore init");
+    // BR-1359: no project doc, so the rule shipped with the binary feeds the pack and its source line says so.
+    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md");
     expect(result.stdout).not.toContain("bun scripts/");
   });
 
