@@ -19,6 +19,8 @@ import { err } from "@lore/core";
 import type { VersionRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { AuditService } from "../../../src/service/audit-service.js";
+import { bareDocWriter } from "../../../src/service/corpus-service.js";
+import { withWriteContext } from "../../../src/store/write-context-store.js";
 import { AuditBackfillService, AUDIT_BACKFILL_BOUNDARY_SOURCE, AUDIT_BACKFILL_REASON } from "../../../src/service/audit-backfill-service.js";
 
 /** The first audit entry of every fixture corpus: the boundary. */
@@ -44,13 +46,35 @@ async function auditCount(store: InMemoryStore): Promise<number> {
 }
 
 describe("AuditBackfillService", () => {
+  it("STATE: every reconstructed entry carries the run of the writer's write context (the caller's), and a writer with no run writes nothing", async () => {
+    const store = await corpusWithTrailFrom();
+    await store.insertVersion(version("DOC1", 1, "2026-01-01T00:00:00.000Z", "create"));
+    const run = "cc:backfill-caller";
+    const writer = bareDocWriter(withWriteContext(store, { identity: { harnessRun: run, claimed: "agent:test", claimedSource: "run" } }));
+
+    const applied = await new AuditBackfillService(store, writer).run({ ...OPTS, apply: true });
+
+    expect(applied.ok).toBe(true);
+    const entries = await store.queryAudit({ action: "audit-backfill" });
+    expect(entries.ok && entries.value.map((entry) => (entry as { harness_run?: string }).harness_run)).toEqual([run]);
+
+    // NEGATIVE: a write context with no known party is refused by the store chokepoint, and nothing is appended.
+    const other = await corpusWithTrailFrom();
+    await other.insertVersion(version("DOC2", 1, "2026-01-01T00:00:00.000Z", "create"));
+    const nobody = bareDocWriter(withWriteContext(other, { identity: { harnessRun: null, claimed: null, claimedSource: null } }));
+    const before = await auditCount(other);
+    const refused = await new AuditBackfillService(other, nobody).run({ ...OPTS, apply: true });
+    expect(refused.ok).toBe(false);
+    expect(await auditCount(other)).toBe(before);
+  });
+
   it("HAPPY+REGRESSION: reconstructs a version before the earliest entry; verify passes, counts it, and the chain stays clean", async () => {
     const store = await corpusWithTrailFrom();
     await store.insertVersion(version("DOC1", 1, "2026-01-01T00:00:00.000Z", "create"));
     const before = await new AuditService(store).verify();
     expect(before.ok && before.value.clean).toBe(false);
 
-    const applied = await new AuditBackfillService(store).run({ ...OPTS, apply: true });
+    const applied = await new AuditBackfillService(store, bareDocWriter(store)).run({ ...OPTS, apply: true });
     expect(applied.ok).toBe(true);
     if (!applied.ok) return;
     expect(applied.value.boundary).toBe(FIRST_ENTRY_AT);
@@ -76,7 +100,7 @@ describe("AuditBackfillService", () => {
     const store = await corpusWithTrailFrom();
     await store.insertVersion(version("DOC1", 2, "2026-09-01T00:00:00.000Z"));
 
-    const applied = await new AuditBackfillService(store).run({ ...OPTS, apply: true });
+    const applied = await new AuditBackfillService(store, bareDocWriter(store)).run({ ...OPTS, apply: true });
     expect(applied.ok && applied.value.reconstructed).toEqual([]);
 
     const verify = await new AuditService(store).verify();
@@ -88,7 +112,7 @@ describe("AuditBackfillService", () => {
     await store.insertVersion(version("DOC1", 2, FIRST_ENTRY_AT));
     await store.insertVersion(version("DOC1", 3, "2026-01-01T00:00:00.000Z", "delete"));
 
-    const preview = await new AuditBackfillService(store).run({ ...OPTS, apply: false });
+    const preview = await new AuditBackfillService(store, bareDocWriter(store)).run({ ...OPTS, apply: false });
     expect(preview.ok && preview.value.reconstructed).toEqual([]);
   });
 
@@ -96,7 +120,7 @@ describe("AuditBackfillService", () => {
     const store = new InMemoryStore();
     await store.insertVersion(version("DOC1", 1, "2026-01-01T00:00:00.000Z", "create"));
 
-    const applied = await new AuditBackfillService(store).run({ ...OPTS, apply: true });
+    const applied = await new AuditBackfillService(store, bareDocWriter(store)).run({ ...OPTS, apply: true });
     expect(applied.ok).toBe(true);
     if (!applied.ok) return;
     expect(applied.value.boundary).toBeNull();
@@ -109,7 +133,7 @@ describe("AuditBackfillService", () => {
     await store.appendAuditEntry({ timestamp: "2026-06-28T05:50:02.104Z", actor: "agent:early", session_id: "s", action: "create", doc_id: "EARLY", details: {} });
     await store.insertVersion(version("DOC1", 1, "2026-07-01T00:00:00.000Z", "create"));
 
-    const preview = await new AuditBackfillService(store).run({ ...OPTS, apply: false });
+    const preview = await new AuditBackfillService(store, bareDocWriter(store)).run({ ...OPTS, apply: false });
     expect(preview.ok).toBe(true);
     if (!preview.ok) return;
     expect(preview.value.boundary).toBe(FIRST_ENTRY_AT);
@@ -119,7 +143,7 @@ describe("AuditBackfillService", () => {
   it("BOUNDARY: backfill entries never move the boundary — a later run derives the same one", async () => {
     const store = await corpusWithTrailFrom();
     await store.insertVersion(version("DOC1", 1, "2026-01-01T00:00:00.000Z", "create"));
-    const service = new AuditBackfillService(store);
+    const service = new AuditBackfillService(store, bareDocWriter(store));
     await service.run({ ...OPTS, apply: true });
 
     const again = await service.run({ ...OPTS, apply: false });
@@ -130,7 +154,7 @@ describe("AuditBackfillService", () => {
     const store = await corpusWithTrailFrom();
     await store.insertVersion(version("DOC1", 1, "2026-01-01T00:00:00.000Z", "create"));
     await store.insertVersion(version("DOC1", 2, "2026-02-01T00:00:00.000Z"));
-    const service = new AuditBackfillService(store);
+    const service = new AuditBackfillService(store, bareDocWriter(store));
     const base = await auditCount(store);
 
     const preview = await service.run({ ...OPTS, apply: false });
@@ -151,7 +175,7 @@ describe("AuditBackfillService", () => {
     await store.insertVersion(version("DOC1", 1, "2026-01-01T00:00:00.000Z", "create"));
     store.appendAuditEntry = async () => err({ code: "STORE_ERROR", message: "disk full" });
 
-    const applied = await new AuditBackfillService(store).run({ ...OPTS, apply: true });
+    const applied = await new AuditBackfillService(store, bareDocWriter(store)).run({ ...OPTS, apply: true });
     expect(applied).toEqual(err({ code: "STORE_ERROR", message: "disk full" }));
   });
 });

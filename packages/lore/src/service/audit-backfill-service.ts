@@ -17,11 +17,12 @@
  * @invariant Preview writes nothing. Every entry goes through `StoreInterface.appendAuditEntry`, so it extends the
  *   hash chain inside the store's own serialized write like any audit row.
  *
- * Side-effect class: IO (reads versions and audit; with `apply`, appends audit rows through the store).
+ * Side-effect class: IO (reads versions and audit; with `apply`, appends audit rows through the one write route).
  */
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import type { DocWritePort } from "./corpus-service.js";
 import { AUDIT_BACKFILL_ACTION, reconcileVersions, type AuditMiss } from "./audit-service.js";
 
 /** Why every backfill entry says its version has no original entry. */
@@ -55,8 +56,15 @@ export interface AuditBackfillReport {
 }
 
 export class AuditBackfillService {
-  /** @param store - the corpus store (the same instance every other service holds) */
-  constructor(private readonly store: StoreInterface) {}
+  /**
+   * @param store - the corpus store (read side only: versions and the audit trail)
+   * @param writer - the one write route; every reconstructed entry is appended through it, so each carries the run of the
+   *   writer's write context (the caller's), like any other audit row
+   */
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly writer: DocWritePort,
+  ) {}
 
   /**
    * @returns `ok(report)`; a store failure is returned as-is. A failure after some entries were appended leaves them
@@ -82,12 +90,12 @@ export class AuditBackfillService {
     const reconstructed = earliest === null ? [] : misses.filter((miss) => miss.created_at < earliest);
     if (opts.apply) {
       for (const miss of reconstructed) {
-        const appended = await this.store.appendAuditEntry({
+        const appended = await this.writer.appendAudit({
           timestamp: opts.nowIso,
-          actor: opts.actor,
-          session_id: opts.run,
+          by: opts.actor,
+          sessionId: opts.run,
           action: AUDIT_BACKFILL_ACTION,
-          doc_id: miss.doc_id,
+          docId: miss.doc_id,
           details: {
             version: miss.version,
             version_action: miss.action,
