@@ -154,6 +154,9 @@ export async function findBaselineIntegrityFindings(
   }
   for (const row of registry.value) {
     if (deletedIds.has(row.leaf_doc_id)) continue; // a rule of a soft-deleted leaf keeps its burned id
+    // reason: BR-626 — a `proposed` id (a pending direct add, or a spec's reservation) is listed by NO leaf as an approved rule
+    // until it lands: its owner not listing it is the state, not a divergence.
+    if (row.lifecycle === "proposed") continue;
     const owner = liveById.get(row.leaf_doc_id);
     if (owner === undefined || !ruleRecordsOf(owner).some((r) => r.id === row.id)) {
       findings.push({

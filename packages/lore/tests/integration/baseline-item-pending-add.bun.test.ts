@@ -1,5 +1,6 @@
 // @reads packages/lore/src/adapters/cli/commands/rule.ts
 // @reads assets/project/lore-config-template.yaml
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * AC-BIA-2 (spec-baseline-approval-is-per-item-an-edit-adds-a-pending, BR-626, BR-1338): `lore rule add` on an approved leaf
  * adds a PENDING ADD. The registry lifecycle is `proposed`, a criterion citing it is not citable as live, coverage and the
@@ -73,6 +74,9 @@ describe("AC-BIA-2: a direct rule add is not live until approved", () => {
       data: Array<{ slug: string; rules: { live: number } }>;
     };
     expect(tree.data.find((n) => n.slug === corpus.leaf)?.rules.live).toBe(1);
+    // the registry's `proposed` row of a pending add is not a divergence from the leaf that does not list it yet
+    const integrity = await corpus.lore(["status", "--check-baseline"]);
+    expect(integrity.exitCode, integrity.stdout + integrity.stderr).toBe(0);
     const find = await corpus.lore(["rule", "find", "--text", "added directly"]);
     expect(find.stdout).toContain("No matching rules");
     const shown = await corpus.lore(["rule", "show", "BR-2"]);
