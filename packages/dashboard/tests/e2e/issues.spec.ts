@@ -78,6 +78,7 @@ import { patchLoreConfig } from "../../../lore/tests/helpers/patch-lore-config.j
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+import { e2eStateHome, knownPartyEnv, startHumanSession } from "./known-party.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // tests/e2e -> tests -> dashboard -> packages -> <repo root>
@@ -98,13 +99,17 @@ interface CliResult {
   status: number;
 }
 
-/** Synchronous `dist/lore <args>` spawn — CLAUDECODE=1 (agent surface, no AI nesting). */
+/**
+ * Synchronous `dist/lore <args>` spawn as a KNOWN PARTY (BR-1351): the e2e human session of the checkout, with the
+ * agent harness marker (CLAUDECODE) STRIPPED from the child env — a process that carries it is treated as an agent,
+ * and an agent never writes under a person's session.
+ */
 function runLore(args: string[], cwd: string, env: Record<string, string> = {}): CliResult {
   assertUnderTmp(cwd);
   try {
     const stdout = execFileSync(DIST_LORE, args, {
       cwd,
-      env: { ...process.env, CLAUDECODE: "1", ...env },
+      env: knownPartyEnv(e2eStateHome(), env),
     }).toString();
     return { stdout, stderr: "", status: 0 };
   } catch (err) {
@@ -169,6 +174,8 @@ function makeConsumer(prefix: string, upstreamRoot: string, rootPrdSlug: string)
   if (initResult.status !== 0) {
     throw new Error(`consumer 'lore init' failed for ${prefix}: ${initResult.stderr}`);
   }
+  // the consumer's `report-issue` writes as the human session of this checkout too
+  startHumanSession([DIST_LORE], consumerRoot, e2eStateHome());
   configureFeedbackUpstream(consumerRoot, upstreamRoot, rootPrdSlug);
   return consumerRoot;
 }
