@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads packages/lore/src/service/**
 /**
  * AC-AU-7 oracle — an override the actor can set is DECIDED, not granted.

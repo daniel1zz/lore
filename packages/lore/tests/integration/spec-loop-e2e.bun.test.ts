@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §9 AC6 — end-to-end closed-loop proof that the
