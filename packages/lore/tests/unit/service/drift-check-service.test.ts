@@ -293,32 +293,41 @@ describe("NEGATIVE — malformed grammar rejected, doc unchanged", () => {
   });
 });
 
-describe("NEGATIVE — task target rejects '#' entries, naming the spec grammar", () => {
-  it("TaskWorkflowService.addAnchors rejects an entry containing '#'", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+describe("task target accepts symbol-scoped anchors, refuses folder-symbol and malformed ones", () => {
+  async function makeTask() {
+    const { store, corpusService, taskWorkflowService } = makeServices();
     const prdId = await createPrd(corpusService);
     const specId = await createSpec(corpusService, prdId);
     const planId = await createPlan(corpusService, specId);
     const taskId = await createTask(corpusService, planId);
+    return { store, taskWorkflowService, taskId };
+  }
+
+  it("TaskWorkflowService.addAnchors accepts path#Symbol and stores the entry", async () => {
+    const { store, taskWorkflowService, taskId } = await makeTask();
 
     const result = await taskWorkflowService.addAnchors(taskId, ["src/a.ts#Foo"], { by: "tester" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code === "VALIDATION_ERROR") {
-      expect(result.error.message).toMatch(/SPEC-045/);
-    }
+    expect(result.ok).toBe(true);
+    const after = await store.find(taskId);
+    if (!after.ok || after.value === null) throw new Error("task re-fetch failed");
+    expect(after.value.extra["file_anchors"]).toContain("src/a.ts#Foo");
   });
 
-  it("TaskWorkflowService.setAnchors rejects an entry containing '#'", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const prdId = await createPrd(corpusService);
-    const specId = await createSpec(corpusService, prdId);
-    const planId = await createPlan(corpusService, specId);
-    const taskId = await createTask(corpusService, planId);
+  it("TaskWorkflowService.setAnchors refuses a folder anchor naming a symbol", async () => {
+    const { taskWorkflowService, taskId } = await makeTask();
 
     const result = await taskWorkflowService.setAnchors(taskId, ["src/dir/#Foo"], { by: "tester" });
     expect(result.ok).toBe(false);
+  });
+
+  it("TaskWorkflowService.addAnchors refuses a malformed symbol name, naming the anchor", async () => {
+    const { taskWorkflowService, taskId } = await makeTask();
+
+    const result = await taskWorkflowService.addAnchors(taskId, ["src/a.ts#9bad"], { by: "tester" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code === "VALIDATION_ERROR") expect(result.error.message).toContain("src/a.ts#9bad");
   });
 });
 
