@@ -1,3 +1,4 @@
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11, P1 slice-2 — `lore gate spec-create`'s
  * "active feeding" rule-doc lookup discovers its source by `extra.skill.applies_to`
@@ -266,7 +267,7 @@ describe("lore gate spec-create — feeding skill discovery by applies_to", () =
     const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
 
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("[source: applies_to:spec");
+    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md");
     expect(result.stdout).not.toContain("Draft marker content");
   });
 
