@@ -2597,6 +2597,7 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
       field: "yaml",
       message: "Failed to parse YAML: malformed input",
       value: yamlText,
+      rule: "BR-1306",
     } satisfies LoreError);
   }
   const entry = doc.getIn(["workflow", "gates", "plan-close"], true);
@@ -2611,6 +2612,7 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
         `workflow.gates."plan-close" carries both ${PRD_SYNC_KEY} and ${CITED_RULE_CHECK_KEY}; ${PRD_SYNC_KEY} was renamed to ` +
         `${CITED_RULE_CHECK_KEY}. Delete the one you do not want in .lore/config.yaml, then \`${CONFIG_KEYS_MIGRATE_COMMAND}\` has nothing left to do (nothing was rewritten).`,
       value: yamlText,
+      rule: "BR-1306",
     } satisfies LoreError);
   }
   const enabled = entry.getIn([PRD_SYNC_KEY, "enabled"]);
@@ -2623,6 +2625,7 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
       field: PRD_SYNC_RENAME_FIELD,
       message: `${PRD_SYNC_KEY} has no source position, so it cannot be renamed in place; rename it to ${CITED_RULE_CHECK_KEY} by hand.`,
       value: yamlText,
+      rule: "BR-1306",
     } satisfies LoreError);
   }
   return ok({
@@ -2669,6 +2672,7 @@ function detectRetiredAdoptionSetting(raw: unknown): LoreError | undefined {
     field: RETIRED_ADOPTION_FIELD,
     message: RETIRED_ADOPTION_MESSAGE,
     value: (memoryFiles as Record<string, unknown>)["adoption"],
+    rule: "BR-1321",
   } satisfies LoreError;
 }
 
@@ -2696,7 +2700,7 @@ export interface RetiredAdoptionRemoval {
 export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
   const doc = yaml.parseDocument(yamlText);
   if (doc.errors.length > 0) {
-    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText } satisfies LoreError);
+    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText, rule: "BR-1323" } satisfies LoreError);
   }
   const memoryFiles = doc.getIn(["context", "memory_files"], true);
   if (!yaml.isMap(memoryFiles)) return ok(undefined);
@@ -2722,6 +2726,7 @@ export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAd
       field: RETIRED_ADOPTION_FIELD,
       message: `${RETIRED_ADOPTION_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
       value: yamlText,
+      rule: "BR-1323",
     } satisfies LoreError);
   const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
   const adoptionKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;

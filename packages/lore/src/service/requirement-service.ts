@@ -121,6 +121,7 @@ export class RequirementService {
         field: issue !== undefined ? `requirements.${issue.path.join(".")}` : "requirements",
         message: issue !== undefined ? issue.message : "Invalid requirement",
         value: requirement,
+        rule: "BR-683",
       });
     }
 
@@ -147,6 +148,7 @@ export class RequirementService {
             field: `requirements.${newRequirement.id}`,
             message,
             value: requirement,
+            rule: "BR-684",
           });
         }
       }
@@ -191,6 +193,7 @@ export class RequirementService {
         field: "requirements[].id",
         message: `Requirement "${reqId}" does not exist on this PRD`,
         value: reqId,
+        rule: "BR-1001",
       });
     }
     const candidate = existing.map((r) => (r.id === reqId ? { ...r, migrated_to: ruleId } : r));
@@ -202,6 +205,7 @@ export class RequirementService {
         field: issue !== undefined ? `requirements.${issue.path.join(".")}` : "requirements",
         message: issue !== undefined ? issue.message : "Invalid migrated_to",
         value: ruleId,
+        rule: "BR-1001",
       });
     }
     const live = await this.requireLiveRule(ruleId);
@@ -253,6 +257,7 @@ export class RequirementService {
         field: "requirements[].id",
         message: `Requirement "${reqId}" does not exist on this PRD`,
         value: reqId,
+        rule: "BR-690",
       });
     }
 
@@ -290,6 +295,7 @@ export class RequirementService {
         field: "migrated_to",
         message: `Rule "${ruleId}" is not in any baseline leaf — a requirement cannot migrate to a rule that does not exist`,
         value: ruleId,
+        rule: "BR-1001",
       });
     }
     if (rule.lifecycle !== "live") {
@@ -298,6 +304,7 @@ export class RequirementService {
         field: "migrated_to",
         message: `Rule "${ruleId}" is ${rule.lifecycle}, not live — a requirement cannot migrate to an inactive rule`,
         value: ruleId,
+        rule: "BR-1001",
       });
     }
     return ok(true);
@@ -314,6 +321,7 @@ export class RequirementService {
         field: "type",
         message: `Expected a prd document; got type '${doc.type}'`,
         value: doc.type,
+        rule: "BR-686",
       });
     }
     return ok(doc);

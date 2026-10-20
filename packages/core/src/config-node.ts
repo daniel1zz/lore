@@ -125,6 +125,7 @@ export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKey
       code: "STORE_ERROR",
       message: e instanceof Error ? e.message : "Failed to migrate config file",
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-1306",
     } satisfies LoreError);
   }
 }
@@ -174,6 +175,7 @@ export function migrateMemoryLimits(dir: string, apply: boolean): Result<MemoryL
       code: "STORE_ERROR",
       message: e instanceof Error ? e.message : "Failed to migrate config file",
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-1323",
     } satisfies LoreError);
   }
 }

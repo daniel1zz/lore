@@ -175,9 +175,11 @@ export class RunService {
    */
   async register(input: RegisterRunInput): Promise<Result<RunRecord, LoreError>> {
     if (input.agentId === undefined && input.agentType !== undefined) {
+      /** @lore-site BR-1217 */
       return err(validationError("agent-type", "--agent-type requires --agent-id", input.agentType));
     }
     if (input.agentId !== undefined && (input.agentType === undefined || input.agentType === "")) {
+      /** @lore-site BR-1217 */
       return err(validationError("agent-type", "a subagent run requires --agent-type", input.agentType));
     }
 
@@ -192,6 +194,7 @@ export class RunService {
       parentRunId = (input.parentRunId ?? null) as RunId | null;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
+      /** @lore-site BR-1217 */
       return err(validationError("harness", message, input.harness));
     }
 
@@ -242,6 +245,7 @@ export class RunService {
    */
   async end(runId: string, reason: string): Promise<Result<RunEndResult, LoreError>> {
     if (runId === "") return err(validationError("run-id", "a run id is required", runId));
+    /** @lore-site BR-1215 */
     if (reason.trim() === "") return err(validationError("reason", "--reason is required", reason));
     if (this.claims === undefined) {
       return err(validationError("claims", "RunService was built without a claim port; cannot end a run's claims"));
@@ -265,6 +269,7 @@ export class RunService {
    *   STORE_ERROR from the store or a non-ENOENT realpath failure.
    */
   async occupancy(input: OccupancyInput): Promise<Result<RunOccupancy, LoreError>> {
+    /** @lore-site BR-1216 */
     if (input.worktree === "") return err(validationError("worktree", "a worktree path is required", input.worktree));
     if (this.realpathPort === undefined) {
       return err(validationError("realpath", "RunService was built without a realpath port; cannot compare worktrees"));
@@ -429,6 +434,7 @@ export class RunService {
     if (runId === "") return err(validationError("run-id", "a run id is required", runId));
     const known = await this.store.getRun(runId as RunId);
     if (!known.ok) return known;
+    /** @lore-site BR-1150 */
     if (known.value === null) return err(validationError("run-id", `run ${runId} is not registered`, runId));
     const claimed = await this.claimedTasks(runId);
     if (!claimed.ok) return claimed;
@@ -439,7 +445,7 @@ export class RunService {
   async show(id: string): Promise<Result<RunRecord, LoreError>> {
     const found = await this.store.getRun(id as RunId);
     if (!found.ok) return found;
-    if (found.value === null) return err({ code: "DOC_NOT_FOUND", id });
+    if (found.value === null) return err({ code: "DOC_NOT_FOUND", id, rule: "BR-1038" });
     return ok(found.value);
   }
 }

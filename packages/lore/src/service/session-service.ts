@@ -809,6 +809,7 @@ export class SessionService {
         records.push({ ...session, liveness: "unmeasured" });
         continue;
       }
+      /** @lore-site BR-383 */
       const probed = await this.probeProcessStartTimePort(recorded.pid);
       records.push({ ...session, liveness: deriveLivenessVerdict(recorded, probed, true) });
     }
@@ -876,6 +877,7 @@ export class SessionService {
           field: "plan_ref",
           message: `plan_ref "${handoff.plan_ref}" does not resolve to any document`,
           value: handoff.plan_ref,
+          rule: "BR-338",
         });
       }
       const planDoc = resolveResult.value;
@@ -887,6 +889,7 @@ export class SessionService {
             `plan_ref "${handoff.plan_ref}" must resolve to a live plan document — ` +
             `found type "${planDoc.type}"${planDoc.deleted_at !== null ? " (soft-deleted)" : ""}`,
           value: handoff.plan_ref,
+          rule: "BR-338",
         });
       }
       parentId = planDoc.id;
@@ -903,6 +906,7 @@ export class SessionService {
           message:
             "multiple PRDs exist in the corpus; plan_ref is required to disambiguate the handoff's parent",
           value: prds.map((p) => p.slug),
+          rule: "BR-339",
         });
       }
       // prds.length === 0 → parentId stays null (parentless — legal for knowledge docs).
@@ -933,6 +937,7 @@ export class SessionService {
     } else {
       try {
         const { session } = parseRunId(caller.run);
+        /** @lore-site BR-1149 */
         trail = this.readTrailPort(session);
         reason = `no session trail for ${session}`;
       } catch (e) {

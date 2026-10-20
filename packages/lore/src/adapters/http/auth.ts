@@ -233,7 +233,7 @@ export class ApiKeyStore {
   async create(name: string, owner: string): Promise<Result<{ rawKey: string; record: ApiKeyRecord }, LoreError>> {
     const existing = this.db.prepare("SELECT key_hash FROM api_keys WHERE name = ?").get(name) as { key_hash: string } | null;
     if (existing !== null) {
-      return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists` });
+      return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists`, rule: "BR-952" });
     }
 
     const rawKey = generateApiKey();
@@ -247,7 +247,7 @@ export class ApiKeyStore {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
       if (message.includes("UNIQUE constraint failed: api_keys.name")) {
-        return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists` });
+        return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists`, rule: "BR-952" });
       }
       return err({ code: "STORE_ERROR", message, ...(e instanceof Error ? { cause: e } : {}) });
     }
@@ -280,7 +280,7 @@ export class ApiKeyStore {
   revoke(name: string): Result<void, LoreError> {
     const row = this.db.prepare("SELECT key_hash FROM api_keys WHERE name = ?").get(name) as { key_hash: string } | null;
     if (row === null) {
-      return err({ code: "DOC_NOT_FOUND", id: name });
+      return err({ code: "DOC_NOT_FOUND", id: name, rule: "BR-956" });
     }
 
     try {
@@ -309,7 +309,7 @@ export class ApiKeyStore {
   /** Validate a raw key. Returns ActorContext if valid, UNAUTHORIZED error otherwise. */
   async validate(rawKey: string): Promise<Result<ActorContext, LoreError>> {
     if (!rawKey.startsWith(KEY_PREFIX)) {
-      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid token format" });
+      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid token format", rule: "BR-945" });
     }
 
     const keyHash = await hashApiKey(rawKey);
@@ -319,11 +319,11 @@ export class ApiKeyStore {
     ).get(keyHash) as { name: string; revoked_at: string | null } | null;
 
     if (row === null) {
-      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid API key" });
+      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid API key", rule: "BR-945" });
     }
 
     if (row.revoked_at !== null) {
-      return err({ code: "VALIDATION_ERROR", field: "token", message: "API key has been revoked" });
+      return err({ code: "VALIDATION_ERROR", field: "token", message: "API key has been revoked", rule: "BR-945" });
     }
 
     return ok({ name: row.name, session_id: keyHash.slice(0, 16) });
@@ -398,13 +398,13 @@ export async function authenticateRequest(
     if (sid !== null) {
       const session = sessionStore.resolve(sid);
       if (session === null) {
-        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session not found or expired" });
+        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session not found or expired", rule: "BR-944" });
       }
 
       // Inline expiry check — resolve() does not delete; we handle it here.
       if (new Date(session.expires_at) <= new Date()) {
         sessionStore.delete(sid);
-        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session expired" });
+        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session expired", rule: "BR-944" });
       }
 
       // Slide expiry on use (sliding 30-day window). SPEC-016 §3.3.
@@ -424,7 +424,7 @@ export async function authenticateRequest(
   // ── Bearer fallback (existing path, unchanged) ────────────────────────────
   const token = extractBearerToken(req);
   if (token === null) {
-    return err({ code: "VALIDATION_ERROR", field: "Authorization", message: "Missing bearer token" });
+    return err({ code: "VALIDATION_ERROR", field: "Authorization", message: "Missing bearer token", rule: "BR-943" });
   }
   const tokenResult = await keyStore.validate(token);
   if (!tokenResult.ok) return tokenResult;

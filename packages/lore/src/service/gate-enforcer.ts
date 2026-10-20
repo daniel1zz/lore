@@ -652,6 +652,7 @@ export class GateEnforcer {
     // an unassessed plan whose other conditions measured would otherwise close with no mention
     // that assessment freshness was never checked. Never blocks (same channel, same contract).
     const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
+    /** @lore-site BR-1303 */
     if (freshnessLine !== null) this.warnSink(freshnessLine);
     // reason: BR-984 - a cited rule whose state was unknown (reportable reason) closes with a line, never silently.
     for (const unknownLine of describeCitedRuleUnknowns(checkpoint, ctx)) this.warnSink(unknownLine);
@@ -946,6 +947,7 @@ export class GateEnforcer {
   ): void {
     const notice = describeCheckpointVacuity(checkpoint, results);
     if (notice === null) return;
+    /** @lore-site BR-227 */
     this.warnSink(notice);
   }
 

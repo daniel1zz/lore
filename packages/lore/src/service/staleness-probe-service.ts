@@ -209,6 +209,7 @@ export class StalenessProbeService {
         field: "type",
         message: `Staleness probing only applies to knowledge/adr documents; got type "${doc.type}"`,
         value: doc.type,
+        rule: "BR-468",
       });
     }
 
@@ -218,6 +219,7 @@ export class StalenessProbeService {
         field: "extra.validity",
         message: `Document "${doc.slug}" is already invalidated — probing it is wasted spend`,
         value: doc.id,
+        rule: "BR-467",
       });
     }
 

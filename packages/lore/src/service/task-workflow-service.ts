@@ -663,7 +663,7 @@ function doneFloorRefusal(
 ): Result<{ refusal: DoneFloorRefusal }, never> {
   // reason: DCL-1 — the rule's name is part of the TEXT too (`done`/`set` print only the message), so a reader
   // and a test can name the refusing floor without parsing `details`.
-  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor } } } });
+  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor }, rule: "BR-1292" } } });
 }
 
 export interface DoneResult {
@@ -1594,6 +1594,7 @@ export function rejectBlankClaimWorktree(worktree: string | undefined): Result<v
       field: "worktree",
       message: "--worktree must not be empty or whitespace-only",
       value: worktree,
+      rule: "BR-136",
     });
   }
   return ok(undefined);
@@ -1782,6 +1783,7 @@ export function rejectMissingNonPassOutputTail(
       "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
       "MCP: output_tail).",
     value: outputTail,
+    rule: "BR-149",
   });
 }
 
@@ -1888,6 +1890,7 @@ export function rejectMissingPassOutputTail(
       "accepts), or use --oracle manual for a check with nothing capturable (still needs a " +
       "genuine non-empty --output-tail/--output-tail-file describing exactly what was checked).",
     value: outputTail,
+    rule: "BR-150",
   });
 }
 
@@ -1945,6 +1948,7 @@ export function rejectCallerGitStamp(entry: EvidenceInput): LoreError | undefine
         field,
         message: `${field} is measured by the verify runner from git (not a valid evidence input field)`,
         value: inCapture ? (captured as Record<string, unknown>)[field] : raw[field],
+        rule: "BR-148",
       };
     }
   }
@@ -2046,6 +2050,7 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
       `trimmed command shorter than 3 characters is rejected unless it is one of the ` +
       `allowlisted short commands (${allowlist})`,
     value: command,
+    rule: "BR-161",
   });
 }
 

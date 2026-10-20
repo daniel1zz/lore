@@ -1234,6 +1234,7 @@ export function resolveGoverningSpecByAcScope(
         "structural plan/spec link (SPEC-069 D2). Ensure ac_scope names AC ids that all " +
         "exist on exactly one spec.",
       value: [...declaredAcScope],
+      rule: "BR-183",
     });
   }
   if (matches.length > 1) {
@@ -1246,6 +1247,7 @@ export function resolveGoverningSpecByAcScope(
         "Never guess which spec governs a task; narrow the declared ac_scope to AC ids " +
         "unique to a single spec.",
       value: matches.map((m) => m.spec.slug),
+      rule: "BR-183",
     });
   }
 

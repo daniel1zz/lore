@@ -1094,7 +1094,7 @@ export class TursoStore implements StoreInterface {
       const existingRow = existingRs.rows[0];
       if (!existingRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1502,7 +1502,7 @@ export class TursoStore implements StoreInterface {
       const existingRow = existingRs.rows[0];
 
       if (!existingRow) {
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1561,7 +1561,7 @@ export class TursoStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and UPDATE (race)
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -1930,7 +1930,7 @@ export class TursoStore implements StoreInterface {
 
       if (!existingRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       // reason: D6 / QA-2 — liveness is read INSIDE the write transaction (see SQLiteStore's twin).
@@ -1944,6 +1944,7 @@ export class TursoStore implements StoreInterface {
         const refusal = buildNonLiveRuleRefusal(id, lifecycles);
         if (refusal !== null) {
           await tx.rollback();
+          /** @lore-site BR-260 */
           return err(refusal);
         }
       }
@@ -2003,7 +2004,7 @@ export class TursoStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and UPDATE (race)
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -2255,6 +2256,7 @@ export class TursoStore implements StoreInterface {
           from: link.from_id,
           to: link.to_id,
           type: link.link_type,
+          rule: "BR-949",
         });
       }
       return wrapStoreError(e);
@@ -2311,7 +2313,7 @@ export class TursoStore implements StoreInterface {
         });
         if (updateRs.rows.length === 0) {
           await tx.rollback();
-          return err({ code: "DOC_NOT_FOUND", id: link.from_id });
+          return err({ code: "DOC_NOT_FOUND", id: link.from_id, rule: "BR-550" });
         }
       }
 
@@ -3179,7 +3181,7 @@ export class TursoStore implements StoreInterface {
       const registryRow = registryRs.rows[0];
       if (!registryRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+        return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-640" });
       }
       const owner = rowStr(registryRow, "leaf_doc_id");
       if (owner !== fromLeaf.id) {
@@ -3189,6 +3191,7 @@ export class TursoStore implements StoreInterface {
           field: "fromLeaf.id",
           message: `rule ${ruleId} is registered to leaf ${owner}, not ${fromLeaf.id}`,
           value: fromLeaf.id,
+          rule: "BR-640",
         });
       }
       const nowIso = new Date().toISOString();

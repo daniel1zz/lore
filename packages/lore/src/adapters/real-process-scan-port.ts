@@ -18,6 +18,7 @@ import type { Measured, ProcessInsideFact } from "../service/worktree-removal-te
 /** Scans for processes inside a set of directory spellings of one worktree. */
 export interface ProcessScanPort {
   /** @param roots - the worktree path in every spelling (given + realpath) */
+  /** @lore-site BR-1219 */
   processesInside(roots: readonly string[]): Measured<readonly ProcessInsideFact[]>;
 }
 

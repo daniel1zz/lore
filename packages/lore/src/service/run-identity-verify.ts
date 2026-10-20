@@ -35,6 +35,7 @@ export async function verifyInvocationIdentity(
   const found = await store.getRun(claimedRun);
   if (!found.ok) return err(found.error);
   if (found.value !== null) return ok(identity);
+  /** @lore-site BR-1035 */
   warn(
     `warning: --harness-run ${claimedRun} is not a registered run; this write is recorded unattested (register it with \`lore run register\`)`,
   );

@@ -950,6 +950,7 @@ export class PhaseWorkflowService {
       const holder = buildClaimHolder(phase, existingClaim, staleResult.value);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
+        /** @lore-site BR-1040 */
         return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
       }
       carryForward = decision.kind === "refresh";

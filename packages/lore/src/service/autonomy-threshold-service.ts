@@ -246,7 +246,7 @@ export class AutonomyThresholdService {
    */
   async propose(next: GovernedThresholds, decisions: ThresholdDecisionPort): Promise<Result<ProposeOutcome, LoreError>> {
     const checked = governedThresholdsSchema.safeParse(next);
-    if (!checked.success) return err({ code: "VALIDATION_ERROR", field: "record", message: checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
+    if (!checked.success) return err({ code: "VALIDATION_ERROR", field: "record", message: checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), rule: "BR-1260" });
     const seeded = await this.ensureSeeded();
     if (!seeded.ok) return seeded;
     const current = seeded.value;

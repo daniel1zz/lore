@@ -172,7 +172,7 @@ export async function syncPush(
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error during sync push";
     const cause = e instanceof Error ? e : undefined;
-    return err({ code: "STORE_ERROR", message, ...(cause !== undefined ? { cause } : {}) });
+    return err({ code: "STORE_ERROR", message, ...(cause !== undefined ? { cause } : {}), rule: "BR-937" });
   } finally {
     localClient?.close();
   }

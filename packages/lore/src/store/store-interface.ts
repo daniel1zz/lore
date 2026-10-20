@@ -903,6 +903,7 @@ export interface StoreInterface {
    * failure (either CAS, a version-row insert, unknown `ruleId` →
    * `DOC_NOT_FOUND`) leaves both leaves and the registry row exactly as before.
    */
+  /** @lore-site BR-647 */
   moveRule(
     ruleId: string,
     fromLeaf: RuleLeafPatch,
@@ -995,6 +996,7 @@ export interface StoreInterface {
    * @param audit - The single audit entry to append (e.g. `migrate_spec_parent`)
    * @returns `ok(updatedDoc)`; `DOC_NOT_FOUND` when `id` is absent (nothing written); `STORE_ERROR` otherwise
    */
+  /** @lore-site BR-1009 */
   setDocParentWithProvenance(
     id: DocId,
     parentId: DocId | null,
@@ -1002,6 +1004,7 @@ export interface StoreInterface {
   ): Promise<Result<DocRecord, LoreError>>;
 
   /** Remove a specific directed link by composite key. */
+  /** @lore-site BR-763 */
   removeLink(
     fromId: DocId,
     toId: DocId,
@@ -1081,6 +1084,7 @@ export interface StoreInterface {
    * Returns ranked results with BM25 score and content snippets.
    * Filters applied as post-FTS WHERE clauses on joined docs table.
    */
+  /** @lore-site BR-749 */
   search(query: string, filters?: StoreFilters): Promise<Result<SearchHit[], LoreError>>;
 
   // ── Versions ───────────────────────────────────────────────────────────
@@ -1214,6 +1218,7 @@ export interface StoreInterface {
    *   `JudgmentService.listFor` is what defaults this to `'review'` for every existing
    *   caller (D3); the store layer itself applies no default.
    */
+  /** @lore-site BR-277 */
   findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>>;
 
   /**
@@ -1262,6 +1267,7 @@ export interface StoreInterface {
    * can group by the actual (doc_type, prompt_version) pair instead of an
    * unpinned `"*"` sentinel.
    */
+  /** @lore-site BR-556 */
   queryCalibrationWindow(
     filter: CalibrationWindowFilter,
   ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>>;
@@ -1351,6 +1357,7 @@ export interface StoreInterface {
    * `ok` and changes nothing — every column keeps the first call's value (a re-registration with a
    * different parent or branch must never rewrite history).
    */
+  /** @lore-site BR-1029 */
   insertRun(run: RunRecord): Promise<Result<void, LoreError>>;
 
   /** The registered run, or `ok(null)` for an unknown id (same shape as `find`; never a fabricated record). */
@@ -1368,9 +1375,11 @@ export interface StoreInterface {
    * (`already-ended`); an unregistered id writes nothing (`unknown-run`, normal for SubagentStop of an
    * internal agent).
    */
+  /** @lore-site BR-1215 */
   endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>>;
 
   /** Clear `ended_at` / `end_reason` (a resumed helper registered again). `ok(true)` iff the run WAS ended. */
+  /** @lore-site BR-1029 */
   reopenRun(id: RunId): Promise<Result<boolean, LoreError>>;
 
   /** The run's end state, or `ok(null)` for an unregistered id. */
@@ -1418,5 +1427,6 @@ export interface StoreInterface {
    * document. `RuleStateService` uses it for `computed_from.corpus_version` so its
    * snapshot can skip fetching knowledge docs without changing that field's meaning.
    */
+  /** @lore-site BR-669 */
   maxDocVersion(): Promise<Result<number, LoreError>>;
 }
