@@ -31,6 +31,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { AuditService } from "../../../src/service/audit-service.js";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
 import { liveWriteActor, actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -331,7 +332,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
 
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
@@ -349,7 +350,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     });
     expect(evidenceResult.ok).toBe(true);
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
 
     // Sanity: the versions rows for these three writes really do carry action "update",

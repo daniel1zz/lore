@@ -1,5 +1,5 @@
 /**
- * Tests for the CLAIM-TIME SESSION IDENTITY fact — task-two-concurrent-orchestrators-
+ * Tests for the CLAIM-TIME SESSION INSTANCE fact (`claim.session_id`) — it was introduced by task-two-concurrent-orchestrators-
  * both-resolve-to-agent-main. Two concurrently-live sessions in ONE checkout that both
  * resolve to the same actor string (`agent:main-orchestrator`, exactly what this repo's
  * own standing discipline instructs operators to export) used to collapse into ONE
@@ -10,7 +10,13 @@
  * instance ("which run") becomes `claim.session_id`, captured at claim time beside
  * `machine`/`worktree` and never merged into actor resolution.
  *
- * Six-dimension coverage for this file:
+ * The anchor mutex NO LONGER compares session ids: it compares RUNS (BR-1056, spec-every-write-is-made-by-a-known-party-
+ * an-attested-agent-run). `claim.session_id` stays a captured FACT (grouping key of `deriveSessions`, the territory
+ * partition), so this file pins the capture seam and the grouping, and pins that two sessions of one actor name are two
+ * RUNS: the second is refused, the same run is permitted. The old cross-session / not-measured gate tests are gone with
+ * the behaviour they pinned (BR-131, BR-134).
+ *
+ * Six-dimension coverage for this file (the gate rows below are the run-keyed successors):
  *   HAPPY:      two claims, identical `by`/`machine`, DIFFERENT session ids derive TWO
  *               sessions — with the CONTROL (identical session id → ONE session) in the
  *               SAME test, so a matcher that silently matches nothing cannot pass;
@@ -68,7 +74,7 @@ import {
   type SiblingClaimInfo,
 } from "../../../src/service/gate-predicates.js";
 import { deriveSessions, taskClaimSchema } from "@lore/core";
-import type { CreateDocInput, DocRecord } from "@lore/core";
+import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -77,6 +83,9 @@ const ORCHESTRATOR = "agent:main-orchestrator";
 const SESSION_A = "3de02220";
 const SESSION_B = "7ab19c04";
 const NOW = "2026-08-03T10:00:00.000Z";
+/** The runs of the two sessions: the anchor mutex compares these, never the shared display name. */
+const RUN_A = `cc:${SESSION_A}` as RunId;
+const RUN_B = `cc:${SESSION_B}` as RunId;
 
 /**
  * A task doc carrying a raw `extra.claim` — deliberately built as a plain object
@@ -266,156 +275,6 @@ describe("compareClaimSessions — absence is NOT-MEASURED, never same-session",
   });
 });
 
-// ─── noAnchorOverlap: same `by`, different session = FOREIGN (required fix 3) ────
-
-describe("noAnchorOverlap — cross-SESSION mutual exclusion, not cross-actor", () => {
-  const candidateAnchors = ["packages/core/src/session.ts"];
-
-  // HAPPY + CONTROL in one test — a blanket-refuse regression cannot pass as green.
-  it("HAPPY: same `by`, DIFFERENT session id → refused with ANCHOR_OVERLAP; SAME session id → permitted", () => {
-    const refused = noAnchorOverlap(
-      ORCHESTRATOR,
-      candidateAnchors,
-      [sibling({ session_id: SESSION_B })],
-      SESSION_A,
-    );
-    expect(refused.ok).toBe(false);
-    if (!refused.ok) {
-      expect(refused.reason).toBe(ANCHOR_OVERLAP_REASON);
-      expect(refused.field).toBe(ANCHOR_OVERLAP_FIELD);
-    }
-
-    const permitted = noAnchorOverlap(
-      ORCHESTRATOR,
-      candidateAnchors,
-      [sibling({ session_id: SESSION_A })],
-      SESSION_A,
-    );
-    expect(permitted.ok).toBe(true);
-  });
-
-  // NEGATIVE — the Silence answer: not-measured must REFUSE and must say which
-  // failure it is, with a reason distinct from a measured conflict.
-  it("NEGATIVE: an absent session id (candidate / sibling / both) refuses with the distinct not-measured reason", () => {
-    const cases: Array<[string | undefined, string | undefined]> = [
-      [undefined, SESSION_B],
-      [SESSION_A, undefined],
-      [undefined, undefined],
-    ];
-    for (const [candidateSession, siblingSession] of cases) {
-      const result = noAnchorOverlap(
-        ORCHESTRATOR,
-        candidateAnchors,
-        [sibling(siblingSession !== undefined ? { session_id: siblingSession } : {})],
-        candidateSession,
-      );
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.reason).toBe(ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON);
-        expect(result.field).toBe(ANCHOR_OVERLAP_FIELD);
-      }
-    }
-  });
-
-  it("REGRESSION: a FOREIGN actor overlap still fails with the original ANCHOR_OVERLAP reason, whatever the session ids", () => {
-    const result = noAnchorOverlap(
-      "agent:someone-else",
-      candidateAnchors,
-      [sibling({ session_id: SESSION_A })],
-      SESSION_A,
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe(ANCHOR_OVERLAP_REASON);
-  });
-
-  it("BOUNDARY: no candidate anchors → vacuous pass even across sessions; disjoint anchors → pass; stale sibling → pass", () => {
-    expect(noAnchorOverlap(ORCHESTRATOR, [], [sibling({ session_id: SESSION_B })], SESSION_A).ok).toBe(
-      true,
-    );
-    expect(
-      noAnchorOverlap(ORCHESTRATOR, ["packages/lore/src/x.ts"], [sibling({ session_id: SESSION_B })], SESSION_A).ok,
-    ).toBe(true);
-    expect(
-      noAnchorOverlap(ORCHESTRATOR, candidateAnchors, [sibling({ session_id: SESSION_B, stale: true })], SESSION_A).ok,
-    ).toBe(true);
-    expect(
-      noAnchorOverlap(ORCHESTRATOR, candidateAnchors, [sibling({ session_id: SESSION_B, anchors: [] })], SESSION_A).ok,
-    ).toBe(true);
-  });
-
-  // The predicate and the feeding-pack renderer must share ONE offending-sibling
-  // finder — the renderer used to re-implement the skip rules and would have printed
-  // "no specific conflicting sibling could be identified" for every new case.
-  it("STATE: findAnchorOverlapConflict classifies each conflict kind and always names the sibling", () => {
-    const foreignActor = findAnchorOverlapConflict(
-      "agent:other",
-      candidateAnchors,
-      [sibling({ session_id: SESSION_A })],
-      SESSION_A,
-    );
-    expect(foreignActor?.kind).toBe("foreign-actor");
-    expect(foreignActor?.sibling.slug).toBe("task-sibling");
-    expect(foreignActor?.pairs.length).toBeGreaterThan(0);
-
-    expect(
-      findAnchorOverlapConflict(ORCHESTRATOR, candidateAnchors, [sibling({ session_id: SESSION_B })], SESSION_A)?.kind,
-    ).toBe("foreign-session");
-    expect(findAnchorOverlapConflict(ORCHESTRATOR, candidateAnchors, [sibling()], SESSION_A)?.kind).toBe(
-      "session-not-measured",
-    );
-    expect(
-      findAnchorOverlapConflict(ORCHESTRATOR, candidateAnchors, [sibling({ session_id: SESSION_A })], SESSION_A),
-    ).toBeUndefined();
-  });
-});
-
-// ─── The gate SAYS SO: registry check + feeding pack ────────────────────────────
-
-describe("checkpointRegistry['task-claim'] — the session verdict reaches the gate output", () => {
-  const def = checkpointRegistry["task-claim"]!;
-
-  it("HAPPY: ctx.candidateSessionId feeds the predicate — differing sessions block, identical sessions pass", () => {
-    const blocked: GateContext = {
-      candidateBy: ORCHESTRATOR,
-      candidateSessionId: SESSION_A,
-      candidateAnchors: ["packages/core/src/session.ts"],
-      siblingClaims: [sibling({ session_id: SESSION_B })],
-      hasSpecParent: false,
-    };
-    expect(isCheckpointBlocked(def.check(blocked))).toBe(true);
-
-    const passing: GateContext = { ...blocked, siblingClaims: [sibling({ session_id: SESSION_A })] };
-    expect(isCheckpointBlocked(def.check(passing))).toBe(false);
-  });
-
-  it("NEGATIVE: the not-measured refusal's feeding pack carries its own reason token AND names the sibling", () => {
-    const ctx: GateContext = {
-      candidateBy: ORCHESTRATOR,
-      candidateAnchors: ["packages/core/src/session.ts"],
-      siblingClaims: [sibling()],
-      hasSpecParent: false,
-    };
-    const results = def.check(ctx);
-    expect(isCheckpointBlocked(results)).toBe(true);
-    const pack = def.feed(ctx, selectFailures(results));
-    expect(pack).toContain(ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON);
-    expect(pack).toContain("task-sibling");
-  });
-
-  it("REGRESSION: the different-session refusal's feeding pack names the sibling instead of the old 'no specific conflicting sibling' text", () => {
-    const ctx: GateContext = {
-      candidateBy: ORCHESTRATOR,
-      candidateSessionId: SESSION_A,
-      candidateAnchors: ["packages/core/src/session.ts"],
-      siblingClaims: [sibling({ session_id: SESSION_B })],
-      hasSpecParent: false,
-    };
-    const pack = def.feed(ctx, selectFailures(def.check(ctx)));
-    expect(pack).toContain("task-sibling");
-    expect(pack).not.toContain("no specific conflicting sibling");
-  });
-});
-
 // ─── resolveClaimSessionId: capture, absence, and the loud failure ──────────────
 
 describe("resolveClaimSessionId — the capture seam (required fix 1)", () => {
@@ -483,13 +342,13 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     });
     const { taskIds } = await createPlanAndTasks(corpusService, [["packages/core/src/session.ts"]]);
 
-    const claimed = await service.claim(taskIds[0]!, { by: ORCHESTRATOR });
+    const claimed = await service.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(claimed.ok).toBe(true);
     if (!claimed.ok) return;
-    expect(claimed.value.extra["claim"]).toMatchObject({ by: ORCHESTRATOR, session_id: "3de02220" });
+    expect(claimed.value.extra["claim"]).toMatchObject({ by: ORCHESTRATOR, session_id: "3de02220", harness_run: RUN_A });
   });
 
-  it("STATE: the SECOND orchestrator's overlapping claim is REFUSED; the same-session control is PERMITTED", async () => {
+  it("STATE: the SECOND orchestrator's overlapping claim (same name, another run) is REFUSED; the same-run control is PERMITTED", async () => {
     const { store, corpusService } = makeStoreAndCorpus();
     const anchors = ["packages/core/src/session.ts"];
     const { taskIds } = await createPlanAndTasks(corpusService, [anchors, anchors]);
@@ -497,23 +356,23 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const sessionOne = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
     const sessionTwo = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_B });
 
-    const first = await sessionOne.claim(taskIds[0]!, { by: ORCHESTRATOR });
+    const first = await sessionOne.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(first.ok).toBe(true);
 
-    const foreignSession = await sessionTwo.claim(taskIds[1]!, { by: ORCHESTRATOR });
+    const foreignSession = await sessionTwo.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_B });
     expect(foreignSession.ok).toBe(false);
     if (!foreignSession.ok) {
       expect(foreignSession.error.code).toBe("VALIDATION_ERROR");
       expect((foreignSession.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
     }
 
-    // CONTROL — the SAME session claiming both overlapping tasks is still permitted,
-    // so the refusal above is session-scoped and not a blanket refuse.
-    const sameSession = await sessionOne.claim(taskIds[1]!, { by: ORCHESTRATOR });
+    // CONTROL — the SAME run claiming both overlapping tasks is still permitted,
+    // so the refusal above is run-scoped and not a blanket refuse.
+    const sameSession = await sessionOne.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(sameSession.ok).toBe(true);
   });
 
-  it("NEGATIVE: a session-less claim colliding with a measured one is refused as not-measured, never permitted", async () => {
+  it("NEGATIVE: a claim with no run colliding with a run-holding claim is refused, never permitted", async () => {
     const { store, corpusService } = makeStoreAndCorpus();
     const anchors = ["packages/core/src/session.ts"];
     const { taskIds } = await createPlanAndTasks(corpusService, [anchors, anchors]);
@@ -521,13 +380,13 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const measured = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
     const unmeasured = makeSessionService(store, corpusService, {});
 
-    expect((await measured.claim(taskIds[0]!, { by: ORCHESTRATOR })).ok).toBe(true);
+    expect((await measured.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A })).ok).toBe(true);
 
     const result = await unmeasured.claim(taskIds[1]!, { by: ORCHESTRATOR });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect((result.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
-      expect(JSON.stringify(result.error)).toContain(ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON);
+      expect(JSON.stringify(result.error)).toContain(ANCHOR_OVERLAP_REASON);
     }
   });
 
@@ -538,10 +397,10 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const measured = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
     const unmeasured = makeSessionService(store, corpusService, {});
 
-    const first = await measured.claim(taskIds[0]!, { by: ORCHESTRATOR });
+    const first = await measured.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(first.ok).toBe(true);
 
-    const refreshed = await unmeasured.claim(taskIds[0]!, { by: ORCHESTRATOR });
+    const refreshed = await unmeasured.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(refreshed.ok).toBe(true);
     if (!refreshed.ok) return;
     expect(refreshed.value.extra["claim"]).not.toHaveProperty("session_id");
@@ -555,7 +414,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const { taskIds } = await createPlanAndTasks(corpusService, [["packages/core/src/session.ts"]]);
     const broken = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: "!!!" });
 
-    const result = await broken.claim(taskIds[0]!, { by: ORCHESTRATOR });
+    const result = await broken.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(result.ok).toBe(false);
     if (!result.ok) expect((result.error as { field?: string }).field).toBe("claim.session_id");
 
@@ -570,7 +429,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const { planId, taskIds } = await createPlanAndTasks(corpusService, [anchors, anchors]);
 
     const sessionOne = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
-    expect((await sessionOne.claim(taskIds[0]!, { by: ORCHESTRATOR })).ok).toBe(true);
+    expect((await sessionOne.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A })).ok).toBe(true);
 
     // The second claim is refused by the gate, so write the colliding claim directly —
     // this is also EXACTLY the legacy/foreign-session state `ready()` must report on.
@@ -581,7 +440,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
       {
         extra: {
           ...second.value.extra,
-          claim: { by: ORCHESTRATOR, at: new Date().toISOString(), session_id: SESSION_B },
+          claim: { by: ORCHESTRATOR, at: new Date().toISOString(), session_id: SESSION_B, harness_run: RUN_B },
         },
       },
       { expected_version: second.value.version },

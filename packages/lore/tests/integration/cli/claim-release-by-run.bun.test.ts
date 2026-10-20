@@ -1,19 +1,19 @@
 // @spawns packages/lore/src/index.ts
 /**
- * RED: release is decided and recorded by harness RUN, on BOTH the task and the phase path.
+ * Release is decided and recorded by harness RUN ONLY, on BOTH the task and the phase path.
  *
  * @spec_ref AC-RID-14
  *   spec-run-identity-slice-1-harness-attested-runs-attested D1 / D2 / D6 / D11; BR-1043
- *   (only the holding run releases without force; anyone else — another run or an unattested
- *   caller — needs force; a forced release names both; a legacy claim is released by name).
- *
- * Today `release` compares `existingClaim.by === opts.by` and records no run. Cases where the
- * verdict or the record depends on the RUN fail; the legacy-by-name cases are green controls.
+ *   (only the holding run releases without force; anyone else — another run, even under the holder's own name —
+ *   needs force; a forced release names both).
+ * @spec_ref AC-HID-3
+ *   spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 4 (BR-1043, BR-1056): a release by
+ *   the other run without force is refused; a lease that names no run is released only with force.
  *
  * Never touches the repo's own `.lore/` — one mkdtemp corpus per file (`lore init`).
  *
- * Coverage: HAPPY (holder releases, run recorded) / NEGATIVE (other run, unattested refused)
- *           / BOUNDARY (--force) / STATE (claim cleared or kept) / REGRESSION (legacy by name).
+ * Coverage: HAPPY (holder releases, run recorded) / NEGATIVE (other run refused, run-less lease refused)
+ *           / BOUNDARY (--force) / STATE (claim cleared or kept) / REGRESSION (a name never decides).
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -72,7 +72,7 @@ describe.each(KINDS)("release by run — %s claim path", (kind: Kind) => {
     expect(getClaim(corpus.dir, target)?.harness_run).toBe(R1);
   });
 
-  it("refuses a release by an UNATTESTED caller (even with the holder's SAME name) naming R1, and keeps the claim", async () => {
+  it("refuses a release by a caller running as ANOTHER session's run (even with the holder's SAME name) naming R1, and keeps the claim", async () => {
     const target = await heldBy(R1);
 
     const r = release(corpus.dir, target, NAME);
@@ -93,16 +93,6 @@ describe.each(KINDS)("release by run — %s claim path", (kind: Kind) => {
     const history = latestHistory(corpus.dir, target);
     expect(history).toContain(R1);
     expect(history).toContain(R2);
-  });
-
-  it("--force by an UNATTESTED caller releases R1's claim and the history names R1 as the previous holder", async () => {
-    const target = await heldBy(R1);
-
-    const r = release(corpus.dir, target, OTHER_NAME, { force: true });
-
-    expect(r.exitCode).toBe(0);
-    expect(getClaim(corpus.dir, target)).toBeUndefined();
-    expect(latestHistory(corpus.dir, target)).toContain(R1);
   });
 
   it("the holding run releases without --force, and the release is recorded with that run", async () => {
@@ -139,39 +129,32 @@ describe.each(KINDS)("release by run — %s claim path", (kind: Kind) => {
     expect(historyOfSecond).not.toContain(R1);
   });
 
-  // ── Legacy: a claim with no harness_run key is released by its stored name, as before ──
+  // ── A lease that names no run belongs to nobody: no name releases it without --force ──
 
-  it("CONTROL: a legacy claim is released by its stored name by an unattested caller without --force", async () => {
+  it("a lease that names no run is NOT released under the holder's own SAME name without --force: a name is not an identity", async () => {
     const target = await corpus.newTarget(kind);
     seedClaim(corpus.dir, target, { by: NAME, at: minutesAgo(5) });
     expect(getClaim(corpus.dir, target)).not.toHaveProperty("harness_run");
-
-    const r = release(corpus.dir, target, NAME);
-
-    expect(r.exitCode).toBe(0);
-    expect(getClaim(corpus.dir, target)).toBeUndefined();
-  });
-
-  it("a legacy claim is released by its stored name by a RUN too, without --force, and the release records that run", async () => {
-    const target = await corpus.newTarget(kind);
-    seedClaim(corpus.dir, target, { by: NAME, at: minutesAgo(5) });
     registerRun(corpus.dir, R1);
 
     const r = release(corpus.dir, target, NAME, { run: R1 });
 
-    expect(r.exitCode).toBe(0);
-    expect(getClaim(corpus.dir, target)).toBeUndefined();
-    expect(latestHistory(corpus.dir, target)).toContain(R1);
-  });
-
-  it("CONTROL: a legacy claim is NOT released under a different name without --force", async () => {
-    const target = await corpus.newTarget(kind);
-    seedClaim(corpus.dir, target, { by: NAME, at: minutesAgo(5) });
-
-    const r = release(corpus.dir, target, OTHER_NAME);
-
     expect(r.exitCode).toBe(CLAIM_CONFLICT_EXIT);
     expect(r.stderr).toContain(NAME);
     expect(getClaim(corpus.dir, target)?.by).toBe(NAME);
+  });
+
+  it("--force releases a lease that names no run, and the history names the previous holder and the releasing run", async () => {
+    const target = await corpus.newTarget(kind);
+    seedClaim(corpus.dir, target, { by: NAME, at: minutesAgo(5) });
+    registerRun(corpus.dir, R2);
+
+    const r = release(corpus.dir, target, OTHER_NAME, { run: R2, force: true });
+
+    expect(r.exitCode).toBe(0);
+    expect(getClaim(corpus.dir, target)).toBeUndefined();
+    const history = latestHistory(corpus.dir, target);
+    expect(history).toContain(NAME);
+    expect(history).toContain(R2);
   });
 });

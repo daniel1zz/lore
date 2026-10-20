@@ -97,7 +97,6 @@ function makeContext(createImpl: ReturnType<typeof vi.fn>): GithubFilingContext 
     consumerCorpusRoot: corpusRoot,
     corpusService: makeCorpusService(createImpl),
     actor: "agent:test",
-    actorSource: "explicit",
     home: homedir(),
     env: process.env,
   };

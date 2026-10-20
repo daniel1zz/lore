@@ -4,14 +4,13 @@
  * and the paired implementation task's own AC — the `frontMatterCodec` module
  * (`packages/core/src/issue-front-matter.ts`, NOT YET CREATED) that serialises
  * the closed six-field set into the issue body's front-matter block, parses it
- * back, and redacts the two identity leaks measured today:
+ * back, and redacts the identity leak measured today:
  *
  *   - `reporterProject` at `packages/lore/src/adapters/cli/report-issue-wiring.ts:225`,
  *     built as `` `${basename(root)} (${root})` `` — an ABSOLUTE `$HOME` path.
- *   - the actor os-fallback tier at `packages/core/src/actor-resolution-node.ts:114`
- *     (`os.userInfo().username`) — the bare OS username.
  *
- * Both would land in a PUBLIC GitHub issue body, and GitHub caches edits, so
+ * (The computer-user-name actor tier, the second leak measured at the time, no longer exists: an actor is
+ * always a known party's own name.) The leak would land in a PUBLIC GitHub issue body, and GitHub caches edits, so
  * the disclosure is irreversible — this is why redaction is asserted here,
  * before any text reaches a `gh` invocation, rather than downstream.
  *
@@ -31,15 +30,13 @@
  *   HAPPY      — round trip of all six fields (group "round-trip")
  *   BOUNDARY   — markdown control chars + embedded newline + a literal `---`
  *                delimiter lookalike inside a field value (group "round-trip")
- *   NEGATIVE   — the two identity leaks, each paired with a positive control
+ *   NEGATIVE   — the identity leak, paired with a positive control
  *                proving the assertion is not vacuously satisfied by deleting
  *                everything (group "redaction")
  *   ERROR      — parsing a body with no front matter at all must return an
  *                explicit absent result, never a silently-empty record
  *                (group "absent")
- *   STATE      — the os-fallback actor is DROPPED, while an explicit-tier
- *                actor with the same shape is RETAINED — behaviour keyed on
- *                which precedence tier produced the value (group "redaction")
+ *   STATE      — the actor is RETAINED verbatim (group "redaction")
  *   REGRESSION — the exact-equality round trip (group "round-trip") pins the
  *                whole six-field contract so a future codec change that
  *                silently drops/renames/reorders a field turns this file red
@@ -70,7 +67,6 @@ import type {
   IssueFrontMatterFields,
   ParsedIssueBody,
   RawReporterIdentity,
-  ReporterActorSource,
 } from "@lore/core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -102,7 +98,7 @@ function baseFields(overrides: Partial<IssueFrontMatterFields> = {}): IssueFront
 // a "leak absent" assertion alone is satisfiable by an implementation that
 // deletes all identity information, which would be a worse defect, not a
 // fix — the control proves real, safe information survives).
-describe("redaction: neither identity leak reaches the assembled body", () => {
+describe("redaction: the home-path identity leak never reaches the assembled body", () => {
   it("scenario 1 — a reporter identity built from an absolute SEEDED home path never appears raw in the assembled body, only its tilde form (or nothing) survives", () => {
     const home = "/Users/zzfm-home-8f21c4-not-a-real-user";
     const corpusRoot = `${home}/zzfm-secret-corpus-9d3f`;
@@ -113,7 +109,6 @@ describe("redaction: neither identity leak reaches the assembled body", () => {
       home,
       rootPrdId,
       actor: "zzfm-scenario1-irrelevant-actor",
-      actorSource: "explicit",
     };
     const identity = redactReporterIdentity(raw);
 
@@ -141,82 +136,24 @@ describe("redaction: neither identity leak reaches the assembled body", () => {
     expect(body).toContain(rootPrdId);
   });
 
-  it("scenario 2 — a seeded distinctive OS-fallback username appears nowhere in the assembled body, while a same-shaped EXPLICIT-tier actor is retained", () => {
-    const osUsername = "zzfm-osuser-4c19e0-not-a-real-user";
-    const explicitActor = "zzfm-explicit-actor-712-not-a-real-user";
-    const sharedRaw = {
+  it("scenario 2 — a known party's actor name is retained verbatim and still reaches the body", () => {
+    const actor = "zzfm-known-party-712-not-a-real-user";
+    const identity = redactReporterIdentity({
       corpusRoot: "/Users/zzfm-scenario2-home/zzfm-scenario2-corpus",
       home: "/Users/zzfm-scenario2-home",
       rootPrdId: "prd-zzfm-scenario2-root",
-    };
-
-    const osFallbackIdentity = redactReporterIdentity({
-      ...sharedRaw,
-      actor: osUsername,
-      actorSource: "os-fallback",
+      actor,
     });
-    // STATE: the os-fallback tier's value is DROPPED entirely at the
-    // redaction boundary itself — not merely omitted later by some other
-    // caller, and not merely redacted-in-place (there is no redacted form
-    // of an OS username that is still safe to publish alongside a
-    // corpus/PRD identity).
-    expect(osFallbackIdentity.actor).toBeUndefined();
+    expect(identity.actor).toBe(actor);
 
-    const bodyWithOsFallbackDropped = assembleIssueBody(
-      baseFields({
-        reporter_corpus: osFallbackIdentity.reporter_corpus,
-        reporter_root_prd: osFallbackIdentity.reporter_root_prd,
-      }),
+    const body = assembleIssueBody(
+      baseFields({ reporter_corpus: identity.reporter_corpus, reporter_root_prd: identity.reporter_root_prd }),
       "Body text unrelated to the actor.",
-      osFallbackIdentity.actor,
+      identity.actor,
     );
-    expect(bodyWithOsFallbackDropped).not.toContain(osUsername);
-    expect(bodyWithOsFallbackDropped).not.toContain("zzfm-osuser-4c19e0-not-a-real-user");
-
-    // Positive control: an EXPLICIT-tier actor of the exact same shape is
-    // NOT dropped. Without this half, "the username never appears" would
-    // also be trivially true of an implementation that drops every actor
-    // unconditionally — which contradicts "dropped entirely rather than
-    // redacted" being a property of the OS-FALLBACK TIER specifically.
-    const explicitIdentity = redactReporterIdentity({
-      ...sharedRaw,
-      actor: explicitActor,
-      actorSource: "explicit",
-    });
-    expect(explicitIdentity.actor).toBe(explicitActor);
-
-    const bodyWithExplicitActor = assembleIssueBody(
-      baseFields({
-        reporter_corpus: explicitIdentity.reporter_corpus,
-        reporter_root_prd: explicitIdentity.reporter_root_prd,
-      }),
-      "Body text unrelated to the actor.",
-      explicitIdentity.actor,
-    );
-    expect(bodyWithExplicitActor).toContain(explicitActor);
-  });
-
-  it("boundary: every ReporterActorSource other than os-fallback retains the actor; only os-fallback drops it", () => {
-    const survivingSources: ReporterActorSource[] = ["explicit", "env", "session"];
-    for (const actorSource of survivingSources) {
-      const identity = redactReporterIdentity({
-        corpusRoot: "/Users/zzfm-tiers-home/zzfm-tiers-corpus",
-        home: "/Users/zzfm-tiers-home",
-        rootPrdId: "prd-zzfm-tiers-root",
-        actor: `zzfm-actor-for-${actorSource}`,
-        actorSource,
-      });
-      expect(identity.actor).toBe(`zzfm-actor-for-${actorSource}`);
-    }
-
-    const dropped = redactReporterIdentity({
-      corpusRoot: "/Users/zzfm-tiers-home/zzfm-tiers-corpus",
-      home: "/Users/zzfm-tiers-home",
-      rootPrdId: "prd-zzfm-tiers-root",
-      actor: "zzfm-actor-for-os-fallback",
-      actorSource: "os-fallback",
-    });
-    expect(dropped.actor).toBeUndefined();
+    expect(body).toContain(actor);
+    // The home prefix of the same identity is still redacted: keeping the actor never reopens the path leak.
+    expect(body).not.toContain("/Users/zzfm-scenario2-home");
   });
 });
 

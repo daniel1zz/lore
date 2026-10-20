@@ -21,6 +21,7 @@
  */
 
 import { createRequire } from "node:module";
+import type { RunId } from "@lore/core";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 // reason: the REAL `fs`, reached through `createRequire`, never `import "node:fs"`: that specifier is aliased to the test
@@ -204,4 +205,16 @@ export function scrubIdentityEnv(env: EnvBag): Record<string, string | undefined
   const scrubbed: Record<string, string | undefined> = { ...env };
   for (const name of IDENTITY_ENV_VARS) delete scrubbed[name];
   return scrubbed;
+}
+
+/**
+ * The run a unit test gives a writer it names only by display name (`claim(slug, { by: "alice" })`): one stable run per
+ * name, so a test that models "the same actor again" and "a different actor" keeps meaning exactly that now that claims
+ * compare RUNS, never names (BR-1040). Two names are two runs; one name is one run.
+ *
+ * @param by - the writer's display name
+ * @returns a run id of the shape an agent integration derives (`cc:<session>`), unique per name
+ */
+export function runOfName(by: string): RunId {
+  return `cc:test-${by.replace(/[^A-Za-z0-9._-]/g, "-")}` as RunId;
 }
