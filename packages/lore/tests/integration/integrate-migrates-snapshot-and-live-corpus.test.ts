@@ -200,6 +200,7 @@ class Fixture {
         branch: null,
         composition: { schemaVersion: 1, fragments: [] },
         registeredAt: "2026-10-01T00:00:00.000Z",
+        messageAddress: null,
       });
       if (!inserted.ok) throw new Error(`insertRun failed: ${JSON.stringify(inserted.error)}`);
     } finally {

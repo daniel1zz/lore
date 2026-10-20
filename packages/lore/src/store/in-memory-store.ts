@@ -1652,7 +1652,8 @@ export class InMemoryStore implements StoreInterface {
 
   async insertRun(run: RunRecord): Promise<Result<void, LoreError>> {
     // reason: first registration wins — mirrors SQLite's INSERT OR IGNORE on the PK.
-    if (!this.runs.has(run.id)) this.runs.set(run.id, structuredClone(run));
+    // reason: the address is never part of the first-wins insert (BR-1360); `recordRunAddress` owns it.
+    if (!this.runs.has(run.id)) this.runs.set(run.id, { ...structuredClone(run), messageAddress: null });
     return ok(undefined);
   }
 
@@ -1689,6 +1690,14 @@ export class InMemoryStore implements StoreInterface {
     if (!this.runs.has(id)) return ok(false);
     // reason: newest registration wins — mirrors SQLite's unconditional UPDATE (a resumed run lives in a new process).
     this.runProcesses.set(id, { ...proc });
+    return ok(true);
+  }
+
+  async recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>> {
+    const run = this.runs.get(id);
+    if (run === undefined) return ok(false);
+    // reason: BR-1360 — unconditional, newest registration wins, NULL clears (mirrors SQLite's UPDATE).
+    this.runs.set(id, { ...run, messageAddress: address });
     return ok(true);
   }
 

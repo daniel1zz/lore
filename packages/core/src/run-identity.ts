@@ -97,6 +97,8 @@ export interface RunRecord {
   branch: string | null;
   composition: CompositionRecord;
   registeredAt: string;
+  /** Where another session can message this run (`uds:<absolute path>`), or null: none recorded (BR-1360). */
+  messageAddress: string | null;
 }
 
 const runIdSchema = z.string().min(1).transform((s) => s as RunId);
@@ -115,6 +117,7 @@ export const runRecordSchema = z.object({
     fragments: z.array(z.object({ id: z.string().min(1), sha256: z.string().regex(/^[0-9a-f]{64}$/) })),
   }),
   registeredAt: z.string().min(1),
+  messageAddress: z.string().min(1).nullable(),
 });
 
 // ---------------------------------------------------------------------------

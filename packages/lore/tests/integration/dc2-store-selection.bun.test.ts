@@ -155,6 +155,7 @@ async function makeReplicaDouble(seedFrom: string): Promise<{ store: TursoStore;
         branch: row["branch"] ?? null,
         composition: JSON.parse(row["composition"] as string) as RunRecord["composition"],
         registeredAt: row["registered_at"] as string,
+        messageAddress: null,
       });
       if (!inserted.ok) throw new Error(`harness: seeding the double's run registry failed: ${JSON.stringify(inserted.error)}`);
     }

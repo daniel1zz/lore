@@ -82,6 +82,7 @@ import {
   promotionAuditEntry,
   SELECT_SPEC_EXTRAS_SQL,
 } from "./migrations/migration-029.js";
+import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -979,6 +980,16 @@ export class TursoStore implements StoreInterface {
         } finally {
           tx.close();
         }
+      }
+
+      if (currentVersion < 30) {
+        // reason: migration-030 is two-phase like 021 (see migration-030.ts's module JSDoc): the nullable
+        // `runs.message_address` column is added only where `PRAGMA table_info` lacks it.
+        for (const { table, column, ddl } of MIGRATION_030_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_030_SQL);
       }
     })();
 
@@ -3817,6 +3828,7 @@ export class TursoStore implements StoreInterface {
           branch: rowStrOrNull(row, "branch"),
           composition: rowStr(row, "composition"),
           registered_at: rowStr(row, "registered_at"),
+          message_address: rowStrOrNull(row, "message_address"),
         } satisfies RunRow),
       );
     } catch (e) {
@@ -3844,6 +3856,7 @@ export class TursoStore implements StoreInterface {
             branch: rowStrOrNull(row, "branch"),
             composition: rowStr(row, "composition"),
             registered_at: rowStr(row, "registered_at"),
+            message_address: rowStrOrNull(row, "message_address"),
           } satisfies RunRow),
         ),
       );
@@ -3900,6 +3913,20 @@ export class TursoStore implements StoreInterface {
       const updated = await this.client.execute({
         sql: "UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ? RETURNING id",
         args: [proc.pid, proc.startTime, proc.worktree, id],
+      });
+      return ok(updated.rows.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: BR-1360 — unconditional, newest registration wins, NULL clears; never part of insertRun (first wins).
+      const updated = await this.client.execute({
+        sql: "UPDATE runs SET message_address = ? WHERE id = ? RETURNING id",
+        args: [address, id],
       });
       return ok(updated.rows.length > 0);
     } catch (e) {

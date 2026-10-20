@@ -38,6 +38,7 @@ function runRecord(id: RunId): RunRecord {
     branch: null,
     composition: { schemaVersion: 1, fragments: [] },
     registeredAt: AT,
+    messageAddress: null,
   };
 }
 

@@ -1390,6 +1390,13 @@ export interface StoreInterface {
    */
   recordRunProcess(id: RunId, process: RunProcessRecord): Promise<Result<boolean, LoreError>>;
 
+  /**
+   * Record the address another session can message a run at (migration-030, BR-1360). UNCONDITIONAL and NEWEST WINS:
+   * called on EVERY register, so a resume replaces the address and an absent one (`null`) clears it. Never part of
+   * {@link StoreInterface.insertRun} (first wins). `ok(false)` for an unregistered id.
+   */
+  recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>>;
+
   /** Every registered run, oldest `registered_at` first (ties by id), with its end state and recorded process. */
   listRunLifecycles(): Promise<Result<RunLifecycle[], LoreError>>;
 

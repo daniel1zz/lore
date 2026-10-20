@@ -157,6 +157,7 @@ import { applyMigration026 } from "./migrations/migration-026.js";
 import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
 import { applyMigration028 } from "./migrations/migration-028.js";
 import { applyMigration029 } from "./migrations/migration-029.js";
+import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -836,6 +837,26 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-029 promotes pending rule revisions that a landed spec change set accounts for (#323) in ONE
       // transaction; a failure rolls back, throws MigrationFailedError naming the node, and leaves schema 28.
       applyMigration029(this.db, this.corpusPath, this.migrationActor);
+    }
+
+    if (currentVersion < 30 && 30 <= ceiling) {
+      // reason: migration-030 is two-phase like 021 (see migration-030.ts's module JSDoc): the nullable
+      // `runs.message_address` column is added only where `PRAGMA table_info` lacks it, then one BEGIN/COMMIT bumps
+      // user_version.
+      try {
+        for (const { table, column, ddl } of MIGRATION_030_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_030_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
     }
   }
 
@@ -3473,6 +3494,16 @@ export class SQLiteStore implements StoreInterface {
       const updated = this.db
         .prepare("UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ? RETURNING id")
         .all(proc.pid, proc.startTime, proc.worktree, id);
+      return ok(updated.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>> {
+    try {
+      // reason: BR-1360 — unconditional, newest registration wins, NULL clears; never part of insertRun (first wins).
+      const updated = this.db.prepare("UPDATE runs SET message_address = ? WHERE id = ? RETURNING id").all(address, id);
       return ok(updated.length > 0);
     } catch (e) {
       return wrapStoreError(e);

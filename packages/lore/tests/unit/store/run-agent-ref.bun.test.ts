@@ -31,6 +31,7 @@ function subagent(session: string, agent: string, registeredAt: string): RunReco
     branch: null,
     composition: { schemaVersion: 1, fragments: [] },
     registeredAt,
+    messageAddress: null,
   };
 }
 
@@ -45,6 +46,7 @@ const MAIN: RunRecord = {
   branch: null,
   composition: { schemaVersion: 1, fragments: [] },
   registeredAt: "2026-10-12T05:00:00.000Z",
+  messageAddress: null,
 };
 
 let dir: string;

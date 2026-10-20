@@ -17,7 +17,8 @@
  *   2. spawn `lore run register --harness claude-code --session S --harness-pid <ppid>`
  *      (the harness process that spawned this hook; AC-AU-5), plus
  *      `--agent-id A --agent-type T` when the payload carries a string
- *      `agent_id` (SubagentStart)
+ *      `agent_id` (SubagentStart); on SessionStart only, `--messaging-socket <raw path>` when the environment
+ *      variable CLAUDE_CODE_MESSAGING_SOCKET is non-empty (BR-1360)
  *   3. success -> print nothing; failure -> print ONE hook-JSON line whose
  *      additionalContext names the failure
  *
@@ -30,9 +31,9 @@
  *
  * ## Invariant: this file holds no grammar (spec D10)
  *
- * Run-id derivation, parent linkage and fragment composition belong to the
- * `lore run register` verb. This file only forwards the identifiers it was
- * given.
+ * Run-id derivation, parent linkage, fragment composition and the messaging-address grammar (`uds:<path>`)
+ * belong to the `lore run register` verb. This file only forwards the identifiers it was given, the socket path
+ * included, raw.
  *
  * @spec_ref spec-run-identity-slice-1-harness-attested-runs-attested D7, D10;
  *   AC-RID-3
@@ -92,6 +93,14 @@ const argv = ['run', 'register', '--harness', HARNESS, '--session', payload.sess
 if (typeof payload.agent_id === 'string') {
   argv.push('--agent-id', payload.agent_id);
   if (typeof payload.agent_type === 'string') argv.push('--agent-type', payload.agent_type);
+}
+
+// reason: BR-1360 — only the main run (SessionStart) carries an address; a subagent shares its session's socket and
+// registers none. The path is forwarded raw: the `uds:` grammar is the verb's (D10 above). Unset or empty -> no flag,
+// which makes the register clear any previously stored address.
+const messagingSocket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+if (typeof payload.agent_id !== 'string' && typeof messagingSocket === 'string' && messagingSocket !== '') {
+  argv.push('--messaging-socket', messagingSocket);
 }
 
 const child = spawnSync(VERB_BINARY, argv, {
