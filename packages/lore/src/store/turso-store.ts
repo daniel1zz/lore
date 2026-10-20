@@ -73,6 +73,15 @@ import {
   type ApprovedVersionRow,
   type BaselineNodeRow,
 } from "./migrations/migration-028.js";
+import {
+  collectLandedChanges,
+  MIGRATION_029_SQL,
+  planLandedPromotion,
+  promotedNodeBindings,
+  promotedVersionBindings,
+  promotionAuditEntry,
+  SELECT_SPEC_EXTRAS_SQL,
+} from "./migrations/migration-029.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -919,6 +928,54 @@ export class TursoStore implements StoreInterface {
             // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
           }
           throw new MigrationFailedError(28, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
+      }
+
+      if (currentVersion < 29) {
+        // reason: migration-029 promotes pending rule revisions that a landed spec change set accounts for (#323),
+        // planned by the same pure function the SQLite store runs, in ONE interactive transaction with the bump.
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          const specRs = await tx.execute(SELECT_SPEC_EXTRAS_SQL);
+          const landed = collectLandedChanges(specRs.rows.map((row) => ({ slug: rowStr(row, "slug"), extra: rowStr(row, "extra") })));
+          const nodes = await tx.execute(SELECT_BASELINE_NODES_SQL);
+          for (const row of nodes.rows) {
+            const node: BaselineNodeRow = {
+              id: rowStr(row, "id"),
+              slug: rowStr(row, "slug"),
+              title: rowStr(row, "title"),
+              content: rowStr(row, "content"),
+              status: rowStr(row, "status"),
+              extra: rowStr(row, "extra"),
+              tags: rowStr(row, "tags"),
+              version: rowNum(row, "version"),
+            };
+            step = `promote landed changes on baseline node ${node.slug}`;
+            const plan = planLandedPromotion(node, landed);
+            if (plan === undefined) continue;
+            const by = requireMigrationActor(this.migrationActor, node.slug);
+            const now = new Date().toISOString();
+            await tx.execute({ sql: UPDATE_CONVERTED_NODE_SQL, args: promotedNodeBindings(node, plan, now) as InValue[] });
+            await tx.execute({ sql: INSERT_CONVERSION_VERSION_SQL, args: promotedVersionBindings(node, plan, by, now) as InValue[] });
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(promotionAuditEntry(node, plan, by, now), prevHash) as InValue[] });
+          }
+          step = "set user_version 29";
+          await tx.execute(MIGRATION_029_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(29, step, this.localPath, error);
         } finally {
           tx.close();
         }
