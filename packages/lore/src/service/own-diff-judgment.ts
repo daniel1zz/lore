@@ -7,8 +7,10 @@
  *   - BR-1348 the branch has at least one task: the tasks claimed on it plus every task of a plan whose declared
  *     integration branch it is ({@link BranchOwnershipReader});
  *   - BR-1346 no changed path, and no changed top-level symbol of a file another live claim holds by symbol, is held by
- *     an anchor of a task that is not the branch's and has not landed (same overlap rule as the claim gate and the
- *     edit-time anchor gate, `anchorsOverlap`);
+ *     an anchor of a task that is not the branch's, has not landed and is still CLAIMED (edit in progress; same overlap
+ *     rule as the claim gate and the edit-time anchor gate, `anchorsOverlap`). A RELEASED task's committed, unlanded
+ *     branch holds nothing (else released branches that share a file deadlock: none can land first); it is listed as
+ *     `unlanded_overlaps` so its owner knows to merge main;
  *   - BR-1347 a declared co-change rule's trigger matches the own change and nothing matching its `require` changed.
  * A change outside the branch's own tasks' anchors that no other live claim holds is NOT refused: it is returned as
  * `outside_anchors` and recorded on the landing, so what landed is always visible.
@@ -24,8 +26,9 @@
  *     generated copy of it). Per-symbol diffs are read only for files some anchor holds by symbol; every other changed
  *     file is judged as a whole file.
  *   - A file whose symbols cannot be determined (not scannable, no declaration) is a change to the WHOLE file: fail closed.
- *   - Another LIVE claim = an unarchived task that is not a task of the branch, carries no landing, and either holds a
- *     claim (`extractHeldClaim`) or has a claim recorded on a branch that still exists and is not on main.
+ *   - Another LIVE claim = an unarchived task that is not a task of the branch, carries no landing and holds a claim
+ *     (`extractHeldClaim`). A task whose claim was released but whose recorded branch still exists and is not on main is an
+ *     UNLANDED RELEASED task: informational only.
  */
 import {
   anchorsOverlap,
@@ -145,10 +148,21 @@ export interface LandedFootprint {
   readonly outside_anchors: readonly string[];
 }
 
+/** A released task whose committed, unlanded branch overlaps the own change: it must merge main after this landing. */
+export interface UnlandedOverlap {
+  readonly task: string;
+  /** The unlanded branch its released claim recorded. */
+  readonly branch: string;
+  /** The changed paths (or `path#Symbol`) its anchors overlap, sorted. */
+  readonly paths: readonly string[];
+}
+
 /** What a passed judgment hands back to the landing. */
 export interface OwnDiffVerdict extends LandedFootprint {
   /** Tasks the change was judged against. */
   readonly tasks: readonly string[];
+  /** Released, unlanded tasks whose anchors overlapped the own change (informational, never a refusal). */
+  readonly unlanded_overlaps: readonly UnlandedOverlap[];
 }
 
 /** Dependencies of {@link OwnDiffJudgment}. */
@@ -205,10 +219,11 @@ export class OwnDiffJudgment {
     const rules = this.deps.loadCoChangeRules();
     if (!rules.measured) return err(refusal(`integrate: refused ${branch}: the co-change rules could not be read (${rules.reason}); fix the config, nothing was landed`));
 
-    const live = this.liveOthers(branch, ownership.value.others);
-    if (!live.ok) return live;
+    const live = ownership.value.others.filter((task) => task.held);
+    const released = this.unlandedReleased(branch, ownership.value.others.filter((task) => !task.held));
+    if (!released.ok) return released;
     const symbolPaths = new Set(
-      [...ownership.value.own, ...live.value].flatMap((task) => task.anchors.map(splitFileAnchor)).filter((a) => a.symbol !== undefined).map((a) => a.path),
+      [...ownership.value.own, ...live, ...released.value.map((r) => r.task)].flatMap((task) => task.anchors.map(splitFileAnchor)).filter((a) => a.symbol !== undefined).map((a) => a.path),
     );
     const candidates = new Map<string, string[]>();
     for (const file of changed) {
@@ -223,7 +238,7 @@ export class OwnDiffJudgment {
         `${OWN_DIFF_RULE_NO_TASK}: no task belongs to branch ${branch}. Claim a task on it (lore claim <task> --worktree ${branch}) or declare it as a plan's integration branch (lore plan integration-branch <plan> ${branch}).`,
       );
     }
-    const collisions = this.collisionsOf(live.value, candidates);
+    const collisions = this.collisionsOf(live, candidates);
     if (collisions.length > 0) {
       problems.push(
         `${OWN_DIFF_RULE_COLLISION}: the own change of ${branch} is held by another live claim:\n` +
@@ -240,7 +255,15 @@ export class OwnDiffJudgment {
       .filter((file) => (candidates.get(file.path) ?? []).some((candidate) => !anchorsOverlap([candidate], ownAnchors).overlaps))
       .map((file) => file.path)
       .sort();
-    return ok({ outside_anchors: outside, tasks: ownership.value.own.map((task) => task.slug) });
+    const unlanded = released.value
+      .map(({ task, branch: heldBranch }) => ({
+        task: task.slug,
+        branch: heldBranch,
+        paths: [...new Set(this.collisionsOf([task], candidates).map((c) => c.label))].sort(),
+      }))
+      .filter((overlap) => overlap.paths.length > 0)
+      .sort((a, b) => a.task.localeCompare(b.task));
+    return ok({ outside_anchors: outside, tasks: ownership.value.own.map((task) => task.slug), unlanded_overlaps: unlanded });
   }
 
   /** `git diff --name-status` between `merge-base(main, tip)` and `tip`: the branch's own files; both sides of a rename. */
@@ -262,15 +285,11 @@ export class OwnDiffJudgment {
     return ok({ base: mergeBase, files });
   }
 
-  /** The holders that are LIVE: held claim, or a claimed branch that exists and has not reached main. */
-  private liveOthers(branch: string, others: readonly OtherTask[]): Result<OtherTask[], LoreError> {
+  /** Unclaimed tasks whose recorded branch still exists and has not reached main, with that branch. */
+  private unlandedReleased(branch: string, others: readonly OtherTask[]): Result<{ task: OtherTask; branch: string }[], LoreError> {
     const { git, projectRoot } = this.deps;
-    const live: OtherTask[] = [];
+    const live: { task: OtherTask; branch: string }[] = [];
     for (const task of others) {
-      if (task.held) {
-        live.push(task);
-        continue;
-      }
       for (const name of task.claimedBranches) {
         if (name === branch || name.startsWith("/")) continue;
         const exists = git(projectRoot, ["rev-parse", "--verify", "-q", `${name}^{commit}`]);
@@ -278,7 +297,7 @@ export class OwnDiffJudgment {
         const onMain = git(projectRoot, ["merge-base", "--is-ancestor", exists.stdout.trim(), TARGET_REF]);
         if (onMain.status === 0) continue;
         if (onMain.status !== 1) return err(gitFailure(`is ${name} on main`, onMain));
-        live.push(task);
+        live.push({ task, branch: name });
         break;
       }
     }
