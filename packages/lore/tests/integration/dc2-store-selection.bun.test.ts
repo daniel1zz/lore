@@ -155,10 +155,10 @@ async function makeReplicaDouble(seedFrom: string): Promise<{ store: TursoStore;
         kind: row["kind"] as RunRecord["kind"],
         harness: row["harness"] as RunRecord["harness"],
         sessionRef: row["session_ref"] as string,
-        agentRef: row["agent_ref"],
-        agentType: row["agent_type"],
+        agentRef: row["agent_ref"] ?? null,
+        agentType: row["agent_type"] ?? null,
         parentRunId: row["parent_run_id"] as RunId | null,
-        branch: row["branch"],
+        branch: row["branch"] ?? null,
         composition: JSON.parse(row["composition"] as string) as RunRecord["composition"],
         registeredAt: row["registered_at"] as string,
       });
