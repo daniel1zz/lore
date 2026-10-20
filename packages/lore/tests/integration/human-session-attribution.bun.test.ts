@@ -7,7 +7,7 @@
  *   - a `lore set` writes a version row and an audit row naming dana, with name source `human` and dana's run;
  *   - `lore session show` names the open session;
  *   - a second `lore session start` exits 4 naming the open session;
- *   - after `lore session end` the next write is refused exactly as in AC-HID-1;
+ *   - after `lore session end` the next write is refused exactly as for a writer with no known party;
  *   - a write from a process carrying the agent harness marker (`CLAUDECODE=1`) is refused, not attributed to dana.
  * Also pinned (end state 2 and 5): the token lives in a file OUTSIDE the checkout (mode 0600) while the runs registry
  * holds only its hash; the session is bound to ITS checkout (another checkout of the same user has none); a person
@@ -183,7 +183,7 @@ describe("AC-HID-2: a registered person is the writer", () => {
       }
     });
 
-    it("lore session end deletes the token and ends the run; the next write is refused as in AC-HID-1", () => {
+    it("lore session end deletes the token and ends the run; the next write is refused as for a writer with no known party", () => {
       const ended = corpus.lore(["session", "end"], HUMAN);
       expect(ended.exitCode).toBe(0);
       expect(tokenFilesOf(corpus)).toEqual([]);

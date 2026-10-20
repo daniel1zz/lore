@@ -1,5 +1,4 @@
 /**
- * @spec_ref AC-HID-1, AC-HID-2, AC-HID-6
  * Spec: spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 1-5 (BR-1055, BR-1350, BR-1351).
  *
  * resolveInvocationIdentity(argv, env, humanSession) returns `{ identity, argv }`: `argv` is the input with the
