@@ -11,8 +11,8 @@
  *
  * Public surface: {@link newRevisionId}, {@link initialPending}, {@link effectiveNodePart}, {@link proposeNodePart},
  *   {@link proposeRuleRevision}, {@link effectiveRuleOf}, {@link discardRuleRevision}, {@link discardNodeRevision},
- *   {@link promoteRuleRevision}, {@link promoteNodeRevision}, {@link listPendingItems}, {@link pendingCountOf},
- *   {@link statusFor}, {@link NODE_ITEM}, and the input/output types.
+ *   {@link promoteRuleRevision}, {@link promoteNodeRevision}, {@link promoteItems}, {@link appendApprovedRule},
+ *   {@link listPendingItems}, {@link pendingCountOf}, {@link statusFor}, {@link NODE_ITEM}, and the input/output types.
  * Invariants:
  *   - Pure: no store, no clock beyond a fresh ULID per revision; every function returns a new `extra`, never mutates.
  *   - A write to an item REPLACES its pending revision and gives it a new `revision_id`, so an approval that saw an
@@ -122,7 +122,7 @@ export type NodePartProposal =
   /** A never-approved node: the change lands on the stored fields. `title` / `content` are set only when they change. */
   | { readonly kind: "direct"; readonly extra: Record<string, unknown>; readonly title?: string; readonly content?: string };
 
-function normalised(field: (typeof LIST_FIELDS)[number], value: readonly unknown[] | null | undefined): unknown[] | null {
+function normalised(value: readonly unknown[] | null | undefined): unknown[] | null {
   if (value === null || value === undefined || value.length === 0) return null;
   return [...value];
 }
@@ -147,7 +147,7 @@ export function proposeNodePart(doc: { title: string; content: string; extra: Ex
     for (const field of LIST_FIELDS) {
       const value = change[field];
       if (value === undefined) continue;
-      const next = normalised(field, value);
+      const next = normalised(value);
       if (!isDeepStrictEqual(next ?? [], effective[field])) touched = true;
       if (next === null) delete extra[field];
       else extra[field] = next;
@@ -169,9 +169,9 @@ export function proposeNodePart(doc: { title: string; content: string; extra: Ex
     title: doc.title,
     content: doc.content,
     label: approvedLabelOf({ extra: doc.extra }) ?? null,
-    glossary: normalised("glossary", approvedGlossaryOf({ extra: doc.extra })),
-    depends_on: normalised("depends_on", approvedDependsOnOf({ extra: doc.extra })),
-    commands: normalised("commands", approvedCommandsOf({ extra: doc.extra })),
+    glossary: normalised(approvedGlossaryOf({ extra: doc.extra })),
+    depends_on: normalised(approvedDependsOnOf({ extra: doc.extra })),
+    commands: normalised(approvedCommandsOf({ extra: doc.extra })),
   };
   let touched = false;
   const apply = (key: string, next: unknown): void => {
@@ -186,7 +186,7 @@ export function proposeNodePart(doc: { title: string; content: string; extra: Ex
   if (change.label !== undefined) apply("label", change.label);
   for (const field of LIST_FIELDS) {
     const value = change[field];
-    if (value !== undefined) apply(field, normalised(field, value));
+    if (value !== undefined) apply(field, normalised(value));
   }
   if (!touched) return { kind: "unchanged" };
   const nextNode = Object.keys(revision).length === 0 ? undefined : ({ revision_id: newRevisionId(), ...revision } as PendingNodeRevision);

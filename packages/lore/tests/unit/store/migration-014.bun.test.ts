@@ -44,6 +44,7 @@ import { computeBaselineStatus } from "../../../src/service/baseline-status.js";
 import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approveAllPending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 // Variable specifier: migration-014.ts does not exist yet; the file must still load and typecheck.
@@ -359,6 +360,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     // baseline-takes-them); `retired` exercises the same leaf-write -> registry trigger path.
     const dep = await rules.setRule("BR-1", { lifecycle: "retired", note: "gone" }, { by: "agent:test" });
     expect(dep.ok).toBe(true);
+    await approveAllPending(store); // a retirement is a pending revision: the registry follows it when approved
     const leafA = (await store.find(LEAF_A)) as { ok: true; value: DocRecord };
     expect(db.query("SELECT lifecycle, version FROM rule_registry WHERE id = 'BR-1'").get()).toEqual({
       lifecycle: "retired",
@@ -368,6 +370,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
     const ret = await rules.setRule("BR-5", { lifecycle: "retired", note: "gone" }, { by: "agent:test" });
     expect(ret.ok).toBe(true);
+    await approveAllPending(store);
     const leafB = (await store.find(LEAF_B)) as { ok: true; value: DocRecord };
     expect(db.query("SELECT lifecycle, version FROM rule_registry WHERE id = 'BR-5'").get()).toEqual({
       lifecycle: "retired",

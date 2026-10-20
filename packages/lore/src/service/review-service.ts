@@ -1100,7 +1100,10 @@ export class ReviewService {
       }
     }
 
-    const bound = !skipBinding && this.judgmentService !== undefined;
+    // reason: `workflow.review.judgment_required_types: []` is the documented kill switch of the review judgment (absent in a
+    // bare construction): with no review required there is no review to bind an approval to, so the approval promotes
+    // what it names. With the default list a review is required for baseline nodes too: an approval needs one that saw it.
+    const bound = !skipBinding && this.judgmentService !== undefined && (this.judgmentRequiredTypes?.length ?? 0) > 0;
     const reviewed = bound ? await this.reviewedRevisionsOf(doc) : undefined;
     if (reviewed !== undefined && !reviewed.ok) return reviewed;
     const selected: PendingItem[] = [];

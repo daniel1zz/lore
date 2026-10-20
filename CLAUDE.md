@@ -33,7 +33,7 @@ Repo-wide invariants. Current-state architecture (modules, layers, standards, de
 - ⛔ `@lore/core`'s default barrel never imports a Node builtin; Node IO lives in `@lore/core/node`, which `packages/dashboard/src/**` never imports.
 - A doc has `id` (ULID, immutable) and `slug` (editable); services accept either via `corpusService.resolve`.
 - Gates run in the service layer, so CLI, MCP and HTTP writes are gated identically.
-- Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/lifecycle.ts` is the only authority. Editing an approved living doc resets it to `draft`; a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
+- Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/lifecycle.ts` is the only authority. Editing an approved living doc resets it to `draft` (a baseline node is the exception: a write adds a pending revision of the ONE item it changes, status is derived, `lore review` then `lore approve [--item]` promotes it); a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
 - ⛔ A listed doc is not proven live; validity is authoritative only by direct address.
 - ⛔ The corpus is the ONLY spec index: read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
 

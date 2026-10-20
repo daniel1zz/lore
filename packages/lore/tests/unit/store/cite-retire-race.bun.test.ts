@@ -55,6 +55,7 @@ import type { RuleStateService } from "../../../src/service/rule-state-service.j
 import { RuleStateService as RuleStateServiceImpl } from "../../../src/service/rule-state-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approveAllPending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 const WORKER = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "fixtures", "cite-retire-race-worker.ts");
@@ -109,6 +110,8 @@ async function seed(dir: string): Promise<Fixture> {
     "rule",
   );
   if (added.ruleId !== RULE_ID) throw new Error(`fixture expected first rule id ${RULE_ID}, got ${added.ruleId}`);
+  await approveAllPending(store); // a direct add is a pending add: citable (live) only once approved
+  await approveAllPending(store); // a direct add is a pending add: citable (live) only once approved
 
   const specIds: string[] = [];
   for (let i = 0; i < WRITERS; i += 1) {

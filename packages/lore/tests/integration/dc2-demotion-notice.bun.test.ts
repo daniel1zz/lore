@@ -92,7 +92,8 @@ function approvedLeaf(): { leaf: string; rule: string } {
   const leaf = draftLeaf();
   const rule = mustRun(["rule", "add", leaf, "--statement", `seed rule ${counter}`, ...RULE_FLAGS]).stdout.match(/\bBR-\d+\b/)?.[0];
   if (rule === undefined) throw new Error("no rule id from seed rule add");
-  mustRun(["approve", leaf]);
+  // a direct add is a pending add: the leaf is approved by promoting it (the override class is loosened in beforeAll)
+  mustRun(["approve", leaf, "--override-no-judgment"]);
   expect(statusOf(leaf)).toBe("approved"); // the fixture must really be approved: a draft leaf proves nothing
   return { leaf, rule };
 }
@@ -141,6 +142,7 @@ beforeAll(async () => {
   const citedLeaf = draftLeaf();
   const cited = mustRun(["rule", "add", citedLeaf, "--statement", "the rule fixture specs cite", ...RULE_FLAGS]).stdout.match(/\bBR-\d+\b/)?.[0];
   if (cited === undefined) throw new Error("no rule id for the cited rule");
+  mustRun(["approve", citedLeaf, "--override-no-judgment"]); // citable (live) only once its leaf is approved
   citedRule = cited;
 });
 
@@ -148,46 +150,49 @@ afterAll(() => {
   if (dir !== "") rmSync(dir, { recursive: true, force: true });
 });
 
-describe(`${SPEC_QUALIFIED} (a) rule add and rule set announce the demotion`, () => {
-  it("rule add on an approved leaf prints the line on stdout, exits 0, and the leaf is draft", () => {
+describe(`${SPEC_QUALIFIED} (a) rule add and rule set no longer demote a baseline leaf (BR-722, BR-627)`, () => {
+  it("rule add on an approved leaf records a pending add: one version, no demotion line, derived status draft", () => {
     const { leaf } = approvedLeaf();
     const before = versionOf(leaf);
     const r = runLore(["rule", "add", leaf, "--statement", "added to an approved leaf", ...RULE_FLAGS]);
     expect(r.exitCode).toBe(0);
-    // the demotion is its own version (before + 1); the rule write is the next one
-    expect(r.stdout).toContain(demotionLine(leaf, before + 1));
+    expect(r.stdout).not.toContain("is now draft");
+    expect(r.stdout).toContain("pending add");
+    // no demotion write precedes the rule write: exactly ONE new version
+    expect(versionOf(leaf)).toBe(before + 1);
     expect(statusOf(leaf)).toBe("draft");
   });
 
-  it("rule add --json carries data.demoted = {slug, from, to, version}", () => {
+  it("rule add --json carries no data.demoted and says it is pending", () => {
     const { leaf } = approvedLeaf();
-    const before = versionOf(leaf);
     const r = runLore(["rule", "add", leaf, "--statement", "json add", ...RULE_FLAGS, "--json"]);
     expect(r.exitCode).toBe(0);
-    const demoted = (JSON.parse(r.stdout) as { data: { demoted?: DemotedPayload } }).data.demoted;
-    expect(demoted).toEqual({ slug: leaf, from: "approved", to: "draft", version: before + 1 });
+    const data = (JSON.parse(r.stdout) as { data: { demoted?: DemotedPayload; pending?: boolean } }).data;
+    expect(data.demoted).toBeUndefined();
+    expect(data.pending).toBe(true);
   });
 
-  it("rule set on an approved leaf prints the line, and --json carries data.demoted", () => {
+  it("rule set on an approved leaf records a pending revision: no demotion line, no data.demoted, one version", () => {
     const text = approvedLeaf();
     const textBefore = versionOf(text.leaf);
     const r = runLore(["rule", "set", text.rule, "--statement", "edited on an approved leaf"]);
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain(demotionLine(text.leaf, textBefore + 1));
+    expect(r.stdout).not.toContain("is now draft");
+    expect(r.stdout).toContain("pending revision");
+    expect(versionOf(text.leaf)).toBe(textBefore + 1);
 
     const json = approvedLeaf();
-    const jsonBefore = versionOf(json.leaf);
     const j = runLore(["rule", "set", json.rule, "--statement", "json edit", "--json"]);
     expect(j.exitCode).toBe(0);
-    const demoted = (JSON.parse(j.stdout) as { data: { demoted?: DemotedPayload } }).data.demoted;
-    expect(demoted).toEqual({ slug: json.leaf, from: "approved", to: "draft", version: jsonBefore + 1 });
+    const data = (JSON.parse(j.stdout) as { data: { demoted?: DemotedPayload; pending?: boolean } }).data;
+    expect(data.demoted).toBeUndefined();
+    expect(data.pending).toBe(true);
   });
 });
 
-describe(`${SPEC_QUALIFIED} (a) MCP lore_rule_add results carry demoted`, () => {
-  it("lore_rule_add on an approved leaf returns demoted in its result", async () => {
+describe(`${SPEC_QUALIFIED} (a) MCP lore_rule_add results carry no demoted`, () => {
+  it("lore_rule_add on an approved leaf returns a result without demoted", async () => {
     const { leaf } = approvedLeaf();
-    const before = versionOf(leaf);
     const config = LoreConfigSchema.parse({
       project: { name: "dc2-18", author: "tester" },
       workflow: { gates: { "record-edit": { enabled: false } } },
@@ -204,11 +209,12 @@ describe(`${SPEC_QUALIFIED} (a) MCP lore_rule_add results carry demoted`, () => 
         { leaf, statement: "added over MCP", confidence: "established", enforced_by: "guaranteed", examples: ["example one"], by: "agent:dc2-18" },
         {},
       );
-      expect(result.isError).not.toBe(true);
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
       const first = result.content[0];
       if (first === undefined || first.type !== "text") throw new Error("expected text content");
-      const payload = JSON.parse(first.text) as { demoted?: DemotedPayload };
-      expect(payload.demoted).toEqual({ slug: leaf, from: "approved", to: "draft", version: before + 1 });
+      const payload = JSON.parse(first.text) as { demoted?: DemotedPayload; ruleId?: string };
+      expect(payload.demoted).toBeUndefined();
+      expect(payload.ruleId).toMatch(/^BR-/);
     } finally {
       made.close();
     }

@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * E2E for baseline-slice-2 QA-5 / AC-BLS2-11 — ROLLBACK / UPGRADE LEAVES NO TRACE: a corpus upgraded to
  * slice 2a that (a) has NO baseline documents and no gate config, or (b) has baseline documents but
@@ -47,6 +48,7 @@ import { loosenOverrideClasses } from "../integration/fixtures/autonomy-override
 import { Database } from "bun:sqlite";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../helpers/cli-live-rule.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -158,6 +160,8 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
     );
     ruleId = ruleOut.stdout.match(/\bBR-\d+\b/)?.[0];
     if (ruleId === undefined) throw new Error(`could not parse rule id from: ${ruleOut.stdout}`);
+    // a direct add is a pending add: the rule is live (citable, counted) only once its leaf is approved
+    approveFixtureNodes(dir, [leaf]);
     if (setup.gate !== "absent") {
       patchLoreConfig(
         dir,
