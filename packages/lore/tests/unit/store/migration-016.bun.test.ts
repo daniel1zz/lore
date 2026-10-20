@@ -133,6 +133,7 @@ function makeRun(id: string, over: Record<string, unknown> = {}): Record<string,
     branch: "main",
     composition: { schemaVersion: 1, fragments: [{ id: "frag-1", sha256: "a".repeat(64) }] },
     registeredAt: STAMP,
+    messageAddress: null,
     ...over,
   };
 }
@@ -210,7 +211,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   it("STATE: LATEST_SCHEMA_VERSION is 22 and opening a schema-15 file lands on user_version 22", async () => {
     await seedSchema15();
     const store = actedStore(new SQLiteStore(path, { migrate: true }));
-    expect(LATEST_SCHEMA_VERSION).toBe(28);
+    expect(LATEST_SCHEMA_VERSION).toBe(30);
     expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     store.close();
   });

@@ -48,6 +48,7 @@ export type RunStore = Pick<
   | "reopenRun"
   | "getRunEnd"
   | "recordRunProcess"
+  | "recordRunAddress"
   | "listRunsByAgentRef"
   | "findMany"
   | "queryAudit"
@@ -137,6 +138,11 @@ export interface RegisterRunInput {
    * identity columns, the newest registration's process wins (a resumed run lives in a new process).
    */
   readonly process?: RunProcessRecord;
+  /**
+   * The composed messaging address of a MAIN run (`uds:<absolute path>`, BR-1360). Absent = none; it is written on
+   * every register, so omitting it on a resume CLEARS the stored address. A subagent run always stores none.
+   */
+  readonly messageAddress?: string;
 }
 
 /** Input of {@link RunService.registerParty}: a person (with their session token's hash) or an HTTP key / login by name. */
@@ -216,6 +222,8 @@ export class RunService {
       branch: input.branch ?? null,
       composition: input.composition,
       registeredAt: this.now().toISOString(),
+      // reason: BR-1360 — only a main run has an address; a subagent shares its session's socket, so it stores none.
+      messageAddress: input.agentId === undefined ? (input.messageAddress ?? null) : null,
     };
     const parsed = runRecordSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -235,6 +243,10 @@ export class RunService {
       const recorded = await this.store.recordRunProcess(id, input.process);
       if (!recorded.ok) return recorded;
     }
+    // reason: BR-1360 / plan I2 — written on EVERY register, outside the `process` branch above: a register without
+    // --harness-pid still writes, a resume replaces, an absent address clears.
+    const addressed = await this.store.recordRunAddress(id, parsed.data.messageAddress);
+    if (!addressed.ok) return addressed;
     const stored = await this.store.getRun(id);
     if (!stored.ok) return stored;
     if (stored.value === null) {
@@ -270,6 +282,8 @@ export class RunService {
       branch: null,
       composition: { schemaVersion: 1, fragments: [] },
       registeredAt: this.now().toISOString(),
+      // reason: a person, key or login has no messaging socket (BR-1360 covers agent runs only).
+      messageAddress: null,
     };
     const parsed = runRecordSchema.safeParse(candidate);
     if (!parsed.success) {

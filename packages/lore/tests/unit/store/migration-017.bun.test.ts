@@ -38,6 +38,7 @@ function runRecord(id: RunId): RunRecord {
     branch: null,
     composition: { schemaVersion: 1, fragments: [] },
     registeredAt: AT,
+    messageAddress: null,
   };
 }
 
@@ -63,7 +64,7 @@ describe("migration-017 constants", () => {
       expect(c.ddl).not.toMatch(/NOT NULL/i);
     }
     expect(MIGRATION_017_SQL).toContain("PRAGMA user_version = 17;");
-    expect(LATEST_SCHEMA_VERSION).toBe(28);
+    expect(LATEST_SCHEMA_VERSION).toBe(30);
   });
 });
 

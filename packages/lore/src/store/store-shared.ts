@@ -59,6 +59,7 @@ export interface RunRow {
   branch: string | null;
   composition: string;
   registered_at: string;
+  message_address: string | null;
 }
 
 /** `runs` row → {@link RunRecord}. Throws on malformed `composition` JSON (surfaced by the caller as STORE_ERROR). */
@@ -74,6 +75,7 @@ export function rowToRunRecord(row: RunRow): RunRecord {
     branch: row.branch,
     composition: JSON.parse(row.composition) as RunRecord["composition"],
     registeredAt: row.registered_at,
+    messageAddress: row.message_address,
   };
 }
 

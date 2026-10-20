@@ -766,6 +766,7 @@ describe("OutlineService.resolve", () => {
         listDecisionLog: (subject) => store.listDecisionLog(subject),
         // reason: AC-AU-5 — new required StoreInterface methods (run process record, run lifecycles).
         recordRunProcess: (id, proc) => store.recordRunProcess(id, proc),
+        recordRunAddress: (id, address) => store.recordRunAddress(id, address),
         listRunLifecycles: () => store.listRunLifecycles(),
         // reason: AC-AU-9 — new required StoreInterface methods (governed autonomy threshold record).
         readAutonomyThresholds: () => store.readAutonomyThresholds(),
