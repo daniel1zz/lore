@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-LB-5 (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1357): `lore claim` prints the
  * definition of done, and it is computed by the SAME predicates `lore done` uses.
@@ -10,11 +11,12 @@
  * src/c.ts is included; the tests assert src/c.ts is ABSENT from unfiltered_pass_files.
  * Made red once by listing all anchors.
  */
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extractFileAnchors, isTestFileAnchor, type DocRecord } from "@lore/core";
+import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import {
   definitionOfDone,
@@ -68,8 +70,8 @@ async function claimJson(task: string): Promise<{ dod: DodJson; stdout: string }
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-lb-dod-"));
   await must(["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:", "  gates:",
       "    spec-create:", "      enabled: false",

@@ -26,13 +26,14 @@
 
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfigFromString } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { withWriteContext } from "../../src/store/write-context-store.js";
 import { bareDocWriter } from "../../src/service/corpus-service.js";
 import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { createPartyCorpus, type PartyCorpus } from "../helpers/known-party-corpus.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
@@ -40,6 +41,33 @@ vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 const AGENT_RUN = { kind: "run", run: "cc:hid4-writer" } as const;
 const RETIRED_KEY = "actor_identity";
 const RETIRED_BLOCK = ["workflow:", "  gates:", '    "task-claim":', "      actor_identity:", "        enabled: false", ""].join("\n");
+
+/** The config text with the retired key and everything nested under it removed (what `migrate config-keys` must produce). */
+function withoutRetiredKey(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const m = /^(\s*)actor_identity:\s*$/.exec(line);
+    if (m === null) {
+      out.push(line);
+      continue;
+    }
+    const indent = m[1]!.length;
+    while (i + 1 < lines.length && lines[i + 1]!.trim() !== "" && lines[i + 1]!.length - lines[i + 1]!.trimStart().length > indent) i++;
+    // The migration also prunes a parent the removal leaves empty: drop each preceding `key:` line whose only child was this block.
+    let childIndent = indent;
+    while (out.length > 0) {
+      const parent = /^(\s*)[\w"-]+:\s*$/.exec(out[out.length - 1]!);
+      const next = lines.slice(i + 1).find((l) => l.trim() !== "");
+      const nextIndent = next === undefined ? -1 : next.length - next.trimStart().length;
+      if (parent === null || parent[1]!.length >= childIndent || nextIndent > parent[1]!.length) break;
+      childIndent = parent[1]!.length;
+      out.pop();
+    }
+  }
+  return out.join("\n");
+}
 
 function configPath(corpus: PartyCorpus): string {
   return join(corpus.dir, ".lore", "config.yaml");
@@ -103,7 +131,7 @@ describe("AC-HID-4: the retired setting is refused", () => {
   });
 
   it("a project config carrying the key is not rewritten by any command but `migrate config-keys`", () => {
-    appendFileSync(configPath(corpus), RETIRED_BLOCK);
+    patchLoreConfig(corpus.dir, RETIRED_BLOCK);
     const before = readFileSync(configPath(corpus), "utf8");
 
     corpus.lore(["list"], AGENT_RUN);
@@ -123,7 +151,7 @@ describe("AC-HID-4: the retired setting is refused", () => {
     expect(applied.exitCode).toBe(0);
     const after = readFileSync(configPath(corpus), "utf8");
     expect(after).not.toContain(RETIRED_KEY);
-    expect(after).toBe(before.replace(RETIRED_BLOCK, ""));
+    expect(after).toBe(withoutRetiredKey(before));
     expect(corpus.lore(["list"], AGENT_RUN).exitCode).toBe(0);
   });
 
@@ -138,17 +166,18 @@ describe("AC-HID-4: the retired setting is refused", () => {
   });
 
   it("BOUNDARY: a sibling key under the same gate survives the removal", () => {
-    // The previous tests left a config without a `workflow:` section, so one block carrying both keys is valid YAML.
-    const clean = readFileSync(configPath(corpus), "utf8");
-    const withSibling = ["workflow:", "  gates:", '    "task-claim":', "      anchor_overlap:", "        enabled: true", "      actor_identity:", "        enabled: false", ""].join("\n");
-    writeFileSync(configPath(corpus), `${clean}${withSibling}`);
+    // Seed through the helper: the sibling and the retired key merge into the init-seeded `workflow:` block.
+    patchLoreConfig(corpus.dir, ["workflow:", "  gates:", '    "task-claim":', "      anchor_overlap:", "        enabled: true", "      actor_identity:", "        enabled: false", ""].join("\n"));
+    const seeded = readFileSync(configPath(corpus), "utf8");
+    expect(seeded).toContain(RETIRED_KEY);
 
     const applied = corpus.lore(["migrate", "config-keys", "--apply"], AGENT_RUN);
 
     expect(applied.exitCode).toBe(0);
     const after = readFileSync(configPath(corpus), "utf8");
     expect(after).not.toContain(RETIRED_KEY);
-    expect(after).toBe(`${clean}${["workflow:", "  gates:", '    "task-claim":', "      anchor_overlap:", "        enabled: true", ""].join("\n")}`);
+    expect(after).toContain("anchor_overlap:");
+    expect(after).toBe(withoutRetiredKey(seeded));
     expect(corpus.lore(["list"], AGENT_RUN).exitCode).toBe(0);
   });
 });
