@@ -21,7 +21,7 @@
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -154,9 +154,19 @@ describe(`${SPEC}#AC-WSR-1 lore init is one atomic scaffold`, () => {
 
     const audit = runLore(["audit", "--json"], repo, home);
     expect(audit.exitCode, audit.stdout + audit.stderr).toBe(0);
-    const trail = (JSON.parse(audit.stdout) as { data: { entries?: unknown[] } }).data;
-    expect(trail.entries ?? []).toHaveLength(0);
+    const trail = (JSON.parse(audit.stdout) as { data: { entries?: Array<{ action: string; doc_id?: string }> } }).data;
+    // reason: inside a git repo `lore init` arms state binding (SPEC-143 AC-CT-3), which records one corpus-level
+    // `state-binding-armed` entry. That entry belongs to no document; "no audit entry" here means no document's
+    // creation (or any other doc-scoped action) was recorded.
+    const docEntries = (trail.entries ?? []).filter((entry) => entry.action !== "state-binding-armed" || entry.doc_id !== undefined);
+    expect(docEntries).toEqual([]);
 
+    // reason: the tree check needs the project's blueprint and its root PRD to run clean (exit 4 without a blueprint;
+    // "expected at least 1 prd" without the root). Both belong to the project, not to init, so the test supplies the
+    // minimal pair: the corpus then holds exactly one document, and anything init had written would be an orphan beside it.
+    const prd = runLore(["create", "prd", "--title", "Fixture Root", "--content", "Root PRD for the tree check.", "--no-ai"], repo, home);
+    expect(prd.exitCode, prd.stdout + prd.stderr).toBe(0);
+    writeFileSync(join(repo, "lore.tree.yaml"), "version: 1\nroot:\n  type: prd\n  children: []\n");
     const tree = runLore(["status", "--check-tree"], repo, home);
     expect(tree.exitCode, tree.stdout + tree.stderr).toBe(0);
   });

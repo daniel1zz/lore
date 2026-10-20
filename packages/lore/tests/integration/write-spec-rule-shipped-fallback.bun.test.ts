@@ -1,5 +1,8 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/governance/write-spec-rule.md
+// @reads packages/lore/src/**
+// @reads packages/core/src/**
+// @reads dist/lore
 /**
  * @spec_ref spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes#AC-WSR-2
  *
@@ -158,6 +161,7 @@ describe(`${SPEC}#AC-WSR-2 the shipped write-spec rule is the named fallback`, (
     const gate = gateSpecCreate(repo, home, true);
     const output = gate.stdout + gate.stderr;
     expect(gate.exitCode, output).not.toBe(0);
+    // a broken install is not a refused candidate: the refusal exit (4) stays reserved for a failing gate predicate
     expect(gate.exitCode, output).not.toBe(4);
     expect(output).toContain(ASSET_PATH);
     expect(output).not.toContain("[source:");

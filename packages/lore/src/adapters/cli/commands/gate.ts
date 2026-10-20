@@ -353,10 +353,10 @@ function readShippedWriteSpecRule(inv: Invocation): Result<string, LoreError> {
   try {
     return ok(readFileSync(assetPath, "utf8"));
   } catch (cause) {
+    // reason: STORE_ERROR (exit 1), not VALIDATION_ERROR (exit 4): exit 4 is the gate's "candidate refused" verdict,
+    // and a broken install must not read as one.
     return err({
-      code: "VALIDATION_ERROR",
-      field: "assetsRoot",
-      value: assetsRoot,
+      code: "STORE_ERROR",
       message:
         `lore gate spec-create: no approved project rule doc, and the write-spec rule shipped with the binary ` +
         `(assets/governance/write-spec-rule.md) is missing from this install: cannot read "${assetPath}": ` +
