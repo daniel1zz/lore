@@ -23,6 +23,7 @@ import { mountRegisteredProject } from "../../src/adapters/cli/commands/dashboar
 import { InMemoryStore } from "../../src/store/in-memory-store";
 import { SQLiteStore } from "../../src/store/sqlite-store";
 import type { TursoConfig, TursoStore } from "../../src/store/turso-store";
+import type { RunId, RunRecord } from "@lore/core";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const SPEC = "spec-defect-clusters-round-2-part-c-criterion-data-demotion";
@@ -143,6 +144,28 @@ async function makeReplicaDouble(seedFrom: string): Promise<{ store: TursoStore;
   for (const doc of seed.value) {
     const inserted = await inner.insert(doc);
     if (!inserted.ok) throw new Error(`harness: seeding the double failed: ${JSON.stringify(inserted.error)}`);
+  }
+  // The run registry is part of the corpus the double stands for: a write by an agent run is refused unless the run is known (BR-1351).
+  const registry = new Database(seedFrom, { readonly: true });
+  try {
+    const rows = registry.query("SELECT id, kind, harness, session_ref, agent_ref, agent_type, parent_run_id, branch, composition, registered_at FROM runs").all() as Array<Record<string, string | null>>;
+    for (const row of rows) {
+      const inserted = await inner.insertRun({
+        id: row["id"] as RunId,
+        kind: row["kind"] as RunRecord["kind"],
+        harness: row["harness"] as RunRecord["harness"],
+        sessionRef: row["session_ref"] as string,
+        agentRef: row["agent_ref"] ?? null,
+        agentType: row["agent_type"] ?? null,
+        parentRunId: row["parent_run_id"] as RunId | null,
+        branch: row["branch"] ?? null,
+        composition: JSON.parse(row["composition"] as string) as RunRecord["composition"],
+        registeredAt: row["registered_at"] as string,
+      });
+      if (!inserted.ok) throw new Error(`harness: seeding the double's run registry failed: ${JSON.stringify(inserted.error)}`);
+    }
+  } finally {
+    registry.close();
   }
   return {
     store,

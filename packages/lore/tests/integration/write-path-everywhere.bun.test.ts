@@ -58,7 +58,8 @@ import { withWriteContext } from "../../src/store/write-context-store.js";
 import { createApp, buildStateBindingOccupancyPort, type App } from "../../src/app.js";
 import { appendAdoptAuditRow, BASELINE_ADOPT_AUDIT_ACTION } from "../../src/adapters/cli/commands/baseline-adopt.js";
 import { loadLoreApp } from "../../src/adapters/cli/loader.js";
-import { actedStore, liveAmbient, liveInvocation, liveWriteContext } from "../live-invocation.js";
+import { actedStore, liveInvocation } from "../live-invocation.js";
+import { createLiveApp } from "../helpers/live-app.js";
 
 const CALLER = "agent:dcl5-caller";
 const AUTHOR = "agent:dcl5-original-author";
@@ -340,8 +341,9 @@ function openOwnWorld(): World {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "write-path-everywhere-")));
   scratch.push(dir);
   const raw = new SQLiteStore(join(dir, "lore.db"));
-  const store = withWriteContext(raw, { identity: { harnessRun: RUN as never, claimed: CALLER, claimedSource: "flag" } });
-  const authorStore = withWriteContext(raw, { identity: { harnessRun: null, claimed: AUTHOR, claimedSource: "flag" } });
+  const store = withWriteContext(raw, { identity: { harnessRun: RUN as never, claimed: CALLER, claimedSource: "run" } });
+  // reason: the seed author is a known party too (every stamped write needs a run, BR-1351); its run is NOT the caller's.
+  const authorStore = withWriteContext(raw, { identity: { harnessRun: "cc:wpe-seed-author" as never, claimed: AUTHOR, claimedSource: "run" } });
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   const writer = new CorpusService(store, lock);
   const seedCorpus = new CorpusService(authorStore, new RecordLockService(authorStore, new GateEnforcer(undefined)));
@@ -372,7 +374,7 @@ function openForeignWorld(): Promise<World> {
     git(repoRoot, ["commit", "-q", "-m", "init"]);
     const loreDir = join(repoRoot, ".lore");
     mkdirSync(loreDir, { recursive: true });
-    createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext()).close();
+    createLiveApp(join(loreDir, "lore.db")).close();
     mkdirSync(join(repoRoot, ".claude", "worktrees"), { recursive: true });
     const worktreePath = join(repoRoot, ".claude", "worktrees", "agent-dcl5");
     git(repoRoot, ["worktree", "add", "-q", "-b", "dcl5-agent", join(".claude", "worktrees", "agent-dcl5")]);

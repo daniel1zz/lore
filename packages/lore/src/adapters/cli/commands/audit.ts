@@ -148,7 +148,7 @@ export default defineLoreCommand({
           return 1;
         }
         const result = args.confirm
-          ? await stateBinding.arm({ actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() })
+          ? await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() })
           : await stateBinding.reportImpact();
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");

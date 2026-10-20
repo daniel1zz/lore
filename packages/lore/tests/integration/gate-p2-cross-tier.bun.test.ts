@@ -922,7 +922,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // No session on either side: the name the gate resolves is the fallback tier's (OS user / worktree
     // name), so the holder is recorded under exactly that name — same actor, nothing measured.
     setSessionEnv(null);
-    await claimTask(taskAId, resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user));
+    await claimTask(taskAId, resolveActor(liveInvocation()));
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv(null);

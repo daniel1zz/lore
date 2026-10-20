@@ -59,7 +59,7 @@ export default defineLoreCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv);
       const result = await app.taskWorkflowService.declareRedFirst(args.task as string, {
         by,
         source: app.callerSurface,

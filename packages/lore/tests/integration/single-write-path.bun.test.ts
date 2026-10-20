@@ -44,8 +44,7 @@ import { FOREIGN_CORPUS_WRITE_TOKEN } from "../../src/service/foreign-corpus-wri
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../src/store/store-interface.js";
 import { withWriteContext } from "../../src/store/write-context-store.js";
-import { createApp } from "../../src/app.js";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { createLiveApp } from "../helpers/live-app.js";
 
 const CALLER = "agent:dcl3-caller";
 const AUTHOR = "agent:dcl3-original-author";
@@ -801,7 +800,7 @@ describe("AC-DCL-3 wiring — createApp composes every service over the one writ
     const dir = mkdtempSync(join(tmpdir(), "single-write-path-app-"));
     scratch.push(dir);
     mkdirSync(join(dir, ".lore"), { recursive: true });
-    const app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+    const app = createLiveApp(join(dir, ".lore", "lore.db"));
     const prd = await mustCreate(app.corpusService, { type: "prd", title: "Wired", content: "v1" } as CreateDocInput);
     const set = await app.corpusService.set(prd.id, { content: "v2" });
     expect(set.ok).toBe(true);
