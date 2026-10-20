@@ -733,6 +733,13 @@ const WorkflowConfigSchema = z
          * output says "skipped (... not set)".
          */
         post_refresh_command: z.string().min(1).optional(),
+        /**
+         * `migrate_command` is the full command line of the BRANCH binary's `lore migrate schema` (this repository:
+         * `bun run packages/lore/src/index.ts migrate schema`). `lore integrate` runs it (with `--json` appended) in the
+         * integration worktree on the floor's corpus snapshot before the floor, and once in the shared checkout on the
+         * live corpus after the landing's refresh and rebuild. Absent = neither runs and the output says "skipped".
+         */
+        migrate_command: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
@@ -741,13 +748,6 @@ const WorkflowConfigSchema = z
 
 /** Task execution workflow config section. Source: SPEC-025 §3 D2; `gates` added for gate on/off overrides. */
 export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
-
-/**
- * The cut-off `lore migrate audit-backfill` uses when a config never set `audit.verify_since`: the SPEC-035 deploy
- * date, the day the audit writers went live. It defines which history PREDATES the writers (and so may be recorded
- * as reconstructed); verification itself never reads a date.
- */
-export const AUDIT_WRITERS_LIVE_FROM = "2026-07-06T00:00:00Z";
 
 // ─── Trace Section Schema ───────────────────────────────────────────────────
 

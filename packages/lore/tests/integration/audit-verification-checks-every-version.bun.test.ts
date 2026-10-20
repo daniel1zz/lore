@@ -156,19 +156,38 @@ describe("lore migrate audit-backfill (AC b)", () => {
     expect(details["run"]).toBe(entry.session_id);
   });
 
-  it("BOUNDARY: a version recorded after the configured cut-off with no audit entry is NOT reconstructed and stays missing", () => {
-    writeFileSync(configPath(), `${base}\naudit:\n  verify_since: "2026-07-06T12:02:00Z"\n`);
+  it("BOUNDARY: the boundary is the earliest audit entry — the preview names it and its source; a version after it with no entry is NOT reconstructed and stays missing", () => {
     seedUnauditedVersion(900, "2026-01-01T00:00:00.000Z");
-    seedUnauditedVersion(901, "2026-09-01T00:00:00.000Z");
+    seedUnauditedVersion(901, "2099-01-01T00:00:00.000Z");
+    const earliest = withDb(
+      (db) => (db.query("SELECT MIN(timestamp) AS t FROM audit WHERE json_extract(details, '$.version') IS NOT NULL").get() as { t: string }).t,
+    );
+
+    const preview = runLore(["migrate", "audit-backfill"], dir);
+    expect(preview.exitCode, preview.stderr).toBe(0);
+    expect(preview.stdout).toContain(`Boundary: ${earliest} (earliest audit entry)`);
+    expect(preview.stdout).toContain("1 version(s) would be recorded as reconstructed");
 
     const applied = runLore(["migrate", "audit-backfill", "--apply"], dir);
     expect(applied.exitCode, applied.stderr).toBe(0);
+    expect(applied.stdout).toContain(`Boundary: ${earliest} (earliest audit entry)`);
     expect(applied.stdout).toContain("1 version(s) recorded as reconstructed");
 
     const verify = runLore(["audit", "--verify", "--json"], dir);
     expect(verify.exitCode).toBe(4);
     const data = (JSON.parse(verify.stdout) as { data: { misses: { version: number }[] } }).data;
     expect(data.misses.map((m) => m.version)).toEqual([901]);
+  }, 120_000);
+
+  it("REGRESSION: a retired cut-off still in the config is NOT the boundary — the data is (a cut-off before the old version would have skipped it)", () => {
+    writeFileSync(configPath(), `${base}\naudit:\n  verify_since: "2020-01-01T00:00:00Z"\n`);
+    seedUnauditedVersion(900, "2026-01-01T00:00:00.000Z");
+
+    const applied = runLore(["migrate", "audit-backfill", "--apply"], dir);
+    expect(applied.exitCode, applied.stderr).toBe(0);
+    expect(applied.stdout).toContain("(earliest audit entry)");
+    expect(applied.stdout).toContain("1 version(s) recorded as reconstructed");
+    expect(runLore(["audit", "--verify"], dir).exitCode).toBe(0);
   });
 
   it("STATE: --apply removes only the retired config setting (every other byte kept)", () => {

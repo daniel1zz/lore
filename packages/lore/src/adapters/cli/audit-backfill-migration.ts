@@ -3,17 +3,19 @@
  * (task-audit-verification-checks-every-version-pre-writer-history).
  *
  * Public surface:
- *   runAuditBackfillMigration(input) — reads the retired `audit.verify_since` from `.lore/config.yaml`, records every
- *     pre-writer version without an audit entry as a reconstructed, hash-chained entry, then removes the setting.
+ *   runAuditBackfillMigration(input) — records every pre-writer version without an audit entry as a reconstructed,
+ *     hash-chained entry, then removes the retired `audit.verify_since` line from `.lore/config.yaml` (its value is
+ *     never read).
  *
  * Why here and not through `loadLoreApp`: every other command refuses the config this action repairs, so it opens the
  * corpus store itself (preview read-only, apply read-write) and edits the config text with the pure
  * `removeRetiredVerifySinceSetting`; no loader ever writes.
  *
  * @invariant ORDER: the entries are appended BEFORE the config line is removed. An interrupted run leaves the setting
- *   in place, so a re-run keeps the same boundary and reconstructs only what is still missing.
- * @invariant The boundary is the cut-off the corpus itself declared (`audit.verify_since`), else
- *   `AUDIT_WRITERS_LIVE_FROM`. It only decides which history may be reconstructed; verification never reads a date.
+ *   in place, and a re-run reconstructs only what is still missing.
+ * @invariant The boundary comes from the data (the created_at of the earliest audit entry, derived by
+ *   `AuditBackfillService`): no config key and no built-in date is read, so the result never depends on what the
+ *   config said or whether it still says it. Verification itself never reads a date.
  *
  * Side-effect class: IO (reads/writes the config file; opens the corpus store).
  */
@@ -21,7 +23,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  AUDIT_WRITERS_LIVE_FROM,
   err,
   ok,
   removeRetiredVerifySinceSetting,
@@ -40,11 +41,9 @@ export interface AuditBackfillMigration {
   readonly file: string;
   /** Whether the config carried the retired setting. */
   readonly found: boolean;
-  /** The cut-off the setting carried, `undefined` when it was absent. */
-  readonly declaredCutoff: string | undefined;
   /** Whether the config file was rewritten (`apply` and `found`). */
   readonly configWritten: boolean;
-  /** The backfill's own report (its `boundary` is the cut-off used). */
+  /** The backfill's own report (its `boundary` and `boundarySource` say where the line was drawn). */
   readonly backfill: AuditBackfillReport;
 }
 
@@ -55,17 +54,8 @@ export interface AuditBackfillMigrationInput {
   readonly apply: boolean;
 }
 
-function invalidCutoff(value: unknown): LoreError {
-  return {
-    code: "VALIDATION_ERROR",
-    field: "audit.verify_since",
-    message: `audit.verify_since is not an ISO 8601 timestamp (${JSON.stringify(value)}); fix or delete it by hand in .lore/config.yaml (nothing was rewritten).`,
-    value,
-  };
-}
-
 /**
- * @returns `ok(report)`; `err(VALIDATION_ERROR)` for a malformed config, a flow-style setting, an unreadable cut-off, or
+ * @returns `ok(report)`; `err(VALIDATION_ERROR)` for a malformed config, a flow-style setting, or
  *   a worktree reaching a behind-schema foreign corpus; `err(STORE_ERROR)` when the corpus or the config cannot be
  *   read/written. Never throws.
  */
@@ -76,10 +66,6 @@ export async function runAuditBackfillMigration(input: AuditBackfillMigrationInp
     const raw = existsSync(file) ? readFileSync(file, "utf8") : "";
     const removal = removeRetiredVerifySinceSetting(raw);
     if (!removal.ok) return removal;
-    const declared = removal.value?.value;
-    if (removal.value !== undefined && (typeof declared !== "string" || Number.isNaN(Date.parse(declared)))) {
-      return err(invalidCutoff(declared));
-    }
 
     const behind = findForeignBehindSchema(input.dbPath, input.inv.cwd);
     if (behind !== null) return err({ code: "VALIDATION_ERROR", field: "schema_version", message: behind.message });
@@ -87,7 +73,6 @@ export async function runAuditBackfillMigration(input: AuditBackfillMigrationInp
 
     const nowIso = new Date().toISOString();
     const backfill = await new AuditBackfillService(store).run({
-      boundary: typeof declared === "string" ? declared : AUDIT_WRITERS_LIVE_FROM,
       apply: input.apply,
       actor: resolveActor(input.inv.io, undefined, input.inv.env, input.inv.cwd, input.inv.user),
       run: `audit-backfill-${nowIso}`,
@@ -105,7 +90,6 @@ export async function runAuditBackfillMigration(input: AuditBackfillMigrationInp
     return ok({
       file,
       found: removal.value !== undefined,
-      declaredCutoff: typeof declared === "string" ? declared : undefined,
       configWritten,
       backfill: backfill.value,
     });
