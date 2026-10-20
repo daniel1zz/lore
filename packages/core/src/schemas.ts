@@ -301,12 +301,6 @@ export const taskExtraSchema = z
      */
     claim: taskClaimSchema.optional(),
     /**
-     * Parked state (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1354): the task's unlanded
-     * branch is set aside on purpose. Written by `lore park`; deleted by the task's next `lore claim` (claiming
-     * unparks). Shape is the plan's shared contract `{at, by, reason}`.
-     */
-    parked: z.object({ at: z.string(), by: z.string(), reason: z.string() }).optional(),
-    /**
      * Declared file/directory scopes this task touches — the worktree-mutex
      * safety net's SSOT (SPEC-042 §3 D3). See this schema's own @invariant above.
      */

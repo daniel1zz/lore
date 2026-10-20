@@ -3237,10 +3237,7 @@ export class TaskWorkflowService {
       inheritedDirtyWorktree !== undefined
         ? { ...builtClaim, inherited_dirty_worktree: inheritedDirtyWorktree }
         : builtClaim;
-    // reason: BR-1354 — claiming unparks: the parked mark (`lore park`) is deleted by the task's next claim, so a
-    // task someone works on again never reads as set aside.
-    const { parked: _unparked, ...extraWithoutParked } = task.extra;
-    const newExtra: Record<string, unknown> = { ...extraWithoutParked, claim: newClaim };
+    const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
     const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
     const takeoverNote =
