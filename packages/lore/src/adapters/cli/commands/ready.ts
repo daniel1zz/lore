@@ -153,7 +153,7 @@ export function formatReadyLine(record: ReadyRecord): string {
 }
 
 /** Render one session grouping line, e.g. "  - alice @hostA:/w1 [b1] tasks: task-a (newest T1)". */
-function formatSessionLine(session: ReadySession): string {
+export function formatSessionLine(session: ReadySession): string {
   const location =
     session.machine !== undefined || session.worktree !== undefined
       ? ` @${session.machine ?? "?"}:${session.worktree ?? "?"}`
