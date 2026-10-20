@@ -1,7 +1,7 @@
 /**
  * @layer core-unit — the retired claim-time identity setting: line-wise removal (`lore migrate config-keys`).
  *
- * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-4
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4)
  *
  * Dimensions: HAPPY (a lone setting is cut with every empty parent) / NEGATIVE (a flow-style placement and malformed
  * YAML are refused, nothing rewritten) / BOUNDARY (a sibling key, a trailing comment, an unrelated gate, absence) /

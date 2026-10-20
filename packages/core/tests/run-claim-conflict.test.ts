@@ -8,7 +8,7 @@
  * the falsifier from AC-RID-12: a name comparison would turn it red; two parties with no run and one name conflict).
  *
  * @spec_ref AC-RID-12
- * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-3
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4)
  */
 import { describe, it, expect } from "vitest";
 import { hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId } from "@lore/core";

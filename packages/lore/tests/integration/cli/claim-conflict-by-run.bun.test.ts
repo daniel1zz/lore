@@ -6,7 +6,7 @@
  *   spec-run-identity-slice-1-harness-attested-runs-attested D1 (global `--harness-run <id>`
  *   flag, stripped at the CLI entry) / D2 (run ids `cc:<session>`) / D6 (`hasClaimConflict`:
  *   two different runs => conflict; same run => refresh; stale => takeover) / D11; BR-1040, BR-1041.
- * @spec_ref AC-HID-3
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4: claims compare runs only)
  *   spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 4: claims compare runs, never names
  *   (BR-1040, BR-1043, BR-1056, BR-130). A lease that names no run belongs to nobody and conflicts with everyone.
  *

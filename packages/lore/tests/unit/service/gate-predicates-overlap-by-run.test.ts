@@ -3,7 +3,7 @@
  *
  * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 3.
- * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-3
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4)
  *
  * Coverage: NEGATIVE (two runs sharing a name; a missing run on either side) / HAPPY (the same run is one holder) /
  * REGRESSION (a stale or non-overlapping sibling never conflicts) / BOUNDARY (an absent `harness_run` key counts as

@@ -6,7 +6,7 @@
  *   spec-run-identity-slice-1-harness-attested-runs-attested D1 / D2 / D6 / D11; BR-1043
  *   (only the holding run releases without force; anyone else — another run, even under the holder's own name —
  *   needs force; a forced release names both).
- * @spec_ref AC-HID-3
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4: claims compare runs only)
  *   spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 4 (BR-1043, BR-1056): a release by
  *   the other run without force is refused; a lease that names no run is released only with force.
  *
