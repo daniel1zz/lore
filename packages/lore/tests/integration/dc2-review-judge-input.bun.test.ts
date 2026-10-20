@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-9 (D9, BR-268, BR-269, BR-960)
  *
@@ -25,6 +27,7 @@
  */
 import { Database } from "bun:sqlite";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -187,8 +190,8 @@ beforeAll(async () => {
   } as never);
   setMode("ok");
   await loosenOverrideClasses(dir, ["override-judgment"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:", "  gates:",
       "    spec-create:", "      enabled: false",

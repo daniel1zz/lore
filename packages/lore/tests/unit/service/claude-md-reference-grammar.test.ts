@@ -1,5 +1,7 @@
 // @reads .claude/**
 // @reads .lore-bootstrap/**
+// @reads adapters/cli/replica-priming.ts
+// @reads adapters/cli/migrate-schema.ts
 // @reads .lore/**
 // @reads .serena/**
 // @reads CLAUDE.md

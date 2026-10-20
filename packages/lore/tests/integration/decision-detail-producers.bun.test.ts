@@ -28,6 +28,7 @@ import { StashPruneService, type GitRunner } from "../../src/service/stash-prune
 import type { ProcessTablePort } from "../../src/adapters/process-table-port.js";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 import { actedStore } from "../live-invocation.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -423,8 +424,8 @@ const PRODUCERS: readonly ProducerRow[] = [
     label: "lore verify --allow-new-commands (command with no attested row)",
     drive: (corpus) => {
       // reason: mirrors tests/integration/verify-ac-ref-wiring.bun.test.ts — the gates that would block the authoring flow are disabled.
-      appendFileSync(
-        join(corpus.dir, ".lore", "config.yaml"),
+      patchLoreConfig(
+        corpus.dir,
         ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", "    plan-promote:", "      enabled: false", "    task-claim:", "      enabled: false", '    "task-create":', "      enabled: false", ""].join("\n"),
       );
       mustOk(corpus, ["create", "prd", "--title", "Hr2 PRD", "--no-ai", "--content", "body"]);

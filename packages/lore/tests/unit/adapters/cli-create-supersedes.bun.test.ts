@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref task-a-task-cannot-be-retracted-supersedes-emits-a-repair, Defect 1;
  *   task-mcp-lore-create-supersedes-still-creates-then-fails-the (precheck later

@@ -30,6 +30,7 @@ import { join } from "node:path";
 
 import { HOOK_ASSET_NAMES } from "../../../src/flows/setup-project-flow.js";
 import { initRepoWithMainCommit } from "../support/main-guard-repo.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 /** A project hook the current binary ships — derived from the SSOT so a hook retirement cannot break this suite again. */
 const SHIPPED_HOOK: string = HOOK_ASSET_NAMES[0];
@@ -122,12 +123,7 @@ beforeAll(() => {
   // `lore init` first so context.language can be set BEFORE the scaffold projects it into the settings file.
   const init = spawnSync(BUN_BIN, ["run", INDEX_TS, "init"], { cwd: templateRepo, env: envFor(templateRepo), encoding: "utf8" });
   if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
-  const configPath = join(templateRepo, ".lore", "config.yaml");
-  const config = readFileSync(configPath, "utf8");
-  const withLanguage = /^context:\s*$/m.test(config)
-    ? config.replace(/^context:\s*$/m, "context:\n  language: zh")
-    : `${config}\ncontext:\n  language: zh\n`;
-  writeFileSync(configPath, withLanguage, "utf8");
+  patchLoreConfig(templateRepo, "context:\n  language: zh\n");
   const scaffold = runSetup(["--project", "--yes"], templateRepo);
   if (scaffold.exitCode !== 0) throw new Error(`scaffold failed (${scaffold.exitCode}): ${scaffold.stderr}\n${scaffold.stdout}`);
 }, 120_000);

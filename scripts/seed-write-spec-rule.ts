@@ -29,6 +29,7 @@
  * (see project CLAUDE.md's "Never write to the repo's own .lore/ corpus from tests").
  */
 
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
 import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
@@ -59,54 +60,14 @@ export class SeedWriteSpecRuleError extends Error {
 export const WRITE_SPEC_RULE_TITLE = "Write-spec rules (gate feeding source)";
 
 /**
- * Markdown body of the seeded doc. Drafted from the five write-spec rules the gate
- * enforces (IoC vertical-slice tech-spec §4.1/§11) — kept short and skeleton-shaped
- * on purpose: this is exactly what `buildFeedingPack` will slice down further, so a
- * dense, front-loaded body maximises what survives an 800-char truncation.
+ * Markdown body of the seeded doc — read from the shipped asset `assets/governance/write-spec-rule.md`, the SSOT the
+ * binary's gate feeds from when a corpus has no rule doc of its own (BR-1359), so this repo's own corpus doc and the
+ * shipped fallback never carry two diverging rule texts.
  */
-export const WRITE_SPEC_RULE_CONTENT = `## Overview
-
-Rules a candidate \`spec\` document must satisfy before \`lore gate spec-create\` will
-let it through. This document is the feeding source the gate quotes back (via a
-minimal, truncated slice — never the full text) when a candidate violates one of
-these rules.
-
-## Rules
-
-1. **No parent.** A spec is created with no parent document: it belongs to the product trees
-   only through its criteria's rule citations (BR-n, AS-n). Creating a spec with a parent, or
-   filing one under a document by a parent link, is rejected (exit 4).
-2. **Declared spec_kind.** A spec must declare \`extra.spec_kind\` as one of
-   \`feature\`, \`tech\`, or \`design\`. An absent value defaults to \`feature\` at create
-   time; an explicit unrecognised value is rejected.
-3. **Required skeleton sections.** A spec's content must include, at minimum, these
-   level-2 headings: \`## Overview/Goal\`, \`## Scope\`, \`## Acceptance Criteria\`.
-4. **Deterministic, oracle-verifiable acceptance criteria.** Every AC must be
-   checkable by a deterministic oracle — an exit code, a test assertion, a concrete
-   observable outcome. Vague verbs (\"works\", \"support\", \"跑通\") are not acceptable
-   AC language; they cannot be mechanically verified.
-5. **Structured AC via \`lore ac add\`, citing rules.** A spec is approved only when at least one
-   criterion cites a live BR or AS rule (\`--cite BR-n\` on \`ac add\`, or \`lore ac cite\`; BR-1007).
-   **Structured AC.** Once the skeleton exists, add machine-checkable
-   acceptance criteria with \`lore ac add <spec> <id> --statement <s> --mode <script|ai|human>\`
-   rather than only prose under \`## Acceptance Criteria\` — structured ACs are what
-   \`lore verify\` / \`lore assess\` can actually execute and score against.
-
-## Scope
-
-Applies to every \`spec\` document created through \`lore create spec\` or
-programmatically via \`CorpusService.create\`. Does not apply to \`prd\`, \`adr\`,
-\`plan\`, \`knowledge\`, or \`task\` documents.
-
-## Acceptance Criteria
-
-- A spec with no \`parent_id\`, or a \`parent_id\` pointing to a non-\`prd\` doc, is
-  rejected by \`gate-predicates.ts::parentLegal\`.
-- A spec with an \`extra.spec_kind\` outside \`feature|tech|design\` is rejected by
-  \`gate-predicates.ts::specKindValid\`.
-- A spec whose content contains no \`## \` heading line is rejected by
-  \`gate-predicates.ts::hasSkeleton\`.
-`;
+export const WRITE_SPEC_RULE_CONTENT = readFileSync(
+  join(import.meta.dirname, "..", "assets", "governance", "write-spec-rule.md"),
+  "utf-8",
+);
 
 /**
  * The three-state outcome of one `seedWriteSpecRule` call — a discriminated result

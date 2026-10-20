@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, it, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
@@ -120,15 +120,20 @@ describe("initCorpusAt — ERROR", () => {
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
 describe("initCorpusAt — STATE", () => {
-  it("calling initCorpusAt twice against the SAME repoDir succeeds both times", async () => {
+  it("calling initCorpusAt twice against the SAME repoDir refuses the second call and leaves the first corpus and no staging directory", async () => {
     const repoDir = makeScratchDir("init-corpus-repeat-");
 
     const first = await initCorpusAt(repoDir, liveAmbient());
+    const configBefore = readFileSync(join(repoDir, ".lore", "config.yaml"), "utf8");
     const second = await initCorpusAt(repoDir, liveAmbient());
 
     expect(first.ok).toBe(true);
-    expect(second.ok).toBe(true);
+    // reason: BR-810 — the corpus is renamed into place, which cannot replace an existing one; the old
+    // in-place overwrite of a live corpus is gone. The caller's own existence check normally fires first.
+    expect(second.ok).toBe(false);
     expect(existsSync(join(repoDir, ".lore", "lore.db"))).toBe(true);
+    expect(readFileSync(join(repoDir, ".lore", "config.yaml"), "utf8")).toBe(configBefore);
+    expect(readdirSync(repoDir).filter((entry) => entry !== ".lore")).toEqual([]);
   });
 });
 

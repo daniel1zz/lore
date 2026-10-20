@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * BL-D1 under BR-1344: the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites
  * whose CODE declares one of its rules, so it needs no proxy command and no corpus mapping. A command-less leaf whose rules are

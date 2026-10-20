@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §9 AC6 — end-to-end closed-loop proof that the
  * spec-production inversion-of-control slice actually works together: a non-compliant
@@ -393,15 +394,16 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
     expect(step6.stdout).toContain("1 acceptance criteria");
   });
 
-  // ── ERROR: feeding pack still reports Missing: reasons even with no seeded rule doc ──
-  it("ERROR: gate spec-create still exits 4 with Missing: reasons when the rule doc was never seeded", async () => {
-    // Deliberately skip seedWriteSpecRule — the candidate names a parent, so the deterministic
-    // gate has no way to pass regardless of the rule doc's presence.
+  // ── ERROR: feeding pack still reports Missing: reasons with no project rule doc ──
+  it("ERROR: gate spec-create still exits 4 with Missing: reasons when the corpus has no rule doc of its own", async () => {
+    // The candidate names a parent, so the deterministic gate has no way to pass regardless of the rule doc.
     const result = await runGateSpecCreate(parentedPayload("some-parent"));
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("Missing:");
     expect(result.stdout).toContain("a spec takes no parent");
-    expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
+    // BR-1359: no project doc, so the rule shipped with the binary feeds the pack and its source line says so.
+    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md");
+    expect(result.stdout).not.toContain("bun scripts/");
   });
 
   // ── REGRESSION: LORE_GATE_BYPASS=1 short-circuits every step of the chain ──

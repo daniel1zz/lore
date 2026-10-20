@@ -1,3 +1,4 @@
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11, P1 slice-2 — `lore gate spec-create`'s
  * "active feeding" rule-doc lookup discovers its source by `extra.skill.applies_to`
@@ -246,13 +247,13 @@ describe("lore gate spec-create — feeding skill discovery by applies_to", () =
     expect(result.stdout).not.toContain("Older marker content");
   });
 
-  // ERROR — backward-compat placeholder when nothing is discoverable.
-  it("degrades to the missing-rule-doc placeholder when no approved skill doc exists", async () => {
+  // NEGATIVE — nothing discoverable in the corpus: the rule shipped with the binary feeds, and is named (BR-1359).
+  it("falls back to the shipped write-spec rule, named on the source line, when no approved skill doc exists", async () => {
     const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
 
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("[source: applies_to:spec");
-    expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
+    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md, trust: team-authored]");
+    expect(result.stdout).not.toContain("bun scripts/");
   });
 
   // STATE — a draft (unapproved) skill doc is invisible to discovery.
@@ -266,7 +267,7 @@ describe("lore gate spec-create — feeding skill discovery by applies_to", () =
     const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
 
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("[source: applies_to:spec");
+    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md");
     expect(result.stdout).not.toContain("Draft marker content");
   });
 

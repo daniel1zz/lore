@@ -79,6 +79,7 @@ import { resolutionToLabel } from "../../../src/service/resolution-projector.js"
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } from "../helpers/payload-gh-stub";
 import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
@@ -155,9 +156,8 @@ function makeThrowawayCorpus(prefix: string): { app: App; corpusRoot: string } {
  * function exists to avoid re-discovering.
  */
 function writeGithubUpstreamConfig(corpusRoot: string, repo: string): void {
-  const configPath = join(corpusRoot, ".lore", "config.yaml");
-  writeFileSync(
-    configPath,
+  patchLoreConfig(
+    corpusRoot,
     [
       "project:",
       "  name: lore-gr-read-surface-fixture",

@@ -70,6 +70,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { saveConfig } from "@lore/core/node";
+import { dropLoreConfigKey } from "../../helpers/patch-lore-config.js";
 import type { LoreConfig } from "@lore/core";
 
 import { checkpointRegistry } from "../../../src/service/checkpoint-registry.js";
@@ -238,6 +239,9 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
       tmpDir = mkdtempSync(join(tmpdir(), "lore-gate-evaluation-trace-"));
       mkdirSync(tmpDir, { recursive: true });
       runLoreOk(["init"], tmpDir, "lore init");
+      // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); the
+      // spec-promote trace case approves a bare spec, so the profiles are removed (an absent profile is a vacuous pass).
+      dropLoreConfigKey(tmpDir, ["workflow", "verification_profiles"]);
     }, 60_000);
 
     afterAll(() => {

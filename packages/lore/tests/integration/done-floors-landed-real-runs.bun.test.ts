@@ -27,6 +27,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -75,20 +76,9 @@ function statusOf(slug: string, cwd: string): string {
 
 /** Plan-close gate off + judgment off: the suite approves a plan only to reach the floors it tests. */
 function relaxPlanGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    [
-      "workflow:",
-      "  gates:",
-      '    "plan-close":',
-      "      enabled: false",
-      "  review:",
-      "    judgment_required_types: []",
-      "  integrate:",
-      '    floor_command: "true"',
-      "",
-    ].join("\n"),
-    "utf8",
+  patchLoreConfig(
+    dir,
+    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
   );
 }
 

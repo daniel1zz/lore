@@ -19,6 +19,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -141,7 +142,7 @@ describe(`${ID} (b) — one red-first task closes red then green`, () => {
     git(["checkout", "-q", "main"], dir);
     // landed through `lore integrate`, which records the landing `lore done` requires (BR-1291)
     appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
-    appendFileSync(join(dir, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
     git(["checkout", "-q", "--detach", "main"], dir); // the shared checkout is a detached view of main
     installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["integrate", "feat-red-first", "--session", "dc2-red-session"], dir);

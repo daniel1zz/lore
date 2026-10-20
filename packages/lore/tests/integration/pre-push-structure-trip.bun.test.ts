@@ -24,10 +24,11 @@
  * @spec_ref AC-STR-3
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { withTestRun } from "../helpers/test-run-identity";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -84,6 +85,9 @@ beforeAll(() => {
   if (!existsSync(DIST_BINARY)) throw new Error("dist/lore missing");
   copyFileSync(DIST_BINARY, join(realBinDir, "lore"));
   chmodSync(join(realBinDir, "lore"), 0o755);
+  // reason: a compiled `lore init` reads the config template from `<binary dir>/../assets` (DC2-5),
+  // as an installed package ships it beside the binary; the copy sits in a temp dir, so the repo's assets are linked in.
+  symlinkSync(join(REPO_ROOT, "assets"), join(tempRoot, "assets"));
 }, 300_000);
 
 afterAll(() => {

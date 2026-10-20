@@ -20,7 +20,8 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -68,7 +69,7 @@ mustSucceed(sh(root, "git", ["init", "-q"]), "git init");
 sh(root, "git", ["config", "user.email", "t@t.t"]);
 sh(root, "git", ["config", "user.name", "t"]);
 mustSucceed(lore(["init"]), "lore init");
-appendFileSync(join(root, ".lore", "config.yaml"), ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"));
+patchLoreConfig(root, ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"));
 mkdirSync(join(root, "src"), { recursive: true });
 mkdirSync(join(root, ".lore", "context"), { recursive: true });
 writeFileSync(join(root, "src", "widget.ts"), "export function renderWidget() {}\n");

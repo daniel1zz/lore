@@ -34,6 +34,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -106,9 +107,7 @@ function writeAiConfig(projectDir: string, opts: {
     "  templates: {}",
     `  telemetry: ${opts.aiTelemetry !== false ? "true" : "false"}`,
   ].join("\n");
-  const loreDir = join(projectDir, ".lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), config + "\n", "utf8");
+  patchLoreConfig(projectDir, config);
 }
 
 /** Write a stub binary to a new temp dir and return { binDir, binName }. */

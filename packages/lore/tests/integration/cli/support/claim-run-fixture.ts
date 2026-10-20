@@ -20,7 +20,8 @@
  */
 
 import { Database } from "bun:sqlite";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { App } from "../../../../src/app.js";
@@ -141,8 +142,8 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
   // test: disable the two claim gates so ONLY the claim-conflict decision can refuse a claim.
   // `claimGates: "enabled"` keeps them ON for suites whose subject IS the claim gate (BR-1056 overlap by run).
   if (opts.claimGates !== "enabled") {
-    appendFileSync(
-      join(dir, ".lore", "config.yaml"),
+    patchLoreConfig(
+      dir,
       ["workflow:", "  gates:", "    task-claim:", "      enabled: false", "    phase-claim:", "      enabled: false", ""].join("\n"),
     );
   }

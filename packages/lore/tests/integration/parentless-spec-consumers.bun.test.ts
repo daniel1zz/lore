@@ -23,7 +23,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -99,8 +100,8 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"]);
   // sync-docs bodies below are not spec-create skeletons; gating itself is not under test here.
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"),
   );
   copyFileSync(join(REPO_ROOT, "lore.tree.yaml"), join(dir, "lore.tree.yaml"));

@@ -97,6 +97,7 @@ import { tmpdir } from "node:os";
 import { z } from "zod";
 import { bootstrapReportSchema } from "@lore/core";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // tests/integration/ → tests/ → packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -206,7 +207,7 @@ function makeTempCorpus(prefix: string): string {
   runLoreOk(["init"], dir);
   // reason: plans are judged by default (BR-281 / BR-1237); this suite approves a plan only to put it in
   // a lifecycle state, never to exercise review-judgment.
-  appendFileSync(join(dir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
+  patchLoreConfig(dir, "workflow:\n  review:\n    judgment_required_types: []\n");
   return dir;
 }
 

@@ -32,6 +32,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -93,9 +94,7 @@ function writeUnknownProviderConfig(projectDir: string, providerName: string): v
     "ai:",
     `  provider: ${providerName}`,
   ].join("\n");
-  const loreDir = join(projectDir, ".lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), config + "\n", "utf8");
+  patchLoreConfig(projectDir, config);
 }
 
 // ─── Project-level state ──────────────────────────────────────────────────────

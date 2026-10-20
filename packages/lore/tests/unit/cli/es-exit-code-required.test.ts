@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * ES-E: a command's exit code is a required number; a dropped code is a compile error
  * (spec-process-state-end-state-one-invocation-per-entry-returned Goal 1 / D2, rule AS-26).

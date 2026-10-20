@@ -72,6 +72,7 @@ import {
   readFileSync,
 } from "fs";
 import { join, resolve, dirname } from "path";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "os";
 
 // ─── Path setup (mirrors tests/integration/cli/check-tree.test.ts) ─────────
@@ -154,7 +155,7 @@ const SECTIONS_PREFIX =
 function writeEnforceConfig(dir: string, extraMemoryFilesYaml = ""): void {
   if (extraMemoryFilesYaml === "") return;
   mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), `context:\n  memory_files:\n${extraMemoryFilesYaml}`);
+  patchLoreConfig(dir, `context:\n  memory_files:\n${extraMemoryFilesYaml}`);
 }
 
 /**
@@ -302,10 +303,7 @@ describe("lore status --check-claude-md: disabled via context.memory_files.enabl
     // the store, this fixture would surface that as a crash/wrong-exit-code
     // rather than the SPEC-required exit 0.
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
-      "context:\n  memory_files:\n    enabled: false\n",
-    );
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    enabled: false\n");
     expect(existsSync(join(tmpDir, ".lore", "lore.db"))).toBe(false);
 
     // Deliberately oversized — proves the config knob suppresses the check
@@ -442,10 +440,7 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
     // lone `warn: 0.999999` is an inverted pair and is refused at parse time.
     // Raising both is what this case has always been about: proving the
     // boundary is READ FROM CONFIG rather than baked into the check.
-    writeFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
-      "context:\n  memory_files:\n    warn_threshold_fraction: 0.999999\n    evict_threshold_fraction: 1\n",
-    );
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    warn_threshold_fraction: 0.999999\n    evict_threshold_fraction: 1\n");
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
 
     const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
@@ -463,10 +458,7 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
     // that exits 0 under the default floor exits 3 under a lowered one — so
     // the floor is provably read from config, not a module constant.
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
-      "context:\n  memory_files:\n    warn_threshold_fraction: 0.2\n    evict_threshold_fraction: 0.3\n",
-    );
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    warn_threshold_fraction: 0.2\n    evict_threshold_fraction: 0.3\n");
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(Math.ceil(30720 * 0.5)));
 
     const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
@@ -478,7 +470,7 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
 
   it("a threshold lowered to 0.01 makes even the CONTROL (comfortably-small) fixture warn", () => {
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    warn_threshold_fraction: 0.01\n");
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    warn_threshold_fraction: 0.01\n");
     writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX + nLineBody(10));
 
     const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);

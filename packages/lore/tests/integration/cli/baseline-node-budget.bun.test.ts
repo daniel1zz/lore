@@ -20,7 +20,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -191,7 +192,7 @@ describe("AC-BLS3B-8 per-kind node budgets: rules", () => {
 
 describe("AC-BLS3B-8 caps are read from budget.baseline.*", () => {
   it("a configured leaf_rules cap of 31 passes the 31-rule leaf; a configured standard_chars of 100 flags a 101-char standard", () => {
-    appendFileSync(join(dir, ".lore", "config.yaml"), "budget:\n  baseline:\n    leaf_rules: 31\n    standard_chars: 100\n");
+    patchLoreConfig(dir, "budget:\n  baseline:\n    leaf_rules: 31\n    standard_chars: 100\n");
     setBodyLength(standard, 101);
     const r = budgetJson();
     expect(r.exitCode).toBe(3);

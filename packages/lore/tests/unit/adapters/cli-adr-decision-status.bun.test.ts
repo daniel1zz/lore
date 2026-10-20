@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * `lore set --decision-status accepted` — CLI-adapter exit-code + wiring contract tests
  * (spec-adr-decision-status-has-a-create-surface-and-no-cli-update, AC-DS-1..7).

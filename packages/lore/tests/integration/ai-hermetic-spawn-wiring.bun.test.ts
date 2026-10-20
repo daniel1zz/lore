@@ -49,6 +49,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -146,9 +147,7 @@ function writeClaudeStubConfig(projectDir: string): void {
     "  templates: {}",
     "  telemetry: false",
   ].join("\n");
-  const loreDir = join(projectDir, ".lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), config + "\n", "utf8");
+  patchLoreConfig(projectDir, config);
 }
 
 /**

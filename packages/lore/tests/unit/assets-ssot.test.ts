@@ -470,6 +470,7 @@ const DECLARED_FILES = [
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
+  "governance/write-spec-rule.md",
 ] as const;
 
 const SKILL_MD_FILES = DECLARED_FILES.filter((f) => f.endsWith("SKILL.md"));

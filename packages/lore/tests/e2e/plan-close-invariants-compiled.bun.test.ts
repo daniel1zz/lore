@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Compiled-binary e2e suite proving
  * spec-plan-close-predicates-measure-invariants-an-applicability end-to-end,

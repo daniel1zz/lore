@@ -56,9 +56,11 @@ function writeGlobalConfig(dir: string, content: string): void {
 
 function makeXdgConfigHome(content: string): string {
   const xdgDir = resolve(mkdtempSync(join(tmpdir(), "lore-xdg-test-")));
-  const loreDir = join(xdgDir, "lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), content, "utf8");
+  // reason: the GLOBAL config (`$XDG_CONFIG_HOME/lore/config.yaml`), not a project `.lore/config.yaml`; named apart
+  // from the project-side `loreDir` so the writers scan does not read this as a project-config write.
+  const globalConfigDir = join(xdgDir, "lore");
+  mkdirSync(globalConfigDir, { recursive: true });
+  writeFileSync(join(globalConfigDir, "config.yaml"), content, "utf8");
   return xdgDir;
 }
 

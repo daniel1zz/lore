@@ -23,6 +23,7 @@ import { mountRegisteredProject } from "../../src/adapters/cli/commands/dashboar
 import { InMemoryStore } from "../../src/store/in-memory-store";
 import { SQLiteStore } from "../../src/store/sqlite-store";
 import type { TursoConfig, TursoStore } from "../../src/store/turso-store";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import type { RunId, RunRecord } from "@lore/core";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -69,14 +70,7 @@ async function makeSandbox(syncYaml: string, withToken: boolean): Promise<Sandbo
   const sb: Sandbox = { root, home, corpus, dbPath: join(corpus, ".lore", "lore.db"), env };
   const init = await lore(sb, "init");
   if (init.code !== 0) throw new Error(`harness: lore init failed: ${init.stderr}`);
-  const configPath = join(corpus, ".lore", "config.yaml");
-  let existing = "";
-  try {
-    existing = readFileSync(configPath, "utf8");
-  } catch {
-    existing = "";
-  }
-  writeFileSync(configPath, `${existing}\n${syncYaml}\n`);
+  patchLoreConfig(corpus, syncYaml);
   return sb;
 }
 

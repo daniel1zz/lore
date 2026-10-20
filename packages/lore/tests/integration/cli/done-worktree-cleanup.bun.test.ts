@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { installShippedGuard } from "../support/main-guard-repo.js";
@@ -156,7 +157,7 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(lore(["init"]), "lore init");
     // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
     appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
-    appendFileSync(join(repo, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+    patchLoreConfig(repo, 'workflow:\n  integrate:\n    floor_command: "true"\n');
     // reason: `lore init` arms state binding (AC-CT-3); a captured pass on a dirty tree is unbound and
     // refused by `lore done`, so the corpus scaffold is committed before any evidence is captured.
     mustOk(git(repo, "add", "-A"), "git add corpus");

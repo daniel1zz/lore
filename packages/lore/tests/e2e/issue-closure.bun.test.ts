@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Compiled-binary e2e oracle for AC-ICL-3/AC-ICL-4/AC-ICL-5
  * (spec-issue-closure-loop-computed-resolution-agent-reachable, §D3/§D4) —

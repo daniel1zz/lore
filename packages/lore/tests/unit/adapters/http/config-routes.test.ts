@@ -41,6 +41,7 @@ import { handleDashboardRoute } from "../../../../src/adapters/http/dashboard-ro
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { actedStore } from "../../../live-invocation.js";
+import { patchLoreConfig } from "../../../helpers/patch-lore-config.js";
 import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 // ─── Harness (mirrors config-service.test.ts) ──────────────────────────────────
@@ -55,9 +56,7 @@ function baseConfig(extra: Partial<LoreConfig> = {}): LoreConfig {
 }
 
 function seedConfig(config: LoreConfig): void {
-  const loreDir = join(corpusDir, ".lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), yaml.stringify(config), "utf8");
+  patchLoreConfig(corpusDir, config as unknown as Record<string, unknown>, { replace: true });
 }
 
 function rawConfigBytes(): string {

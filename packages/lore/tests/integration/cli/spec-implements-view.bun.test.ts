@@ -22,7 +22,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -107,7 +108,7 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"]);
   // reason: the fixture specs are one-line stubs; the skeleton gate is not what this test is about.
-  appendFileSync(join(dir, ".lore", "config.yaml"), "workflow:\n  gates:\n    spec-create:\n      enabled: false\n");
+  patchLoreConfig(dir, "workflow:\n  gates:\n    spec-create:\n      enabled: false\n");
 
   prd = slugOf(mustRun(["create", "prd", "--title", "IV PRD", "--content", "root", "--no-ai"]).stdout);
   const bizRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root"]).stdout);

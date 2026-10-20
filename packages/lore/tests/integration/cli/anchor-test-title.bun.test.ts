@@ -20,7 +20,8 @@
  */
 
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -66,8 +67,8 @@ function checkDrift(dir: string): { exitCode: number; drifts: DriftRowJson[] } {
 
 const tmpDir = mkdtempSync(join(tmpdir(), "lore-anchor-test-title-"));
 runOrThrow(["init"], tmpDir, "lore init");
-appendFileSync(
-  join(tmpDir, ".lore", "config.yaml"),
+patchLoreConfig(
+  tmpDir,
   ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"),
 );
 

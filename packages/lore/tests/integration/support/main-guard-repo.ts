@@ -9,6 +9,7 @@
  * Side-effect class: IO (temp directories, child processes).
  */
 import { spawn, spawnSync } from "node:child_process";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,9 +167,7 @@ export class GuardRepo {
 
   /** Sets `workflow.integrate.floor_command` in the throwaway corpus config. */
   setFloor(floorCommand: string): void {
-    const configPath = join(this.repo, ".lore", "config.yaml");
-    const base = readFileSync(configPath, "utf8").split("\nworkflow:")[0] ?? "";
-    writeFileSync(configPath, `${base.trimEnd()}\n\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(floorCommand)}\n`);
+    patchLoreConfig(this.repo, { workflow: { integrate: { floor_command: floorCommand } } });
   }
 
   /** A branch off main holding one new file, created without ever checking out main; returns its name. */

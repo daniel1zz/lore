@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * `lore get` structured-`extra` loss notice — COMPILED-BINARY end-to-end contract
  * (task-lore-get-s-default-render-silently-omits-structured-extra, AC-1/AC-2/AC-4/AC-5).

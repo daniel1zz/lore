@@ -52,7 +52,8 @@
  */
 
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -126,8 +127,8 @@ function runOrThrow(args: string[], dir: string, label: string): RunResult {
  * `lore init`-ed `config.yaml` already carries a REQUIRED top-level `project:` key.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

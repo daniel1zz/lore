@@ -23,6 +23,7 @@ import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { withSessionIdentity } from "../../helpers/session-actor.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 const GIT_AUTHOR_ARGS = ["-c", "user.email=lore-test@example.com", "-c", "user.name=Lore Test"] as const;
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -56,8 +57,8 @@ function extractSlug(stdout: string): string {
 }
 
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

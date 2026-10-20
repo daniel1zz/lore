@@ -33,6 +33,7 @@ import { dirname, join, resolve } from "node:path";
 import { nameOfAgentRun, type RunId } from "@lore/core";
 import { sessionActorFor, sessionIdOfActor } from "../helpers/session-actor";
 import { registerRun, runLore } from "./cli/support/claim-run-fixture.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -111,7 +112,7 @@ function buildFixture(): Fixture {
 
   mustLore(["init"], repo);
   // Pre-flight claim gates are not under test (the declare command runs the overlap predicate itself).
-  appendFileSync(join(repo, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
+  patchLoreConfig(repo, ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
   const prd = slugOf(mustLore(["create", "prd", "--title", "EAG PRD", "--content", "root", "--no-ai"], repo));
   const plan = slugOf(mustLore(["create", "plan", "--title", "EAG Plan", "--parent", prd, "--content", "x", "--no-ai"], repo));
   const newTask = (title: string, anchors: string[]): string =>

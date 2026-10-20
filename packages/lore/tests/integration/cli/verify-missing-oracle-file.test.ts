@@ -20,7 +20,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { withSessionIdentity } from "../../helpers/session-actor.js";
@@ -58,8 +59,8 @@ function extractSlug(stdout: string): string {
 }
 
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

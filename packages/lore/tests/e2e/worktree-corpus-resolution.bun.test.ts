@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref AC-WH-4
  *
@@ -51,7 +53,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
-  appendFileSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -62,6 +63,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -147,8 +149,8 @@ async function initCorpus(dir: string): Promise<void> {
  * unrelated source of flakiness from the claim/evidence chain.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

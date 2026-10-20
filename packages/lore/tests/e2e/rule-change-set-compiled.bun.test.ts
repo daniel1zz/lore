@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * rule-change-set-compiled.bun.test.ts — AC-CS-3: a spec's rule change set, from proposal to landing, observed
  * from the REAL compiled binary on a throwaway corpus with the citation gate ENFORCING.
@@ -37,7 +39,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import yaml from "yaml";
+import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 setDefaultTimeout(180_000);
@@ -98,16 +100,16 @@ class World {
     this.branch = await this.slug(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "CS Branch"]);
     this.leaf = await this.slug(["baseline", "add", this.branch, "--node", "leaf", "--label", "Leaf", "--title", "CS Leaf"]);
     await this.must(["rule", "add", this.leaf, "--statement", "A live rule that already describes the product", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e1"]);
-    const cfgPath = join(this.dir, ".lore", "config.yaml");
-    const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-    const workflow = {
-      ...(existing["workflow"] as Record<string, unknown> | undefined),
-      // citation gate ENFORCING on the branch; judgment off (fixture approvals); plan-close gate off so the apply
-      // step is the only plan-close refusal under test (it is unconditional, not part of that gate).
-      gates: { "ac-cite": { mode: "enforce", armed_branches: [this.branch] }, "plan-close": { enabled: false } },
-      review: { judgment_required_types: [] },
-    };
-    writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow }), "utf8");
+    patchLoreConfig(this.dir, {
+      workflow: {
+        // citation gate ENFORCING on the branch; judgment off (fixture approvals); plan-close gate off so the apply
+        // step is the only plan-close refusal under test (it is unconditional, not part of that gate).
+        gates: { "ac-cite": { mode: "enforce", armed_branches: [this.branch] }, "plan-close": { enabled: false } },
+        review: { judgment_required_types: [] },
+      },
+    });
+    // `lore init` seeds the verification profiles (a tech spec needs a `test` oracle to be approved); an absent profile is a vacuous pass.
+    dropLoreConfigKey(this.dir, ["workflow", "verification_profiles"]);
     return this;
   }
 

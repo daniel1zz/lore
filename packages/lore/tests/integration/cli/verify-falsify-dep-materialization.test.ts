@@ -115,7 +115,6 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
-  appendFileSync,
   existsSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -124,6 +123,7 @@ import { tmpdir } from "node:os";
 import { extractEvidence } from "@lore/core";
 import type { DocRecord } from "@lore/core";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── CLI subprocess plumbing (same shape as verify-falsify-green-control.test.ts::runLore) ──
 
@@ -153,8 +153,8 @@ function runLore(args: string[], cwd: string, actor: string | null = null): RunR
 
 /** Disables every `lore gate` service-layer checkpoint for a fixture corpus that deliberately stays "draft". */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

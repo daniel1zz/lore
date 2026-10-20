@@ -13,7 +13,8 @@
  */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -64,8 +65,8 @@ beforeEach(() => {
   mustRun(["init"], tmpDir);
   // Fixture-only: spec promotion/review gates would demand AC + judgments for setup states
   // this file is not testing. task-claim and plan-promote stay ENABLED — they are the subject.
-  appendFileSync(
-    join(tmpDir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    tmpDir,
     [
       "workflow:",
       "  gates:",
@@ -77,7 +78,6 @@ beforeEach(() => {
       "    judgment_required_types: []",
       "",
     ].join("\n"),
-    "utf8",
   );
   const specSlug = parseSlug(
     mustRun(["create", "spec", "--title", "Active Gate Spec", "--content", "## Overview\n\nx\n", "--no-ai"], tmpDir),

@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * plan-exempt-attestation-compiled.bun.test.ts — SPEC-069 AC-069-13: THE PAIR.
  *
@@ -41,6 +43,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
@@ -88,14 +91,7 @@ function parseSlug(stdout: string): string {
 
 /** Shallow-merges a `workflow:` YAML fragment into `.lore/config.yaml`. */
 function appendWorkflowConfig(dir: string, fragmentYaml: string): void {
-  const cfgPath = join(dir, ".lore", "config.yaml");
-  const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-  const fragment = yaml.parse(fragmentYaml) as { workflow?: Record<string, unknown> };
-  const mergedWorkflow = {
-    ...(existing["workflow"] as Record<string, unknown> | undefined),
-    ...fragment.workflow,
-  };
-  writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow: mergedWorkflow }), "utf8");
+  patchLoreConfig(dir, fragmentYaml);
 }
 
 /** Reads a doc's `extra` through the real binary's JSON surface. */

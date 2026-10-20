@@ -20,7 +20,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -107,7 +108,7 @@ beforeAll(() => {
   mustRun(["rule", "add", standard, "--statement", "Services return Result", ...RULE], both);
 
   // A spec whose script AC cites AS-1, verified through lore verify (attested evidence).
-  appendFileSync(join(both, ".lore", "config.yaml"), ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"));
+  patchLoreConfig(both, ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"));
   mustRun(["create", "spec", "--title", "Cites Standard", "--no-ai", "--content", "## Overview\nbody"], both);
   mustRun(
     ["ac", "add", "spec-cites-standard", "AC-TOT-1", "--statement", "The standard holds.", "--mode", "script", "--oracle", "other", "--command", "true", "--cite", "AS-1"],

@@ -35,6 +35,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry, VersionRecord } from "@lore/core";
@@ -235,7 +236,7 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
     // so the claim names the fixture repo and the two fixture test files are committed first.
     // The corpus (.lore/) and the fake HOME state (Library/) live inside the fixture repo; ignore them.
     writeFileSync(join(dir, ".gitignore"), ".lore/\nLibrary/\n.claude/\n");
-    appendFileSync(join(dir, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
     execFileSync("git", ["add", ".gitignore", "red.fixture.test.ts", "green.fixture.test.ts"], { cwd: dir });
     execFileSync("git", ["commit", "-q", "-m", "fixture tests"], { cwd: dir });
     // `lore done` needs the landing `lore integrate` records (BR-1291): the task's branch holds nothing past main, so

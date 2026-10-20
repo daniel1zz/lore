@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore scope add|rm|list` + `lore create task --ac-scope` — the declared-scope
  * authoring surface's CLI contract (spec-declared-scope-attestation-contract-
@@ -50,7 +52,8 @@
 
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
-import { appendFileSync, cpSync, mkdtempSync, rmSync } from "fs";
+import { cpSync, mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
@@ -150,8 +153,8 @@ async function seedFixture(cwd: string): Promise<void> {
   // post-create) refuse at creation with AC_SCOPE_REQUIRED. This suite tests
   // the scope WRITER, not the admission gate; that gate has its own dedicated
   // coverage (create-task-ac-scope.test.ts / create-task-ac-scope-e2e.bun.test.ts).
-  appendFileSync(
-    join(cwd, ".lore", "config.yaml"),
+  patchLoreConfig(
+    cwd,
     [
       "workflow:",
       "  gates:",
@@ -161,7 +164,6 @@ async function seedFixture(cwd: string): Promise<void> {
       "      enabled: false",
       "",
     ].join("\n"),
-    "utf8",
   );
   await mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
   await mustRun(

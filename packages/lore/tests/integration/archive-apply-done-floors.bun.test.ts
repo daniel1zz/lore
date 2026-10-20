@@ -35,6 +35,7 @@ import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -80,8 +81,8 @@ function parseSlug(stdout: string): string {
  * fixture approves a plan only to reach the archive floors it tests, not to exercise review-judgment.
  */
 function disablePlanCloseGate(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -91,7 +92,6 @@ function disablePlanCloseGate(dir: string): void {
       "    judgment_required_types: []",
       "",
     ].join("\n"),
-    "utf8",
   );
 }
 

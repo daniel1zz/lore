@@ -14,7 +14,8 @@
  */
 import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -51,8 +52,8 @@ const slugOf = (stdout: string): string => (JSON.parse(stdout) as { data: { slug
 
 const tmpDir = mkdtempSync(join(tmpdir(), "lore-list-omitted-invalid-"));
 runOrThrow(["init"], tmpDir, "lore init");
-appendFileSync(
-  join(tmpDir, ".lore", "config.yaml"),
+patchLoreConfig(
+  tmpDir,
   ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"),
 );
 const prd = slugOf(

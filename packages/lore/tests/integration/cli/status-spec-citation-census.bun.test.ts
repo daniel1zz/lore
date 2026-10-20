@@ -24,7 +24,8 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -126,7 +127,7 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
     const must = mustOf(run);
     must(["init"]);
     // reason: the fixture specs are one-line stubs; the skeleton gate is not what this test is about.
-    appendFileSync(join(dir, ".lore", "config.yaml"), "workflow:\n  gates:\n    spec-create:\n      enabled: false\n");
+    patchLoreConfig(dir, "workflow:\n  gates:\n    spec-create:\n      enabled: false\n");
 
     const prd = slugOf(must(["create", "prd", "--title", "CS PRD", "--content", "root", "--no-ai"]).stdout);
     const bizRoot = slugOf(must(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root"]).stdout);

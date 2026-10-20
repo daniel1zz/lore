@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Compiled-binary e2e for SPEC-061/AC-061-21 — `lore ac add`'s D8
  * declaration-time path-existence check, driven end-to-end through the
