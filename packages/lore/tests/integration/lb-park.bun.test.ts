@@ -29,8 +29,7 @@ function setup(): { fx: OwnDiffFixture; taskT: string; taskU: string } {
   const f = new OwnDiffFixture();
   fx = f;
   f.commitOnMain(BASE, "base sources");
-  // branch-y really changed src/x.ts: an unlanded branch holds what its own change touched (BR-1346)
-  f.makeBranch("branch-y", { "src/x.ts": "export const x = 3;\n" });
+  f.makeBranch("branch-y", { "y.txt": "y\n" });
   const taskU = f.createTask("U", ["src/x.ts"]);
   f.claim(taskU, "branch-y");
   f.release(taskU);
