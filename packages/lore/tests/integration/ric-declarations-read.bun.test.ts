@@ -70,7 +70,13 @@ interface SiteRow {
   readonly rules: string[];
 }
 
+const SHARED = `import { err } from "./refusal.js";\nexport function sharedRefusal() {\n  return err({ code: "SHARED_REFUSAL" });\n}\n`;
+const ONE = `import { sharedRefusal } from "../lib/shared.js";\n/** @lore-site BR-6 */\nfunction checkOne() {\n  return sharedRefusal();\n}\nexport default { run() { return checkOne(); } };\n`;
+const TWO = `import { sharedRefusal } from "../lib/shared.js";\n/** @lore-site BR-7 */\nfunction checkSeven() {\n  return sharedRefusal();\n}\n/** @lore-site BR-8 */\nfunction checkEight() {\n  return sharedRefusal();\n}\nexport default { run() { return [checkSeven(), checkEight()]; } };\n`;
+const THREE = `import { sharedRefusal } from "../lib/shared.js";\nfunction untaggedCheck() {\n  return sharedRefusal();\n}\nexport default { run() { return untaggedCheck(); } };\n`;
+
 let dir = "";
+let run: (command: string) => Promise<SiteRow[]>;
 let sites: SiteRow[] = [];
 
 // reason: a bare TS root with no corpus on purpose: the census reads the tree alone, so each declared id reads as declared
@@ -88,9 +94,16 @@ beforeAll(async () => {
   write(`${MINI_CLI}/lib/helpers.ts`, HELPERS);
   write(`${MINI_CLI}/lib/port.ts`, PORT);
   write(`${MINI_CLI}/commands/probe.ts`, PROBE);
-  const r = await runLoreInProcess(["baseline", "sites", "probe", "--json"], { cwd: dir, home, env: { ...process.env, HOME: home, ...sessionEnvFor("ric1") } });
-  expect(r.exitCode, r.stderr + r.stdout).toBe(0);
-  sites = (JSON.parse(r.stdout) as { data: { sites: SiteRow[] } }).data.sites;
+  write(`${MINI_CLI}/lib/shared.ts`, SHARED);
+  write(`${MINI_CLI}/commands/one.ts`, ONE);
+  write(`${MINI_CLI}/commands/two.ts`, TWO);
+  write(`${MINI_CLI}/commands/three.ts`, THREE);
+  run = async (command) => {
+    const r = await runLoreInProcess(["baseline", "sites", command, "--json"], { cwd: dir, home, env: { ...process.env, HOME: home, ...sessionEnvFor("ric1") } });
+    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
+    return (JSON.parse(r.stdout) as { data: { sites: SiteRow[] } }).data.sites;
+  };
+  sites = await run("probe");
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -123,5 +136,22 @@ describe("AC-RIC-1 — the census reads every declaration form from the tree", (
   it("(6) the list is exactly the five sites: the helper's pass-through literal is not a site of its own", () => {
     expect(sites).toHaveLength(5);
     expect(sites.filter((s) => s.code === "VALIDATION_ERROR")).toHaveLength(1);
+  });
+
+  it("(7) a shared refusal that declares nothing takes the rule of the one predicate above it, and says where the predicate is written", async () => {
+    const [shared] = await run("one");
+    expect(shared).toMatchObject({ code: "SHARED_REFUSAL", status: "declared", rule: "BR-6", rules: [] });
+    expect((shared as unknown as { via: { line: number } }).via.line).toBe(3);
+  });
+
+  it("(8) the same shared refusal reached through predicates of two rules is generic: both listed, none chosen", async () => {
+    const [shared] = await run("two");
+    expect(shared).toMatchObject({ code: "SHARED_REFUSAL", status: "generic", rule: null, rules: [] });
+    expect((shared as unknown as { predicates: { rule: string }[] }).predicates.map((p) => p.rule)).toEqual(["BR-7", "BR-8"]);
+  });
+
+  it("(9) reached through no tagged predicate it stays unmapped (never inherited from a neighbour command)", async () => {
+    const [shared] = await run("three");
+    expect(shared).toMatchObject({ code: "SHARED_REFUSAL", status: "unmapped", rule: null });
   });
 });

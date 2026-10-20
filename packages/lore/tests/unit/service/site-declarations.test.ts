@@ -57,4 +57,30 @@ describe("classifySiteDeclaration", () => {
   it("without a liveness index a single id reads as declared (the caller says liveness was unchecked)", () => {
     expect(classifySiteDeclaration(["BR-99999"])).toEqual({ state: "declared", rule: "BR-99999" });
   });
+
+  const predicate = (rule: string, line: number) => ({ rule, file: "p.ts", line, symbol: "check" });
+
+  it("a site that declares nothing takes the rule of the one predicate above it, saying where the predicate is written", () => {
+    expect(classifySiteDeclaration([], statusOf, [predicate("BR-1", 7)])).toEqual({ state: "declared", rule: "BR-1", via: predicate("BR-1", 7) });
+  });
+
+  it("a shared site reached through predicates of different rules is generic: it lists them and attributes the site to none", () => {
+    expect(classifySiteDeclaration([], statusOf, [predicate("BR-1", 7), predicate("BR-3", 20)])).toEqual({
+      state: "generic",
+      rules: ["BR-1", "BR-3"],
+      predicates: [predicate("BR-1", 7), predicate("BR-3", 20)],
+    });
+  });
+
+  it("the site's own declaration wins over the predicate above it", () => {
+    expect(classifySiteDeclaration(["BR-1"], statusOf, [predicate("BR-3", 20)])).toEqual({ state: "declared", rule: "BR-1" });
+  });
+
+  it("a predicate declaring a retired rule is reported retired, with the predicate", () => {
+    expect(classifySiteDeclaration([], statusOf, [predicate("BR-2", 9)])).toEqual({ state: "retired", rule: "BR-2", via: predicate("BR-2", 9) });
+  });
+
+  it("no declaration and no predicate is unmapped", () => {
+    expect(classifySiteDeclaration([], statusOf, [])).toEqual({ state: "unmapped" });
+  });
 });
