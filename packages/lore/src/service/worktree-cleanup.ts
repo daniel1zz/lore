@@ -84,6 +84,11 @@ export interface WorktreeGitProbe {
   headSha(path: string): ProbeResult<string>;
   /** `git rev-parse --verify refs/heads/<name>` run in `cwd` (any worktree of the repo — branch refs are shared). */
   branchTip(cwd: string, name: string): ProbeResult<string>;
+  /**
+   * Short names of the local branches whose tip contains commit `sha` (`for-each-ref --contains`), run in `cwd`.
+   * Optional: an absent method cannot name a source branch, so the BR-1353 refusal then names the count only.
+   */
+  branchesContaining?(cwd: string, sha: string): ProbeResult<readonly string[]>;
   /** Plain `git worktree remove <path>` run from `repoRoot`. */
   removeWorktree(repoRoot: string, path: string): ProbeResult<true>;
   /** Plain `git branch -d <branch>` run from `repoRoot`. */
@@ -736,6 +741,10 @@ export function createRealWorktreeProbe(cwd: string): WorktreeGitProbe {
     branchTip: (cwd, name) => {
       const out = runGit(cwd, ["rev-parse", "--verify", `refs/heads/${name}`]);
       return out.ok ? { ok: true, value: out.value.trim() } : out;
+    },
+    branchesContaining: (cwd, sha) => {
+      const out = runGit(cwd, ["for-each-ref", "--contains", sha, "--format=%(refname:short)", "refs/heads"]);
+      return out.ok ? { ok: true, value: out.value.split("\n").filter((line) => line !== "") } : out;
     },
     removeWorktree: (repoRoot, path) => {
       const out = runGit(repoRoot, ["worktree", "remove", path]);

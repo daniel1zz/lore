@@ -390,6 +390,7 @@ import {
   measureAnchorRemoval,
   resolveClaimHead,
   type AnchorRemovalVerdict,
+  type ListedWorktree,
   type RecordedWorktree,
   type WorktreeGitProbe,
   type WorktreeOutcome,
@@ -1138,7 +1139,7 @@ function readEvidence(task: DocRecord): EvidenceEntry[] {
  * (absent, `false`, or a corrupted non-boolean value from a legacy row)
  * reads as "not declared", never a thrown error.
  */
-function readRedFirstDeclared(task: DocRecord): boolean {
+export function readRedFirstDeclared(task: DocRecord): boolean {
   return task.extra["red_first"] === true;
 }
 
@@ -1349,6 +1350,16 @@ function toRepoRelativeExecutionRoot(executionRoot: string | undefined, repoRoot
 }
 
 /**
+ * The test FILES a task's anchors name, deduplicated, in declaration order — the one extraction both the
+ * `unfiltered-test-file` floor ({@link findMissingUnfilteredTestFileRuns}) and the claim-time
+ * {@link definitionOfDone} read, so neither keeps its own list.
+ */
+function declaredTestFileAnchors(task: DocRecord): string[] {
+  // reason: a `path#Symbol` test anchor names the same file as its bare path; the floor asks about FILES.
+  return [...new Set(extractFileAnchors(task).filter(isTestFileAnchor).map(fileAnchorPath))];
+}
+
+/**
  * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
  * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
  * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
@@ -1377,13 +1388,12 @@ function toRepoRelativeExecutionRoot(executionRoot: string | undefined, repoRoot
  * @returns Every anchor lacking a satisfying row, in declaration order —
  *   `[]` iff every declared test-file anchor is satisfied (or none exist).
  */
-function findMissingUnfilteredTestFileRuns(
+export function findMissingUnfilteredTestFileRuns(
   task: DocRecord,
   evidence: EvidenceEntry[],
   repoRoot: string | undefined,
 ): string[] {
-  // reason: a `path#Symbol` test anchor names the same file as its bare path; the floor asks about FILES.
-  const testFileAnchors = [...new Set(extractFileAnchors(task).filter(isTestFileAnchor).map(fileAnchorPath))];
+  const testFileAnchors = declaredTestFileAnchors(task);
   if (testFileAnchors.length === 0) return [];
 
   // reason: F7 — each row contributes its OWN attested `attestation.execution_root`
@@ -1478,7 +1488,7 @@ function findMissingUnfilteredTestFileRuns(
  * @example
  * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no ac_scope key at all
  */
-function requiresNoNewTestsDeclaration(
+export function requiresNoNewTestsDeclaration(
   task: DocRecord,
   evidence: EvidenceEntry[],
   supersession?: DeclaredScopeSupersession,
@@ -1492,6 +1502,44 @@ function requiresNoNewTestsDeclaration(
   // (unresolvable) means nothing is assumed superseded — fail closed.
   if (acScope.length > 0 && supersession !== undefined && supersession.live.length === 0) return false;
   return !evidence.some(isRunnerProducedRedRun);
+}
+
+/** What `lore done` will demand of a task, computed before the work starts (BR-1357). */
+export interface DefinitionOfDone {
+  /** Anchored test files that each need an attested UNFILTERED passing run (the `unfiltered-test-file` floor). */
+  readonly unfiltered_pass_files: string[];
+  /** Whether a runner-produced red run must be on record (the `red-first` / `no-new-tests` floors). */
+  readonly red_required: boolean;
+  /** Declared ac_scope ids that `lore verify` runs: live (not superseded) script-mode criteria. */
+  readonly verify_acs: string[];
+}
+
+/**
+ * The definition of done of `task`, as DATA, from the done floors' own predicates (BR-1357): the test-file list is
+ * {@link declaredTestFileAnchors} (what {@link findMissingUnfilteredTestFileRuns} reports with no evidence), and
+ * `red_required` is {@link readRedFirstDeclared} or {@link requiresNoNewTestsDeclaration} evaluated with no evidence
+ * (the arming test of floors 2 and 4). Pure: no store, no git, no evidence read.
+ *
+ * @param task - the task
+ * @param criteria - the governing spec's criteria; `null` when they cannot be resolved (then every declared ac_scope
+ *   id is listed, because nothing proves it is superseded or not script-mode: fail closed)
+ * @example
+ * definitionOfDone(taskAnchoringTestsAndSrc, criteria) // { unfiltered_pass_files: ["tests/a.test.ts"], red_required: true, verify_acs: ["AC-X-1"] }
+ */
+export function definitionOfDone(task: DocRecord, criteria: readonly AcceptanceCriterion[] | null): DefinitionOfDone {
+  const scope = extractDeclaredAcScope(task);
+  const supersession =
+    scope !== undefined && scope.length > 0 && criteria !== null ? partitionDeclaredScopeBySupersession(scope, criteria) : undefined;
+  const verifyAcs = (scope ?? []).filter((acId) => {
+    if (criteria === null) return true;
+    const criterion = criteria.find((c) => c.id === acId);
+    return criterion !== undefined && !isAcSuperseded(criterion) && criterion.verify.mode === "script";
+  });
+  return {
+    unfiltered_pass_files: declaredTestFileAnchors(task),
+    red_required: readRedFirstDeclared(task) || requiresNoNewTestsDeclaration(task, [], supersession),
+    verify_acs: verifyAcs,
+  };
 }
 
 /**
@@ -3090,6 +3138,9 @@ export class TaskWorkflowService {
     if (!holderResult.ok) return holderResult;
 
     const existingClaim = readClaimRecord(task);
+    // reason: BR-1353 — measured before anything is written, so a refused claim persists nothing.
+    const offMainResult = await this.refuseFirstClaimOffMain(task, opts, existingClaim?.branch);
+    if (!offMainResult.ok) return offMainResult;
     const claimant = buildClaimParty(opts);
     let carryForward = false;
     let inheritedDirtyWorktree: string | undefined;
@@ -3266,6 +3317,98 @@ export class TaskWorkflowService {
     }
 
     return writeResult;
+  }
+
+  /**
+   * BR-1353: a task's FIRST claim from a linked worktree is refused when the worktree's HEAD carries commits not on
+   * the integration branch. A claim starts from main; commits carried in from another unlanded branch would be
+   * judged as this task's own at landing. A later claim on a branch an earlier claim of this task already recorded
+   * (the current claim record or any claim audit row) is exempt: those are the task's own commits.
+   *
+   * Applies only when `--worktree` names an existing path that is a LINKED worktree (not the main checkout); a branch
+   * name or a path that does not exist names no working copy to measure. When it applies, every git read must
+   * succeed: an unreadable worktree list, integration branch or commit count REFUSES (fail loud), never passes.
+   * An unwired probe (bare unit construction; `app.ts` always wires one) skips the check.
+   *
+   * @param currentClaimBranch - `branch` of the claim record the task holds now, when it holds one
+   * @returns `err(VALIDATION_ERROR)` field `gate:task-claim:first-claim-off-main` naming BR-1353, the commit count and
+   *   (when found) the local branch whose tip contains those commits; `ok` otherwise
+   */
+  private async refuseFirstClaimOffMain(
+    task: DocRecord,
+    opts: ClaimOpts,
+    currentClaimBranch: string | undefined,
+  ): Promise<Result<void, LoreError>> {
+    const target = opts.worktree;
+    const probe = this.worktreeProbe;
+    if (target === undefined || probe === undefined || !probe.pathExists(target)) return ok(undefined);
+    const field = "gate:task-claim:first-claim-off-main";
+    const unreadable = (what: string, reason: string): Result<void, LoreError> =>
+      err({
+        code: "VALIDATION_ERROR",
+        field,
+        message:
+          `Task "${task.slug}": BR-1353 cannot be checked because ${what} is unreadable (${reason}); ` +
+          `the claim is refused rather than allowed unmeasured.`,
+        value: { worktree: target, reason },
+      });
+
+    const listed = probe.listWorktrees(target);
+    if (!listed.ok) return unreadable(`the worktree list of ${target}`, listed.reason);
+    const real = probe.realPath(target);
+    const index = listed.value.findIndex((entry) => probe.realPath(entry.path) === real);
+    // reason: index 0 is the main checkout and a path matching no entry is not a worktree root: neither is a linked
+    // worktree, and BR-1353 is about a linked worktree's own HEAD.
+    if (index <= 0) return ok(undefined);
+    const ownBranch = (listed.value[index] as ListedWorktree).branch;
+
+    const integration = probe.integrationBranch(target);
+    if (!integration.ok) return unreadable("the integration branch", integration.reason);
+    const ahead = probe.countCommits(target, `${integration.value}..HEAD`);
+    if (!ahead.ok) return unreadable(`the commit count ${integration.value}..HEAD in ${target}`, ahead.reason);
+    if (ahead.value === 0) return ok(undefined);
+
+    if (ownBranch !== undefined) {
+      const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+      if (!auditResult.ok) return auditResult;
+      const recordedBranches = new Set<string>(
+        auditResult.value.flatMap((row) => {
+          const branch = row.details?.["branch"];
+          return typeof branch === "string" ? [branch] : [];
+        }),
+      );
+      if (currentClaimBranch !== undefined) recordedBranches.add(currentClaimBranch);
+      if (recordedBranches.has(ownBranch)) return ok(undefined);
+    }
+
+    const head = probe.headSha(target);
+    const sources =
+      head.ok && probe.branchesContaining !== undefined ? probe.branchesContaining(target, head.value) : undefined;
+    const sourceBranches =
+      sources !== undefined && sources.ok
+        ? sources.value.filter((name) => name !== ownBranch && name !== integration.value)
+        : [];
+    const commits = `${ahead.value} commit${ahead.value === 1 ? "" : "s"}`;
+    const fromNote = sourceBranches.length > 0 ? `, the commits of branch ${sourceBranches.join(", ")}` : "";
+    return err({
+      code: "VALIDATION_ERROR",
+      field,
+      message:
+        `Task "${task.slug}": a first claim starts from ${integration.value} (BR-1353), but worktree ${target} carries ` +
+        `${commits} not on ${integration.value}${fromNote}. Land that work first (\`lore integrate <branch>\`), or cut ` +
+        `this worktree from ${integration.value} (\`git worktree add -b <name> <path> ${integration.value}\`) and claim from there.`,
+      value: { worktree: target, commits: ahead.value, branches: sourceBranches, rule: "BR-1353" },
+    });
+  }
+
+  /**
+   * The definition of done of `task` for claim time (BR-1357): {@link definitionOfDone} over the criteria of the spec
+   * that governs the task. An unresolvable criterion set (a task with no governing spec, or a failed lookup) yields
+   * the `null`-criteria reading, which lists every declared ac_scope id.
+   */
+  async describeDefinitionOfDone(task: DocRecord): Promise<DefinitionOfDone> {
+    const criteria = await this.resolveFloorCriteria(task);
+    return definitionOfDone(task, criteria.ok ? criteria.value : null);
   }
 
   /**

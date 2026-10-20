@@ -369,6 +369,8 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
     upstreamSpecApproved,
     relatedKnowledge,
     ...(governingRulesResult.value !== undefined ? { governingRules: governingRulesResult.value } : {}),
+    // reason: BR-1357 — the same value `lore claim` prints, from the done floors' own predicates.
+    definitionOfDone: await app.taskWorkflowService.describeDefinitionOfDone(task),
   });
 }
 

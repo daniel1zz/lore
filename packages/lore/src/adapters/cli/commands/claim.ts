@@ -61,6 +61,7 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { printLine } from "../output.js";
 import { refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
+import { renderDefinitionOfDone } from "../definition-of-done-render.js";
 
 export default defineLoreCommand({
   meta: {
@@ -155,12 +156,27 @@ export default defineLoreCommand({
         await scopeCandidatesOf(app, result.value.slug, inv.cwd, typeof args.worktree === "string" ? [args.worktree] : []),
       );
 
+      // reason: BR-1357 — the definition of done is computed by the done floors' own predicates
+      // (`TaskWorkflowService.describeDefinitionOfDone`); a phase claim has no done floors, so it carries none.
+      const definitionOfDone =
+        result.value.type === "task" ? await app.taskWorkflowService.describeDefinitionOfDone(result.value) : undefined;
+
       if (args.json) {
-        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
+        printLine(
+          inv.io.stdout,
+          JSON.stringify(
+            { ok: true, data: { doc: result.value, ...(definitionOfDone !== undefined ? { definition_of_done: definitionOfDone } : {}) } },
+            null,
+            2,
+          ),
+        );
         return 0;
       }
 
       printLine(inv.io.stdout, `Claimed ${result.value.slug} by ${by} (v${result.value.version})`);
+      if (definitionOfDone !== undefined) {
+        for (const line of renderDefinitionOfDone(definitionOfDone)) printLine(inv.io.stdout, line);
+      }
       // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work, so the output names that worktree.
       const writtenClaim = taskClaimSchema.safeParse(result.value.extra["claim"]);
       const inheritedWorktree = writtenClaim.success ? writtenClaim.data.inherited_dirty_worktree : undefined;
