@@ -1,6 +1,6 @@
 // @spawns packages/lore/src/index.ts
 /**
- * AC-BLC-1 (#323, task-a-schema-upgrade-promotes-pending-revisions-that-a-landed): migration 029 promotes each pending
+ * AC-FIXTURE-LANDED-1 (#323, task-a-schema-upgrade-promotes-pending-revisions-that-a-landed): migration 029 promotes each pending
  * rule revision that equals the LATEST applied entry of a spec change set for that rule id into the approved version,
  * and leaves every other pending revision pending. Migration 028 had turned reviewed, landed changes into pending
  * revisions (pre-BR-1211 `lore rule apply` demoted the leaf).
@@ -160,7 +160,7 @@ afterAll(() => {
   corpus.cleanup();
 });
 
-describe("AC-BLC-1: the schema upgrade promotes pending revisions that a landed change set accounts for", () => {
+describe("AC-FIXTURE-LANDED-1: the schema upgrade promotes pending revisions that a landed change set accounts for", () => {
   let afterFirst = "";
 
   beforeAll(() => {
