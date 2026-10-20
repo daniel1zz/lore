@@ -30,6 +30,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import { UnknownPartyError } from "@lore/core/node";
 import { AuditBackfillService, type AuditBackfillReport } from "../../service/audit-backfill-service.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
@@ -67,6 +68,17 @@ export async function runAuditBackfillMigration(input: AuditBackfillMigrationInp
     const removal = removeRetiredVerifySinceSetting(raw);
     if (!removal.ok) return removal;
 
+    // reason: the writer is the invocation's known party. With none, the run is refused HERE (VALIDATION_ERROR, exit 4,
+    // naming `lore session start --human <name>` and `lore setup`) before the store is opened, so nothing is written;
+    // it must not surface as the generic STORE_ERROR the catch below would make of the thrown refusal.
+    let actor: string;
+    try {
+      actor = resolveActor(input.inv);
+    } catch (refusal) {
+      if (refusal instanceof UnknownPartyError) return err(refusal.loreError);
+      throw refusal;
+    }
+
     const behind = findForeignBehindSchema(input.dbPath, input.inv.cwd);
     if (behind !== null) return err({ code: "VALIDATION_ERROR", field: "schema_version", message: behind.message });
     store = input.apply ? new SQLiteStore(input.dbPath) : new SQLiteStore(input.dbPath, { readonly: true });
@@ -74,7 +86,7 @@ export async function runAuditBackfillMigration(input: AuditBackfillMigrationInp
     const nowIso = new Date().toISOString();
     const backfill = await new AuditBackfillService(store).run({
       apply: input.apply,
-      actor: resolveActor(input.inv.io, undefined, input.inv.env, input.inv.cwd, input.inv.user),
+      actor,
       run: `audit-backfill-${nowIso}`,
       nowIso,
     });
