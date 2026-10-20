@@ -221,7 +221,9 @@ test.describe("SPEC-075 dashboard adjudication workbench", () => {
     expect(record?.doc_id).toBe(taskId);
     expect(record?.doc_type).toBe("task");
     expect(record?.human_outcome).toBe("confirmed"); // AI said approve, human approved
-    expect(record?.actor).toBe("admin"); // dashboard-local key's owner (global-setup.ts)
+    // The reviewer is the cookie login's owner: this suite runs under `lore serve` (no human-session wiring), and the
+    // machine-wide dashboard-local key minted by ensureLocalApiKey is owned by its own placeholder name (GitHub #324).
+    expect(record?.actor).toBe("dashboard-local");
     expect(record?.delta_reasons).toEqual([noteText]); // note -> delta_reasons[0]
   });
 });
