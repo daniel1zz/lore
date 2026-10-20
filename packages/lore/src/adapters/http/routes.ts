@@ -318,7 +318,8 @@ export async function handleApiRoute(
   // /api/review/:id/approve or /api/review/:id/reject
   const reviewMatch = matchReviewPath(path);
   if (reviewMatch !== null && method === "POST") {
-    return handleReviewAction(reviewMatch.id, reviewMatch.action, app);
+    // `?item=<BR-n|node>` (baseline nodes, BR-1338): approve / discard ONE item's pending revision
+    return handleReviewAction(reviewMatch.id, reviewMatch.action, app, url.searchParams.get("item") ?? undefined);
   }
 
   return null;
@@ -709,11 +710,17 @@ async function handleDeleteLink(from: string, to: string, app: App, actor: Actor
   return jsonOk({ ok: true });
 }
 
-async function handleReviewAction(id: string, action: "approve" | "reject", app: App): Promise<Response> {
+async function handleReviewAction(id: string, action: "approve" | "reject", app: App, item?: string): Promise<Response> {
   if (action === "approve") {
-    const result = await app.reviewService.approve(id);
+    const result = await app.reviewService.approve(id, item !== undefined ? { item } : undefined);
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
+  }
+
+  if (item !== undefined) {
+    const discarded = await app.reviewService.rejectItem(id, item);
+    if (!discarded.ok) return loreErrorResponse(discarded.error);
+    return jsonOk({ ...discarded.value.doc, discarded_item: discarded.value.discarded.item });
   }
 
   const result = await app.reviewService.reject(id);

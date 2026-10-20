@@ -13,6 +13,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { saveConfig } from "@lore/core/node";
+import { SQLiteStore } from "../../src/store/sqlite-store";
+import { actedStore } from "../live-invocation";
+import { pendingCountOf } from "../../src/service/baseline-pending";
+import { approvePending } from "./approve-baseline";
 import { runLoreInProcess } from "./run-lore-in-process";
 import { sessionEnvFor } from "./session-actor";
 
@@ -29,6 +34,10 @@ export interface MiniCorpus {
   readonly leafA: string;
   readonly leafB: string;
   run(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  /** `run` without the auto-approval of a write verb's pending revision: for a test whose subject is the pending state. */
+  runRaw(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  /** Approve every pending revision of the given nodes (a node a test adds after build is draft, its rules pending). */
+  approve(...nodes: string[]): Promise<void>;
   /** Write (or overwrite) a source file of the mini checkout; `rel` is relative to the checkout root. */
   writeSource(rel: string, content: string): void;
   /** Census site keys of a registry command (`lore baseline sites <command> --json`). */
@@ -67,7 +76,7 @@ const MINI_SOURCES: Readonly<Record<string, string>> = {
   "package.json": JSON.stringify({ name: "mini-checkout", private: true }),
 };
 
-export async function buildMiniCorpus(): Promise<MiniCorpus> {
+export async function buildMiniCorpus(opts: { autoApprove?: boolean } = {}): Promise<MiniCorpus> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "bcr-mini-")));
   if (dir.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
   const home = join(dir, ".home");
@@ -90,6 +99,17 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
     return r.stdout;
   };
   await must(["init"]);
+  // the AI behind `lore review` is a shell-script test double that always approves (a review is the first half of an approval)
+  const aiScript = join(dir, "fake-ai.sh");
+  writeFileSync(
+    aiScript,
+    `#!/bin/sh\ncat > /dev/null\ncat <<'JSONEOF'\n${JSON.stringify({ decision: "approve", confidence: 0.9, reasons: [{ dimension: "completeness", finding: "fine" }], blocking_questions: [] })}\nJSONEOF\n`,
+    { mode: 0o755 },
+  );
+  saveConfig(dir, {
+    project: { name: "bcr-mini", author: "tester" },
+    ai: { provider: "claude-cli", providers: { "claude-cli": { command: aiScript, args: [], timeout_ms: 5000 } }, templates: {}, telemetry: false },
+  } as never);
   const prd = slugOf(await must(["create", "prd", "--title", "BCR PRD", "--content", "root", "--no-ai"]));
   const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BCR Root"]));
   const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch"]));
@@ -105,6 +125,36 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
   }
   await must(["baseline", "map", leafA, "--command", "alpha"]);
   await must(["baseline", "map", leafB, "--command", "beta"]);
+  // reason: a direct rule add and a command declaration are PENDING revisions (BR-626/BR-628) and a new node is born draft;
+  // the coverage tests measure an APPROVED tree, so every node is approved through a bare ReviewService (no AI judge).
+  const approve = async (...nodes: string[]): Promise<void> => {
+    const side = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
+    try {
+      for (const node of nodes) await approvePending(side, node);
+    } finally {
+      side.close();
+    }
+  };
+  await approve(root, branch, leafA, leafB);
+  // reason: the tests below keep writing through the CLI (`baseline map`, `rule add|set`, `baseline add`) and measure the tree as
+  // an approved one, so a successful write verb is followed by approving whatever it left pending (`autoApprove: false` keeps
+  // the pending state for a test whose subject is approval).
+  const approveAllPending = async (): Promise<void> => {
+    const side = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
+    try {
+      const nodes = await side.findMany({ type: "baseline" });
+      if (!nodes.ok) throw new Error(`fixture listing failed: ${JSON.stringify(nodes.error)}`);
+      for (const node of nodes.value) if (pendingCountOf(node.extra) > 0) await approvePending(side, node.id);
+    } finally {
+      side.close();
+    }
+  };
+  const WRITE_VERBS = new Set(["baseline add", "baseline map", "baseline set-label", "baseline depends", "baseline glossary", "rule add", "rule set"]);
+  const runApproving = async (args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+    const result = await run(args);
+    if (result.exitCode === 0 && WRITE_VERBS.has(`${args[0]} ${args[1]}`)) await approveAllPending();
+    return result;
+  };
   const sitesOf = async (command: string): Promise<string[]> => {
     const parsed = JSON.parse(await must(["baseline", "sites", command, "--json"])) as { data: { sites: { key: string }[] } };
     return parsed.data.sites.map((s) => s.key);
@@ -127,7 +177,9 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
     leafA,
     leafB,
     ruleOf,
-    run,
+    run: opts.autoApprove === false ? run : runApproving,
+    runRaw: run,
+    approve,
     writeSource,
     sitesOf,
     mapSite,

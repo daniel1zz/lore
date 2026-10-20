@@ -43,6 +43,7 @@ async function build(): Promise<Fx> {
   const leafC = (out.match(/Slug:\s+(\S+)/) ?? out.match(/Created baseline \w+ (\S+) \(/))?.[1] as string;
   const ruleOut = await must(c, ["rule", "add", leafC, "--statement", "Cross-cutting guard refuses.", "--example", "a refusal", "--confidence", "observed", "--enforced-by", "guaranteed"]);
   const rule = ruleOut.match(/BR-\d+/)?.[0] as string;
+  await c.approve(leafC); // the rule is a pending add until its leaf is approved
   const betaSite = (await c.sitesOf("beta"))[0] as string;
   return { c, leafC, rule, betaSite };
 }

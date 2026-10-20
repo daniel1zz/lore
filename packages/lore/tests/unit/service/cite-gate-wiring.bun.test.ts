@@ -19,7 +19,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput, type LoreConfig } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
-import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
+import { actedStore, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 const PROJECT = { name: "wiring", author: "tester" };
 
@@ -51,6 +53,13 @@ async function seed(app: App): Promise<{ specId: string; prdId: string }> {
     await rulesOf(app).addRule(leaf.id, { statement: "Config reaches the gate", confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "agent:seed" }),
     "rule",
   );
+  // a direct rule add is a pending add: BR-1 is live (citable) only once the leaf's revision is approved
+  const side = actedStore(new SQLiteStore(join(dir, "c.db")));
+  try {
+    await approvePending(side, leaf.id);
+  } finally {
+    side.close();
+  }
   const spec = await must(await cs.create({ type: "spec", title: "Wiring spec", content: SKELETON} as CreateDocInput), "spec");
   return { specId: spec.id, prdId: prd.id };
 }

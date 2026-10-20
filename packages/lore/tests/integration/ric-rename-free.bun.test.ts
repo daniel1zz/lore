@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref spec-refusal-sites-declare-their-rule-in-code-baseline-leaf  AC-RIC-3 (BR-1344)
  *

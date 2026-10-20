@@ -581,6 +581,8 @@ export const LoreApproveSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
   calibration_note: z.string().optional(),
+  /** Baseline node only (BR-1338): approve this one item (`BR-n`, `AS-n`, `AD-n`, or `node`); items not named are untouched. */
+  item: z.string().optional(),
 });
 
 /** Input schema for lore_reopen (spec-documents-are-living-or-records D5). `reason` is required and non-blank (service-enforced). */
@@ -2052,11 +2054,11 @@ export function registerTools(
   });
 
   // lore_approve
-  registerToolWithArgs(server, "lore_approve", "Approve a document, transitioning it from draft to approved", LoreApproveSchema, async (args) => {
+  registerToolWithArgs(server, "lore_approve", "Approve a document, transitioning it from draft to approved; on a baseline node it promotes the pending revisions a review saw (or the one `item`) to their approved version", LoreApproveSchema, async (args) => {
     // reason: the approver is the call's own identity (the attested run's name) — there is no `reviewer`
     // argument, so an approve is never recorded under the literal "system".
     const reviewer = args.by;
-    const result = await reviewService.approve(args.id_or_slug, { reviewer });
+    const result = await reviewService.approve(args.id_or_slug, { reviewer, ...(args.item !== undefined ? { item: args.item } : {}) });
     if (!result.ok) return errorContent(result.error);
 
     // reason: SPEC-033 F1 — MCP's lore_approve is an adjudication tool, same as CLI

@@ -18,6 +18,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { leavesUnder } from "../../src/service/leaf-coverage";
 import { createItemsCorpus, type ItemsCorpus, type StoredNode } from "../helpers/baseline-items-corpus";
 
@@ -182,6 +184,23 @@ describe("AC-BIA-5: node status is derived from its items", () => {
     expect(approved.status).toBe("approved");
     expect(approved.extra.pending).toBeUndefined();
     expect(approved.extra["label"]).toBe("Fresh again");
+  }, TIMEOUT_MS);
+
+  it("REGRESSION: an export mirror shows the approved text, never the pending revision as if it were approved", async () => {
+    await corpus.must(["set", corpus.leaf, "--content", "PENDING-BODY-NOBODY-APPROVED"]);
+    await corpus.must(["rule", "add", corpus.leaf, "--statement", "PENDING-RULE-NOBODY-APPROVED", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e"]);
+    const exported = await corpus.lore(["export-docs", "--type", "baseline", "--force"]);
+    expect(exported.exitCode).toBe(0);
+    const mirrorDir = join(corpus.dir, "docs", "requirements", "baseline");
+    const files = readdirSync(mirrorDir).filter((f) => f.endsWith(".md"));
+    expect(files.length).toBeGreaterThan(0);
+    const text = files.map((f) => readFileSync(join(mirrorDir, f), "utf8")).join("\n");
+    expect(text).not.toContain("PENDING-BODY-NOBODY-APPROVED");
+    expect(text).not.toContain("PENDING-RULE-NOBODY-APPROVED");
+    expect(text).not.toContain("pending:");
+    await corpus.must(["reject", corpus.leaf, "--item", "node"]);
+    await corpus.must(["reject", corpus.leaf, "--item", "BR-2"]);
+    expect(corpus.node(corpus.leaf).status).toBe("approved");
   }, TIMEOUT_MS);
 
   it("NEGATIVE: lore set --status approved|draft on a baseline node exits 4; a clean node prints approved", async () => {

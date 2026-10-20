@@ -20,6 +20,7 @@ import { createApp, type App } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { AcExemptionService } from "../../../src/service/ac-exemption-service.js";
 import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { exemptionHeadroom, indexBaseline, satisfiedExemptionKeys } from "../../../src/service/ac-cite-gate.js";
 import { exemptionState } from "../../../src/store/store-shared.js";
 import { liveAmbient, liveWriteContext, actedStore } from "../../live-invocation.js";
@@ -38,6 +39,7 @@ let app: App;
 let side: SQLiteStore;
 let svc: AcExemptionService;
 let specId: string;
+let leafId: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "ac-exempt-satisfied-"));
@@ -62,6 +64,8 @@ beforeEach(async () => {
   for (const statement of ["First rule", "Second rule"]) {
     await must(await rs.addRule(leaf.id, { statement, confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "agent:seed" }), "rule");
   }
+  leafId = leaf.id;
+  await approvePending(side, leaf.id); // a direct rule add is a pending add: live only once approved
   const spec = await must(await cs.create({ type: "spec", title: "Sat spec", content: SKELETON } as CreateDocInput), "spec");
   specId = spec.id;
   // 10 live criteria -> the cap is floor(10%) = 1 exemption. All uncited.
@@ -121,6 +125,7 @@ describe("exemption satisfied state (BR-959)", () => {
     await must(await cite(1, "BR-2"), "cite while BR-2 is live");
     await must(await grant(1), "grant 1"); // cited-live at grant time: satisfied already
     await must(await app.ruleService!.setRule("BR-2", { lifecycle: "retired", note: "gone" }, { by: "agent:seed" }), "retire BR-2");
+    await approvePending(side, leafId); // the retirement is a pending revision until approved
     expect(await counts()).toMatchObject({ active: 1, satisfied: 0 });
     expect(await headroom()).toBe(0);
     const listed = await must(await svc.list(), "list");
