@@ -43,11 +43,10 @@ import {
   loadConfigFromString,
   renamePrdSyncConfigKey,
   removeRetiredAdoptionSetting,
-  removeRetiredActorIdentityGate,
-  RETIRED_ACTOR_IDENTITY_FIELD,
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
+import { removeRetiredActorIdentityGate, RETIRED_ACTOR_IDENTITY_FIELD } from "./retired-claim-gate-setting.js";
 
 /** The invocation environment the global-config path resolvers read (`Invocation.env`). */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
@@ -97,7 +96,7 @@ export interface ConfigKeysMigration {
 /**
  * The explicit, one-time rename of retired config keys in `<dir>/.lore/config.yaml` (`lore migrate config-keys`):
  * `workflow.gates."plan-close".prd_sync` -> `cited_rule_check` (BL-D3), and the removal of the retired
- * `workflow.gates."task-claim".actor_identity` setting (claims compare runs only). Only those keys change; every
+ * retired claim-time identity setting of the `task-claim` gate (claims compare runs only). Only those keys change; every
  * other byte of the file is identical. The write is atomic (temp file in the same directory, then rename). A second
  * run finds no old key and changes nothing.
  *

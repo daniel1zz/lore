@@ -54,6 +54,7 @@ import { TelemetryConfigSchema } from "./telemetry.js";
 import { AiConfigSchema } from "./ai.js";
 import { verificationProfileSchema } from "./verification-profile.js";
 import { SPEC_KINDS } from "./spec-kind.js";
+import { detectRetiredActorIdentityKey } from "./retired-claim-gate-setting.js";
 import type { BootstrapInjectionBudgets } from "./session.js";
 
 // ─── Shared Defaults Schema ───────────────────────────────────────────────────
@@ -1712,7 +1713,7 @@ export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined)
  * refusal token literal, `gate:corpus-write:foreign-provenance`.
  *
  * Same default polarity as {@link resolveAnchorOverlapGateEnabled} /
- * {@link resolveActorIdentityGateEnabled} / {@link resolveAcQuantifiableGateEnabled}
+ * {@link resolveAcQuantifiableGateEnabled}
  * / {@link resolveOracleCoverageGateEnabled} / {@link resolveRequiresUatGateEnabled}
  * (all default ENABLED) — the OPPOSITE of {@link resolvePrdSyncGateEnabled}'s
  * default-OFF polarity immediately above. Absence of the whole config, the
@@ -2710,120 +2711,6 @@ export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAd
   return ok({ text: yamlText.slice(0, lineStart) + yamlText.slice(lineEnd), value });
 }
 
-/** The `LoreError.field` of the retired `task-claim` gate setting that `lore migrate config-keys` removes. */
-export const RETIRED_ACTOR_IDENTITY_FIELD = 'workflow.gates."task-claim".actor_identity';
-
-/** The refusal text for a config that still names the retired claim-time identity setting; quoted by the loader and the migrate command alike. */
-export const RETIRED_ACTOR_IDENTITY_MESSAGE =
-  `${RETIRED_ACTOR_IDENTITY_FIELD} was removed: claims compare runs only (a name never decides), so there is nothing left for it to switch. ` +
-  `Run \`${CONFIG_KEYS_MIGRATE_COMMAND}\` to remove it from .lore/config.yaml.`;
-
-/**
- * Whether `error` is the refusal about the retired claim-time identity setting. The loader fails LOUD on it instead of
- * falling back to default settings: a silent fallback would run every other gate unconfigured.
- */
-export function isRetiredActorIdentityError(error: LoreError): boolean {
-  return error.code === "VALIDATION_ERROR" && error.field === RETIRED_ACTOR_IDENTITY_FIELD;
-}
-
-/**
- * Names the retired `workflow.gates."task-claim".actor_identity` setting when a YAML-parsed config still carries it,
- * whatever its value. The strict config schema would also refuse the key as unknown; this refusal exists so the loader
- * can fail loud by name and name the fix (the other unknown-key refusals fall back silently).
- *
- * @returns a VALIDATION_ERROR payload naming the setting and the migrate command, or `undefined` when it is absent
- */
-function detectRetiredActorIdentityKey(raw: unknown): LoreError | undefined {
-  const at = (value: unknown, key: string): unknown =>
-    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
-  const entry = at(at(at(raw, "workflow"), "gates"), "task-claim");
-  if (typeof entry !== "object" || entry === null || !("actor_identity" in entry)) return undefined;
-  return {
-    code: "VALIDATION_ERROR",
-    field: RETIRED_ACTOR_IDENTITY_FIELD,
-    message: RETIRED_ACTOR_IDENTITY_MESSAGE,
-    value: (entry as Record<string, unknown>)["actor_identity"],
-  } satisfies LoreError;
-}
-
-/** What {@link removeRetiredActorIdentityGate} computed for a config text. */
-export interface RetiredActorIdentityRemoval {
-  /** The config text without the setting: every other byte is identical to the input. */
-  readonly text: string;
-  /** The value the removed setting carried (for example `{ enabled: false }`). */
-  readonly value: unknown;
-}
-
-/**
- * PURE computation of the removal of `workflow.gates."task-claim".actor_identity` from a config text. The setting
- * switched the retired claim-time same-name guard; claims now compare runs only (BR-1040), so there is nothing left for
- * it to switch and the strict config schema refuses the key. The setting's own lines are cut out, and so is every parent
- * mapping (`task-claim`, `gates`, `workflow`) that the cut leaves empty. Every other byte is identical.
- * Writing the result is `lore migrate config-keys --apply`'s job: no loader ever writes a config file.
- *
- * @param yamlText - the raw config file text
- * @returns `ok(undefined)` when the setting is absent; `ok({text, value})` when present; `err(VALIDATION_ERROR)` when
- *   the YAML is malformed or the setting shares a line with other keys (flow style), which cannot be cut out without
- *   rewriting them: the operator deletes it by hand (nothing is written).
- * @example
- *   removeRetiredActorIdentityGate('workflow:\n  gates:\n    "task-claim":\n      actor_identity:\n        enabled: false\n');
- *   // => ok({ text: "", value: { enabled: false } })
- */
-export function removeRetiredActorIdentityGate(yamlText: string): Result<RetiredActorIdentityRemoval | undefined, LoreError> {
-  const doc = yaml.parseDocument(yamlText);
-  if (doc.errors.length > 0) {
-    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText } satisfies LoreError);
-  }
-  const chain = ["workflow", "gates", "task-claim"] as const;
-  const maps: yaml.YAMLMap[] = [];
-  for (let depth = 1; depth <= chain.length; depth += 1) {
-    const node = doc.getIn(chain.slice(0, depth), true);
-    if (!yaml.isMap(node)) return ok(undefined);
-    maps.push(node);
-  }
-  const taskClaim = maps[maps.length - 1]!;
-  const pair = taskClaim.items.find((item) => yaml.isScalar(item.key) && item.key.value === "actor_identity");
-  if (pair === undefined) return ok(undefined);
-  const value = doc.getIn([...chain, "actor_identity"]);
-
-  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty parent mapping.
-  let cutPair = pair;
-  let level = maps.length;
-  while (level > 0 && maps[level - 1]!.items.length === 1) {
-    const parent = level === 1 ? doc.contents : maps[level - 2];
-    if (!yaml.isMap(parent)) break;
-    const parentPair = parent.items.find((item) => item.value === maps[level - 1]);
-    if (parentPair === undefined) break;
-    cutPair = parentPair;
-    level -= 1;
-  }
-
-  const handEdit = (reason: string): Result<never, LoreError> =>
-    err({
-      code: "VALIDATION_ERROR",
-      field: RETIRED_ACTOR_IDENTITY_FIELD,
-      message: `${RETIRED_ACTOR_IDENTITY_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
-      value: yamlText,
-    } satisfies LoreError);
-  const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
-  const settingKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
-  const settingValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
-  if (keyRange === undefined || keyRange === null || settingKeyRange === undefined || settingKeyRange === null) {
-    return handEdit("has no source position, so it cannot be removed in place");
-  }
-  // The cut ends where the setting's own content ends (it is the last content inside any escalated parent).
-  const contentEnd = settingValueRange === undefined || settingValueRange === null ? settingKeyRange[1] : settingValueRange[1];
-  const lineStart = yamlText.lastIndexOf("\n", keyRange[0] - 1) + 1;
-  const newline = yamlText.indexOf("\n", contentEnd);
-  const lineEnd = newline === -1 ? yamlText.length : newline + 1;
-  const before = yamlText.slice(lineStart, keyRange[0]);
-  const after = yamlText.slice(contentEnd, newline === -1 ? yamlText.length : newline).trim();
-  if (before.trim() !== "" || (after !== "" && !after.startsWith("#"))) {
-    return handEdit("shares its line with other settings, so it cannot be removed line-wise");
-  }
-  return ok({ text: yamlText.slice(0, lineStart) + yamlText.slice(lineEnd), value });
-}
-
 /**
  * Parse a YAML string into LoreConfig.
  * Pure function — no filesystem access.
@@ -2861,7 +2748,7 @@ export function loadConfigFromString(
   const retiredAdoption = detectRetiredAdoptionSetting(parsed);
   if (retiredAdoption !== undefined) return err(retiredAdoption);
 
-  const retiredActorIdentity = detectRetiredActorIdentityKey(parsed);
+  const retiredActorIdentity = detectRetiredActorIdentityKey(parsed, CONFIG_KEYS_MIGRATE_COMMAND);
   if (retiredActorIdentity !== undefined) return err(retiredActorIdentity);
 
   const result = parseConfig(parsed);
