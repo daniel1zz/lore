@@ -81,6 +81,29 @@ describe("BR-1346 — a released holder never blocks another branch's landing", 
     expect(refused.stderr).toContain(holder);
   }, 300_000);
 
+  it("(2b) a claimed holder's directory anchor holds only the files its branch changed", () => {
+    const f = new OwnDiffFixture();
+    fx = f;
+    f.commitOnMain({ "packages/x/a.ts": "export const a = 1;\n", "packages/x/b.ts": "export const b = 1;\n" }, "base");
+    const holder = f.createTask("DirHolder", ["packages/x/"]);
+    const onB = f.createTask("OnB", ["src/ob.ts"]);
+    const onA = f.createTask("OnA", ["src/oa.ts"]);
+    f.makeBranch("dir-holder", { "packages/x/a.ts": "export const a = 2;\n" });
+    f.makeBranch("touch-b", { "packages/x/b.ts": "export const b = 2;\n" });
+    f.makeBranch("touch-a", { "packages/x/a.ts": "export const a = 3;\n" });
+    claimOn(f, holder, "dir-holder");
+    claimOn(f, onB, "touch-b");
+    claimOn(f, onA, "touch-a");
+
+    const free = f.integrate("touch-b");
+    expect(free.exitCode, free.text).toBe(0);
+
+    const refused = f.integrate("touch-a");
+    expect(refused.exitCode, refused.text).toBe(4);
+    expect(refused.stderr).toContain("packages/x/a.ts");
+    expect(refused.stderr).toContain(holder);
+  }, 300_000);
+
   it("(3) the verdict lists a released, unlanded holder whose anchor overlapped, and does not refuse", async () => {
     const f = new OwnDiffFixture();
     fx = f;

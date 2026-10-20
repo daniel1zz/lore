@@ -219,7 +219,9 @@ export class OwnDiffJudgment {
     const rules = this.deps.loadCoChangeRules();
     if (!rules.measured) return err(refusal(`integrate: refused ${branch}: the co-change rules could not be read (${rules.reason}); fix the config, nothing was landed`));
 
-    const live = ownership.value.others.filter((task) => task.held);
+    const claimedHolders = this.narrowDirectoryAnchors(branch, ownership.value.others.filter((task) => task.held));
+    if (!claimedHolders.ok) return claimedHolders;
+    const live = claimedHolders.value;
     const released = this.unlandedReleased(branch, ownership.value.others.filter((task) => !task.held));
     if (!released.ok) return released;
     const symbolPaths = new Set(
@@ -283,6 +285,48 @@ export class OwnDiffJudgment {
       files.push({ path, kind: status === "A" ? "A" : status === "D" ? "D" : "M" });
     }
     return ok({ base: mergeBase, files });
+  }
+
+  /**
+   * A claimed holder's directory anchor (trailing `/`) holds only the files the holder's claimed branch changed
+   * (`merge-base(main, holderBranch)..holderBranch`), per the `lore anchor add` contract, never the whole directory.
+   * File and symbol anchors pass through unchanged. A holder with a directory anchor whose branch cannot be measured
+   * (no branch recorded, or it no longer exists) is an `err` naming the task: guessing either way would be silent.
+   * (The claim-time gate, `gate-predicates.ts`, still treats a directory anchor as the whole directory.)
+   */
+  private narrowDirectoryAnchors(branch: string, holders: readonly OtherTask[]): Result<OtherTask[], LoreError> {
+    const { git, projectRoot } = this.deps;
+    const narrowed: OtherTask[] = [];
+    for (const task of holders) {
+      const dirs = task.anchors.filter((a) => a.endsWith("/"));
+      if (dirs.length === 0) {
+        narrowed.push(task);
+        continue;
+      }
+      const names = task.claimedBranches.filter((name) => name !== branch && !name.startsWith("/"));
+      let changed: string[] | undefined;
+      for (const name of names) {
+        const tip = git(projectRoot, ["rev-parse", "--verify", "-q", `${name}^{commit}`]);
+        if (tip.status !== 0) continue;
+        const base = git(projectRoot, ["merge-base", TARGET_REF, tip.stdout.trim()]);
+        if (base.status !== 0 || base.stdout.trim() === "") return err(gitFailure(`merge-base of ${TARGET_REF} and ${name}`, base));
+        const diff = git(projectRoot, ["diff", "--name-only", "--no-renames", "-z", base.stdout.trim(), tip.stdout.trim()]);
+        if (diff.status !== 0) return err(gitFailure(`git diff of ${name} against main`, diff));
+        changed = diff.stdout.split("\0").filter((p) => p !== "");
+        break;
+      }
+      if (changed === undefined) {
+        return err(
+          refusal(
+            `integrate: refused ${branch}: ${task.slug} holds directory anchor ${dirs.join(", ")} but its claimed branch cannot be measured (recorded: ${task.claimedBranches.join(", ") || "none"}); nothing was landed. Release or re-claim ${task.slug} on an existing branch.`,
+          ),
+        );
+      }
+      const touched = changed;
+      const anchors = task.anchors.flatMap((a) => (a.endsWith("/") ? touched.filter((p) => p.startsWith(a)) : [a]));
+      narrowed.push({ ...task, anchors });
+    }
+    return ok(narrowed);
   }
 
   /** Unclaimed tasks whose recorded branch still exists and has not reached main, with that branch. */
