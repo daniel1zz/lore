@@ -2713,6 +2713,39 @@ export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAd
 /** The `LoreError.field` of the retired `task-claim` gate setting that `lore migrate config-keys` removes. */
 export const RETIRED_ACTOR_IDENTITY_FIELD = 'workflow.gates."task-claim".actor_identity';
 
+/** The refusal text for a config that still names the retired claim-time identity setting; quoted by the loader and the migrate command alike. */
+export const RETIRED_ACTOR_IDENTITY_MESSAGE =
+  `${RETIRED_ACTOR_IDENTITY_FIELD} was removed: claims compare runs only (a name never decides), so there is nothing left for it to switch. ` +
+  `Run \`${CONFIG_KEYS_MIGRATE_COMMAND}\` to remove it from .lore/config.yaml.`;
+
+/**
+ * Whether `error` is the refusal about the retired claim-time identity setting. The loader fails LOUD on it instead of
+ * falling back to default settings: a silent fallback would run every other gate unconfigured.
+ */
+export function isRetiredActorIdentityError(error: LoreError): boolean {
+  return error.code === "VALIDATION_ERROR" && error.field === RETIRED_ACTOR_IDENTITY_FIELD;
+}
+
+/**
+ * Names the retired `workflow.gates."task-claim".actor_identity` setting when a YAML-parsed config still carries it,
+ * whatever its value. The strict config schema would also refuse the key as unknown; this refusal exists so the loader
+ * can fail loud by name and name the fix (the other unknown-key refusals fall back silently).
+ *
+ * @returns a VALIDATION_ERROR payload naming the setting and the migrate command, or `undefined` when it is absent
+ */
+function detectRetiredActorIdentityKey(raw: unknown): LoreError | undefined {
+  const at = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  const entry = at(at(at(raw, "workflow"), "gates"), "task-claim");
+  if (typeof entry !== "object" || entry === null || !("actor_identity" in entry)) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: RETIRED_ACTOR_IDENTITY_FIELD,
+    message: RETIRED_ACTOR_IDENTITY_MESSAGE,
+    value: (entry as Record<string, unknown>)["actor_identity"],
+  } satisfies LoreError;
+}
+
 /** What {@link removeRetiredActorIdentityGate} computed for a config text. */
 export interface RetiredActorIdentityRemoval {
   /** The config text without the setting: every other byte is identical to the input. */
@@ -2827,6 +2860,9 @@ export function loadConfigFromString(
 
   const retiredAdoption = detectRetiredAdoptionSetting(parsed);
   if (retiredAdoption !== undefined) return err(retiredAdoption);
+
+  const retiredActorIdentity = detectRetiredActorIdentityKey(parsed);
+  if (retiredActorIdentity !== undefined) return err(retiredActorIdentity);
 
   const result = parseConfig(parsed);
   if (result.ok && warn !== undefined) {
