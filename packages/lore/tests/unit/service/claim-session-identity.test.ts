@@ -67,7 +67,6 @@ import {
 import {
   ANCHOR_OVERLAP_FIELD,
   ANCHOR_OVERLAP_REASON,
-  ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON,
   compareClaimSessions,
   findAnchorOverlapConflict,
   noAnchorOverlap,

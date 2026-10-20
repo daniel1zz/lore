@@ -11,6 +11,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.js";
 import { computeDecisionEntryHash, DECISION_GENESIS_HASH, verifyDecisionChain, type DecisionRecordInput } from "../../../src/store/decision-log.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function input(n: number, verdict: DecisionRecordInput["verdict"]): DecisionRecordInput {
   return {
@@ -89,7 +90,7 @@ describe("migration 023 decision_log superseded verdict", () => {
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 4 });
         expect(after.ok && after.value[3]?.verdict).toBe("superseded");
         const db = store.getDatabase();
-        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
         expect(() => db.run("UPDATE decision_log SET score = 1 WHERE id = 1")).toThrow(/append-only/);
         expect(() => db.run("DELETE FROM decision_log WHERE id = 1")).toThrow(/append-only/);
         const bad = await store.appendDecisionRecord({ ...input(5, "auto"), verdict: "bogus" as DecisionRecordInput["verdict"] });
