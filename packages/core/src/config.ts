@@ -733,6 +733,13 @@ const WorkflowConfigSchema = z
          * output says "skipped (... not set)".
          */
         post_refresh_command: z.string().min(1).optional(),
+        /**
+         * `migrate_command` is the full command line of the BRANCH binary's `lore migrate schema` (this repository:
+         * `bun run packages/lore/src/index.ts migrate schema`). `lore integrate` runs it (with `--json` appended) in the
+         * integration worktree on the floor's corpus snapshot before the floor, and once in the shared checkout on the
+         * live corpus after the landing's refresh and rebuild. Absent = neither runs and the output says "skipped".
+         */
+        migrate_command: z.string().min(1).optional(),
       })
       .strict()
       .optional(),

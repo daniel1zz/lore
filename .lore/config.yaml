@@ -32,6 +32,9 @@ workflow:
     floor_command: "bun install --frozen-lockfile && bun run check:floor"
     # After a landing refreshes the shared checkout, rebuild its dist/lore (the binary ~/.local/bin/lore links to).
     post_refresh_command: "bun run build"
+    # The BRANCH binary's `lore migrate schema` (integrate appends --json): run on the floor's corpus snapshot before the floor
+    # (install first: the fresh integration worktree has no node_modules of its own), then once on the live corpus after the rebuild.
+    migrate_command: "bun install --frozen-lockfile && bun run packages/lore/src/index.ts migrate schema"
   # The main agent dispatches all source changes to implementer agents in this repo
   # (adr-rule-delivery-tiers-gate-hook-skill-and-optimistic); stop-turn-review checks it once per turn.
   turn_end:
