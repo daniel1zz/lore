@@ -103,7 +103,7 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
   const startedAt = Date.now();
   let store: SQLiteStore;
   try {
-    store = new SQLiteStore(dbPath, { migrate: true });
+    store = new SQLiteStore(dbPath, { migrate: true, migrationActor: actor });
   } catch (error) {
     // reason: a failed migration rolled back and left the corpus at its last good schema; its message names the step
     // and the corpus path. Fail loud with exit 1 rather than let citty dump a stack.

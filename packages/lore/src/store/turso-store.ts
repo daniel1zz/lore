@@ -55,6 +55,24 @@ import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { MIGRATION_026_SQL, MigrationFailedError } from "./migrations/migration-026.js";
 import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
+import {
+  auditBindings,
+  conversionAuditEntry,
+  conversionVersionBindings,
+  convertedNodeBindings,
+  INSERT_AUDIT_SQL,
+  INSERT_CONVERSION_VERSION_SQL,
+  MIGRATION_028_SQL,
+  planBaselineItemConversion,
+  PROPOSE_RULE_SQL,
+  requireMigrationActor,
+  SELECT_AUDIT_HEAD_SQL,
+  SELECT_BASELINE_NODES_SQL,
+  SELECT_LAST_APPROVED_SQL,
+  UPDATE_CONVERTED_NODE_SQL,
+  type ApprovedVersionRow,
+  type BaselineNodeRow,
+} from "./migrations/migration-028.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -292,6 +310,8 @@ export interface TursoConfig {
   syncInterval?: number;
   /** Permit upgrading an older corpus (same meaning as `SQLiteStoreOptions.migrate`); absent → refuse with `SchemaBehindError`. */
   migrate?: true;
+  /** Author of the migration's data-conversion writes (same meaning as `SQLiteStoreOptions.migrationActor`). */
+  migrationActor?: string;
 }
 
 /**
@@ -507,6 +527,8 @@ export class TursoStore implements StoreInterface {
   private readonly localPath: string;
   /** True only when the config carries `migrate: true`; see {@link TursoConfig.migrate}. */
   private readonly migrateAllowed: boolean;
+  /** See {@link TursoConfig.migrationActor}. */
+  private readonly migrationActor: string | undefined;
 
   /**
    * @param config - Local path + optional remote/auth/interval.
@@ -531,6 +553,7 @@ export class TursoStore implements StoreInterface {
     this.hasRemote = Boolean(config.remoteUrl);
     this.localPath = config.localPath;
     this.migrateAllowed = config.migrate === true;
+    this.migrationActor = config.migrationActor;
     this.client =
       injectedClient !== undefined
         ? injectedClient
@@ -844,6 +867,61 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 27) {
         // reason: migration-027 only moves user_version (see migration-027.ts).
         await this.client.executeMultiple(MIGRATION_027_SQL);
+      }
+
+      if (currentVersion < 28) {
+        // reason: migration-028 converts every baseline node to approved + pending items (BR-1341), planned by the
+        // same pure function the SQLite store runs, in ONE interactive transaction with the version bump.
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          const nodes = await tx.execute(SELECT_BASELINE_NODES_SQL);
+          for (const row of nodes.rows) {
+            const node: BaselineNodeRow = {
+              id: rowStr(row, "id"),
+              slug: rowStr(row, "slug"),
+              title: rowStr(row, "title"),
+              content: rowStr(row, "content"),
+              status: rowStr(row, "status"),
+              extra: rowStr(row, "extra"),
+              tags: rowStr(row, "tags"),
+              version: rowNum(row, "version"),
+            };
+            step = `convert baseline node ${node.slug}`;
+            const approvedRs = await tx.execute({ sql: SELECT_LAST_APPROVED_SQL, args: [node.id] as InValue[] });
+            const approvedRow = approvedRs.rows[0];
+            const lastApproved: ApprovedVersionRow | undefined =
+              approvedRow === undefined
+                ? undefined
+                : { title: rowStr(approvedRow, "title"), content: rowStr(approvedRow, "content"), extra: rowStr(approvedRow, "extra") };
+            const conversion = planBaselineItemConversion(node, lastApproved);
+            if (conversion === undefined) continue;
+            const by = requireMigrationActor(this.migrationActor, node.slug);
+            const now = new Date().toISOString();
+            await tx.execute({ sql: UPDATE_CONVERTED_NODE_SQL, args: convertedNodeBindings(node, conversion, now) as InValue[] });
+            await tx.execute({ sql: INSERT_CONVERSION_VERSION_SQL, args: conversionVersionBindings(node, conversion, by, now) as InValue[] });
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(conversionAuditEntry(node, conversion, by, now), prevHash) as InValue[] });
+            for (const ruleId of conversion.proposedRuleIds) {
+              await tx.execute({ sql: PROPOSE_RULE_SQL, args: [ruleId, node.id] as InValue[] });
+            }
+          }
+          step = "set user_version 28";
+          await tx.execute(MIGRATION_028_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(28, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
       }
     })();
 

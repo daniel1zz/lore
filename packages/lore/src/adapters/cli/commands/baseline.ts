@@ -58,6 +58,7 @@ import type { ConflictedSite, GenericSite, InvalidDeclaration, MappedSite } from
 import { classifySiteDeclaration, ruleStatusIndexOf } from "../../../service/site-declarations.js";
 import type { RuleStatusOf } from "../../../service/site-declarations.js";
 import { treePredicateFor } from "../absent-declarations.js";
+import { approvedCommandsOf, approvedDependsOnOf, approvedRulesOf } from "../../../service/baseline-items.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
@@ -145,10 +146,8 @@ async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Pr
     if (rule !== undefined) {
       const entry = full.value.rules[0] as RuleStateEntry;
       const leafDoc = await store.findBySlug(entry.leaf);
-      const rules = leafDoc.ok && leafDoc.value !== null ? leafDoc.value.extra["rules"] : undefined;
-      const statement = Array.isArray(rules)
-        ? (rules as Array<{ id?: unknown; statement?: unknown }>).find((r) => r.id === rule)?.statement
-        : undefined;
+      const rules = leafDoc.ok && leafDoc.value !== null ? approvedRulesOf(leafDoc.value) : [];
+      const statement = (rules as Array<{ id?: unknown; statement?: unknown }>).find((r) => r.id === rule)?.statement;
       if (json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: entry, statement: statement ?? null, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
         return 0;
@@ -274,7 +273,7 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
     leaves.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
     // reason: every distinct command of every leaf is censused ONCE over one shared program (BR-1248); a per-leaf
     // census rebuilt the program per command (~2.8 s each, 128 commands).
-    const leafCommands = (leaf: DocRecord): string[] => (Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : []);
+    const leafCommands = (leaf: DocRecord): string[] => approvedCommandsOf(leaf);
     // reason: a declared command absent from the analysed tree is REPORTED, never a coverage defect: a branch that adds a command
     // must declare it in the shared corpus before it lands, so every other branch's tree lacks it until then and refusing it would
     // block every other integrate. It also must not surface as a census error (exit 4) from resolveCommandEntry; only an
@@ -333,7 +332,7 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
         for (const site of census) byKey.set(site.key, site);
         for (const site of census.bootstrap) bootstrapByKey.set(site.key, site);
       }
-      const rules = Array.isArray(leaf.extra["rules"]) ? (leaf.extra["rules"] as Array<{ id: string; lifecycle: string }>) : [];
+      const rules = approvedRulesOf(leaf) as Array<{ id: string; lifecycle: string }>;
       // reason: BL-D1 - a cross-cutting leaf declares no command (its rules guard sites other leaves' commands reach), so it
       // is measured by the sites that declare its rules instead of a proxy command; owning none is UNMEASURED, never silently ok.
       // reason: a leaf whose declared commands are ALL absent from this tree is measured as if command-less.
@@ -583,9 +582,9 @@ export default defineLoreCommand({
             { by: resolveActor(inv) },
           );
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          const dependsOn = result.value.extra["depends_on"];
+          const dependsOn = approvedDependsOnOf(result.value);
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, depends_on: dependsOn } }, null, 2));
-          else printLine(inv.io.stdout, `${result.value.slug} depends_on: ${Array.isArray(dependsOn) && dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}`);
+          else printLine(inv.io.stdout, `${result.value.slug} depends_on: ${dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}`);
           return 0;
         });
       },
@@ -670,7 +669,7 @@ export default defineLoreCommand({
           }
           const result = await svc.setCommands(args.leaf as string, change, { by });
           if (!result.ok) return reportFailure(inv, result.error, json);
-          const commands = (result.value.extra["commands"] ?? []) as string[];
+          const commands = approvedCommandsOf(result.value);
           if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, commands } }, null, 2));
           else printLine(inv.io.stdout, `${result.value.slug}: commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}`);
           return 0;

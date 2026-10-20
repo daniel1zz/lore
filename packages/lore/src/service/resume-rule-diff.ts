@@ -23,6 +23,7 @@ import { err, ok, type Result } from "@lore/core";
 import type { LoreError, DocRecord, VersionRecord } from "@lore/core";
 import { AC_CITE_ID_PATTERN, baselineRuleSchema, type BaselineRule } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { approvedRulesOf } from "./baseline-items.js";
 import { resolveDoc } from "./resolve.js";
 
 export type RuleChangeKind = "statement" | "confidence" | "lifecycle";
@@ -58,9 +59,8 @@ function parseRule(raw: unknown, where: string): Result<BaselineRule, LoreError>
   return ok(parsed.data);
 }
 
-function rulesIn(extra: Record<string, unknown>): unknown[] {
-  const raw = extra["rules"];
-  return Array.isArray(raw) ? raw : [];
+function rulesIn(extra: Record<string, unknown>): readonly unknown[] {
+  return approvedRulesOf({ extra });
 }
 
 /** Governing rule ids: every citable id (BR-n or AS-n) cited by the spec's acceptance criteria, first-seen order. */

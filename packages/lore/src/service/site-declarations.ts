@@ -15,6 +15,7 @@
  * Side-effect class: pure.
  */
 
+import { approvedRulesOf } from "./baseline-items.js";
 import type { PredicateRule } from "./site-census.js";
 
 /** Lifecycle of a rule id as the corpus records it; `unknown` = no baseline node holds that id. */
@@ -66,10 +67,8 @@ export function classifySiteDeclaration(rules: readonly string[], statusOf?: Rul
 export function ruleStatusIndexOf(nodes: readonly { extra: Record<string, unknown> }[]): RuleStatusOf {
   const lifecycleOf = new Map<string, RuleStatus>();
   for (const node of nodes) {
-    const rules = node.extra["rules"];
-    if (!Array.isArray(rules)) continue;
-    for (const rule of rules as { id?: unknown; lifecycle?: unknown }[]) {
-      if (typeof rule.id !== "string") continue;
+    for (const rule of approvedRulesOf(node) as ({ id?: unknown; lifecycle?: unknown } | null)[]) {
+      if (typeof rule !== "object" || rule === null || typeof rule.id !== "string") continue;
       const lifecycle = rule.lifecycle;
       lifecycleOf.set(rule.id, lifecycle === "live" || lifecycle === "deprecated" || lifecycle === "retired" ? lifecycle : "unknown");
     }

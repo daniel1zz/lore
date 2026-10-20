@@ -133,6 +133,7 @@ import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.j
 import { ownProposedRules } from "./rule-changes.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, pipeAdvisories, resolveCiteGateFor } from "./ac-write-chokepoint.js";
 import type { CiteGateConfig } from "./ac-cite-gate.js";
+import { approvedRuleIdsOf } from "./baseline-items.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -404,10 +405,8 @@ export class AcService {
     if (!leaves.ok) return leaves;
     const carrying = new Map<string, DocRecord>();
     for (const leaf of leaves.value) {
-      const rules = leaf.extra["rules"];
-      if (!Array.isArray(rules)) continue;
-      for (const rule of rules as Array<{ id?: unknown }>) {
-        if (typeof rule.id === "string" && ruleIds.includes(rule.id)) carrying.set(rule.id, leaf);
+      for (const id of approvedRuleIdsOf(leaf)) {
+        if (ruleIds.includes(id)) carrying.set(id, leaf);
       }
     }
     const known = ruleIds.map((id) => carrying.get(id));

@@ -6,6 +6,7 @@
  *   `spec-baseline-slice-1-rules-with-permanent-ids-ac-citations` §C1, §C3).
  * Public surface: `baselineExtraSchema`, `baselineRuleSchema`, `glossaryEntrySchema`,
  *   `BASELINE_RULE_ID_PATTERN` (BR), `STANDARD_RULE_ID_PATTERN` (AS), `DEBT_RULE_ID_PATTERN` (AD),
+ *   `baselinePendingSchema` (pending revisions beside the approved versions, BR-1340),
  *   `ANY_RULE_ID_PATTERN`, `ruleIdPrefix`, `ruleIdPrefixOfNode`, `isBusinessBaseline`, `isNodeOfTree`,
  *   `validateBaselineParent`, `isLawfulRuleLifecycleTransition`, `lintRuleStatement`, and their
  *   derived types.
@@ -163,6 +164,40 @@ export type GlossaryEntry = z.infer<typeof glossaryEntrySchema>;
 export const baselineLabelSchema = z.string().refine((label) => label.trim() !== "", { message: "label must not be empty" });
 
 /**
+ * One pending revision of a rule (BR-1340): the whole proposed rule. The approved version of the same id stays in
+ * `extra.rules` and keeps governing; a rule with no approved version (a pending add) is absent from `extra.rules`.
+ * `revision_id` changes on every write to the item, so an approval that saw an older revision can be refused.
+ */
+export const pendingRuleRevisionSchema = z.object({
+  revision_id: z.string().min(1),
+  rule: baselineRuleSchema,
+});
+export type PendingRuleRevision = z.infer<typeof pendingRuleRevisionSchema>;
+
+/**
+ * The pending revision of a node's own part (title, body, label, glossary, depends_on, commands). A key that is
+ * present is a proposed change to that field: its new value, or `null` to clear it. An empty revision (only
+ * `revision_id`) marks a never-approved node part: the node has no approved version yet.
+ */
+export const pendingNodeRevisionSchema = z.object({
+  revision_id: z.string().min(1),
+  title: z.string().min(1).optional(),
+  content: z.string().optional(),
+  label: baselineLabelSchema.nullable().optional(),
+  glossary: z.array(glossaryEntrySchema).nullable().optional(),
+  depends_on: z.array(z.string().min(1)).nullable().optional(),
+  commands: z.array(z.string().min(1)).nullable().optional(),
+});
+export type PendingNodeRevision = z.infer<typeof pendingNodeRevisionSchema>;
+
+/** Every pending revision of a baseline node: per rule id, plus at most one for the node's own part. */
+export const baselinePendingSchema = z.object({
+  rules: z.record(z.string().regex(ANY_RULE_ID_PATTERN), pendingRuleRevisionSchema).optional(),
+  node: pendingNodeRevisionSchema.optional(),
+});
+export type BaselinePending = z.infer<typeof baselinePendingSchema>;
+
+/**
  * `extra` of a `baseline` doc.
  * @invariant `rules`, `commands` present only when `node === "leaf"`; `glossary` only on root|branch;
  *   rule ids unique within the leaf.
@@ -178,8 +213,23 @@ export const baselineExtraSchema = z
     glossary: z.array(glossaryEntrySchema).optional(),
     /** Leaf only: CLI command names (e.g. `ac add`) whose census this leaf answers for. Written only by `lore baseline map --command`. */
     commands: z.array(z.string().min(1)).optional(),
+    /**
+     * Pending revisions (BR-1340). `rules`, `label`, `glossary`, `depends_on` and `commands` above are the APPROVED
+     * versions; this holds what is proposed and not yet approved. Read approved content only through the
+     * approved-version accessor (`service/baseline-items.ts`).
+     */
+    pending: baselinePendingSchema.optional(),
   })
   .superRefine((extra, ctx) => {
+    for (const [key, revision] of Object.entries(extra.pending?.rules ?? {})) {
+      if (revision.rule.id !== key) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `pending revision keyed ${key} carries rule ${revision.rule.id}`,
+          path: ["pending", "rules", key, "rule", "id"],
+        });
+      }
+    }
     if (extra.commands !== undefined && extra.node !== "leaf") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

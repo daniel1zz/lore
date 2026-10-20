@@ -36,7 +36,8 @@ function legacyDb(path: string, version: 21 | 22 = 21): void {
   db.exec(MIGRATION_020_SQL);
   // reason: this fixture models only the tables migration 023 touches; migration-025 indexes `versions` and
   // migration-026 rebuilds it, so the upgrade chain needs that table to exist with every column 026 copies.
-  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY)"); // `versions.doc_id` references it; the RENAME in 026 resolves that reference
+  // `versions.doc_id` references it; the RENAME in 026 resolves that reference. 027 reads the baseline columns (no row here).
+  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT, version INTEGER)");
   db.exec(
     "CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', extra TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', change_summary TEXT, slug TEXT, harness_run TEXT)",
   );
