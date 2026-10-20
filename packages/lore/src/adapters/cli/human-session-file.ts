@@ -22,7 +22,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { deriveHumanRunId } from "@lore/core";
@@ -102,6 +102,34 @@ export function readHumanSessionFile(env: EnvBag, home: string, checkout: string
 /** The binding an invocation writes under: the person's name and the run derived from the token's hash. */
 export function bindingOfHumanSessionFile(file: HumanSessionFile): HumanSessionBinding {
   return { name: file.name, run: deriveHumanRunId(hashSessionToken(file.token)) };
+}
+
+/**
+ * The binding a WRITE finds for a checkout: the open human session's person and run, or `null` when there is none.
+ * A damaged token file also reads as `null` (fail closed): reads are never refused for identity (BR-1351), and the
+ * write that needed the binding is refused as "no open human session"; `lore session show|end` name the damage.
+ * The single lookup `lore` invocations (`run-cli.ts`) and the dashboard server (per write request) both use.
+ *
+ * @param checkout - absolute path of the checkout (project root); symlinks are resolved first, because `lore session
+ *   start` keys the file by the process's own (already resolved) working directory while a registered project path
+ *   may be spelled through a symlink (macOS `/var` -> `/private/var`)
+ */
+export function resolveHumanSessionBinding(env: EnvBag, home: string, checkout: string): HumanSessionBinding | null {
+  let resolvedCheckout: string;
+  try {
+    resolvedCheckout = realpathSync(checkout);
+  } catch (error) {
+    // reason: a checkout that does not exist has no session; any other failure (permissions, loops) is real.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const file = readHumanSessionFile(env, home, resolvedCheckout);
+    return file === null ? null : bindingOfHumanSessionFile(file);
+  } catch (error) {
+    if (error instanceof HumanSessionFileError) return null;
+    throw error;
+  }
 }
 
 /**

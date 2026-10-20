@@ -41,6 +41,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 import type { FullConfig } from "@playwright/test";
+import { knownPartyEnv, startHumanSession } from "./known-party.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // tests/e2e -> tests -> dashboard -> packages -> <repo root>
@@ -197,6 +198,13 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
     execFileSync("bun", [LORE_ENTRY, "init", "--author", "e2e-runner"], { cwd: projectARoot, stdio: "pipe" });
     execFileSync("bun", [LORE_ENTRY, "init", "--author", "e2e-runner"], { cwd: projectBRoot, stdio: "pipe" });
 
+    // 1b. Open the e2e human session in BOTH checkouts: the local dashboard makes a cookie write as the person whose
+    //     human session is open in the checkout the write lands in (GitHub #324), and refuses it with none. Session
+    //     files live in `machineAuthBaseDir` (the isolated mkdtemp, removed in cleanup), which the server below reads
+    //     through `LORE_STATE_HOME`.
+    startHumanSession(["bun", LORE_ENTRY], projectARoot, machineAuthBaseDir);
+    startHumanSession(["bun", LORE_ENTRY], projectBRoot, machineAuthBaseDir);
+
     // 2. Seed distinguishable, gate-conformant content into both.
     const seedOut = execFileSync(
       "bun",
@@ -238,7 +246,7 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
     const serverProc = spawn(
       "bun",
       [SERVER_SCRIPT, projectARoot, String(API_PORT), "127.0.0.1", machineAuthBaseDir, registryProjects],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "pipe", "pipe"], env: knownPartyEnv(machineAuthBaseDir) },
     );
     let serverStdout = "";
     serverProc.stdout?.on("data", (chunk: Buffer) => {

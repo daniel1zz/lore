@@ -30,7 +30,7 @@ import type { Invocation } from "@lore/core";
 import { UnknownPartyError } from "@lore/core/node";
 import type { InvocationResolvers } from "@lore/core/node";
 import { CliExit } from "./cli-exit.js";
-import { bindingOfHumanSessionFile, HumanSessionFileError, readHumanSessionFile } from "./human-session-file.js";
+import { resolveHumanSessionBinding } from "./human-session-file.js";
 import { primeReplicaClientWhenSyncEnabled } from "./replica-priming.js";
 import type { ExitReport } from "./cli-exit.js";
 import { printLine } from "./output.js";
@@ -79,18 +79,8 @@ export const invocationResolvers: InvocationResolvers = {
   },
   userConfigDir: (env, home) => resolveUserConfigDir(env, home),
   projectRoot: findProjectRoot,
-  humanSession: ({ env, home, projectRoot }) => {
-    try {
-      const file = readHumanSessionFile(env, home, projectRoot);
-      return file === null ? null : bindingOfHumanSessionFile(file);
-    } catch (error) {
-      // reason: a damaged token file must not crash a READ (reads are never refused for identity, BR-1351); the
-      // write that needed it is refused as "no open human session" (fail closed), and `lore session show|end` read
-      // the file themselves and name the damage.
-      if (error instanceof HumanSessionFileError) return null;
-      throw error;
-    }
-  },
+  // reason: a damaged token file must not crash a READ (BR-1351); see resolveHumanSessionBinding.
+  humanSession: ({ env, home, projectRoot }) => resolveHumanSessionBinding(env, home, projectRoot),
 };
 
 /**
