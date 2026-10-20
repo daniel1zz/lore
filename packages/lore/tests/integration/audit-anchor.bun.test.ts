@@ -96,7 +96,8 @@ interface VerifyJsonPayload {
   data?: {
     clean: boolean;
     misses: unknown[];
-    since: string;
+    audited: number;
+    reconstructed: number;
     chain: { clean: boolean; checked: number; break?: { id: number; reason: string } };
     anchor:
       | { status: "absent" }
@@ -118,7 +119,7 @@ function readAnchorFile(cwd: string): AuditAnchorFileShape {
 }
 
 function runVerifyJson(cwd: string): VerifyJsonPayload {
-  const result = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z", "--json"], cwd);
+  const result = runLore(["audit", "--verify", "--json"], cwd);
   return JSON.parse(result.stdout) as VerifyJsonPayload;
 }
 
@@ -217,7 +218,7 @@ describe("lore audit anchor — HAPPY", () => {
     expect(verify.data?.chain.clean).toBe(true);
     expect(verify.data?.anchor).toEqual({ status: "clean", head_id: onDisk.head_id, head_hash: onDisk.head_hash });
 
-    const verifyExit = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z"], tmpDir);
+    const verifyExit = runLore(["audit", "--verify"], tmpDir);
     expect(verifyExit.exitCode).toBe(0);
   });
 
@@ -225,7 +226,7 @@ describe("lore audit anchor — HAPPY", () => {
     createPrd("Anchor HAPPY Human PRD");
     runLore(["audit", "anchor"], tmpDir);
 
-    const result = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z"], tmpDir);
+    const result = runLore(["audit", "--verify"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toLowerCase()).toContain("chain integrity: clean");
     expect(result.stdout.toLowerCase()).toContain("anchor: verified");
@@ -287,7 +288,7 @@ describe("lore audit anchor — ERROR", () => {
     // Corrupt the file with invalid JSON.
     writeFileSync(anchorFilePath(tmpDir), "{ not valid json", "utf8");
 
-    const result = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z"], tmpDir);
+    const result = runLore(["audit", "--verify"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr.toLowerCase()).toContain("malformed");
     expect(result.stderr).toContain("audit-anchor.json");
@@ -337,7 +338,7 @@ describe("lore audit anchor — REGRESSION (rewritten/rewound chain → anchor_m
       reason: "hash_mismatch",
     });
 
-    const verifyExit = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z"], tmpDir);
+    const verifyExit = runLore(["audit", "--verify"], tmpDir);
     expect(verifyExit.exitCode).toBe(4);
     expect(verifyExit.stdout.toLowerCase()).toContain("mismatch");
   });
@@ -369,7 +370,7 @@ describe("lore audit anchor — REGRESSION (rewritten/rewound chain → anchor_m
     // walker's current head) — both signals fire, neither masks the other.
     expect(verify.data?.chain.clean).toBe(false);
 
-    const verifyExit = runLore(["audit", "--verify", "--since", "2000-01-01T00:00:00.000Z"], tmpDir);
+    const verifyExit = runLore(["audit", "--verify"], tmpDir);
     expect(verifyExit.exitCode).toBe(4);
   });
 });

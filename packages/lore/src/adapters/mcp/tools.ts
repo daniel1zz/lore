@@ -833,9 +833,8 @@ export const LoreAssessSchema = z.object({
  * Input schema for lore_audit (SPEC-035 §2).
  * Query mode (default): `id_or_slug`/`actor`/`action`/`since`/`limit` map to
  * `AuditFilters` — all optional, combinable. Verify mode (`verify: true`): runs
- * the versions⋈audit completeness oracle instead; `since` overrides the
- * configured `audit.verify_since` watermark for this call only; the other query
- * filters are ignored in this mode.
+ * the versions⋈audit completeness oracle instead, over every version; `since` is
+ * refused in this mode (the cut-off is retired); the other query filters are ignored.
  */
 export const LoreAuditSchema = z.object({
   id_or_slug: z.string().optional(),
@@ -2782,7 +2781,14 @@ export function registerTools(
       if (args.verify === true) {
         // reason: the MCP server is long-lived, so the full-chain verdict runs off its loop (worker per persistent
         // store) and reads the anchor file — the same verdict `lore audit --verify` reports.
-        const result = await app.auditVerifyRunner.verify(args.since !== undefined ? { since: args.since } : undefined);
+        if (args.since !== undefined) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: "since",
+            message: "since is not accepted with verify: verification checks every version. History that predates the audit writers is recorded by `lore migrate audit-backfill --apply`.",
+          });
+        }
+        const result = await app.auditVerifyRunner.verify();
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }

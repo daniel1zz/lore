@@ -8,9 +8,9 @@
  * command is a thin arg-parse + render layer, same shape as `commands/audit.ts`.
  *
  * `--since` defaults to the Unix epoch (effectively "all time") when omitted
- * — SPEC-102 names no pinned default watermark the way `audit.verify_since`
- * has one, so an unbounded-by-default window is the least-surprising choice
- * for a first-run `lore trace stats` with no flags.
+ * — SPEC-102 names no pinned default watermark, so an unbounded-by-default
+ * window is the least-surprising choice for a first-run `lore trace stats`
+ * with no flags.
  *
  * `--raw-queries` includes literal `details.query` search text — LOCAL-ONLY,
  * OFF by default (SPEC-102 §Security & Privacy: aggregates only unless

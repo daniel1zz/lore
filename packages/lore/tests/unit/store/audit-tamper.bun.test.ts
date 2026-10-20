@@ -199,7 +199,7 @@ function rawAuditRows(dbPath: string): RawAuditRow[] {
  * scope for the completeness join. */
 function openAuditService(dbPath: string): { store: SQLiteStore; audit: AuditService } {
   const store = actedStore(new SQLiteStore(dbPath));
-  const audit = new AuditService(store, { verifySince: "2000-01-01T00:00:00.000Z" });
+  const audit = new AuditService(store);
   return { store, audit };
 }
 
@@ -551,7 +551,7 @@ describe("audit hash chain — adversarial tamper detection (SPEC-079 G3)", () =
       expect(walk).toEqual({ clean: true, checked: 0 });
     }
 
-    const audit = new AuditService(handle.store, { verifySince: "2000-01-01T00:00:00.000Z" });
+    const audit = new AuditService(handle.store);
     const verifyResult = await audit.verify();
     expect(verifyResult.ok).toBe(true);
     if (verifyResult.ok) {
@@ -603,7 +603,7 @@ describe("audit hash chain — adversarial tamper detection (SPEC-079 G3)", () =
       expect(walk.checked).toBe(6);
     }
 
-    const audit = new AuditService(handle.store, { verifySince: "2000-01-01T00:00:00.000Z" });
+    const audit = new AuditService(handle.store);
     const verifyResult = await audit.verify();
     expect(verifyResult.ok).toBe(true);
     if (verifyResult.ok) {
@@ -656,7 +656,7 @@ describe("audit hash chain — adversarial tamper detection (SPEC-079 G3)", () =
       expect(walk.break).toEqual({ id: targetId, reason: "hash_mismatch" });
     }
 
-    const auditService = new AuditService(reopened, { verifySince: "2000-01-01T00:00:00.000Z" });
+    const auditService = new AuditService(reopened);
     const verifyResult = await auditService.verify();
     expect(verifyResult.ok).toBe(true);
     if (verifyResult.ok) {

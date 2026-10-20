@@ -1105,8 +1105,7 @@ export interface StoreInterface {
    * `findVersions` is per-doc only, and the completeness oracle needs every version
    * row corpus-wide since the watermark, not one doc at a time.
    *
-   * @param since - ISO 8601; omit for no lower bound (all versions ever, used only
-   *   by tests — production callers always pass the resolved `audit.verify_since`)
+   * @param since - ISO 8601; omit for no lower bound (all versions ever)
    * @see PLAN task D (SPEC-035) — audit surface
    */
   listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>>;

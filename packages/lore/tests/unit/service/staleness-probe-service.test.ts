@@ -259,7 +259,7 @@ describe("REGRESSION — staleness_probe audit action is excluded from VERSION_A
     const telemetry = makeNoOpTelemetry();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const judgmentService = new JudgmentService(store, telemetry);
-    const auditService = new AuditService(store, { verifySince: "2000-01-01T00:00:00Z" });
+    const auditService = new AuditService(store);
 
     await createAndBackdate(corpusService, store, "knowledge", "Audit family K", 20);
 

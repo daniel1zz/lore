@@ -742,29 +742,12 @@ const WorkflowConfigSchema = z
 /** Task execution workflow config section. Source: SPEC-025 §3 D2; `gates` added for gate on/off overrides. */
 export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
 
-// ─── Audit Section Schema ───────────────────────────────────────────────────
-
 /**
- * Audit completeness-oracle configuration (SPEC-035 §2 D5).
- * `verify_since` is the watermark `lore audit --verify` anchors its versions⋈audit
- * reconcile walk to — versions rows older than this are known-historical holes
- * (pre-SPEC-035 TaskWorkflow silence, v1-migration imports) and are never reported
- * as misses, so the oracle is strict going forward without permanently failing on
- * data that predates audit-writer coverage.
- *
- * @invariant Default is the SPEC-035 deploy date (2026-07-06) — every audit writer
- *   upgraded by this spec is live from that point forward, so the default watermark
- *   already makes `--verify` meaningful with zero config.
+ * The cut-off `lore migrate audit-backfill` uses when a config never set `audit.verify_since`: the SPEC-035 deploy
+ * date, the day the audit writers went live. It defines which history PREDATES the writers (and so may be recorded
+ * as reconstructed); verification itself never reads a date.
  */
-const AuditConfigSchema = z
-  .object({
-    /** ISO 8601 — versions rows before this timestamp are excluded from --verify. */
-    verify_since: z.string().default("2026-07-06T00:00:00Z"),
-  })
-  .strict();
-
-/** Audit completeness-oracle config section. Source: SPEC-035 §2 D5. */
-export type AuditConfig = z.infer<typeof AuditConfigSchema>;
+export const AUDIT_WRITERS_LIVE_FROM = "2026-07-06T00:00:00Z";
 
 // ─── Trace Section Schema ───────────────────────────────────────────────────
 
@@ -1410,12 +1393,9 @@ export const LoreConfigSchema = z
      * When absent, createApp uses WorkflowConfigSchema.parse({}) defaults (120min TTL).
      */
     workflow: WorkflowConfigSchema.optional(),
-    /**
-     * Audit completeness-oracle configuration (SPEC-035).
-     * When absent, createApp uses AuditConfigSchema.parse({}) defaults
-     * (verify_since = SPEC-035 deploy date).
-     */
-    audit: AuditConfigSchema.optional(),
+    // reason: there is NO audit section. Verification checks every version (task-audit-verification-checks-every-
+    // version-pre-writer-history); a config still setting `audit.verify_since` never reaches this schema:
+    // `loadConfigFromString` refuses it first, naming `lore migrate audit-backfill --apply`.
     /**
      * Trusted-runner (`lore verify`) configuration (SPEC-039).
      * When absent, createApp uses VerifyConfigSchema.parse({}) defaults
@@ -1766,22 +1746,6 @@ export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined)
  */
 export function resolveForeignCorpusWriteGateEnabled(config: LoreConfig | undefined): boolean {
   return config?.workflow?.gates?.["corpus-write"]?.foreign_corpus_write?.enabled !== false;
-}
-
-/**
- * Resolve the effective audit-verify watermark (ISO 8601 string) from an optional
- * LoreConfig. Mirrors {@link resolveClaimTtlMinutes} — absence of the whole config
- * or the audit section both fall back to the schema default (SPEC-035 deploy date).
- *
- * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns Effective audit.verify_since value
- * @example
- *   resolveAuditVerifySince(undefined) // => "2026-07-06T00:00:00Z"
- *   resolveAuditVerifySince({ ..., audit: { verify_since: "2026-08-01T00:00:00Z" } })
- *   // => "2026-08-01T00:00:00Z"
- */
-export function resolveAuditVerifySince(config: LoreConfig | undefined): string {
-  return (config?.audit ?? AuditConfigSchema.parse({})).verify_since;
 }
 
 /**
@@ -2698,44 +2662,61 @@ export interface RetiredAdoptionRemoval {
  *   // => ok({ text: "", value: "warn" })
  */
 export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
+  return removeConfigSetting(yamlText, ["context", "memory_files", "adoption"], RETIRED_ADOPTION_FIELD);
+}
+
+/**
+ * PURE removal of one scalar setting (`path`, e.g. `["audit", "verify_since"]`) from a config text: the setting's own
+ * line is cut out, and so is every parent mapping the cut leaves empty. Every other byte is identical. The ONE
+ * implementation behind every retired-setting migration (`removeRetiredAdoptionSetting`, `removeRetiredVerifySinceSetting`).
+ *
+ * @param yamlText - the raw config file text
+ * @param path - key path of the setting, outermost key first
+ * @param field - the dotted name quoted by the hand-edit refusal
+ * @returns `ok(undefined)` when absent; `ok({text, value})` when present; `err(VALIDATION_ERROR)` when the YAML is
+ *   malformed or the setting shares its line with other keys (flow style) and must be deleted by hand.
+ */
+function removeConfigSetting(yamlText: string, path: readonly string[], field: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
   const doc = yaml.parseDocument(yamlText);
   if (doc.errors.length > 0) {
     return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText, rule: "BR-1323" } satisfies LoreError);
   }
-  const memoryFiles = doc.getIn(["context", "memory_files"], true);
-  if (!yaml.isMap(memoryFiles)) return ok(undefined);
-  const pair = memoryFiles.items.find((item) => yaml.isScalar(item.key) && item.key.value === "adoption");
+  const parentPath = path.slice(0, -1);
+  const settingKey = path[path.length - 1];
+  const parent = doc.getIn(parentPath, true);
+  if (!yaml.isMap(parent)) return ok(undefined);
+  const pair = parent.items.find((item) => yaml.isScalar(item.key) && item.key.value === settingKey);
   if (pair === undefined) return ok(undefined);
-  const value = doc.getIn(["context", "memory_files", "adoption"]);
+  const value = doc.getIn(path);
 
-  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty `memory_files:` / `context:`.
+  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty parent mapping behind.
   let cutPair = pair;
-  const context = doc.getIn(["context"], true);
-  if (memoryFiles.items.length === 1 && yaml.isMap(context)) {
-    const memoryFilesPair = context.items.find((item) => item.value === memoryFiles);
-    if (memoryFilesPair !== undefined) cutPair = memoryFilesPair;
-    if (memoryFilesPair !== undefined && context.items.length === 1 && yaml.isMap(doc.contents)) {
-      const contextPair = doc.contents.items.find((item) => item.value === context);
-      if (contextPair !== undefined) cutPair = contextPair;
-    }
+  let cutMap = parent;
+  for (let depth = parentPath.length; depth > 0 && cutMap.items.length === 1; depth--) {
+    const grand = depth === 1 ? doc.contents : doc.getIn(parentPath.slice(0, depth - 1), true);
+    if (!yaml.isMap(grand)) break;
+    const grandPair = grand.items.find((item) => item.value === cutMap);
+    if (grandPair === undefined) break;
+    cutPair = grandPair;
+    cutMap = grand;
   }
 
   const handEdit = (reason: string): Result<never, LoreError> =>
     err({
       code: "VALIDATION_ERROR",
-      field: RETIRED_ADOPTION_FIELD,
-      message: `${RETIRED_ADOPTION_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
+      field,
+      message: `${field} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
       value: yamlText,
       rule: "BR-1323",
     } satisfies LoreError);
   const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
-  const adoptionKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
-  const adoptionValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
-  if (keyRange === undefined || keyRange === null || adoptionKeyRange === undefined || adoptionKeyRange === null) {
+  const settingKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
+  const settingValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
+  if (keyRange === undefined || keyRange === null || settingKeyRange === undefined || settingKeyRange === null) {
     return handEdit("has no source position, so it cannot be removed in place");
   }
   // The cut ends where the setting's own content ends (it is the last content inside any escalated parent).
-  const contentEnd = adoptionValueRange === undefined || adoptionValueRange === null ? adoptionKeyRange[1] : adoptionValueRange[1];
+  const contentEnd = settingValueRange === undefined || settingValueRange === null ? settingKeyRange[1] : settingValueRange[1];
 
   const lineStart = yamlText.lastIndexOf("\n", keyRange[0] - 1) + 1;
   const newline = yamlText.indexOf("\n", contentEnd);
@@ -2747,6 +2728,48 @@ export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAd
     return handEdit("shares its line with other settings, so it cannot be removed line-wise");
   }
   return ok({ text: yamlText.slice(0, lineStart) + yamlText.slice(lineEnd), value });
+}
+
+/** The `LoreError.field` of the refusal about the retired audit cut-off setting. */
+export const RETIRED_VERIFY_SINCE_FIELD = "audit.verify_since";
+
+/** The command that removes the retired cut-off and records pre-writer history, named by every refusal about it. */
+export const AUDIT_BACKFILL_MIGRATE_COMMAND = "lore migrate audit-backfill --apply";
+
+/** The refusal text for a config that still sets the retired audit cut-off. One constant: loader and migrate quote the same words. */
+export const RETIRED_VERIFY_SINCE_MESSAGE =
+  `${RETIRED_VERIFY_SINCE_FIELD} was retired: audit verification checks every version. ` +
+  `Run \`${AUDIT_BACKFILL_MIGRATE_COMMAND}\` to remove it from .lore/config.yaml and record the versions that predate the audit writers as reconstructed.`;
+
+/** Whether `error` is the refusal about the retired audit cut-off — the loader fails LOUD on it, never reads around it. */
+export function isRetiredVerifySinceError(error: LoreError): boolean {
+  return error.code === "VALIDATION_ERROR" && error.field === RETIRED_VERIFY_SINCE_FIELD;
+}
+
+/** Names the retired `audit.verify_since` setting when a YAML-parsed config still carries it, whatever its value. */
+function detectRetiredVerifySinceSetting(raw: unknown): LoreError | undefined {
+  const audit = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>)["audit"] : undefined;
+  if (typeof audit !== "object" || audit === null || !("verify_since" in audit)) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: RETIRED_VERIFY_SINCE_FIELD,
+    message: RETIRED_VERIFY_SINCE_MESSAGE,
+    value: (audit as Record<string, unknown>)["verify_since"],
+  } satisfies LoreError;
+}
+
+/**
+ * PURE removal of `audit.verify_since` from a config text (the `audit:` mapping goes too when it held nothing else).
+ * Writing the result is `lore migrate audit-backfill --apply`'s job: no loader ever writes a config file.
+ *
+ * @returns `ok(undefined)` when the setting is absent; `ok({text, value})` when present (`value` is the cut-off the
+ *   corpus declared, which the backfill uses as its own boundary); `err(VALIDATION_ERROR)` when malformed or flow-style.
+ * @example
+ *   removeRetiredVerifySinceSetting('audit:\n  verify_since: "2026-07-06T00:00:00Z"\n');
+ *   // => ok({ text: "", value: "2026-07-06T00:00:00Z" })
+ */
+export function removeRetiredVerifySinceSetting(yamlText: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
+  return removeConfigSetting(yamlText, ["audit", "verify_since"], RETIRED_VERIFY_SINCE_FIELD);
 }
 
 /**
@@ -2785,6 +2808,9 @@ export function loadConfigFromString(
 
   const retiredAdoption = detectRetiredAdoptionSetting(parsed);
   if (retiredAdoption !== undefined) return err(retiredAdoption);
+
+  const retiredVerifySince = detectRetiredVerifySinceSetting(parsed);
+  if (retiredVerifySince !== undefined) return err(retiredVerifySince);
 
   const result = parseConfig(parsed);
   if (result.ok && warn !== undefined) {
