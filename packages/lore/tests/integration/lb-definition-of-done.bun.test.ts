@@ -3,7 +3,7 @@
  * AC-LB-5 (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1357): `lore claim` prints the
  * definition of done, and it is computed by the SAME predicates `lore done` uses.
  *
- * Fixture: a throwaway corpus (mkdtemp + `lore init`). Task T anchors tests/a.test.ts, tests/b.test.ts and src/c.ts and
+ * Fixture: a throwaway corpus (mkdtemp + `lore init`). Task T anchors tests/a.test.ts, tests/b.test.ts, src/c.ts and the symbol anchor src/d.ts#Foo and
  * declares ac_scope AC-X-1 of a spec whose AC-X-1 is script-mode; task U declares neither an ac_scope nor a test anchor.
  *
  * SIMPLEST GREEN-BUT-BROKEN CASE (asserted): a hand-written list naming every anchor gets the counts right only when
@@ -87,7 +87,7 @@ beforeAll(async () => {
   taskT = slugOf(
     await must([
       "create", "task", "--title", "T", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
-      "--anchor", "tests/a.test.ts", "--anchor", "tests/b.test.ts", "--anchor", "src/c.ts",
+      "--anchor", "tests/a.test.ts", "--anchor", "tests/b.test.ts", "--anchor", "src/c.ts", "--anchor", "src/d.ts#Foo",
       "--ac-scope", "AC-X-1", "--ac-scope", "AC-X-2",
     ]),
   );
@@ -107,6 +107,11 @@ describe("AC-LB-5 claim prints the definition of done", () => {
       const { dod } = await claimJson(taskT);
       expect(dod.unfiltered_pass_files).toEqual(["tests/a.test.ts", "tests/b.test.ts"]);
       expect(dod.unfiltered_pass_files).not.toContain("src/c.ts");
+      // a symbol-scoped task anchor (path#Symbol) is accepted, stored as written, and is not a test file
+      expect(dod.unfiltered_pass_files).not.toContain("src/d.ts#Foo");
+      expect(dod.unfiltered_pass_files.some((f) => f.includes("#"))).toBe(false);
+      const got = await must(["get", taskT, "--json"]);
+      expect(got).toContain("src/d.ts#Foo");
       expect(dod.red_required).toBe(true);
       expect(dod.verify_acs).toEqual(["AC-X-1"]);
     },

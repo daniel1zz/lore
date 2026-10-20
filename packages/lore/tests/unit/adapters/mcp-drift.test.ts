@@ -358,16 +358,15 @@ describe("lore_anchor_set — REGRESSION (task target, byte-identical to pre-SPE
     expect((data.doc.extra["verification_evidence"] as unknown[]).length).toBe(1);
   });
 
-  it("a '#'-carrying task anchor is STILL rejected loud, naming the SPEC code-anchor grammar", async () => {
+  it("a symbol-scoped task anchor (path#Symbol) is accepted and stored as written", async () => {
     const { id: planId } = await createPlan();
     const { slug: taskSlug } = await createTask(planId);
 
     const call = getToolHandler(server, "lore_anchor_set");
     const result = await call({ id_or_slug: taskSlug, anchors: ["src/y.ts#Foo"], by: "agent:mcp" });
-    expect(result.isError).toBe(true);
-    const error = parseError(result);
-    if (error.code !== "VALIDATION_ERROR") throw new Error(`expected VALIDATION_ERROR, got ${error.code}`);
-    expect(error.message).toContain("SPEC-045");
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result) as { doc: { extra: Record<string, unknown> } };
+    expect(data.doc.extra["file_anchors"]).toEqual(["src/y.ts#Foo"]);
   });
 });
 
