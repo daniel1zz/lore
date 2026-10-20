@@ -389,6 +389,7 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
           branches: ["wt-a"],
           task_slugs: ["task-one"],
           newest_at: "2026-07-11T10:00:00.000Z",
+          message_address: null,
         },
       ],
       archive_candidates: 0,

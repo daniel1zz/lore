@@ -691,6 +691,13 @@ export const readySessionSchema = z.object({
    * group that is NOT stale — present-iff-true.
    */
   stale: z.boolean().optional(),
+  /**
+   * Where another session can message this session's MAIN run (`uds:<absolute path>`), or `null` when none is
+   * recorded (BR-1363, BR-1360). Always present: `null` is the measured "no address", never an omitted field.
+   * It is the address of the main run of the session the claims' runs belong to, so a subagent's claim shows
+   * the same address as its main run's.
+   */
+  message_address: z.string().nullable(),
 });
 
 /** Derived TypeScript type for one session grouping (SPEC-042 D1). */
@@ -722,6 +729,11 @@ export type ReadySession = z.infer<typeof readySessionSchema>;
  * @param staleByTask - Optional run-aware staleness the caller already resolved per task id (BR-1058:
  *   an `orphaned_dirty` claim never ages out, a clean ended-run claim is stale at once). A task with an
  *   entry uses it; a task without one falls back to TTL-only `isClaimStale`.
+ * @param messageAddressByRun - Optional lookup `claim.harness_run -> the address of that run's session's MAIN
+ *   run` (null = none recorded), built by the caller from the run registry (BR-1363). The session's
+ *   `message_address` is the first non-null address among its member claims; a claim whose run is absent from
+ *   the lookup (or an absent lookup) contributes none, so the field is `null`, never a guess. Joined by run id
+ *   only: never by `parentRunId` (the hook registers subagents without a parent), `session_id` or a name.
  * @returns One `ReadySession` per distinct `(by, machine, worktree, session_id)`
  *   key present among `tasks`' fresh claims, in first-seen order.
  *
@@ -747,6 +759,7 @@ export function deriveSessions(
   nowIso: string,
   ttlMinutes: number,
   staleByTask?: ReadonlyMap<DocId, boolean>,
+  messageAddressByRun?: ReadonlyMap<string, string | null>,
 ): ReadySession[] {
   interface MutableGroup {
     by: string;
@@ -757,6 +770,7 @@ export function deriveSessions(
     branchSeen: Set<string>;
     task_slugs: string[];
     newest_at: string;
+    message_address: string | null;
   }
 
   const groups = new Map<string, MutableGroup>();
@@ -793,6 +807,7 @@ export function deriveSessions(
         branchSeen: new Set<string>(),
         task_slugs: [],
         newest_at: claim.at,
+        message_address: null,
       };
       groups.set(key, group);
       order.push(key);
@@ -803,6 +818,9 @@ export function deriveSessions(
       group.branches.push(claim.branch);
     }
     group.task_slugs.push(task.slug);
+    if (group.message_address === null && claim.harness_run != null) {
+      group.message_address = messageAddressByRun?.get(claim.harness_run) ?? null;
+    }
     if (claim.at > group.newest_at) group.newest_at = claim.at;
   }
 
@@ -818,6 +836,7 @@ export function deriveSessions(
       branches: g.branches,
       task_slugs: g.task_slugs,
       newest_at: g.newest_at,
+      message_address: g.message_address,
     };
   });
 }

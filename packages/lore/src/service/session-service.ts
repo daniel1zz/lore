@@ -103,6 +103,7 @@ import { resolveDoc } from "./resolve.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 import { isPlanMember } from "./plan-membership.js";
+import { resolveMessageAddressByRun } from "./holder-message-address.js";
 import { computeRuleDiffSinceClaim, renderRuleDiff } from "./resume-rule-diff.js";
 import { deriveLivenessVerdict, type LivenessVerdict } from "./session-liveness.js";
 import { probeProcessStartTime, type ProcessStartTimeProbe } from "../adapters/process-probe-port.js";
@@ -490,7 +491,9 @@ export class SessionService {
     // paying for this method's unrelated plan/queue/handoff assembly.
     // `TaskWorkflowService.ready`'s plan-scoped `sessions[]` remains a
     // SEPARATE, untouched call site over the shared `deriveSessions` pure fn.
-    const activeSessions: ReadySession[] = this.computeActiveSessionsFrom(allDocs, nowIso);
+    const activeSessionsResult = await this.computeActiveSessionsFrom(allDocs, nowIso);
+    if (!activeSessionsResult.ok) return activeSessionsResult;
+    const activeSessions: ReadySession[] = activeSessionsResult.value;
 
     // Pending review queue — same `status: "draft"` filter ReviewService.pending uses.
     const pendingDrafts = allDocs.filter((d) => d.status === "draft").sort(byCreatedAtAsc);
@@ -694,7 +697,7 @@ export class SessionService {
     const nowIso = now();
     const allDocsResult = await this.store.findMany({});
     if (!allDocsResult.ok) return allDocsResult;
-    return ok(this.computeActiveSessionsFrom(allDocsResult.value, nowIso));
+    return this.computeActiveSessionsFrom(allDocsResult.value, nowIso);
   }
 
   /**
@@ -1220,19 +1223,30 @@ export class SessionService {
    * @param allDocs - Every doc in the corpus (already fetched by the caller).
    * @param nowIso - Current time, ISO 8601.
    */
-  private computeActiveSessionsFrom(allDocs: DocRecord[], nowIso: string): ReadySession[] {
+  private async computeActiveSessionsFrom(
+    allDocs: DocRecord[],
+    nowIso: string,
+  ): Promise<Result<ReadySession[], LoreError>> {
     const claimBearingTasks = allDocs.filter(
       (d) => d.type === "task" && d.status !== "archived" && d.status !== "deprecated",
     );
+    // reason: BR-1363 — every holder listing shows the holding session's main-run address; the registry reads
+    // happen here so `deriveSessions` stays pure.
+    const addressByRun = await resolveMessageAddressByRun(this.store, claimBearingTasks);
+    if (!addressByRun.ok) return addressByRun;
     const UNBOUNDED_TTL_MINUTES = Number.POSITIVE_INFINITY;
-    return deriveSessions(claimBearingTasks, nowIso, UNBOUNDED_TTL_MINUTES).map((session) => {
-      const groupIsStale = isClaimStale(
-        { by: session.by, at: session.newest_at },
-        nowIso,
-        this.deps.claimTtlMinutes,
-      );
-      return groupIsStale ? { ...session, stale: true } : session;
-    });
+    return ok(
+      deriveSessions(claimBearingTasks, nowIso, UNBOUNDED_TTL_MINUTES, undefined, addressByRun.value).map(
+        (session) => {
+          const groupIsStale = isClaimStale(
+            { by: session.by, at: session.newest_at },
+            nowIso,
+            this.deps.claimTtlMinutes,
+          );
+          return groupIsStale ? { ...session, stale: true } : session;
+        },
+      ),
+    );
   }
 
   /**

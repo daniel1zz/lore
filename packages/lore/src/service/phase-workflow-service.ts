@@ -220,6 +220,7 @@ import {
   resolveEffectiveStalenessByDoc,
   buildEffectiveAnchorGateContext,
 } from "./task-workflow-service.js";
+import { resolveMessageAddressByRun } from "./holder-message-address.js";
 
 /**
  * Re-exported verbatim from `./task-workflow-service.js` (SPEC-056 D1/P1) — never
@@ -1410,12 +1411,14 @@ export class PhaseWorkflowService {
 
     const staleByDoc = await resolveEffectiveStalenessByDoc(this.store, children, nowIso, this.claimTtlMinutes);
     if (!staleByDoc.ok) return staleByDoc;
+    const addressByRun = await resolveMessageAddressByRun(this.store, children);
+    if (!addressByRun.ok) return addressByRun;
     const { anchorConflicts } = this.computeAnchorAdvisories(children, nowIso, staleByDoc.value);
 
     return ok({
       records,
       counts: computeReadyCounts(records),
-      sessions: deriveSessions(children, nowIso, this.claimTtlMinutes, staleByDoc.value),
+      sessions: deriveSessions(children, nowIso, this.claimTtlMinutes, staleByDoc.value, addressByRun.value),
       anchor_conflicts: anchorConflicts,
       // reason: task-a-mistyped-task-file-anchor-is-stored-and-consulted — the
       // PHASE tier does not (yet) probe its `extra.file_anchors` against the

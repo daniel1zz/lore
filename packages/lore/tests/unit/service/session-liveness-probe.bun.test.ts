@@ -111,6 +111,7 @@ function makeSession(overrides: Partial<ReadySession>): ReadySession {
     branches: [],
     task_slugs: [],
     newest_at: "2026-08-12T10:00:00.000Z",
+    message_address: null,
     ...overrides,
   };
 }
