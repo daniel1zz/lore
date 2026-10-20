@@ -54,7 +54,7 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, CommandsChange } from "../../../service/rule-service.js";
 import { commandFixCommand, sitesDeclaringRulesOf, computeLeafCoverage, computeUndeclaredCommands, partitionDeclaredCommands, siteFixHint, absentCommandFixCommand } from "../../../service/leaf-coverage.js";
-import type { ConflictedSite, InvalidDeclaration, MappedSite } from "../../../service/leaf-coverage.js";
+import type { ConflictedSite, GenericSite, InvalidDeclaration, MappedSite } from "../../../service/leaf-coverage.js";
 import { classifySiteDeclaration, ruleStatusIndexOf } from "../../../service/site-declarations.js";
 import type { RuleStatusOf } from "../../../service/site-declarations.js";
 import { treePredicateFor } from "../absent-declarations.js";
@@ -237,6 +237,8 @@ interface LeafCoverageReport {
   conflicts: ConflictedSite[];
   /** Reached sites whose code declares a retired, deprecated or unknown rule id. */
   invalid_declarations: InvalidDeclaration[];
+  /** Shared sites reached through predicates of different rules: listed with those rules, attributed to none. */
+  generic: GenericSite[];
   /** Imports the census could not resolve; non-empty means the site list is a lower bound and the leaf is NOT complete. */
   unresolved_imports: string[];
   bootstrap: string[];
@@ -355,6 +357,7 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
         not_measured: verdict.notMeasured,
         conflicts: verdict.conflicts,
         invalid_declarations: verdict.invalid,
+        generic: verdict.generic,
         unresolved_imports: verdict.unresolvedImports ?? [],
         bootstrap: [...bootstrapByKey.keys()].sort(),
         fix_hints: [...verdict.gaps, ...verdict.notMeasured].map((key) => siteFixHint(byKey.get(key) as Site)),
@@ -370,12 +373,13 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
       if (reports.length === 0) printLine(inv.io.stdout, `${resolved.value.slug}: no leaves under this node.`);
       for (const r of reports) {
         const state = r.measured_by === "absent" ? "PENDING (declared commands not in this tree)" : r.measured_by === "none" ? "UNMEASURED (no commands declared and no code site declares one of its rules; use `lore baseline map --command` or declare its rule at the sites it enforces)" : r.ok ? "fully mapped" : "UNMAPPED sites (report only)";
-        printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.mapped_sites.length} mapped, ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.conflicts.length} conflict(s), ${r.invalid_declarations.length} invalid declaration(s), ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
+        printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.mapped_sites.length} mapped, ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.conflicts.length} conflict(s), ${r.generic.length} generic, ${r.invalid_declarations.length} invalid declaration(s), ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         if (r.measured_by === "absent") printLine(inv.io.stdout, `  all declared commands absent from this tree (pending or stale): ${r.absent_commands.map((a) => a.command).join(", ")}`);
         for (const a of r.absent_commands) printLine(inv.io.stdout, `  declared command not in this tree: ${a.command} (pending in a branch that has not landed, or stale; not counted against coverage)\n    if stale: ${a.fix}`);
         for (const m of r.mapped_sites) printLine(inv.io.stdout, `  mapped       ${m.file}:${m.line} ${m.rule}`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
         for (const c of r.conflicts) printLine(inv.io.stdout, `  conflict     ${c.file}:${c.line} declares ${c.rules.join(" and ")} (a site carries at most one rule)`);
+        for (const g of r.generic) printLine(inv.io.stdout, `  generic      ${g.file}:${g.line} is shared by predicates of ${g.rules.join(", ")}: ${g.predicates.map((p) => `${p.rule} at ${p.file}:${p.line}`).join("; ")}`);
         for (const d of r.invalid_declarations) printLine(inv.io.stdout, `  ${d.status}      ${d.file}:${d.line} declares ${d.rule}, which is ${d.status === "unknown" ? "not a rule of the baseline" : d.status}`);
         for (const [i, key] of [...r.gaps, ...r.not_measured].entries()) printLine(inv.io.stdout, `  ${i < r.gaps.length ? "gap         " : "not_measured"} ${key}\n    fix: ${r.fix_hints[i]}`);
         for (const key of r.bootstrap) printLine(inv.io.stdout, `  bootstrap    ${key}`);
@@ -703,9 +707,9 @@ export default defineLoreCommand({
           // reason: each site is reported as what the tree declares there (BR-1344); `liveness` says whether the corpus was consulted to
           // tell a live rule from a retired or unknown id, so an unchecked id is never read as a verified one.
           const described = (site: Site) => {
-            const declaration = classifySiteDeclaration(site.rules, statusOf);
+            const declaration = classifySiteDeclaration(site.rules, statusOf, site.predicates);
             const rule = "rule" in declaration ? declaration.rule : null;
-            return { ...site, status: declaration.state, rule, rules: site.rules };
+            return { ...site, status: declaration.state, rule, rules: site.rules, ...("via" in declaration && declaration.via !== undefined ? { via: declaration.via } : {}) };
           };
           if (json) {
             printLine(
@@ -736,9 +740,10 @@ export default defineLoreCommand({
           }
           printLine(inv.io.stdout, `${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
           const declared = (site: Site): string => {
-            const d = classifySiteDeclaration(site.rules, statusOf);
-            if (d.state === "declared") return d.rule;
+            const d = classifySiteDeclaration(site.rules, statusOf, site.predicates);
+            if (d.state === "declared") return d.via === undefined ? d.rule : `${d.rule} (via ${d.via.file}:${d.via.line})`;
             if (d.state === "unmapped") return "unmapped";
+            if (d.state === "generic") return `generic: predicates of ${d.rules.join(", ")}`;
             if (d.state === "conflict") return `conflict ${d.rules.join(" vs ")}`;
             return `${d.state} ${d.rule}`;
           };

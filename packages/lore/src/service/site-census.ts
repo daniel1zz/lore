@@ -110,9 +110,24 @@ export interface Site {
    * a conflict (a site carries at most one rule). Read from the syntax at the site only; see {@link RULE_TAG}.
    */
   readonly rules: readonly string[];
+  /**
+   * Only when `rules` is empty: the rules of the NEAREST tagged predicate above the site on the call paths the walk took (a function
+   * or registry entry carrying `@lore-site BR-<n>`). A shared refusal site declares nothing itself; the predicate that decides each
+   * rule does. One predicate rule = the site is attributed to it; two or more = `generic` (the census cannot tell which produced
+   * the refusal, so it lists them and guesses none). `[]` = no predicate above it either.
+   */
+  readonly predicates: readonly PredicateRule[];
 }
 
-/** The doc-tag that declares a rule on a port type, interface, method, callee or statement: `@lore-site BR-<n>`. */
+/** One predicate's declaration reached above a site: the rule it carries and where the predicate is written. */
+export interface PredicateRule {
+  readonly rule: string;
+  readonly file: string;
+  readonly line: number;
+  readonly symbol: string;
+}
+
+/** The doc-tag that declares a rule on a port type, interface, method, callee, statement or predicate function: `@lore-site BR-<n>`. */
 export const RULE_TAG = "@lore-site";
 
 /** How a refusal's `field` shows in its key: nothing, the literal, or a per-(file,symbol,code) ordinal. */
@@ -128,6 +143,8 @@ interface PendingSite {
   readonly line: number;
   readonly column: number;
   readonly rules: readonly string[];
+  /** The AST node the site was recorded at: its enclosing functions are walked to the predicates above it. */
+  readonly node: TS.Node;
   readonly bootstrap: boolean;
 }
 
@@ -686,7 +703,10 @@ class CensusWalker {
 
   /** Ready-keyed sites plus the pending coded sites of one sink, keys finalised (ordinals by source position). */
   private mergedSites(ready: ReadonlyMap<string, Site>, bootstrap: boolean): Map<string, Site> {
-    const merged = new Map(ready);
+    const merged = new Map<string, Site>();
+    for (const [key, site] of ready) {
+      merged.set(key, site.rules.length === 0 ? { ...site, predicates: this.predicatesOf(this.siteNodes.get(key) ?? []) } : site);
+    }
     const ordered = [...this.pending.values()].filter((p) => p.bootstrap === bootstrap).sort((a, b) => (a.rel === b.rel ? a.pos - b.pos : a.rel < b.rel ? -1 : 1));
     const ordinals = new Map<string, number>();
     const bases: string[] = [];
@@ -714,7 +734,9 @@ class CensusWalker {
         seen.set(base, n + 1);
         key = p.field.kind === "none" ? `${base}#~${n}` : `${base}~${n}`;
       }
-      if (!merged.has(key)) merged.set(key, { key, file: p.rel, symbol: p.symbol, code: p.code, dynamic: false, line: p.line, column: p.column, rules: p.rules });
+      if (!merged.has(key)) {
+        merged.set(key, { key, file: p.rel, symbol: p.symbol, code: p.code, dynamic: false, line: p.line, column: p.column, rules: p.rules, predicates: p.rules.length === 0 ? this.predicatesOf([p.node]) : [] });
+      }
     });
     return merged;
   }
@@ -916,6 +938,13 @@ class CensusWalker {
 
   /** Walk one function body, recording sites and recursing into statically resolvable callees. */
   visit(fn: FunctionLike, depth: number): void {
+    // reason: the call edge is recorded on EVERY reach, before the visited-set early return, so the predicate walk sees all callers.
+    const caller = this.fnStack[this.fnStack.length - 1];
+    if (caller !== undefined && caller !== fn) {
+      const known = this.callers.get(fn) ?? new Set<FunctionLike>();
+      known.add(caller);
+      this.callers.set(fn, known);
+    }
     const seenAt = this.visited.get(fn);
     if ((seenAt !== undefined && seenAt <= depth) || fn.body === undefined) return;
     // reason: keyed on the shallowest depth - a body first walked at the depth bound had its callees cut, so a later
@@ -926,7 +955,75 @@ class CensusWalker {
       else if (this.ts.isObjectLiteralExpression(node)) this.handleTypedLiteral(node);
       this.ts.forEachChild(node, scan);
     };
-    scan(fn.body);
+    this.fnStack.push(fn);
+    try {
+      scan(fn.body);
+    } finally {
+      this.fnStack.pop();
+    }
+  }
+
+  // ── predicates (BR-1344): the rule of the function that decides a refusal, found above a shared refusal site ──────────────────
+
+  /** Functions currently being walked (innermost last): the caller of the next followed callee. */
+  private readonly fnStack: FunctionLike[] = [];
+  /** Every function that reached a followed function, over all reaches of the walk. */
+  private readonly callers = new Map<FunctionLike, Set<FunctionLike>>();
+  /** Per site key, the nodes of every call that recorded it (a dynamic key can stand for several calls). */
+  private readonly siteNodes = new Map<string, TS.Node[]>();
+  private readonly nearestMemo = new Map<FunctionLike, PredicateRule[]>();
+
+  /** The `@lore-site` ids a function carries: on it, or on the entry / declaration it is the value of (up to the enclosing statement or block). */
+  private functionRules(fn: FunctionLike): string[] {
+    const ts = this.ts;
+    const found: string[] = [];
+    let cur: TS.Node | undefined = fn;
+    for (let hops = 0; cur !== undefined && hops < 6 && !ts.isSourceFile(cur) && !ts.isBlock(cur) && !ts.isClassDeclaration(cur) && !ts.isClassExpression(cur); hops++) {
+      found.push(...this.tagRulesOf(cur));
+      cur = cur.parent;
+    }
+    return found;
+  }
+
+  /**
+   * The nearest tagged predicate at or above `fn` over the recorded call edges: its own tags when it has any (the search stops there),
+   * else the union over its callers. Memoised; a cycle contributes nothing on the second visit (the answer is then a lower bound).
+   */
+  private nearestOf(fn: FunctionLike, inProgress: Set<FunctionLike> = new Set()): PredicateRule[] {
+    const memo = this.nearestMemo.get(fn);
+    if (memo !== undefined) return memo;
+    if (inProgress.has(fn)) return [];
+    const own = this.functionRules(fn);
+    let out: PredicateRule[];
+    if (own.length > 0) {
+      const file = path.relative(this.rootDir, fn.getSourceFile().fileName).split(path.sep).join("/");
+      const line = this.positionOf(fn).line;
+      const symbol = this.enclosingSymbolName(fn);
+      out = [...new Set(own)].map((rule) => ({ rule, file, line, symbol }));
+    } else {
+      inProgress.add(fn);
+      out = [];
+      for (const caller of this.callers.get(fn) ?? []) out.push(...this.nearestOf(caller, inProgress));
+      inProgress.delete(fn);
+    }
+    this.nearestMemo.set(fn, out);
+    return out;
+  }
+
+  /** Predicates above the nodes' enclosing functions (innermost function first, the first one that has any wins), de-duplicated by rule. */
+  private predicatesOf(nodes: readonly TS.Node[]): PredicateRule[] {
+    const byRule = new Map<string, PredicateRule>();
+    for (const node of nodes) {
+      const chain: FunctionLike[] = [];
+      for (let cur: TS.Node | undefined = node; cur !== undefined; cur = cur.parent) if (this.isFunctionLike(cur)) chain.push(cur);
+      for (const fn of chain) {
+        const found = this.nearestOf(fn);
+        if (found.length === 0) continue;
+        for (const p of found) if (!byRule.has(p.rule)) byRule.set(p.rule, p);
+        break;
+      }
+    }
+    return [...byRule.values()].sort((a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0));
   }
 
   private handleCall(call: TS.CallExpression, depth: number): void {
@@ -1130,7 +1227,7 @@ class CensusWalker {
     const symbol = this.enclosingSymbolName(call);
     const key = `${rel}#${symbol}#depth-bound`;
     const where = this.positionOf(call);
-    this.depthCuts.set(call, { site: { key, file: rel, symbol, dynamic: true, kind: "depth-bound", ...where, rules: [] }, bootstrap: this.isNonBusinessSymbol(symbol, file) });
+    this.depthCuts.set(call, { site: { key, file: rel, symbol, dynamic: true, kind: "depth-bound", ...where, rules: [], predicates: [] }, bootstrap: this.isNonBusinessSymbol(symbol, file) });
   }
 
   // ── dependency injection (#104) ──────────────────────────────────────────────
@@ -1498,6 +1595,7 @@ class CensusWalker {
       dynamic: true,
       ...this.positionOf(dispatch.decl),
       rules: CensusWalker.uniqueRules(this.tagRulesAlong([dispatch.decl])),
+      predicates: [],
     });
   }
 
@@ -1586,6 +1684,7 @@ class CensusWalker {
       pos: node.getStart(),
       ...this.positionOf(node),
       rules: CensusWalker.uniqueRules(rules),
+      node,
       bootstrap: this.isNonBusinessSymbol(symbol, file),
     });
   }
@@ -1694,7 +1793,8 @@ class CensusWalker {
     const merged = CensusWalker.uniqueRules([...(existing?.rules ?? []), ...rules]);
     const first = existing !== undefined && existing.line <= where.line ? existing : undefined;
     const position = first === undefined ? where : { line: first.line, column: first.column };
-    sink.set(key, code === undefined ? { key, file: rel, symbol, dynamic: true, ...position, rules: merged } : { key, file: rel, symbol, code, dynamic: false, ...position, rules: merged });
+    sink.set(key, code === undefined ? { key, file: rel, symbol, dynamic: true, ...position, rules: merged, predicates: [] } : { key, file: rel, symbol, code, dynamic: false, ...position, rules: merged, predicates: [] });
+    this.siteNodes.set(key, [...(this.siteNodes.get(key) ?? []), node]);
   }
 
   private label(node: TS.Node): string {

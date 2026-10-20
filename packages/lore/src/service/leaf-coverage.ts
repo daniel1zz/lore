@@ -29,6 +29,17 @@ export interface MappedSite {
   readonly file: string;
   readonly line: number;
   readonly rule: string;
+  /** Present when the site declares nothing itself and takes the rule of the predicate above it: where that predicate is written. */
+  readonly via?: { readonly file: string; readonly line: number; readonly symbol: string };
+}
+
+/** One reached site shared by predicates of different rules: the census lists their rules and attributes the site to none. */
+export interface GenericSite {
+  readonly key: string;
+  readonly file: string;
+  readonly line: number;
+  readonly rules: readonly string[];
+  readonly predicates: readonly { readonly rule: string; readonly file: string; readonly line: number; readonly symbol: string }[];
 }
 
 /** One reached site whose code declares two or more rules (a site carries at most one). */
@@ -60,6 +71,8 @@ export interface LeafCoverage {
   readonly conflicts: ConflictedSite[];
   /** Sites declaring a retired, deprecated or unknown rule id. */
   readonly invalid: InvalidDeclaration[];
+  /** Shared sites reached through predicates of different rules (`generic`): reported with those rules, never attributed to one. */
+  readonly generic: GenericSite[];
   /** `<specifier> (from <file>)` for each import the census could not resolve: sites behind it are missing. */
   readonly unresolvedImports?: string[];
   readonly ok: boolean;
@@ -80,7 +93,7 @@ export function siteFixHint(site: { key: string; file: string; line: number; dyn
  * @param ruleIds - the leaf's rule ids (any lifecycle: a retired rule's site still belongs to the leaf that held it).
  */
 export function sitesDeclaringRulesOf(sites: readonly Site[], ruleIds: ReadonlySet<string>): Site[] {
-  return sites.filter((site) => site.rules.some((rule) => ruleIds.has(rule)));
+  return sites.filter((site) => (site.rules.length > 0 ? site.rules : site.predicates.map((p) => p.rule)).some((rule) => ruleIds.has(rule)));
 }
 
 /** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
@@ -214,16 +227,18 @@ export function computeLeafCoverage(input: {
   const notMeasured: string[] = [];
   const conflicts: ConflictedSite[] = [];
   const invalid: InvalidDeclaration[] = [];
+  const generic: GenericSite[] = [];
   const bootstrap = new Set((input.bootstrap ?? []).map((s) => s.key));
   for (const site of input.sites) {
     if (bootstrap.has(site.key)) continue;
     const at = { key: site.key, file: site.file, line: site.line };
-    const declaration = classifySiteDeclaration(site.rules, input.statusOf);
+    const declaration = classifySiteDeclaration(site.rules, input.statusOf, site.predicates);
     if (declaration.state === "unmapped") (site.dynamic ? notMeasured : gaps).push(site.key);
     else if (declaration.state === "conflict") conflicts.push({ ...at, rules: declaration.rules });
+    else if (declaration.state === "generic") generic.push({ ...at, rules: declaration.rules, predicates: declaration.predicates });
     else if (declaration.state === "declared") {
       // reason: a site declaring ANOTHER leaf's live rule is accounted for by that leaf; it is neither this leaf's mapping nor a gap.
-      if (live.has(declaration.rule)) mapped.push({ ...at, rule: declaration.rule });
+      if (live.has(declaration.rule)) mapped.push({ ...at, rule: declaration.rule, ...(declaration.via !== undefined ? { via: { file: declaration.via.file, line: declaration.via.line, symbol: declaration.via.symbol } } : {}) });
     } else invalid.push({ ...at, rule: declaration.rule, status: declaration.state });
   }
   const unresolvedImports = (input.unresolvedImports ?? []).map((u) => `${u.specifier} (from ${u.from})`);
@@ -234,7 +249,8 @@ export function computeLeafCoverage(input: {
     notMeasured,
     conflicts,
     invalid,
+    generic,
     ...(unresolvedImports.length > 0 ? { unresolvedImports } : {}),
-    ok: gaps.length === 0 && notMeasured.length === 0 && conflicts.length === 0 && invalid.length === 0 && unresolvedImports.length === 0,
+    ok: gaps.length === 0 && notMeasured.length === 0 && conflicts.length === 0 && invalid.length === 0 && generic.length === 0 && unresolvedImports.length === 0,
   };
 }
