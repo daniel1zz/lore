@@ -307,7 +307,6 @@ export function buildRetiredFeedbackUpstreamError(): Extract<LoreError, { code: 
       "({root_prd, ...}) — SQLite-based issue reporting was removed " +
       "(spec-the-defect-channel-reaches-no-machine-but-its-own-github P4). Reconfigure " +
       'feedback.upstream.repo (e.g. "owner/repo") to file/list issue reports via GitHub.',
-    rule: "BR-490",
   };
 }
 
@@ -650,7 +649,6 @@ function buildPartialSuccessStoreError(issueNumber: number, issueUrl: string, re
     message:
       `issue filed upstream as #${issueNumber} (${issueUrl}) but the corpus task could not be created ` +
       `(${reason}) — the upstream issue itself was NOT lost.`,
-    rule: "BR-496",
   };
 }
 
@@ -725,13 +723,11 @@ async function mintIssueTask(
 
   const taskInputResult = toIssueTaskInput(listedIssue, ref, rootPrdId);
   if (!taskInputResult.ok) {
-    /** @lore-site BR-496 */
     return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(taskInputResult.error)));
   }
 
   const createResult = await corpusService.create(taskInputResult.value, { by: actor });
   if (!createResult.ok) {
-    /** @lore-site BR-496 */
     return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(createResult.error)));
   }
 
@@ -820,7 +816,6 @@ export async function fileGithubIssue(
         "this corpus has no root PRD at all — 'reporter_root_prd' (Risk R1's identity mitigation) has nothing " +
         "to publish. Create one (`lore create prd`) before filing.",
       value: ctx.consumerCorpusRoot,
-      rule: "BR-493",
     });
   }
 

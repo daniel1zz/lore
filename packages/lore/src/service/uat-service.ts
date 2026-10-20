@@ -116,7 +116,6 @@ export class UatService {
         code: "VALIDATION_ERROR",
         field: issue ? String(issue.path.join(".")) : "uat",
         message: `Invalid UAT verdict payload: ${issue?.message ?? "unknown"}`,
-        rule: "BR-560",
       });
     }
     const verdict: UatVerdict = parsed.data;
@@ -125,7 +124,6 @@ export class UatService {
     // pre-existing not-found/ambiguous-prefix error from resolveTarget is returned
     // unchanged (AC-8: check order matters — a bad id/slug never reaches the new type
     // check below).
-    /** @lore-site BR-561 */
     const targetResult = await this.deps.resolveTarget(planIdOrSlug);
     if (!targetResult.ok) return targetResult;
     const target = targetResult.value;
@@ -148,7 +146,6 @@ export class UatService {
           `anything. There is no supported way to record a UAT verdict without a plan: ` +
           `if none exists yet, create one first (\`lore create plan ...\`) and record ` +
           `the verdict against it.`,
-        rule: "BR-561",
       });
     }
     const planId = target.id;
@@ -163,7 +160,6 @@ export class UatService {
     if (!createResult.ok) return createResult;
     const doc = createResult.value;
 
-    /** @lore-site BR-564 */
     const linkResult = await this.deps.addLink({
       from_id: doc.id,
       to_id: planId,
@@ -182,7 +178,6 @@ export class UatService {
           `UAT verdict doc created (${doc.slug}) but linking it to plan "${planIdOrSlug}" ` +
           `failed: ${linkResult.error.code}. Repair: ` +
           `\`lore link ${doc.slug} ${planIdOrSlug} --type informs\``,
-        rule: "BR-564",
       });
     }
 

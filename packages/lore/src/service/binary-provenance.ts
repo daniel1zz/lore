@@ -217,7 +217,6 @@ export interface GitProvenanceProbe {
    * @returns the 40-hex sha, or `null` when `cwd` is not in a git repo or the
    *   repo has no commit yet (both exit 128 — measured).
    */
-  /** @lore-site BR-434 */
   readHeadCommit(cwd: string): string | null;
   /**
    * Whether `sha` names a commit object present in this repo's object store.
@@ -228,7 +227,6 @@ export interface GitProvenanceProbe {
    *   exits 128 for an unknown sha — measured, and NOT an error path: that 128
    *   is exactly the evidence for the `not-a-dev-checkout` verdict.
    */
-  /** @lore-site BR-434 */
   hasCommit(cwd: string, sha: string): boolean;
 }
 

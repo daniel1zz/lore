@@ -47,10 +47,8 @@ export class SpawnGitPort implements GitPort {
 
   headSha(): Result<string, LoreError> {
     const run = this.run(["rev-parse", "HEAD"]);
-    /** @lore-site BR-666 */
     if (run.status !== 0) return err(gitUnavailable("HEAD", this.describe(run)));
     const sha = run.stdout.trim();
-    /** @lore-site BR-666 */
     if (!/^[0-9a-f]{40}$/.test(sha)) return err(gitUnavailable("HEAD", `unexpected output '${sha}'`));
     return ok(sha);
   }
@@ -68,7 +66,6 @@ export class SpawnGitPort implements GitPort {
         if (known.status !== 0 && known.spawnError === undefined) return ok(false);
       }
     }
-    /** @lore-site BR-666 */
     return err(gitUnavailable(`ancestry of ${sha}`, this.describe(run)));
   }
 

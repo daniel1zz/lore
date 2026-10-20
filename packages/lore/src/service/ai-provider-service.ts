@@ -215,7 +215,6 @@ export function validateAcIdContainment(
     message:
       `AI judge returned ac_id(s) not in the spec's declared acceptance criteria: ` +
       `${offending.join(", ")}. Declared ids: ${Array.from(declaredIds).join(", ")}.`,
-    rule: "BR-545",
   });
 }
 
@@ -726,7 +725,6 @@ export function verifyFindingPaths(
         `environment problem (shallow clone, pruned range, or a stale reference), never an ` +
         `absent path: fix the environment, or supply --diff/--diff-file explicitly.`,
       value: commit,
-      rule: "BR-549",
     });
   }
 
@@ -1160,7 +1158,6 @@ export class AIProviderService {
           message:
             `AI returned invalid link type "${rawOutput}". ` +
             `Expected one of: parent, implements, informs, supersedes, relates-to, blocks, governs.`,
-          rule: "BR-762",
         },
       };
       this._emitAiEvent(validationError, duration_ms, {
@@ -1475,7 +1472,6 @@ export class AIProviderService {
       message:
         `AI judge response could not be parsed as valid assessment JSON after one ` +
         `corrective retry: ${second.parseErrorMessage ?? "unknown error"}. Raw output prefix: ${rawPrefix}`,
-      rule: "BR-544",
     });
     emitAssessEvent(doubleFailure);
     return doubleFailure;
@@ -1586,7 +1582,6 @@ export class AIProviderService {
       message:
         `AI judge response could not be parsed as valid review JSON after one ` +
         `corrective retry: ${second.parseErrorMessage ?? "unknown error"}. Raw output prefix: ${rawPrefix}`,
-      rule: "BR-264",
     });
     emitReviewEvent(doubleFailure);
     return doubleFailure;
@@ -1684,7 +1679,6 @@ export class AIProviderService {
         message:
           `AI staleness probe returned an out-of-enum decision (must be "holds" or ` +
           `"stale_candidate"): ${first.parseErrorMessage ?? "invalid decision"}. Raw output prefix: ${rawPrefix}`,
-        rule: "BR-471",
       });
       emitStalenessEvent(hardFailure);
       return hardFailure;
@@ -1712,7 +1706,6 @@ export class AIProviderService {
       message:
         `AI staleness probe response could not be parsed as valid verdict JSON after one ` +
         `corrective retry: ${second.parseErrorMessage ?? "unknown error"}. Raw output prefix: ${rawPrefix}`,
-      rule: "BR-471",
     });
     emitStalenessEvent(doubleFailure);
     return doubleFailure;

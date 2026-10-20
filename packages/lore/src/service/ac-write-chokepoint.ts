@@ -139,7 +139,6 @@ function falsifierRangeRefusal(
         `${FALSIFIER_EXIT_CODE_MIN} to ${FALSIFIER_EXIT_CODE_MAX} (0 is success, so it can never be the outcome of a ` +
         `failing mutation); got ${JSON.stringify(falsifier.exitCode)}`,
       value: falsifier.exitCode,
-      rule: "BR-1076",
     };
   }
   return undefined;
@@ -203,7 +202,6 @@ function pipeRefusal(stored: unknown, incoming: unknown, docId: string | undefin
       `then inspect the saved output: \`f=$(mktemp); <check> > "$f" 2>&1; ec=$?; cat "$f"; [ "$ec" -eq 0 ] && grep -q <pattern> "$f"\` ` +
       `(plain POSIX — \`lore verify\` runs commands under \`sh -c\`, so no here-string and no pipefail).`,
     value: first.command,
-    rule: "BR-1078",
   };
 }
 
@@ -230,7 +228,6 @@ function unparseableCommandRefusal(stored: unknown, incoming: unknown, docId: st
         `(the shell \`lore verify\` runs it with), so it could never run: ${parserMessage}. Nothing was written. ` +
         `Fix the quoting (an apostrophe inside single quotes closes the string; put the text in double quotes).`,
       value: now.command,
-      rule: "BR-1282",
     };
   }
   return undefined;
@@ -306,23 +303,19 @@ export function applyAcChange(
         `${ids} is a debt entry: a criterion cites a business rule (BR-n) or an architecture standard (AS-n), ` +
         `never a debt entry. Debt ids are named only in a standard's current_exceptions.`,
       violations: debtViolations,
-      rule: "BR-980",
     });
   }
   // reason: BR-1076 holds on every path, like BR-980 above; a write that leaves a stored falsifier
   // unchanged is not re-checked (a pre-existing 0 must not block unrelated edits).
   const rangeRefusal = falsifierRangeRefusal(before?.[KEY], after[KEY], docId);
-  /** @lore-site BR-1076 */
   if (rangeRefusal !== undefined) return err(rangeRefusal);
   // reason: BR-1078 holds on every sanctioned path, like BR-1076 above; a wholesale write is refused or
   // echoed below, so it never reaches here with a changed command, and a stored command is not re-checked.
   if (path !== "wholesale") {
     const pipeBlocked = pipeRefusal(before?.[KEY], after[KEY], docId);
-    /** @lore-site BR-1078 */
     if (pipeBlocked !== undefined) return err(pipeBlocked);
     // reason: TG-45 — same paths and changed-only scope as the pipe refusal above; wholesale never carries a changed command.
     const unparseable = unparseableCommandRefusal(before?.[KEY], after[KEY], docId);
-    /** @lore-site BR-1282 */
     if (unparseable !== undefined) return err(unparseable);
   }
   if (path === "ac-verb") return ok(undefined);
@@ -337,7 +330,6 @@ export function applyAcChange(
       field: issue !== undefined ? `${KEY}.${issue.path.join(".")}` : KEY,
       message: `${path}: ${issue !== undefined ? issue.message : "invalid acceptance criteria"}`,
       value: incoming,
-      rule: "BR-232",
     });
   }
   if (canonical(before?.[KEY]) === canonical(after[KEY])) return ok(undefined);
@@ -348,7 +340,6 @@ export function applyAcChange(
       `extra.${KEY} is owned by \`lore ac add|set|rm|cite\` — \`lore set\`/\`lore_set\`/PATCH ` +
       `replace \`extra\` wholesale and must not add, drop, reword or reorder criteria. ` +
       `Use \`lore ac add|set|rm|cite\` instead, or pass the stored array byte-identical.`,
-    rule: "BR-247",
   });
 }
 
@@ -415,7 +406,7 @@ export async function resolveCiteGateFor(
     return ok(resolveCiteGateConfig(rawGateConfig, hasBaselineDocs));
   } catch (cause) {
     if (cause instanceof CiteGateConfigError) {
-      return err({ code: "VALIDATION_ERROR", field: cause.field, message: cause.message, value: cause.value, rule: "BR-259" });
+      return err({ code: "VALIDATION_ERROR", field: cause.field, message: cause.message, value: cause.value });
     }
     throw cause;
   }
@@ -512,7 +503,6 @@ export async function admitAcWrite(
   }
 
   const violations: AcCiteViolation[] = decision.findings.flatMap((f) => f.violations);
-  /** @lore-site BR-257 */
   return err(
     await buildRefusal(store, input.target, input.existing, input.next, decision.message, violations, decision.findings[0], input.creating === true),
   );
@@ -553,7 +543,6 @@ async function buildRefusal(
       exemptions: exemptions.value,
       nowIso: new Date().toISOString(),
     }),
-    rule: "BR-257",
   };
 }
 

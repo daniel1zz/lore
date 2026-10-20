@@ -269,7 +269,6 @@ function fixedNotSettableError(): LoreError {
       "`lore link --type resolves <fixer-doc> <issue>` (once the fixer doc reaches " +
       "active/archived). Use --state rejected or --state wontfix here instead.",
     value: "fixed",
-    rule: "BR-527",
   };
 }
 
@@ -282,7 +281,6 @@ function invalidStateError(value: string | undefined): LoreError {
       `Invalid --state '${value ?? ""}'. Valid values: ${VALID_STATE_LIST} ` +
       "('fixed' is computed via `lore link --type resolves`, never passed here).",
     value,
-    rule: "BR-527",
   };
 }
 
@@ -292,7 +290,6 @@ function missingReasonError(): LoreError {
     code: "VALIDATION_ERROR",
     field: "reason",
     message: `--reason is required (non-empty) when resolving an issue as ${VALID_STATE_LIST}.`,
-    rule: "BR-528",
   };
 }
 
@@ -310,7 +307,6 @@ function missingPointerError(binding: PointerFlagBinding): LoreError {
       `--state ${binding.state} REQUIRES ${binding.flag} <doc>, naming ${binding.names} — ` +
       "without it the state records nothing a reader could act on, and is indistinguishable " +
       "from --state rejected. Pass an existing doc id or slug.",
-    rule: "BR-529",
   };
 }
 
@@ -323,7 +319,6 @@ function pointerForWrongStateError(binding: PointerFlagBinding, state: ExplicitR
       `${binding.flag} is only valid with --state ${binding.state}, but --state ${state} was requested. ` +
       "Drop the flag, or resolve with the state it belongs to.",
     value: state,
-    rule: "BR-529",
   };
 }
 
@@ -344,7 +339,6 @@ function unresolvablePointerError(binding: PointerFlagBinding, value: string, ca
       `(${describeLoreErrorWithCode(cause)}) — nothing was written. A ${binding.state} resolution must ` +
       `name ${binding.names}, otherwise it is a silent trash can.`,
     value,
-    rule: "BR-529",
   };
 }
 
@@ -373,7 +367,6 @@ function wrongPointerTypeError(
       `${binding.state} requires one of: ${allowedDocTypes.join(", ")} — naming ${binding.names}. Without a ` +
       "live plan or task as owner, adoption would name an owner that cannot do the work it claims.",
     value: pointerDoc.slug,
-    rule: "BR-529",
   };
 }
 
@@ -386,7 +379,6 @@ function selfPointerError(binding: PointerFlagBinding, slug: string): LoreError 
       `${binding.flag} points at the report being resolved ('${slug}') — it must name ` +
       `${binding.names}, which cannot be the report itself.`,
     value: slug,
-    rule: "BR-529",
   };
 }
 
@@ -399,7 +391,6 @@ function notAnIssueError(slug: string): LoreError {
       `Document "${slug}" does not carry extra.issue_report — only a filed issue report ` +
       "(created via the upstream `lore report-issue` consumer flow) can be resolved.",
     value: slug,
-    rule: "BR-531",
   };
 }
 
@@ -414,7 +405,6 @@ function invalidIssueNumberError(raw: string): LoreError {
       `'${raw}' is not a valid GitHub issue number (a positive integer) — pass the number ` +
       "'lore issues' printed.",
     value: raw,
-    rule: "BR-520",
   };
 }
 
@@ -435,7 +425,6 @@ function issueNotListedError(issueNumber: number, repo: string, listedCount: num
       `GitHub issue #${issueNumber} was not found in ${repo}'s live listing (${listedCount} issue(s) ` +
       "currently listed) — run 'lore issues' to see what is adoptable, or check the number.",
     value: issueNumber,
-    rule: "BR-522",
   };
 }
 
@@ -454,7 +443,6 @@ function noRootPrdError(): LoreError {
     message:
       "this corpus has no root PRD at all — an adopted task (D13) has nothing to be adhoc-parented " +
       "to. Create one (`lore create prd`) first.",
-    rule: "BR-524",
   };
 }
 

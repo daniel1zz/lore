@@ -178,7 +178,6 @@ export function toIssueTaskInput(
         `Cannot mint a corpus task for GitHub issue #${issue.number}: no root PRD id was supplied — an adhoc ` +
         `task (D13) can only be minted once this corpus has a root PRD to anchor it to.`,
       value: rootPrdId,
-      rule: "BR-524",
     });
   }
 
@@ -203,7 +202,6 @@ export function toIssueTaskInput(
       field: "issue.body",
       message: `GitHub issue #${issue.number}'s body has a corrupted lore front-matter block: ${String(error)}`,
       value: issue.body,
-      rule: "BR-523",
     });
   }
 
@@ -215,7 +213,6 @@ export function toIssueTaskInput(
         `GitHub issue #${issue.number} carries no parsable lore front matter — it was not filed through ` +
         `'lore report-issue' (or its body no longer opens with the front-matter block).`,
       value: issue.body,
-      rule: "BR-523",
     });
   }
 

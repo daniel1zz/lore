@@ -345,7 +345,6 @@ export class DriftCheckService {
         field: "type",
         message: `Expected a ${ANCHOR_SCANNED_DOC_TYPES.join(" or ")} document; got type '${doc.type}'`,
         value: doc.type,
-        rule: "BR-62",
       });
     }
     return ok(doc);

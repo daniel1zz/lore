@@ -128,7 +128,6 @@ export async function buildPhaseStatusPayload(
       field: "type",
       message: `Expected a phase document; got type '${phase.type}'`,
       value: phase.type,
-      rule: "BR-1190",
     });
   }
   if (phase.parent_id === null) {
@@ -137,7 +136,6 @@ export async function buildPhaseStatusPayload(
       field: "parent_id",
       message: `Phase '${phase.slug}' has no parent plan`,
       value: phase.id,
-      rule: "BR-1190",
     });
   }
 

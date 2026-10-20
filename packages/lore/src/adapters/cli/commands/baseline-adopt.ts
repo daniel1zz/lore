@@ -148,7 +148,7 @@ function fail(inv: Invocation, error: LoreError, json: boolean, code: number): E
 }
 
 function usageError(field: string, message: string, value?: unknown): LoreError {
-  return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}), rule: "BR-987" };
+  return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}) };
 }
 
 const sameSettings = (a: AcCiteStored, b: AcCiteStored): boolean =>

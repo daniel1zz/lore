@@ -422,7 +422,6 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
             cause instanceof Error ? cause.message : String(cause)
           }`,
           value: name,
-          rule: "BR-830",
         });
       }
     },
@@ -456,11 +455,10 @@ function makeRealProjectSkillSource(assetsRoot: string): ProjectSkillAssetSource
           field: "skills",
           message: `cannot read the ${rel} assets under ${assetsRoot}: ${cause instanceof Error ? cause.message : String(cause)}`,
           value: rel,
-          rule: "BR-986",
         });
       }
       if (collected.length === 0) {
-        return err({ code: "VALIDATION_ERROR", field: "skills", message: `no files under ${join(assetsRoot, rel)}`, value: rel, rule: "BR-986" });
+        return err({ code: "VALIDATION_ERROR", field: "skills", message: `no files under ${join(assetsRoot, rel)}`, value: rel });
       }
       return ok(collected);
     },
@@ -718,7 +716,6 @@ function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Resul
         field: "settings",
         message: `${item.settingsPath} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
         value: item.settingsPath,
-        rule: "BR-1181",
       });
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -727,7 +724,6 @@ function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Resul
         field: "settings",
         message: `${item.settingsPath} must hold a JSON object at its root`,
         value: item.settingsPath,
-        rule: "BR-1181",
       });
     }
     const current = (parsed as Record<string, unknown>)["language"];

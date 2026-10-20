@@ -655,7 +655,6 @@ export interface App {
    *
    * Source: SPEC-024 §9.3
    */
-  /** @lore-site BR-539 */
   resolveAiDefault(explicit: boolean | undefined): { ai: boolean; source: AiDefaultSource };
   /**
    * Build a sibling App over the same corpus whose store is wrapped for ONE invocation identity

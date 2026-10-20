@@ -25,6 +25,6 @@ export class ImpactService {
     const data = await loadRuleIndexData(this.store);
     if (!data.ok) return data;
     const report = computeImpact(ruleId, data.value);
-    return report === undefined ? err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-681" }) : ok(report);
+    return report === undefined ? err({ code: "DOC_NOT_FOUND", id: ruleId }) : ok(report);
   }
 }

@@ -79,7 +79,6 @@ export function renderOutlet(fragments: readonly Fragment[], outlet: OutletId): 
       chars,
       perFragment,
       message: `BUDGET_EXCEEDED: ${outlet} block is ${chars} chars, cap is ${cap}. Fragments (id=chars): ${breakdown}`,
-      rule: "BR-907",
     });
   }
 

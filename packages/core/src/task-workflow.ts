@@ -244,7 +244,6 @@ export function rejectSelfLabelledRunnerUnattested(captureSource: string): Resul
       `capture_source "${RUNNER_UNATTESTED_CAPTURE_SOURCE}" is runner-issued; ` +
       "not a valid value for a caller-supplied evidence row.",
     value: captureSource,
-    rule: "BR-1180",
   });
 }
 
@@ -1278,7 +1277,6 @@ export function resolveTargetTask(
         field: "task",
         message: `no task matching "${explicitTaskIdOrSlug}" among this plan's tasks`,
         value: explicitTaskIdOrSlug,
-        rule: "BR-162",
       });
     }
     return ok(match);
@@ -1302,7 +1300,7 @@ export function resolveTargetTask(
       ? "no task in this plan has a fresh claim — pass --task to select one explicitly"
       : `ambiguous target task — ${freshlyClaimed.length} tasks have a fresh claim (${candidateSlugs.join(", ")}); pass --task to disambiguate`;
 
-  return err({ code: "VALIDATION_ERROR", field: "task", message, value: candidateSlugs, rule: "BR-162" });
+  return err({ code: "VALIDATION_ERROR", field: "task", message, value: candidateSlugs });
 }
 
 /**

@@ -37,7 +37,7 @@ export interface ResolvesTarget {
 }
 
 function refusal(message: string, value: string): LoreError {
-  return { code: "VALIDATION_ERROR", field: "resolves", message, value, rule: "BR-1083" };
+  return { code: "VALIDATION_ERROR", field: "resolves", message, value };
 }
 
 /**
@@ -56,7 +56,6 @@ export async function resolveResolvesTargets(
   const targets: ResolvesTarget[] = [];
   for (const rawToken of tokens) {
     const token = rawToken.trim();
-    /** @lore-site BR-1083 */
     if (token === "") return err(refusal("--resolves received an empty value", rawToken));
 
     let match: DocRecord | undefined;
@@ -64,7 +63,6 @@ export async function resolveResolvesTargets(
       const number = Number(token);
       const candidates = reports.filter((doc) => readGithubIssueRef(doc.extra)?.issueNumber === number);
       if (candidates.length === 0) {
-        /** @lore-site BR-1083 */
         return err(
           refusal(
             `--resolves ${token}: no filed defect report carries GitHub issue #${token} — adopt it first with \`lore issue adopt ${token}\``,
@@ -73,7 +71,6 @@ export async function resolveResolvesTargets(
         );
       }
       if (candidates.length > 1) {
-        /** @lore-site BR-1083 */
         return err(
           refusal(
             `--resolves ${token} is ambiguous (${candidates.map((doc) => doc.slug).join(", ")}) — name the report by slug`,
@@ -86,7 +83,6 @@ export async function resolveResolvesTargets(
       match = reports.find((doc) => doc.slug === token || doc.id === token);
       if (match === undefined) {
         const existing = listed.value.docs.find((doc) => doc.slug === token || doc.id === token);
-        /** @lore-site BR-1083 */
         return err(
           refusal(
             existing === undefined

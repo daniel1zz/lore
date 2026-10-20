@@ -438,7 +438,6 @@ export class ValidityService {
           `Validity metadata only applies to ${[...VALIDITY_ELIGIBLE_TYPES].join("/")} documents; ` +
           `got type "${doc.type}"`,
         value: doc.type,
-        rule: "BR-776",
       });
     }
 
@@ -466,7 +465,6 @@ export class ValidityService {
         field: "extra.validity",
         message: "Document is not currently invalidated — nothing to undo",
         value: doc.id,
-        rule: "BR-780",
       });
     }
 
@@ -528,7 +526,6 @@ export class ValidityService {
         field: "invalid_at",
         message: "invalid_at cannot be in the future",
         value: effectiveInvalidAt,
-        rule: "BR-778",
       });
     }
 
@@ -549,7 +546,6 @@ export class ValidityService {
         field: issue !== undefined ? `validity.${issue.path.join(".")}` : "validity",
         message: issue !== undefined ? issue.message : "Invalid validity payload",
         value: candidateValidity,
-        rule: "BR-777",
       });
     }
 

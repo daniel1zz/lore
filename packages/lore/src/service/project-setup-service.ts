@@ -103,7 +103,6 @@ export async function checkProjectLedger(
       field: "manifest",
       message: `no project install ledger at "${ledgerPath}" — nothing to check; run \`lore setup --project\` first.`,
       value: ledgerPath,
-      rule: "BR-1181",
     });
   }
   let parsedJson: unknown;
@@ -115,7 +114,6 @@ export async function checkProjectLedger(
       field: "manifest",
       message: `malformed JSON in project install ledger "${ledgerPath}": ${cause instanceof Error ? cause.message : String(cause)}`,
       value: ledgerPath,
-      rule: "BR-847",
     });
   }
   const ledger = setupManifestSchema.safeParse(parsedJson);
@@ -125,7 +123,6 @@ export async function checkProjectLedger(
       field: "manifest",
       message: `project install ledger "${ledgerPath}" failed schema validation: ${ledger.error.message}`,
       value: ledgerPath,
-      rule: "BR-847",
     });
   }
 

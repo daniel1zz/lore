@@ -274,7 +274,6 @@ export function probeTmpdirUsability(env: Readonly<Record<string, string | undef
         "The Turso sync client needs to unpack a native module into a " +
         "writable TMPDIR before it can load.\n" +
         `Fix: export TMPDIR=/tmp   (or any writable directory you control), then retry.`,
-      rule: "BR-931",
     } satisfies LoreError;
   }
 }
@@ -926,7 +925,7 @@ export class TursoStore implements StoreInterface {
         ...(cause instanceof Error ? { cause } : {}),
       };
     }
-    return { code: "DUPLICATE_SLUG", slug, existing_id: winnerId, rule: "BR-498" };
+    return { code: "DUPLICATE_SLUG", slug, existing_id: winnerId };
   }
 
   async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
@@ -1095,7 +1094,7 @@ export class TursoStore implements StoreInterface {
       const existingRow = existingRs.rows[0];
       if (!existingRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
+        return err({ code: "DOC_NOT_FOUND", id });
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1113,7 +1112,6 @@ export class TursoStore implements StoreInterface {
           id,
           expected: expectedVersion,
           actual: current.version,
-          rule: "BR-536",
         });
       }
 
@@ -1144,7 +1142,7 @@ export class TursoStore implements StoreInterface {
             }
             return {
               kind: "error",
-              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version, rule: "BR-536" },
+              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version },
             };
           } catch (e) {
             const msg = e instanceof Error ? e.message : "";
@@ -1504,7 +1502,7 @@ export class TursoStore implements StoreInterface {
       const existingRow = existingRs.rows[0];
 
       if (!existingRow) {
-        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
+        return err({ code: "DOC_NOT_FOUND", id });
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1563,7 +1561,7 @@ export class TursoStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and UPDATE (race)
-            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
+            return err({ code: "DOC_NOT_FOUND", id });
           }
 
           return err({
@@ -1571,7 +1569,6 @@ export class TursoStore implements StoreInterface {
             id,
             expected: opts.expected_version,
             actual: rowNum(actualRow, "version"),
-            rule: "BR-44",
           });
         }
 
@@ -1781,7 +1778,6 @@ export class TursoStore implements StoreInterface {
         // regardless — the row holding the slug is committed data written by
         // another writer (this transaction inserted `doc` exactly once, so it
         // cannot be conflicting with itself).
-        /** @lore-site BR-498 */
         return err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e));
       }
       return wrapStoreError(e);
@@ -1934,7 +1930,7 @@ export class TursoStore implements StoreInterface {
 
       if (!existingRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
+        return err({ code: "DOC_NOT_FOUND", id });
       }
 
       // reason: D6 / QA-2 — liveness is read INSIDE the write transaction (see SQLiteStore's twin).
@@ -1948,7 +1944,6 @@ export class TursoStore implements StoreInterface {
         const refusal = buildNonLiveRuleRefusal(id, lifecycles);
         if (refusal !== null) {
           await tx.rollback();
-          /** @lore-site BR-260 */
           return err(refusal);
         }
       }
@@ -2008,7 +2003,7 @@ export class TursoStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and UPDATE (race)
-            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
+            return err({ code: "DOC_NOT_FOUND", id });
           }
 
           return err({
@@ -2260,7 +2255,6 @@ export class TursoStore implements StoreInterface {
           from: link.from_id,
           to: link.to_id,
           type: link.link_type,
-          rule: "BR-949",
         });
       }
       return wrapStoreError(e);
@@ -2305,7 +2299,7 @@ export class TursoStore implements StoreInterface {
         await tx.rollback();
         const msg = e instanceof Error ? e.message : "";
         if (msg.includes("UNIQUE constraint failed: links.")) {
-          return err({ code: "DUPLICATE_LINK", from: link.from_id, to: link.to_id, type: link.link_type, rule: "BR-550" });
+          return err({ code: "DUPLICATE_LINK", from: link.from_id, to: link.to_id, type: link.link_type });
         }
         return wrapStoreError(e);
       }
@@ -2317,7 +2311,7 @@ export class TursoStore implements StoreInterface {
         });
         if (updateRs.rows.length === 0) {
           await tx.rollback();
-          return err({ code: "DOC_NOT_FOUND", id: link.from_id, rule: "BR-550" });
+          return err({ code: "DOC_NOT_FOUND", id: link.from_id });
         }
       }
 
@@ -2912,7 +2906,7 @@ export class TursoStore implements StoreInterface {
     });
     const existingRow = existingRs.rows[0];
     if (!existingRow || rowStrOrNull(existingRow, "deleted_at") !== null) {
-      return err({ code: "DOC_NOT_FOUND", id: patch.id, rule: "BR-633" });
+      return err({ code: "DOC_NOT_FOUND", id: patch.id });
     }
     const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
     const updated: DocRecord = {
@@ -2963,7 +2957,6 @@ export class TursoStore implements StoreInterface {
         id: patch.id,
         expected: patch.expectedVersion,
         actual: current.version,
-        rule: "BR-631",
       });
     }
     await tx.execute({
@@ -3186,7 +3179,7 @@ export class TursoStore implements StoreInterface {
       const registryRow = registryRs.rows[0];
       if (!registryRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-640" });
+        return err({ code: "DOC_NOT_FOUND", id: ruleId });
       }
       const owner = rowStr(registryRow, "leaf_doc_id");
       if (owner !== fromLeaf.id) {
@@ -3196,7 +3189,6 @@ export class TursoStore implements StoreInterface {
           field: "fromLeaf.id",
           message: `rule ${ruleId} is registered to leaf ${owner}, not ${fromLeaf.id}`,
           value: fromLeaf.id,
-          rule: "BR-640",
         });
       }
       const nowIso = new Date().toISOString();

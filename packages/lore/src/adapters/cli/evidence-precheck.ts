@@ -392,7 +392,6 @@ export function findUnderMatchedPassRefusal(input: {
       "argument), so this exit-0 does not prove every named file ran. " +
       DROPPED_FILE_REPAIR_HINT,
     value: input.command,
-    rule: "BR-252",
   };
 }
 
@@ -732,7 +731,6 @@ export function findFilteredPassRefusal(input: {
       `so this pass is unproven. ${MATCHED_COUNT_REPAIR_HINT}` +
       (mismatchClause.length > 0 ? ` ${mismatchClause}` : ""),
     value: input.command,
-    rule: "BR-153",
   };
 }
 
@@ -796,7 +794,6 @@ export function findCaptureFlagConflict(input: {
         "--capture spawns --command itself and uses ITS OWN captured stdout+stderr " +
         "as the tail; supply exactly one evidentiary source, not both.",
       value: true,
-      rule: "BR-152",
     };
   }
 
@@ -810,7 +807,6 @@ export function findCaptureFlagConflict(input: {
         "via --output-tail/--output-tail-file instead (a non-empty description is " +
         "still required for a manual --result pass).",
       value: true,
-      rule: "BR-152",
     };
   }
 
@@ -958,7 +954,6 @@ export function findPipeRefusal(input: {
       "this call means to assert about, so the recorded result cannot have been measured " +
       `against it. ${PIPE_REPAIR_HINT}`,
     value: input.command,
-    rule: "BR-154",
   };
 }
 
@@ -1105,7 +1100,6 @@ export function findCapturedFailDiscoveryRefusal(input: {
       "runner actually executes something, then re-run with --capture; or, if the run " +
       "genuinely never executed anything on purpose, record nothing and investigate why.",
     value: input.command,
-    rule: "BR-155",
   };
 }
 
@@ -1151,7 +1145,6 @@ export function findCapturedRedProofGap(input: {
         `so nothing was measured: it cannot be recorded as "${input.result}" for any check ` +
         "(BR-1077). Fix the command so it actually runs, then re-run with --capture.",
       value: input.exitCode,
-      rule: "BR-1077",
     };
   }
 
@@ -1174,6 +1167,5 @@ export function findCapturedRedProofGap(input: {
       "runner's summary was pushed out by later stderr, add `2>&1` to --command so the summary " +
       "stays at the end. Playwright output has no recognised summary and cannot be captured as a red.",
     value: input.outputTail ?? "",
-    rule: "BR-1077",
   };
 }

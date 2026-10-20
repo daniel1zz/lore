@@ -1305,14 +1305,12 @@ function unregisteredAssessTemplateVersionError(version: number): LoreError {
     message:
       `No assess judge prompt template registered for version ${version}. ` +
       `Known versions: ${Object.keys(ASSESS_TEMPLATE_REGISTRY).join(", ")}.`,
-    rule: "BR-552",
   };
 }
 
 export function getAssessTemplate(version: number): Result<AssessTemplateFn, LoreError> {
   const entry = ASSESS_TEMPLATE_REGISTRY[version];
   if (entry === undefined) {
-    /** @lore-site BR-552 */
     return err(unregisteredAssessTemplateVersionError(version));
   }
   return ok(entry.fn);
@@ -1341,7 +1339,6 @@ export function getAssessTemplate(version: number): Result<AssessTemplateFn, Lor
 export function getAssessTemplateReproducibility(version: number): Result<boolean, LoreError> {
   const entry = ASSESS_TEMPLATE_REGISTRY[version];
   if (entry === undefined) {
-    /** @lore-site BR-552 */
     return err(unregisteredAssessTemplateVersionError(version));
   }
   return ok(entry.reproducible);

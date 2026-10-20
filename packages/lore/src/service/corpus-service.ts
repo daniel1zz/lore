@@ -317,7 +317,6 @@ export interface SetOptions extends WriteActorOpts {
  * The result is read as a `DocRecord` — `ApproveResult` is one, plus an optional advisory field.
  */
 export interface ApprovalPort {
-  /** @lore-site BR-77 */
   approve(
     idOrSlug: string,
     opts: { readonly reviewer: string; readonly expectedVersion?: number },
@@ -332,7 +331,6 @@ export interface ApprovalPort {
  * the first failing floor with the exact error `done()` would return (`error.details.floor === floor`).
  */
 export interface DoneFloorPort {
-  /** @lore-site BR-1072 */
   checkDoneFloors(
     taskIdOrSlug: string,
   ): Promise<Result<{ readonly floor: string; readonly error: LoreError } | null, LoreError>>;
@@ -1116,12 +1114,7 @@ export class CorpusService {
   }
 
   /** Present iff {@link setRuleStateService} was called. */
-  private ruleStateService:
-    | {
-        /** @lore-site BR-984 */
-        full(): Promise<Result<RuleStateFull, LoreError>>;
-      }
-    | undefined;
+  private ruleStateService: { full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
   /**
    * Hands the corpus service the one writer from a spec's rule change set to the baseline tree (D3 of
@@ -1231,10 +1224,8 @@ export class CorpusService {
     // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
     if (this.corpusWriteAuthority !== undefined) {
       const decided = await this.corpusWriteAuthority.decide(targets);
-      /** @lore-site BR-802 */
       return decided.ok ? undefined : err(decided.error);
     }
-    /** @lore-site BR-802 */
     return err(foreignCorpusWriteRefusalError(verdict));
   }
 
@@ -1741,8 +1732,7 @@ export class CorpusService {
         ? await this.buildSuggestions(input)
         : await this.buildSlugSuggestions(input);
       if (suggestions.length > 0) {
-        /** @lore-site BR-577 */
-        return err({ ...result.error, suggestions, rule: "BR-577" });
+        return err({ ...result.error, suggestions });
       }
     }
 
@@ -1877,7 +1867,7 @@ export class CorpusService {
         issue.path.includes("parent_id") &&
         issue.message.includes("required")
       ) {
-        return err({ code: "PARENT_REQUIRED", type: input.type, rule: "BR-1" });
+        return err({ code: "PARENT_REQUIRED", type: input.type });
       }
 
       return err({
@@ -1890,7 +1880,6 @@ export class CorpusService {
           }
           return undefined;
         }, input),
-        rule: "BR-3",
       });
     }
 
@@ -1968,7 +1957,6 @@ export class CorpusService {
           'knowledge sub_type "handoff" may only be created via `lore handoff` — ' +
           "direct creation through `lore create` / `lore_create` is not permitted",
         value: "handoff",
-        rule: "BR-704",
       });
     }
 
@@ -1989,7 +1977,6 @@ export class CorpusService {
           'knowledge sub_type "uat" may only be created via `lore uat record` — ' +
           "direct creation through `lore create` / `lore_create` is not permitted",
         value: "uat",
-        rule: "BR-705",
       });
     }
 
@@ -2002,7 +1989,6 @@ export class CorpusService {
         field: "parent_id",
         message: parentlessRefusalMessage(data.type),
         value: data.parent_id,
-        rule: "BR-2",
       });
     }
 
@@ -2033,7 +2019,7 @@ export class CorpusService {
       if (!parentDocResult.ok) return parentDocResult;
       const parentDoc = parentDocResult.value;
       if (parentDoc === null || parentDoc.deleted_at !== null) {
-        return err({ code: "DOC_NOT_FOUND", id: resolvedParentId, rule: "BR-235" });
+        return err({ code: "DOC_NOT_FOUND", id: resolvedParentId });
       }
       if (!isValidParentType(data.type, parentDoc.type)) {
         return err({
@@ -2041,7 +2027,6 @@ export class CorpusService {
           child: data.type,
           parent: parentDoc.type,
           allowed: [...PARENT_TYPE_CONTRACT[data.type]],
-          rule: "BR-2",
         });
       }
       resolvedParentType = parentDoc.type;
@@ -2076,7 +2061,6 @@ export class CorpusService {
           field: "parent_id",
           message:
             "cannot create an --adhoc task: no root PRD exists in this corpus to parent it to",
-          rule: "BR-113",
         });
       }
       resolvedParentId = rootPrd.id;
@@ -2117,7 +2101,6 @@ export class CorpusService {
             message:
               "plan declares extra.ac_scope but its parent is not a spec with declared acceptance criteria",
             value: acScope,
-            rule: "BR-98",
           });
         }
         const unknownIds = (acScope as unknown[]).filter(
@@ -2131,7 +2114,6 @@ export class CorpusService {
               `plan extra.ac_scope references id(s) not declared on parent spec: ` +
               `${unknownIds.join(", ")}. Declared ids: ${Array.from(declared).join(", ")}.`,
             value: unknownIds,
-            rule: "BR-98",
           });
         }
       }
@@ -2158,7 +2140,6 @@ export class CorpusService {
             field: "extra.file_anchors",
             message: "extra.file_anchors must be an array of strings",
             value: rawAnchors,
-            rule: "BR-122",
           });
         }
         const normalizedResult = normalizeFileAnchors(rawAnchors as string[]);
@@ -2195,7 +2176,6 @@ export class CorpusService {
             field: "extra.code_anchors",
             message: "extra.code_anchors must be an array of strings",
             value: rawCodeAnchors,
-            rule: "BR-11",
           });
         }
         for (const raw of rawCodeAnchors as string[]) {
@@ -2732,7 +2712,7 @@ export class CorpusService {
     const findResult = await this.store.find(resolveResult.value);
     if (!findResult.ok) return findResult;
     if (findResult.value === null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-526" });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
     }
 
     const doc = findResult.value;
@@ -2870,7 +2850,6 @@ export class CorpusService {
         code: "VALIDATION_ERROR",
         field: issue ? String(issue.path.join(".")) : "patch",
         message: issue ? issue.message : "Invalid patch",
-        rule: "BR-727",
       });
     }
 
@@ -2880,7 +2859,7 @@ export class CorpusService {
     const findResult = await this.store.find(resolveResult.value);
     if (!findResult.ok) return findResult;
     if (findResult.value === null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-531" });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
     }
 
     const existing = findResult.value;
@@ -2933,7 +2912,6 @@ export class CorpusService {
           field: "correction.reason",
           message: "a correction needs a non-empty reason (--correction \"<why this is a fix, not a change>\")",
           value: correction.reason,
-          rule: "BR-1049",
         });
       }
       if (parsedPatch.data.status !== undefined && parsedPatch.data.status !== existing.status) {
@@ -2944,7 +2922,6 @@ export class CorpusService {
             "a correction fixes text and keeps the record's status; it cannot be combined with a status change — " +
             "make the status change in a separate `lore set --status`",
           value: parsedPatch.data.status,
-          rule: "BR-1178",
         });
       }
       const lockResult = await this.recordLock.resolve(existing);
@@ -3028,7 +3005,6 @@ export class CorpusService {
         from: existing.status,
         to: newStatus,
         allowed: getAllowedTransitions(existing.status, existing.type),
-        rule: "BR-213",
       });
     }
 
@@ -3111,7 +3087,6 @@ export class CorpusService {
             `slug "${parsedPatch.data.slug}" is already taken by ` +
             `${holderResult.value.slug} (id ${holderResult.value.id})`,
           value: parsedPatch.data.slug,
-          rule: "BR-725",
         });
       }
     }
@@ -3138,7 +3113,6 @@ export class CorpusService {
             `${existing.slug} --json\` (read \`.extra\`), merge your change into it, and pass ` +
             `the FULL merged object as \`extra\`.`,
           value: parsedPatch.data.extra,
-          rule: "BR-728",
         });
       }
     }
@@ -3245,7 +3219,6 @@ export class CorpusService {
           field: issue ? `extra.${String(issue.path.join("."))}` : "extra",
           message: issue ? issue.message : "invalid spec extra",
           value: parsedPatch.data.extra["spec_kind"],
-          rule: "BR-246",
         });
       }
     }
@@ -3307,7 +3280,6 @@ export class CorpusService {
           field: issue ? `extra.${String(issue.path.join("."))}` : "extra",
           message: issue ? issue.message : `invalid ${existing.type} extra`,
           value: parsedPatch.data.extra,
-          rule: "BR-729",
         });
       }
 
@@ -3319,7 +3291,6 @@ export class CorpusService {
           field: "extra.validity",
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
-          rule: "BR-730",
         });
       }
     }
@@ -4143,7 +4114,6 @@ export class CorpusService {
         from: doc.status,
         to: "archived",
         allowed: getAllowedTransitions(doc.status, doc.type),
-        rule: "BR-456",
       });
     }
 
@@ -4229,7 +4199,7 @@ export class CorpusService {
       // Resolve ID for the error even without confirm
       const r = await this.resolve(idOrSlug);
       const id = r.ok ? r.value : idOrSlug;
-      return err({ code: "DELETE_REQUIRES_CONFIRM", id, rule: "BR-739" });
+      return err({ code: "DELETE_REQUIRES_CONFIRM", id });
     }
 
     const resolved = await resolveDoc(this.store, idOrSlug);
@@ -4275,7 +4245,6 @@ export class CorpusService {
         field: "deleted_at",
         message: `${idOrSlug} is not deleted — nothing to undelete`,
         value: idOrSlug,
-        rule: "BR-741",
       });
     }
     const now = opts?.now ?? new Date().toISOString();
@@ -4288,7 +4257,6 @@ export class CorpusService {
           `${idOrSlug} was deleted on ${deletedAt.slice(0, 10)} and its recovery window ended on ` +
           `${recoverableUntil.slice(0, 10)}; it can no longer be undeleted`,
         value: recoverableUntil,
-        rule: "BR-741",
       });
     }
 
@@ -4540,7 +4508,7 @@ export class CorpusService {
       const findResult = await this.store.find(resolveResult.value);
       if (!findResult.ok) return findResult;
       if (findResult.value === null) {
-        return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-753" });
+        return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
       }
       rootDoc = findResult.value;
     } else {
@@ -4550,7 +4518,7 @@ export class CorpusService {
       if (!strategyResult.ok) return strategyResult;
       const first = baselineRootResult.value ?? strategyResult.value;
       if (!first) {
-        return err({ code: "DOC_NOT_FOUND", id: "prd", suggestions: ["No PRD documents found"], rule: "BR-753" });
+        return err({ code: "DOC_NOT_FOUND", id: "prd", suggestions: ["No PRD documents found"] });
       }
       rootDoc = first;
     }
@@ -4590,7 +4558,7 @@ export class CorpusService {
     if (!planResult.ok) return planResult;
     const plan = planResult.value;
     if (plan === null || plan.deleted_at !== null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-538" });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
     }
     if (plan.type !== "plan") {
       return err({
@@ -4598,7 +4566,6 @@ export class CorpusService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
-        rule: "BR-233",
       });
     }
 
@@ -4877,7 +4844,6 @@ export class CorpusService {
         code: "VALIDATION_ERROR",
         message: `plan-close cannot read the acceptance criteria of ${spec.slug} to find the rules it cites: ${parsed.error.message}`,
         field: "extra.acceptance_criteria",
-        rule: "BR-984",
       });
     }
     const cited = new Set(parsed.data.flatMap((criterion) => criterion.cites ?? []));
@@ -4905,7 +4871,6 @@ export class CorpusService {
           `plan-close cannot close ${spec.slug}: the state of cited rule(s) ${unmeasurable.join(", ")} could not be measured ` +
           `(git-unavailable: git did not answer for HEAD or the citing pass's commit). Restore git access, then close again.`,
         field: "gate:plan-close:cited-rule-measurement",
-        rule: "BR-984",
       });
     }
     return ok({ violations, unknowns });
@@ -5009,7 +4974,7 @@ export class CorpusService {
     if (!planResult.ok) return planResult;
     const plan = planResult.value;
     if (plan === null || plan.deleted_at !== null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-1328" });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
     }
     if (plan.type !== "plan") {
       return err({
@@ -5017,7 +4982,6 @@ export class CorpusService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
-        rule: "BR-1329",
       });
     }
 
@@ -5259,7 +5223,6 @@ export class CorpusService {
           "extra.plan_id (never parent_id) — declare it, or drop extra.phase. An --adhoc task " +
           "is planless by design and can never carry a phase.",
         value: taskPhase,
-        rule: "BR-116",
       });
     }
 
@@ -5274,7 +5237,6 @@ export class CorpusService {
           "ULID — a slug or short prefix makes the task a member of nothing at every " +
           "phase-scoped read too, so it is not accepted here either.",
         value: taskPhase,
-        rule: "BR-116",
       });
     }
 
@@ -5289,7 +5251,6 @@ export class CorpusService {
           `task references phase "${taskPhase}" but its plan ${owningPlan.slug} ` +
           `(${owningPlan.id}) declares no phases`,
         value: taskPhase,
-        rule: "BR-116",
       });
     }
 
@@ -5310,7 +5271,6 @@ export class CorpusService {
         `unknown phase "${taskPhase}"; its plan ${owningPlan.slug} (${owningPlan.id}) declares: ` +
         `[${knownNames}]`,
       value: taskPhase,
-      rule: "BR-116",
     });
   }
 
@@ -5391,7 +5351,6 @@ export class CorpusService {
           "be resolved (no plan/spec link exists for an --adhoc task, SPEC-069 D2) — declare " +
           `one with 'lore scope add ${task.slug} <AC-ID>' first.`,
         value: task.slug,
-        rule: "BR-1327",
       });
     }
     if (declared.length === 0) {
@@ -5403,7 +5362,6 @@ export class CorpusService {
           "EMPTY array, so there is no declared AC id to resolve a governing spec from. " +
           `Re-declare with 'lore scope add ${task.slug} <AC-ID>' before recording evidence.`,
         value: task.slug,
-        rule: "BR-1327",
       });
     }
 
@@ -5505,7 +5463,7 @@ export class CorpusService {
     if (!docResult.ok) return docResult;
     const doc = docResult.value;
     if (doc === null || doc.deleted_at !== null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-272" });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
     }
 
     let parent: DocRecord | undefined;
@@ -5595,13 +5553,13 @@ export class CorpusService {
       const fromDocResult = await this.store.find(fromResult.value);
       if (!fromDocResult.ok) return fromDocResult;
       const fromDoc = fromDocResult.value;
-      if (fromDoc === null) return err({ code: "DOC_NOT_FOUND", id: fromResult.value, rule: "BR-550" });
+      if (fromDoc === null) return err({ code: "DOC_NOT_FOUND", id: fromResult.value });
 
       const toDocResult = await this.store.find(toResult.value);
       if (!toDocResult.ok) return toDocResult;
       const toDoc = toDocResult.value;
       if (toDoc === null || toDoc.deleted_at !== null) {
-        return err({ code: "DOC_NOT_FOUND", id: toResult.value, rule: "BR-550" });
+        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
       }
 
       // BR-2: a spec is never filed under a document by a parent link either.
@@ -5611,7 +5569,6 @@ export class CorpusService {
           field: "type",
           message: parentlessRefusalMessage(fromDoc.type),
           value: type,
-          rule: "BR-550",
         });
       }
 
@@ -5622,7 +5579,6 @@ export class CorpusService {
           child: fromDoc.type,
           parent: toDoc.type,
           allowed: [...allowedParents],
-          rule: "BR-550",
         });
       }
 
@@ -5636,7 +5592,6 @@ export class CorpusService {
           child: fromDoc.type,
           parent: toDoc.type,
           allowed: [...allowedParents],
-          rule: "BR-550",
         });
       }
     }
@@ -5652,7 +5607,7 @@ export class CorpusService {
       if (!toDocResult.ok) return toDocResult;
       const toDoc = toDocResult.value;
       if (toDoc === null || toDoc.deleted_at !== null) {
-        return err({ code: "DOC_NOT_FOUND", id: toResult.value, rule: "BR-550" });
+        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
       }
 
       if (toDoc.type !== "task" || !hasIssueReport(toDoc.extra)) {
@@ -5662,7 +5617,6 @@ export class CorpusService {
           message:
             "resolves edge target must be a task carrying extra.issue_report (an issue task)",
           value: { id: toResult.value, type: toDoc.type },
-          rule: "BR-550",
         });
       }
     }

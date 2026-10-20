@@ -155,7 +155,6 @@ function validateTriageLabels(
           `Invalid --severity '${severityArg}'. Valid values: ${ISSUE_SEVERITIES.join(", ")}. ` +
           "Severity is an ordering-only label — it never changes whether a report is accepted.",
         value: severityArg,
-        rule: "BR-492",
       });
     }
     severity = trimmed;
@@ -170,7 +169,6 @@ function validateTriageLabels(
         field: "category",
         message: "--category must be a non-empty label (omit the flag to declare none).",
         value: categoryArg,
-        rule: "BR-492",
       });
     }
     if (trimmed.length > ISSUE_CATEGORY_MAX_LENGTH) {
@@ -181,7 +179,6 @@ function validateTriageLabels(
           `--category is limited to ${ISSUE_CATEGORY_MAX_LENGTH} characters ` +
           `(got ${trimmed.length}) — it is rendered as a column on both issue read surfaces.`,
         value: categoryArg,
-        rule: "BR-492",
       });
     }
     category = trimmed;

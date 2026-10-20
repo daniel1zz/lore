@@ -26,7 +26,7 @@ export class RuleReadService {
     const data = await loadRuleIndexData(this.store);
     if (!data.ok) return data;
     const view = buildRuleView(ruleId, data.value);
-    return view === undefined ? err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-676" }) : ok(view);
+    return view === undefined ? err({ code: "DOC_NOT_FOUND", id: ruleId }) : ok(view);
   }
 
   /** Rule ids relevant to a spec (cited by it), a file (cited by specs anchored to it) or a text. */

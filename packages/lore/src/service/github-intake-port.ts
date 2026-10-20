@@ -249,7 +249,6 @@ export class GitHubIntakePort {
         field: "gh_user_response",
         message: `gh returned a user payload this module could not parse: ${userParsed.error.message}`,
         value: userResult.value.stdout,
-        rule: "BR-504",
       });
     }
 
@@ -263,7 +262,6 @@ export class GitHubIntakePort {
         field: "gh_repo_response",
         message: `gh returned a repo payload this module could not parse: ${repoParsed.error.message}`,
         value: repoResult.value.stdout,
-        rule: "BR-504",
       });
     }
 
@@ -358,7 +356,6 @@ export class GitHubIntakePort {
         field: "gh_issue_create_response",
         message: `gh returned an issue-creation payload this module could not parse: ${createdParsed.error.message}`,
         value: createResult.value.stdout,
-        rule: "BR-504",
       });
     }
 
@@ -375,7 +372,6 @@ export class GitHubIntakePort {
         message:
           `issue filed upstream as #${createdParsed.data.number} (${createdParsed.data.html_url}) but the ` +
           `local receipt outcome failed to record (${outcomeMessage}) — the upstream issue itself was NOT lost.`,
-        rule: "BR-496",
       });
     }
 
@@ -411,7 +407,6 @@ export class GitHubIntakePort {
         field: "gh_issues_list_response",
         message: `gh returned an issues-list payload this module could not parse: ${parsed.error.message}`,
         value: listResult.value.stdout,
-        rule: "BR-501",
       });
     }
 

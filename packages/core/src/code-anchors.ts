@@ -194,7 +194,7 @@ export function classifyCodeAnchor(raw: string): CodeAnchorClassification {
 export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError> {
   const classified = classifyCodeAnchor(raw);
   if (classified.kind === "valid") return ok(classified.anchor);
-  return err({ code: "VALIDATION_ERROR", field: "code_anchors", message: classified.message, value: raw, rule: "BR-11" });
+  return err({ code: "VALIDATION_ERROR", field: "code_anchors", message: classified.message, value: raw });
 }
 
 /**

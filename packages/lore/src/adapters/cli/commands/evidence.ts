@@ -558,7 +558,6 @@ export default defineLoreCommand({
             "Author the oracle file or fix the path in --command; " +
             "use --oracle manual for genuinely manual checks.",
           value: args.command,
-          rule: "BR-253",
         };
         inv.io.stderr.write(formatErrorFor(inv, precheckError) + "\n");
         return exitCode(precheckError);

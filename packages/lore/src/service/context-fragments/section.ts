@@ -84,7 +84,6 @@ export function renderRulesFile(fragment: Fragment): Result<RulesFileRender, Rul
       field: "fragment.id",
       message: `fragment id "${id}" (${fragment.path}) cannot be written as a rules file name; use letters, digits, "-" and "_" only.`,
       value: id,
-      rule: "BR-897",
     });
   }
   const rest = fragment.body.endsWith("\n") ? fragment.body : `${fragment.body}\n`;
@@ -161,7 +160,6 @@ export function renderSkillFile(fragment: Fragment): Result<SkillFileRender, Rul
       field: "fragment.id",
       message: `fragment id "${id}" (${fragment.path}) cannot be written as a skill directory name; use letters, digits, "-" and "_" only.`,
       value: id,
-      rule: "BR-897",
     });
   }
   const description = fragment.frontmatter.description;

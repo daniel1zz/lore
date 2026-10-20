@@ -18,7 +18,6 @@ import { err, ok, type DocRecord, type LoreError, type Result } from "@lore/core
 /** What the corpus checkout's tree (main's tree) reaches. Implemented over the census / registry helpers coverage uses. */
 export interface MainTreePort {
   /** The subset of `commands` main's registry still lists as runnable commands. */
-  /** @lore-site BR-1316 */
   presentCommands(commands: readonly string[]): Promise<Result<readonly string[], LoreError>>;
 }
 
@@ -41,7 +40,6 @@ export async function refuseLiveCommandRemoval(
   const present = await port.presentCommands(removeCommands);
   if (!present.ok) return present;
   if (present.value.length === 0) return ok(undefined);
-  /** @lore-site BR-1316 */
   return err(refusal(
     "commands",
     `cannot remove command declaration(s) of ${leaf.slug}, nothing written: main's registry still has ${present.value.map((c) => `"${c}"`).join(", ")} as runnable. ` +

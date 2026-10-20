@@ -121,7 +121,6 @@ function unsupportedTargetTypeError(docType: string): LoreError {
     field: "type",
     message: `Expected a task or phase document; got type '${docType}' (a plan's own ac_scope is declared with \`lore set\`, not here)`,
     value: docType,
-    rule: "BR-256",
   };
 }
 

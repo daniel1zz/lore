@@ -194,7 +194,6 @@ export class JudgmentService {
         code: "VALIDATION_ERROR",
         field: issue ? issue.path.join(".") || "(root)" : "(root)",
         message: issue?.message ?? "invalid review judgment",
-        rule: "BR-263",
       });
     }
 
@@ -321,7 +320,6 @@ export class JudgmentService {
         code: "VALIDATION_ERROR",
         field: issue ? issue.path.join(".") || "(root)" : "(root)",
         message: issue?.message ?? "invalid calibration record",
-        rule: "BR-288",
       });
     }
 

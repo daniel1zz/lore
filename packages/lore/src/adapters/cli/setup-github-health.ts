@@ -89,7 +89,6 @@ import type { GhRunner } from "../../service/gh-runner.js";
  * fake directly and never reaches that adapter at all.
  */
 export interface GhHealthProbeRunner {
-  /** @lore-site BR-850 */
   run(args: string[]): Promise<GhHealthRunResult>;
 }
 

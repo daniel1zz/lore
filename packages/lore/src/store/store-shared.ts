@@ -900,11 +900,10 @@ export async function detectParentCycleViaAncestry(
  */
 export function toStoreError(e: unknown): LoreError {
   const message = e instanceof Error ? e.message : "Unknown store error";
-  return e instanceof Error ? { code: "STORE_ERROR", message, cause: e, rule: "BR-941" } : { code: "STORE_ERROR", message, rule: "BR-941" };
+  return e instanceof Error ? { code: "STORE_ERROR", message, cause: e } : { code: "STORE_ERROR", message };
 }
 
 export function wrapStoreError(e: unknown): Result<never, LoreError> {
-  /** @lore-site BR-941 */
   return err(toStoreError(e));
 }
 
@@ -1492,7 +1491,6 @@ export function buildAcExemptionCapError(activeCount: number, liveCriteria: numb
       `Exemption cap reached: ${activeCount} active exemption(s) already fill the 10% cap ` +
       `(max ${maxActive} = floor(10% x ${liveCriteria} live criteria)). ` +
       "Cite a baseline rule instead, or wait for an existing exemption to expire.",
-    rule: "BR-971",
   } as LoreError;
 }
 
@@ -1503,7 +1501,6 @@ export function buildAcExemptionAlreadyActiveError(docId: string, acId: string):
     field: "ac_id",
     message: `Criterion ${acId} of ${docId} already has an active exemption.`,
     value: acId,
-    rule: "BR-971",
   } as LoreError;
 }
 

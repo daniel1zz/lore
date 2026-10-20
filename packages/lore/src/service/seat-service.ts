@@ -146,7 +146,6 @@ function mainCheckoutBranch(worktrees: readonly WorktreeInfo[]): Result<string, 
       field: "gate:seat-remove:no-base-branch",
       message: "Cannot determine the base branch: the main checkout has no checked-out branch (detached HEAD?). Check out a branch in the main checkout and retry.",
       value: main?.path ?? "",
-      rule: "BR-379",
     });
   }
   return ok(main.branch);
@@ -173,7 +172,6 @@ function wrapStepError(verb: "entry" | "remove", step: string, underlying: LoreE
   return {
     code: "STORE_ERROR",
     message: `seat ${verb} step "${step}" failed: ${underlyingMessage}`,
-    rule: "BR-371",
   };
 }
 
@@ -227,12 +225,10 @@ export class SeatService {
         field: "gate:seat-entry:not-a-plan",
         message: `Seat entry blocked: "${plan.slug}" is a ${plan.type}, not a plan — a seat belongs to a plan. Run \`lore seat <plan-slug>\` with a plan.`,
         value: plan.slug,
-        rule: "BR-370",
       });
     }
 
     const dirtyResult = await this.gitPort.isDirty(opts.mainCwd);
-    /** @lore-site BR-371 */
     if (!dirtyResult.ok) return err(wrapStepError("entry", "isDirty", dirtyResult.error));
     if (dirtyResult.value) {
       return err({
@@ -240,12 +236,10 @@ export class SeatService {
         field: "gate:seat-entry:dirty-main",
         message: `Seat entry blocked: main checkout "${opts.mainCwd}" has uncommitted changes — commit or stash before entering a seat.`,
         value: opts.mainCwd,
-        rule: "BR-367",
       });
     }
 
     const rebaseResult = await this.gitPort.rebaseFromMain(opts.mainCwd);
-    /** @lore-site BR-371 */
     if (!rebaseResult.ok) return err(wrapStepError("entry", "rebaseFromMain", rebaseResult.error));
 
     const readyReport = await this.getReadyReport(plan.id);
@@ -258,7 +252,6 @@ export class SeatService {
     const path = computeSeatWorktreePath(opts.mainCwd, shortSlug);
 
     const addResult = await this.gitPort.worktreeAdd(path, branch);
-    /** @lore-site BR-371 */
     if (!addResult.ok) return err(wrapStepError("entry", "worktreeAdd", addResult.error));
 
     return ok({ path, branch });
@@ -326,7 +319,6 @@ export class SeatService {
         field: "gate:seat-resume:not-found",
         message: `No seat worktree found for plan "${plan.slug}" (expected branch "${expectedBranch}") — run \`lore seat ${plan.slug}\` to create one.`,
         value: expectedBranch,
-        rule: "BR-372",
       });
     }
 
@@ -354,7 +346,6 @@ export class SeatService {
     const force = opts?.force === true;
 
     const listResult = await this.gitPort.worktreeList();
-    /** @lore-site BR-378 */
     if (!listResult.ok) return err(wrapStepError("remove", "worktreeList", listResult.error));
     const match = listResult.value.find((w) => w.branch === branch);
     if (match === undefined) {
@@ -363,7 +354,6 @@ export class SeatService {
         field: "gate:seat-remove:not-found",
         message: `No seat worktree found for plan "${plan.slug}" (expected branch "${branch}") — nothing to remove.`,
         value: branch,
-        rule: "BR-378",
       });
     }
 
@@ -371,7 +361,6 @@ export class SeatService {
       const base = mainCheckoutBranch(listResult.value);
       if (!base.ok) return base;
       const mergedResult = await this.gitPort.isMerged(branch, base.value);
-      /** @lore-site BR-378 */
       if (!mergedResult.ok) return err(wrapStepError("remove", "isMerged", mergedResult.error));
       if (!mergedResult.value) {
         return err({
@@ -379,17 +368,14 @@ export class SeatService {
           field: "gate:seat-remove:unmerged",
           message: `Refusing to remove seat branch "${branch}" — it has unmerged commits. Re-run with --force to delete it anyway (commits will be LOST).`,
           value: branch,
-          rule: "BR-374",
         });
       }
     }
 
     const removeResult = await this.gitPort.worktreeRemove(match.path, force);
-    /** @lore-site BR-378 */
     if (!removeResult.ok) return err(wrapStepError("remove", "worktreeRemove", removeResult.error));
 
     const deleteResult = await this.gitPort.branchDelete(branch);
-    /** @lore-site BR-378 */
     if (!deleteResult.ok) return err(wrapStepError("remove", "branchDelete", deleteResult.error));
 
     return ok(undefined);

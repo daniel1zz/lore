@@ -1469,7 +1469,6 @@ export function extractAssessmentJson(raw: string): Result<unknown, LoreError> {
       code: "VALIDATION_ERROR",
       field: "assessment_json",
       message: "AI judge response was empty; no JSON found.",
-      rule: "BR-264",
     });
   }
 
@@ -1505,7 +1504,6 @@ export function extractAssessmentJson(raw: string): Result<unknown, LoreError> {
     field: "assessment_json",
     message: `No valid JSON object found in AI judge response (${raw.length} chars).`,
     value: raw.slice(0, 500),
-    rule: "BR-264",
   });
 }
 

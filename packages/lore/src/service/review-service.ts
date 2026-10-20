@@ -348,7 +348,6 @@ export class ReviewService {
             field: "baseline-commands",
             message: absentDeclarationRefusal(doc.slug, absent.value),
             value: absent.value,
-            rule: "BR-1308",
           });
         }
       }
@@ -760,7 +759,6 @@ export class ReviewService {
         id: doc.id,
         expected: opts.expectedVersion,
         actual: doc.version,
-        rule: "BR-1015",
       });
     }
 
@@ -770,7 +768,6 @@ export class ReviewService {
         from: doc.status,
         to: "approved",
         allowed: getAllowedTransitions(doc.status),
-        rule: "BR-275",
       });
     }
 
@@ -784,7 +781,6 @@ export class ReviewService {
         field: "override-judgment",
         message: "specify at most one of --override-judgment / --override-no-judgment, not both",
         value: { overrideJudgmentId: opts.overrideJudgmentId, overrideNoJudgment: opts.overrideNoJudgment },
-        rule: "BR-284",
       });
     }
 
@@ -813,7 +809,6 @@ export class ReviewService {
           field: "override-judgment",
           message: `judgment "${opts.overrideJudgmentId}" was not found for doc "${doc.slug}"`,
           value: opts.overrideJudgmentId,
-          rule: "BR-284",
         });
       }
       overriddenJudgmentId = targetJudgment.id;
@@ -846,7 +841,6 @@ export class ReviewService {
             `doc "${doc.slug}" already has ${allJudgmentsResult.value.length} judgment(s) recorded — ` +
             `name one of them via --override-judgment instead of --override-no-judgment`,
           value: allJudgmentsResult.value.length,
-          rule: "BR-285",
         });
       }
       overrodeNoJudgment = true;
@@ -931,7 +925,6 @@ export class ReviewService {
               `failed (${rollbackResult.error.code}) — it was left APPROVED despite the ` +
               `invalidated prerequisite. Manually inspect/re-set its status.`,
             value: { conflict: postGateResult.error, rollback_error: rollbackResult.error },
-            rule: "BR-287",
           });
         }
         return postGateResult;
@@ -1029,7 +1022,6 @@ export class ReviewService {
         from: doc.status,
         to: "draft",
         allowed: getAllowedTransitions(doc.status),
-        rule: "BR-292",
       });
     }
 
@@ -1111,7 +1103,6 @@ export class ReviewService {
         field: "type",
         message: `Only a spec can be reopened; ${doc.slug} is a ${doc.type}`,
         value: doc.type,
-        rule: "BR-1184",
       });
     }
     const trimmedReason = reason.trim();
@@ -1121,7 +1112,6 @@ export class ReviewService {
         field: "reason",
         message: `Reopening ${doc.slug} requires a non-empty --reason`,
         value: reason,
-        rule: "BR-1185",
       });
     }
     if (!isReopenTransition(doc.type, doc.status, "draft")) {
@@ -1130,7 +1120,6 @@ export class ReviewService {
         from: doc.status,
         to: "draft",
         allowed: getAllowedTransitions(doc.status),
-        rule: "BR-1186",
       });
     }
 
@@ -1142,13 +1131,11 @@ export class ReviewService {
         field: "status",
         message: `${doc.slug} is not a locked record, so there is nothing to reopen - edit it directly`,
         value: doc.status,
-        rule: "BR-1187",
       });
     }
 
     const before = await this.countSpecEvidence(doc);
     if (!before.ok) return before;
-    /** @lore-site BR-1050 */
     if (before.value > 0) return err(this.reopenRefusal(doc, before.value, false));
 
     const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
@@ -1181,7 +1168,6 @@ export class ReviewService {
     const after = await this.countSpecEvidence(doc);
     if (!after.ok) return after;
     // BR-1054: the spec stays draft - approved is never written back.
-    /** @lore-site BR-1054 */
     if (after.value > 0) return err(this.reopenRefusal(doc, after.value, true));
 
     return ok(reopened);
@@ -1204,7 +1190,6 @@ export class ReviewService {
       field: "gate:reopen",
       message: `Cannot reopen ${spec.slug}: ${tail}`,
       value: count,
-      rule: "BR-1050",
     };
   }
 }

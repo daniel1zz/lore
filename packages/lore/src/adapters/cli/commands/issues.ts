@@ -1046,7 +1046,6 @@ async function fetchGithubLabelResolutions(
         field: "gh_issues_verify_response",
         message: `gh returned an issues-list payload --verify could not parse: ${parsed.error.message}`,
         value: listResult.value.stdout,
-        rule: "BR-516",
       });
     }
 

@@ -950,7 +950,6 @@ export class PhaseWorkflowService {
       const holder = buildClaimHolder(phase, existingClaim, staleResult.value);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
-        /** @lore-site BR-1040 */
         return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
       }
       carryForward = decision.kind === "refresh";
@@ -1110,7 +1109,6 @@ export class PhaseWorkflowService {
     const holder = buildClaimHolder(phase, existingClaim, false);
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
-      /** @lore-site BR-142 */
       return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
     }
 

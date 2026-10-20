@@ -390,7 +390,6 @@ function loadExportIndexOrFail(indexPath: string): Result<ExportIndex, LoreError
       code: "STORE_ERROR",
       message: `export-index.json at ${indexPath} exists but could not be read: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
-      rule: "BR-800",
     });
   }
   let parsedJson: unknown;
@@ -401,7 +400,6 @@ function loadExportIndexOrFail(indexPath: string): Result<ExportIndex, LoreError
       code: "VALIDATION_ERROR",
       field: "export-index.json",
       message: `export-index.json at ${indexPath} is not valid JSON — fix or remove it before running the ordinal migration (never silently rebuilt): ${e instanceof Error ? e.message : String(e)}`,
-      rule: "BR-800",
     });
   }
   const parsed = exportIndexSchema.safeParse(parsedJson);
@@ -410,7 +408,6 @@ function loadExportIndexOrFail(indexPath: string): Result<ExportIndex, LoreError
       code: "VALIDATION_ERROR",
       field: "export-index.json",
       message: `export-index.json at ${indexPath} failed schema validation — fix or remove it before running the ordinal migration: ${parsed.error.message}`,
-      rule: "BR-800",
     });
   }
   return ok(parsed.data);
@@ -430,7 +427,6 @@ function saveExportIndexAtomic(indexPath: string, index: ExportIndex): Result<vo
       code: "STORE_ERROR",
       message: `Failed to write export-index.json: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
-      rule: "BR-800",
     });
   }
 }
@@ -494,7 +490,6 @@ export class OrdinalMigrationService {
     // policy the rest of this method follows).
     const indexPath = join(projectDir, ".lore", "export-index.json");
     const indexResult = loadExportIndexOrFail(indexPath);
-    /** @lore-site BR-799 */
     if (!indexResult.ok) return err(indexResult.error);
     const index = indexResult.value;
 
@@ -512,7 +507,6 @@ export class OrdinalMigrationService {
     // ── Step 1: per-type ordinal backfill ─────────────────────────────────
     for (const type of ORDINAL_REGISTERED_TYPES) {
       const fetchResult = await this.store.findMany({ type, exclude_deleted: false });
-      /** @lore-site BR-799 */
       if (!fetchResult.ok) return err(fetchResult.error);
       const docsOfType = fetchResult.value;
       allDocs.push(...docsOfType);
@@ -759,7 +753,6 @@ export class OrdinalMigrationService {
 
     if (!dryRun && indexDirty) {
       const saveResult = saveExportIndexAtomic(indexPath, index);
-      /** @lore-site BR-799 */
       if (!saveResult.ok) return err(saveResult.error);
       writesPerformed += 1;
     }

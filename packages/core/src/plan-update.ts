@@ -136,10 +136,8 @@ export type FileFreshness = (typeof FILE_FRESHNESS_STATES)[number];
  */
 export interface UpdateProbe {
   /** Per-path sha256 lookup. Returns `"missing"` when the path does not exist on disk. */
-  /** @lore-site BR-846 */
   resolve(path: string): { sha256: string } | "missing";
   /** Sync enumeration of every path currently on disk under lore-managed directories (POSIX-relative). */
-  /** @lore-site BR-846 */
   listManagedPaths(): string[];
 }
 
@@ -310,7 +308,6 @@ export function planUpdate(
         code: "STORE_ERROR",
         message: `planUpdate: probe.resolve threw for "${entry.path}": ${caught instanceof Error ? caught.message : String(caught)}`,
         ...(caught instanceof Error ? { cause: caught } : {}),
-        rule: "BR-846",
       });
     }
 
@@ -346,7 +343,6 @@ export function planUpdate(
         code: "STORE_ERROR",
         message: `planUpdate: probe.resolve threw for "${candidate.path}": ${caught instanceof Error ? caught.message : String(caught)}`,
         ...(caught instanceof Error ? { cause: caught } : {}),
-        rule: "BR-846",
       });
     }
     if (diskResult === "missing") continue;
@@ -371,7 +367,6 @@ export function planUpdate(
       code: "STORE_ERROR",
       message: `planUpdate: probe.listManagedPaths threw: ${caught instanceof Error ? caught.message : String(caught)}`,
       ...(caught instanceof Error ? { cause: caught } : {}),
-      rule: "BR-846",
     });
   }
 

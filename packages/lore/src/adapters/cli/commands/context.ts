@@ -251,7 +251,6 @@ export function makeRealContextFsPort(repoRoot: string, roots: readonly string[]
   // wrongly nest them under the repo, so absolute paths pass through unchanged.
   const resolvePath = (path: string): string => (isAbsolute(path) ? path : join(repoRoot, path));
   const realRoots = roots.map((root) => resolveWriteLanding(root));
-  /** @lore-site BR-1177 */
   const guard = (path: string, target: string): Result<void, LoreError> =>
     isInsideRoots(resolveWriteLanding(target), realRoots) ? ok(undefined) : err(outsideRootsError(path, roots));
   return {
@@ -583,7 +582,6 @@ export default defineLoreCommand({
           field: "options",
           message: `\`lore context refresh\` does not use ${unused.join(", ")} (init-only options); remove ${unused.length === 1 ? "it" : "them"}`,
           value: unused,
-          rule: "BR-889",
         });
       }
     }

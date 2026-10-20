@@ -97,7 +97,7 @@ const judgeReplySchema = z.array(
 );
 
 function aiError(provider: string, message: string): LoreError {
-  return { code: "AI_PROVIDER_ERROR", provider, message, rule: "BR-964" };
+  return { code: "AI_PROVIDER_ERROR", provider, message };
 }
 
 // ─── Seeded draw ──────────────────────────────────────────────────────────────
@@ -131,9 +131,9 @@ function makeRandom(seed: number | string): () => number {
  * @example drawFidelitySample([{ id: 1 }, { id: 2 }], 1, 42); // ok([{ id: 2 }]) for every call
  */
 export function drawFidelitySample<T>(pairs: readonly T[], size: number, seed: number | string): Result<T[], LoreError> {
-  if (!Number.isInteger(size) || size < 1) return err(validationError("size", `--size must be a positive integer, got ${String(size)}`, undefined, "BR-963"));
+  if (!Number.isInteger(size) || size < 1) return err(validationError("size", `--size must be a positive integer, got ${String(size)}`));
   if (size > pairs.length) {
-    return err(validationError("size", `--size ${size} exceeds the pool of ${pairs.length}; the sample would repeat or be empty`, undefined, "BR-963"));
+    return err(validationError("size", `--size ${size} exceeds the pool of ${pairs.length}; the sample would repeat or be empty`));
   }
   const random = makeRandom(seed);
   const working = [...pairs];
@@ -333,22 +333,17 @@ async function askJudge(ai: AIProvider, prompt: string, expected: readonly numbe
   try {
     parsed = JSON.parse(stripJsonFence(generated.value.content));
   } catch (cause) {
-    /** @lore-site BR-964 */
     return err(aiError(ai.name, `${role} reply is not JSON: ${String(cause)}`));
   }
   const reply = judgeReplySchema.safeParse(parsed);
-  /** @lore-site BR-964 */
   if (!reply.success) return err(aiError(ai.name, `${role} reply does not match [{n, verdict, reason}]: ${reply.error.message.slice(0, 300)}`));
   const judged: Judged = new Map();
   for (const entry of reply.data) {
-    /** @lore-site BR-964 */
     if (!expected.includes(entry.n)) return err(aiError(ai.name, `${role} reply names item ${entry.n}, which is not in the request`));
-    /** @lore-site BR-964 */
     if (judged.has(entry.n)) return err(aiError(ai.name, `${role} reply gives item ${entry.n} twice`));
     judged.set(entry.n, { verdict: entry.verdict, reason: entry.reason });
   }
   const missing = expected.filter((n) => !judged.has(n));
-  /** @lore-site BR-964 */
   if (missing.length > 0) return err(aiError(ai.name, `${role} reply has no verdict for item(s) ${missing.join(", ")}`));
   return ok(judged);
 }
@@ -399,7 +394,7 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
   const items: JudgeItem[] = reads.flatMap((r, i) => (r.unseen.length === 0 ? [{ n: i + 1, body: r.body }] : []));
   const allN = items.map((i) => i.n);
   if (items.some((i) => i.body.includes(`<<END-${nonce}>>`))) {
-    return err(validationError("nonce", "the sampled text contains the closing fence; pass another --nonce", undefined, "BR-964"));
+    return err(validationError("nonce", "the sampled text contains the closing fence; pass another --nonce"));
   }
 
   const first: Result<Judged, LoreError> = allN.length === 0 ? ok(new Map()) : await askJudge(input.ai, fenceItems(instructions, items, nonce), allN, "judge A");

@@ -698,7 +698,6 @@ export interface StoreInterface {
    *
    * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC phase 1a — CAS implementation
    */
-  /** @lore-site BR-27 */
   update(
     id: DocId,
     patch: Partial<DocRecord>,
@@ -737,7 +736,6 @@ export interface StoreInterface {
    *   error shape.
    * @see BUG-002 (audit finding) — corpus-service.ts `_createImpl`
    */
-  /** @lore-site BR-495 */
   insertWithProvenance(
     doc: DocRecord,
     version: VersionRecord,
@@ -786,7 +784,6 @@ export interface StoreInterface {
    *   error shape.
    * @see SPEC-084 §Module Boundary; BUG-002 (audit finding) — corpus-service.ts `_createImpl`
    */
-  /** @lore-site BR-9 */
   insertWithAllocatedOrdinalAndProvenance(
     doc: DocRecord,
     version: VersionRecord,
@@ -817,7 +814,6 @@ export interface StoreInterface {
    *   version/audit step's own error, on failure — never a new error shape.
    * @see BUG-002 (audit finding) — corpus-service.ts `set`
    */
-  /** @lore-site BR-260 */
   updateWithProvenance(
     id: DocId,
     patch: Partial<DocRecord>,
@@ -869,7 +865,6 @@ export interface StoreInterface {
    *   Supplied only by `withWriteContext`.
    * @returns `{ ruleId, doc }` (the updated leaf) or a loud error; never a duplicate id.
    */
-  /** @lore-site BR-625 */
   allocateRuleAndUpdateLeaf(
     leafId: DocId,
     expectedVersion: number,
@@ -908,7 +903,6 @@ export interface StoreInterface {
    * failure (either CAS, a version-row insert, unknown `ruleId` →
    * `DOC_NOT_FOUND`) leaves both leaves and the registry row exactly as before.
    */
-  /** @lore-site BR-647 */
   moveRule(
     ruleId: string,
     fromLeaf: RuleLeafPatch,
@@ -917,7 +911,6 @@ export interface StoreInterface {
   ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>>;
 
   /** All registry rows ordered by `n` ASC. There is deliberately no delete method. */
-  /** @lore-site BR-640 */
   listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>>;
 
   /**
@@ -925,11 +918,9 @@ export interface StoreInterface {
    * transaction as the citing spec; `InMemoryStore` serves the equivalent computed view. The citation
    * gate and `computeBaselineStatus` (`index_mismatch`) read this — never repaired on read.
    */
-  /** @lore-site BR-676 */
   listAcCites(): Promise<Result<AcCiteRow[], LoreError>>;
 
   /** Every `rule_depends` row (migration-014), sorted by (leaf_id, rule_id); same contract as {@link listAcCites}. */
-  /** @lore-site BR-681 */
   listRuleDepends(): Promise<Result<RuleDependsRow[], LoreError>>;
 
   /**
@@ -963,7 +954,6 @@ export interface StoreInterface {
    * Fails with DUPLICATE_LINK if (from_id, to_id, link_type) already exists.
    * For link_type='parent': validates no cycle in the parent tree.
    */
-  /** @lore-site BR-550 */
   addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>>;
 
   /**
@@ -987,7 +977,6 @@ export interface StoreInterface {
    * @param audit - The `action: "link"` audit entry (same contract as {@link appendAuditEntry})
    * @returns `ok(link)` on success
    */
-  /** @lore-site BR-550 */
   addLinkWithProvenance(link: LinkRecord, audit: AuditEntry): Promise<Result<LinkRecord, LoreError>>;
 
   /**
@@ -1006,7 +995,6 @@ export interface StoreInterface {
    * @param audit - The single audit entry to append (e.g. `migrate_spec_parent`)
    * @returns `ok(updatedDoc)`; `DOC_NOT_FOUND` when `id` is absent (nothing written); `STORE_ERROR` otherwise
    */
-  /** @lore-site BR-1009 */
   setDocParentWithProvenance(
     id: DocId,
     parentId: DocId | null,
@@ -1014,7 +1002,6 @@ export interface StoreInterface {
   ): Promise<Result<DocRecord, LoreError>>;
 
   /** Remove a specific directed link by composite key. */
-  /** @lore-site BR-763 */
   removeLink(
     fromId: DocId,
     toId: DocId,
@@ -1094,7 +1081,6 @@ export interface StoreInterface {
    * Returns ranked results with BM25 score and content snippets.
    * Filters applied as post-FTS WHERE clauses on joined docs table.
    */
-  /** @lore-site BR-749 */
   search(query: string, filters?: StoreFilters): Promise<Result<SearchHit[], LoreError>>;
 
   // ── Versions ───────────────────────────────────────────────────────────
@@ -1144,7 +1130,6 @@ export interface StoreInterface {
    * extending from it would fork the chain into two branches, silently
    * defeating the tamper-evidence property.
    */
-  /** @lore-site BR-405 */
   appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>>;
 
   /** Query audit log with filters. */
@@ -1218,7 +1203,6 @@ export interface StoreInterface {
    * before calling — this method does not re-validate, matching `insert`'s
    * contract for DocRecord.
    */
-  /** @lore-site BR-266 */
   insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>>;
 
   /**
@@ -1230,7 +1214,6 @@ export interface StoreInterface {
    *   `JudgmentService.listFor` is what defaults this to `'review'` for every existing
    *   caller (D3); the store layer itself applies no default.
    */
-  /** @lore-site BR-277 */
   findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>>;
 
   /**
@@ -1242,7 +1225,6 @@ export interface StoreInterface {
    *   `decision: 'approve'`) could become a doc's latest judgment and masquerade as a
    *   real review approval in `lore pending` (review S2).
    */
-  /** @lore-site BR-288 */
   latestJudgment(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment | null, LoreError>>;
 
   /**
@@ -1268,7 +1250,6 @@ export interface StoreInterface {
   // ── Calibration Records ────────────────────────────────────────────────
 
   /** Insert a new calibration record (human confirm/override of a judgment). */
-  /** @lore-site BR-288 */
   insertCalibrationRecord(record: CalibrationRecord): Promise<Result<void, LoreError>>;
 
   /**
@@ -1281,7 +1262,6 @@ export interface StoreInterface {
    * can group by the actual (doc_type, prompt_version) pair instead of an
    * unpinned `"*"` sentinel.
    */
-  /** @lore-site BR-556 */
   queryCalibrationWindow(
     filter: CalibrationWindowFilter,
   ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>>;
@@ -1371,7 +1351,6 @@ export interface StoreInterface {
    * `ok` and changes nothing — every column keeps the first call's value (a re-registration with a
    * different parent or branch must never rewrite history).
    */
-  /** @lore-site BR-1029 */
   insertRun(run: RunRecord): Promise<Result<void, LoreError>>;
 
   /** The registered run, or `ok(null)` for an unknown id (same shape as `find`; never a fabricated record). */
@@ -1389,11 +1368,9 @@ export interface StoreInterface {
    * (`already-ended`); an unregistered id writes nothing (`unknown-run`, normal for SubagentStop of an
    * internal agent).
    */
-  /** @lore-site BR-1215 */
   endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>>;
 
   /** Clear `ended_at` / `end_reason` (a resumed helper registered again). `ok(true)` iff the run WAS ended. */
-  /** @lore-site BR-1029 */
   reopenRun(id: RunId): Promise<Result<boolean, LoreError>>;
 
   /** The run's end state, or `ok(null)` for an unregistered id. */
@@ -1441,6 +1418,5 @@ export interface StoreInterface {
    * document. `RuleStateService` uses it for `computed_from.corpus_version` so its
    * snapshot can skip fetching knowledge docs without changing that field's meaning.
    */
-  /** @lore-site BR-669 */
   maxDocVersion(): Promise<Result<number, LoreError>>;
 }

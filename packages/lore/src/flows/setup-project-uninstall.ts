@@ -232,7 +232,6 @@ export async function uninstallProject(
       field: "manifest",
       message: `no project setup manifest found at "${manifestPath}" — nothing to uninstall`,
       value: manifestPath,
-      rule: "BR-841",
     });
   }
 
@@ -245,7 +244,6 @@ export async function uninstallProject(
       field: "manifest",
       message: `manifest at "${manifestPath}" is not valid JSON: ${toMessage(cause)}`,
       value: manifestPath,
-      rule: "BR-841",
     });
   }
 
@@ -256,7 +254,6 @@ export async function uninstallProject(
       field: "manifest",
       message: `manifest at "${manifestPath}" failed schema validation: ${manifestResult.error.message}`,
       value: manifestPath,
-      rule: "BR-841",
     });
   }
   const manifest = manifestResult.data;
@@ -304,7 +301,6 @@ export async function uninstallProject(
         `lore setup --project --uninstall: reversal failed after restoring ${restored.length} and removing ` +
         `${removed.length} tracked path(s): ${toMessage(cause)}`,
       ...(cause instanceof Error ? { cause } : {}),
-      rule: "BR-842",
     });
   }
 
@@ -317,7 +313,6 @@ export async function uninstallProject(
         `lore setup --project --uninstall: file reversal completed, but removing the manifest at ` +
         `"${manifestPath}" failed: ${toMessage(cause)}. Re-run --uninstall to retry manifest removal.`,
       ...(cause instanceof Error ? { cause } : {}),
-      rule: "BR-842",
     });
   }
 

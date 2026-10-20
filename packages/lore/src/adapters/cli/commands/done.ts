@@ -225,7 +225,6 @@ async function resolveEvidenceCitation(
         "nothing --override-attestation-cite can point at. Use " +
         '--override-attestation "<reason>" instead.',
       value: index,
-      rule: "BR-204",
     });
   }
   if (index < 1 || index > rows.length) {
@@ -236,7 +235,6 @@ async function resolveEvidenceCitation(
         `--override-attestation-cite ${index} is out of range — task "${target.slug}" holds ` +
         `${rows.length} verification_evidence row(s) (valid 1-based indices: 1..${rows.length}).`,
       value: index,
-      rule: "BR-204",
     });
   }
 
@@ -250,7 +248,6 @@ async function resolveEvidenceCitation(
         `"${row.result}", not "pass" — --override-attestation-cite refuses to bypass the ` +
         "attestation floor with a row that never passed.",
       value: { index, result: row.result },
-      rule: "BR-204",
     });
   }
   const tailIsEmpty = row.output_tail === undefined || row.output_tail.trim().length === 0;
@@ -263,7 +260,6 @@ async function resolveEvidenceCitation(
         "output_tail — an empty tail does not count as evidence anywhere else in this repo, " +
         "so --override-attestation-cite refuses it too.",
       value: { index },
-      rule: "BR-204",
     });
   }
 

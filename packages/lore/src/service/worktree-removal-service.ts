@@ -252,7 +252,7 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
   async sweep(opts: { apply: boolean; callerSession: string | null; cwd: string }): Promise<Result<WorktreeSweepEntry[], LoreError>> {
     const listed = this.deps.probe.listWorktrees(opts.cwd);
     if (!listed.ok) {
-      return err({ code: "VALIDATION_ERROR", field: "cwd", message: `lore worktree sweep must run inside a git repository: ${listed.reason}`, value: opts.cwd, rule: "BR-1220" });
+      return err({ code: "VALIDATION_ERROR", field: "cwd", message: `lore worktree sweep must run inside a git repository: ${listed.reason}`, value: opts.cwd });
     }
     const rows: WorktreeSweepEntry[] = [];
     for (const entry of listed.value.slice(1)) {

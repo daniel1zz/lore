@@ -133,7 +133,6 @@ function withLiveServerRemoval(
 ): (signal: string) => Promise<void> {
   return async (signal) => {
     unregisterLiveServer();
-    /** @lore-site BR-869 */
     await teardown(signal);
   };
 }

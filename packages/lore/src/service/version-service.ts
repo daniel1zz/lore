@@ -126,7 +126,6 @@ export class VersionService {
         code: "DOC_NOT_FOUND",
         id: docId,
         suggestions: ["No versions found for this document"],
-        rule: "BR-769",
       });
     }
 
@@ -143,7 +142,6 @@ export class VersionService {
           code: "DOC_NOT_FOUND",
           id: docId,
           suggestions: [`Version ${toVer} not found`],
-          rule: "BR-769",
         });
       }
 
@@ -164,7 +162,6 @@ export class VersionService {
         code: "DOC_NOT_FOUND",
         id: docId,
         suggestions: [`Version ${fromVer} not found`],
-        rule: "BR-769",
       });
     }
     if (!toRecord) {
@@ -172,7 +169,6 @@ export class VersionService {
         code: "DOC_NOT_FOUND",
         id: docId,
         suggestions: [`Version ${toVer} not found`],
-        rule: "BR-769",
       });
     }
 
@@ -232,7 +228,7 @@ export class VersionService {
     const all = allResult.value;
 
     if (all.length === 0) {
-      return err({ code: "DOC_NOT_FOUND", id: docId, rule: "BR-775" });
+      return err({ code: "DOC_NOT_FOUND", id: docId });
     }
 
     const targetRecord = all.find((v) => v.version === version);
@@ -241,14 +237,13 @@ export class VersionService {
         code: "DOC_NOT_FOUND",
         id: docId,
         suggestions: [`Version ${version} not found`],
-        rule: "BR-775",
       });
     }
 
     const docResult = await this.store.find(docId);
     if (!docResult.ok) return docResult;
     if (docResult.value === null) {
-      return err({ code: "DOC_NOT_FOUND", id: docId, rule: "BR-775" });
+      return err({ code: "DOC_NOT_FOUND", id: docId });
     }
 
     const currentDoc = docResult.value;

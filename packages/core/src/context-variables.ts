@@ -87,7 +87,7 @@ export function findPlaceholders(text: string): { name: string; line: number }[]
 }
 
 function refuse(field: string, message: string) {
-  return err({ code: "VALIDATION_ERROR" as const, field, message, rule: "BR-1095" });
+  return err({ code: "VALIDATION_ERROR" as const, field, message });
 }
 
 /**

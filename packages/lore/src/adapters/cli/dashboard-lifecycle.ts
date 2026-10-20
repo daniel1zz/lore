@@ -25,31 +25,26 @@ import type { CliIo } from "./output.js";
 
 /** Minimal duck-typed slice of `node:child_process.ChildProcess` this module needs. */
 export interface KillableChild {
-  /** @lore-site BR-869 */
   kill(signal?: NodeJS.Signals): void;
 }
 
 /** Minimal duck-typed slice of `Bun.serve`'s returned server this module needs. */
 export interface StoppableServer {
-  /** @lore-site BR-869 */
   stop(closeActiveConnections?: boolean): void;
 }
 
 /** Minimal duck-typed slice of `SPEC-078` `MountRegistry` this module needs. */
 export interface ClosableMountRegistry {
-  /** @lore-site BR-869 */
   closeAll(): Promise<void>;
 }
 
 /** Minimal duck-typed slice of `App` this module needs. */
 export interface ClosableApp {
-  /** @lore-site BR-869 */
   close(): void;
 }
 
 /** Minimal duck-typed slice of the machine-auth `bun:sqlite Database` this module needs. */
 export interface ClosableDb {
-  /** @lore-site BR-869 */
   close(): void;
 }
 
@@ -132,7 +127,6 @@ export function registerDashboardShutdownSignals(
 ): void {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
-      /** @lore-site BR-869 */
       void teardown(signal).then(onDone);
     });
   }

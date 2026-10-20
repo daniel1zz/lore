@@ -109,7 +109,6 @@ export async function resolveDoc(
       id: idOrSlug,
       deleted_at: deletedAt,
       suggestions: [describeSoftDeleted(idOrSlug, deletedAt)],
-      rule: "BR-338",
     });
   }
   return found;
@@ -163,7 +162,6 @@ async function lookupDoc(
         message:
           `Ambiguous ID prefix "${idOrSlug}" matches ${candidates.length} documents — ` +
           `use the full ID or slug to disambiguate:\n${candidateLines}`,
-        rule: "BR-338",
       });
     }
     // zero candidates — fall through to DOC_NOT_FOUND below, with the
@@ -181,7 +179,6 @@ async function lookupDoc(
           ],
         }
       : {}),
-    rule: "BR-338",
   });
 }
 

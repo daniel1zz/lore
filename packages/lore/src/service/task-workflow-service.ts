@@ -663,7 +663,7 @@ function doneFloorRefusal(
 ): Result<{ refusal: DoneFloorRefusal }, never> {
   // reason: DCL-1 — the rule's name is part of the TEXT too (`done`/`set` print only the message), so a reader
   // and a test can name the refusing floor without parsing `details`.
-  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor }, rule: "BR-1292" } } });
+  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor } } } });
 }
 
 export interface DoneResult {
@@ -993,7 +993,6 @@ export function buildClaimConflictError(
     holder: claim.by,
     age_minutes: ageMinutesBetween(nowIso, claim.at),
     ...(holder.legacy ? {} : { holder_run: holder.harnessRun }),
-    rule: "BR-1040",
   };
 }
 
@@ -1595,7 +1594,6 @@ export function rejectBlankClaimWorktree(worktree: string | undefined): Result<v
       field: "worktree",
       message: "--worktree must not be empty or whitespace-only",
       value: worktree,
-      rule: "BR-136",
     });
   }
   return ok(undefined);
@@ -1665,7 +1663,6 @@ export function resolveClaimSessionId(
         "[a-z0-9-] characters, so it cannot be recorded as a session discriminator. Unset the " +
         "variable to claim with an explicitly UNMEASURED session, or set it to a usable id.",
       value: raw,
-      rule: "BR-138",
     });
   }
 }
@@ -1785,7 +1782,6 @@ export function rejectMissingNonPassOutputTail(
       "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
       "MCP: output_tail).",
     value: outputTail,
-    rule: "BR-149",
   });
 }
 
@@ -1892,7 +1888,6 @@ export function rejectMissingPassOutputTail(
       "accepts), or use --oracle manual for a check with nothing capturable (still needs a " +
       "genuine non-empty --output-tail/--output-tail-file describing exactly what was checked).",
     value: outputTail,
-    rule: "BR-150",
   });
 }
 
@@ -1950,7 +1945,6 @@ export function rejectCallerGitStamp(entry: EvidenceInput): LoreError | undefine
         field,
         message: `${field} is measured by the verify runner from git (not a valid evidence input field)`,
         value: inCapture ? (captured as Record<string, unknown>)[field] : raw[field],
-        rule: "BR-148",
       };
     }
   }
@@ -2052,7 +2046,6 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
       `trimmed command shorter than 3 characters is rejected unless it is one of the ` +
       `allowlisted short commands (${allowlist})`,
     value: command,
-    rule: "BR-161",
   });
 }
 
@@ -2294,7 +2287,6 @@ function buildUncommittedWorktreeRefusal(opts: {
       "(task-lore-evidence-and-lore-release-accept-an-attestation-from). " +
       buildDirtyWorktreeRepairHint(opts.worktree, opts.rankedPaths),
     value: opts.rankedPaths,
-    rule: "BR-144",
   };
 }
 
@@ -2316,7 +2308,6 @@ function buildNoWorktreeMismatchRefusal(opts: {
       `Re-claim with \`lore claim ${opts.taskSlug} --worktree "$PWD"\` from the actual working ` +
       "directory, then retry.",
     value: opts.callerCwd,
-    rule: "BR-144",
   };
 }
 
@@ -2675,7 +2666,6 @@ export class TaskWorkflowService {
         field: "attestation",
         message: "attestation is runner-issued; use lore verify (not a valid addEvidence input field)",
         value: (entry as Record<string, unknown>)["attestation"],
-        rule: "BR-148",
       });
     }
 
@@ -2683,7 +2673,6 @@ export class TaskWorkflowService {
     // (`VerifyRunnerService`), never declared by a caller: a self-reported value would
     // let rule-state derivation treat an unmeasured claim as an anchored run.
     const gitStampRefusal = rejectCallerGitStamp(entry);
-    /** @lore-site BR-148 */
     if (gitStampRefusal !== undefined) return err(gitStampRefusal);
 
     // SPEC-061 §Scope D2 — mirrors the attestation guard directly above: "inconclusive"
@@ -2699,7 +2688,6 @@ export class TaskWorkflowService {
         message:
           "result \"inconclusive\" is runner-issued; use lore verify (not a valid addEvidence input value)",
         value: entry.result,
-        rule: "BR-147",
       });
     }
 
@@ -2760,7 +2748,6 @@ export class TaskWorkflowService {
         "`lore evidence --result pass`",
         entry.callerCwd,
       );
-      /** @lore-site BR-159 */
       if (worktreeError !== null) return err(worktreeError);
     }
 
@@ -2826,7 +2813,6 @@ export class TaskWorkflowService {
           "ac_oracle_generation is stamped by the evidence write path from the referenced " +
           "acceptance criterion (not a valid evidence input field)",
         value: (entry as Record<string, unknown>)["ac_oracle_generation"],
-        rule: "BR-238",
       });
     }
 
@@ -2838,7 +2824,6 @@ export class TaskWorkflowService {
           "recorded_corpus_rev is written by the evidence write path from the audit head " +
           "(not a valid evidence input field)",
         value: (entry as Record<string, unknown>)["recorded_corpus_rev"],
-        rule: "BR-1180",
       });
     }
 
@@ -2853,7 +2838,6 @@ export class TaskWorkflowService {
         field: "extra.verification_evidence",
         message: "Evidence log is full (50 entries max) — cannot append a 51st entry",
         value: existing.length,
-        rule: "BR-158",
       });
     }
 
@@ -2911,7 +2895,6 @@ export class TaskWorkflowService {
         field: issue !== undefined ? `evidence.${issue.path.join(".")}` : "evidence",
         message: issue !== undefined ? issue.message : "Invalid evidence entry",
         value: candidate,
-        rule: "BR-145",
       });
     }
 
@@ -2938,7 +2921,6 @@ export class TaskWorkflowService {
             field: "ac_ref",
             message: `ac_ref "${parsedEntry.data.ac_ref}" is ${AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC}. Available ids: ${available}`,
             value: parsedEntry.data.ac_ref,
-            rule: "BR-156",
           });
         }
       } else {
@@ -2948,7 +2930,6 @@ export class TaskWorkflowService {
             field: "ac_ref",
             message: `ac_ref "${parsedEntry.data.ac_ref}" cannot be validated — task has no parent plan`,
             value: parsedEntry.data.ac_ref,
-            rule: "BR-156",
           });
         }
         const declaredResult = await this.resolveDeclaredAcIds(task.parent_id);
@@ -2964,7 +2945,6 @@ export class TaskWorkflowService {
             field: "ac_ref",
             message: `ac_ref "${parsedEntry.data.ac_ref}" is ${AC_REF_NOT_ON_PARENT_SPEC}. Available ids: ${available}`,
             value: parsedEntry.data.ac_ref,
-            rule: "BR-156",
           });
         }
       }
@@ -3114,7 +3094,6 @@ export class TaskWorkflowService {
           `Task "${task.slug}" is ${task.status} — a terminal task cannot be claimed. Claim an open task ` +
           `(\`lore ready <plan>\`), or reopen this one first if the work really continues (\`lore reopen ${task.slug}\`).`,
         value: task.status,
-        rule: "BR-140",
       });
     }
 
@@ -3150,7 +3129,6 @@ export class TaskWorkflowService {
       const holder = buildClaimHolder(task, existingClaim, stale);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
-        /** @lore-site BR-1040 */
         return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
       }
       // reason: SPEC-042 D2 — carry-forward applies ONLY to a same-holder FRESH
@@ -3176,7 +3154,6 @@ export class TaskWorkflowService {
     // gate-predicates.ts::compareClaimSessions's "not-measured" branch).
     let capturedBranch = opts.branch;
     if (capturedBranch === undefined && opts.worktree !== undefined) {
-      /** @lore-site BR-137 */
       const measurement = await this.detectBranch(opts.worktree);
       if (measurement.status === "measured") {
         capturedBranch = measurement.branch;
@@ -3296,7 +3273,6 @@ export class TaskWorkflowService {
             `automatic self-rollback failed (${rollbackResult.error.code}) — its claim was ` +
             `left in the conflicting state. Manually inspect/release "${task.slug}".`,
           value: { conflict: postWriteGateResult.error, rollback_error: rollbackResult.error },
-          rule: "BR-139",
         });
       }
       return postWriteGateResult;
@@ -3312,7 +3288,6 @@ export class TaskWorkflowService {
     // discipline the branch capture above follows). Never awaited into this
     // method's own Result — see installClaimTrailerBinding's own JSDoc.
     if (opts.worktree !== undefined && sessionId !== undefined) {
-      /** @lore-site BR-1162 */
       await this.installClaimTrailerBinding(opts.worktree, sessionId);
     }
 
@@ -3335,7 +3310,6 @@ export class TaskWorkflowService {
           "--corpus-scope requires --worktree: corpus-authoring authority binds to the worktree " +
           "session that holds the lease, so a scope with no worktree has nothing to authorize",
         value: opts.corpusScope,
-        rule: "BR-237",
       });
     }
     const resolved = await resolveDoc(this.store, opts.corpusScope);
@@ -3349,7 +3323,6 @@ export class TaskWorkflowService {
           `--corpus-scope must name a baseline branch node; '${opts.corpusScope}' is ` +
           (doc.type === "baseline" ? `a baseline ${String(doc.extra["node"])}` : `a ${doc.type}`),
         value: opts.corpusScope,
-        rule: "BR-237",
       });
     }
     return ok(doc.slug);
@@ -3440,7 +3413,6 @@ export class TaskWorkflowService {
         field: "extra.claim",
         message: "Task has no active claim to release",
         value: task.id,
-        rule: "BR-142",
       });
     }
 
@@ -3452,7 +3424,6 @@ export class TaskWorkflowService {
     const holder = buildClaimHolder(task, existingClaim, false);
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
-      /** @lore-site BR-142 */
       return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
     }
 
@@ -3464,7 +3435,6 @@ export class TaskWorkflowService {
     // AFTER the holder/force authorization gate above — an unauthorized
     // release attempt fails for THAT reason first.
     const worktreeError = this.checkUncommittedAttestationWorktree(task, "`lore release`", opts.callerCwd);
-    /** @lore-site BR-144 */
     if (worktreeError !== null) return err(worktreeError);
 
     const newExtra: Record<string, unknown> = { ...task.extra };
@@ -3501,7 +3471,6 @@ export class TaskWorkflowService {
     // awaited into this method's own Result — see releaseClaimTrailerBinding's
     // own JSDoc.
     if (writeResult.ok && existingClaim.worktree !== undefined && existingClaim.session_id !== undefined) {
-      /** @lore-site BR-1162 */
       await this.releaseClaimTrailerBinding(existingClaim.worktree, existingClaim.session_id);
     }
 
@@ -3785,7 +3754,6 @@ export class TaskWorkflowService {
               "the CLI usage-error check (exit 2) should have caught this before " +
               "reaching the service; a direct caller must supply a real reason too",
             value: escapes.overrideReason,
-            rule: "BR-203",
           });
         }
         // reason: the message is built by ONE pure function over the SAME rows
@@ -3811,7 +3779,6 @@ export class TaskWorkflowService {
             attested: e.attestation !== undefined,
             ...(stampReadings[index]?.stamp === "unbound" ? { unbound: true } : {}),
           })),
-          rule: "BR-199",
         });
       }
       overrideReason = escapes.overrideReason;
@@ -3831,7 +3798,6 @@ export class TaskWorkflowService {
           `result is \`fail\`: ${failedCriteria.join(", ")} — an earlier pass does not outvote it. Fix the work, ` +
           `then record a newer passing run for each. ${RUNNER_ROUTES_SENTENCE}`,
         value: failedCriteria,
-        rule: "BR-205",
       });
     }
 
@@ -3853,7 +3819,6 @@ export class TaskWorkflowService {
           `<kind> --command "<cmd that exits nonzero>" --result expected-fail --capture\`). ` +
           RUNNER_ROUTES_SENTENCE,
         value: evidence.map((e) => e.result),
-        rule: "BR-206",
       });
     }
 
@@ -3876,7 +3841,6 @@ export class TaskWorkflowService {
               "usage-error check (exit 2) should have caught this before reaching the " +
               "service; a direct caller must supply a real reason too",
             value: escapes.noNewTestsReason,
-            rule: "BR-206",
           });
         }
         const acScope = extractDeclaredAcScope(task) ?? [];
@@ -3904,7 +3868,6 @@ export class TaskWorkflowService {
             'expected-fail --capture`, or use the audited `--declare-no-new-tests "<reason>"` escape hatch). ' +
             RUNNER_ROUTES_SENTENCE,
           value: evidence.map((e) => e.result),
-          rule: "BR-207",
         });
       }
       noNewTestsReason = escapes.noNewTestsReason;
@@ -3946,7 +3909,6 @@ export class TaskWorkflowService {
           `<that directory>\` — the attested root is joined with the command's paths, so a ` +
           `package-relative command matches the repo-relative anchor.${measurementNote}`,
         value: missingUnfilteredRuns,
-        rule: "BR-207",
       });
     }
 
@@ -4100,9 +4062,8 @@ export class TaskWorkflowService {
         "Repoint the command with `lore ac set <spec> <AC-ID> --command \"<cmd naming an existing file>\"`, " +
         `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`.`,
       value: findings,
-      rule: "BR-1179",
     };
-    return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" }, rule: "BR-1179" } });
+    return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" } } });
   }
 
   /**
@@ -4251,7 +4212,6 @@ export class TaskWorkflowService {
       supersession,
     );
     if (!evaluated.ok) return evaluated;
-    /** @lore-site BR-199 */
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
     const { overrideReason, noNewTestsReason } = evaluated.value;
     const removedTestAnchors = evaluated.value.removedTestAnchors ?? [];
@@ -4271,7 +4231,6 @@ export class TaskWorkflowService {
 
     const asyncFloor = await this.findAsyncFloor(task);
     if (!asyncFloor.ok) return asyncFloor;
-    /** @lore-site BR-1179 */
     if (asyncFloor.value !== null) return err(asyncFloor.value.error);
 
     const nowIso = now();
@@ -4291,7 +4250,6 @@ export class TaskWorkflowService {
             `Task "${task.slug}" is held by a fresh claim from "${claim.by}"${runNote} — lore done ` +
             `refuses to archive a task out from under an active session`,
           value: claim.by,
-          rule: "BR-208",
         });
       }
     }
@@ -4313,7 +4271,6 @@ export class TaskWorkflowService {
           field: "status",
           message: `Illegal lifecycle step ${task.status} -> ${nextStatus} while archiving "${task.slug}"`,
           value: { from: task.status, to: nextStatus },
-          rule: "BR-197",
         });
       }
       const stepResult = await this.writeTaskStatus(
@@ -5116,7 +5073,6 @@ export class TaskWorkflowService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
-        rule: "BR-233",
       });
     }
 

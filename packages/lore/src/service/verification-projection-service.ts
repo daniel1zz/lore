@@ -121,7 +121,6 @@ async function resolvePlanTasks(
         "this projection assumes the pre-SPEC-056 task-centric hierarchy (resolvePlanTasks, SPEC-075 D9); " +
         "a raw type=task filter silently returns empty for a plan the phase migration has already run on. " +
         "See SPEC-056 (phase execution model) and SPEC-075 §Module Boundary for the documented assumption.",
-      rule: "BR-1223",
     });
   }
 

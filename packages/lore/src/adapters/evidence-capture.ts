@@ -392,7 +392,6 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
           elapsed_ms: elapsedMs,
           capture_timeout_ms: timeoutMs,
         },
-        rule: "BR-152",
       },
     };
   }
@@ -405,7 +404,6 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
         field: "capture",
         message: `--capture failed to spawn --command: ${spawnResult.error.message}`,
         value: request.command,
-        rule: "BR-254",
       },
     };
   }
@@ -439,7 +437,6 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
           elapsed_ms: elapsedMs,
           capture_timeout_ms: timeoutMs,
         },
-        rule: "BR-254",
       },
     };
   }
@@ -457,7 +454,6 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
           `--result "${request.declaredResult}" does not match (pass requires exit 0; fail/` +
           "expected-fail requires nonzero). Recorded nothing; fix --result or --command and retry.",
         value: { observed_exit_code: spawnResult.status, declared_result: request.declaredResult },
-        rule: "BR-152",
       },
     };
   }

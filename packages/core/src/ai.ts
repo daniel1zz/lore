@@ -125,7 +125,6 @@ export interface GenerateOutput {
  */
 export interface AIProvider {
   readonly name: string;
-  /** @lore-site BR-588 */
   generate(input: GenerateInput): Promise<Result<GenerateOutput, LoreError>>;
 }
 

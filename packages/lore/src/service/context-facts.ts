@@ -261,7 +261,6 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
       field: packagePath,
       message: `${packagePath} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
       value: packagePath,
-      rule: "BR-883",
     });
   }
 
@@ -274,7 +273,6 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
         .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
         .join("; ")}`,
       value: packagePath,
-      rule: "BR-883",
     });
   }
   const scripts = validated.data.scripts ?? {};
@@ -289,7 +287,6 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
         .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
         .join("; ")}`,
       value: marker,
-      rule: "BR-1294",
     });
   }
   const documented: Record<string, DocumentedCommand> = {};
@@ -301,7 +298,6 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
         field: "package.json lore.documentedScripts",
         message: `lore.documentedScripts names "${name}" but package.json has no such script`,
         value: name,
-        rule: "BR-883",
       });
     }
     documented[name] = { command: body, description };

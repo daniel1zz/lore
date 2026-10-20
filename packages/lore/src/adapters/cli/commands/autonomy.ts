@@ -102,7 +102,6 @@ async function propose(inv: Invocation, opened: Opened, build: (current: Governe
   const thresholds = opened.service.thresholds();
   const seeded = await thresholds.ensureSeeded();
   if (!seeded.ok) return fail(inv, seeded.error);
-  /** @lore-site BR-1260 */
   const next = build(seeded.value.record);
   if (!next.ok) {
     inv.io.stderr.write(`Error: ${next.message}\n`);

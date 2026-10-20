@@ -87,16 +87,13 @@ export interface MountRegistry<TApp = unknown> {
    * Idempotent-by-construction: called exactly once per process lifetime
    * (D6 restart-only registry — no hot reload).
    */
-  /** @lore-site BR-868 */
   init(config: DashboardConfig, deps: MountRegistryDeps<TApp>): Promise<void>;
   /**
    * Resolves a registered project name to its {@link MountEntry}.
    * `undefined` for an unregistered name — the path shim's 404 case (R-12).
    */
-  /** @lore-site BR-868 */
   resolve(name: string): MountEntry<TApp> | undefined;
   /** All registry entries in declaration order (`GET /api/projects`, D7). */
-  /** @lore-site BR-868 */
   listEntries(): MountEntry<TApp>[];
   /**
    * Flips a previously-`"mounted"` entry to the `"error"` state at runtime
@@ -105,7 +102,6 @@ export interface MountRegistry<TApp = unknown> {
    * any other mount). Idempotent — marking an already-`"error"` entry again
    * just replaces `diagnosis`.
    */
-  /** @lore-site BR-868 */
   markError(name: string, error: Error): void;
   /**
    * Ordered `close()` fan-out over every `"mounted"` entry's `App` (shutdown,

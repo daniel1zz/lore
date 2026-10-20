@@ -197,7 +197,6 @@ function locateZone(content: string): Result<ZoneLocation, LoreError> | null {
       code: "VALIDATION_ERROR",
       field: "content",
       message: "found a lore-managed zone start marker with no matching end marker",
-      rule: "BR-836",
     });
   }
 
@@ -265,7 +264,6 @@ export function parseManagedSections(content: string): Result<ParsedManagedSecti
         code: "VALIDATION_ERROR",
         field: "content",
         message: `expected a lore-managed fingerprint comment inside the managed zone, found: ${fingerprintLine}`,
-        rule: "BR-836",
       });
     }
     i += 1;
@@ -465,7 +463,6 @@ function buildRebuiltZone(existing: string, zone: ZoneLocation, next: ManagedSec
           "the lore-managed zone carries no fingerprint (written by an older lore, whose format this lore no longer reads). " +
           `Repair: delete the zone — every line from "${CLAUDE_MD_MARKER_START}" through "${CLAUDE_MD_MARKER_END}" — then re-run \`lore context refresh\` ` +
           "(or `lore setup --project`), which writes a fresh fingerprinted zone; hand-written text outside the markers is kept.",
-        rule: "BR-881",
       });
     }
     return parsed;

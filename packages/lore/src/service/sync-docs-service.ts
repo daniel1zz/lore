@@ -285,7 +285,6 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
       code: "VALIDATION_ERROR",
       field: "file",
       message: `${absPath}: cannot read file — ${e instanceof Error ? e.message : String(e)}`,
-      rule: "BR-791",
     });
   }
 
@@ -298,7 +297,6 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
       code: "VALIDATION_ERROR",
       field: "frontmatter",
       message: `${absPath}: missing or malformed frontmatter (expected ---\\n...\\n---\\n)`,
-      rule: "BR-791",
     });
   }
 
@@ -317,7 +315,6 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
       code: "VALIDATION_ERROR",
       field: "frontmatter",
       message: `${absPath}: YAML parse error — ${e instanceof Error ? e.message : String(e)}`,
-      rule: "BR-791",
     });
   }
 
@@ -326,7 +323,6 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
       code: "VALIDATION_ERROR",
       field: "frontmatter",
       message: `${absPath}: frontmatter is not a YAML object`,
-      rule: "BR-791",
     });
   }
 
@@ -338,7 +334,6 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
       code: "VALIDATION_ERROR",
       field: "type",
       message: `${absPath}: type='${String(record["type"])}' (expected 'spec')`,
-      rule: "BR-791",
     });
   }
 
@@ -348,7 +343,6 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
       code: "VALIDATION_ERROR",
       field: "title",
       message: `${absPath}: missing or empty 'title' in frontmatter`,
-      rule: "BR-791",
     });
   }
 

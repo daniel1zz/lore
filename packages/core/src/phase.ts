@@ -343,7 +343,6 @@ export function assertScopeFreeze(
       field: "ac_scope",
       message: `cannot remove ac_scope id(s) with recorded evidence: ${removedEvidenced.join(", ")}`,
       value: removedEvidenced,
-      rule: "BR-120",
     });
   }
 
@@ -453,7 +452,6 @@ export function computeAcScopeEdit(
       field: "ac_scope",
       message: `no ac_scope id supplied to ${op} — name at least one acceptance-criterion id`,
       value: ids,
-      rule: "BR-255",
     });
   }
 
@@ -464,7 +462,6 @@ export function computeAcScopeEdit(
       field: "ac_scope",
       message: `ac_scope id must be a non-empty string — received ${malformed.length} blank id(s)`,
       value: ids,
-      rule: "BR-121",
     });
   }
 
@@ -477,7 +474,6 @@ export function computeAcScopeEdit(
       field: "ac_scope",
       message: `ac_scope would hold ${next.length} ids, exceeding the ${MAX_AC_SCOPE_IDS}-id cap (a scope is a subset of one spec's declared criteria)`,
       value: next.length,
-      rule: "BR-121",
     });
   }
 

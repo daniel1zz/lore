@@ -85,7 +85,6 @@ export function parseConfigTemplateOverlay(yamlText: string): Result<Record<stri
       field: "configTemplateYaml",
       message: `failed to parse config template overlay YAML: ${cause instanceof Error ? cause.message : String(cause)}`,
       value: yamlText,
-      rule: "BR-829",
     } satisfies LoreError);
   }
 
@@ -95,7 +94,6 @@ export function parseConfigTemplateOverlay(yamlText: string): Result<Record<stri
       field: "configTemplateYaml",
       message: "config template overlay must parse to a YAML mapping (object) at the top level",
       value: parsed,
-      rule: "BR-829",
     } satisfies LoreError);
   }
 

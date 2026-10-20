@@ -218,7 +218,6 @@ export class ReceiptLogV2 {
           error instanceof Error ? error.message : String(error)
         }`,
         ...(error instanceof Error ? { cause: error } : {}),
-        rule: "BR-497",
       });
     }
   }
@@ -249,7 +248,6 @@ export class ReceiptLogV2 {
           error instanceof Error ? error.message : String(error)
         }`,
         ...(error instanceof Error ? { cause: error } : {}),
-        rule: "BR-500",
       });
     }
 
