@@ -408,7 +408,7 @@ export default defineLoreCommand({
         inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
         return exitCode(verifiedIdentity.error);
       }
-      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv);
       // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
       const callerSession = resolveCallerSession(undefined, inv.env);
       const doneOpts = {

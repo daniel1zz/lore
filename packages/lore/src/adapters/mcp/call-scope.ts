@@ -1,5 +1,6 @@
 /**
- * Per-call write scope for MCP tools (spec-run-identity-slice-1 D1/D3/D11; BR-1034, BR-1035, BR-1036).
+ * Per-call write scope for MCP tools (spec-run-identity-slice-1 D1/D3; spec-every-write-is-made-by-a-known-party-an-attested-agent-run;
+ * BR-1034, BR-1036, BR-1351).
  *
  * Purpose: an MCP server is ONE long-lived process serving many callers, so the identity of a write can never be
  * the server's environment. Each attested tool call builds its own {@link InvocationIdentity} from the call's
@@ -10,31 +11,32 @@
  * Public surface: {@link McpCallScope} (`run`, `app`, `current`), {@link CallContext}.
  *
  * Invariants:
- *   - The run is verified ONCE per call by the wrapped App (`verifyInvocationIdentity`): an unregistered run is
- *     downgraded to unattested with one warning on the injected sink, never refused. The verified identity is what
- *     `CallContext.identity` exposes, so claim/release decide on the same run the rows are stamped with.
+ *   - A call without `harness_run` has no known party: its writes are refused before anything is written (exit-4
+ *     class `VALIDATION_ERROR` naming `lore session start --human <name>` and `lore setup`); its reads proceed. The
+ *     wrapped store verifies the run at the call's first write: an unregistered run is refused there, never downgraded.
  *   - An App with no `forWriteContext` (hand-built stub) cannot attest: a call that names a `harness_run` is
- *     refused loudly; a call with none runs on the base App (unattested, as before).
+ *     refused loudly.
  *   - {@link McpCallScope.app} is a live view: every property read resolves against the App of the call that is
  *     currently running (AsyncLocalStorage), else the base App. Handlers keep using `app.xxxService` unchanged.
  *   - Reads outside `run` (non-attested tools) never open a second store connection.
  *
- * Side-effect class: IO (opens and closes one store connection per attested call) + injected warn sink.
+ * Side-effect class: IO (opens and closes one store connection per attested call).
  */
 
-import { warnSinkOf } from "../../service/warn-sink.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
-import { OsUserLookupError, RunIdentityArgumentError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
+import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity } from "@lore/core/node";
 import type { App } from "../../app.js";
 
 /** What the running call exposes to its handler. */
 export interface CallContext {
   /** The App for THIS call: the base App, or a sibling whose store is wrapped for the call's identity. */
   readonly app: App;
-  /** The call's identity with its run verified against the registry (unregistered -> `harnessRun` null). */
-  /** Resolved name or the reason there is none: only a tool that needs an actor fails on the latter. */
+  /**
+   * The call's identity: its attested run and name, or the refusal reason when the call carried no `harness_run`.
+   * Only a tool that needs an actor (or a store write) fails on the latter; reads proceed.
+   */
   readonly identity: InvocationIdentity;
 }
 
@@ -48,15 +50,14 @@ function errorResult(error: LoreError): CallToolResult {
 }
 
 /**
- * Build the invocation identity of one call. `harness_run` is the run the agent integration vouched for. The
- * name falls to the server's own chain (session, OS user) exactly as `resolveInvocationIdentity` resolves it — so
- * the name source stays honest (`session`/`os`), and the working-copy tier is skipped (the server's cwd says
- * nothing about the caller).
+ * Build the invocation identity of one call. `harness_run` is the run the agent integration vouched for and the
+ * ONLY source: a call without it has no known party (BR-1351) — the server's own environment, user and working copy
+ * say nothing about the caller, and a human session is never consulted (an MCP server is no person's terminal).
  */
-export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env" | "user">): Result<InvocationIdentity, LoreError> {
+export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env">): Result<InvocationIdentity, LoreError> {
   const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
-    const { identity } = resolveInvocationIdentity(argv, server.env, server.user);
+    const { identity } = resolveInvocationIdentity(argv, server.env, () => null);
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {
@@ -70,36 +71,16 @@ export function buildCallIdentity(input: CallAttestation, server: Pick<Invocatio
  * The identity of the attested call that is running. Only attested tools (those whose schema declares
  * `harness_run`) run in a scope, so a handler that decides on identity (claim/release/report_issue) always has one.
  * @throws Error when called outside an attested call — a wiring defect, never a caller error.
- * @throws {OsUserLookupError} when the call has no name for its writer (`McpCallScope.run` returns it as an error result)
+ * @throws {UnknownPartyError} when the call carried no `harness_run` (`McpCallScope.run` returns it as an error result)
  */
 export function requireCallIdentity(scope: McpCallScope): ResolvedInvocationIdentity {
   const context = scope.current();
   if (context === undefined) {
     throw new Error("requireCallIdentity: no attested call is running (the tool's schema must declare harness_run)");
   }
-  // reason: these callers (claim/release/report_issue) record an actor, so THEY are where an unnamed call fails.
-  if (context.identity.claimed === null) throw new OsUserLookupError(context.identity.unresolvedReason);
+  // reason: these callers (claim/release/report_issue) record an actor, so THEY are where a call with no known party fails.
+  if (context.identity.claimed === null) throw new UnknownPartyError(context.identity.unresolvedReason);
   return context.identity;
-}
-
-/**
- * Map a name source onto the actor-source tier the claim identity guard reads. `mcp` and `flag` are explicit
- * caller-given names; `worktree` is a derived non-colliding name (explicit-equivalent); only the OS user name is
- * the colliding "os-fallback" tier.
- */
-export function actorSourceOfName(source: NameSource): ActorSource {
-  switch (source) {
-    case "mcp":
-    case "flag":
-    case "worktree":
-      return "explicit";
-    case "env":
-      return "env";
-    case "session":
-      return "session";
-    case "os":
-      return "os-fallback";
-  }
 }
 
 /** Service keys of App that tool handlers read through the live view. */
@@ -113,10 +94,11 @@ export class McpCallScope {
 
   constructor(
     readonly base: App,
-    /** The server's environment and OS user (`Invocation` of the MCP entry): the session and OS tiers of every call's name. */
-    private readonly server: Pick<Invocation, "env" | "user" | "io">,
-    // reason: MCP stdout is the protocol channel; a warning goes to the server's stderr writer (`inv.io.stderr`).
-    private readonly warn: (line: string) => void = warnSinkOf(server.io.stderr),
+    /**
+     * The server's invocation: its environment words the refusal of a call with no `harness_run`; its identity is used
+     * ONLY for a hand-built App double that has no per-call write context (see {@link McpCallScope.run}).
+     */
+    private readonly server: Pick<Invocation, "env" | "identity">,
   ) {
     const resolve = (): App => this.store.getStore()?.app ?? this.base;
     this.view = new Proxy(base, {
@@ -163,17 +145,21 @@ export class McpCallScope {
   async run(input: CallAttestation, body: (context: CallContext) => Promise<CallToolResult>): Promise<CallToolResult> {
     const built = buildCallIdentity(input, this.server);
     if (!built.ok) return errorResult(built.error);
-    const identity = built.value;
+    // reason: an App with no `forWriteContext` is a hand-built test double (every App `createApp` returns has one): it
+    // has no per-call store to stamp, so a call without `harness_run` is made as the server's OWN invocation identity.
+    // A real server (production, any `createApp` App) never takes this branch: there a call without `harness_run` has no
+    // known party and its writes are refused (BR-1351).
+    const identity = this.base.forWriteContext === undefined && input.harness_run === undefined ? this.server.identity : built.value;
 
     let app = this.base;
     let scoped: App | undefined;
     if (this.base.forWriteContext !== undefined) {
-      const opened = this.base.forWriteContext({ identity, warn: this.warn });
+      const opened = this.base.forWriteContext({ identity });
       if (!opened.ok) return errorResult(opened.error);
       scoped = opened.value;
       scoped.callerSurface = this.base.callerSurface;
       app = scoped;
-    } else if (identity.harnessRun !== null) {
+    } else if (input.harness_run !== undefined) {
       return errorResult({
         code: "STORE_ERROR",
         message: "This server cannot attest writes: its App has no per-call write context (harness_run was supplied)",
@@ -181,20 +167,15 @@ export class McpCallScope {
     }
 
     try {
-      let verified = identity;
-      const check = await app.verifiedInvocationIdentity?.();
-      if (check !== undefined) {
-        if (!check.ok) return errorResult(check.error);
-        // reason: verification only downgrades `harnessRun`; the name stays the resolved one of this call.
-        if (check.value !== undefined) verified = { ...identity, harnessRun: check.value.harnessRun };
-      }
-      const context: CallContext = { app, identity: verified };
+      // reason: the call's run is verified by the wrapped store at its first WRITE (an unregistered run is refused
+      // there, BR-1351), not eagerly here: a read made with an unknown run is never refused for identity.
+      const context: CallContext = { app, identity };
       try {
         return await this.store.run(context, () => body(context));
       } catch (error) {
-        // reason: an unnamed call reaches here only from a tool that needed an actor (`by`, a service write, claim);
-        // it ends as that call's error result, naming the lookup's failure. Anything else is a defect and rethrows.
-        if (error instanceof OsUserLookupError) return errorResult(error.loreError);
+        // reason: a call with no known party reaches here only from a tool that needed an actor (`by`, a service write,
+        // claim); it ends as that call's error result, naming how to become one. Anything else is a defect and rethrows.
+        if (error instanceof UnknownPartyError) return errorResult(error.loreError);
         throw error;
       }
     } finally {

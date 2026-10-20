@@ -154,6 +154,7 @@ import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { applyMigration026 } from "./migrations/migration-026.js";
+import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -806,6 +807,12 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-026 rebuilds `versions` in ONE transaction so its action CHECK admits 'undelete'; a failed
       // step rolls back, leaves schema 25 and throws MigrationFailedError naming the step and this corpus path.
       applyMigration026(this.db, this.corpusPath);
+    }
+
+    if (currentVersion < 27 && 27 <= ceiling) {
+      // reason: migration-027 only moves user_version (claims compare runs only; the expiry of run-less leases is
+      // the `lore migrate schema` command's own data step, see migration-027.ts).
+      this.db.exec(MIGRATION_027_SQL);
     }
   }
 

@@ -124,7 +124,8 @@ async function createPlan(tmpDir: string, title: string): Promise<string> {
  *  compiled binary, mirroring how CI/deploy runs this script (module header). */
 function seedFeedingSkill(tmpDir: string): { slug: string } {
   const dbPath = join(tmpDir, ".lore", "lore.db");
-  const proc = Bun.spawnSync(["bun", SEED_SCRIPT, dbPath]);
+  // reason: cwd is the corpus, so the test run's known-party spawn rewrite registers the seed's run in THIS corpus.
+  const proc = Bun.spawnSync(["bun", SEED_SCRIPT, dbPath], { cwd: tmpDir });
   if (proc.exitCode !== 0) {
     throw new Error(`seed-write-spec-rule failed: ${proc.stderr.toString()}`);
   }

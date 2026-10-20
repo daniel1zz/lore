@@ -224,6 +224,13 @@ export interface IntegrateRequest {
   readonly postRefreshCommand?: string | undefined;
   /** `workflow.integrate.migrate_command`: the branch binary's `lore migrate schema` (see the file header); `undefined` = not configured (both migrate steps are reported skipped). */
   readonly migrateCommand?: string | undefined;
+  /**
+   * The CALLER's attested run: the party the migrate child of both migrate steps runs as (`--harness-run <run>` is appended
+   * to `migrate_command`), so its `migrate_schema` audit row names the caller and the child is not refused as a run-less
+   * write. Required whenever `migrateCommand` is set; absent (or not a plain run id) then = integrate is refused before
+   * anything moves.
+   */
+  readonly harnessRun?: string | undefined;
   /** Merge commit message; default `merge(<branch>): <tip subject>`. */
   readonly message?: string;
 }
@@ -353,6 +360,18 @@ export class IntegrateService {
         rule: "BR-1272",
       });
     }
+    const migrating = request.migrateCommand !== undefined && request.migrateCommand.trim() !== "";
+    if (migrating && !isChildRunId(request.harnessRun)) {
+      // reason: the migrate child is a write made by the caller's party; with no attested run to hand it, it would be refused
+      // mid-integration (after the snapshot). Refused here instead, before any git side effect, with nothing changed.
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "identity",
+        message:
+          "lore integrate runs workflow.integrate.migrate_command as the caller's party, and this invocation has no attested agent run " +
+          "(or its run id is not a plain run id) to hand it: nothing was integrated. Run it from an agent run the integration registered (`lore setup`).",
+      });
+    }
     // reason: first of every git side effect. BR-1273 refuses "before anything moves, with nothing changed", and a fetch
     // moves refs/remotes/*; the guard check only reads, so a refused run leaves every ref as it found it.
     const guarded = this.requireMainRefGuard();
@@ -417,7 +436,7 @@ export class IntegrateService {
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
         const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
-        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand) });
+        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
       }
       log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
       const attemptStart = clock();
@@ -446,7 +465,7 @@ export class IntegrateService {
         // reason: since 5f0259a1 opening an older corpus refuses; the branch binary must upgrade the SNAPSHOT explicitly (cwd = the
         // integration worktree, whose own .lore/lore.db is the snapshot) before the floor opens it. Never run against the live corpus.
         const snapshotDir = join(wt, ".lore");
-        const migrated = runSchemaMigration(this.deps.runFloor, request.migrateCommand, wt, snapshotDir);
+        const migrated = runSchemaMigration(this.deps.runFloor, request.migrateCommand, wt, snapshotDir, request.harnessRun);
         if (migrated.state === "failed") {
           const dropped = this.deps.corpus.remove(wt);
           if (!dropped.ok) return dropped;
@@ -490,7 +509,7 @@ export class IntegrateService {
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
         const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand) });
+        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
       }
 
       const now = this.resolveCommit(TARGET_REF);
@@ -654,13 +673,13 @@ export class IntegrateService {
    * reported (`skipped` with its reason, `failed` with the corpus and the exact command to rerun). Runs only when the
    * binary the command resolves is main's: the view was `refreshed` and the rebuild did not fail.
    */
-  private migrateLiveCorpus(view: SharedViewRefresh, rebuild: SharedViewRebuild, command: string | undefined): SchemaMigration {
+  private migrateLiveCorpus(view: SharedViewRefresh, rebuild: SharedViewRebuild, command: string | undefined, harnessRun: string | undefined): SchemaMigration {
     if (command === undefined || command.trim() === "") return { state: "skipped", reason: "workflow.integrate.migrate_command is not set" };
     const { projectRoot, runFloor, log } = this.deps;
     if (view.state !== "refreshed") return { state: "skipped", reason: `the shared checkout view is ${view.state}, so its binary is not main's; run \`${command}\` in ${projectRoot} once it is` };
     if (rebuild.state === "rebuild_failed") return { state: "skipped", reason: `the shared checkout rebuild failed, so its binary is not main's; rebuild, then run \`${command}\` in ${projectRoot}` };
     log(`integrate: migrating the live corpus in ${projectRoot}: ${command}`);
-    return runSchemaMigration(runFloor, command, projectRoot, join(projectRoot, ".lore"));
+    return runSchemaMigration(runFloor, command, projectRoot, join(projectRoot, ".lore"), harnessRun);
   }
 
   /**
@@ -762,7 +781,9 @@ export class IntegrateService {
 }
 
 /**
- * Runs `<command> --json` in `cwd` through the injected runner and reads the report. A non-zero exit, or an exit 0
+ * Runs `<command> --json --harness-run <run>` in `cwd` through the injected runner and reads the report. The child is a write
+ * made by the caller's party, so it carries the caller's attested run (see {@link IntegrateRequest.harnessRun}); a run that is
+ * not a plain run id is `failed` without spawning anything. A non-zero exit, or an exit 0
  * whose output carries no readable `--json` report (a migrate whose result cannot be named must not read as success),
  * is `failed`.
  *
@@ -770,9 +791,13 @@ export class IntegrateService {
  * @param command - `workflow.integrate.migrate_command`, the full `lore migrate schema` command line
  * @param cwd - the directory whose corpus is migrated (the integration worktree for the snapshot, the shared checkout for the live corpus)
  * @param corpus - the `.lore/` directory the run is expected to touch, named in a failure
+ * @param harnessRun - the caller's attested run, appended as `--harness-run <run>`
  */
-export function runSchemaMigration(runner: FloorRunner, command: string, cwd: string, corpus: string): SchemaMigration {
-  const full = `${command} --json`;
+export function runSchemaMigration(runner: FloorRunner, command: string, cwd: string, corpus: string, harnessRun: string | undefined): SchemaMigration {
+  if (!isChildRunId(harnessRun)) {
+    return { state: "failed", exit_status: 0, output_tail: "the migrate child has no attested caller run to run as; nothing was spawned", corpus, command: `${command} --json` };
+  }
+  const full = `${command} --json --harness-run ${harnessRun}`;
   const ran = runner(full, cwd);
   const tail = ran.output.slice(-FLOOR_TAIL_CHARS);
   if (ran.status !== 0) return { state: "failed", exit_status: ran.status, output_tail: tail, corpus, command: full };
@@ -786,6 +811,11 @@ export function runSchemaMigration(runner: FloorRunner, command: string, cwd: st
   }
   if (report === undefined) return { state: "failed", exit_status: 0, output_tail: `exited 0 but printed no readable --json report:\n${tail}`, corpus, command: full };
   return report.data.upgraded ? { state: "migrated", from: report.data.from, to: report.data.to } : { state: "current", version: report.data.to };
+}
+
+/** A run id safe to put on a shell command line: the registry's `cc:<session>[:<agent>]` / `human:<hash>` shapes, never a free string. */
+function isChildRunId(run: string | undefined): run is string {
+  return run !== undefined && /^[A-Za-z0-9][A-Za-z0-9:._-]*$/.test(run);
 }
 
 /** One line for a migration result: `schema: <from> -> <to>`, `schema: already current`, or the skip/failure in words. */

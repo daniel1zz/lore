@@ -95,7 +95,7 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
-import { resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
+import { findTraceActorFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -2711,7 +2711,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // `traceRecorder` is absent in every bare test construction, mirroring
     // `gateEnforcer`'s identical optional-DI shape.
     if (result.ok && this.traceRecorder !== undefined) {
-      this.traceRecorder.recordGet(this.resolveWriteActor(undefined), result.value.doc.id);
+      // reason: a read is never refused for identity (BR-1351): with no known party the advisory trace row is skipped.
+      const traceActor = findTraceActorFor(this.store);
+      if (traceActor !== undefined) this.traceRecorder.recordGet(traceActor, result.value.doc.id);
     }
     return result;
   }
@@ -4486,7 +4488,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // same count a caller actually sees), never the raw pre-filter store hit
     // count. `traceRecorder` absent in bare test constructions (mirrors `get`).
     if (this.traceRecorder !== undefined) {
-      this.traceRecorder.recordSearch(this.resolveWriteActor(undefined), query, visibleHits.length);
+      const traceActor = findTraceActorFor(this.store);
+      if (traceActor !== undefined) this.traceRecorder.recordSearch(traceActor, query, visibleHits.length);
     }
     return result;
   }

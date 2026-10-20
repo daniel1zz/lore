@@ -48,9 +48,14 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { sessionActorFromId } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveWriteActor } from "../../live-invocation.js";
 
-const OS_USERNAME = userInfo().username;
+/**
+ * The author of a write that names no `by`: the name the store's write context carries (the invocation's known party,
+ * BR-1055) — never $LORE_ACTOR, a session id in the env, or the computer's user name. `actedStore` declares it.
+ */
+const OS_USERNAME = liveWriteActor();
+void userInfo;
 
 // ─── Ambient-env isolation (mirrors cli-utils.test.ts's resolveActorWithSource
 // describe block) — save/restore around every test in this file so a real
@@ -164,19 +169,18 @@ describe("NEGATIVE — omitted opts.by falls back through the real env chain", (
     expect(entries[0]?.actor).toBe(OS_USERNAME);
   });
 
-  it("falls back to the session tier when opts.by and $LORE_ACTOR are both absent", async () => {
+  it("never reads the session id in the env either: the write context's party is the author (BR-1055)", async () => {
     process.env["CLAUDE_CODE_SESSION_ID"] = "3de02220-5d69-4b5a-ac23-d66e14c0261b";
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const doc = await createPlan(cs, "Session Fallback Create");
 
-    const expectedActor = sessionActorFromId("3de02220-5d69-4b5a-ac23-d66e14c0261b");
     const entries = await auditFor(store, doc.id, "create");
-    expect(entries[0]?.actor).toBe(expectedActor);
-    expect(entries[0]?.actor).toBe("agent:session-3de02220");
+    expect(entries[0]?.actor).toBe(OS_USERNAME);
+    expect(entries[0]?.actor).not.toBe(sessionActorFromId("3de02220-5d69-4b5a-ac23-d66e14c0261b"));
   });
 
-  it("falls back to the OS username when opts.by, $LORE_ACTOR, and the session tier are all absent", async () => {
+  it("the write context's party is the author when opts.by, $LORE_ACTOR, and the session tier are all absent", async () => {
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const doc = await createPlan(cs, "OS Fallback Create");

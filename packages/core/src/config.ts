@@ -271,16 +271,6 @@ export const GateCheckpointConfigSchema = z
      */
     anchor_overlap: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
-     * `task-claim`-ONLY sub-predicate override (spec claim-time-actor-identity-
-     * guard-zero-evidence-release-advis, AC-IDENTITY-ESCAPE) — `false` disables
-     * JUST the claim-time actor-identity-collision guard, leaving anchor-overlap
-     * and upstream-approval (and every other checkpoint's own `enabled` key)
-     * untouched. Inert on `spec-create`/`spec-promote`/`plan-promote` (no
-     * checkpoint reads it there) — same narrower-blast-radius shape as
-     * `anchor_overlap` above.
-     */
-    actor_identity: z.object({ enabled: z.boolean().optional() }).strict().optional(),
-    /**
      * `spec-create`/`spec-promote` sub-predicate override (AC-Quantifiability Gate
      * spec §Design) — `false` disables JUST the `acQuantifiable` predicate on the
      * checkpoint it's nested under, leaving that checkpoint's other predicates
@@ -337,7 +327,7 @@ export const GateCheckpointConfigSchema = z
      *
      * Absence of the whole config, the `workflow` section, the `gates` map, the
      * `"corpus-write"` entry, or the nested `foreign_corpus_write` key ALL mean
-     * "enabled" (same default polarity as `anchor_overlap`/`actor_identity`/
+     * "enabled" (same default polarity as `anchor_overlap`/
      * `ac_quantifiable`/`oracle_coverage`/`requires_uat` — the OPPOSITE of
      * `prd_sync`'s default-OFF) — AC-CP-4(a): a bare `lore init` project is
      * already covered with zero config edits. Only an EXPLICIT
@@ -1598,30 +1588,6 @@ export function resolveAnchorOverlapGateEnabled(config: LoreConfig | undefined):
 }
 
 /**
- * Resolve whether `task-claim`'s claim-time actor-identity-collision guard
- * specifically is enabled, per `workflow.gates."task-claim".actor_identity
- * .enabled` (spec claim-time-actor-identity-guard-zero-evidence-release-advis,
- * AC-IDENTITY-ESCAPE). Narrower than {@link resolveGateEnabled}`(config,
- * "task-claim")`, which governs the WHOLE checkpoint (actor-identity, anchor-
- * overlap, AND upstream-approval together). Absence of the whole config, the
- * `workflow` section, the `gates` map, the `task-claim` entry, or the nested
- * `actor_identity` key ALL mean "enabled" — only an EXPLICIT `actor_identity
- * .enabled: false` disables just this predicate (mirrors {@link
- * resolveAnchorOverlapGateEnabled}'s single-checkpoint shape exactly).
- *
- * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `false` iff `workflow.gates."task-claim".actor_identity.enabled === false`; `true` otherwise
- * @example
- *   resolveActorIdentityGateEnabled(undefined) // => true
- *   resolveActorIdentityGateEnabled({
- *     project, workflow: { gates: { "task-claim": { actor_identity: { enabled: false } } } },
- *   }) // => false
- */
-export function resolveActorIdentityGateEnabled(config: LoreConfig | undefined): boolean {
-  return config?.workflow?.gates?.["task-claim"]?.actor_identity?.enabled !== false;
-}
-
-/**
  * Resolve whether `checkpoint`'s `acQuantifiable` sub-predicate specifically is
  * enabled, per `workflow.gates.<checkpoint>.ac_quantifiable.enabled` (AC-Quantifiability
  * Gate spec §Design). Narrower than {@link resolveGateEnabled}`(config, checkpoint)`,
@@ -1726,7 +1692,7 @@ export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined)
  * refusal token literal, `gate:corpus-write:foreign-provenance`.
  *
  * Same default polarity as {@link resolveAnchorOverlapGateEnabled} /
- * {@link resolveActorIdentityGateEnabled} / {@link resolveAcQuantifiableGateEnabled}
+ * {@link resolveAcQuantifiableGateEnabled}
  * / {@link resolveOracleCoverageGateEnabled} / {@link resolveRequiresUatGateEnabled}
  * (all default ENABLED) — the OPPOSITE of {@link resolvePrdSyncGateEnabled}'s
  * default-OFF polarity immediately above. Absence of the whole config, the

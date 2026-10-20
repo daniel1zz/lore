@@ -81,8 +81,8 @@ export type LoreError = RuleDeclared &
       /** Current claim age in minutes at the time of the conflicting request */
       age_minutes: number;
       /**
-       * The run holding the lease (spec-run-identity-slice-1 D6, BR-1040/BR-1043). Absent on a legacy
-       * claim (no `harness_run` key); `null` on a claim by an unattested caller.
+       * The run holding the lease (spec-run-identity-slice-1 D6, BR-1040/BR-1043). `null` only for a lease that
+       * carries no run (written before runs existed and not yet expired by `lore migrate schema`).
        */
       holder_run?: string | null;
     }

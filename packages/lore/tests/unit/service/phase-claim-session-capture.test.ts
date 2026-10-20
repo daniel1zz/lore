@@ -31,18 +31,17 @@
  *   STATE:      two anchor-overlapping phases claimed by ONE actor in ONE measured
  *               session — the second is EXEMPTED (the defect's headline case), and
  *               the persisted second claim still carries the session id
- *   NEGATIVE:   same actor, DIFFERENT measured sessions → refused as FOREIGN
+ *   NEGATIVE:   same actor name, DIFFERENT runs → refused as FOREIGN
  *               (`ANCHOR_OVERLAP`), so the STATE case above is not satisfiable by a
  *               blanket same-`by` exemption; a FOREIGN actor overlap still refuses
  *   ERROR:      a session env var present but sanitizing to empty fails LOUD
  *               (`VALIDATION_ERROR`, field `claim.session_id`) and writes NOTHING
  *   BOUNDARY:   unset / whitespace-only env is "no session" (never an error);
  *               $CLAUDE_SESSION_ID is honored as the fallback variable name
- *   REGRESSION: an ABSENT session id on either side still refuses with
- *               `ANCHOR_OVERLAP_SESSION_UNMEASURED` (the fail-safe survives the
- *               fix); a LEGACY sibling claim with no `session_id` never reads as
- *               "same session"; a same-holder refresh never INHERITS a session id
- *               from the previous claim record
+ *   REGRESSION: the anchor mutex compares RUNS, not session ids (BR-1056): two runs of one
+ *               name are refused whatever the session env says, and a sibling lease
+ *               that names no run never reads as the same holder; a same-holder
+ *               refresh never INHERITS a session id from the previous claim record
  *
  * @spec_ref task-phaseworkflowservice-claim-captures-no-session-id-so-every
  *   §Required fix 1-4, §Acceptance criteria AC-1..AC-7;
@@ -57,11 +56,8 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { PhaseWorkflowService } from "../../../src/service/phase-workflow-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { GateDependencies } from "../../../src/service/gate-enforcer.js";
-import {
-  ANCHOR_OVERLAP_REASON,
-  ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON,
-} from "../../../src/service/gate-predicates.js";
-import type { DocRecord, DocType, TaskClaim } from "@lore/core";
+import { ANCHOR_OVERLAP_REASON } from "../../../src/service/gate-predicates.js";
+import type { DocRecord, DocType, RunId, TaskClaim } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -72,6 +68,9 @@ const SESSION_A_RAW = "3DE02220-5d69-4b5a-ac23-d66e14c0261b";
 const SESSION_A_ID = "3de02220";
 const SESSION_B_RAW = "7ab19c04-second-live-session";
 const SESSION_B_ID = "7ab19c04";
+/** The runs of the two sessions: the anchor mutex compares these, never the shared display name. */
+const RUN_A = `cc:${SESSION_A_ID}` as RunId;
+const RUN_B = `cc:${SESSION_B_ID}` as RunId;
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 
 function makePlanRecord(): DocRecord {
@@ -188,7 +187,7 @@ describe("PhaseWorkflowService.claim — session instance capture (AC-1)", () =>
     const { store, corpusService, phaseOne } = await seedOverlappingPhases();
     const service = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
 
-    const claimed = await service.claim(phaseOne.slug, { by: ACTOR });
+    const claimed = await service.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(claimed.ok).toBe(true);
 
     const claim = await readClaim(store, phaseOne.id);
@@ -200,7 +199,7 @@ describe("PhaseWorkflowService.claim — session instance capture (AC-1)", () =>
     const { store, corpusService, phaseOne } = await seedOverlappingPhases();
     const service = makeSessionService(store, corpusService, { CLAUDE_SESSION_ID: SESSION_B_RAW });
 
-    const claimed = await service.claim(phaseOne.slug, { by: ACTOR });
+    const claimed = await service.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(claimed.ok).toBe(true);
     expect((await readClaim(store, phaseOne.id))?.session_id).toBe(SESSION_B_ID);
   });
@@ -209,7 +208,7 @@ describe("PhaseWorkflowService.claim — session instance capture (AC-1)", () =>
     const { store, corpusService, phaseOne, phaseTwo } = await seedOverlappingPhases();
 
     const unset = makeSessionService(store, corpusService, {});
-    const claimedUnset = await unset.claim(phaseOne.slug, { by: ACTOR });
+    const claimedUnset = await unset.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(claimedUnset.ok).toBe(true);
     expect((await readClaim(store, phaseOne.id))?.session_id).toBeUndefined();
 
@@ -232,10 +231,10 @@ describe("PhaseWorkflowService.claim — same-actor, same-session anchor overlap
     const { store, corpusService, phaseOne, phaseTwo } = await seedOverlappingPhases();
     const service = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
 
-    const first = await service.claim(phaseOne.slug, { by: ACTOR });
+    const first = await service.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(first.ok).toBe(true);
 
-    const second = await service.claim(phaseTwo.slug, { by: ACTOR });
+    const second = await service.claim(phaseTwo.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
 
@@ -249,19 +248,18 @@ describe("PhaseWorkflowService.claim — same-actor, same-session anchor overlap
 // ─── NEGATIVE controls ───────────────────────────────────────────────────────
 
 describe("PhaseWorkflowService.claim — cross-session and foreign-actor refusals (AC-2)", () => {
-  it("NEGATIVE: same actor, DIFFERENT measured session → refused as FOREIGN, not exempted", async () => {
+  it("NEGATIVE: same actor name, DIFFERENT run (another session) → refused as FOREIGN, not exempted", async () => {
     const { store, corpusService, phaseOne, phaseTwo } = await seedOverlappingPhases();
     const sessionA = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
     const sessionB = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_B_RAW });
 
-    expect((await sessionA.claim(phaseOne.slug, { by: ACTOR })).ok).toBe(true);
+    expect((await sessionA.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A })).ok).toBe(true);
 
-    const second = await sessionB.claim(phaseTwo.slug, { by: ACTOR });
+    const second = await sessionB.claim(phaseTwo.slug, { by: ACTOR, harnessRun: RUN_B });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect((second.error as { field?: string }).field).toBe("gate:phase-claim:anchor-overlap");
     expect(JSON.stringify(second.error)).toContain(ANCHOR_OVERLAP_REASON);
-    expect(JSON.stringify(second.error)).not.toContain(ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON);
     // Nothing persisted for the refused claim (the post-write re-check self-rolls-back).
     expect(await readClaim(store, phaseTwo.id)).toBeUndefined();
   });
@@ -270,7 +268,7 @@ describe("PhaseWorkflowService.claim — cross-session and foreign-actor refusal
     const { store, corpusService, phaseOne, phaseTwo } = await seedOverlappingPhases();
     const service = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
 
-    expect((await service.claim(phaseOne.slug, { by: ACTOR })).ok).toBe(true);
+    expect((await service.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A })).ok).toBe(true);
 
     const foreign = await service.claim(phaseTwo.slug, { by: "agent:other" });
     expect(foreign.ok).toBe(false);
@@ -294,29 +292,29 @@ describe("PhaseWorkflowService.claim — cross-session and foreign-actor refusal
 
     const sessionA = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
     const sessionB = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_B_RAW });
-    expect((await sessionA.claim(phaseOne.slug, { by: ACTOR })).ok).toBe(true);
-    expect((await sessionB.claim(phaseTwo.slug, { by: ACTOR })).ok).toBe(true);
+    expect((await sessionA.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A })).ok).toBe(true);
+    expect((await sessionB.claim(phaseTwo.slug, { by: ACTOR, harnessRun: RUN_B })).ok).toBe(true);
   });
 });
 
 // ─── REGRESSION: the fail-safe must survive the fix ──────────────────────────
 
-describe("PhaseWorkflowService.claim — the not-measured fail-safe survives (AC-3/AC-5)", () => {
-  it("REGRESSION: NO session env on either side still refuses with ANCHOR_OVERLAP_SESSION_UNMEASURED", async () => {
+describe("PhaseWorkflowService.claim — a lease with no run is nobody's (BR-1056)", () => {
+  it("REGRESSION: NO session env on either side, two runs of one name → refused as a foreign run", async () => {
     const { store, corpusService, phaseOne, phaseTwo } = await seedOverlappingPhases();
     const service = makeSessionService(store, corpusService, {});
 
-    expect((await service.claim(phaseOne.slug, { by: ACTOR })).ok).toBe(true);
+    expect((await service.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A })).ok).toBe(true);
     expect((await readClaim(store, phaseOne.id))?.session_id).toBeUndefined();
 
-    const second = await service.claim(phaseTwo.slug, { by: ACTOR });
+    const second = await service.claim(phaseTwo.slug, { by: ACTOR, harnessRun: RUN_B });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect((second.error as { field?: string }).field).toBe("gate:phase-claim:anchor-overlap");
-    expect(JSON.stringify(second.error)).toContain(ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON);
+    expect(JSON.stringify(second.error)).toContain(ANCHOR_OVERLAP_REASON);
   });
 
-  it("REGRESSION: a LEGACY sibling claim with no session_id never reads as 'same session'", async () => {
+  it("REGRESSION: a sibling lease that names no run never reads as the same holder", async () => {
     const { store, corpusService } = makeStore();
     await mustInsert(store, makePlanRecord());
     // A pre-capture claim record: `by` + `at` only, exactly the shape on disk in
@@ -341,25 +339,25 @@ describe("PhaseWorkflowService.claim — the not-measured fail-safe survives (AC
     );
 
     const service = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
-    const result = await service.claim(candidate.slug, { by: ACTOR });
+    const result = await service.claim(candidate.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(JSON.stringify(result.error)).toContain(ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON);
-    // The legacy record itself parses fine and is left untouched.
+    expect(JSON.stringify(result.error)).toContain(ANCHOR_OVERLAP_REASON);
+    // The record itself parses fine and is left untouched.
     expect((await readClaim(store, legacyHolder.id))?.by).toBe(ACTOR);
   });
 
   it("REGRESSION: a same-holder refresh never INHERITS a session id from the previous claim", async () => {
     const { store, corpusService, phaseOne } = await seedOverlappingPhases();
     const measured = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A_RAW });
-    expect((await measured.claim(phaseOne.slug, { by: ACTOR })).ok).toBe(true);
+    expect((await measured.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A })).ok).toBe(true);
     expect((await readClaim(store, phaseOne.id))?.session_id).toBe(SESSION_A_ID);
 
     // The SAME actor refreshes from a session-less environment: the refreshed
     // record must report "not measured", never carry the earlier session forward
     // (which would fabricate same-session evidence).
     const unmeasured = makeSessionService(store, corpusService, {});
-    const refreshed = await unmeasured.claim(phaseOne.slug, { by: ACTOR });
+    const refreshed = await unmeasured.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(refreshed.ok).toBe(true);
     expect((await readClaim(store, phaseOne.id))?.session_id).toBeUndefined();
   });
@@ -373,7 +371,7 @@ describe("PhaseWorkflowService.claim — unusable session id (AC-6)", () => {
     const versionBefore = await readVersion(store, phaseOne.id);
     const service = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: "!!!" });
 
-    const result = await service.claim(phaseOne.slug, { by: ACTOR });
+    const result = await service.claim(phaseOne.slug, { by: ACTOR, harnessRun: RUN_A });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -389,7 +387,7 @@ describe("PhaseWorkflowService.claim — unusable session id (AC-6)", () => {
     await mustInsert(store, makePlanRecord());
     const service = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: "###" });
 
-    const result = await service.claim("phase-does-not-exist", { by: ACTOR });
+    const result = await service.claim("phase-does-not-exist", { by: ACTOR, harnessRun: RUN_A });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect((result.error as { field?: string }).field).toBe("claim.session_id");

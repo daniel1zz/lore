@@ -76,8 +76,9 @@ import { JudgmentService } from "../../../../src/service/judgment-service.js";
 import { AuditService } from "../../../../src/service/audit-service.js";
 import { buildAuditVerifyRunner } from "../../../../src/service/audit-verify-runner.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
-import { NoOpTelemetry } from "@lore/core";
+import { NoOpTelemetry, derivePartyRunId } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
+import { runWithRequestIdentity } from "../../../../src/store/write-context-store.js";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
@@ -429,14 +430,21 @@ describe("POST /api/docs", () => {
       expect(doc.created_by).toBe(TEST_ACTOR.name);
     });
 
-    it("a cookie-session actor's create resolves doc.created_by via the actor chain, never 'system' or the static bootstrap identity", async () => {
+    it("a cookie-session actor's create is authored by the request's person, never 'system', the static bootstrap identity or the process session", async () => {
       const { req, url } = makePostRequest("/api/docs", { type: "prd", title: "Cookie Attribution PRD" });
-      const res = await handleApiRoute(req, url, app, TEST_COOKIE_ACTOR);
+      // the server hands the request's party (a `dashboard` run) to the store; the production path registers it first (http-write-identity.test.ts)
+      // a cookie login is named by the session's owner (the person it was minted for), not by the shared key name
+      const person = "dana";
+      const res = await runWithRequestIdentity(
+        { harnessRun: derivePartyRunId("dashboard", person), claimed: person, claimedSource: "dashboard" },
+        () => handleApiRoute(req, url, app, { ...TEST_COOKIE_ACTOR, owner: person }),
+      );
       expect(res!.status).toBe(201);
       const body = await parseResponse(res!);
       const doc = body.data as Record<string, unknown>;
 
-      expect(doc.created_by).toBe("agent:session-v1da5b0a");
+      expect(doc.created_by).toBe(person);
+      expect(doc.created_by).not.toContain("v1da5b0a");
       expect(doc.created_by).not.toBe("system");
       expect(doc.created_by).not.toBe("admin");
       expect(doc.created_by).not.toBe("dashboard-local");

@@ -30,13 +30,12 @@
  *     `WriteActorOpts` — every route handler that calls `create`/`set`/`delete` MUST go
  *     through it rather than hand-building `{ by: actor.name }`, so the cookie-vs-bearer
  *     attribution policy lives in exactly one place. Cookie sessions (`http_cookie`) omit
- *     `by` entirely and set `attributeCreatedBy: true` — the static "dashboard-local"
- *     bootstrap-key identity (`actor.name`) / its hardcoded "admin" owner field
- *     (`actor.owner`) are NEVER used as the write actor; the human and `lore serve` share
- *     a machine (SPEC-016), so `CorpusService.resolveWriteActor(undefined)` falls through
- *     to the session tier → OS username (of the `lore serve` process) — the
- *     SAME chain the CLI's `resolveActor` applies. Bearer sessions (`http_token`) are
- *     UNCHANGED: explicit `by: actor.name` (the API key name), `attributeCreatedBy` omitted
+ *     `by` entirely and set `attributeCreatedBy: true`: the write actor is then the request's
+ *     own party — the dashboard login registered by `request-identity.ts` (source `dashboard`,
+ *     named by the session's `owner`) — which the store's write context resolves
+ *     (`resolveWriteActorFor`). It is NEVER the `lore serve` process's environment, session or
+ *     computer user name (BR-1055). Bearer sessions (`http_token`) pass explicit
+ *     `by: actor.name` (the API key name, source `api-key`), `attributeCreatedBy` omitted
  *     (doc/version `created_by` stays the historical literal `"system"`).
  * Side-effect class: IO (bun:sqlite reads/writes, crypto)
  * Source: SPEC-010 §3.2, §3.3; SPEC-016 §3.3
@@ -444,13 +443,12 @@ export async function authenticateRequest(
  * - `http_cookie` (dashboard UI, human on the SAME machine as `lore serve` —
  *   SPEC-016's local-bootstrap model): omits `by` entirely and sets
  *   `attributeCreatedBy: true`. `CorpusService.resolveWriteActor(undefined)`
- *   then falls through its full chain (session tier → OS username of the
- *   `lore serve` process) — the exact `resolveActor`
- *   precedence the CLI applies. The static `"dashboard-local"` bootstrap-key
- *   name (`actor.name`) and its hardcoded `"admin"` owner field (`actor.owner`)
- *   are deliberately NEVER used here: neither identifies WHICH human is at the
- *   keyboard, so passing either as an "explicit" actor would just replace one
- *   wrong static string ("system") with another ("admin").
+ *   then takes the request's own party from the store's write context: the
+ *   dashboard login registered per request by `request-identity.ts`
+ *   (`dispatchUnderRequestParty`), never the `lore serve` process's
+ *   environment, session or user name. It is deliberately not passed as an
+ *   explicit `by`, so the name the audit row shows and its recorded source
+ *   (`dashboard`) come from the one write-context path.
  * - `http_token` (bearer, agent-issued) and any other/absent surface: explicit
  *   `by: actor.name` (the API key name) — UNCHANGED from the pre-existing
  *   behavior, `attributeCreatedBy` omitted so `doc.created_by`/

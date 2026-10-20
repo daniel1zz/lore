@@ -806,10 +806,11 @@ export const taskClaimSchema = z.object({
    */
   corpus_scope: z.string().min(1).optional(),
   /**
-   * The harness run that took this lease (spec-run-identity-slice-1 D6, BR-1040/BR-1042). THREE states, all
-   * load-bearing: a run id = attested claim; `null` = a claim written after runs existed by an unattested
-   * caller; KEY ABSENT = a LEGACY claim written before runs existed, compared by `by` alone (BR-1042).
-   * Never carried forward on a refresh — the refreshing claimant's own run is recorded.
+   * The harness run that took this lease (spec-run-identity-slice-1 D6, BR-1040/BR-1352). Every claim written now
+   * carries one (the store refuses a claim without a run); the schema still ACCEPTS an absent or null value only so a
+   * claim written before runs existed can be read, shown and expired by the schema upgrade (`lore migrate schema`).
+   * Compared by run only, never by `by`. Never carried forward on a refresh — the refreshing claimant's own run is
+   * recorded.
    */
   harness_run: z.string().nullable().optional(),
   /**
@@ -840,7 +841,7 @@ export interface ClaimCaptureInput {
   session_id?: string;
   /** See {@link taskClaimSchema}'s `corpus_scope` — explicit-only, NEVER carried forward. */
   corpus_scope?: string;
-  /** See {@link taskClaimSchema}'s `harness_run` — `null` = unattested claimant; `undefined` = key not written. NEVER carried forward. */
+  /** See {@link taskClaimSchema}'s `harness_run` — the claimant's own run; NEVER carried forward. */
   harness_run?: string | null;
 }
 
@@ -932,8 +933,8 @@ export function buildTaskClaim(
     ...(worktree !== undefined ? { worktree } : {}),
     ...(sessionId !== undefined ? { session_id: sessionId } : {}),
     ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
-    // reason: BR-1042 — `undefined` writes NO key (a caller that never resolved a run); `null` writes the
-    // key as null (unattested). Never `?? base?.harness_run`: a refresh records the REFRESHING run.
+    // reason: BR-1040 — a refresh records the REFRESHING run, never `?? base?.harness_run`; the store refuses a claim
+    // that carries none (BR-1352).
     ...(input.harness_run !== undefined ? { harness_run: input.harness_run } : {}),
   };
 }

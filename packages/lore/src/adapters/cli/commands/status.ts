@@ -2164,8 +2164,8 @@ export default defineLoreCommand({
           `claims/evidence/handoffs carry an attested run (share ${attributionShare.share})`,
       );
       printLine(inv.io.stdout, 
-        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, session ${identitySources.session}, ` +
-          `worktree ${identitySources.worktree}, os ${identitySources.os}, other ${identitySources.other}`,
+        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, human ${identitySources.human}, ` +
+          `api-key ${identitySources.api_key}, dashboard ${identitySources.dashboard}, other ${identitySources.other}`,
       );
       printLine(inv.io.stdout, 
         `Orphaned-dirty claims: ${orphanedDirty.count}` +

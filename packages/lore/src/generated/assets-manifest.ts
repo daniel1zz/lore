@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "daf9361371dc7bc7daba7569a042d9364d61b1fe8c18c11896e28d2c5579b044",
+  tree_digest: "c6f7be880b17c9503f04f286aab82d6c9126d0e0ac5d1e27a2eacf00672cf399",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -55,7 +55,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "9ffda72eb264f2ec358a1631ff6716f34a0d5279a47c48930ae677bccc0194a4" },
   { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "c97c3731947951c869ca4541f21548ffc8fecf936129bbe14c2f19d2b07f3116" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "2264ffe628851da11a33c9090e7da4f396577da0fa16a0ee26aff7afc5af7259" },
-  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "ff7fb4844547648f1da95b9a2451e3ebcbbaec0037cdb514b02ace35ab49760f" },
+  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "741dc35d24628dc821e1f61702d2e09585642dcc45d6136b863c72ef43ff4c54" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "fad2df8beb68f36fd591290ec8d91bbec836eeaf149708d8b6ec263b869cac39" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "1202d4007575d28a3403245b6d797771b3f0a9bc0b66d75830b028ab22d6c79d" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "f1fab470d792479ccae9dbaee7a2fff23a10ebd2a21d0deb03d06b70322e505b" },
@@ -74,9 +74,9 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/pre-edit-anchor-gate.mjs", kind: "hook", ownership: "managed", sha256: "8dd34c73b4b7b3c6dbe13f299d05c87ef8ea0c479e869598667f367d9125136a" },
   { path: "hooks/pre-helper-foreign-working-copy-gate.mjs", kind: "hook", ownership: "managed", sha256: "cb5908db3a8beeb904a555e7c57d7c60e33eb3da9350d243dccf8776a8a307a9" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "795dcedc192ba2cee8bb00938afee11b2a513db682e13f6bc6cdaec191ae0892" },
-  { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "56647fbe978d185db43e4f87e2425d70a3a965e39bb7d08c696745a240c2fd28" },
+  { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "d6685e3c13aaee80b07eaa2c005d3ea5cb37795a1e0a6e91d0903610c972d671" },
   { path: "hooks/run-end.mjs", kind: "hook", ownership: "managed", sha256: "3615dadf253fa5ec2142ba8262e6478c5b487752de8699c17f2fd69952d5d60d" },
-  { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "f927077ec59e0d094700cca6e6c1fd4ae43ea931878b278ec2f62df37e3320dd" },
+  { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "2d9d2094211634641908e2f91b19fda70d82dc77ca284641d335cd216d9ee28d" },
   { path: "hooks/session-start-marker.mjs", kind: "hook", ownership: "managed", sha256: "8ce033f95a90a4f100f72b9f6a84a95cb563f339dbf6418ff1947e693b6ba1e8" },
   { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "822a231c0a4b77eaf13bad1700c3447782d920c7ea4cb19d16c6054109dc57b8" },
   { path: "hooks/session-trail-start.mjs", kind: "hook", ownership: "managed", sha256: "25a3adfed51be127797c7efdc9e1904321f298c09fb63fb73ebe0dcf5b78d6c5" },

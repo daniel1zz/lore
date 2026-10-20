@@ -73,6 +73,7 @@ import type { SessionHeartbeatRecord } from "../../src/service/session-liveness.
 import { RealGitPort } from "../../src/adapters/real-git-port.js";
 import { partitionTerritory, type TerritoryEntry } from "../../src/adapters/cli/territory-partition.js";
 import { actedStore } from "../live-invocation.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -246,7 +247,7 @@ describe("AC-REPLAY-1: replaying the 2026-08-11 diagnosis through lore invocatio
     // ── seed EXACTLY 2 sessions ──
     const mineWorkflow = makeTaskWorkflowService(store, `${MINE_SESSION_ID}-mine-orchestrator`);
     const { taskId: mineTaskId } = await createPlanAndTask(corpusService, "Mine task");
-    const mineClaim = await mineWorkflow.claim(mineTaskId, { by: "agent:mine", worktree: repoRoot });
+    const mineClaim = await mineWorkflow.claim(mineTaskId, { by: "agent:mine", harnessRun: runOfName("agent:mine"), worktree: repoRoot });
     expect(mineClaim.ok).toBe(true);
 
     const foreignWorkflow = makeTaskWorkflowService(store, `${FOREIGN_SESSION_ID}-foreign-orchestrator`);
@@ -254,7 +255,7 @@ describe("AC-REPLAY-1: replaying the 2026-08-11 diagnosis through lore invocatio
     // reason: no live worktree for the foreign session's branch — the EXACT
     // 2026-08-11 shape ("a live peer's in-flight branch", worktree already
     // gone) — `branch` is explicit since there is no worktree to auto-detect it from.
-    const foreignClaim = await foreignWorkflow.claim(foreignTaskId, { by: "agent:foreign", branch: "foreign-branch" });
+    const foreignClaim = await foreignWorkflow.claim(foreignTaskId, { by: "agent:foreign", harnessRun: runOfName("agent:foreign"), branch: "foreign-branch" });
     expect(foreignClaim.ok).toBe(true);
 
     // ── REPLAY step 1: `lore territory --json`'s own two data sources ──
@@ -392,11 +393,11 @@ describe("AC-REPLAY-1 dimension: NEGATIVE — a dead session's holder is disting
 
     const aliveWorkflow = makeTaskWorkflowService(store, `${ALIVE_SESSION_ID}-x`);
     const { taskId: aliveTaskId } = await createPlanAndTask(corpusService, "Alive holder task");
-    await aliveWorkflow.claim(aliveTaskId, { by: "agent:alive-holder", machine });
+    await aliveWorkflow.claim(aliveTaskId, { by: "agent:alive-holder", harnessRun: runOfName("agent:alive-holder"), machine });
 
     const deadWorkflow = makeTaskWorkflowService(store, `${DEAD_SESSION_ID}-x`);
     const { taskId: deadTaskId } = await createPlanAndTask(corpusService, "Dead holder task");
-    await deadWorkflow.claim(deadTaskId, { by: "agent:dead-holder", machine });
+    await deadWorkflow.claim(deadTaskId, { by: "agent:dead-holder", harnessRun: runOfName("agent:dead-holder"), machine });
 
     await sessionService.recordOwnHeartbeat(ALIVE_SESSION_ID, process.pid, machine);
     // Dead session's heartbeat is a fact from when its pid WAS alive — recorded
@@ -445,7 +446,7 @@ describe("AC-REPLAY-1 dimension: ERROR — a claim with no measurable branch sta
 
     const workflow = makeTaskWorkflowService(store, `${SESSION_ID}-x`);
     const { taskId } = await createPlanAndTask(corpusService, "Detached-HEAD task");
-    const claimed = await workflow.claim(taskId, { by: "agent:detached", worktree: repoRoot });
+    const claimed = await workflow.claim(taskId, { by: "agent:detached", harnessRun: runOfName("agent:detached"), worktree: repoRoot });
     expect(claimed.ok).toBe(true);
 
     const sessionsResult = await sessionService.getActiveSessions();
@@ -482,7 +483,7 @@ describe("AC-REPLAY-1 dimension: STATE — releasing the foreign claim removes i
 
     const foreignWorkflow = makeTaskWorkflowService(store, `${FOREIGN_SESSION_ID}-x`);
     const { taskId } = await createPlanAndTask(corpusService, "Releasable foreign task");
-    await foreignWorkflow.claim(taskId, { by: "agent:foreign-to-release", branch: "foreign-branch" });
+    await foreignWorkflow.claim(taskId, { by: "agent:foreign-to-release", harnessRun: runOfName("agent:foreign-to-release"), branch: "foreign-branch" });
 
     const gitPort = new RealGitPort(repoRoot);
     const worktreeListResult = await gitPort.worktreeList();
@@ -508,7 +509,7 @@ describe("AC-REPLAY-1 dimension: STATE — releasing the foreign claim removes i
     );
     expect(beforePartition.foreign.some((e) => e.branch === "foreign-branch")).toBe(true);
 
-    const released = await foreignWorkflow.release(taskId, { by: "agent:foreign-to-release" });
+    const released = await foreignWorkflow.release(taskId, { by: "agent:foreign-to-release", harnessRun: runOfName("agent:foreign-to-release") });
     expect(released.ok).toBe(true);
 
     const afterSessions = await sessionService.getActiveSessions();
@@ -546,7 +547,7 @@ describe("AC-REPLAY-1 dimension: REGRESSION — a session on another machine is 
 
     const workflow = makeTaskWorkflowService(store, `${SESSION_ID}-x`);
     const { taskId } = await createPlanAndTask(corpusService, "Cross-machine task");
-    await workflow.claim(taskId, { by: "agent:remote-machine", machine: "other-machine" });
+    await workflow.claim(taskId, { by: "agent:remote-machine", harnessRun: runOfName("agent:remote-machine"), machine: "other-machine" });
     // Heartbeat recorded from THIS (the "other") machine's own perspective —
     // `recordOwnHeartbeat` legitimately calls the probe too (self-verification
     // at record time), so the flag is reset below to scope the assertion to

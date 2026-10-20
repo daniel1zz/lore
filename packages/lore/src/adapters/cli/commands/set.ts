@@ -337,7 +337,7 @@ export default defineLoreCommand({
       }
     }
 
-    const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+    const resolvedActor = resolveActor(inv);
     const { app, defaults } = loadLoreApp({ inv });
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────

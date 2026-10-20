@@ -32,6 +32,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMPILED_BINARY_INPUTS, matchesAnyPattern, parseDeclaredInputs, type DeclaredInputs } from "./test-declared-inputs";
+import { rewriteNodeSpawnArgs } from "./test-known-party-spawn";
 
 const nodeRequire = createRequire(import.meta.url);
 // reason: the REAL fs, reached without an aliased specifier — `import "node:fs"` here would resolve
@@ -205,7 +206,10 @@ export function wrapChildProcessModule<T extends object>(real: T): T {
     const original = (real as Record<string, unknown>)[name];
     if (typeof original !== "function") return;
     const fn = original as AnyFn;
-    const replacement: AnyFn = function (this: unknown, ...args: unknown[]) {
+    const replacement: AnyFn = function (this: unknown, ...originalArgs: unknown[]) {
+      // reason: a `lore` start gets a known party (a registered `--harness-run`), see scripts/test-known-party-spawn.ts;
+      // shell-string starts are never rewritten.
+      const args = (shell ? undefined : rewriteNodeSpawnArgs(originalArgs)) ?? originalArgs;
       const [command, second, third] = args;
       const argv = Array.isArray(second) ? (second as unknown[]) : [];
       const options = Array.isArray(second) ? third : second;

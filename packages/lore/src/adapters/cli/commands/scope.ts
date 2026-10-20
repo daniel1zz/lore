@@ -228,7 +228,7 @@ export default defineLoreCommand({
             return exitCode(targetResult.error);
           }
 
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           return await runScopeMutation(inv, app, targetResult.value, "add", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
@@ -272,7 +272,7 @@ export default defineLoreCommand({
             return exitCode(targetResult.error);
           }
 
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           return await runScopeMutation(inv, app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
         } finally {
           app.close();

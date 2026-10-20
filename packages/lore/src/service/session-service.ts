@@ -770,8 +770,7 @@ export class SessionService {
    *      advisory-only, never rendered as a live/dead verdict). An ABSENT
    *      `session.machine` does NOT trip this — `TaskClaim.machine` is
    *      additive/optional, and absence is not evidence of a DIFFERENT
-   *      machine (mirrors `actorIdentityGuard`'s "missing on either side ⇒
-   *      not comparable, never a trip" discipline, `gate-predicates.ts`).
+   *      machine (a missing side is "not comparable", never a trip).
    *   3. No recorded heartbeat on file for this `session_id` → `"unmeasured"`
    *      (the session never called `recordOwnHeartbeat` — on this machine or
    *      at all — or its heartbeat was never written).

@@ -20,7 +20,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NoOpTelemetry } from "@lore/core";
+import { NoOpTelemetry, nameOfAgentRun, type RunId } from "@lore/core";
 import { mirrorDirRelative, MIRROR_TYPES, scriptChainReachesTarget, type MirrorDocType } from "../export-spec-mirror-core.js";
 import { InMemoryStore } from "../../packages/lore/src/store/in-memory-store.js";
 import { withWriteContext } from "../../packages/lore/src/store/write-context-store.js";
@@ -197,8 +197,10 @@ export function measureAllTypesParity(root: string, corpusCwd: string): AllTypes
  * corpus: `MigrationService`/`InMemoryStore` operate entirely in memory.
  */
 function makeThrowawayApp(): App {
-  // reason: the throwaway app's writes (migration) need an author; it is a fixed label, never a process read.
-  const store = withWriteContext(new InMemoryStore(), { identity: { harnessRun: null, claimed: "mirror-integrity", claimedSource: "flag" } });
+  // reason: the throwaway app's writes (migration) need a known party (BR-1351); it is a fixed run of an in-memory store that has
+  // no registry to verify against, never a process read.
+  const run = "cc:mirror-integrity" as RunId;
+  const store = withWriteContext(new InMemoryStore(), { identity: { harnessRun: run, claimed: nameOfAgentRun(run), claimedSource: "run" } });
   const telemetry = new NoOpTelemetry();
   return {
     warn: () => undefined,
