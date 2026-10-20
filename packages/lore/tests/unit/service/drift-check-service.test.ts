@@ -295,21 +295,21 @@ describe("NEGATIVE — malformed grammar rejected, doc unchanged", () => {
 
 describe("task target accepts symbol-scoped anchors, refuses folder-symbol and malformed ones", () => {
   async function makeTask() {
-    const { corpusService, taskWorkflowService } = makeServices();
+    const { store, corpusService, taskWorkflowService } = makeServices();
     const prdId = await createPrd(corpusService);
     const specId = await createSpec(corpusService, prdId);
     const planId = await createPlan(corpusService, specId);
     const taskId = await createTask(corpusService, planId);
-    return { corpusService, taskWorkflowService, taskId };
+    return { store, taskWorkflowService, taskId };
   }
 
   it("TaskWorkflowService.addAnchors accepts path#Symbol and stores the entry", async () => {
-    const { corpusService, taskWorkflowService, taskId } = await makeTask();
+    const { store, taskWorkflowService, taskId } = await makeTask();
 
     const result = await taskWorkflowService.addAnchors(taskId, ["src/a.ts#Foo"], { by: "tester" });
     expect(result.ok).toBe(true);
-    const after = await corpusService.get(taskId);
-    if (!after.ok) throw new Error("get failed");
+    const after = await store.find(taskId);
+    if (!after.ok || after.value === null) throw new Error("task re-fetch failed");
     expect(after.value.extra["file_anchors"]).toContain("src/a.ts#Foo");
   });
 
