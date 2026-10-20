@@ -55,12 +55,13 @@
  * Source: SPEC-045 §Design Decisions D4, D6, D9; §Acceptance Criteria AC-DR-2, AC-DR-3, AC-DR-8
  */
 
-import { err, ok, type Result } from "@lore/core";
+import { err, isTerminalStatus, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
   computeDrift,
   normalizeCodeAnchorEntries,
   classifyCodeAnchor,
+  serializeCodeAnchor,
   type DriftInputEntry,
   collectAnchorProbes,
   type FsProbe,
@@ -326,6 +327,69 @@ export class DriftCheckService {
     if (!normalizedResult.ok) return normalizedResult;
 
     return this.writeCodeAnchors(doc, normalizedResult.value, "set", now);
+  }
+
+  // ── Anchors follow moved files (BR-1355) ───────────────────────────────────
+
+  /**
+   * Rewrites the `code_anchors` that name a moved file to its new path (`#Symbol` / `#"title"` suffixes kept) on every
+   * live spec and knowledge doc, ONE version per document, through the shared write route, attributed to the landing
+   * (`landing` names the branch and commit in the change summary and the audit details). Called by `lore integrate`
+   * after main moved. A directory anchor is left alone (a directory is not moved by a file rename); a document in a
+   * terminal status is left alone (nothing judges it); an unreadable stored anchor is left byte-identical.
+   * Idempotent: a second call finds nothing to rewrite and writes nothing. Every document is attempted; the first
+   * write failure is returned after the rest were tried.
+   *
+   * @param moves - `{from, to}` repo-relative paths the landed branch renamed.
+   * @param landing - the landing the rewrite belongs to.
+   * @returns the slugs of the documents that were rewritten (empty: no document anchored a moved file).
+   * @throws STORE_ERROR (findMany failure), STALE_VERSION / foreign-corpus refusal from the write route.
+   */
+  async followMovedFiles(
+    moves: readonly { readonly from: string; readonly to: string }[],
+    landing: { readonly branch: string; readonly landing_commit: string },
+    now: () => string = defaultNow,
+  ): Promise<Result<string[], LoreError>> {
+    if (moves.length === 0) return ok([]);
+    const target = new Map(moves.map((move) => [move.from, move.to] as const));
+    const armedResult = await this.loadArmedDocsByType();
+    if (!armedResult.ok) return armedResult;
+    const rewrittenSlugs: string[] = [];
+    let firstFailure: LoreError | undefined;
+    for (const armedDocs of armedResult.value.values()) {
+      for (const { doc } of armedDocs) {
+        if (isTerminalStatus(doc.status, doc.type)) continue;
+        const stored = extractCodeAnchorStrings(doc);
+        let moved = false;
+        const rewritten = stored.map((raw) => {
+          const classified = classifyCodeAnchor(raw);
+          if (classified.kind !== "valid" || classified.anchor.isDir) return raw;
+          const to = target.get(classified.anchor.path);
+          if (to === undefined) return raw;
+          moved = true;
+          return serializeCodeAnchor({ ...classified.anchor, path: to });
+        });
+        if (!moved) continue;
+        const anchors = [...new Set(rewritten)];
+        const written = await this.writer.writeDoc({
+          doc,
+          patch: { extra: { ...doc.extra, code_anchors: anchors } },
+          action: "update",
+          changeSummary: `lore integrate: anchors follow the files ${landing.branch} moved (${landing.landing_commit.slice(0, 12)})`,
+          auditAction: "update",
+          auditDetails: { operation: "follow-moved-files", branch: landing.branch, landing_commit: landing.landing_commit, moves: moves.map((m) => ({ ...m })) },
+          auditSessionId: `landing-anchors-${doc.id}`,
+          lock: "none",
+          now: now(),
+        });
+        if (!written.ok) {
+          firstFailure ??= written.error;
+          continue;
+        }
+        rewrittenSlugs.push(doc.slug);
+      }
+    }
+    return firstFailure === undefined ? ok(rewrittenSlugs) : err(firstFailure);
   }
 
   // ── Private Helpers ───────────────────────────────────────────────────────
