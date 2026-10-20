@@ -48,9 +48,10 @@ describe("BR-1346 — a released holder never blocks another branch's landing", 
     const t2 = f.createTask("R2", ["src/shared.ts"]);
     f.makeBranch("rel-1", { "src/shared.ts": shared(10, 1) });
     f.makeBranch("rel-2", { "src/shared.ts": shared(1, 20) });
+    // sequential, as real sessions work: the claim gate itself refuses a second claim while the first is held
     claimOn(f, t1, "rel-1");
-    claimOn(f, t2, "rel-2");
     release(f, t1);
+    claimOn(f, t2, "rel-2");
     release(f, t2);
 
     const first = f.integrate("rel-1");
