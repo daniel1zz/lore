@@ -293,7 +293,7 @@ describe("plan-close cascade (R1) — REGRESSION (audit chain integrity)", () =>
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
 
-      const verifyResult = await app.auditService.verify({ since: "2020-01-01T00:00:00.000Z" });
+      const verifyResult = await app.auditService.verify();
       expect(verifyResult.ok).toBe(true);
       if (verifyResult.ok) {
         expect(verifyResult.value.clean).toBe(true);

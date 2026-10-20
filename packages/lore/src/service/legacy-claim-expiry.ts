@@ -1,5 +1,5 @@
 /**
- * `expireRunlessClaims` — the one-time data step of the schema upgrade to schema 28 (BR-1352): every claim lease that
+ * `expireRunlessClaims` — the one-time data step of the schema upgrade to schema 27 (BR-1352): every claim lease that
  * names no run (written before leases were compared by run: the `harness_run` key is absent, or null) is expired, so
  * no stored lease belongs to nobody.
  *
@@ -74,7 +74,7 @@ export async function expireRunlessClaims(
         action: "update",
         changeSummary: `Claim by ${holder} expired by the schema upgrade: it was written before claims compared runs and names no run (BR-1352)`,
         auditAction: "release",
-        auditDetails: { reason: "expired_pre_run_claim", previous_holder: holder, migration: 28 },
+        auditDetails: { reason: "expired_pre_run_claim", previous_holder: holder, migration: 27 },
         auditSessionId: EXPIRY_AUDIT_SESSION_ID,
         lock: "none",
         by,

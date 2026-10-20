@@ -1,5 +1,5 @@
 /**
- * @layer core-unit — the retired claim-time identity setting: detection, refusal text and line-wise removal.
+ * @layer core-unit — the retired claim-time identity setting: line-wise removal (`lore migrate config-keys`).
  *
  * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-4
  *
@@ -8,15 +8,8 @@
  * STATE (a second removal finds nothing) / REGRESSION (every other byte of the file is identical).
  */
 import { describe, it, expect } from "vitest";
-import {
-  detectRetiredActorIdentityKey,
-  isRetiredActorIdentityError,
-  removeRetiredActorIdentityGate,
-  retiredActorIdentityMessage,
-} from "@lore/core";
-import yaml from "yaml";
+import { removeRetiredActorIdentityGate } from "../src/retired-actor-identity-migration.js";
 
-const COMMAND = "lore migrate config-keys --apply";
 const KEY = ["actor", "identity"].join("_");
 
 function removal(text: string) {
@@ -24,28 +17,6 @@ function removal(text: string) {
   if (!result.ok) throw new Error(`unexpected error: ${JSON.stringify(result.error)}`);
   return result.value;
 }
-
-describe("detectRetiredActorIdentityKey", () => {
-  it("HAPPY: names the setting and the command, whatever the value", () => {
-    const parsed = yaml.parse(`workflow:\n  gates:\n    task-claim:\n      ${KEY}:\n        enabled: true\n`);
-    const error = detectRetiredActorIdentityKey(parsed, COMMAND);
-
-    expect(error).toMatchObject({ code: "VALIDATION_ERROR", value: { enabled: true } });
-    expect(error && "message" in error ? error.message : "").toContain(COMMAND);
-    expect(error && isRetiredActorIdentityError(error)).toBe(true);
-    expect(retiredActorIdentityMessage(COMMAND)).toContain(KEY);
-  });
-
-  it("NEGATIVE: a config without it, or without the gate at all, is not refused", () => {
-    expect(detectRetiredActorIdentityKey(yaml.parse("workflow:\n  gates:\n    task-claim:\n      anchor_overlap:\n        enabled: true\n"), COMMAND)).toBeUndefined();
-    expect(detectRetiredActorIdentityKey(yaml.parse("project:\n  name: x\n"), COMMAND)).toBeUndefined();
-    expect(detectRetiredActorIdentityKey(null, COMMAND)).toBeUndefined();
-  });
-
-  it("BOUNDARY: the same key under another gate is not this setting", () => {
-    expect(detectRetiredActorIdentityKey(yaml.parse(`workflow:\n  gates:\n    plan-close:\n      ${KEY}:\n        enabled: false\n`), COMMAND)).toBeUndefined();
-  });
-});
 
 describe("removeRetiredActorIdentityGate", () => {
   it("HAPPY: a lone setting is cut together with every parent mapping it leaves empty", () => {

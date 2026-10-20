@@ -28,7 +28,7 @@
  *     - POST /api/docs/:id/restore → 200 with doc
  *     - GET /api/judgments/:docId → 200 with { latest, history } (SPEC-033 F1)
  *     - GET /api/audit/:docId → 200 with the doc's audit entries, raw actor strings (SPEC-033 F1)
- *     - GET /api/audit/verify → 200 with { clean, misses, since } (SPEC-033 F1)
+ *     - GET /api/audit/verify → 200 with { clean, misses, audited, reconstructed } (SPEC-033 F1); ?since= → 422
  *     - GET /api/calibration/stats → 200 with CalibrationStats[] (SPEC-033 F1)
  *     - GET /api/ready/:planIdOrSlug → 200 with ReadyRecord[] parity with the
  *       direct TaskWorkflowService.ready() call (SPEC-037 D1, AC-37-1)
@@ -122,12 +122,12 @@ function makeApp(): App {
     // dashboard-routes.test.ts fix for the same reason: approve/reject's calibration
     // hook also depends on a real judgmentService).
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
-    auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditService: new AuditService(store),
     // reason: this stub composes an in-memory-style App, so verify runs in-loop (the runner choice is by store kind);
     // the anchor root has no `.lore/audit-anchor.json`, so the anchor reads as absent.
     auditVerifyRunner: buildAuditVerifyRunner(
-      { kind: "memory", auditService: new AuditService(store, { verifySince: FAR_PAST }) },
-      { verifySince: FAR_PAST, anchorRoot: "/nonexistent-lore-anchor-root" },
+      { kind: "memory", auditService: new AuditService(store) },
+      { anchorRoot: "/nonexistent-lore-anchor-root" },
     ),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
@@ -835,23 +835,22 @@ describe("GET /api/audit/verify", () => {
       expect(res!.status).toBe(200);
       const body = await parseResponse(res!);
       expect(body.ok).toBe(true);
-      const data = body.data as { clean: boolean; misses: unknown[]; since: string };
+      const data = body.data as { clean: boolean; misses: unknown[]; audited: number; reconstructed: number };
       expect(data.clean).toBe(true);
       expect(data.misses).toEqual([]);
-      expect(typeof data.since).toBe("string");
+      expect(data).toMatchObject({ audited: 1, reconstructed: 0 });
     });
+  });
 
-    it("accepts a ?since= override matching AuditService.verify's opts.since", async () => {
-      await createPrd("Since Override Doc");
+  describe("negative", () => {
+    it("REGRESSION: a ?since= cut-off is refused 422 — the per-call option is removed, so no date can hide a version", async () => {
+      await createPrd("Since Refused Doc");
       const { req, url } = makeGetRequest("/api/audit/verify?since=2099-01-01T00:00:00.000Z");
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
-      expect(res!.status).toBe(200);
+      expect(res!.status).toBe(422);
       const body = await parseResponse(res!);
-      const data = body.data as { clean: boolean; since: string };
-      // reason: a watermark in the far future excludes every real versions row from
-      // the reconcile walk — always reports clean (mirrors AuditService's own contract).
-      expect(data.clean).toBe(true);
-      expect(data.since).toBe("2099-01-01T00:00:00.000Z");
+      expect(body.ok).toBe(false);
+      expect(JSON.stringify(body)).toContain("lore migrate audit-backfill --apply");
     });
   });
 });

@@ -82,7 +82,6 @@ export const TEAM_FIELD_SPECS: readonly FieldSpec[] = [
     type: "boolean",
   },
 
-  { path: "audit.verify_since", label: "Audit verify watermark (ISO 8601)", section: "audit", type: "string" },
 
   { path: "verify.default_timeout_ms", label: "Default verify timeout (ms)", section: "verify", type: "number" },
   {

@@ -46,7 +46,7 @@ import {
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
-import { removeRetiredActorIdentityGate, RETIRED_ACTOR_IDENTITY_FIELD } from "./retired-claim-gate-setting.js";
+import { removeRetiredActorIdentityGate, RETIRED_ACTOR_IDENTITY_FIELD } from "./retired-actor-identity-migration.js";
 
 /** The invocation environment the global-config path resolvers read (`Invocation.env`). */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;

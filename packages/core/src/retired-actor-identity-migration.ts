@@ -1,13 +1,12 @@
 /**
- * The retired claim-time identity setting of the `task-claim` gate: its refusal, its detection and its removal.
+ * The removal of the retired claim-time identity setting of the `task-claim` gate, for `lore migrate config-keys`.
  *
  * Purpose: claims compare RUNS only (spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 4,
- * BR-1040), so the setting that switched the same-name collision guard has nothing left to switch. This module is the
- * ONE place that still names it: a config carrying it is refused loudly (the loader), and `lore migrate config-keys`
- * removes it. Nothing reads its value.
+ * BR-1040), so the setting that switched the same-name collision guard no longer exists. The strict config schema
+ * rejects it like any unknown key; this module is the ONE place that still names it, so that `lore migrate config-keys`
+ * can cut it out of a project config. Nothing reads its value and no loader special-cases it.
  *
- * Public surface: {@link RETIRED_ACTOR_IDENTITY_FIELD}, {@link retiredActorIdentityMessage},
- * {@link isRetiredActorIdentityError}, {@link detectRetiredActorIdentityKey}, {@link removeRetiredActorIdentityGate},
+ * Public surface: {@link RETIRED_ACTOR_IDENTITY_FIELD}, {@link removeRetiredActorIdentityGate},
  * {@link RetiredActorIdentityRemoval}.
  *
  * Invariants:
@@ -24,44 +23,6 @@ import type { Result, LoreError } from "./errors.js";
 
 /** The `LoreError.field` of the retired `task-claim` gate setting that `lore migrate config-keys` removes. */
 export const RETIRED_ACTOR_IDENTITY_FIELD = 'workflow.gates."task-claim".actor_identity';
-
-/** The refusal text for a config that still names the retired claim-time identity setting; `migrateCommand` is the command that removes it. */
-export function retiredActorIdentityMessage(migrateCommand: string): string {
-  return (
-    `${RETIRED_ACTOR_IDENTITY_FIELD} was removed: claims compare runs only (a name never decides), so there is nothing left for it to switch. ` +
-    `Run \`${migrateCommand}\` to remove it from .lore/config.yaml.`
-  );
-}
-
-/**
- * Whether `error` is the refusal about the retired claim-time identity setting. The loader fails LOUD on it instead of
- * falling back to default settings: a silent fallback would run every other gate unconfigured.
- */
-export function isRetiredActorIdentityError(error: LoreError): boolean {
-  return error.code === "VALIDATION_ERROR" && error.field === RETIRED_ACTOR_IDENTITY_FIELD;
-}
-
-/**
- * Names the retired `workflow.gates."task-claim".actor_identity` setting when a YAML-parsed config still carries it,
- * whatever its value. The strict config schema would also refuse the key as unknown; this refusal exists so the loader
- * can fail loud by name and name the fix (the other unknown-key refusals fall back silently).
- *
- * @param raw - the YAML-parsed config
- * @param migrateCommand - the command that removes the setting, named by the refusal
- * @returns a VALIDATION_ERROR payload naming the setting and the migrate command, or `undefined` when it is absent
- */
-export function detectRetiredActorIdentityKey(raw: unknown, migrateCommand: string): LoreError | undefined {
-  const at = (value: unknown, key: string): unknown =>
-    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
-  const entry = at(at(at(raw, "workflow"), "gates"), "task-claim");
-  if (typeof entry !== "object" || entry === null || !("actor_identity" in entry)) return undefined;
-  return {
-    code: "VALIDATION_ERROR",
-    field: RETIRED_ACTOR_IDENTITY_FIELD,
-    message: retiredActorIdentityMessage(migrateCommand),
-    value: (entry as Record<string, unknown>)["actor_identity"],
-  } satisfies LoreError;
-}
 
 /** What {@link removeRetiredActorIdentityGate} computed for a config text. */
 export interface RetiredActorIdentityRemoval {

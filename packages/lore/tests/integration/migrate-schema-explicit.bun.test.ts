@@ -1,5 +1,4 @@
 // @spawns packages/lore/src/index.ts
-// @reads packages/lore/src/store/migrations/**
 /**
  * Corpus schema upgrades run ONLY through `lore migrate schema`
  * (task-skill-implement-corpus-schema-upgrades-run-only-through, user decision 2026-10-19).
@@ -19,7 +18,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SQLiteStore } from "../../src/store/sqlite-store";
@@ -29,19 +28,7 @@ import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version";
 const PKG_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const CLI_ENTRY = join(PKG_ROOT, "src", "index.ts");
 const TEST_TIMEOUT_MS = 90_000;
-/**
- * The schema one real migration behind the latest: the highest `migration-NNN` number below `LATEST_SCHEMA_VERSION`.
- * Read from the migrations directory, NOT `LATEST_SCHEMA_VERSION - 1`: migration numbers can have a gap while two
- * branches have each taken a number (028 landed while 027 was still on another branch), and a store stopped at a
- * number no migration produces is not "genuinely one behind".
- */
-const BEHIND = Math.max(
-  ...readdirSync(join(new URL("../../src/store/migrations/", import.meta.url).pathname))
-    .map((name) => /^migration-(\d+)\.ts$/.exec(name)?.[1])
-    .filter((digits): digits is string => digits !== undefined)
-    .map(Number)
-    .filter((number) => number < LATEST_SCHEMA_VERSION),
-);
+const BEHIND = LATEST_SCHEMA_VERSION - 1;
 
 let sandbox = "";
 let corpusDir = "";

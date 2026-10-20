@@ -54,7 +54,7 @@ import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { MIGRATION_026_SQL, MigrationFailedError } from "./migrations/migration-026.js";
-import { MIGRATION_028_SQL } from "./migrations/migration-028.js";
+import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -841,9 +841,9 @@ export class TursoStore implements StoreInterface {
         }
       }
 
-      if (currentVersion < 28) {
-        // reason: migration-028 only moves user_version (see migration-028.ts).
-        await this.client.executeMultiple(MIGRATION_028_SQL);
+      if (currentVersion < 27) {
+        // reason: migration-027 only moves user_version (see migration-027.ts).
+        await this.client.executeMultiple(MIGRATION_027_SQL);
       }
     })();
 

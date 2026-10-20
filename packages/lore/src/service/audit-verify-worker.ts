@@ -37,9 +37,8 @@ async function runJob(job: AuditVerifyJob): Promise<Result<AuditVerifyResult, Lo
   let store: (StoreInterface & { close(): void }) | undefined;
   try {
     store = await openStore(job);
-    const service = new AuditService(store, { verifySince: job.verifySince });
+    const service = new AuditService(store);
     return await service.verify({
-      ...(job.since !== undefined ? { since: job.since } : {}),
       ...(job.anchor !== undefined ? { anchor: job.anchor } : {}),
     });
   } catch (e) {

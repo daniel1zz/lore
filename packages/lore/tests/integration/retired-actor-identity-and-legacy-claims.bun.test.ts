@@ -5,7 +5,7 @@
  * state 4; BR-1352).
  *
  * Contract under test, in throwaway corpora:
- *   - a project config naming `workflow.gates."task-claim".actor_identity` is refused (exit 4) naming the key, and
+ *   - a project config naming `workflow.gates."task-claim".actor_identity` is refused by the strict config schema as an unknown key naming it, and
  *     `lore migrate config-keys` previews and (with `--apply`) removes it, leaving every other byte of the file;
  *     a second `--apply` changes nothing;
  *   - a store write of a claim that names no run returns VALIDATION_ERROR on `extra.claim.harness_run` and writes
@@ -28,6 +28,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadConfigFromString } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { withWriteContext } from "../../src/store/write-context-store.js";
 import { bareDocWriter } from "../../src/service/corpus-service.js";
@@ -89,14 +90,25 @@ describe("AC-HID-4: the retired setting is refused", () => {
     expect(preview.stdout).toContain("no retired keys");
   });
 
-  it("a config naming the retired key is refused (exit 4) naming the key and the migrate command", () => {
+  it("the strict config schema refuses the retired key as an unknown key, naming it", () => {
+    const parsed = loadConfigFromString(`project:\n  name: demo\n${RETIRED_BLOCK}`);
+
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error.code).toBe("VALIDATION_ERROR");
+      expect(JSON.stringify(parsed.error)).toContain(RETIRED_KEY);
+    }
+    // The control: the same config without the key parses.
+    expect(loadConfigFromString("project:\n  name: demo\n").ok).toBe(true);
+  });
+
+  it("a project config carrying the key is not rewritten by any command but `migrate config-keys`", () => {
     appendFileSync(configPath(corpus), RETIRED_BLOCK);
+    const before = readFileSync(configPath(corpus), "utf8");
 
-    const refused = corpus.lore(["list"], AGENT_RUN);
+    corpus.lore(["list"], AGENT_RUN);
 
-    expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain(RETIRED_KEY);
-    expect(refused.stderr).toContain("lore migrate config-keys --apply");
+    expect(readFileSync(configPath(corpus), "utf8")).toBe(before);
   });
 
   it("`migrate config-keys` previews the removal without writing, then `--apply` removes the key and nothing else", () => {
@@ -256,7 +268,7 @@ describe("AC-HID-4: the schema upgrade expires the claims that name no run", () 
     const dry = corpus.lore(["migrate", "schema", "--dry-run"], AGENT_RUN);
 
     expect(dry.exitCode).toBe(0);
-    expect(dry.stdout).toContain("migration-028");
+    expect(dry.stdout).toContain("migration-027");
     expect(docRow(corpus, legacy).extra["claim"]).toBeDefined();
   });
 

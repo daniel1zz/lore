@@ -27,7 +27,6 @@ export * from "./errors.js";
 export * from "./types.js";
 export * from "./schemas.js";
 export * from "./config.js";
-export * from "./retired-claim-gate-setting.js";
 export * from "./telemetry.js";
 export * from "./graph-utils.js";
 export * from "./doc-type-rules.js";
