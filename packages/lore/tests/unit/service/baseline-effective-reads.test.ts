@@ -114,8 +114,6 @@ const DIRECT_READ_ALLOWLIST: Record<string, string> = {
   "packages/lore/src/store/index-rows.ts": "index derivation: the registry and rule_depends rows follow the approved versions stored in these keys",
   "packages/lore/src/store/migrations/migration-027.ts": "the one-time conversion that splits stored items into approved and pending versions",
   "packages/lore/src/ai/review-template.ts":"review bundle renderer; reworked per item by the review/approve task",
-  "packages/lore/src/adapters/cli/commands/baseline.ts":
-    "five reads (rule show statement, leaf commands, coverage rules, depends and map echoes) still direct: the file is held by task-identity-resolves-only-to-a-run-a-human-session-an-http; move them to the accessor when that claim releases and delete this entry",
   "packages/core/src/review-checks.ts":"review-time checks on the node under review; reworked per item by the review/approve task",
 };
 
