@@ -49,6 +49,12 @@ export default defineLoreCommand({
         "recorded on the approve audit entry as override_no_judgment. Mutually exclusive " +
         "with --override-judgment.",
     },
+    item: {
+      type: "string",
+      description:
+        "Baseline node only (BR-1338): approve this one item (BR-n | AS-n | AD-n | node) instead of every pending " +
+        "revision a review saw. Items not named are untouched.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -66,6 +72,7 @@ export default defineLoreCommand({
           ? { overrideJudgmentId: args["override-judgment"] }
           : {}),
         ...(args["override-no-judgment"] === true ? { overrideNoJudgment: true } : {}),
+        ...(typeof args.item === "string" ? { item: args.item } : {}),
       });
 
       if (!result.ok) {
@@ -100,6 +107,11 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
+      } else if (doc.promoted_items !== undefined) {
+        // reason: BR-1338/BR-1339 — a baseline approval names what it promoted and what is still pending, so a partial
+        // approval is never read as a whole one; the status printed is the node's derived status.
+        const left = doc.still_pending ?? [];
+        printLine(inv.io.stdout, `Approved ${doc.promoted_items.join(", ")} of ${doc.slug} → status: ${doc.status}${left.length > 0 ? ` (${left.length} pending: ${left.join(", ")})` : ""} (v${doc.version})`);
       } else {
         printLine(inv.io.stdout, `Approved ${doc.slug} → status: approved (v${doc.version})`);
       }

@@ -6,7 +6,8 @@
  *   `spec-baseline-slice-1-rules-with-permanent-ids-ac-citations` §C1, §C3).
  * Public surface: `baselineExtraSchema`, `baselineRuleSchema`, `glossaryEntrySchema`,
  *   `BASELINE_RULE_ID_PATTERN` (BR), `STANDARD_RULE_ID_PATTERN` (AS), `DEBT_RULE_ID_PATTERN` (AD),
- *   `baselinePendingSchema` (pending revisions beside the approved versions, BR-1340),
+ *   `baselinePendingSchema` (pending revisions beside the approved versions, BR-1340), `countPendingItems`,
+ *   `deriveBaselineStatus` (node status is derived from its items, BR-1339),
  *   `ANY_RULE_ID_PATTERN`, `ruleIdPrefix`, `ruleIdPrefixOfNode`, `isBusinessBaseline`, `isNodeOfTree`,
  *   `validateBaselineParent`, `isLawfulRuleLifecycleTransition`, `lintRuleStatement`, and their
  *   derived types.
@@ -23,6 +24,7 @@
  *   (service layer) owns the filesystem probe.
  */
 import { z } from "zod";
+import type { DocStatus } from "./types.js";
 
 /** Permanent business rule id grammar: `BR-` + positive integer without leading zero. */
 export const BASELINE_RULE_ID_PATTERN = /^BR-[1-9][0-9]*$/;
@@ -171,6 +173,11 @@ export const baselineLabelSchema = z.string().refine((label) => label.trim() !==
 export const pendingRuleRevisionSchema = z.object({
   revision_id: z.string().min(1),
   rule: baselineRuleSchema,
+  /**
+   * Id of the leaf the rule moves to when this revision is approved (`lore rule set --move-to`). The rule stays on its
+   * source leaf, listing its approved version, until then.
+   */
+  move_to: z.string().min(1).optional(),
 });
 export type PendingRuleRevision = z.infer<typeof pendingRuleRevisionSchema>;
 
@@ -181,6 +188,12 @@ export type PendingRuleRevision = z.infer<typeof pendingRuleRevisionSchema>;
  */
 export const pendingNodeRevisionSchema = z.object({
   revision_id: z.string().min(1),
+  /**
+   * `true` on a node created and never approved: it has no approved version to protect, so its own-part writes
+   * (title, body, label, glossary, depends_on, commands) land directly and this marker keeps the node `draft` until the
+   * first approval.
+   */
+  initial: z.literal(true).optional(),
   title: z.string().min(1).optional(),
   content: z.string().optional(),
   label: baselineLabelSchema.nullable().optional(),
@@ -196,6 +209,25 @@ export const baselinePendingSchema = z.object({
   node: pendingNodeRevisionSchema.optional(),
 });
 export type BaselinePending = z.infer<typeof baselinePendingSchema>;
+
+/** Number of items that hold a pending revision: each pending rule, plus the node's own part when it has one. */
+export function countPendingItems(pending: BaselinePending | undefined): number {
+  if (pending === undefined) return 0;
+  return Object.keys(pending.rules ?? {}).length + (pending.node !== undefined ? 1 : 0);
+}
+
+/**
+ * The status a baseline node holds given its pending items (BR-1339): `approved` when nothing is pending, `draft`
+ * otherwise. Only `approved` and `draft` are derived; any other status (`in-review`, `active`, `archived`,
+ * `deprecated`) is returned as is — a lifecycle move that belongs to another verb.
+ *
+ * @param current - the node's stored status
+ * @param pendingCount - {@link countPendingItems} of its `extra.pending`
+ */
+export function deriveBaselineStatus(current: DocStatus, pendingCount: number): DocStatus {
+  if (current !== "approved" && current !== "draft") return current;
+  return pendingCount > 0 ? "draft" : "approved";
+}
 
 /**
  * `extra` of a `baseline` doc.

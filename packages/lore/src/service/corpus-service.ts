@@ -116,6 +116,7 @@ import { computeRecoverableUntil } from "./soft-delete-window.js";
 import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
 import { computeStampVerdictDistribution, type StampVerdictDistribution } from "./gate-predicates.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+import { initialPending, proposeNodePart, statusFor } from "./baseline-pending.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
@@ -923,6 +924,11 @@ export interface ProposedRuleReserveRequest {
   readonly by?: string;
   /** See {@link DocWriteRequest.foreignIntent}. */
   readonly foreignIntent?: boolean;
+  /**
+   * The docs this write lands in, when they are baseline-scoped authoring targets (a direct pending rule add writes the
+   * leaf itself): a claim lease covering them lets the write cross into a foreign corpus, as for {@link CorpusService.allocateRule}.
+   */
+  readonly targets?: readonly DocRecord[];
 }
 
 /** A store-owned rule move, as {@link CorpusService.moveRule} takes it. */
@@ -1385,7 +1391,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   async reserveProposedRule(
     request: ProposedRuleReserveRequest,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(request.foreignIntent === true);
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(
+      request.foreignIntent === true,
+      request.targets !== undefined ? [...request.targets] : undefined,
+    );
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -2248,10 +2257,14 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // of the spec_kind-defaulted extra — the two defaults are independent
     // (never both apply to the same doc type) but composed this way so a
     // future third create-time extra transform can chain the same way.
-    const resolvedExtra: Record<string, unknown> =
+    const anchoredExtra: Record<string, unknown> =
       normalizedFileAnchors !== undefined
         ? { ...specKindDefaultedExtra, file_anchors: normalizedFileAnchors }
         : specKindDefaultedExtra;
+    // reason: BR-1339 — a baseline node is born with its own part awaiting a first approval (`pending.node.initial`), so it
+    // is `draft` by derivation, not by a status nobody may set; the first approval removes the marker.
+    const resolvedExtra: Record<string, unknown> =
+      data.type === "baseline" && anchoredExtra["pending"] === undefined ? { ...anchoredExtra, pending: initialPending() } : anchoredExtra;
 
     // SPEC-103 §Mechanisms M1 — ledger fast-track (D1: knowledge sub_types
     // assessment/retro/handoff/uat ONLY; `task` is deliberately excluded, see
@@ -2879,6 +2892,25 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     const existing = findResult.value;
     const now = new Date().toISOString();
 
+    // BR-1339 — a baseline node's status is derived from its items (approved iff nothing is pending): no command sets it.
+    // A resend of the stored value is not a change (the dashboard and MCP resend whole forms).
+    if (
+      existing.type === "baseline" &&
+      (parsedPatch.data.status === "approved" || parsedPatch.data.status === "draft") &&
+      parsedPatch.data.status !== existing.status
+    ) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "status",
+        message:
+          `a baseline node's status is derived from its items: ${existing.slug} is ${existing.status} and becomes approved when nothing is pending. ` +
+          `Review it (\`lore review ${existing.slug}\`), then approve what the review saw (\`lore approve ${existing.slug}\`, or \`--item <BR-n|node>\`); ` +
+          `discard a revision with \`lore reject ${existing.slug} --item <BR-n|node>\``,
+        value: parsedPatch.data.status,
+        rule: "BR-1339",
+      });
+    }
+
     // BR-1071 (issues #65 #50) — setting a status to approved IS an approval: it takes the approve path
     // (judgment, spec/plan-promote, rule-citation checks; an `approve` version + audit row), never a
     // direct write that skips them. A pure approval carries no other change (D4): a changed field or a
@@ -2995,9 +3027,12 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // and fails if EITHER call site stops following it.
     // reason: a correction on a locked record writes ONE version and keeps its status (D15) — it skips this
     // demotion, and `isApprovedAutoResetToDraft` staying false also skips the ledger re-approve second write.
-    const demotedStatus = correctionApplies
-      ? existing.status
-      : resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
+    // reason: BR-722 — a baseline node is never demoted by an edit: a body or title edit records a PENDING revision of the
+    // node's own part (below) and the status is derived from the pending items (BR-1339).
+    const demotedStatus =
+      correctionApplies || existing.type === "baseline"
+        ? existing.status
+        : resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
     const isApprovedAutoResetToDraft = demotedStatus !== existing.status;
     if (isApprovedAutoResetToDraft) {
       newStatus = demotedStatus;
@@ -3163,6 +3198,28 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
             `Use \`${violation.writer}\` instead, or pass the current value byte-equal.`,
           value: parsedPatch.data.extra[violation.key],
         });
+      }
+    }
+
+    // BR-722 — a body or title edit of a baseline node is a pending revision of the node's own part, never a write to the
+    // approved text (a never-approved node has none to protect, so its text is written directly). Runs after the
+    // dedicated-key guard so the guard still sees the caller's own `extra`.
+    if (existing.type === "baseline" && (docPatch.title !== undefined || docPatch.content !== undefined)) {
+      const proposal = proposeNodePart(
+        { title: existing.title, content: existing.content, extra: docPatch.extra ?? existing.extra },
+        {
+          ...(docPatch.title !== undefined ? { title: docPatch.title } : {}),
+          ...(docPatch.content !== undefined ? { content: docPatch.content } : {}),
+        },
+      );
+      delete docPatch.title;
+      delete docPatch.content;
+      if (proposal.kind === "pending") {
+        docPatch.extra = proposal.extra;
+        docPatch.status = statusFor(existing.status, proposal.extra);
+      } else if (proposal.kind === "direct") {
+        if (proposal.title !== undefined) docPatch.title = proposal.title;
+        if (proposal.content !== undefined) docPatch.content = proposal.content;
       }
     }
 

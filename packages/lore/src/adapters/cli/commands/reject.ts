@@ -33,6 +33,12 @@ export default defineLoreCommand({
       type: "string",
       description: "Rejection reason (stored in audit log)",
     },
+    item: {
+      type: "string",
+      description:
+        "Baseline node only (BR-1338): discard the pending revision of this one item (BR-n | AS-n | AD-n | node); " +
+        "the item reads as its approved version again. Items not named are untouched.",
+    },
     "calibration-note": {
       type: "string",
       description: "Optional note recorded as the calibration record's delta_reasons[0]",
@@ -50,6 +56,24 @@ export default defineLoreCommand({
       const reviewer = resolveActor(inv);
       const opts: Record<string, unknown> = { reviewer };
       if (args.reason !== undefined) opts["reason"] = args.reason;
+
+      // BR-1338 — `--item` discards ONE pending revision of a baseline node; no judgment calibration applies (the
+      // human decision is about a revision, not about the node's reviewed version).
+      if (typeof args.item === "string") {
+        const discarded = await app.reviewService.rejectItem(args.id as DocId, args.item, opts);
+        if (!discarded.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, discarded.error) + "\n");
+          return exitCode(discarded.error);
+        }
+        const { doc, discarded: revision } = discarded.value;
+        if (args.json) {
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ...doc, discarded_item: revision.item, discarded_revision: revision.revisionId } }, null, 2));
+        } else {
+          printLine(inv.io.stdout, `Discarded the pending revision of ${revision.item} on ${doc.slug} → status: ${doc.status} (v${doc.version})`);
+          if (args.reason) printLine(inv.io.stdout, `  Reason: ${args.reason}`);
+        }
+        return 0;
+      }
 
       const result = await app.reviewService.rejectWithOutcome(args.id as DocId, opts);
 
