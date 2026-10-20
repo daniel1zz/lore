@@ -31,6 +31,7 @@ import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledg
 import { deriveCommitSetForPlan } from "../../src/adapters/cli/assess-commit-derivation.js";
 import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -116,7 +117,7 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
     "2026-10-19T09:00:00.000Z",
   );
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
-  const claim = await svc.claim(task.value.id, { by: "alice", worktree: "feat-landing" });
+  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "feat-landing" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   // the branch's own work comes AFTER the claim, so the claim's recorded base_sha (the branch tip at claim time) precedes it
   run(repo, "checkout", "-q", "feat-landing");
@@ -148,9 +149,9 @@ async function reclaimFromDetachedMain(f: Fixture): Promise<void> {
   dirs.push(holder);
   const detached = join(holder, "evid");
   run(f.repo, "worktree", "add", "-q", "--detach", detached, "main");
-  const released = await f.svc.release(f.taskId, { by: "alice" });
+  const released = await f.svc.release(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
   if (!released.ok) throw new Error(`release ${JSON.stringify(released.error)}`);
-  const reclaimed = await f.svc.claim(f.taskId, { by: "alice", worktree: realpathSync(detached) });
+  const reclaimed = await f.svc.claim(f.taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: realpathSync(detached) });
   if (!reclaimed.ok) throw new Error(`reclaim ${JSON.stringify(reclaimed.error)}`);
 }
 
@@ -162,7 +163,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const mergeSha = landed.ok && landed.value.kind === "landed" ? landed.value.sha : "";
     await reclaimFromDetachedMain(f);
 
-    const done = await f.svc.done(f.taskId, { by: "alice" });
+    const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
@@ -183,13 +184,13 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s2", floorCommand: "true" });
     await reclaimFromDetachedMain(f);
 
-    const refused = await f.svc.done(f.taskId, { by: "alice" });
+    const refused = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(refused.ok).toBe(false);
     expect(!refused.ok && "message" in refused.error ? refused.error.message : "").toContain("[floor: not-landed]");
 
     const again = await integrateService(f, true).integrate({ branch: "feat-landing", sessionId: "s2b", floorCommand: "true" });
     expect(again.ok && again.value.kind).toBe("already_integrated");
-    const done = await f.svc.done(f.taskId, { by: "alice" });
+    const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(done.value.task.extra["landing"]).toMatchObject({ branch: "feat-landing", branch_head: f.branchHead });
@@ -221,7 +222,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     runMarked(f.repo, "checkout", "-q", "main");
     runMarked(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
     run(f.repo, "checkout", "-q", "--detach", "main");
-    const done = await f.svc.done(f.taskId, { by: "alice" });
+    const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(false);
     expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
     const task = await f.store.find(f.taskId);

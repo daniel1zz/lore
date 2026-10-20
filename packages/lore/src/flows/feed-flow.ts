@@ -162,7 +162,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { App } from "../app.js";
-import type { DocRecord, Invocation, LoreError, OsUser, Result } from "@lore/core";
+import type { DocRecord, Invocation, LoreError, Result } from "@lore/core";
 import {
   err,
   ok,
@@ -175,7 +175,7 @@ import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js"
 import { isRegisteredCheckpoint } from "../service/checkpoint-registry.js";
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
-import { formatError, resolveActor } from "../adapters/cli/utils.js";
+import { formatError } from "../adapters/cli/utils.js";
 import {
   composeWithStructuredExtraNotice,
   type RenderedBodyFacts,
@@ -788,8 +788,7 @@ async function buildRuleDiffBlock(
  * Also computes the `suppressFloor` decision
  * (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1): on the
  * single-record, found path, this session's own resolved actor
- * (`resolveActor(opts.by)` — the SAME full precedence chain
- * session-tier/worktree/OS-username every other corpus
+ * (`opts.by`, else the invocation's known-party name — the SAME name every other corpus
  * write surface uses, computed here PURELY for this side-decision, never
  * forwarded to `SessionService.resume` — `opts` itself is passed through
  * untouched, so the resume/candidate-selection behavior is byte-identical to
@@ -814,7 +813,7 @@ async function buildRuleDiffBlock(
  *
  * @param app - Wired `App` providing `sessionService`.
  * @param opts - `{plan?, handoff?, by?}`, forwarded to `SessionService.resume` untouched.
- * @param ambient - The invocation's `env`, `paths.tmpDir`, `cwd` and `user`, read only to locate the SessionStart marker and resolve the actor
+ * @param ambient - The invocation's `env`, `paths.tmpDir`, `cwd` and `identity`, read only to locate the SessionStart marker and name the actor
  *   (AS-26: this flow reads no ambient state itself).
  * @returns `ok(ResumeFeedOutcome)`, or `err(LoreError)` on an unresolvable target,
  *   a `SessionService.resume` store error, or a missing `sessionService` (an
@@ -826,7 +825,7 @@ async function buildRuleDiffBlock(
 export async function buildResumeFeed(
   app: App,
   opts: { plan?: string; handoff?: string; by?: string },
-  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly user: OsUser; readonly io: Invocation["io"] },
+  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly identity: Invocation["identity"]; readonly io: Invocation["io"] },
 ): Promise<Result<ResumeFeedOutcome, LoreError>> {
   if (app.sessionService === undefined) {
     return err({
@@ -843,13 +842,15 @@ export async function buildResumeFeed(
   let suppressFloor = false;
   let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
-    const currentActor = resolveActor(ambient.io, opts.by, ambient.env, ambient.cwd, ambient.user);
+    // reason: this is a READ-side decision (`by` here is the feed's own filter, never a write identity), so an
+    // invocation with no known party is not refused: it is nobody's session, the floor stays armed (`suppressFloor` false).
+    const currentActor = opts.by !== undefined && opts.by.trim() !== "" ? opts.by : ambient.identity.claimed;
     const sessionStart = readSessionStartIso(ambient.env, ambient.tmpDir);
     const sessionStartIso = sessionStart.kind === "measured" ? sessionStart.startedAt : undefined;
     // Same call, same argument shape as before this task — the arming
     // VERDICT for every non-measured kind is therefore byte-identical
     // (task-the-session-start-marker-collapses-five-distinct AC 2).
-    suppressFloor = isSameSessionAuthorship(resume.handoff, currentActor, sessionStartIso);
+    suppressFloor = currentActor !== null && isSameSessionAuthorship(resume.handoff, currentActor, sessionStartIso);
 
     if (sessionStart.kind !== "measured") {
       authorshipUndeterminedNote = describeUnmeasuredAuthorship(sessionStart);

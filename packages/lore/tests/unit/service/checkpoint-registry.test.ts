@@ -411,17 +411,14 @@ describe("checkpointRegistry", () => {
     });
 
     // BOUNDARY — no spec-tier ancestor ⇒ upstreamApproved is skipped, but
-    // noAnchorOverlap AND actorIdentityGuard (spec claim-time-actor-identity-
-    // guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) STILL run
-    // (SPEC-042 D5 — this checkpoint no longer short-circuits any of the
-    // three predicates on hasSpecParent:false, only the upstream one; with no
-    // candidateAnchors/siblingClaims/candidateIdentitySource supplied here,
-    // both vacuously pass, so the overall result is still an unblocked pass —
-    // just no longer a literal empty array).
-    it("check() runs noAnchorOverlap and actorIdentityGuard unconditionally even when hasSpecParent is false (SPEC-042 D5)", () => {
+    // noAnchorOverlap STILL runs (SPEC-042 D5 — this checkpoint no longer
+    // short-circuits it on hasSpecParent:false, only the upstream one; with no
+    // candidateAnchors/siblingClaims supplied here it vacuously passes, so the
+    // overall result is still an unblocked pass — just no longer a literal empty array).
+    it("check() runs noAnchorOverlap unconditionally even when hasSpecParent is false (SPEC-042 D5)", () => {
       const results = checkpoint.check({ hasSpecParent: false });
       expect(isCheckpointBlocked(results)).toBe(false);
-      expect(results).toEqual([{ ok: true }, { ok: true }]);
+      expect(results).toEqual([{ ok: true }]);
     });
 
     // REGRESSION (SPEC-042 D5, AC-S3-3) — the hole two adversarial-review lenses

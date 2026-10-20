@@ -15,8 +15,9 @@
  *     `updatedInput.command` is the command with the run flag injected; running THAT command with the built CLI
  *     leaves an evidence audit row whose harness_run is the run of the payload's session/agent.
  *   - The hook never emits `permissionDecision` (D12).
- *   - A payload from an agent id that was never registered: the write is stored unattested (harness_run NULL),
- *     never refused, and exactly one stderr line names the unregistered id (branch B2 input).
+ *   - A payload from an agent id that was never registered: the write is REFUSED (exit 4, nothing stored) and exactly
+ *     one stderr line names the unregistered id (branch B2 input); the same holds for a write with no run at all
+ *     (spec-every-write-is-made-by-a-known-party-an-attested-agent-run, BR-1351; this used to be stored unattested).
  *
  * Dimensions: HAPPY (three attested rows), STATE (parents, distinctness), NEGATIVE (unregistered agent),
  * REGRESSION (D12 no permissionDecision), BOUNDARY (the control: the raw un-rewritten command stays unattested).
@@ -247,8 +248,9 @@ describe("AC-RID-18: pre-tool hook output, executed with the built CLI, stamps e
     expect(rewritten["main"]).not.toContain(`${MAIN_RUN}:`);
   });
 
-  it("all four hook-routed writes and the control write succeed (an unattested write is never refused)", () => {
-    for (const [key, r] of Object.entries(writeResults)) expect({ key, exitCode: r.exitCode, err: r.stderr }).toMatchObject({ key, exitCode: 0 });
+  it("the three registered runs' writes succeed; the never-registered run's write and the control (no run at all) are refused, exit 4 (BR-1351)", () => {
+    for (const key of ["main", "a1", "a2"]) expect({ key, exitCode: writeResults[key]?.exitCode, err: writeResults[key]?.stderr }).toMatchObject({ key, exitCode: 0 });
+    for (const key of ["ghost", "control"]) expect({ key, exitCode: writeResults[key]?.exitCode }).toEqual({ key, exitCode: 4 });
   });
 
   it("the evidence audit rows carry cc:S, cc:S:A1, cc:S:A2 for main, agent 1 and agent 2", async () => {
@@ -265,10 +267,9 @@ describe("AC-RID-18: pre-tool hook output, executed with the built CLI, stamps e
     expect(new Set(attested).size).toBe(3);
   });
 
-  it("control: the same command that skipped the hook is stored unattested (the stamp comes from the hook, not the CLI)", async () => {
+  it("control: the same command that skipped the hook is refused and stores nothing (the run comes from the hook, not the CLI)", async () => {
     const rows = (await evidenceAuditRows()).filter((r) => r.doc_id === docIds.get(tasks.control));
-    expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows) expect(r.harness_run ?? null).toBeNull();
+    expect(rows).toEqual([]);
   });
 
   it("D12: the pre-tool hook never emits permissionDecision, for a main or a subagent payload", () => {
@@ -285,10 +286,9 @@ describe("AC-RID-18 / branch B2 input: a payload from an agent id that never reg
     expect(rewritten["ghost"]).toContain(RUN_GHOST);
   });
 
-  it("the write is stored unattested: harness_run NULL on its evidence audit row", async () => {
+  it("the write is refused and stores nothing: no evidence audit row exists for its task", async () => {
     const rows = (await evidenceAuditRows()).filter((r) => r.doc_id === docIds.get(tasks.ghost));
-    expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows) expect(r.harness_run ?? null).toBeNull();
+    expect(rows).toEqual([]);
   });
 
   it("exactly one stderr warning names the unregistered id", () => {

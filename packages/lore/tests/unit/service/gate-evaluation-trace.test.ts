@@ -79,8 +79,7 @@ import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
-const APP_TS = join(PACKAGE_ROOT, "src", "app.ts");
-const LIVE_TS = join(PACKAGE_ROOT, "tests", "live-invocation.ts");
+const LIVE_APP_TS = join(PACKAGE_ROOT, "tests", "helpers", "live-app.ts");
 
 interface RunResult {
   readonly stdout: string;
@@ -154,13 +153,13 @@ function gateSkippedRows(entries: readonly AuditEntryJson[], checkpoint: string)
 function seedServiceOps(dbPath: string, scriptDir: string, ops: readonly Record<string, unknown>[]): unknown[] {
   const scriptPath = join(scriptDir, "seed-ops.ts");
   const scriptSource = `
-import { createApp } from ${JSON.stringify(APP_TS)};
-import { liveAmbient, liveWriteContext } from ${JSON.stringify(LIVE_TS)};
+import { createLiveApp } from ${JSON.stringify(LIVE_APP_TS)};
 
 const dbPath = process.argv[2];
 const ops = JSON.parse(process.argv[3]);
 
-const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
+// reason: this child is a plain bun process (no test-run app shim), so the live test run is registered by createLiveApp.
+const app = createLiveApp(dbPath);
 const results = [];
 try {
   for (const op of ops) {

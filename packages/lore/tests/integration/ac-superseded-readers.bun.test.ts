@@ -29,7 +29,7 @@ import {
 } from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
-import { liveAmbient, liveInvocation, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
 import { createApp } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 
@@ -225,7 +225,7 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     try {
       const result = (await client.callTool({
         name: "lore_ac_supersede",
-        arguments: { spec: specS, ac_id: "AC-2", by_spec: specS2, by_ac: "AC-9", reason: "replaced via MCP" },
+        arguments: { harness_run: LIVE_TEST_RUN, spec: specS, ac_id: "AC-2", by_spec: specS2, by_ac: "AC-9", reason: "replaced via MCP" },
       })) as unknown as { isError?: boolean; content: { text: string }[] };
       expect(result.isError ?? false, result.content.map((c) => c.text).join("\n")).toBe(false);
     } finally {

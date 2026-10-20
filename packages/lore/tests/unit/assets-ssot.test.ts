@@ -551,7 +551,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
   // RE-BASELINE (task-skill-implement-close-fragment-scopes-defect-reports-br, BR-1153): the report-issue bullet gains the scope rule (lore defects only, one root cause per report, repo upkeep to plan/task).
   // RE-BASELINE (orchestrator-owned doc change, spec-the-approval-judge-rejects-patch-shaped-designs-design D3): adds the lesson-changes-a-mechanism bullet after the invalidate bullet.
-  "context/corpus-workflow-4-close.md": "91f727466e49304d1632eb6b24e4ef7b52715c493ba4d1abf18a42e6b1806219",
+  // RE-BASELINE (task-igh-t1-close-guidance-and-root-claude-md-file-every, BR-1153): the report-issue bullet now routes every problem not fixed in place to an issue (also in lore's own repo); a task names the issues it resolves, never a task whose subject is the problem; lore defects go to `lore report-issue`, every other problem to the project's own issue tracker (the two coincide in lore's own repo).
+  "context/corpus-workflow-4-close.md": "7c7e6c3e5c6840ff5ca9d0306c7e9c970a859090a3b0915448ea49abfbad21c6",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */

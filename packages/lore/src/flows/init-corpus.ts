@@ -52,7 +52,7 @@ import type { LoreConfig, LoreError, Result } from "@lore/core";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
-import { createApp, type App, type AppAmbient } from "../app.js";
+import { createApp, type App, type AppAmbient, type AppWriteContext } from "../app.js";
 import { describeConfigTemplateError, mergeConfigWithOverlay, parseConfigTemplateOverlay } from "./config-template.js";
 
 /**
@@ -87,6 +87,11 @@ export interface InitCorpusOptions {
    * `lore init` arms state binding here.
    */
   onDatabaseReady?: (app: App) => Promise<Result<void, LoreError>>;
+  /**
+   * The invoking party's write context. Every store write is stamped with a known party (BR-1351), so the `App`
+   * handed to `onDatabaseReady` is built with it; omitted, that `App` can read but cannot write.
+   */
+  writeContext?: AppWriteContext;
 }
 
 /** Renders a thrown value as a diagnostic string. Never re-throws. Mirrors `setup-service.ts`'s `describeCaught`. */
@@ -198,7 +203,7 @@ async function buildCorpus(
   if (opts.onDatabaseReady !== undefined) {
     let app: App;
     try {
-      app = createApp(dbPath, undefined, ambient);
+      app = createApp(dbPath, undefined, ambient, opts.writeContext);
     } catch (cause) {
       return err(storeFailure(`initCorpusAt: failed to reopen the SQLite DB at "${dbPath}"`, cause));
     }

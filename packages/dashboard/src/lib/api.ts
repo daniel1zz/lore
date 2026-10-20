@@ -452,7 +452,10 @@ export interface AuditMissRow {
 export interface AuditVerifyResponse {
   clean: boolean;
   misses: AuditMissRow[];
-  since: string;
+  /** Versions explained by an original audit entry. */
+  audited: number;
+  /** Versions explained only by an entry `lore migrate audit-backfill` reconstructed. */
+  reconstructed: number;
 }
 
 /**
@@ -508,12 +511,8 @@ export async function apiGetAuditForDoc(project: string | null, docId: string): 
  * @returns `{ clean, misses, since }`.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetAuditVerify(
-  project: string | null,
-  opts: { since?: string } = {},
-): Promise<AuditVerifyResponse> {
-  const qs = buildQueryString(opts as Record<string, string | undefined>);
-  return fetchJson<AuditVerifyResponse>(project, `/audit/verify${qs}`);
+export async function apiGetAuditVerify(project: string | null): Promise<AuditVerifyResponse> {
+  return fetchJson<AuditVerifyResponse>(project, "/audit/verify");
 }
 
 /**

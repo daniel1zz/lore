@@ -14,7 +14,7 @@
  *     ended the run with (`exitCli(code)` throws `CliExit`), else what the command RETURNED (a required number,
  *     reported through `buildMain`'s `reportExit`), with ONE mapping (`exitCode(error)` in utils.ts). citty's own exits
  *     (`--help`, an unknown command, a thrown error) are decided by `dispatch` below with the codes `runMain` used
- *     (0, 1, 1), not by citty. A write that finds the invocation unnamed (`OsUserLookupError`) ends with 4. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
+ *     (0, 1, 1), not by citty. A write that finds the invocation without a known party (`UnknownPartyError`) ends with 4. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
  *   - Nothing here reads or assigns a process global (`process.argv`, `process.exit`, `process.exitCode`,
  *     `process.env`, `process.chdir`, `console`, `process.stdout`); a run writes through `inv.io` and reports its
  *     code by return value, so two runs in one process share nothing.
@@ -27,17 +27,16 @@
 
 import type { CommandDef } from "citty";
 import type { Invocation } from "@lore/core";
-import { OsUserLookupError } from "@lore/core/node";
+import { UnknownPartyError } from "@lore/core/node";
 import type { InvocationResolvers } from "@lore/core/node";
 import { CliExit } from "./cli-exit.js";
+import { bindingOfHumanSessionFile, HumanSessionFileError, readHumanSessionFile } from "./human-session-file.js";
 import { primeReplicaClientWhenSyncEnabled } from "./replica-priming.js";
 import type { ExitReport } from "./cli-exit.js";
 import { printLine } from "./output.js";
 import { resolveTargetDir } from "./setup-args.js";
-import { detectWorktreeDerivedActor } from "./utils.js";
 import { resolveUserConfigDir } from "../../service/context-fragments/user-config-dir.js";
 import { existsSync } from "node:fs";
-import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
 /** Options for {@link runCli}. */
@@ -79,9 +78,19 @@ export const invocationResolvers: InvocationResolvers = {
     return resolveTargetDir({ ...(claudeDirFlag === undefined ? {} : { claudeDirFlag }), env, homeDir: home, cwd });
   },
   userConfigDir: (env, home) => resolveUserConfigDir(env, home),
-  worktreeActor: (cwd) => detectWorktreeDerivedActor(cwd),
-  osUsername: () => userInfo().username,
   projectRoot: findProjectRoot,
+  humanSession: ({ env, home, projectRoot }) => {
+    try {
+      const file = readHumanSessionFile(env, home, projectRoot);
+      return file === null ? null : bindingOfHumanSessionFile(file);
+    } catch (error) {
+      // reason: a damaged token file must not crash a READ (reads are never refused for identity, BR-1351); the
+      // write that needed it is refused as "no open human session" (fail closed), and `lore session show|end` read
+      // the file themselves and name the damage.
+      if (error instanceof HumanSessionFileError) return null;
+      throw error;
+    }
+  },
 };
 
 /**
@@ -146,9 +155,9 @@ async function dispatch(inv: Invocation, main: CommandDef<any>, reported: { code
     return reported.code;
   } catch (error) {
     if (error instanceof CliExit) throw error;
-    if (error instanceof OsUserLookupError) {
-      // reason: a write needed an actor and the entry had recorded no name (OS user lookup failed): a validation
-      // refusal (exit 4), the same code the rest of the validation family ends with.
+    if (error instanceof UnknownPartyError) {
+      // reason: a write needed an actor and the invocation has no known party (BR-1351): a validation refusal
+      // (exit 4, before anything is written), the same code the rest of the validation family ends with.
       printLine(inv.io.stderr, `Error: ${error.loreError.message}`);
       return 4;
     }

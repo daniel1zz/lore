@@ -42,6 +42,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -120,7 +121,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect((result.value.extra["claim"] as Record<string, unknown>)["branch"]).toBe(
@@ -134,7 +135,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     const { taskId } = await createPlanAndTask(corpusService);
 
     const result = await taskWorkflowService.claim(taskId, {
-      by: "alice",
+      by: "alice", harnessRun: runOfName("alice"),
       worktree: repoRoot,
       branch: "declared-branch",
     });
@@ -148,7 +149,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const claim = result.value.extra["claim"] as Record<string, unknown>;
@@ -161,7 +162,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     const { taskId } = await createPlanAndTask(corpusService);
 
     const result = await taskWorkflowService.claim(taskId, {
-      by: "alice",
+      by: "alice", harnessRun: runOfName("alice"),
       worktree: "/definitely/does/not/exist/lore-ac-own-2",
     });
     expect(result.ok).toBe(true);
@@ -177,7 +178,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
 
     const first = await taskWorkflowService.claim(
       taskId,
-      { by: "alice", worktree: repoRoot },
+      { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot },
       () => "2026-08-12T09:00:00.000Z",
     );
     expect(first.ok).toBe(true);
@@ -188,7 +189,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
 
     const refresh = await taskWorkflowService.claim(
       taskId,
-      { by: "alice" },
+      { by: "alice", harnessRun: runOfName("alice") },
       () => "2026-08-12T09:05:00.000Z",
     );
     expect(refresh.ok).toBe(true);
@@ -202,7 +203,7 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const claim = result.value.extra["claim"] as Record<string, unknown>;

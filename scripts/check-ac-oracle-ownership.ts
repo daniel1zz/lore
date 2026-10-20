@@ -13,6 +13,9 @@
  * superRefine) — every resolution below is per spec, never by global id.
  * Side-effect class: IO (reads the corpus through `lore ac list --json`, reads test files).
  *
+ * Live criteria only: a criterion with `superseded_by` is retired behaviour (its test was deleted on
+ * purpose, #313) — it is not checked for an owner file and is not an owner for the reference rules.
+ *
  * Rules (printed as `rule=<name>`):
  *   - `missing-owner-file`: the AC's first test file does not exist on disk.
  *   - `ambiguous-ac-id`: a test file is the owner of the same AC id in two or more specs and
@@ -58,6 +61,8 @@ export interface ScriptAc {
   readonly command: string;
   /** The `--allow-missing-path` reason when the AC is declared red-first (its oracle is not written yet). */
   readonly allowMissingReason?: string;
+  /** True when the criterion carries `superseded_by`: retired behaviour, not live (`lore verify` skips it too). */
+  readonly superseded?: true;
 }
 
 export type OwnershipRule = "missing-owner-file" | "ambiguous-ac-id" | "unowned-ac-reference";
@@ -143,8 +148,11 @@ export function evaluateOwnership(
   const owners = new Map<string, Map<string, string[]>>(); // owner file -> acId -> owning specs
   const specsByAcId = new Map<string, string[]>();
   let acsWithoutTestFile = 0;
+  // reason: a superseded criterion's test is deleted on purpose with the retired behaviour (#313);
+  // it is neither an owner nor a referenceable AC, exactly as `lore verify` skips it.
+  const liveAcs = acs.filter((ac) => ac.superseded !== true);
 
-  for (const ac of acs) {
+  for (const ac of liveAcs) {
     specsByAcId.set(ac.id, [...(specsByAcId.get(ac.id) ?? []), ac.spec]);
     const owner = extractTestFilePaths(ac.command)[0];
     if (owner === undefined) {
@@ -180,7 +188,7 @@ export function evaluateOwnership(
     }
   }
 
-  return { scannedScriptAcs: acs.length, scannedTestFiles: testFiles.length, acsWithoutTestFile, findings, ledgered };
+  return { scannedScriptAcs: liveAcs.length, scannedTestFiles: testFiles.length, acsWithoutTestFile, findings, ledgered };
 }
 
 // ─── IO ─────────────────────────────────────────────────────────────────────
@@ -204,6 +212,7 @@ const AcListSchema = z.object({
       z.object({
         id: z.string(),
         verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional(),
+        superseded_by: z.unknown().optional(),
       }),
     ),
     allow_missing_declarations: z.array(z.object({ ac_id: z.string(), reason: z.string() })).optional(),
@@ -254,7 +263,13 @@ export function collectScriptAcs(
     for (const c of acs.data.criteria) {
       if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
         const reason = reasons.get(c.id);
-        out.push({ spec: doc.slug, id: c.id, command: c.verify.command, ...(reason !== undefined ? { allowMissingReason: reason } : {}) });
+        out.push({
+          spec: doc.slug,
+          id: c.id,
+          command: c.verify.command,
+          ...(reason !== undefined ? { allowMissingReason: reason } : {}),
+          ...(c.superseded_by !== undefined ? { superseded: true as const } : {}),
+        });
       }
     }
   }
@@ -268,7 +283,13 @@ const CorpusDumpSchema = z.object({
     z.object({
       slug: z.string(),
       status: z.string(),
-      criteria: z.array(z.object({ id: z.string(), verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional() })),
+      criteria: z.array(
+        z.object({
+          id: z.string(),
+          verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional(),
+          superseded: z.literal(true).optional(),
+        }),
+      ),
       allow_missing_declarations: z.array(z.object({ ac_id: z.string(), reason: z.string() })),
     }),
   ),
@@ -287,7 +308,13 @@ export function scriptAcsFromDump(dump: CorpusDump): ScriptAcScan {
     for (const c of spec.criteria) {
       if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
         const reason = reasons.get(c.id);
-        acs.push({ spec: spec.slug, id: c.id, command: c.verify.command, ...(reason !== undefined ? { allowMissingReason: reason } : {}) });
+        acs.push({
+          spec: spec.slug,
+          id: c.id,
+          command: c.verify.command,
+          ...(reason !== undefined ? { allowMissingReason: reason } : {}),
+          ...(c.superseded === true ? { superseded: true as const } : {}),
+        });
       }
     }
   }

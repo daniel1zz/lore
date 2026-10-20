@@ -553,7 +553,7 @@ export default defineLoreCommand({
             title: args.title as string,
             content,
           };
-          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
           else printLine(inv.io.stdout, `Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
@@ -572,7 +572,7 @@ export default defineLoreCommand({
         const { args } = context;
         const inv = invocationOf(context);
         return await withRuleService(inv, async (svc): Promise<number> => {
-          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
           else printLine(inv.io.stdout, `Label of ${result.value.slug} set to '${String(args.label)}'.`);
@@ -595,7 +595,7 @@ export default defineLoreCommand({
           const result = await svc.setDependsOn(
             args.leaf as string,
             { add: repeatable(args.add), remove: repeatable(args.remove) },
-            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
+            { by: resolveActor(inv) },
           );
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           const dependsOn = result.value.extra["depends_on"];
@@ -626,7 +626,7 @@ export default defineLoreCommand({
                 meaning: args.meaning as string,
                 ...(args.note !== undefined ? { note: args.note as string } : {}),
               };
-              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(inv) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
               if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
               else printLine(inv.io.stdout, `Defined '${entry.term}' on ${result.value.slug}.`);
@@ -645,7 +645,7 @@ export default defineLoreCommand({
             const { args } = context;
             const inv = invocationOf(context);
             return await withRuleService(inv, async (svc): Promise<number> => {
-              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
               if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
               else printLine(inv.io.stdout, `Removed '${String(args.term)}' from ${result.value.slug}.`);
@@ -672,7 +672,7 @@ export default defineLoreCommand({
         const inv = invocationOf(context);
         return await withRuleService(inv, async (svc): Promise<number> => {
           const json = args.json === true;
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const site = typeof args.site === "string" ? args.site : undefined;
           const rules = repeatable(args.rule);
           if (site === undefined && rules.length > 0) {

@@ -29,6 +29,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { withTestRun } from "../helpers/test-run-identity";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const DIST_BINARY = join(REPO_ROOT, "dist", "lore");
@@ -45,7 +46,10 @@ let tempRoot = "";
 let realBinDir = "";
 
 function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([join(realBinDir, "lore"), ...args], { cwd, env: { ...process.env, HOME: cwd } });
+  // reason: the binary is reached through a symlinked `lore` the test run's spawn rewrite does not recognise, so this suite
+  // names its known party itself (a registered agent run, BR-1351) — `init` runs before any corpus exists to register in.
+  const env = { ...process.env, HOME: cwd };
+  const proc = Bun.spawnSync([join(realBinDir, "lore"), ...withTestRun(args, env, cwd)], { cwd, env });
   return { exitCode: proc.exitCode ?? 1, combined: `${proc.stdout.toString()}${proc.stderr.toString()}` };
 }
 

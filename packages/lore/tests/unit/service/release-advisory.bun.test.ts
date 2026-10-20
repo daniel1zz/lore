@@ -48,6 +48,7 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -165,10 +166,10 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
     // REGRESSION — the return value IS the DocRecord directly, not a wrapper.
@@ -182,11 +183,11 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(evidenceResult.ok).toBe(true);
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
     expect(hasZeroReleaseEvidence(releaseResult.value)).toBe(false);
@@ -198,13 +199,13 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     await taskWorkflowService.addEvidence(
       taskId,
       evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
     );
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
     expect(hasZeroReleaseEvidence(releaseResult.value)).toBe(false);
@@ -216,13 +217,13 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(evidenceResult.ok).toBe(true);
     if (!evidenceResult.ok) return;
     const beforeRelease = evidenceResult.value.extra["verification_evidence"];
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
     expect(releaseResult.value.extra["verification_evidence"]).toEqual(beforeRelease);
@@ -234,8 +235,8 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
   });
 
@@ -244,8 +245,8 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "bob", force: true });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob"), force: true });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
     expect(hasZeroReleaseEvidence(releaseResult.value)).toBe(true);

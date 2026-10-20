@@ -8,11 +8,6 @@
 import type { AuditService } from "../../src/service/audit-service.js";
 import { buildAuditVerifyRunner, type AuditVerifyRunner } from "../../src/service/audit-verify-runner.js";
 
-const STUB_VERIFY_SINCE = "2000-01-01T00:00:00.000Z";
-
 export function inLoopAuditVerifyRunner(auditService: AuditService): AuditVerifyRunner {
-  return buildAuditVerifyRunner(
-    { kind: "memory", auditService },
-    { verifySince: STUB_VERIFY_SINCE, anchorRoot: "/nonexistent-lore-anchor-root" },
-  );
+  return buildAuditVerifyRunner({ kind: "memory", auditService }, { anchorRoot: "/nonexistent-lore-anchor-root" });
 }

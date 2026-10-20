@@ -93,6 +93,7 @@ import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
 import { actedStore } from "../../../live-invocation.js";
+import { runOfName } from "../../../helpers/test-run-identity.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -206,7 +207,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
     });
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(claimResult.ok).toBe(true);
 
     commitFile(repoRoot, "under-claim.txt", "content\n", "commit under active claim");
@@ -235,8 +236,8 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
     const { taskId: taskA } = await createPlanAndTask(corpusA);
     const { taskId: taskB } = await createPlanAndTask(corpusB);
 
-    await serviceA.claim(taskA, { by: "alice", worktree: repoA });
-    await serviceB.claim(taskB, { by: "bob", worktree: repoB });
+    await serviceA.claim(taskA, { by: "alice", harnessRun: runOfName("alice"), worktree: repoA });
+    await serviceB.claim(taskB, { by: "bob", harnessRun: runOfName("bob"), worktree: repoB });
 
     commitFile(repoA, "a.txt", "a\n", "commit in repo A");
     commitFile(repoB, "b.txt", "b\n", "commit in repo B");
@@ -252,7 +253,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
     const { taskId } = await createPlanAndTask(corpusService);
 
     const result = await taskWorkflowService.claim(taskId, {
-      by: "alice",
+      by: "alice", harnessRun: runOfName("alice"),
       worktree: "/definitely/does/not/exist/lore-ac-own-4",
     });
     expect(result.ok).toBe(true);
@@ -273,7 +274,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
       undefined,
       { CLAUDE_CODE_SESSION_ID: "first-session-1234" },
     );
-    await serviceFirst.claim(taskId, { by: "alice", worktree: repoRoot });
+    await serviceFirst.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     commitFile(repoRoot, "first.txt", "first\n", "commit under first session");
     expect(readLoreSessionTrailer(repoRoot)).toBe(sessionIdDiscriminator("first-session-1234"));
 
@@ -286,7 +287,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
       undefined,
       { CLAUDE_CODE_SESSION_ID: "second-session-5678" },
     );
-    await serviceSecond.claim(taskId, { by: "alice", worktree: repoRoot });
+    await serviceSecond.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     commitFile(repoRoot, "second.txt", "second\n", "commit under second session");
     expect(readLoreSessionTrailer(repoRoot)).toBe(sessionIdDiscriminator("second-session-5678"));
   });
@@ -296,7 +297,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
     const { corpusService, taskWorkflowService } = makeServices({}); // no CLAUDE_*_SESSION_ID at all
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(
@@ -321,7 +322,7 @@ describe("core.hooksPath outside the git dir but inside the repo still gets the 
     });
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(claimResult.ok).toBe(true);
 
     commitFile(repoRoot, "under-claim.txt", "content\n", "commit under active claim, hooksPath outside .git");
@@ -342,7 +343,7 @@ describe("core.hooksPath outside the git dir but inside the repo still gets the 
       CLAUDE_CODE_SESSION_ID: "hookspath-clean-1234",
     });
     const { taskId } = await createPlanAndTask(corpusService);
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(claimResult.ok).toBe(true);
 
     // reason: this is the invariant the pre-fix code's blanket skip existed
@@ -361,14 +362,14 @@ describe("core.hooksPath outside the git dir but inside the repo still gets the 
     });
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const first = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const first = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(first.ok).toBe(true);
     const excludeContentAfterFirst = readFileSync(join(repoRoot, ".git", "info", "exclude"), "utf8");
     const patternOccurrences = excludeContentAfterFirst.split("\n").filter((line) => line === "/hooks/commit-msg")
       .length;
     expect(patternOccurrences).toBe(1);
 
-    const second = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const second = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(second.ok).toBe(true);
     const excludeContentAfterSecond = readFileSync(join(repoRoot, ".git", "info", "exclude"), "utf8");
     expect(excludeContentAfterSecond.split("\n").filter((line) => line === "/hooks/commit-msg").length).toBe(1);
@@ -385,7 +386,7 @@ describe("core.hooksPath outside the git dir but inside the repo still gets the 
       CLAUDE_CODE_SESSION_ID: "hookspath-foreign-1234",
     });
     const { taskId } = await createPlanAndTask(corpusService);
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(claimResult.ok).toBe(true);
 
     commitFile(repoRoot, "under-claim.txt", "content\n", "commit under active claim, hooksPath entirely foreign");
@@ -406,12 +407,12 @@ describe("a released claim's session no longer taints later commits (AC-OWN-4, s
     });
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(claimResult.ok).toBe(true);
     commitFile(repoRoot, "before-release.txt", "content\n", "commit while the claim is still active");
     expect(readLoreSessionTrailer(repoRoot)).toBe(sessionIdDiscriminator("release-state-5678"));
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
 
     commitFile(repoRoot, "after-release.txt", "content\n", "commit after the claim was released");
@@ -429,16 +430,16 @@ describe("a released claim's session no longer taints later commits (AC-OWN-4, s
     const { taskId: firstTaskId } = await createPlanAndTask(corpusA);
     const { taskId: secondTaskId } = await createPlanAndTask(corpusB);
 
-    const firstClaim = await serviceA.claim(firstTaskId, { by: "alice", worktree: repoRoot });
+    const firstClaim = await serviceA.claim(firstTaskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     expect(firstClaim.ok).toBe(true);
     // reason: a DIFFERENT task claims the SAME worktree before the first
     // claim's (stale) release call ever runs — mirrors AC-OWN-4's own STATE
     // case ("re-claiming overwrites the marker"), just staged as the
     // precondition here instead of the assertion.
-    const secondClaim = await serviceB.claim(secondTaskId, { by: "bob", worktree: repoRoot });
+    const secondClaim = await serviceB.claim(secondTaskId, { by: "bob", harnessRun: runOfName("bob"), worktree: repoRoot });
     expect(secondClaim.ok).toBe(true);
 
-    const releaseResult = await serviceA.release(firstTaskId, { by: "alice" });
+    const releaseResult = await serviceA.release(firstTaskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
 
     commitFile(repoRoot, "after-mismatched-release.txt", "content\n", "commit after a stale claim's release");

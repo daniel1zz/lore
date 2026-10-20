@@ -7,12 +7,11 @@
  *               query({doc_id}) surfaces the create audit entry
  *   NEGATIVE:   a versions row with NO matching audit entry (a writer that "forgot"
  *               to audit) is reported as a miss
- *   BOUNDARY:   pre-watermark holes are ignored (D5); a version-number mismatch
- *               (off-by-one) between versions row and audit entry is NOT satisfied
- *               by an adjacent version's audit entry
- *   STATE:      verify()'s `since` resolution — constructor default vs per-call
- *               override — is genuinely read from the two different sources, not
- *               hardcoded
+ *   BOUNDARY:   no date skips a version (the retired D5 cut-off); a version-number
+ *               mismatch (off-by-one) between versions row and audit entry is NOT
+ *               satisfied by an adjacent version's audit entry
+ *   STATE:      every version is reported audited, reconstructed (only a backfill
+ *               entry) or missing
  *   REGRESSION: `delete` is excluded from the anchor set even though CorpusService
  *               stamps details.version on delete's audit entry too; the
  *               TaskWorkflowService action-string divergence (versions:"update"
@@ -29,9 +28,9 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
-import { resolveActorWithSource } from "@lore/core/node";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { liveWriteActor, actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -76,24 +75,24 @@ function baseVersionRow(overrides: Partial<VersionRecord> & Pick<VersionRecord, 
 // ─── HAPPY ────────────────────────────────────────────────────────────────────
 
 describe("HAPPY — a CorpusService.create() write satisfies verify() out of the box", () => {
-  it("verify({since: <before creation>}) reports clean:true after a single create", async () => {
+  it("verify() reports clean:true after a single create", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
     void planId;
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(true);
     expect(result.value.misses).toEqual([]);
-    expect(result.value.since).toBe(FAR_PAST);
+    expect(result.value).toMatchObject({ audited: 1, reconstructed: 0 });
   });
 
   it("query({doc_id}) returns the create audit entry with action 'create' and details.version 1", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
 
@@ -103,20 +102,16 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     expect(result.value).toHaveLength(1);
     const entry = result.value[0] as AuditEntry;
     expect(entry.action).toBe("create");
-    // SPEC-079 G2 (actor fidelity) — the audit entry's actor is now the
-    // resolved actor (opts.by > $LORE_ACTOR > session tier > OS username),
-    // never the literal "system". `createPlan` passes no `by`, so the
-    // expected value is whatever the SAME env-chain resolution yields at
-    // test time (this test never mutates process.env, so it's stable within
-    // a single run — see audit-actor-fidelity.test.ts for the full env-chain
-    // coverage this asymmetry is dedicated to).
-    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, liveInvocation().user).actor);
+    // SPEC-079 G2 (actor fidelity) — the audit entry's actor is the write context's known-party name, never the
+    // literal "system". `createPlan` passes no `by`, so the expected value is the name the store was declared with
+    // (`actedStore` -> `liveWriteActor()`).
+    expect(entry.actor).toBe(liveWriteActor());
     expect(entry.details?.["version"]).toBe(1);
   });
 
   it("query() with an unrelated doc_id returns an empty array (defeats a hardcoded non-empty stub)", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     await createPlan(corpusService);
 
@@ -132,7 +127,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
 describe("NEGATIVE — a versions row with no matching audit entry is a miss", () => {
   it("an update versions row written WITHOUT a matching appendAuditEntry call is reported as exactly one miss", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
 
@@ -141,7 +136,7 @@ describe("NEGATIVE — a versions row with no matching audit entry is a miss", (
       baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2020-06-01T00:00:00.000Z" }),
     );
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(false);
@@ -156,31 +151,30 @@ describe("NEGATIVE — a versions row with no matching audit entry is a miss", (
 
 // ─── BOUNDARY ─────────────────────────────────────────────────────────────────
 
-describe("BOUNDARY — pre-watermark holes are ignored (D5)", () => {
-  it("a versions row created BEFORE `since`, with no matching audit entry, does not count as a miss", async () => {
+describe("BOUNDARY — no date skips a version (task-audit-verification-checks-every-version-pre-writer-history)", () => {
+  it("a versions row recorded long ago, with no matching audit entry, IS a miss", async () => {
     const { store, corpusService } = makeStore();
-    const since = "2025-06-01T00:00:00.000Z";
-    const auditService = new AuditService(store, { verifySince: since });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
-
-    // This row predates the watermark — must be excluded from the reconcile walk.
     await store.insertVersion(
-      baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2025-01-01T00:00:00.000Z" }),
+      baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2001-01-01T00:00:00.000Z" }),
     );
 
-    const result = await auditService.verify({ since });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.clean).toBe(true);
-    expect(result.value.misses).toEqual([]);
+    expect(result.value.clean).toBe(false);
+    expect(result.value.misses).toEqual([
+      { doc_id: planId, version: 2, action: "update", created_at: "2001-01-01T00:00:00.000Z" },
+    ]);
   });
 });
 
 describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match", () => {
   it("an audit entry at details.version=2 does NOT satisfy a versions row at version=3", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
 
@@ -198,7 +192,7 @@ describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match"
       details: { version: 2 },
     });
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(false);
@@ -207,58 +201,75 @@ describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match"
   });
 });
 
-// ─── STATE — since resolution: constructor default vs per-call override ────
+// ─── STATE — audited vs reconstructed vs missing ───────────────────────────
 
-describe("STATE — verify()'s `since` genuinely reads from the constructor default when opts is omitted", () => {
-  it("two AuditService instances with different constructor verifySince values disagree on the same store state", async () => {
-    const store = actedStore(new InMemoryStore());
-    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const planId = await createPlan(corpusService);
+describe("STATE — every version is reported audited, reconstructed or missing", () => {
+  it("a backfill entry satisfies its version and counts as reconstructed; an original entry counts as audited", async () => {
+    const { store, corpusService } = makeStore();
+    const auditService = new AuditService(store);
+    const planId = await createPlan(corpusService); // version 1: audited by the create entry
 
-    // A versions row sitting between two candidate watermarks, with no matching audit entry.
     await store.insertVersion(
-      baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2025-06-15T00:00:00.000Z" }),
+      baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2001-01-01T00:00:00.000Z" }),
     );
+    await store.appendAuditEntry({
+      timestamp: "2026-10-19T00:00:00.000Z",
+      actor: "system",
+      session_id: "audit-backfill-run",
+      action: "audit-backfill",
+      doc_id: planId,
+      details: { version: 2, reconstructed: true },
+    });
 
-    // Watermark BEFORE the row → row is a candidate → miss → dirty.
-    const serviceEarlyWatermark = new AuditService(store, { verifySince: "2025-06-01T00:00:00.000Z" });
-    const dirtyResult = await serviceEarlyWatermark.verify(); // no opts — must use constructor default
-    expect(dirtyResult.ok).toBe(true);
-    if (!dirtyResult.ok) return;
-    expect(dirtyResult.value.clean).toBe(false);
-    expect(dirtyResult.value.since).toBe("2025-06-01T00:00:00.000Z");
-
-    // Watermark AFTER the row → row is excluded → clean.
-    const serviceLateWatermark = new AuditService(store, { verifySince: "2025-07-01T00:00:00.000Z" });
-    const cleanResult = await serviceLateWatermark.verify(); // no opts — must use constructor default
-    expect(cleanResult.ok).toBe(true);
-    if (!cleanResult.ok) return;
-    expect(cleanResult.value.clean).toBe(true);
-    expect(cleanResult.value.since).toBe("2025-07-01T00:00:00.000Z");
+    const result = await auditService.verify();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.clean).toBe(true);
+    expect(result.value.audited).toBe(1);
+    expect(result.value.reconstructed).toBe(1);
+    expect(result.value.misses).toEqual([]);
+    expect(result.value.chain.clean).toBe(true);
   });
 
-  it("a per-call opts.since overrides the constructor default", async () => {
-    const store = actedStore(new InMemoryStore());
-    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  it("an original entry wins: a version with BOTH an original and a backfill entry counts as audited", async () => {
+    const { store, corpusService } = makeStore();
     const planId = await createPlan(corpusService);
+    await store.appendAuditEntry({
+      timestamp: "2026-10-19T00:00:00.000Z",
+      actor: "system",
+      session_id: "audit-backfill-run",
+      action: "audit-backfill",
+      doc_id: planId,
+      details: { version: 1, reconstructed: true },
+    });
 
+    const result = await new AuditService(store).verify();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toMatchObject({ audited: 1, reconstructed: 0, clean: true });
+  });
+
+  it("a backfill entry never satisfies a different version of the same doc", async () => {
+    const { store, corpusService } = makeStore();
+    const planId = await createPlan(corpusService);
     await store.insertVersion(
-      baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2025-06-15T00:00:00.000Z" }),
+      baseVersionRow({ doc_id: planId, version: 3, action: "update", created_at: "2001-01-01T00:00:00.000Z" }),
     );
+    await store.appendAuditEntry({
+      timestamp: "2026-10-19T00:00:00.000Z",
+      actor: "system",
+      session_id: "audit-backfill-run",
+      action: "audit-backfill",
+      doc_id: planId,
+      details: { version: 2, reconstructed: true },
+    });
 
-    // Constructor default would report dirty (early watermark)...
-    const auditService = new AuditService(store, { verifySince: "2025-06-01T00:00:00.000Z" });
-    const withoutOverride = await auditService.verify();
-    expect(withoutOverride.ok).toBe(true);
-    if (!withoutOverride.ok) return;
-    expect(withoutOverride.value.clean).toBe(false);
-
-    // ...but an explicit per-call `since` after the row overrides it to clean.
-    const withOverride = await auditService.verify({ since: "2025-07-01T00:00:00.000Z" });
-    expect(withOverride.ok).toBe(true);
-    if (!withOverride.ok) return;
-    expect(withOverride.value.clean).toBe(true);
-    expect(withOverride.value.since).toBe("2025-07-01T00:00:00.000Z");
+    const result = await new AuditService(store).verify();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.clean).toBe(false);
+    expect(result.value.misses).toHaveLength(1);
+    expect(result.value.misses[0]).toMatchObject({ doc_id: planId, version: 3 });
   });
 });
 
@@ -267,7 +278,7 @@ describe("STATE — verify()'s `since` genuinely reads from the constructor defa
 describe("REGRESSION — delete is excluded from the verifiable-action anchor set", () => {
   it("a delete versions row (version:0) with no matching audit entry does NOT count as a miss", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
 
@@ -285,7 +296,7 @@ describe("REGRESSION — delete is excluded from the verifiable-action anchor se
       }),
     );
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(true);
@@ -296,7 +307,7 @@ describe("REGRESSION — delete is excluded from the verifiable-action anchor se
 describe("REGRESSION — an unrelated action family (\"judge\") does not mask a missing audit entry", () => {
   it("an update versions row satisfied ONLY by a same-version 'judge' audit entry is still reported as a MISS", async () => {
     const { store, corpusService } = makeStore();
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
 
@@ -318,7 +329,7 @@ describe("REGRESSION — an unrelated action family (\"judge\") does not mask a 
       details: { judgment_ref: "01JUDGMENTFAKE00000000001", version: 2 },
     });
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(false);
@@ -331,12 +342,12 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
   it("claim → addEvidence → release all satisfy verify() despite versions:'update' vs audit:'claim'/'evidence'/'release'", async () => {
     const { store, corpusService } = makeStore();
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
 
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
@@ -354,7 +365,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     });
     expect(evidenceResult.ok).toBe(true);
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
 
     // Sanity: the versions rows for these three writes really do carry action "update",

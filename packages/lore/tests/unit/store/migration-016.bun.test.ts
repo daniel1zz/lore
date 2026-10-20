@@ -210,8 +210,8 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   it("STATE: LATEST_SCHEMA_VERSION is 22 and opening a schema-15 file lands on user_version 22", async () => {
     await seedSchema15();
     const store = actedStore(new SQLiteStore(path, { migrate: true }));
-    expect(LATEST_SCHEMA_VERSION).toBe(26);
-    expect(userVersion(store.getDatabase())).toBe(26);
+    expect(LATEST_SCHEMA_VERSION).toBe(27);
+    expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     store.close();
   });
 
@@ -286,7 +286,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
 
     const second = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = second.getDatabase();
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(db.query("SELECT * FROM audit ORDER BY id").all()).toEqual(audit1);
     expect(db.query("SELECT * FROM versions ORDER BY doc_id, version").all()).toEqual(versions1);
     expect(columnNames(db, "audit")).toEqual(auditCols1);
@@ -310,7 +310,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   it("REGRESSION: a fresh (never-migrated) corpus is created at the same shape: version 22 + runs + columns", () => {
     const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(tableExists(db, "runs")).toBe(true);
     expect(columnNames(db, "audit")).toContain("harness_run");
     expect(columnNames(db, "versions")).toContain("harness_run");
@@ -466,13 +466,14 @@ for (const sc of STORES) {
       expect(v[0]!.harness_run ?? null).toBeNull();
     });
 
-    it("NEGATIVE: an unattested context (harnessRun null) stamps NULL, never a guessed run", async () => {
+    it("NEGATIVE: a context with no run (harnessRun null) is REFUSED and writes nothing — never stamped NULL, never a guessed run (BR-1351)", async () => {
       const wrap = await loadWithWriteContext();
-      await wrap(store, { identity: identity(null) }).appendAuditEntry(makeAudit(DOC_1));
+      const refused = await wrap(store, { identity: identity(null) }).appendAuditEntry(makeAudit(DOC_1));
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      expect(refused.error.code).toBe("VALIDATION_ERROR");
       const rows = await store.queryAudit({ doc_id: DOC_1 });
-      const a = (rows.ok ? rows.value : []) as Array<AuditEntry & { harness_run?: string | null }>;
-      expect(a.length).toBe(1);
-      expect(a[0]!.harness_run ?? null).toBeNull();
+      expect((rows.ok ? rows.value : []).length).toBe(0);
     });
 
     it("NEGATIVE: the wrapper overrides nothing on the underlying store — a later unwrapped write is still NULL", async () => {

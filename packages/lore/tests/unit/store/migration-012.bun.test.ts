@@ -45,6 +45,7 @@ import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.j
 import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
 import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -100,7 +101,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
 
     insertDoc(db, "01HRESOLVESFIX000000001", "fix-doc");
     insertDoc(db, "01HRESOLVESISSUE0000001", "issue-doc");
@@ -310,7 +311,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
 
     const preservedGovernsLink = db
       .query("SELECT * FROM links WHERE from_id = ? AND link_type = 'governs'")

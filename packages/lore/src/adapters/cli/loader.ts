@@ -58,7 +58,7 @@
 
 import { dirname, join } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, isRetiredAdoptionError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, isRetiredAdoptionError, isRetiredVerifySinceError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -373,7 +373,11 @@ export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig
     // reason: a broken config must not read as "no config" in silence (every gate would run unconfigured). This
     // per-call re-read never aborts a live server mid-request (the start-up `loadLoreApp` already refused a file
     // broken at boot), so it names the defect on stderr on every call and degrades to `undefined`.
-    if (isPrdSyncRenameError(configResult.error) || isRetiredAdoptionError(configResult.error)) {
+    if (
+      isPrdSyncRenameError(configResult.error) ||
+      isRetiredAdoptionError(configResult.error) ||
+      isRetiredVerifySinceError(configResult.error)
+    ) {
       printLine(io.stderr, formatError(configResult.error)); // CLI surface
     } else {
       const unusable = describeUnusableProjectConfig(dbPath, configResult.error);
@@ -464,7 +468,8 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   } else if (
     isAiConfigValidationError(configResult.error) ||
     isPrdSyncRenameError(configResult.error) ||
-    isRetiredAdoptionError(configResult.error)
+    isRetiredAdoptionError(configResult.error) ||
+    isRetiredVerifySinceError(configResult.error)
   ) {
     // BL-D3: a config still naming `prd_sync` that this checkout may not rewrite (or that carries both names) fails
     // loud here for the same reason an invalid `ai` block does — the fallback below would run every gate unconfigured.

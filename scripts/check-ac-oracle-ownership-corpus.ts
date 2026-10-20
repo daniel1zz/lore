@@ -23,7 +23,7 @@ import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
 export interface CorpusDumpSpec {
   readonly slug: string;
   readonly status: string;
-  readonly criteria: readonly { id: string; verify?: { mode?: string | undefined; command?: string | undefined } | undefined }[];
+  readonly criteria: readonly { id: string; verify?: { mode?: string | undefined; command?: string | undefined } | undefined; superseded?: true | undefined }[];
   readonly allow_missing_declarations: readonly { ac_id: string; reason: string }[];
 }
 export interface CorpusDump {
@@ -63,6 +63,7 @@ export async function readCorpusSpecAcs(app: App): Promise<CorpusDump> {
       status: doc.status,
       criteria: criteria.map((c) => ({
         id: c.id,
+        ...(c.superseded_by === undefined ? {} : { superseded: true as const }),
         ...(c.verify === undefined ? {} : c.verify.mode === "script" ? { verify: { mode: c.verify.mode, command: c.verify.command } } : { verify: { mode: c.verify.mode } }),
       })),
       allow_missing_declarations: extractAllowMissingPathDeclarations(doc).map((d) => ({ ac_id: d.ac_id, reason: d.reason })),

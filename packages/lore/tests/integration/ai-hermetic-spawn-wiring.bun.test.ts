@@ -229,7 +229,10 @@ describe("SPEC-030 AC-HJ-1: hermetic judge spawn — cwd/env/flag wiring", () =>
     const envVarLines = content.split("\n").filter((l) => l.startsWith("ENVVAR:"));
     expect(envVarLines).toEqual([]);
     expect(content).not.toContain("CLAUDECODE");
-    expect(content).not.toContain("host-session-should-not-leak-into-judge");
+    // reason: the document header now names the writing RUN (`cc:<session>`, BR-1351), which is that same session id; only what the
+    // STUB echoed (its PWD / ENVVAR / ARG lines) says what reached the judge subprocess.
+    const echoedByStub = content.split("\n").filter((l) => /^(PWD|ENVVAR|ARG):/.test(l)).join("\n");
+    expect(echoedByStub).not.toContain("host-session-should-not-leak-into-judge");
 
     // ── flag: argv must include --setting-sources followed by an empty-string arg ──
     const argLines = content

@@ -24,7 +24,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildMiniCorpus, type MiniCorpus } from "../../packages/lore/tests/helpers/coverage-mini-corpus";
 import { seedSiteMapValue } from "../../packages/lore/tests/helpers/seed-site-map-value";
-import { sessionEnvFor } from "../../packages/lore/tests/helpers/session-actor";
+import { sessionEnvFor, sessionIdFor } from "../../packages/lore/tests/helpers/session-actor";
+import { registerTestRun } from "../../packages/lore/tests/helpers/test-run-identity";
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const STRIP = join(REPO_ROOT, "scripts", "strip-site-map-excuses.ts");
@@ -50,7 +51,7 @@ function makeWrapper(): { lore: string; callLog: string } {
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const callLog = join(dir, "calls.log");
   const lore = join(dir, "lore-wrapper.sh");
-  writeFileSync(lore, `#!/bin/sh\nprintf '%s\\n' "$*" >> "${callLog}"\nexec bun run "${LORE_ENTRY}" "$@"\n`);
+  writeFileSync(lore, `#!/bin/sh\nprintf '%s\\n' "$*" >> "${callLog}"\nexec bun run "${LORE_ENTRY}" --harness-run "cc:$CLAUDE_CODE_SESSION_ID" "$@"\n`);
   chmodSync(lore, 0o755);
   return { lore, callLog };
 }
@@ -59,7 +60,9 @@ async function fixture(): Promise<Fixture> {
   const c = await buildMiniCorpus();
   cleanup.push(() => c.dispose());
   const { lore, callLog } = makeWrapper();
-  const env = { ...process.env, HOME: join(c.dir, ".home"), CLAUDECODE: "1", ...sessionEnvFor("bcg") };
+  // reason: the wrapper runs `lore` as the agent run of this session (BR-1351), which must be known to the corpus it writes
+  registerTestRun(c.dir, `cc:${sessionIdFor("bcg")}`);
+  const env ={ ...process.env, HOME: join(c.dir, ".home"), CLAUDECODE: "1", ...sessionEnvFor("bcg") };
   return { c, lore, callLog, env };
 }
 

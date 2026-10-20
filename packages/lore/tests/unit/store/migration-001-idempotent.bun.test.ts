@@ -45,6 +45,7 @@ import { Database } from "bun:sqlite";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -100,7 +101,7 @@ describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker
     // "resolves" link-type CHECK widening, migration-012).
     // migration-001's own concern (idempotent CREATEs) is what BOUNDARY below
     // asserts directly; this test just confirms the happy path still lands.
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(tableNames(db)).toEqual(
       expect.arrayContaining(["docs", "links", "versions", "audit", "docs_fts"]),
     );

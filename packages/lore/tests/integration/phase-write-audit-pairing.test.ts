@@ -54,7 +54,7 @@
  * pinned a JSON field instead, and an earlier draft of AC-PHASEVER-4 was
  * corrected for the same inconsistency. Fields read here, all measured
  * 2026-08-24/25 to exist: `data.clean`, `data.misses`, `data.chain.clean`,
- * `data.chain.checked`, `data.anchor.status`, `data.since`.
+ * `data.chain.checked`, `data.anchor.status`, `data.audited`, `data.reconstructed`.
  *
  * ⛔ `audit --verify` sets `process.exitCode = clean ? 0 : 4` and prints the
  * JSON envelope in BOTH cases, so `readAuditVerify` accepts exactly those two
@@ -319,7 +319,8 @@ interface AuditMissRow {
 interface AuditVerifyData {
   readonly clean: boolean;
   readonly misses: readonly AuditMissRow[];
-  readonly since: string;
+  readonly audited: number;
+  readonly reconstructed: number;
   readonly chain: { readonly clean: boolean; readonly checked: number };
   readonly anchor: { readonly status: string; readonly reason?: string };
 }
@@ -346,7 +347,8 @@ function readAuditVerify(dir: string): AuditVerifyReading {
   const data = parseEnvelope<AuditVerifyData>(run.stdout, label);
   if (typeof data.clean !== "boolean") throw new Error(`${label} carries no boolean data.clean`);
   if (!Array.isArray(data.misses)) throw new Error(`${label} carries no data.misses array`);
-  if (typeof data.since !== "string") throw new Error(`${label} carries no string data.since`);
+  if (typeof data.audited !== "number") throw new Error(`${label} carries no numeric data.audited`);
+  if (typeof data.reconstructed !== "number") throw new Error(`${label} carries no numeric data.reconstructed`);
   if (typeof data.chain?.clean !== "boolean") throw new Error(`${label} carries no boolean data.chain.clean`);
   if (typeof data.chain?.checked !== "number") throw new Error(`${label} carries no numeric data.chain.checked`);
   if (typeof data.anchor?.status !== "string") throw new Error(`${label} carries no string data.anchor.status`);
@@ -618,15 +620,11 @@ describe("AC-PHASEVER-4 — lore audit --verify stays clean across phase add, re
     ]);
   });
 
-  it("BOUNDARY non-vacuity: the reconcile watermark precedes the fixture's own version rows, so misses[] was never vacuously empty", () => {
-    const watermark = Date.parse(steps[steps.length - 1]?.verify.since ?? "");
-    const earliest = Date.parse(earliestVersionAt);
-    expect(Number.isNaN(watermark), `data.since is not a parseable timestamp`).toBe(false);
-    expect(Number.isNaN(earliest), `the earliest version row's created_at is not a parseable timestamp`).toBe(false);
-    expect(
-      watermark,
-      `data.since (${steps[steps.length - 1]?.verify.since}) is after the fixture's earliest version row (${earliestVersionAt}) — every misses[] assertion above would be vacuous`,
-    ).toBeLessThanOrEqual(earliest);
+  it("BOUNDARY non-vacuity: the join checked the fixture's own version rows (audited > 0, none reconstructed), so misses[] was never vacuously empty", () => {
+    const last = steps[steps.length - 1]?.verify;
+    expect(Number.isNaN(Date.parse(earliestVersionAt)), `the earliest version row's created_at is not a parseable timestamp`).toBe(false);
+    expect(last?.audited ?? 0, "no version row was audited — every misses[] assertion above would be vacuous").toBeGreaterThan(0);
+    expect(last?.reconstructed, "this fixture never ran the backfill").toBe(0);
   });
 
   it("the anchor cross-check reports 'absent' throughout, so no anchor state silently coloured these verdicts", () => {

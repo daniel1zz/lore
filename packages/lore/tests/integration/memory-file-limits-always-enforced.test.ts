@@ -118,7 +118,7 @@ describe("a config still naming the retired setting is refused by every command 
 });
 
 describe("lore migrate memory-limits (AC b)", () => {
-  const TAIL = 'audit:\n  verify_since: "2026-07-06T12:02:00Z"\n';
+  const TAIL = "verify:\n  default_timeout_ms: 900000\n";
   const head = (): string => `# keep me\n${base}\ncontext:\n  memory_files:\n    root:\n      max_lines: 400\n`;
   const oldText = (): string => `${head()}    adoption: warn # old\n${TAIL}`;
   const newText = (): string => `${head()}${TAIL}`;

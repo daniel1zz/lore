@@ -15,16 +15,17 @@
  *      an attested run. Claims/evidence are audit actions `claim` / `evidence` (`countAttributedWrites`);
  *      handoffs are `create` audit rows of knowledge docs carrying `extra.handoff` (how `lore handoff` writes
  *      them). Ordinary document writes never enter the count.
- *   3. {@link AttributionReport.identitySources} — every audit row in the window, counted by identity source
- *      (spec-run-only-write-identity-and-run-end-claim-release Scope 8, BR-1039): `run` when the row carries an
- *      attested `harness_run` (it wins over the name's source), else the row's `details.name_source`
- *      (`session` / `worktree` / `os`); anything else (no recorded source: internal writers, pre-source rows; or
- *      a retired `flag` / `env` source) is `other`, never dropped, so the buckets sum to the window's rows.
+ *   3. {@link AttributionReport.identitySources} — every audit row in the window, counted by the known party's
+ *      source (spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 6, BR-1039): the row's
+ *      `details.name_source` (`run` / `human` / `api-key` / `dashboard`); a row with a run but no recorded source
+ *      counts as `run`; anything else (internal writers, rows written before sources existed, a retired
+ *      `flag` / `env` / `session` / `worktree` / `os` source) is `other`, never dropped, so the buckets sum to the
+ *      window's rows. No bucket is called "unattested".
  *   4. {@link AttributionReport.orphanedDirty} — claims kept by `lore run end` because their worktree was dirty
  *      (`extra.claim.orphaned_dirty`): how many, and the age in minutes of the oldest.
  */
 
-import type { AuditEntry, DocId, LoreError, Result, VersionRecord } from "@lore/core";
+import type { AuditEntry, DocId, LoreError, NameSource, Result, VersionRecord } from "@lore/core";
 import { err, extractHeldClaim, ok } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
@@ -34,7 +35,7 @@ export interface WriteAttribution {
   /** The harness run id, or the word `unattested`. */
   readonly attested: string;
   readonly claimed: string;
-  /** flag | env | mcp | session | worktree | os; absent for a row written before the source was recorded. */
+  /** run | human | api-key | dashboard; absent for a row written before the source was recorded (older rows keep their retired source text). */
   readonly claimed_source?: string;
 }
 
@@ -86,10 +87,10 @@ export interface AttributionShare {
 export interface IdentitySourceCounts {
   window_days: number;
   run: number;
-  session: number;
-  worktree: number;
-  os: number;
-  /** Unattested rows with no recorded source, or a retired one (`flag`, `env`). */
+  human: number;
+  api_key: number;
+  dashboard: number;
+  /** Rows with no run and no recorded source (internal writers, rows written before sources existed), or a retired source. */
   other: number;
 }
 
@@ -99,11 +100,16 @@ export interface OrphanedDirtySummary {
   oldest_age_minutes: number | null;
 }
 
-const NAMED_SOURCES = ["session", "worktree", "os"] as const;
-type NamedSource = (typeof NAMED_SOURCES)[number];
+/** The recorded `details.name_source` values and the report bucket each counts into (`NameSource`, run-identity.ts). */
+const BUCKET_BY_NAME_SOURCE: Readonly<Record<NameSource, "run" | "human" | "api_key" | "dashboard">> = {
+  run: "run",
+  human: "human",
+  "api-key": "api_key",
+  dashboard: "dashboard",
+};
 
-function isNamedSource(value: unknown): value is NamedSource {
-  return NAMED_SOURCES.some((s) => s === value);
+function bucketOfNameSource(value: unknown): "run" | "human" | "api_key" | "dashboard" | undefined {
+  return typeof value === "string" && Object.hasOwn(BUCKET_BY_NAME_SOURCE, value) ? BUCKET_BY_NAME_SOURCE[value as NameSource] : undefined;
 }
 
 const DAY_MS = 86_400_000;
@@ -149,14 +155,13 @@ export class AttributionReport {
     const windowStart = new Date(clock().getTime() - windowDays * DAY_MS).toISOString();
     const rows = await this.store.queryAudit({ since: windowStart });
     if (!rows.ok) return rows;
-    const counts: IdentitySourceCounts = { window_days: windowDays, run: 0, session: 0, worktree: 0, os: 0, other: 0 };
+    const counts: IdentitySourceCounts = { window_days: windowDays, run: 0, human: 0, api_key: 0, dashboard: 0, other: 0 };
     for (const row of rows.value) {
-      if (row.harness_run != null) {
-        counts.run += 1;
-        continue;
-      }
-      const source = row.details?.name_source;
-      if (isNamedSource(source)) counts[source] += 1;
+      const bucket = bucketOfNameSource(row.details?.name_source);
+      if (bucket !== undefined) counts[bucket] += 1;
+      // reason: a row stamped with a run whose actor differs from the claimed name carries no `name_source`; its run
+      // is still the known party's, so it counts as `run`, never `other`.
+      else if (row.harness_run != null) counts.run += 1;
       else counts.other += 1;
     }
     return ok(counts);

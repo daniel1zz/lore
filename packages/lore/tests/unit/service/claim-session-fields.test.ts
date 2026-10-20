@@ -28,6 +28,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { buildTaskClaim, taskClaimSchema } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     const first = await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-11T09:00:00.000Z",
     );
     expect(first.ok).toBe(true);
@@ -76,10 +77,10 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       branch: "b1",
       machine: "A",
       worktree: "/w",
-      harness_run: null,
+      harness_run: runOfName("alice"),
     });
 
-    const refresh = await taskWorkflowService.claim(taskId, { by: "alice" }, () => "2026-07-11T09:30:00.000Z");
+    const refresh = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => "2026-07-11T09:30:00.000Z");
     expect(refresh.ok).toBe(true);
     if (!refresh.ok) return;
     expect(refresh.value.extra["claim"]).toEqual({
@@ -88,7 +89,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       branch: "b1",
       machine: "A",
       worktree: "/w",
-      harness_run: null,
+      harness_run: runOfName("alice"),
     });
   });
 
@@ -99,13 +100,13 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-11T09:00:00.000Z",
     );
 
     const refresh = await taskWorkflowService.claim(
       taskId,
-      { by: "alice", branch: "b2" },
+      { by: "alice", harnessRun: runOfName("alice"), branch: "b2" },
       () => "2026-07-11T09:30:00.000Z",
     );
     expect(refresh.ok).toBe(true);
@@ -119,13 +120,13 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-11T09:00:00.000Z",
     );
 
     const refresh = await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "B", worktree: "/w2" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "B", worktree: "/w2" },
       () => "2026-07-11T09:30:00.000Z",
     );
     expect(refresh.ok).toBe(true);
@@ -140,15 +141,15 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-11T09:00:00.000Z",
     );
-    await taskWorkflowService.release(taskId, { by: "alice" }, () => "2026-07-11T09:10:00.000Z");
+    await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => "2026-07-11T09:10:00.000Z");
 
-    const acquire = await taskWorkflowService.claim(taskId, { by: "bob" }, () => "2026-07-11T09:20:00.000Z");
+    const acquire = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, () => "2026-07-11T09:20:00.000Z");
     expect(acquire.ok).toBe(true);
     if (!acquire.ok) return;
-    expect(acquire.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:20:00.000Z", harness_run: null });
+    expect(acquire.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:20:00.000Z", harness_run: runOfName("bob") });
   });
 
   // STATE — --steal starts fresh, no inherited fields from the stolen-from holder
@@ -158,18 +159,18 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-11T09:00:00.000Z",
     );
 
     const steal = await taskWorkflowService.claim(
       taskId,
-      { by: "bob", steal: true },
+      { by: "bob", harnessRun: runOfName("bob"), steal: true },
       () => "2026-07-11T09:05:00.000Z",
     );
     expect(steal.ok).toBe(true);
     if (!steal.ok) return;
-    expect(steal.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:05:00.000Z", harness_run: null });
+    expect(steal.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:05:00.000Z", harness_run: runOfName("bob") });
   });
 
   // STATE — a stale takeover BY THE SAME ACTOR still starts fresh (staleness breaks
@@ -180,7 +181,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-08T00:00:00.000Z",
     );
 
@@ -188,12 +189,12 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     // not a fresh same-holder refresh, EVEN THOUGH `by` is identical.
     const takeover = await taskWorkflowService.claim(
       taskId,
-      { by: "alice" },
+      { by: "alice", harnessRun: runOfName("alice") },
       () => "2026-07-08T03:20:00.000Z",
     );
     expect(takeover.ok).toBe(true);
     if (!takeover.ok) return;
-    expect(takeover.value.extra["claim"]).toEqual({ by: "alice", at: "2026-07-08T03:20:00.000Z", harness_run: null });
+    expect(takeover.value.extra["claim"]).toEqual({ by: "alice", at: "2026-07-08T03:20:00.000Z", harness_run: runOfName("alice") });
   });
 
   // REGRESSION — a stale takeover by a DIFFERENT actor also starts fresh (the
@@ -204,18 +205,18 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     await taskWorkflowService.claim(
       taskId,
-      { by: "alice", machine: "A", worktree: "/w", branch: "b1" },
+      { by: "alice", harnessRun: runOfName("alice"), machine: "A", worktree: "/w", branch: "b1" },
       () => "2026-07-08T00:00:00.000Z",
     );
 
     const takeover = await taskWorkflowService.claim(
       taskId,
-      { by: "bob" },
+      { by: "bob", harnessRun: runOfName("bob") },
       () => "2026-07-08T03:20:00.000Z", // 200 min later, stale
     );
     expect(takeover.ok).toBe(true);
     if (!takeover.ok) return;
-    expect(takeover.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-08T03:20:00.000Z", harness_run: null });
+    expect(takeover.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-08T03:20:00.000Z", harness_run: runOfName("bob") });
   });
 
   // REGRESSION — legacy claims without machine/worktree still validate, render, refresh
@@ -228,14 +229,14 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     // machine/worktree keys present at all, not merely undefined).
     const taskResult = await store.find(taskId);
     if (!taskResult.ok || taskResult.value === null) throw new Error("task not found");
-    const legacyClaim = { by: "carol", at: "2026-07-05T00:00:00.000Z", branch: "legacy-branch" };
+    const legacyClaim = { by: "carol", at: "2026-07-05T00:00:00.000Z", branch: "legacy-branch", harness_run: runOfName("carol") };
     expect(taskClaimSchema.safeParse(legacyClaim).success).toBe(true);
     const updateResult = await store.update(taskId, {
       extra: { ...taskResult.value.extra, claim: legacyClaim },
     });
     if (!updateResult.ok) throw new Error("seed update failed");
 
-    const refresh = await taskWorkflowService.claim(taskId, { by: "carol" }, () => "2026-07-05T01:00:00.000Z");
+    const refresh = await taskWorkflowService.claim(taskId, { by: "carol", harnessRun: runOfName("carol") }, () => "2026-07-05T01:00:00.000Z");
     expect(refresh.ok).toBe(true);
     if (!refresh.ok) return;
     // carry-forward on a legacy claim: branch inherited, no machine/worktree keys appear
@@ -243,7 +244,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       by: "carol",
       at: "2026-07-05T01:00:00.000Z",
       branch: "legacy-branch",
-      harness_run: null,
+      harness_run: runOfName("carol"),
     });
   });
 });

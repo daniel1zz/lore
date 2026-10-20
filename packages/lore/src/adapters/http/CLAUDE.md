@@ -31,7 +31,7 @@ Full pre-eviction file (per-route mechanism walkthroughs, rejected-alternative r
 
 - **Route dispatch is a flat conditional table** in `routes.ts::handleApiRoute` — `if (method === "X" && path === "Y") return handleX(...)`. Returns `null` for unmatched routes; the server then 404s.
 - **Body parsing via `parseJsonBody`** — returns `Result<unknown, LoreError>`. ⛔ Routes never `await req.json()` directly.
-- **`ActorContext` flows from auth to routes** — `{ name, session_id }`, passed through to services as the audit-log actor where applicable.
+- **`ActorContext` flows from auth to routes** — `{ name, session_id }`, passed through to services as the audit-log actor where applicable. ⛔ A write's PARTY is per request, never the `lore serve` process's identity: `request-identity.ts::dispatchUnderRequestParty` registers (first-wins, reused) an `api-key` run for a bearer key or a `dashboard` run for a cookie login (named by the session's `owner`) and runs the request inside `runWithRequestIdentity`, which the store chokepoint reads first. Reads register nothing.
 - **Server lifecycle** — `startHttpServer(app, { port, host })` returns the `Bun.Server`. The caller (typically `lore serve`) owns `app.close()` on shutdown.
 
 ## Files
