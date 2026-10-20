@@ -25,6 +25,7 @@ import type { App } from "../../../src/app.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore, liveInvocation, liveIo } from "../../live-invocation.js";
 
 const T_SETUP = "2026-03-01T08:00:00.000Z";
@@ -70,6 +71,7 @@ async function makeFixture(): Promise<Fixture> {
     { by: "agent:test" },
   );
   if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
+  await approvePending(store, leaf.id); // a direct add is a pending add: the diff reads approved rules
   const ruleId = added.value.ruleId;
   const spec = await mustCreate({
     type: "spec", title: "Wiring Spec",content: "s",
@@ -123,6 +125,7 @@ describe("lore feed session-resume prints the BL-15 rule diff", () => {
     at(T_POST);
     const set = await rules.setRule(fx.ruleId, { statement: "Wired rule now differs" }, { by: "agent:test" });
     if (!set.ok) throw new Error(JSON.stringify(set.error));
+    await approvePending(store, set.value.doc.id); // the revision is pending until approved; the diff reads approved rules
 
     const feed = await feedFor(fx.plan);
     expect(feed).toContain(BLOCK_HEADER);

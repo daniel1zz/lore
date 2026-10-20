@@ -1,8 +1,9 @@
 // @layer service-rule-set-commands AC-SMM-1
 /**
- * AC-SMM-1 as narrowed by BR-1344 (a site's rule lives in code, so the leaf's only map write is its commands): a call that adds or
- * removes a declared command demotes an approved baseline leaf to draft (one version, one `baseline-map` audit row); a refused call
- * leaves the approved leaf untouched.
+ * AC-SMM-1 as narrowed by BR-1344 (a site's rule lives in code, so the leaf's only map write is its commands) and BR-628
+ * (spec-baseline-approval-is-per-item-an-edit-adds-a-pending): a call that adds or removes a declared command records a PENDING
+ * revision of the leaf's own part (one version, one `baseline-map` audit row) and never touches the approved commands; the leaf's
+ * status is derived (draft while the revision is pending). A refused call leaves the approved leaf untouched.
  * InMemoryStore - MOCK RISK: hides SQLite transactions; the CLI e2e covers the real store.
  * @spec_ref AC-SMM-1
  */
@@ -13,7 +14,9 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { RuleService } from "../../../src/service/rule-service.js";
+import { approvedCommandsOf, pendingRevisionsOf } from "../../../src/service/baseline-items.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 let store: InMemoryStore;
@@ -50,26 +53,31 @@ beforeEach(async () => {
   if (!added.ok) throw new Error(JSON.stringify(added.error));
   const seeded = await svc.setCommands(leaf.id, { addCommands: ["ac add"] }, { by: "fx" });
   if (!seeded.ok) throw new Error(JSON.stringify(seeded.error));
-  const approved = await corpus.set(leaf.id, { status: "approved" });
-  if (!approved.ok || approved.value.status !== "approved") throw new Error("fixture approve failed");
+  await approvePending(store, leaf.id);
+  if ((await fresh()).status !== "approved") throw new Error("fixture approve failed");
 });
 
 describe("setCommands approval handling (AC-SMM-1)", () => {
-  it("adding a command demotes to draft with one version and one baseline-map audit row", async () => {
+  it("adding a command records a pending revision with one version and one baseline-map audit row; the approved commands stay", async () => {
     const before = await fresh();
     const mapRowsBefore = (await auditOps()).filter((o) => o === "baseline-map").length;
     const res = await svc.setCommands(leafId, { addCommands: ["ac list"] }, { by: "t" });
     expect(res.ok).toBe(true);
     const after = await fresh();
     expect(after.status).toBe("draft");
-    expect(after.version).toBeGreaterThan(before.version);
+    expect(after.version).toBe(before.version + 1);
+    expect(approvedCommandsOf(after)).toEqual(["ac add"]);
+    expect(pendingRevisionsOf(after).node?.commands).toEqual(["ac add", "ac list"]);
     expect((await auditOps()).filter((o) => o === "baseline-map").length).toBe(mapRowsBefore + 1);
   });
 
-  it("removing a command demotes to draft", async () => {
+  it("removing a command is a pending revision too: the approved commands still hold it", async () => {
     const res = await svc.setCommands(leafId, { removeCommands: ["ac add"] }, { by: "t" });
     expect(res.ok).toBe(true);
-    expect((await fresh()).status).toBe("draft");
+    const after = await fresh();
+    expect(after.status).toBe("draft");
+    expect(approvedCommandsOf(after)).toEqual(["ac add"]);
+    expect(pendingRevisionsOf(after).node?.commands).toBeNull();
   });
 
   it("a call refused before any write leaves the approved leaf untouched (no version, still approved)", async () => {
@@ -81,12 +89,16 @@ describe("setCommands approval handling (AC-SMM-1)", () => {
     expect(after.version).toBe(before.version);
   });
 
-  it("a draft leaf stays draft on a command call (control)", async () => {
-    const demoted = await svc.addRule(leafId, { statement: "second", confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "fx" });
-    expect(demoted.ok).toBe(true);
+  it("a leaf already holding a pending revision stays draft on a command call (control)", async () => {
+    const pending = await svc.addRule(leafId, { statement: "second", confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "fx" });
+    expect(pending.ok).toBe(true);
     expect((await fresh()).status).toBe("draft");
     const res = await svc.setCommands(leafId, { addCommands: ["ac list"] }, { by: "t" });
     expect(res.ok).toBe(true);
-    expect((await fresh()).status).toBe("draft");
+    const after = await fresh();
+    expect(after.status).toBe("draft");
+    // two items pending: the rule add and the node's own part
+    expect(Object.keys(pendingRevisionsOf(after).rules)).toEqual(["BR-2"]);
+    expect(pendingRevisionsOf(after).node?.commands).toEqual(["ac add", "ac list"]);
   });
 });

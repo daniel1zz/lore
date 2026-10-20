@@ -37,6 +37,7 @@ import { OrdinalMigrationService } from "../../src/service/ordinal-migration-ser
 import { PhaseMigrationService } from "../../src/service/phase-migration-service.js";
 import { ValidityService } from "../../src/service/validity-service.js";
 import { RuleService } from "../../src/service/rule-service.js";
+import { ReviewService } from "../../src/service/review-service.js";
 import { PhaseService } from "../../src/service/phase-service.js";
 import { TreeCheckService } from "../../src/service/tree-check-service.js";
 import { RequirementService } from "../../src/service/requirement-service.js";
@@ -605,10 +606,14 @@ describe("AC-DCL-3 baseline — RuleService", () => {
       { by: CALLER },
     );
     if (!added.ok) throw new Error(`fixture addRule failed: ${JSON.stringify(added.error)}`);
+    // a direct add is a pending add, and a rule can be moved only once it is in the baseline: approve it through the same route
+    const review = new ReviewService(fx.store, fx.lock, undefined, undefined, undefined, undefined, fx.corpus);
+    const approved = await review.approve(from.id, { reviewer: CALLER });
+    if (!approved.ok) throw new Error(`fixture approve failed: ${JSON.stringify(approved.error)}`);
     return { rules, from, to, ruleId: added.value.ruleId };
   }
 
-  it("HAPPY: moving a rule writes exactly one version row and one audit row on EACH leaf, by the CALLER and RUN (#145)", async () => {
+  it("HAPPY: a move is a pending revision of the source leaf; approving it writes one version row and one audit row on EACH leaf, by the CALLER and RUN (#145)", async () => {
     const fx = openFixture();
     const { rules, from, to, ruleId } = await seedTree(fx);
     const beforeFrom = await rowsOf(fx, from.id);
@@ -616,8 +621,15 @@ describe("AC-DCL-3 baseline — RuleService", () => {
 
     const moved = await rules.setRule(ruleId, { moveTo: to.id }, { by: CALLER });
     expect(moved.ok).toBe(true);
-
+    // the move itself is ONE paired write on the source leaf; the destination is not touched until the move is approved
     expect(await expectPairedRowsByCaller(fx, from.id, beforeFrom)).toBe(1);
+    await expectNothingWritten(fx, to.id, beforeTo);
+
+    const afterRequestFrom = await rowsOf(fx, from.id);
+    const review = new ReviewService(fx.store, fx.lock, undefined, undefined, undefined, undefined, fx.corpus);
+    const approved = await review.approve(from.id, { reviewer: CALLER });
+    expect(approved.ok).toBe(true);
+    expect(await expectPairedRowsByCaller(fx, from.id, afterRequestFrom)).toBe(1);
     expect(await expectPairedRowsByCaller(fx, to.id, beforeTo)).toBe(1);
   });
 

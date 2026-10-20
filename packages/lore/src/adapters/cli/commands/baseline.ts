@@ -58,7 +58,8 @@ import type { ConflictedSite, GenericSite, InvalidDeclaration, MappedSite } from
 import { classifySiteDeclaration, ruleStatusIndexOf } from "../../../service/site-declarations.js";
 import type { RuleStatusOf } from "../../../service/site-declarations.js";
 import { treePredicateFor } from "../absent-declarations.js";
-import { approvedCommandsOf, approvedDependsOnOf, approvedRulesOf } from "../../../service/baseline-items.js";
+import { approvedCommandsOf, approvedDependsOnOf, approvedGlossaryOf, approvedLabelOf, approvedRulesOf } from "../../../service/baseline-items.js";
+import { effectiveNodePart } from "../../../service/baseline-pending.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
@@ -77,6 +78,11 @@ import type { ExitReport } from "../cli-exit.js";
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+/** What turns the node's pending revision into its approved version (BR-1338). */
+function pendingHint(slug: string): string {
+  return `lore review ${slug}, then lore approve ${slug} --item node`;
 }
 
 function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
@@ -558,8 +564,9 @@ export default defineLoreCommand({
         return await withRuleService(inv, async (svc): Promise<number> => {
           const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
-          else printLine(inv.io.stdout, `Label of ${result.value.slug} set to '${String(args.label)}'.`);
+          const isPending = approvedLabelOf(result.value) !== args.label;
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label, pending: isPending, status: result.value.status } }, null, 2));
+          else printLine(inv.io.stdout, `Label of ${result.value.slug} set to '${String(args.label)}'${isPending ? ` as a pending revision of the node (approved label: ${JSON.stringify(approvedLabelOf(result.value) ?? null)}); ${pendingHint(result.value.slug)}` : ""}.`);
           return 0;
         });
       },
@@ -582,9 +589,11 @@ export default defineLoreCommand({
             { by: resolveActor(inv) },
           );
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          const dependsOn = approvedDependsOnOf(result.value);
-          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, depends_on: dependsOn } }, null, 2));
-          else printLine(inv.io.stdout, `${result.value.slug} depends_on: ${dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}`);
+          const dependsOn = effectiveNodePart(result.value).depends_on;
+          const approvedDepends = approvedDependsOnOf(result.value);
+          const isPending = JSON.stringify(dependsOn) !== JSON.stringify(approvedDepends);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, depends_on: dependsOn, approved_depends_on: approvedDepends, pending: isPending, status: result.value.status } }, null, 2));
+          else printLine(inv.io.stdout, `${result.value.slug} depends_on: ${dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}${isPending ? ` (pending revision of the node; approved: ${approvedDepends.length > 0 ? approvedDepends.join(", ") : "(none)"}); ${pendingHint(result.value.slug)}` : ""}`);
           return 0;
         });
       },
@@ -612,8 +621,9 @@ export default defineLoreCommand({
               };
               const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(inv) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-              if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
-              else printLine(inv.io.stdout, `Defined '${entry.term}' on ${result.value.slug}.`);
+              const isPending = !(approvedGlossaryOf(result.value) as Array<{ term?: unknown }>).some((g) => g.term === entry.term);
+              if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term, pending: isPending, status: result.value.status } }, null, 2));
+              else printLine(inv.io.stdout, `Defined '${entry.term}' on ${result.value.slug}${isPending ? ` as a pending revision of the node; ${pendingHint(result.value.slug)}` : ""}.`);
               return 0;
             });
           },
@@ -631,8 +641,9 @@ export default defineLoreCommand({
             return await withRuleService(inv, async (svc): Promise<number> => {
               const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-              if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
-              else printLine(inv.io.stdout, `Removed '${String(args.term)}' from ${result.value.slug}.`);
+              const isPending = (approvedGlossaryOf(result.value) as Array<{ term?: unknown }>).some((g) => g.term === args.term);
+              if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term, pending: isPending, status: result.value.status } }, null, 2));
+              else printLine(inv.io.stdout, `Removed '${String(args.term)}' from ${result.value.slug}${isPending ? ` as a pending revision of the node; ${pendingHint(result.value.slug)}` : ""}.`);
               return 0;
             });
           },
@@ -669,9 +680,11 @@ export default defineLoreCommand({
           }
           const result = await svc.setCommands(args.leaf as string, change, { by });
           if (!result.ok) return reportFailure(inv, result.error, json);
-          const commands = approvedCommandsOf(result.value);
-          if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, commands } }, null, 2));
-          else printLine(inv.io.stdout, `${result.value.slug}: commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}`);
+          const commands = effectiveNodePart(result.value).commands;
+          const approvedCommands = approvedCommandsOf(result.value);
+          const isPending = JSON.stringify(commands) !== JSON.stringify(approvedCommands);
+          if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, commands, approved_commands: approvedCommands, pending: isPending, status: result.value.status } }, null, 2));
+          else printLine(inv.io.stdout, `${result.value.slug}: commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}${isPending ? ` (pending revision of the node; coverage keeps measuring the approved: ${approvedCommands.length > 0 ? approvedCommands.join(", ") : "(none)"}); ${pendingHint(result.value.slug)}` : ""}`);
           return 0;
         });
       },
@@ -815,7 +828,9 @@ export default defineLoreCommand({
             const holdsRules = ruleIdPrefixOfNode({ tree: entry.tree, node: entry.node }) !== undefined;
             const rules = holdsRules ? `  [rules: ${counts}]` : "";
             const kind = entry.tree === "architecture" ? `architecture ${entry.node}` : entry.node;
-            printLine(inv.io.stdout, `${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
+            // reason: BR-1339 — the status is derived from the items: a node with any pending revision prints `draft (N pending)`.
+            const status = entry.pending > 0 ? `${entry.status} (${entry.pending} pending)` : entry.status;
+            printLine(inv.io.stdout, `${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${status})${rules}`);
           }
           return 0;
         });

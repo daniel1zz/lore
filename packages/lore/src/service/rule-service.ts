@@ -27,13 +27,14 @@
  *   - Writes are CAS-guarded. On STALE_VERSION the mutation is re-applied to a fresh read at
  *     most {@link MAX_CAS_REAPPLIES} times, then the STALE_VERSION error is returned — no
  *     silent last-writer-wins.
- *   - Editing the content of an `approved` leaf demotes it to `draft` (the one shared rule,
- *     `resolveStatusAfterContractEdit`, same as CorpusService.set / AcService.setCriterion).
- *     The demotion is its own CAS write BEFORE the rule write, so a failure after it leaves
- *     the doc conservatively un-approved rather than approved with unreviewed content.
+ *   - A write NEVER demotes and never changes any approved version: it records a pending revision of the ONE item it
+ *     changes (`baseline-pending.ts`): `rule add` a pending add (registry state `proposed`), `rule set` a revision
+ *     (revise, retire or move), `set-label|depends|glossary|map` a revision of the node's own part. The approved
+ *     version keeps governing until `lore approve` promotes what a review saw. A second write to an item replaces its
+ *     pending revision. The node's status is derived from its pending items, never set here (BR-1339).
  *   - Every write leaves one version row + one audit entry (single-leaf writes are one
- *     atomic `updateWithProvenance`; allocate/move append their audit entry right after the
- *     store's own transaction).
+ *     atomic `updateWithProvenance`; a pending add reserves its id in the store's own transaction and appends its
+ *     audit entry right after).
  *
  * Side-effect class: IO (reads and writes via StoreInterface; node creation via the injected
  *   create port).
@@ -54,7 +55,6 @@ import {
   glossaryEntrySchema,
   isLawfulRuleLifecycleTransition,
   isNodeOfTree,
-  resolveStatusAfterContractEdit,
   ruleIdPrefix,
   ruleIdPrefixOfNode,
   validateBaselineParent,
@@ -72,7 +72,16 @@ import { resolveDoc } from "./resolve.js";
 import { bareDocWriter, type CreateDocResult, type DocWritePort, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { collectLeafRules } from "./rule-index-queries.js";
-import { demotionOf, type Demotion } from "./demotion-notice.js";
+import { approvedRulesOf, pendingRevisionsOf } from "./baseline-items.js";
+import {
+  effectiveNodePart,
+  effectiveRuleOf,
+  pendingCountOf,
+  proposeNodePart,
+  proposeRuleRevision,
+  statusFor,
+  type NodePartChange,
+} from "./baseline-pending.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // reason: C7's `--check-baseline` imports this from the service that owns rules; the helper itself
@@ -147,6 +156,8 @@ export interface BaselineTreeEntry {
   slug: string;
   title: string;
   status: DocStatus;
+  /** Items holding a pending revision (BR-1339): a node with any is `draft` and prints `(N pending)`. */
+  pending: number;
   depth: number;
   node: string;
   label: string | null;
@@ -267,11 +278,8 @@ export class RuleService {
     leaf: string,
     input: AddRuleInput,
     opts?: { by?: string },
-  ): Promise<Result<{ ruleId: string; doc: DocRecord; demoted?: Demotion }, LoreError>> {
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
-    // reason: D18 — the demotion is its own CAS write; a later STALE_VERSION re-apply reads the leaf already
-    // draft, so the notice is captured on the attempt that wrote it and survives the retry.
-    let demoted: Demotion | undefined;
     // reason: first pass validates the rule's own fields only; "AS" is the one family that admits every
     // field (four-part standard included). The family-specific verdict comes from the extra check below.
     const candidate = baselineRuleSchema.safeParse({ ...input, id: `AS-${PREVALIDATION_NUMBER}`, lifecycle: "live" });
@@ -302,30 +310,39 @@ export class RuleService {
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const fresh = await this.readLeaf(leafId);
       if (!fresh.ok) return fresh;
-      const readied = await this.demoteIfApproved(fresh.value, actor, "rule add");
-      if (!readied.ok) {
-        if (readied.error.code === "STALE_VERSION") { lastStale = readied.error; continue; }
-        return readied;
-      }
-      demoted ??= demotionOf(fresh.value, readied.value);
-      const base = readied.value;
-      const withRule = (ruleId: string): Record<string, unknown> => ({
-        ...base.extra,
-        rules: [...rulesOf(base), { ...candidate.data, id: ruleId }],
-      });
-      const shape = baselineExtraSchema.safeParse(withRule(`${family}-${PREVALIDATION_NUMBER}`));
+      const base = fresh.value;
+      // reason: BR-626 — the new rule is a PENDING ADD of its own item: it is not in `extra.rules` (not live, not citable,
+      // not counted) until a review has seen it and an approval promotes it. No other item and no approval is touched,
+      // so the node's status is only re-derived from its pending items (BR-1339), never demoted.
+      const withRule = (ruleId: string): Record<string, unknown> => proposeRuleRevision(base.extra, { ...candidate.data, id: ruleId });
+      const placeholderExtra = withRule(`${family}-${PREVALIDATION_NUMBER}`);
+      const shape = baselineExtraSchema.safeParse(placeholderExtra);
       if (!shape.success) {
         const issue = shape.error.issues[0];
         return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid leaf extra", undefined, "BR-632"));
       }
-      // reason: AC-DCL-3 — allocation goes through the one write route (foreign-corpus refusal, the store's
-      // one transaction, then the audit row as the calling actor).
-      const allocated = await this.writer.allocateRule({ leaf: base, buildExtra: withRule, family, by: actor });
-      if (!allocated.ok) {
-        if (allocated.error.code === "STALE_VERSION") { lastStale = allocated.error; continue; }
-        return allocated;
+      // reason: AC-DCL-3 — the id is reserved by the one write route, in registry state `proposed` (the leaf lists no such
+      // rule yet, so the registry must not read it as `live`): foreign-corpus refusal, the store's one transaction, then
+      // the audit row as the calling actor. The leaf is its own owner here (a spec's reservation owns another leaf).
+      const reserved = await this.writer.reserveProposedRule({
+        write: {
+          specId: base.id,
+          expectedVersion: base.version,
+          buildExtra: withRule,
+          ownerLeafId: base.id,
+          status: statusFor(base.status, placeholderExtra),
+          changeSummary: "Rule added (pending: not live until approved)",
+        },
+        family,
+        auditDetails: { operation: "rule-add", pending: true },
+        targets: [base],
+        by: actor,
+      });
+      if (!reserved.ok) {
+        if (reserved.error.code === "STALE_VERSION") { lastStale = reserved.error; continue; }
+        return reserved;
       }
-      return ok({ ...allocated.value, ...(demoted !== undefined ? { demoted } : {}) });
+      return ok(reserved.value);
     }
     /** @lore-site BR-631 */
     return err(lastStale ?? staleExhausted(leafId));
@@ -343,9 +360,8 @@ export class RuleService {
     ruleId: string,
     patch: SetRulePatch,
     opts?: { by?: string },
-  ): Promise<Result<{ rule: BaselineRule; doc: DocRecord; demoted?: Demotion }, LoreError>> {
+  ): Promise<Result<{ rule: BaselineRule; doc: DocRecord; revisionId: string | undefined }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
-    let demoted: Demotion | undefined; // reason: D18 — kept across CAS re-applies, see addRule
     if (!ANY_RULE_ID_PATTERN.test(ruleId)) {
       return err(validationError("ruleId", `rule id must match BR-<n>, AS-<n> or AD-<n> (got '${ruleId}')`, ruleId));
     }
@@ -359,89 +375,54 @@ export class RuleService {
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const located = await this.locateRule(ruleId);
       if (!located.ok) return located;
-      const { sourceLeaf, current, registered } = located.value;
+      const { sourceLeaf, approved, current, pendingMoveTo } = located.value;
+      // reason: a patch applies to the rule as it reads with its pending revision laid over the approved version, so a
+      // second write composes with the first; the result REPLACES the pending revision (new revision id).
       const edited = applyRulePatch(current, patch);
       if (!edited.ok) return edited;
-      if (patch.moveTo === undefined) {
-        if (!authorized) {
-          const gate = await this.authorizeCorpusWrite([sourceLeaf], "rule-set", opts?.by);
-          if (!gate.ok) return gate;
-          authorized = true;
-        }
-        const written = await this.writeLeafExtra(
-          sourceLeaf, actor,
-          (doc) => replaceRule(doc, ruleId, edited.value, patchSummary(patch), {
-            rule_id: ruleId, operation: "rule-set", fields: Object.keys(patch),
-          }),
-        );
-        if (!written.ok) {
-          if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
-          return written;
-        }
-        demoted ??= written.value.demoted;
-        return ok({ rule: edited.value, doc: written.value.doc, ...(demoted !== undefined ? { demoted } : {}) });
-      }
 
-      const dest = await this.resolveBaselineDoc(patch.moveTo, ["leaf", "standard", "debt-registry"]);
-      if (!dest.ok) return dest;
-      if (ruleIdPrefixOfNode(dest.value.extra) !== ruleIdPrefix(ruleId)) {
-        return err(validationError(
-          "moveTo",
-          `rule ${ruleId} cannot move to a ${String(dest.value.extra["tree"] ?? "business")} ${String(dest.value.extra["node"])}: it holds ${ruleIdPrefixOfNode(dest.value.extra) ?? "no"} ids`,
-          patch.moveTo,
-        ));
-      }
-      if (dest.value.id === sourceLeaf.id) {
-        return err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.moveTo, "BR-646"));
+      let moveTo: string | undefined = pendingMoveTo;
+      let targets: DocRecord[] = [sourceLeaf];
+      if (patch.moveTo !== undefined) {
+        const dest = await this.resolveBaselineDoc(patch.moveTo, ["leaf", "standard", "debt-registry"]);
+        if (!dest.ok) return dest;
+        if (ruleIdPrefixOfNode(dest.value.extra) !== ruleIdPrefix(ruleId)) {
+          return err(validationError(
+            "moveTo",
+            `rule ${ruleId} cannot move to a ${String(dest.value.extra["tree"] ?? "business")} ${String(dest.value.extra["node"])}: it holds ${ruleIdPrefixOfNode(dest.value.extra) ?? "no"} ids`,
+            patch.moveTo,
+          ));
+        }
+        if (dest.value.id === sourceLeaf.id) {
+          return err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.moveTo, "BR-646"));
+        }
+        if (approved === undefined) {
+          return err(validationError("moveTo", `rule ${ruleId} is a pending add and is not in the baseline yet: approve it, then move it`, patch.moveTo, "BR-648"));
+        }
+        moveTo = dest.value.id;
+        targets = [sourceLeaf, dest.value];
       }
       if (!authorized) {
-        const gate = await this.authorizeCorpusWrite([sourceLeaf, dest.value], "rule-move", opts?.by);
+        const gate = await this.authorizeCorpusWrite(targets, patch.moveTo !== undefined ? "rule-move" : "rule-set", opts?.by);
         if (!gate.ok) return gate;
         authorized = true;
       }
-      const fromReady = await this.demoteIfApproved(sourceLeaf, actor, "rule move");
-      if (!fromReady.ok) {
-        if (fromReady.error.code === "STALE_VERSION") { lastStale = fromReady.error; continue; }
-        return fromReady;
+      // reason: BR-627/BR-648 — a revise, a retirement and a move each record a pending revision of THIS rule only. The
+      // approved version keeps governing (and a moved rule stays on its source leaf) until an approval promotes it; no other
+      // item and no approval is touched, and the node's status is re-derived from its pending items, never demoted.
+      const written = await this.writeLeafExtra(
+        sourceLeaf, actor,
+        (doc) => ok({
+          extra: proposeRuleRevision(doc.extra, edited.value, moveTo),
+          summary: `${patchSummary(patch)} (pending revision of ${ruleId})`,
+          details: { rule_id: ruleId, operation: patch.moveTo !== undefined ? "rule-move" : "rule-set", fields: Object.keys(patch), pending: true },
+        }),
+      );
+      if (!written.ok) {
+        if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
+        return written;
       }
-      const toFresh = await this.readLeaf(dest.value.id);
-      if (!toFresh.ok) return toFresh;
-      const toReady = await this.demoteIfApproved(toFresh.value, actor, "rule move");
-      if (!toReady.ok) {
-        if (toReady.error.code === "STALE_VERSION") { lastStale = toReady.error; continue; }
-        return toReady;
-      }
-      // reason: a move can demote both leaves; `demoted` is a single value, so the source leaf wins and the
-      // destination's is reported only when the source was not approved.
-      demoted ??= demotionOf(sourceLeaf, fromReady.value) ?? demotionOf(toFresh.value, toReady.value);
-      const from = fromReady.value;
-      const to = toReady.value;
-      const fromExtra = { ...from.extra, rules: rulesOf(from).filter((r) => r.id !== ruleId) };
-      const toExtra = { ...to.extra, rules: [...rulesOf(to), edited.value] };
-      for (const [label, extra] of [["source", fromExtra], ["destination", toExtra]] as const) {
-        const shape = baselineExtraSchema.safeParse(extra);
-        if (!shape.success) {
-          const issue = shape.error.issues[0];
-          return err(validationError(`extra.${issue ? issue.path.join(".") : ""}`, `${label} leaf: ${issue ? issue.message : "invalid extra"}`));
-        }
-      }
-      // reason: AC-DCL-3 / #145 — a registered move goes through the one write route: foreign-corpus refusal,
-      // the store's single transaction (both leaves' version rows stamped with the invocation's run), then
-      // one audit row per leaf as the calling actor.
-      const moved = registered
-        ? await this.writer.moveRule({
-            ruleId,
-            from: { id: from.id, expectedVersion: from.version, extra: fromExtra },
-            to: { id: to.id, expectedVersion: to.version, extra: toExtra },
-            auditDetails: { rule_id: ruleId, from: from.id, to: to.id, registered },
-            by: actor,
-          })
-        : await this.moveUnregisteredRule(from, fromExtra, to, toExtra, actor);
-      if (!moved.ok) {
-        if (moved.error.code === "STALE_VERSION") { lastStale = moved.error; continue; }
-        return moved;
-      }
-      return ok({ rule: edited.value, doc: moved.value.to, ...(demoted !== undefined ? { demoted } : {}) });
+      return ok({ rule: edited.value, doc: written.value, revisionId: pendingRevisionsOf(written.value).rules[ruleId]?.revision_id });
     }
     return err(lastStale ?? staleExhausted(ruleId));
   }
@@ -510,11 +491,8 @@ export class RuleService {
     if (!target.ok) return target;
     const gate = await this.authorizeCorpusWrite([target.value], "label-set", opts?.by);
     if (!gate.ok) return gate;
-    return this.retryWrite(target.value.id, opts?.by, (doc) => ok({
-      extra: { ...doc.extra, label },
-      summary: `Baseline label set to '${label}'`,
-      details: { operation: "label-set", label },
-    }));
+    return this.retryWrite(target.value.id, opts?.by, (doc) =>
+      nodePartMutation(doc, { label }, `Baseline label set to '${label}' (pending revision of the node)`, { operation: "label-set", label }));
   }
 
   /**
@@ -550,17 +528,13 @@ export class RuleService {
       return err(validationError("depends_on", `rule id(s) that exist nowhere in the baseline tree or registry: ${unknown.join(", ")}`, unknown, "BR-650"));
     }
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const current = dependsOnOf(doc);
+      const current = effectiveNodePart(doc).depends_on;
       const absent = remove.filter((id) => !current.includes(id));
       if (absent.length > 0) {
         return err(validationError("depends_on", `cannot remove, not present: ${absent.join(", ")}`, absent, "BR-651"));
       }
       const next = [...new Set([...current.filter((id) => !remove.includes(id)), ...add])];
-      return ok({
-        extra: { ...doc.extra, depends_on: next },
-        summary: `depends_on +${add.length} -${remove.length}`,
-        details: { operation: "depends-on", add, remove },
-      });
+      return nodePartMutation(doc, { depends_on: next }, `depends_on +${add.length} -${remove.length} (pending revision of the node)`, { operation: "depends-on", add, remove });
     });
   }
 
@@ -590,25 +564,21 @@ export class RuleService {
     // reason: dropping a command declaration leaves the command undeclared for every other branch, so it waits until main's
     // registry no longer has it (BR-1316/BR-1317).
     if (this.mainTree !== undefined) {
-      const declared = commandsOf(target.value);
+      const declared = effectiveNodePart(target.value).commands;
       const commandsGone = await refuseLiveCommandRemoval(this.mainTree, target.value, removeCommands.filter((c) => declared.includes(c)));
       if (!commandsGone.ok) return commandsGone;
     }
-    // A command add/remove changes what the census measures, so it re-opens approval (the default of retryWrite).
+    // A command add/remove changes what the census measures: it is a pending revision of the node's own part, and the
+    // census keeps measuring the APPROVED commands until an approval promotes it (BR-628).
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const currentCommands = commandsOf(doc);
+      const currentCommands = effectiveNodePart(doc).commands;
       const absentCommands = removeCommands.filter((c) => !currentCommands.includes(c));
       if (absentCommands.length > 0) {
         return err(validationError("commands", `cannot remove, not present: ${absentCommands.join(", ")}`, absentCommands, "BR-656"));
       }
       const nextCommands = [...new Set([...currentCommands.filter((c) => !removeCommands.includes(c)), ...addCommands])];
-      const extra: Record<string, unknown> = { ...doc.extra };
-      if (nextCommands.length > 0) extra["commands"] = nextCommands;
-      else delete extra["commands"];
-      return ok({
-        extra,
-        summary: `commands +${addCommands.length} -${removeCommands.length}`,
-        details: { operation: "baseline-map", addCommands, removeCommands },
+      return nodePartMutation(doc, { commands: nextCommands }, `commands +${addCommands.length} -${removeCommands.length} (pending revision of the node)`, {
+        operation: "baseline-map", addCommands, removeCommands,
       });
     });
   }
@@ -629,14 +599,12 @@ export class RuleService {
     const gate = await this.authorizeCorpusWrite([target.value], "glossary-add", opts?.by);
     if (!gate.ok) return gate;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const current = glossaryOf(doc);
+      const current = effectiveNodePart(doc).glossary;
       if (current.some((g) => g.term === parsed.data.term)) {
         return err(validationError("glossary.term", `term '${parsed.data.term}' already defined`, parsed.data.term, "BR-620"));
       }
-      return ok({
-        extra: { ...doc.extra, glossary: [...current, parsed.data] },
-        summary: `Glossary + '${parsed.data.term}'`,
-        details: { operation: "glossary-add", term: parsed.data.term },
+      return nodePartMutation(doc, { glossary: [...current, parsed.data] }, `Glossary + '${parsed.data.term}' (pending revision of the node)`, {
+        operation: "glossary-add", term: parsed.data.term,
       });
     });
   }
@@ -648,14 +616,12 @@ export class RuleService {
     const gate = await this.authorizeCorpusWrite([target.value], "glossary-remove", opts?.by);
     if (!gate.ok) return gate;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const current = glossaryOf(doc);
+      const current = effectiveNodePart(doc).glossary;
       if (!current.some((g) => g.term === term)) {
         return err(validationError("glossary.term", `term '${term}' is not defined on this node`, term, "BR-622"));
       }
-      return ok({
-        extra: { ...doc.extra, glossary: current.filter((g) => g.term !== term) },
-        summary: `Glossary - '${term}'`,
-        details: { operation: "glossary-remove", term },
+      return nodePartMutation(doc, { glossary: current.filter((g) => g.term !== term) }, `Glossary - '${term}' (pending revision of the node)`, {
+        operation: "glossary-remove", term,
       });
     });
   }
@@ -694,6 +660,7 @@ export class RuleService {
         slug: doc.slug,
         title: doc.title,
         status: doc.status,
+        pending: pendingCountOf(doc.extra),
         depth,
         node: String(doc.extra["node"] ?? "?"),
         label: typeof label === "string" ? label : null,
@@ -779,16 +746,21 @@ export class RuleService {
     return this.store.findMany({ type: "baseline" });
   }
 
-  /** Owning leaf + stored rule for `ruleId`, and whether the registry knows the id. */
+  /**
+   * Owning leaf of `ruleId` and the rule as it reads there: `current` is the pending revision laid over the approved
+   * version, `approved` the approved version (absent for a pending add).
+   */
   private async locateRule(
     ruleId: string,
-  ): Promise<Result<{ sourceLeaf: DocRecord; current: BaselineRule; registered: boolean }, LoreError>> {
+  ): Promise<Result<{ sourceLeaf: DocRecord; approved: BaselineRule | undefined; current: BaselineRule; pendingMoveTo: string | undefined; registered: boolean }, LoreError>> {
     const docs = await this.listBaselineDocs();
     if (!docs.ok) return docs;
-    const sourceLeaf = docs.value.find((d) => rulesOf(d).some((r) => r.id === ruleId));
+    const sourceLeaf = docs.value.find((d) => effectiveRuleOf(d.extra, ruleId) !== undefined);
     if (sourceLeaf === undefined) return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-637" });
-    const current = rulesOf(sourceLeaf).find((r) => r.id === ruleId);
+    const current = effectiveRuleOf(sourceLeaf.extra, ruleId);
     if (current === undefined) return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-637" });
+    const approved = rulesOf(sourceLeaf).find((r) => r.id === ruleId);
+    const pendingMoveTo = pendingRevisionsOf(sourceLeaf).rules[ruleId]?.move_to;
     const registry = await this.store.listRuleRegistry();
     if (!registry.ok) return registry;
     const row = registry.value.find((r) => r.id === ruleId);
@@ -799,20 +771,7 @@ export class RuleService {
         rule: "BR-640",
       });
     }
-    return ok({ sourceLeaf, current, registered: row !== undefined });
-  }
-
-  /**
-   * If `doc` is approved, write the approved→draft demotion (the shared
-   * `resolveStatusAfterContractEdit` rule) as its own CAS write and return the fresh doc;
-   * otherwise return `doc` unchanged.
-   */
-  private async demoteIfApproved(doc: DocRecord, actor: string, why: string): Promise<Result<DocRecord, LoreError>> {
-    const status = resolveStatusAfterContractEdit(doc.status, true);
-    if (status === doc.status) return ok(doc);
-    return this.commit(doc, doc.extra, status, actor, `Demoted to draft: ${why} edits approved content`, {
-      operation: "demote", reason: why,
-    });
+    return ok({ sourceLeaf, approved, current, pendingMoveTo, registered: row !== undefined });
   }
 
   /**
@@ -841,71 +800,48 @@ export class RuleService {
     return ok(written.value.doc);
   }
 
-  /** One mutate→demote→commit attempt on `doc` (already freshly read). */
+  /**
+   * One mutate→commit attempt on `doc` (already freshly read). The mutation records a pending revision of ONE item; the
+   * node's status is re-derived from its pending items (BR-1339) and is never a demotion.
+   */
   private async writeLeafExtra(
     doc: DocRecord,
     actor: string,
     mutate: (doc: DocRecord) => Mutation,
-    keepsApproval = false,
-  ): Promise<Result<{ doc: DocRecord; demoted?: Demotion }, LoreError>> {
-    // reason: #297 — a mutation that leaves `extra` as stored is a no-op and must write NOTHING, not even the
-    // approved->draft demotion that precedes a real edit. `mutate` is pure over the doc, and the demotion changes
-    // only `status`, so previewing it on the stored doc yields the same `extra` the real run would.
-    const preview = mutate(doc);
-    if (preview.ok && isDeepStrictEqual(preview.value.extra, doc.extra)) return ok({ doc });
-    const ready = keepsApproval ? ok(doc) : await this.demoteIfApproved(doc, actor, "baseline edit");
-    if (!ready.ok) return ready;
-    const mutation = mutate(ready.value);
+  ): Promise<Result<DocRecord, LoreError>> {
+    const mutation = mutate(doc);
     if (!mutation.ok) return mutation;
+    // reason: #297 — a mutation that leaves `extra` as stored is a no-op and must write NOTHING.
+    if (isDeepStrictEqual(mutation.value.extra, doc.extra)) return ok(doc);
     const shape = baselineExtraSchema.safeParse(mutation.value.extra);
     if (!shape.success) {
       const issue = shape.error.issues[0];
       return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid baseline extra"));
     }
-    const committed = await this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details);
-    if (!committed.ok) return committed;
-    const demoted = demotionOf(doc, ready.value);
-    return ok({ doc: committed.value, ...(demoted !== undefined ? { demoted } : {}) });
+    return this.commit(doc, mutation.value.extra, statusFor(doc.status, mutation.value.extra), actor, mutation.value.summary, mutation.value.details);
   }
 
-  /** Re-read → mutate → commit, re-applying on STALE_VERSION up to {@link MAX_CAS_REAPPLIES} times. */
+  /**
+   * Re-read → mutate → commit, re-applying on STALE_VERSION up to {@link MAX_CAS_REAPPLIES} times. The mutation is re-run
+   * on every fresh read, so a concurrent write to ANOTHER item is carried through and only a write to the same item is
+   * replaced (the per-item guard of BR-627).
+   */
   private async retryWrite(
     docId: string,
     by: string | undefined,
     mutate: (doc: DocRecord) => Mutation,
-    keepsApproval = false,
   ): Promise<Result<DocRecord, LoreError>> {
     const actor = this.resolveActor(by);
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const fresh = await this.readLeaf(docId);
       if (!fresh.ok) return fresh;
-      const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval);
-      if (written.ok) return ok(written.value.doc);
+      const written = await this.writeLeafExtra(fresh.value, actor, mutate);
+      if (written.ok) return written;
       if (written.error.code !== "STALE_VERSION") return written;
       lastStale = written.error;
     }
     return err(lastStale ?? staleExhausted(docId));
-  }
-
-  /**
-   * Move a rule the registry never allocated (a leaf authored with the rule already inside).
-   * `store.moveRule` needs the registry row, so this is two CAS writes — DESTINATION first, so
-   * a crash between them leaves the rule on both leaves (a duplicate id, loudly detectable)
-   * rather than on neither (a lost rule). The id still never changes.
-   */
-  private async moveUnregisteredRule(
-    from: DocRecord,
-    fromExtra: Record<string, unknown>,
-    to: DocRecord,
-    toExtra: Record<string, unknown>,
-    actor: string,
-  ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
-    const added = await this.commit(to, toExtra, to.status, actor, "Rule moved in (unregistered id)", { operation: "rule-move-in" });
-    if (!added.ok) return added;
-    const removed = await this.commit(from, fromExtra, from.status, actor, "Rule moved out (unregistered id)", { operation: "rule-move-out" });
-    if (!removed.ok) return removed;
-    return ok({ from: removed.value, to: added.value });
   }
 }
 
@@ -919,25 +855,16 @@ function staleExhausted(id: string): LoreError {
   };
 }
 
-/** Rules stored on a leaf, parsed through the schema so a corrupt row fails loud downstream. */
+/** The APPROVED rules stored on a leaf. */
 function rulesOf(doc: DocRecord): BaselineRule[] {
-  const raw = doc.extra["rules"];
-  return Array.isArray(raw) ? (raw as BaselineRule[]) : [];
+  return approvedRulesOf(doc) as BaselineRule[];
 }
 
-function dependsOnOf(doc: DocRecord): string[] {
-  const raw = doc.extra["depends_on"];
-  return Array.isArray(raw) ? (raw as string[]) : [];
-}
-
-function commandsOf(doc: DocRecord): string[] {
-  const raw = doc.extra["commands"];
-  return Array.isArray(raw) ? (raw as string[]) : [];
-}
-
-function glossaryOf(doc: DocRecord): GlossaryEntry[] {
-  const raw = doc.extra["glossary"];
-  return Array.isArray(raw) ? (raw as GlossaryEntry[]) : [];
+/** The mutation that records `change` on the node's own part: a pending revision of the one item (or a direct write on a never-approved node). */
+function nodePartMutation(doc: DocRecord, change: NodePartChange, summary: string, details: Record<string, unknown>): Mutation {
+  const proposal = proposeNodePart(doc, change);
+  if (proposal.kind === "unchanged") return ok({ extra: doc.extra, summary, details });
+  return ok({ extra: proposal.extra, summary, details: { ...details, pending: proposal.kind === "pending" } });
 }
 
 const SETTABLE_RULE_FIELDS = ["statement", "confidence", "enforced_by", "examples", "lifecycle", "note", "moveTo", "current_reality", "target_rule", "current_exceptions", "migration"] as const;
@@ -1000,23 +927,4 @@ function applyRulePatch(current: BaselineRule, patch: SetRulePatch): Result<Base
 
 function patchSummary(patch: SetRulePatch): string {
   return `Rule set: ${Object.keys(patch).filter((k) => patch[k as keyof SetRulePatch] !== undefined).join(", ")}`;
-}
-
-/** Replace one rule inside a leaf's `extra.rules`, keeping its position. */
-function replaceRule(
-  doc: DocRecord,
-  ruleId: string,
-  next: BaselineRule,
-  summary: string,
-  details: Record<string, unknown>,
-): Mutation {
-  const rules = rulesOf(doc);
-  if (!rules.some((r) => r.id === ruleId)) {
-    return err({ code: "STORE_ERROR", message: `rule ${ruleId} disappeared from ${doc.slug} between read and write`, rule: "BR-640" });
-  }
-  return ok({
-    extra: { ...doc.extra, rules: rules.map((r) => (r.id === ruleId ? next : r)) },
-    summary,
-    details,
-  });
 }

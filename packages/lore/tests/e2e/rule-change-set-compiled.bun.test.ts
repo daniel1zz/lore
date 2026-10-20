@@ -110,6 +110,8 @@ class World {
     });
     // `lore init` seeds the verification profiles (a tech spec needs a `test` oracle to be approved); an absent profile is a vacuous pass.
     dropLoreConfigKey(this.dir, ["workflow", "verification_profiles"]);
+    // a direct add is a PENDING add: BR-1 is live (citable) only once its leaf is approved (judgment is off above, so no review is bound)
+    await this.must(["approve", this.leaf]);
     return this;
   }
 

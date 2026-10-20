@@ -122,6 +122,7 @@ import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import type { ApiKeyStore, ActorContext } from "../../../src/adapters/http/auth.js";
 import type { App } from "../../../src/app.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 
 // ─── RuleService loader (guarded import: the module does not exist yet) ───────
 
@@ -228,6 +229,8 @@ async function seedLeaf(leaf: DocRecord, statements: string[], dependsOn: string
     const dep = await svc.setDependsOn(leaf.id, { add: dependsOn }, { by: "fixture" });
     if (!dep.ok) throw new Error(`fixture setDependsOn failed: ${JSON.stringify(dep.error)}`);
   }
+  // reason: a direct add and a depends_on write are PENDING revisions (BR-626/BR-628); the fixture leaf is the APPROVED one.
+  await approvePending(store, leaf.id);
   const stored = await corpusService.get(leaf.id);
   if (!stored.ok) throw new Error(`fixture get failed: ${JSON.stringify(stored.error)}`);
   return stored.value.doc;
@@ -269,7 +272,7 @@ function errorText(r: ServiceResult): string {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("RuleService.addRule", () => {
-  it("returns a BR-n id, appends a live rule and bumps the leaf version by exactly 1", async () => {
+  it("returns a BR-n id, records a PENDING add (not in the approved rules) and bumps the leaf version by exactly 1", async () => {
     const { leaf } = await makeTree();
     const svc = await makeRuleService(store);
     const res = await svc.addRule(leaf.id, NEW_RULE, { by: "t" });
@@ -279,18 +282,23 @@ describe("RuleService.addRule", () => {
     const after = await corpusService.get(leaf.id);
     expect(after.ok && after.value.doc.version).toBe(leaf.version + 1);
     const rules = (after.ok ? after.value.doc.extra["rules"] : []) as Array<{ id: string; lifecycle: string }>;
-    expect(rules.find((r) => r.id === res.value["ruleId"])?.lifecycle).toBe("live");
+    expect(rules.find((r) => r.id === res.value["ruleId"])).toBeUndefined();
+    const pending = (after.ok ? after.value.doc.extra["pending"] : undefined) as { rules: Record<string, { rule: { lifecycle: string } }> };
+    expect(pending.rules[String(res.value["ruleId"])]?.rule.lifecycle).toBe("live");
   });
 
-  it("demotes an approved leaf to draft when a rule is added", async () => {
+  it("never demotes an approved item: an add records a pending add and the leaf's status is derived (draft, 1 pending)", async () => {
     const { leaf } = await makeTree();
-    const approved = await corpusService.set(leaf.id, { status: "approved" });
-    expect(approved.ok && approved.value.status).toBe("approved");
+    expect(leaf.status).toBe("approved");
     const svc = await makeRuleService(store);
     const res = await svc.addRule(leaf.id, NEW_RULE, { by: "t" });
     expect(res.ok).toBe(true);
     const after = await corpusService.get(leaf.id);
     expect(after.ok && after.value.doc.status).toBe("draft");
+    // the approved rules and the node's own part are untouched
+    const doc = after.ok ? after.value.doc : undefined;
+    expect((doc?.extra["rules"] as Array<{ id: string }>).map((r) => r.id)).toEqual(["BR-1", "BR-2"]);
+    expect((doc?.extra["pending"] as { node?: unknown }).node).toBeUndefined();
   });
 
   it("refuses rules on a non-leaf node (branch)", async () => {
@@ -331,6 +339,11 @@ describe("RuleService.setRule", () => {
     const svc = await makeRuleService(store);
     const res = await svc.setRule("BR-1", { lifecycle: "retired", note: "superseded by BR-2" }, { by: "t" });
     expect(res.ok).toBe(true);
+    // pending until approved: the approved BR-1 is still live
+    const pendingDoc = await corpusService.get(leaf.id);
+    const stillLive = (pendingDoc.ok ? pendingDoc.value.doc.extra["rules"] : []) as Array<{ id: string; lifecycle: string }>;
+    expect(stillLive.find((r) => r.id === "BR-1")?.lifecycle).toBe("live");
+    await approvePending(store, leaf.id);
     const after = await corpusService.get(leaf.id);
     const rules = (after.ok ? after.value.doc.extra["rules"] : []) as Array<{ id: string; lifecycle: string; retired_note?: string }>;
     const r1 = rules.find((r) => r.id === "BR-1");
@@ -371,6 +384,10 @@ describe("RuleService.setRule", () => {
     const svc = await makeRuleService(store);
     const res = await svc.setRule("BR-2", { moveTo: dest.id }, { by: "t" });
     expect(res.ok).toBe(true);
+    // a move is a pending revision: the rule stays on its source leaf until approved
+    const stays = await corpusService.get(leaf.id);
+    expect(((stays.ok ? stays.value.doc.extra["rules"] : []) as Array<{ id: string }>).map((r) => r.id)).toContain("BR-2");
+    await approvePending(store, leaf.id);
     const from = await corpusService.get(leaf.id);
     const to = await corpusService.get(dest.id);
     const fromIds = ((from.ok ? from.value.doc.extra["rules"] : []) as Array<{ id: string }>).map((r) => r.id);
@@ -423,6 +440,9 @@ describe("RuleService baseline node verbs", () => {
     const svc = await makeRuleService(store);
     const res = await svc.setLabel(leaf.id, "Renamed", { by: "t" });
     expect(res.ok).toBe(true);
+    const pendingDoc = await corpusService.get(leaf.id);
+    expect(pendingDoc.ok && pendingDoc.value.doc.extra["label"]).toBe("Leaf"); // pending until approved
+    await approvePending(store, leaf.id);
     const after = await corpusService.get(leaf.id);
     expect(after.ok && after.value.doc.extra["label"]).toBe("Renamed");
   });
@@ -441,6 +461,9 @@ describe("RuleService baseline node verbs", () => {
     const svc = await makeRuleService(store);
     const res = await svc.setDependsOn(leaf.id, { add: ["BR-2"] }, { by: "t" });
     expect(res.ok).toBe(true);
+    const pendingDoc = await corpusService.get(leaf.id);
+    expect(pendingDoc.ok && pendingDoc.value.doc.extra["depends_on"]).toEqual(["BR-1"]); // pending until approved
+    await approvePending(store, leaf.id);
     const after = await corpusService.get(leaf.id);
     expect(after.ok && after.value.doc.extra["depends_on"]).toEqual(["BR-1", "BR-2"]);
   });

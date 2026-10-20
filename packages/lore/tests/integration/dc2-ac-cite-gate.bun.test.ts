@@ -59,11 +59,18 @@ function addRule(leaf: string, statement: string): string {
   const out = mustRun(["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   const id = out.stdout.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${out.stdout}`);
+  // a direct add is a pending add (not live, not citable) until its leaf is approved; the suite's override class is loosened
+  mustRun(["approve", leaf, "--override-no-judgment"]);
+  leafOfRules = leaf;
   return id;
 }
 
+/** The leaf holding the suite's rules (a retirement is a pending revision of it until approved). */
+let leafOfRules = "";
+
 function retire(rule: string): void {
   mustRun(["rule", "set", rule, "--lifecycle", "retired", "--note", "retired for the test"]);
+  mustRun(["approve", leafOfRules, "--override-no-judgment"]);
 }
 
 interface AcJson {

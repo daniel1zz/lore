@@ -113,8 +113,7 @@ const DIRECT_READ_ALLOWLIST: Record<string, string> = {
   "packages/lore/src/service/corpus-service.ts": "write path: a baseline create / wholesale write guard",
   "packages/lore/src/store/index-rows.ts": "index derivation: the registry and rule_depends rows follow the approved versions stored in these keys",
   "packages/lore/src/store/migrations/migration-028.ts": "the one-time conversion that splits stored items into approved and pending versions",
-  "packages/lore/src/ai/review-template.ts":"review bundle renderer; reworked per item by the review/approve task",
-  "packages/core/src/review-checks.ts":"review-time checks on the node under review; reworked per item by the review/approve task",
+  "packages/lore/src/service/baseline-pending.ts": "write path: the one place a pending revision is proposed, discarded and promoted to the approved version",
 };
 
 const KEYS = "rules|commands|label|glossary|depends_on";

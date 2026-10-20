@@ -33,6 +33,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 const base = {
@@ -154,8 +155,11 @@ describe("four-part standard (RuleService.addRule)", () => {
   it("stores the four parts on an AS rule whose exceptions are live AD entries", async () => {
     const w = await world();
     const ad = await must(await w.rules.addRule(w.debt.slug, input(), { by: "agent:t" }), "ad");
+    await approvePending(w.store, w.debt.slug); // an exception names an APPROVED live debt entry; a direct add is pending until then
     const as = await must(await w.rules.addRule(w.standard.slug, input(parts([(ad as { ruleId: string }).ruleId])), { by: "agent:t" }), "as");
-    const stored = ((as as { doc: DocRecord }).doc.extra["rules"] as Array<Record<string, unknown>>)[0];
+    // the new rule is a pending add: its stored form is the pending revision, the approved rules list holds none yet
+    const pending = ((as as { doc: DocRecord }).doc.extra["pending"] as { rules: Record<string, { rule: Record<string, unknown> }> }).rules;
+    const stored = pending["AS-1"]?.rule;
     expect({ id: stored?.["id"], exceptions: stored?.["current_exceptions"], migration: stored?.["migration"] }).toEqual({
       id: "AS-1",
       exceptions: ["AD-1"],
@@ -181,7 +185,9 @@ describe("four-part standard (RuleService.addRule)", () => {
   it("refuses a RETIRED debt entry as an exception (state: only live debt can be listed)", async () => {
     const w = await world();
     const ad = (await must(await w.rules.addRule(w.debt.slug, input(), { by: "agent:t" }), "ad")) as { ruleId: string };
+    await approvePending(w.store, w.debt.slug);
     await must(await w.rules.setRule(ad.ruleId, { lifecycle: "retired", note: "paid off" }, { by: "agent:t" }), "retire");
+    await approvePending(w.store, w.debt.slug); // the retirement is a pending revision until approved
     const res = await w.rules.addRule(w.standard.slug, input(parts([ad.ruleId])), { by: "agent:t" });
     expect({ code: res.ok ? "ok" : res.error.code, registry: await registrySize(w.store) }).toEqual({
       code: "VALIDATION_ERROR",

@@ -48,7 +48,6 @@ import type { App } from "../../../app.js";
 import type { AddRuleInput, SetRulePatch } from "../../../service/rule-service.js";
 import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/rule-change-service.js";
 import { invocationOf } from "../command-invocation.js";
-import { formatDemotionLine } from "../../../service/demotion-notice.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
@@ -57,6 +56,11 @@ import type { ExitReport } from "../cli-exit.js";
 function repeatable(value: unknown): string[] | undefined {
   if (value === undefined) return undefined;
   return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+/** The one line that says what turns a pending revision into the approved version (BR-1338). */
+function pendingNextStep(leaf: string, item: string): string {
+  return `Next: lore review ${leaf}, then lore approve ${leaf} --item ${item} (or lore reject ${leaf} --item ${item} to discard it).`;
 }
 
 function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
@@ -123,11 +127,18 @@ export default defineLoreCommand({
             return 0;
           }
           const v = result.value;
-          if (v.state === "proposed") {
+          if (v.state === "proposed" && v.pending?.kind === "add") {
+            // A pending add: written directly, not approved yet, so not in the baseline (BR-626).
+            printLine(inv.io.stdout, `${v.id} [pending add, ${v.confidence}] on ${v.leaf} — not in the baseline until approved\npending: ${v.statement}\n(revision ${v.pending.revision_id})`);
+          } else if (v.state === "proposed") {
             // A proposed rule is not part of the baseline: it has no confidence and no leaf yet (spec: change set).
             printLine(inv.io.stdout, `${v.id} [proposed] — proposed by ${v.proposed_by ?? "(unknown spec)"}, not in the baseline\nWill land on ${v.leaf}.\n${v.statement}`);
           } else {
             printLine(inv.io.stdout, `${v.id} [${v.state}, ${v.confidence}] on ${v.leaf}\n${v.statement}`);
+            if (v.pending !== undefined) {
+              const move = v.pending.move_to !== undefined ? `, moves to ${v.pending.move_to}` : "";
+              printLine(inv.io.stdout, `pending (revision ${v.pending.revision_id}, ${v.pending.lifecycle}${move}): ${v.pending.statement}${v.pending.retired_note !== undefined ? ` (retired: ${v.pending.retired_note})` : ""}`);
+            }
           }
           printLine(inv.io.stdout, v.citingCriteria.length === 0 ? "Cited by: (none)" : `Cited by:\n${v.citingCriteria.map((c) => `  ${c.spec} ${c.ac}`).join("\n")}`);
         } finally {
@@ -396,10 +407,10 @@ export default defineLoreCommand({
           const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version, ...(result.value.demoted !== undefined ? { demoted: result.value.demoted } : {}) } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version, pending: true, status: result.value.doc.status } }, null, 2));
           } else {
-            printLine(inv.io.stdout, `Added ${result.value.ruleId} to ${result.value.doc.slug} (v${result.value.doc.version}).`);
-            if (result.value.demoted !== undefined) printLine(inv.io.stdout, formatDemotionLine(result.value.demoted));
+            printLine(inv.io.stdout, `Added ${result.value.ruleId} to ${result.value.doc.slug} (v${result.value.doc.version}) as a pending add: not live until approved.`);
+            printLine(inv.io.stdout, pendingNextStep(result.value.doc.slug, result.value.ruleId));
           }
         } finally {
           app.close();
@@ -448,10 +459,12 @@ export default defineLoreCommand({
           const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version, ...(result.value.demoted !== undefined ? { demoted: result.value.demoted } : {}) } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version, revision_id: result.value.revisionId ?? null, pending: result.value.revisionId !== undefined, status: result.value.doc.status } }, null, 2));
+          } else if (result.value.revisionId === undefined) {
+            printLine(inv.io.stdout, `${result.value.rule.id} already reads as written on ${result.value.doc.slug}: nothing pending.`);
           } else {
-            printLine(inv.io.stdout, `Updated ${result.value.rule.id} [${result.value.rule.lifecycle}] on ${result.value.doc.slug} (v${result.value.doc.version}).`);
-            if (result.value.demoted !== undefined) printLine(inv.io.stdout, formatDemotionLine(result.value.demoted));
+            printLine(inv.io.stdout, `Recorded a pending revision of ${result.value.rule.id} [${result.value.rule.lifecycle}] on ${result.value.doc.slug} (v${result.value.doc.version}); the approved version keeps governing.`);
+            printLine(inv.io.stdout, pendingNextStep(result.value.doc.slug, result.value.rule.id));
           }
         } finally {
           app.close();

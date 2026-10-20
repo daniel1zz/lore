@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * AC-FIP-5 (BR-86, BR-982, BR-753): the enforce-mode citation refusal's hint, `lore tree --help`, and the
  * connector prefixes of `lore tree <prd>`.
@@ -21,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -89,6 +91,7 @@ beforeAll(() => {
   const id = ruleOut.stdout.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${ruleOut.stdout}`);
   ruleId = id;
+  approveFixtureNodes(dir, [leafA1]); // a direct add is a pending add: the rule is citable (live) only once its leaf is approved
   specSlug = slugOf(mustRun(["create", "spec", "--title", "Hint Spec", "--content", "## Spec\n\nbody", "--no-ai"], dir).stdout);
   // AC-H-1 cites a rule under branch A, which places the spec there (the gate arms per branch); AC-H-0 is an
   // uncited criterion that predates the gate, so a later `ac set` of it is a refused write of an EXISTING criterion.
@@ -146,7 +149,7 @@ describe("AC-FIP-5 / F10: tree connector prefixes are identical at every depth (
     "├── <id> Branch B (draft)",
     "│   └── <id> Leaf Three (draft)",
     "└── <id> Branch A (draft)",
-    "    ├── <id> Leaf One (draft)",
+    "    ├── <id> Leaf One (approved)",
     "    └── <id> Leaf Two (draft)",
   ].join("\n");
 
@@ -161,7 +164,7 @@ describe("AC-FIP-5 / F10: tree connector prefixes are identical at every depth (
       "    ├── <id> Branch B (draft)",
       "    │   └── <id> Leaf Three (draft)",
       "    └── <id> Branch A (draft)",
-      "        ├── <id> Leaf One (draft)",
+      "        ├── <id> Leaf One (approved)",
       "        └── <id> Leaf Two (draft)",
     ].join("\n");
     expect(normaliseTree(mustRun(["tree", prd, "--depth", "4"], dir).stdout)).toBe(golden);

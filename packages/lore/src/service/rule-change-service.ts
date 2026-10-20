@@ -64,6 +64,7 @@ import { resolveDoc } from "./resolve.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { findOtherSpecChange, findProposal, isLanded, ruleChangesOf } from "./rule-changes.js";
 import { measureLandingEvidence } from "./landing-evidence.js";
+import { approvedRulesOf, pendingRevisionsOf } from "./baseline-items.js";
 import type { AbandonmentPlan, RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
 
 /** Immediate re-applies after a CAS miss before the STALE_VERSION error is surfaced. */
@@ -388,7 +389,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
       leaves: planned.value.map(({ leaf, plan }) => ({
         leaf,
         extra: plan.extra,
-        status: resolveStatusAfterContractEdit(leaf.status, true),
+        status: leaf.status, // reason: BR-1211 — a landed change set is approved by its spec; the leaf's status is untouched
         summary: `Proposed rules retired, never landed (${spec.slug}): ${plan.touched.join(", ")}`,
         details: { operation: "rule-abandon", spec: spec.slug, rules: plan.touched },
         rules: plan.touched,
@@ -425,7 +426,9 @@ export class RuleChangeService implements RuleChangeLandingPort {
         const summary = mode === "land"
           ? `Rule changes landed from ${spec.slug}: ${plan.value.touched.join(", ")}`
           : `Proposed rules retired, never landed (${spec.slug}): ${plan.value.touched.join(", ")}`;
-        const committed = await this.commitDoc(fresh.value, plan.value.extra, resolveStatusAfterContractEdit(fresh.value.status, true), summary, actor, {
+        // reason: BR-1211 — landing writes the APPROVED version of each changed rule and demotes nothing: the spec that
+        // carried the change set was reviewed and approved, so the leaf keeps its status.
+        const committed = await this.commitDoc(fresh.value, plan.value.extra, fresh.value.status, summary, actor, {
           operation: mode === "land" ? "rule-apply" : "rule-abandon",
           spec: spec.slug,
           rules: plan.value.touched,
@@ -859,9 +862,21 @@ function planLeaf(
   mode: "land" | "abandon",
   states: ReadonlyMap<string, string>,
 ): Result<LeafPlan | undefined, LoreError> {
-  const rules: BaselineRule[] = Array.isArray(leaf.extra["rules"]) ? [...(leaf.extra["rules"] as BaselineRule[])] : [];
+  const rules: BaselineRule[] = [...(approvedRulesOf(leaf) as BaselineRule[])];
   const touched: string[] = [];
+  const pendingDirect = pendingRevisionsOf(leaf).rules;
   for (const change of changes) {
+    // reason: BR-1211 — a rule a direct write has revised and nobody has approved yet cannot also be landed by a spec:
+    // the landing would approve over a revision no review has seen. Refused naming the rule, nothing written.
+    if (pendingDirect[change.id] !== undefined && !(mode === "abandon" && change.op !== "add")) {
+      return err(validationError(
+        "id",
+        `${change.id} on ${leaf.slug} holds a pending direct revision (${pendingDirect[change.id]?.revision_id ?? "?"}); ` +
+          `approve it (\`lore review ${leaf.slug}\`, \`lore approve ${leaf.slug} --item ${change.id}\`) or discard it ` +
+          `(\`lore reject ${leaf.slug} --item ${change.id}\`), then re-run \`lore rule apply ${specSlug}\``,
+        change.id, "BR-1211",
+      ));
+    }
     const index = rules.findIndex((rule) => rule.id === change.id);
     const current = index === -1 ? undefined : rules[index];
     if (change.op === "add") {

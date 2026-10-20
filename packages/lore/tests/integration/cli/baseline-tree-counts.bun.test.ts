@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * `lore baseline tree` rule counts on every rule-holding node (issue #125, BR-674, AC-BLC-6), over a throwaway corpus.
  *
@@ -19,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
 setDefaultTimeout(300_000);
 
@@ -95,6 +97,7 @@ beforeAll(() => {
   mustRun(["rule", "add", debtRegistry, "--statement", "Legacy throw B", ...RULE]);
   mustRun(["rule", "add", standard, "--statement", "Services return Result", ...RULE, ...FOUR_PARTS]);
   mustRun(["rule", "add", businessLeaf, "--statement", "Business rule", ...RULE]);
+  approveFixtureNodes(dir, "all"); // direct adds are pending adds: the tallies count approved rules
 });
 
 afterAll(() => {
@@ -122,6 +125,8 @@ describe("lore baseline tree rule counts (AC-BLC-6, BR-674)", () => {
 
   it("STATE: retiring a debt entry moves it from live to retired in the row (no rule enters deprecated since D4)", () => {
     mustRun(["rule", "set", "AD-2", "--lifecycle", "retired", "--note", "paid down"]);
+    expect(rowOf(debtRegistry)).toContain("[rules: live 2 / deprecated 0 / retired 0]"); // pending until approved
+    approveFixtureNodes(dir, "all");
     expect(rowOf(debtRegistry)).toContain("[rules: live 1 / deprecated 0 / retired 1]");
   });
 

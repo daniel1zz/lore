@@ -1,4 +1,5 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/project/lore-config-template.yaml
 /**
  * BR-1344 (replaces the corrupt site-map-value refusal of AC-BCG-1): a refusal site whose code declares a rule id that no live rule
  * holds is REPORTED by `lore baseline coverage`, naming the id, its status and file:line, and never refuses: exit exactly 0, the

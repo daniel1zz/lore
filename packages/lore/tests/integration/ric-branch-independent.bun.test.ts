@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-refusal-sites-declare-their-rule-in-code-baseline-leaf  AC-RIC-7 (BR-1344)
@@ -16,6 +17,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
+import { approveFixtureNodes } from "../helpers/cli-live-rule.js";
 
 const CLI = "packages/lore/src/adapters/cli";
 
@@ -68,6 +70,7 @@ function setup(): Setup {
   const ruleB = ruleOf(leafB);
   f.mustLore(["baseline", "map", leafA, "--command", "alpha"]);
   f.mustLore(["baseline", "map", leafB, "--command", "beta"]);
+  approveFixtureNodes(f.dir, "all"); // direct adds and command declarations are pending revisions: the census measures the approved tree
 
   f.commitOnMain(
     {

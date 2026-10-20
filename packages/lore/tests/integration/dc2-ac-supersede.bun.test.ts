@@ -119,7 +119,9 @@ beforeAll(async () => {
   const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
-  specS = slugOf(await must(["create", "spec", "--title", "DC2-15 Spec S", "--content", "body", "--no-ai"]));
+  // a direct add is a pending add: citable only once its leaf is approved (the override class is loosened above)
+  await must(["approve", leaf, "--override-no-judgment"]);
+  specS =slugOf(await must(["create", "spec", "--title", "DC2-15 Spec S", "--content", "body", "--no-ai"]));
   specS2 = slugOf(await must(["create", "spec", "--title", "DC2-15 Spec S2", "--content", "body", "--no-ai"]));
   await addScriptAc(specS, "AC-1");
   await addScriptAc(specS, "AC-2");

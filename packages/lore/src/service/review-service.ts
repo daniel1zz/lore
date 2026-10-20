@@ -50,6 +50,20 @@ import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
 import { REOPEN_AUDIT_ACTION, REOPEN_OPERATION, type RecordLockService } from "./record-lock-service.js";
 import { countEvidenceEntries, findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
+import { ANY_RULE_ID_PATTERN } from "@lore/core";
+import {
+  appendApprovedRule,
+  discardNodeRevision,
+  discardRuleRevision,
+  listPendingItems,
+  NODE_ITEM,
+  pendingCountOf,
+  promoteItems,
+  promoteRuleRevision,
+  statusFor,
+  type PendingItem,
+} from "./baseline-pending.js";
+import { pendingRevisionsOf } from "./baseline-items.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -160,6 +174,12 @@ export interface ApproveOpts {
    * direct write had. Absent = no caller-side version claim (the CAS still guards the write itself).
    */
   expectedVersion?: number;
+  /**
+   * Baseline node only (BR-1338): approve this ONE item (`BR-n` / `AS-n` / `AD-n`, or `node` for the node's own part)
+   * instead of every pending revision a review saw. Items not named are untouched. Refused (VALIDATION_ERROR) when the
+   * item holds no pending revision, or no review saw its current revision.
+   */
+  item?: string;
 }
 
 /** Measures declared leaf commands against the tree the corpus lives in (the adapter owns the source analysis). */
@@ -186,6 +206,32 @@ export interface BaselineDeclarationPort {
  */
 export interface ApproveResult extends DocRecord {
   reachability_advisories?: string[];
+  /**
+   * Baseline node only: the items this approval promoted to their approved version, and the items still pending after it
+   * (so a caller never reads a partial approval as a whole one). Absent for every other doc type.
+   */
+  promoted_items?: string[];
+  still_pending?: string[];
+}
+
+/** What {@link ReviewService.approve} decided to promote for a baseline node (see `planBaselinePromotion`). */
+interface BaselinePromotionPlan {
+  /** The pending revisions promoted: exactly the ones a review saw (or the one `--item` named). */
+  readonly selected: readonly PendingItem[];
+  /** The node as it reads once the selection is promoted: what the approval gates measure. */
+  readonly gateDoc: DocRecord;
+}
+
+/** A pending revision judged by a review: per item, the revision id the review's version held. */
+interface ReviewedRevisions {
+  readonly revisions: ReadonlyMap<string, string>;
+}
+
+/** Result of {@link ReviewService.rejectItem}. */
+export interface RejectItemOutcome {
+  readonly doc: DocRecord;
+  /** The pending revision that was discarded. */
+  readonly discarded: PendingItem;
 }
 
 export interface RejectOpts {
@@ -764,13 +810,28 @@ export class ReviewService {
       });
     }
 
-    if (!isValidTransition(doc.status, "approved")) {
+    // reason: BR-1338 — a baseline node holding pending revisions is approved item by item, not by a status move: its
+    // status is derived (approved iff nothing is pending), so there is no draft->approved transition to validate.
+    const baselinePending = doc.type === "baseline" && pendingCountOf(doc.extra) > 0;
+    if (!baselinePending && !isValidTransition(doc.status, "approved")) {
       return err({
         code: "INVALID_TRANSITION",
         from: doc.status,
         to: "approved",
         allowed: getAllowedTransitions(doc.status),
         rule: "BR-275",
+      });
+    }
+    if (opts?.item !== undefined && !baselinePending) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message:
+          doc.type === "baseline"
+            ? `${doc.slug} has nothing pending: --item ${opts.item} names no revision to approve`
+            : `--item applies to a baseline node (BR-1338); ${doc.slug} is a ${doc.type}`,
+        value: opts.item,
+        rule: "BR-1338",
       });
     }
 
@@ -868,7 +929,16 @@ export class ReviewService {
       if (!decided.ok) return decided;
     }
 
-    const gateResult = await this.enforceApprovalGate(doc, {
+    // reason: BR-1338 — which pending revisions this approval promotes is decided BEFORE the gates, so they measure the
+    // node as it will read (its declared commands, its judgment) and a refusal writes nothing.
+    let baselinePlan: BaselinePromotionPlan | undefined;
+    if (baselinePending) {
+      const planned = await this.planBaselinePromotion(doc, opts?.item, overriddenJudgmentId !== undefined || overrodeNoJudgment);
+      if (!planned.ok) return planned;
+      baselinePlan = planned.value;
+    }
+
+    const gateResult = await this.enforceApprovalGate(baselinePlan?.gateDoc ?? doc, {
       skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment,
     });
     if (!gateResult.ok) return gateResult;
@@ -882,6 +952,14 @@ export class ReviewService {
     const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
     if (!resolvedReviewer.ok) return resolvedReviewer;
     const reviewer = resolvedReviewer.value;
+
+    if (baselinePlan !== undefined) {
+      return this.writeBaselinePromotion(doc, baselinePlan, {
+        reviewer,
+        ...(overriddenJudgmentId !== undefined ? { overrideJudgmentId: overriddenJudgmentId } : {}),
+        ...(overrodeNoJudgment ? { overrideNoJudgment: true } : {}),
+      });
+    }
 
     // reason: SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was used) rides on this SAME
     // audit row rather than a second entry — one audited event, "approved, and here's the escape hatch that let it
@@ -948,6 +1026,280 @@ export class ReviewService {
       ...updatedDoc,
       ...(reachabilityAdvisories.length > 0 ? { reachability_advisories: reachabilityAdvisories } : {}),
     });
+  }
+
+  // ─── Per-item approval of a baseline node (BR-1338) ─────────────────────────
+
+  /**
+   * The id `--item` names, as the pending list keys it: `node` (or the node's own slug / id) for the node's own part,
+   * else a rule id.
+   *
+   * @returns the item key, or a VALIDATION_ERROR naming the accepted forms.
+   */
+  private normaliseItem(doc: DocRecord, item: string): Result<string, LoreError> {
+    if (item === NODE_ITEM || item === doc.slug || item === doc.id) return ok(NODE_ITEM);
+    if (ANY_RULE_ID_PATTERN.test(item)) return ok(item);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "item",
+      message: `--item must be a rule id (BR-<n>, AS-<n>, AD-<n>) or \`node\` for ${doc.slug}'s own part (got '${item}')`,
+      value: item,
+      rule: "BR-1338",
+    });
+  }
+
+  /**
+   * The pending revisions the latest review of `doc` saw: per item, the revision id its version held. Read from that
+   * version's own stored snapshot, so a judgment needs no extra column to be bound to revisions.
+   *
+   * @returns an empty map when no usable review exists or its version can no longer be read: nothing was seen.
+   */
+  private async reviewedRevisionsOf(doc: DocRecord): Promise<Result<ReviewedRevisions, LoreError>> {
+    if (this.judgmentService === undefined) return ok({ revisions: new Map() });
+    const judgments = await this.judgmentService.listFor(doc.id, "review");
+    if (!judgments.ok) return judgments;
+    // reason: BR-269 — a truncated approve never counts as having seen the whole node (same rule the judgment gate applies).
+    const usable = judgments.value.filter((j) => !(j.decision === "approve" && j.truncated === true));
+    const latest = [...usable].sort((a, b) => b.doc_version - a.doc_version || b.created_at.localeCompare(a.created_at))[0];
+    if (latest === undefined) return ok({ revisions: new Map() });
+    const versions = await this.store.findVersions(doc.id, { limit: 500 });
+    if (!versions.ok) return versions;
+    const snapshot = versions.value.find((v) => v.version === latest.doc_version);
+    if (snapshot === undefined) return ok({ revisions: new Map() });
+    return ok({ revisions: new Map(listPendingItems(snapshot.extra).map((p) => [p.item, p.revisionId])) });
+  }
+
+  /**
+   * Decide which pending revisions of `doc` an approval promotes (BR-1338): exactly the revisions a review saw.
+   *   - a revision whose item the review saw with ANOTHER revision id was rewritten after the review: refused, named;
+   *   - a revision of an item the review never saw (written after it) is not promoted and stays pending, unless it is
+   *     the one `--item` names, which is then refused;
+   *   - `item` narrows the selection to that one item; items not selected are untouched.
+   * An override (`--override-judgment` / `--override-no-judgment`, already decided by the autonomy port) or a service
+   * with no judgment store skips the binding: every candidate is promoted.
+   */
+  private async planBaselinePromotion(
+    doc: DocRecord,
+    item: string | undefined,
+    skipBinding: boolean,
+  ): Promise<Result<BaselinePromotionPlan, LoreError>> {
+    const pending = listPendingItems(doc.extra);
+    let candidates: readonly PendingItem[] = pending;
+    if (item !== undefined) {
+      const wanted = this.normaliseItem(doc, item);
+      if (!wanted.ok) return wanted;
+      candidates = pending.filter((p) => p.item === wanted.value);
+      if (candidates.length === 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "item",
+          message: `${wanted.value} holds no pending revision on ${doc.slug} (pending: ${pending.map((p) => p.item).join(", ")})`,
+          value: item,
+          rule: "BR-1338",
+        });
+      }
+    }
+
+    // reason: `workflow.review.judgment_required_types: []` is the documented kill switch of the review judgment (absent in a
+    // bare construction): with no review required there is no review to bind an approval to, so the approval promotes
+    // what it names. With the default list a review is required for baseline nodes too: an approval needs one that saw it.
+    const bound = !skipBinding && this.judgmentService !== undefined && (this.judgmentRequiredTypes?.length ?? 0) > 0;
+    const reviewed = bound ? await this.reviewedRevisionsOf(doc) : undefined;
+    if (reviewed !== undefined && !reviewed.ok) return reviewed;
+    const selected: PendingItem[] = [];
+    const unseen: PendingItem[] = [];
+    const rewritten: Array<{ item: PendingItem; reviewedId: string }> = [];
+    for (const candidate of candidates) {
+      const seen = reviewed?.ok === true ? reviewed.value.revisions.get(candidate.item) : candidate.revisionId;
+      if (seen === candidate.revisionId) selected.push(candidate);
+      else if (seen === undefined) unseen.push(candidate);
+      else rewritten.push({ item: candidate, reviewedId: seen });
+    }
+    if (rewritten.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message:
+          `${rewritten.map((r) => `${r.item.item} (revision ${r.item.revisionId}, the review saw ${r.reviewedId})`).join("; ")} on ${doc.slug} ` +
+          `changed after the review that saw it: nothing was approved. Review it again (\`lore review ${doc.slug}\`) and approve what that review saw`,
+        value: rewritten.map((r) => r.item.item),
+        rule: "BR-1338",
+      });
+    }
+    if (item !== undefined && unseen.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message: `${unseen.map((u) => u.item).join(", ")} on ${doc.slug} was not seen by any review: run \`lore review ${doc.slug}\`, then approve it`,
+        value: unseen.map((u) => u.item),
+        rule: "BR-1338",
+      });
+    }
+    if (selected.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message:
+          `no pending revision of ${doc.slug} was seen by a review (pending: ${pending.map((p) => p.item).join(", ")}): ` +
+          `run \`lore review ${doc.slug}\`, then approve`,
+        value: pending.map((p) => p.item),
+        rule: "BR-1338",
+      });
+    }
+    const promotion = promoteItems(doc, selected.map((s) => s.item));
+    const reviewedVersion = await this.reviewedVersionOf(doc, bound);
+    if (!reviewedVersion.ok) return reviewedVersion;
+    const gateDoc: DocRecord = {
+      ...doc,
+      extra: promotion.extra,
+      ...(promotion.title !== undefined ? { title: promotion.title } : {}),
+      ...(promotion.content !== undefined ? { content: promotion.content } : {}),
+      // reason: the judgment gate matches judgments on the doc version they were made against; a baseline node's version
+      // moves with every pending write, so it is measured at the version the review saw.
+      version: reviewedVersion.value ?? doc.version,
+    };
+    return ok({ selected, gateDoc });
+  }
+
+  /** The doc version the latest usable review was made against, or `undefined` when the approval is not bound to one. */
+  private async reviewedVersionOf(doc: DocRecord, bound: boolean): Promise<Result<number | undefined, LoreError>> {
+    if (!bound || this.judgmentService === undefined) return ok(undefined);
+    const judgments = await this.judgmentService.listFor(doc.id, "review");
+    if (!judgments.ok) return judgments;
+    const versions = judgments.value.filter((j) => !(j.decision === "approve" && j.truncated === true)).map((j) => j.doc_version);
+    return ok(versions.length === 0 ? undefined : Math.max(...versions));
+  }
+
+  /**
+   * Write the promotion of `plan.selected`: the non-moving revisions in ONE approve write of the node, then each moved
+   * rule through the store's move transaction (source leaf + destination leaf + registry together).
+   */
+  private async writeBaselinePromotion(
+    doc: DocRecord,
+    plan: BaselinePromotionPlan,
+    ctx: { reviewer: string; overrideJudgmentId?: string; overrideNoJudgment?: true },
+  ): Promise<Result<ApproveResult, LoreError>> {
+    const moving = new Set(
+      plan.selected.filter((s) => pendingRevisionsOf(doc).rules[s.item]?.move_to !== undefined).map((s) => s.item),
+    );
+    const staying = plan.selected.filter((s) => !moving.has(s.item));
+    let current: DocRecord = doc;
+    if (staying.length > 0) {
+      const promotion = promoteItems(doc, staying.map((s) => s.item));
+      const toStatus = statusFor(doc.status, promotion.extra);
+      const written = await this.writer.writeDoc({
+        doc,
+        patch: {
+          extra: promotion.extra,
+          status: toStatus,
+          ...(promotion.title !== undefined ? { title: promotion.title } : {}),
+          ...(promotion.content !== undefined ? { content: promotion.content } : {}),
+        },
+        action: "approve",
+        auditAction: "approve",
+        changeSummary: `Approved ${staying.map((s) => s.item).join(", ")}`,
+        auditDetails: {
+          reviewer: ctx.reviewer,
+          from_status: doc.status,
+          to_status: toStatus,
+          items: staying.map((s) => s.item),
+          revisions: Object.fromEntries(staying.map((s) => [s.item, s.revisionId])),
+          ...(ctx.overrideJudgmentId !== undefined ? { override_judgment_id: ctx.overrideJudgmentId } : {}),
+          ...(ctx.overrideNoJudgment === true ? { override_no_judgment: true } : {}),
+        },
+        auditSessionId: `review-${doc.id}`,
+        lock: "none",
+        by: ctx.reviewer,
+      });
+      if (!written.ok) return written;
+      current = written.value.doc;
+    }
+    for (const ruleId of moving) {
+      const source = await this.store.find(doc.id);
+      if (!source.ok) return source;
+      if (source.value === null) return err({ code: "DOC_NOT_FOUND", id: doc.id });
+      const revision = pendingRevisionsOf(source.value).rules[ruleId];
+      if (revision?.move_to === undefined) continue;
+      const dest = await this.store.find(revision.move_to as DocId);
+      if (!dest.ok) return dest;
+      if (dest.value === null) return err({ code: "DOC_NOT_FOUND", id: revision.move_to });
+      const fromExtra = promoteRuleRevision(source.value.extra, ruleId);
+      if (fromExtra === undefined) continue;
+      const moved = await this.writer.moveRule({
+        ruleId,
+        from: { id: source.value.id, expectedVersion: source.value.version, extra: fromExtra, status: statusFor(source.value.status, fromExtra), change_summary: `Approved move of ${ruleId} to ${dest.value.slug}` },
+        to: { id: dest.value.id, expectedVersion: dest.value.version, extra: appendApprovedRule(dest.value.extra, revision.rule), change_summary: `Approved move of ${ruleId} from ${source.value.slug}` },
+        auditDetails: { rule_id: ruleId, from: source.value.id, to: dest.value.id, approved_by: ctx.reviewer, revision_id: revision.revision_id },
+        by: ctx.reviewer,
+      });
+      if (!moved.ok) return moved;
+      current = moved.value.from;
+    }
+    return ok({
+      ...current,
+      promoted_items: plan.selected.map((s) => s.item),
+      still_pending: listPendingItems(current.extra).map((p) => p.item),
+    });
+  }
+
+  /**
+   * Discard one pending revision of a baseline node (`lore reject <node> --item <id>`): the item reads as its approved
+   * version again (a pending add disappears). Items not named are untouched; the node's status is re-derived.
+   *
+   * @param item - `BR-n` / `AS-n` / `AD-n`, or `node` for the node's own part
+   * @returns the node as written and the discarded revision; VALIDATION_ERROR when the item holds no pending revision
+   *   or is a never-approved node's own part (there is nothing to fall back to).
+   */
+  async rejectItem(
+    id: string,
+    item: string,
+    opts?: RejectOpts,
+  ): Promise<Result<RejectItemOutcome, LoreError>> {
+    const found = await this.resolveDoc(id);
+    if (!found.ok) return found;
+    const doc = found.value;
+    if (doc.type !== "baseline") {
+      return err({ code: "VALIDATION_ERROR", field: "item", message: `--item applies to a baseline node (BR-1338); ${doc.slug} is a ${doc.type}`, value: item, rule: "BR-1338" });
+    }
+    const wanted = this.normaliseItem(doc, item);
+    if (!wanted.ok) return wanted;
+    const target = listPendingItems(doc.extra).find((p) => p.item === wanted.value);
+    if (target === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "item", message: `${wanted.value} holds no pending revision on ${doc.slug}`, value: item, rule: "BR-1338" });
+    }
+    if (target.item === NODE_ITEM && pendingRevisionsOf(doc).node?.initial === true) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message: `${doc.slug} was never approved: its own part has no approved version to return to. Approve it, or delete the node`,
+        value: item,
+        rule: "BR-1338",
+      });
+    }
+    const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
+    if (!resolvedReviewer.ok) return resolvedReviewer;
+    const extra = target.item === NODE_ITEM ? discardNodeRevision(doc.extra) : discardRuleRevision(doc.extra, target.item);
+    const status = statusFor(doc.status, extra);
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra, status },
+      action: "reject",
+      auditAction: "reject",
+      changeSummary: `Discarded the pending revision of ${target.item}`,
+      auditDetails: {
+        reviewer: resolvedReviewer.value,
+        item: target.item,
+        revision_id: target.revisionId,
+        from_status: doc.status,
+        to_status: status,
+        ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
+      },
+      auditSessionId: `review-${doc.id}`,
+      lock: "none",
+      by: resolvedReviewer.value,
+    });
+    if (!written.ok) return written;
+    return ok({ doc: written.value.doc, discarded: target });
   }
 
   /**

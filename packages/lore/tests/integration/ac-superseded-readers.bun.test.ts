@@ -29,7 +29,9 @@ import {
 } from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
-import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
+import { actedStore, liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
+import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { approvePending } from "../helpers/approve-baseline.js";
 import { createApp } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 
@@ -123,7 +125,14 @@ beforeAll(async () => {
   const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
-  specS = slugOf(await must(["create", "spec", "--title", "SR Spec S", "--content", "body", "--no-ai"]));
+  // a direct add is a pending add: the rule is citable (live) only once its leaf is approved
+  const side = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
+  try {
+    await approvePending(side, leaf);
+  } finally {
+    side.close();
+  }
+  specS =slugOf(await must(["create", "spec", "--title", "SR Spec S", "--content", "body", "--no-ai"]));
   specS2 = slugOf(await must(["create", "spec", "--title", "SR Spec S2", "--content", "body", "--no-ai"]));
   await addScriptAc(specS, "AC-1");
   await addScriptAc(specS, "AC-2");

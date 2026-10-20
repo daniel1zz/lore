@@ -31,6 +31,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Module loader (module does not exist yet; keep the file loadable + typecheck at 0) ───────────
@@ -124,13 +125,16 @@ async function world(
     );
     if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
     ruleIds.push(added.value.ruleId);
+  }
+  await approvePending(store, leaf.id); // a direct add is a pending add: it is citable only once approved
+  for (const [index, def] of ruleDefs.entries()) {
     if (def.lifecycle !== undefined) {
       // reason: `rule set --lifecycle deprecated` is refused since D4 (spec-a-spec-carries-its-rule-changes-the-
       // baseline-takes-them), but deprecated rules still exist in older corpora: seed the state on the leaf directly.
       const current = await store.find(leaf.id);
       if (!current.ok || current.value === null) throw new Error("leaf vanished");
       const marked = (current.value.extra["rules"] as Array<{ id: string }>).map((r) =>
-        r.id === added.value.ruleId ? { ...r, lifecycle: def.lifecycle } : r,
+        r.id === ruleIds[index] ? { ...r, lifecycle: def.lifecycle } : r,
       );
       const set = await store.update(leaf.id, { extra: { ...current.value.extra, rules: marked } });
       if (!set.ok) throw new Error(`seeding a deprecated rule failed: ${JSON.stringify(set.error)}`);

@@ -209,6 +209,8 @@ beforeAll(async () => {
   const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
+  // a direct add is a pending add: citable only once its leaf is approved (the override class is loosened above)
+  await must(["approve", leaf, "--override-no-judgment"]);
 }, 180_000);
 
 afterAll(() => {
@@ -305,7 +307,8 @@ describe(ID, () => {
     expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     const prompt = capturedPrompt();
     for (const example of [...examples, "EXAMPLE-DELTA-FOUR"]) expect(prompt, example).toContain(example);
-    for (const command of commands) expect(prompt, command).toContain(`commands (${commands.length}): ${commands.join(" | ")}`);
+    // the leaf's own part is a never-approved node: its declared commands are shown whole, as the proposed revision
+    for (const command of commands) expect(prompt, command).toContain(commands.join(" | "));
   }, 120_000);
 
   it(`${ID} (d) guard: a leaf declaring no commands renders no commands line, so the commands assertion can fail`, () => {

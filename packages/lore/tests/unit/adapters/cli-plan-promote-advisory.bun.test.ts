@@ -1,5 +1,6 @@
 // @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * `lore approve <plan>` — `plan-promote` reachability EARLY-WARNING advisory,
  * rendered on the LIVE CLI approve path (spec-verify-reachability-plan-promote-

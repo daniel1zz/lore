@@ -82,6 +82,11 @@ describe("snapshot views list only live rules (AC-CS-4)", () => {
     const world = await makeWorld();
     const retired = await world.rules.setRule("BR-1", { lifecycle: "retired", note: "no longer true" }, { by: "test" });
     expect(retired.ok).toBe(true);
+    // the retirement is a pending revision: the approved rule is still live and found
+    const stillLive = await world.read.find({ text: "live rule" });
+    expect(stillLive.ok && stillLive.value).toEqual(["BR-1"]);
+    const approved = await world.review.approve("leaf-a", { reviewer: "test" });
+    expect(approved.ok).toBe(true);
     const hidden = await world.read.find({ text: "live rule" });
     expect(hidden.ok && hidden.value).toEqual([]);
     const withTombstones = await world.read.find({ text: "live rule" }, { includeTombstones: true });

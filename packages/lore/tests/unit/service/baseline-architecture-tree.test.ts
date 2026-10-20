@@ -53,6 +53,7 @@ import { RuleStateService } from "../../../src/service/rule-state-service.js";
 import { computeBaselineStatus } from "../../../src/service/baseline-status.js";
 import { indexBaseline } from "../../../src/service/ac-cite-gate.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ async function world(opts: { architecture: boolean } = { architecture: true }): 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
+  storeOfRules.set(rules, store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
   const bizRoot = await baseline(cs, "Business root", prd, { node: "root" });
   const bizBranch = await baseline(cs, "Alpha branch", bizRoot, { node: "branch" });
@@ -129,8 +131,14 @@ async function world(opts: { architecture: boolean } = { architecture: true }): 
   return { store, cs, rules, prd, bizRoot, bizBranch, leaves, archRoot, section, moduleCard, standards, debts };
 }
 
+/** The store behind each world's RuleService, so a fixture add can be approved (a direct add is a pending add, BR-626). */
+const storeOfRules = new WeakMap<RuleService, InMemoryStore>();
+
 async function addRuleId(rules: RuleService, node: DocRecord, n: number | string): Promise<string> {
   const r = await must(await rules.addRule(node.slug, ruleInput(n), { by: "agent:test" }), `addRule ${node.slug}`);
+  const store = storeOfRules.get(rules);
+  if (store === undefined) throw new Error("addRuleId: RuleService not made by world()");
+  await approvePending(store, node.slug);
   return (r as { ruleId: string }).ruleId;
 }
 
