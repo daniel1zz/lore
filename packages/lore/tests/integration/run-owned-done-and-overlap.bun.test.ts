@@ -201,16 +201,18 @@ describe("lore done decides the holder by run (spec-run-only-write-identity-and-
     expect(errorText(refused)).toContain(runA);
   });
 
-  it("REGRESSION: both sides unattested compare by name (a different name refused, the same name archives)", async () => {
-    const { taskIds } = await createPlanWithTasks([[], []]);
-    expect((await claimAs(taskIds[0]!, "agent:legacy-a", null)).ok).toBe(true);
-    expect((await claimAs(taskIds[1]!, "agent:legacy-b", null)).ok).toBe(true);
+  it("REGRESSION: a claim that names no run is refused by the store (BR-1352), so no name-only holder can ever be archived by another name-only caller", async () => {
+    const { taskIds } = await createPlanWithTasks([[]]);
 
-    const foreign = await doneAs(taskIds[0]!, "agent:legacy-b", null);
-    const own = await doneAs(taskIds[1]!, "agent:legacy-b", null);
+    const refused = await claimAs(taskIds[0]!, "agent:legacy-a", null);
 
-    expect(foreign.ok).toBe(false);
-    expect(own.ok).toBe(true);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.error.code).toBe("VALIDATION_ERROR");
+      expect((refused.error as { field?: string }).field).toBe("extra.claim.harness_run");
+    }
+    // Nothing was written: the task is still unclaimed.
+    expect((await fetchTask(taskIds[0]!)).extra["claim"]).toBeUndefined();
   });
 
   it("BOUNDARY: a fresh claim whose run has ended with a clean worktree no longer blocks another run's done", async () => {

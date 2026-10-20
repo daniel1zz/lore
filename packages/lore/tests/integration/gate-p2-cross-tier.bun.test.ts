@@ -36,10 +36,10 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
-import type { CreateDocInput, LoreConfig } from "@lore/core";
-import { asSessionActor } from "../helpers/session-actor";
+import type { CreateDocInput, LoreConfig, RunId } from "@lore/core";
+import { asSessionActor, sessionIdFor } from "../helpers/session-actor";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext, actedStore, runHandlerForExit, liveIo } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, actedStore, runHandlerForExit, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
 
 /** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
 let lastExitCode = 0;
@@ -321,10 +321,19 @@ async function createTaskWithAnchors(
  * `lore claim` write path, so fixture claims bypass gating entirely — the same
  * fixture-construction convention `approveDoc`/`softDeleteDoc` already use.
  */
-async function claimTask(taskId: string, by: string): Promise<void> {
+/**
+ * The run a caller named by fixture label runs as: the run `asSessionActor(label)` makes `liveInvocation()` resolve
+ * to, so a claim written here and a gate call made under `asSessionActor(label)` are the SAME holder (BR-1056: claims
+ * compare runs, never names).
+ */
+function runOfLabel(label: string): string {
+  return `cc:${sessionIdFor(label)}`;
+}
+
+async function claimTask(taskId: string, by: string, run: string = runOfLabel(by)): Promise<void> {
   const app = createFixtureApp(dbPath());
   try {
-    const result = await app.taskWorkflowService.claim(taskId, { by });
+    const result = await app.taskWorkflowService.claim(taskId, { by, harnessRun: run as RunId });
     if (!result.ok) throw new Error(`claim failed: ${JSON.stringify(result.error)}`);
   } finally {
     app.close();
@@ -332,10 +341,10 @@ async function claimTask(taskId: string, by: string): Promise<void> {
 }
 
 /** Releases `taskId`'s claim as `by` (fixture app, gates disabled — see `claimTask`). */
-async function releaseTask(taskId: string, by: string): Promise<void> {
+async function releaseTask(taskId: string, by: string, run: string = runOfLabel(by)): Promise<void> {
   const app = createFixtureApp(dbPath());
   try {
-    const result = await app.taskWorkflowService.release(taskId, { by });
+    const result = await app.taskWorkflowService.release(taskId, { by, harnessRun: run as RunId });
     if (!result.ok) throw new Error(`release failed: ${JSON.stringify(result.error)}`);
   } finally {
     app.close();
@@ -871,7 +880,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
   // instead of as the SECOND case it actually is. Both branches are now constructed
   // and asserted explicitly, independent of the ambient environment.
 
-  it("REGRESSION: a fresh claim by the SAME actor, in the SAME measured session, does not conflict, even with overlapping anchors", async () => {
+  it("REGRESSION: a fresh claim by the SAME run (one measured session) does not conflict, even with overlapping anchors", async () => {
     const { planId } = await createPrdParentedPlan();
     const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor Same-Session Task A", [
       "src/shared.ts",
@@ -889,7 +898,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // The gate resolves its candidate name from that SAME session (`agent:session-<id8>`), so the
     // holder is recorded under that name: same actor AND same measured session.
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
-    await claimTask(taskAId, "agent:session-3de02220");
+    await claimTask(taskAId, "agent:session-3de02220", "cc:3de02220-same-session");
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
@@ -904,25 +913,48 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     expect(output.stdout.join("\n")).toContain("gate: pass");
   });
 
-  it("REGRESSION: a fresh claim by the SAME actor with NO measured session on either side refuses as ANCHOR_OVERLAP_SESSION_UNMEASURED — the fail-safe branch of the case above", async () => {
+  it("REGRESSION: the SAME run with NO session id on either side does not conflict — the run decides, an absent session id never does", async () => {
     const { planId } = await createPrdParentedPlan();
-    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor No-Session Task A", [
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Run No-Session Task A", [
       "src/shared.ts",
     ]);
     const { taskSlug: taskBSlug } = await createTaskWithAnchors(
       planId,
-      "Anchor Gate Same-Actor No-Session Task B",
+      "Anchor Gate Same-Run No-Session Task B",
       ["src/shared.ts"],
     );
 
-    // Explicitly ABSENT on both sides (mirrors `beforeEach`'s default, restated here
-    // so the fact under test is visible at the call site, not merely inherited). "Same
-    // actor" alone is never evidence of "one session" — without a measured session id
-    // on both sides the mutex must refuse, not silently permit.
-    // No session on either side: the name the gate resolves is the fallback tier's (OS user / worktree
-    // name), so the holder is recorded under exactly that name — same actor, nothing measured.
+    // Explicitly ABSENT on both sides: with no session env the gate's candidate runs as the live test run, and the
+    // holder is recorded under that same run.
     setSessionEnv(null);
-    await claimTask(taskAId, resolveActor(liveInvocation()));
+    await claimTask(taskAId, resolveActor(liveInvocation()), LIVE_TEST_RUN);
+
+    const cmd = await importGateSubCommand("task-claim");
+    setSessionEnv(null);
+    const output = captureOutput();
+    try {
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
+    } finally {
+      output.restore();
+    }
+
+    expect(lastExitCode).toBe(0);
+    expect(output.stdout.join("\n")).toContain("gate: pass");
+  });
+
+  it("NEGATIVE: a fresh claim under the SAME display name but ANOTHER run refuses as ANCHOR_OVERLAP — a name is not a holder", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Name Other-Run Task A", [
+      "src/shared.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(
+      planId,
+      "Anchor Gate Same-Name Other-Run Task B",
+      ["src/shared.ts"],
+    );
+
+    setSessionEnv(null);
+    await claimTask(taskAId, resolveActor(liveInvocation()), "cc:some-other-run");
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv(null);
@@ -934,7 +966,9 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     }
 
     expect(lastExitCode).toBe(4);
-    expect(output.stdout.join("\n")).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("ANCHOR_OVERLAP");
+    expect(stdoutText).toContain("cc:some-other-run");
   });
 
   it("BOUNDARY: disjoint anchors between fresh siblings → gate: pass", async () => {

@@ -48,9 +48,9 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
-import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
+import type { CreateDocInput, DocRecord, RunId, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit, liveIo } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -60,6 +60,16 @@ import type { Invocation } from "@lore/core";
  */
 function currentActor(): string {
   return resolveActor(liveInvocation());
+}
+
+/**
+ * The run the CURRENT process environment resolves to: `cc:<session id>` when a session env is set, else the live test
+ * run. It is exactly the run `liveInvocation()` (and so the `lore gate phase-claim` pre-flight) resolves, so a claim
+ * written under it and the pre-flight made in the same environment are ONE holder (claims compare runs, BR-1056).
+ */
+function currentRun(): RunId {
+  const session = process.env["CLAUDE_CODE_SESSION_ID"] ?? process.env["CLAUDE_SESSION_ID"];
+  return (session !== undefined && session.trim() !== "" ? `cc:${session}` : LIVE_TEST_RUN) as RunId;
 }
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;
@@ -226,7 +236,7 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const claimed = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: currentActor() });
+      return service.claim(phaseSlugs[0]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(claimed.ok).toBe(true);
 
@@ -242,7 +252,7 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const claimed = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: currentActor() });
+      return service.claim(phaseSlugs[0]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(claimed.ok).toBe(true);
     expect(readClaim(await fetchDoc(phaseSlugs[0]!))?.session_id).toBe("7ab19c04");
@@ -255,7 +265,7 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const first = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: currentActor() });
+      return service.claim(phaseSlugs[0]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(first.ok).toBe(true);
 
@@ -267,20 +277,20 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const second = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[1]!, { by: currentActor() });
+      return service.claim(phaseSlugs[1]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(second.ok).toBe(true);
     expect(readClaim(await fetchDoc(phaseSlugs[1]!))?.session_id).toBe("3de02220");
   });
 
-  it("NEGATIVE: ONE actor, TWO sessions — claim REFUSES as foreign and the pre-flight agrees (exit 4)", async () => {
+  it("NEGATIVE: ONE actor name, TWO sessions (two runs) — claim REFUSES as foreign and the pre-flight agrees (exit 4)", async () => {
     const { phaseSlugs } = await createPlanWithPhases([[SHARED_ANCHOR], [SHARED_ANCHOR]]);
 
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-first");
     const first = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: currentActor() });
+      return service.claim(phaseSlugs[0]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(first.ok).toBe(true);
 
@@ -290,45 +300,44 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const preflight = await runPreflight(phaseSlugs[1]!);
     expect(preflight.exitCode).toBe(4);
     expect(preflight.stdout).toContain("ANCHOR_OVERLAP");
-    expect(preflight.stdout).not.toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
 
     const second = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[1]!, { by: currentActor() });
+      return service.claim(phaseSlugs[1]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(second.ok).toBe(false);
     if (!second.ok) {
       expect((second.error as { field?: string }).field).toBe("gate:phase-claim:anchor-overlap");
-      expect(JSON.stringify(second.error)).not.toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
     }
     expect(readClaim(await fetchDoc(phaseSlugs[1]!))).toBeUndefined();
   });
 
-  it("REGRESSION: with NO session env, BOTH surfaces refuse with the explicit not-measured marker", async () => {
+  it("REGRESSION: with NO session env the run still decides — another run's claim is refused by BOTH surfaces, the process's own run is not", async () => {
     const { phaseSlugs } = await createPlanWithPhases([[SHARED_ANCHOR], [SHARED_ANCHOR]]);
     setSessionEnv(null);
 
+    // A claim held by ANOTHER run (same display name, no session captured on the claim).
     const first = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: currentActor() });
+      return service.claim(phaseSlugs[0]!, { by: currentActor(), harnessRun: "cc:holder-other-run" as RunId });
     });
     expect(first.ok).toBe(true);
     expect(readClaim(await fetchDoc(phaseSlugs[0]!))?.session_id).toBeUndefined();
 
     const preflight = await runPreflight(phaseSlugs[1]!);
     expect(preflight.exitCode).toBe(4);
-    expect(preflight.stdout).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
+    expect(preflight.stdout).toContain("ANCHOR_OVERLAP");
 
     const second = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[1]!, { by: currentActor() });
+      return service.claim(phaseSlugs[1]!, { by: currentActor(), harnessRun: currentRun() });
     });
     expect(second.ok).toBe(false);
     if (!second.ok) {
-      expect(JSON.stringify(second.error)).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
+      expect(JSON.stringify(second.error)).toContain("ANCHOR_OVERLAP");
     }
   });
 });

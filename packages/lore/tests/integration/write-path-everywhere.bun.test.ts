@@ -60,6 +60,7 @@ import { appendAdoptAuditRow, BASELINE_ADOPT_AUDIT_ACTION } from "../../src/adap
 import { loadLoreApp } from "../../src/adapters/cli/loader.js";
 import { actedStore, liveInvocation } from "../live-invocation.js";
 import { createLiveApp } from "../helpers/live-app.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 const CALLER = "agent:dcl5-caller";
 const AUTHOR = "agent:dcl5-original-author";
@@ -476,7 +477,7 @@ const SCENARIOS: readonly Scenario[] = [
       const task = await mustCreate(w.seedCorpus, {
         type: "task", title: slugFor("task"), parent_id: plan.id, content: "body", extra: { plan_id: plan.id },
       });
-      return { docIds: [task.id], run: async () => failureText(await w.svc.taskWorkflow.claim(task.id, { by: CALLER })) };
+      return { docIds: [task.id], run: async () => failureText(await w.svc.taskWorkflow.claim(task.id, { by: CALLER, harnessRun: runOfName(CALLER) })) };
     },
   },
   {

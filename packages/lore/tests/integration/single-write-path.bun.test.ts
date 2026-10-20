@@ -494,7 +494,7 @@ describe("AC-DCL-3 phase migration — PhaseMigrationService", () => {
       fx,
       makeDoc("task", {
         parent_id: plan.id,
-        extra: { plan_id: plan.id, phase: "build", claim: { by: "agent:holder", at: new Date().toISOString() } },
+        extra: { plan_id: plan.id, phase: "build", claim: { by: "agent:holder", at: new Date().toISOString(), harness_run: "cc:holder" } },
       }),
     );
     const edit = await fx.corpus.writeDoc({
