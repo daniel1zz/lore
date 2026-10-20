@@ -158,7 +158,12 @@ describe("partitionTerritory (AC-OWN-1)", () => {
     expect(partition.mine.some((e) => e.kind === "worktree" && e.path === "/wt-mine")).toBe(true);
     const foreignEntry = partition.foreign.find((e) => e.kind === "worktree" && e.path === "/wt-peer");
     expect(foreignEntry).toBeDefined();
-    expect(foreignEntry?.holder).toEqual({ session_id: "bbbb2222", by: "agent:peer", worktree: "/wt-peer" });
+    expect(foreignEntry?.holder).toEqual({
+      session_id: "bbbb2222",
+      by: "agent:peer",
+      worktree: "/wt-peer",
+      message_address: null,
+    });
   });
 
   it("NEGATIVE: a claim with no session_id never classifies mine/foreign, regardless of the worktree it names", () => {

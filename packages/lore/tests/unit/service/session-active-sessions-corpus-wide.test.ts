@@ -211,6 +211,8 @@ describe("bootstrap active_sessions — HAPPY/REGRESSION: active plan, byte-iden
       branches: ["feat/x"],
       task_slugs: [task.slug],
       newest_at: expect.any(String),
+      // BR-1363: always present; null = no address recorded for the holder's main run
+      message_address: null,
     });
     expect(session).not.toHaveProperty("stale");
   });

@@ -29,8 +29,10 @@ vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
-const SESSION = "e2e-addr-session-5c1d";
-const OTHER_SESSION = "e2e-addr-session-9e44";
+// reason: the claim actor name is `agent:session-<first 8 chars>`, so the two sessions must differ inside those 8 characters
+// or their claims group into one session row (the grouping key is by/machine/worktree/session_id).
+const SESSION = "5c1daaaa-e2e-address-session";
+const OTHER_SESSION = "9e44bbbb-e2e-address-session";
 const MAIN_RUN = `cc:${SESSION}`;
 const OTHER_RUN = `cc:${OTHER_SESSION}`;
 
