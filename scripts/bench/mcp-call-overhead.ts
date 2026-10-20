@@ -43,11 +43,8 @@ const root = mkdtempSync(join(tmpdir(), "lore-mcp-overhead-"));
 try {
   mkdirSync(join(root, ".lore"), { recursive: true });
   const dbPath = join(root, ".lore", "lore.db");
-  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
-  const created = await app.corpusService.create({ type: "plan", title: "Bench Plan", content: "# Plan" } as CreateDocInput);
-  if (!created.ok) throw new Error(`seed doc: ${JSON.stringify(created.error)}`);
-  const slug = created.value.slug;
-
+  // reason: every write needs a known party (BR-1351) and an unregistered run is refused, so the bench's run is registered
+  // FIRST (this also creates the corpus file), then the App is composed as that run.
   const seeder = new SQLiteStore(dbPath);
   try {
     const inserted = await seeder.insertRun({
@@ -67,9 +64,14 @@ try {
     seeder.close();
   }
 
-  const scope = new McpCallScope(app, inv, (line) => {
-    throw new Error(`unexpected warning during bench: ${line}`);
+  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), {
+    identity: { harnessRun: RUN as never, claimed: "agent:session-bench-se", claimedSource: "run" },
   });
+  const created = await app.corpusService.create({ type: "plan", title: "Bench Plan", content: "# Plan" } as CreateDocInput);
+  if (!created.ok) throw new Error(`seed doc: ${JSON.stringify(created.error)}`);
+  const slug = created.value.slug;
+
+  const scope = new McpCallScope(app, inv);
 
   async function timed(fn: () => Promise<unknown>): Promise<number> {
     const start = performance.now();

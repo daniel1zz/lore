@@ -30,6 +30,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { nameOfAgentRun, type RunId } from "@lore/core";
 import { sessionActorFor, sessionIdOfActor } from "../helpers/session-actor";
 import { registerRun, runLore } from "./cli/support/claim-run-fixture.js";
 
@@ -256,7 +257,8 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
     expect(after.version).toBe(before.version + 1);
     expect(after.versionRows).toBe(before.versionRows + 1);
     const row = latestVersionRow(fx.taskA);
-    expect(row["created_by"]).toBe(ACTOR_A);
+    // the writer's name derives from the helper's RUN (BR-1055), no longer from a name the caller supplied
+    expect(row["created_by"]).toBe(nameOfAgentRun(RUN_A as RunId));
     expect(JSON.stringify(row)).toContain(RUN_A);
   });
 

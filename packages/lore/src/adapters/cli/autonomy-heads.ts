@@ -42,7 +42,7 @@ type Ledger = z.infer<typeof ledgerSchema>;
 export type PushedHead = Ledger["heads"][number];
 
 function ledgerError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
+  return { code: "STORE_ERROR", message, rule: "BR-1264" };
 }
 
 /** The ledger path for the corpus database at `dbPath`. */
@@ -57,9 +57,11 @@ export function readPushedHeads(path: string): Result<PushedHead[], LoreError> {
   try {
     json = JSON.parse(readFileSync(path, "utf8"));
   } catch (cause) {
+    /** @lore-site BR-1264 */
     return err(ledgerError(`pushed-heads ledger ${path} is unreadable: ${String(cause)}`));
   }
   const parsed = ledgerSchema.safeParse(json);
+  /** @lore-site BR-1264 */
   if (!parsed.success) return err(ledgerError(`pushed-heads ledger ${path} has an unexpected shape: ${parsed.error.issues[0]?.message ?? "invalid"}`));
   return ok(parsed.data.heads);
 }

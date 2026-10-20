@@ -153,6 +153,7 @@ function parseWildcardGlobBaseDir(glob: string): Result<string, LoreError> {
       field: "package.json#workspaces",
       message: `unsupported workspace glob "${glob}" — only the "<dir>/*" shape can be derived; refusing rather than silently skipping it.`,
       value: glob,
+      rule: "BR-188",
     });
   }
   return ok(glob.slice(0, -suffix.length));
@@ -168,6 +169,7 @@ function readJsonFile(path: string, describedAs: string): Result<unknown, LoreEr
       field: describedAs,
       message: `"${path}" is not readable: ${error instanceof Error ? error.message : String(error)}`,
       value: path,
+      rule: "BR-188",
     });
   }
   try {
@@ -178,6 +180,7 @@ function readJsonFile(path: string, describedAs: string): Result<unknown, LoreEr
       field: describedAs,
       message: `"${path}" is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
       value: path,
+      rule: "BR-188",
     });
   }
 }
@@ -213,6 +216,7 @@ export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMe
       field: "package.json#workspaces",
       message: `"${rootPackageJsonPath}" does not match the expected package.json shape: ${rootParsed.error.message}`,
       value: rootJsonResult.value,
+      rule: "BR-188",
     });
   }
   const workspaces = rootParsed.data.workspaces;
@@ -222,6 +226,7 @@ export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMe
       field: "package.json#workspaces",
       message: `"${rootPackageJsonPath}" declares no non-empty "workspaces" array — cannot derive workspace members without one.`,
       value: workspaces,
+      rule: "BR-188",
     });
   }
 
@@ -242,6 +247,7 @@ export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMe
         field: "package.json#workspaces",
         message: `workspace glob "${glob}" resolves to unreadable directory "${baseDirAbs}": ${error instanceof Error ? error.message : String(error)}`,
         value: glob,
+        rule: "BR-188",
       });
     }
     for (const dirName of dirEntryNames) {
@@ -269,6 +275,7 @@ export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMe
           field: "workspaceMember.package.json#name",
           message: `"${memberPackageJsonPath}" has no non-empty "name" field — cannot derive this member's package name.`,
           value: memberPackageJsonPath,
+          rule: "BR-188",
         });
       }
       const packageName = memberParsed.data.name;
@@ -279,6 +286,7 @@ export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMe
           field: "workspaceMember.package.json#name",
           message: `"${memberPackageJsonPath}" declares unscoped package name "${packageName}" — this materializer requires every workspace member to share one "@scope/" prefix.`,
           value: packageName,
+          rule: "BR-188",
         });
       }
       members.push({
@@ -301,6 +309,7 @@ function deriveSingleWorkspaceScope(members: readonly WorkspaceMember[]): Result
       field: "workspaceMembers",
       message: "no workspace members were derived — nothing to build the scope directory from.",
       value: members,
+      rule: "BR-188",
     });
   }
   const scopes = new Set(members.map((m) => m.scope));
@@ -310,6 +319,7 @@ function deriveSingleWorkspaceScope(members: readonly WorkspaceMember[]): Result
       field: "workspaceMembers",
       message: `derived workspace members declare more than one scope (${[...scopes].join(", ")}) — this materializer supports exactly one workspace scope.`,
       value: [...scopes],
+      rule: "BR-188",
     });
   }
   return ok([...scopes][0]!);
@@ -345,6 +355,7 @@ export function materializeFalsifierDependencies(
       field: "scratchWorktreeDir",
       message: `scratch worktree directory "${scratchDirAbs}" does not exist — materialization requires an already-created scratch worktree.`,
       value: scratchDirAbs,
+      rule: "BR-188",
     });
   }
   const mainNodeModulesDir = join(mainRepoRootAbs, "node_modules");
@@ -354,6 +365,7 @@ export function materializeFalsifierDependencies(
       field: "mainRepoRoot",
       message: `"${mainNodeModulesDir}" does not exist — the main checkout has no installed dependencies to materialize from (run the package manager's install first).`,
       value: mainNodeModulesDir,
+      rule: "BR-188",
     });
   }
   const scratchNodeModulesDir = join(scratchDirAbs, "node_modules");
@@ -363,6 +375,7 @@ export function materializeFalsifierDependencies(
       field: "scratchWorktreeDir",
       message: `"${scratchNodeModulesDir}" already exists — refusing to materialize over an unexpected pre-existing entry.`,
       value: scratchNodeModulesDir,
+      rule: "BR-188",
     });
   }
 
@@ -380,6 +393,7 @@ export function materializeFalsifierDependencies(
     return err({
       code: "STORE_ERROR",
       message: `could not create "${scratchNodeModulesDir}": ${error instanceof Error ? error.message : String(error)}`,
+      rule: "BR-188",
     });
   }
 
@@ -395,6 +409,7 @@ export function materializeFalsifierDependencies(
     return err({
       code: "STORE_ERROR",
       message: `could not list "${mainNodeModulesDir}": ${error instanceof Error ? error.message : String(error)}`,
+      rule: "BR-188",
     });
   }
   const linkedTopLevelEntries: string[] = [];
@@ -411,6 +426,7 @@ export function materializeFalsifierDependencies(
       return err({
         code: "STORE_ERROR",
         message: `could not symlink main checkout's node_modules entry "${entryName}": ${error instanceof Error ? error.message : String(error)}`,
+        rule: "BR-188",
       });
     }
     linkedTopLevelEntries.push(entryName);
@@ -424,6 +440,7 @@ export function materializeFalsifierDependencies(
     return err({
       code: "STORE_ERROR",
       message: `could not create scope directory "${scopeDir}": ${error instanceof Error ? error.message : String(error)}`,
+      rule: "BR-188",
     });
   }
   for (const member of members) {
@@ -435,6 +452,7 @@ export function materializeFalsifierDependencies(
       return err({
         code: "STORE_ERROR",
         message: `could not link workspace member "${member.packageName}" into the scratch node_modules: ${error instanceof Error ? error.message : String(error)}`,
+        rule: "BR-188",
       });
     }
   }
@@ -457,6 +475,7 @@ export function materializeFalsifierDependencies(
         field: "scratchWorktreeDir",
         message: `main checkout has a nested node_modules at "${relativeNestedPath}" but the scratch worktree has no "${join(member.baseDir, member.dirName)}" directory to attach it to.`,
         value: scratchNestedParent,
+        rule: "BR-188",
       });
     }
     try {
@@ -465,6 +484,7 @@ export function materializeFalsifierDependencies(
       return err({
         code: "STORE_ERROR",
         message: `could not symlink nested node_modules "${relativeNestedPath}": ${error instanceof Error ? error.message : String(error)}`,
+        rule: "BR-188",
       });
     }
     linkedNestedNodeModules.push(relativeNestedPath);

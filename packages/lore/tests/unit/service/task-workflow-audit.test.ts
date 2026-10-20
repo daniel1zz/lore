@@ -27,6 +27,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, AuditEntry } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ describe("HAPPY — claim appends exactly one audit entry with the expected shap
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const newVersion = claimResult.value.version;
@@ -107,8 +108,8 @@ describe("HAPPY — release appends one audit entry with action 'release' and de
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
 
@@ -172,8 +173,8 @@ describe("BOUNDARY — claim with --steal records the previous holder in audit.d
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", steal: true });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), steal: true });
     expect(stolen.ok).toBe(true);
 
     const auditResult = await store.queryAudit({ doc_id: taskId, action: "claim" });
@@ -194,13 +195,13 @@ describe("NEGATIVE — a rejected claim (CLAIM_CONFLICT) appends zero audit entr
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     const beforeResult = await store.queryAudit({ doc_id: taskId });
     expect(beforeResult.ok).toBe(true);
     if (!beforeResult.ok) return;
     const beforeCount = beforeResult.value.length;
 
-    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob" });
+    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(conflicting.ok).toBe(false);
     if (conflicting.ok) return;
     expect(conflicting.error.code).toBe("CLAIM_CONFLICT");
@@ -216,13 +217,13 @@ describe("NEGATIVE — a rejected claim (CLAIM_CONFLICT) appends zero audit entr
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     const beforeResult = await store.queryAudit({ doc_id: taskId });
     expect(beforeResult.ok).toBe(true);
     if (!beforeResult.ok) return;
     const beforeCount = beforeResult.value.length;
 
-    const rejected = await taskWorkflowService.release(taskId, { by: "bob" });
+    const rejected = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(rejected.ok).toBe(false);
 
     const afterResult = await store.queryAudit({ doc_id: taskId });
@@ -287,9 +288,9 @@ describe("STATE — claim → evidence → release produces exactly 3 audit entr
     expect(afterCreate.value).toHaveLength(1);
     expect(afterCreate.value[0]?.action).toBe("create");
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     await taskWorkflowService.addEvidence(taskId, evidence());
-    await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
 
     const finalResult = await store.queryAudit({ doc_id: taskId });
     expect(finalResult.ok).toBe(true);

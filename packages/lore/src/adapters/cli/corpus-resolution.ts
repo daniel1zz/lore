@@ -184,10 +184,7 @@ function resolveCallerTreeRoot(cwd: string): string {
  * Supplies `@lore/core`'s pure `resolveCorpusProvenance` with real
  * `CorpusProvenanceGitFacts` about `cwd` — the §D1 "one boundary detector,
  * never a third" adapter. Extracted from `utils.ts`'s `findMainCheckoutLoreDb`
- * (the git-shellout detector), NOT `detectWorktreeDerivedActor` (the
- * `.git`-file-reading one, still in `utils.ts` unchanged, serving SPEC-104's
- * unrelated actor-identity question): the git-shellout detector already
- * answers exactly the "main-checkout CROSSING determination" §D1 calls out
+ * (the git-shellout detector): that detector answers exactly the "main-checkout CROSSING determination" §D1 calls out
  * as the two detectors' disagreement surface, via git's OWN documented
  * `rev-parse` contract rather than a hand-parsed assumption about the
  * `.git/worktrees/<name>` internal layout. Extending it one step further
@@ -196,11 +193,6 @@ function resolveCallerTreeRoot(cwd: string): string {
  * already established as the precedent — see `@lore/core`'s
  * `corpus-provenance.ts` module header) supplies `callerTreeRoot` too, with
  * zero new detection MECHANISM invented.
- *
- * `detectWorktreeDerivedActor` stays exactly where it is, doing its own
- * independent `.git`-file probe for a DIFFERENT question (branch name for
- * actor identity) — that overlap is coincidental, not a second competing
- * boundary detector for corpus resolution.
  */
 export function gatherCorpusGitFacts(cwd: string): CorpusProvenanceGitFacts {
   const probe = probeGitCommonDir(cwd);

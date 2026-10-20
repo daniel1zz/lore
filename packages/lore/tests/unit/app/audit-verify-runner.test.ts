@@ -6,7 +6,7 @@
  *   HAPPY:      the in-loop runner returns the service's own verdict
  *   NEGATIVE:   a worker that errors makes the request fail with that error, verbatim, never an in-loop retry
  *   NEGATIVE:   a worker verdict that is itself an error result is passed through unchanged
- *   BOUNDARY:   `since` reaches the job; absent stays absent (the worker applies the configured watermark)
+ *   REGRESSION: the job carries no date or cut-off (the retired `audit.verify_since` is gone)
  *   STATE:      an anchor file on disk reaches the job as `{head_id, head_hash}`; no file -> no anchor
  *   ERROR:      a malformed anchor file fails loud (VALIDATION_ERROR naming the file) and starts no worker
  *
@@ -31,7 +31,8 @@ import {
 const CLEAN: AuditVerifyResult = {
   clean: true,
   misses: [],
-  since: "2000-01-01T00:00:00.000Z",
+  audited: 0,
+  reconstructed: 0,
   chain: { clean: true, checked: 0 },
   anchor: { status: "absent" },
 };
@@ -45,20 +46,17 @@ describe("buildAuditVerifyRunner", () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   function deps(port: AuditVerifyWorkerPort) {
-    return { verifySince: "2000-01-01T00:00:00.000Z", anchorRoot: root, workerPort: port };
+    return { anchorRoot: root, workerPort: port };
   }
 
-  it("SQLite file store -> worker, handed the db path and the configured watermark", async () => {
+  it("SQLite file store -> worker, handed the db path and nothing that bounds the verdict", async () => {
     const port = vi.fn<AuditVerifyWorkerPort>(async () => ok(CLEAN));
     const runner = buildAuditVerifyRunner({ kind: "sqlite", dbPath: "/c/.lore/lore.db" }, deps(port));
     expect(runner.mode).toBe("worker");
     const r = await runner.verify();
     expect(r).toEqual(ok(CLEAN));
     expect(port).toHaveBeenCalledTimes(1);
-    expect(port.mock.calls[0]?.[0]).toEqual({
-      store: { kind: "sqlite", dbPath: "/c/.lore/lore.db" },
-      verifySince: "2000-01-01T00:00:00.000Z",
-    });
+    expect(port.mock.calls[0]?.[0]).toEqual({ store: { kind: "sqlite", dbPath: "/c/.lore/lore.db" } });
   });
 
   it("Turso store -> worker, handed the local replica path (no remote, no sync)", async () => {
@@ -71,7 +69,7 @@ describe("buildAuditVerifyRunner", () => {
 
   it("InMemory store -> in-loop: the worker port is never touched and the service's own verdict comes back", async () => {
     const port = vi.fn<AuditVerifyWorkerPort>(async () => ok(CLEAN));
-    const service = new AuditService(new InMemoryStore(), { verifySince: "2000-01-01T00:00:00.000Z" });
+    const service = new AuditService(new InMemoryStore());
     const runner = buildAuditVerifyRunner({ kind: "memory", auditService: service }, deps(port));
     expect(runner.mode).toBe("in-loop");
     const r = await runner.verify();
@@ -80,7 +78,7 @@ describe("buildAuditVerifyRunner", () => {
   });
 
   it("a worker that errors fails the request with that error, verbatim; the service is never run in-loop", async () => {
-    const service = new AuditService(new InMemoryStore(), { verifySince: "2000-01-01T00:00:00.000Z" });
+    const service = new AuditService(new InMemoryStore());
     const spy = vi.spyOn(service, "verify");
     const port: AuditVerifyWorkerPort = async () => err({ code: "STORE_ERROR", message: "worker blew up: unable to open database file" });
     // reason: the sqlite spec carries no AuditService at all; the spy proves the service object of another
@@ -103,13 +101,11 @@ describe("buildAuditVerifyRunner", () => {
     expect((r.error as { message: string }).message).toContain("Worker constructor refused");
   });
 
-  it("`since` reaches the job; omitted stays omitted", async () => {
+  it("REGRESSION: the job carries no date or cut-off of any kind (verification checks every version)", async () => {
     const port = vi.fn<AuditVerifyWorkerPort>(async () => ok(CLEAN));
     const runner = buildAuditVerifyRunner({ kind: "sqlite", dbPath: "/c/.lore/lore.db" }, deps(port));
-    await runner.verify({ since: "2026-10-01T00:00:00.000Z" });
     await runner.verify();
-    expect((port.mock.calls[0]?.[0] as AuditVerifyJob).since).toBe("2026-10-01T00:00:00.000Z");
-    expect("since" in (port.mock.calls[1]?.[0] as AuditVerifyJob)).toBe(false);
+    expect(Object.keys(port.mock.calls[0]?.[0] as AuditVerifyJob)).toEqual(["store"]);
   });
 
   it("an anchor file on disk reaches the job; no file means no anchor", async () => {

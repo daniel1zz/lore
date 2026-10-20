@@ -261,7 +261,7 @@ export default defineLoreCommand({
         try {
           if (app.ruleChangeService === undefined) return failUsage(inv.io, "RuleChangeService is not available in this build.", json);
           const result = await app.ruleChangeService.propose(args.spec as string, input, {
-            by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+            by: resolveActor(inv),
             ...(args.correction !== undefined ? { correction: { reason: args.correction as string } } : {}),
           });
           if (!result.ok) return reportFailure(inv, result.error, json);
@@ -302,7 +302,7 @@ export default defineLoreCommand({
         const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleChangeService === undefined) return failUsage(inv.io, "RuleChangeService is not available in this build.", json);
-          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const outcome = result.value;
           if (json) {
@@ -393,7 +393,7 @@ export default defineLoreCommand({
             examples: repeatable(args.example) ?? [],
             ...four.parts,
           };
-          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version, ...(result.value.demoted !== undefined ? { demoted: result.value.demoted } : {}) } }, null, 2));
@@ -445,7 +445,7 @@ export default defineLoreCommand({
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
             ...four.parts,
           };
-          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version, ...(result.value.demoted !== undefined ? { demoted: result.value.demoted } : {}) } }, null, 2));

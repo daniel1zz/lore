@@ -241,6 +241,7 @@ export class MigrationService {
         field: "sourcePath",
         message: `Secret scan found ${report.secret_warnings.length} potential secret(s). Fix source files or pass skipSecretScan=true to proceed.`,
         value: report.secret_warnings.map((w) => w.file),
+        rule: "BR-795",
       });
     }
 

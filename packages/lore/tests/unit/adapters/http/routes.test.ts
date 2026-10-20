@@ -28,7 +28,7 @@
  *     - POST /api/docs/:id/restore → 200 with doc
  *     - GET /api/judgments/:docId → 200 with { latest, history } (SPEC-033 F1)
  *     - GET /api/audit/:docId → 200 with the doc's audit entries, raw actor strings (SPEC-033 F1)
- *     - GET /api/audit/verify → 200 with { clean, misses, since } (SPEC-033 F1)
+ *     - GET /api/audit/verify → 200 with { clean, misses, audited, reconstructed } (SPEC-033 F1); ?since= → 422
  *     - GET /api/calibration/stats → 200 with CalibrationStats[] (SPEC-033 F1)
  *     - GET /api/ready/:planIdOrSlug → 200 with ReadyRecord[] parity with the
  *       direct TaskWorkflowService.ready() call (SPEC-037 D1, AC-37-1)
@@ -76,8 +76,9 @@ import { JudgmentService } from "../../../../src/service/judgment-service.js";
 import { AuditService } from "../../../../src/service/audit-service.js";
 import { buildAuditVerifyRunner } from "../../../../src/service/audit-verify-runner.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
-import { NoOpTelemetry } from "@lore/core";
+import { NoOpTelemetry, derivePartyRunId } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
+import { runWithRequestIdentity } from "../../../../src/store/write-context-store.js";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
@@ -121,12 +122,12 @@ function makeApp(): App {
     // dashboard-routes.test.ts fix for the same reason: approve/reject's calibration
     // hook also depends on a real judgmentService).
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
-    auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditService: new AuditService(store),
     // reason: this stub composes an in-memory-style App, so verify runs in-loop (the runner choice is by store kind);
     // the anchor root has no `.lore/audit-anchor.json`, so the anchor reads as absent.
     auditVerifyRunner: buildAuditVerifyRunner(
-      { kind: "memory", auditService: new AuditService(store, { verifySince: FAR_PAST }) },
-      { verifySince: FAR_PAST, anchorRoot: "/nonexistent-lore-anchor-root" },
+      { kind: "memory", auditService: new AuditService(store) },
+      { anchorRoot: "/nonexistent-lore-anchor-root" },
     ),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
@@ -429,14 +430,21 @@ describe("POST /api/docs", () => {
       expect(doc.created_by).toBe(TEST_ACTOR.name);
     });
 
-    it("a cookie-session actor's create resolves doc.created_by via the actor chain, never 'system' or the static bootstrap identity", async () => {
+    it("a cookie-session actor's create is authored by the request's person, never 'system', the static bootstrap identity or the process session", async () => {
       const { req, url } = makePostRequest("/api/docs", { type: "prd", title: "Cookie Attribution PRD" });
-      const res = await handleApiRoute(req, url, app, TEST_COOKIE_ACTOR);
+      // the server hands the request's party (a `dashboard` run) to the store; the production path registers it first (http-write-identity.test.ts)
+      // a cookie login is named by the session's owner (the person it was minted for), not by the shared key name
+      const person = "dana";
+      const res = await runWithRequestIdentity(
+        { harnessRun: derivePartyRunId("dashboard", person), claimed: person, claimedSource: "dashboard" },
+        () => handleApiRoute(req, url, app, { ...TEST_COOKIE_ACTOR, owner: person }),
+      );
       expect(res!.status).toBe(201);
       const body = await parseResponse(res!);
       const doc = body.data as Record<string, unknown>;
 
-      expect(doc.created_by).toBe("agent:session-v1da5b0a");
+      expect(doc.created_by).toBe(person);
+      expect(doc.created_by).not.toContain("v1da5b0a");
       expect(doc.created_by).not.toBe("system");
       expect(doc.created_by).not.toBe("admin");
       expect(doc.created_by).not.toBe("dashboard-local");
@@ -827,23 +835,22 @@ describe("GET /api/audit/verify", () => {
       expect(res!.status).toBe(200);
       const body = await parseResponse(res!);
       expect(body.ok).toBe(true);
-      const data = body.data as { clean: boolean; misses: unknown[]; since: string };
+      const data = body.data as { clean: boolean; misses: unknown[]; audited: number; reconstructed: number };
       expect(data.clean).toBe(true);
       expect(data.misses).toEqual([]);
-      expect(typeof data.since).toBe("string");
+      expect(data).toMatchObject({ audited: 1, reconstructed: 0 });
     });
+  });
 
-    it("accepts a ?since= override matching AuditService.verify's opts.since", async () => {
-      await createPrd("Since Override Doc");
+  describe("negative", () => {
+    it("REGRESSION: a ?since= cut-off is refused 422 — the per-call option is removed, so no date can hide a version", async () => {
+      await createPrd("Since Refused Doc");
       const { req, url } = makeGetRequest("/api/audit/verify?since=2099-01-01T00:00:00.000Z");
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
-      expect(res!.status).toBe(200);
+      expect(res!.status).toBe(422);
       const body = await parseResponse(res!);
-      const data = body.data as { clean: boolean; since: string };
-      // reason: a watermark in the far future excludes every real versions row from
-      // the reconcile walk — always reports clean (mirrors AuditService's own contract).
-      expect(data.clean).toBe(true);
-      expect(data.since).toBe("2099-01-01T00:00:00.000Z");
+      expect(body.ok).toBe(false);
+      expect(JSON.stringify(body)).toContain("lore migrate audit-backfill --apply");
     });
   });
 });

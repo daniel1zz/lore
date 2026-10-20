@@ -1,17 +1,17 @@
 // @reads packages/lore/src/adapters/cli/**
 /**
- * Task task-skill-fix-bl-d1-coverage-census-measures-a-cross-cutting (BL-D1): the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites it
- * OWNS, so it needs no proxy command. The sites a command-less leaf owns are its own `site_map` keys (free-text hand-offs
- * from other leaves no longer exist). A command-less leaf that owns no site at all is reported UNMEASURED (never
- * silently ok), as report output: coverage refuses only an undeclared command.
+ * BL-D1 under BR-1344: the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites
+ * whose CODE declares one of its rules, so it needs no proxy command and no corpus mapping. A command-less leaf whose rules are
+ * declared nowhere is reported UNMEASURED (never silently ok), as report output: coverage refuses only an undeclared command.
  *
  * Fixture: tests/helpers/coverage-mini-corpus.ts (throwaway checkout + corpus; never the repo's .lore/).
- * Dimensions: HAPPY (owned site mapped -> fully mapped),
- * BOUNDARY (no owned site at all -> UNMEASURED, exit 0), REGRESSION (a leaf WITH commands is measured exactly
- * as before), STATE (JSON `measured_by`).
- *
+ * Dimensions: HAPPY (a site declaring the leaf's rule -> fully mapped, owned_sites), NEGATIVE (rule declared nowhere -> UNMEASURED,
+ * exit 0), REGRESSION (a leaf WITH commands is measured by its command census), STATE (the other leaf stays accounted: a site
+ * declaring ANOTHER leaf's rule is not its gap).
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
 
 const corpora: MiniCorpus[] = [];
@@ -45,27 +45,40 @@ async function build(): Promise<Fx> {
   return { c, leafC, rule, betaSite };
 }
 
-type Leaf = { slug: string; ok: boolean; sites: number; measured_by: string; gaps: string[]; commands: string[] };
+type Leaf = { slug: string; ok: boolean; sites: number; measured_by: string; gaps: string[]; commands: string[]; mapped_sites: { rule: string }[] };
 async function coverageJson(c: MiniCorpus, target: string): Promise<{ exitCode: number; leaves: Leaf[]; stdout: string }> {
   const r = await c.run(["baseline", "coverage", target, "--json"]);
   const data = (JSON.parse(r.stdout) as { data: { leaves: Leaf[] } }).data;
   return { exitCode: r.exitCode, leaves: data.leaves, stdout: r.stdout };
 }
 
-describe("BL-D1 a command-less leaf is measured by the sites it owns", () => {
-  it("a command-less leaf mapping one site to its live rule is fully mapped: 1 site, measured_by owned_sites", async () => {
+describe("BL-D1 a command-less leaf is measured by the sites that declare its rules", () => {
+  it("a site declaring the command-less leaf's live rule makes it fully mapped: 1 site, measured_by owned_sites", async () => {
     const fx = await build();
-    await must(fx.c, ["baseline", "map", fx.leafC, "--site", fx.betaSite, "--rule", fx.rule]);
+    const [file] = fx.betaSite.split("#");
+    const before = readFileSync(join(fx.c.dir, file as string), "utf8");
+    fx.c.writeSource(file as string, before.replace(`{ code: "BETA_BAD" }`, `{ code: "BETA_BAD", rule: "${fx.rule}" }`));
     const r = await coverageJson(fx.c, fx.leafC);
     expect(r.exitCode, r.stdout).toBe(0);
     expect(r.leaves).toHaveLength(1);
     expect(r.leaves[0]).toMatchObject({ slug: fx.leafC, ok: true, sites: 1, measured_by: "owned_sites", commands: [] });
+    expect(r.leaves[0]?.mapped_sites).toEqual([expect.objectContaining({ rule: fx.rule })]);
     const human = await fx.c.run(["baseline", "coverage", fx.leafC]);
     expect(human.stdout).toContain(`${fx.leafC}: fully mapped - 1 site(s)`);
     expect(human.stdout).not.toContain("UNMEASURED");
   }, 120_000);
 
-  it("a command-less leaf that owns no site at all is reported UNMEASURED (exit 0, report only), never silently ok", async () => {
+  it("the leaf that reaches that site through its command does not see it as its own gap", async () => {
+    const fx = await build();
+    const [file] = fx.betaSite.split("#");
+    const before = readFileSync(join(fx.c.dir, file as string), "utf8");
+    fx.c.writeSource(file as string, before.replace(`{ code: "BETA_BAD" }`, `{ code: "BETA_BAD", rule: "${fx.rule}" }`));
+    const r = await coverageJson(fx.c, fx.c.leafB);
+    expect(r.exitCode, r.stdout).toBe(0);
+    expect(r.leaves[0]).toMatchObject({ measured_by: "commands", gaps: [], mapped_sites: [] });
+  }, 120_000);
+
+  it("a command-less leaf whose rule is declared nowhere is reported UNMEASURED (exit 0, report only), never silently ok", async () => {
     const fx = await build();
     const r = await coverageJson(fx.c, fx.leafC);
     expect(r.exitCode, r.stdout).toBe(0);
@@ -74,7 +87,7 @@ describe("BL-D1 a command-less leaf is measured by the sites it owns", () => {
     expect(human.stdout).toContain("UNMEASURED");
   }, 120_000);
 
-  it("regression: a leaf with a declared command is measured by the command census exactly as before", async () => {
+  it("regression: a leaf with a declared command is measured by the command census", async () => {
     const fx = await build();
     await fx.c.mapAllSites(fx.c.leafB, "beta");
     const r = await coverageJson(fx.c, fx.c.leafB);

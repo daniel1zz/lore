@@ -390,6 +390,7 @@ function loadExportIndexOrFail(indexPath: string): Result<ExportIndex, LoreError
       code: "STORE_ERROR",
       message: `export-index.json at ${indexPath} exists but could not be read: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-800",
     });
   }
   let parsedJson: unknown;
@@ -400,6 +401,7 @@ function loadExportIndexOrFail(indexPath: string): Result<ExportIndex, LoreError
       code: "VALIDATION_ERROR",
       field: "export-index.json",
       message: `export-index.json at ${indexPath} is not valid JSON — fix or remove it before running the ordinal migration (never silently rebuilt): ${e instanceof Error ? e.message : String(e)}`,
+      rule: "BR-800",
     });
   }
   const parsed = exportIndexSchema.safeParse(parsedJson);
@@ -408,6 +410,7 @@ function loadExportIndexOrFail(indexPath: string): Result<ExportIndex, LoreError
       code: "VALIDATION_ERROR",
       field: "export-index.json",
       message: `export-index.json at ${indexPath} failed schema validation — fix or remove it before running the ordinal migration: ${parsed.error.message}`,
+      rule: "BR-800",
     });
   }
   return ok(parsed.data);
@@ -427,6 +430,7 @@ function saveExportIndexAtomic(indexPath: string, index: ExportIndex): Result<vo
       code: "STORE_ERROR",
       message: `Failed to write export-index.json: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-800",
     });
   }
 }

@@ -141,7 +141,6 @@ import {
   type LoreConfig,
   type LoreError,
   type RawReporterIdentity,
-  type ReporterActorSource,
   type Result,
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
@@ -529,18 +528,10 @@ export interface GithubFilingContext {
   /** The reporter's OWN corpus service — used ONLY to resolve `reporter_root_prd` (this corpus's root PRD), never the upstream's. */
   readonly corpusService: CorpusService;
   /**
-   * The resolved filing actor — every `resolveActorWithSource` tier
-   * (`@lore/core/node`) always resolves SOME string, including the
-   * `"os-fallback"` tier (`os.userInfo().username`). Required, mirroring
-   * `RawReporterIdentity.actor`'s own required-string shape: when
-   * `actorSource === "os-fallback"`, `redactReporterIdentity` DROPS this
-   * value from the published identity regardless of what it is (Risk R1),
-   * so its content is irrelevant for that tier but its PRESENCE is not
-   * optional at this type.
+   * The filing actor: the name of the invocation's known party (an agent run's session name, a registered human's
+   * or a key's own name). Required, mirroring `RawReporterIdentity.actor`'s own required-string shape.
    */
   readonly actor: string;
-  /** Which precedence tier produced `actor` — `"os-fallback"` is DROPPED entirely by `redactReporterIdentity` (Risk R1). */
-  readonly actorSource: ReporterActorSource;
   /** The Invocation's home directory (`inv.paths.home`), for redacting `reporter_corpus`'s path prefix. No ambient default (AS-26). */
   readonly home: string;
   /** The environment `gh` is spawned from (`Invocation.env`; no ambient default, AS-26). */
@@ -649,6 +640,7 @@ function buildPartialSuccessStoreError(issueNumber: number, issueUrl: string, re
     message:
       `issue filed upstream as #${issueNumber} (${issueUrl}) but the corpus task could not be created ` +
       `(${reason}) — the upstream issue itself was NOT lost.`,
+    rule: "BR-496",
   };
 }
 
@@ -723,11 +715,13 @@ async function mintIssueTask(
 
   const taskInputResult = toIssueTaskInput(listedIssue, ref, rootPrdId);
   if (!taskInputResult.ok) {
+    /** @lore-site BR-496 */
     return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(taskInputResult.error)));
   }
 
   const createResult = await corpusService.create(taskInputResult.value, { by: actor });
   if (!createResult.ok) {
+    /** @lore-site BR-496 */
     return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(createResult.error)));
   }
 
@@ -816,6 +810,7 @@ export async function fileGithubIssue(
         "this corpus has no root PRD at all — 'reporter_root_prd' (Risk R1's identity mitigation) has nothing " +
         "to publish. Create one (`lore create prd`) before filing.",
       value: ctx.consumerCorpusRoot,
+      rule: "BR-493",
     });
   }
 
@@ -824,7 +819,6 @@ export async function fileGithubIssue(
     home: ctx.home,
     rootPrdId: rootPrd.slug,
     actor: ctx.actor,
-    actorSource: ctx.actorSource,
   };
 
   const fileResult = await port.fileIssue({

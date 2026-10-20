@@ -166,7 +166,6 @@ describe("(ii) BEHAVIOURAL: one fileIssue call invokes assembleIssueBody + appen
           home: "/Users/tester",
           rootPrdId: "prd-x",
           actor: "tester",
-          actorSource: "explicit",
         },
       });
 

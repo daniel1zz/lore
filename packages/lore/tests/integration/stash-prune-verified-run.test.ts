@@ -102,14 +102,13 @@ afterAll(() => {
 });
 
 describe("lore stash prune records the VERIFIED run (BR-1035)", () => {
-  it("an unregistered --harness-run id yields a decision executor_run of null", async () => {
+  it("an unregistered --harness-run id is REFUSED (exit 4) and records no decision at all (BR-1351: never downgraded to null)", async () => {
     makeContainedStash();
     const before = (await decisionExecutorRuns()).length;
     const result = runLore(["stash", "prune", "--apply", "--harness-run", "cc:sess-unregistered:ghost"]);
-    expect(result.exitCode).toBe(0);
-    const added = (await decisionExecutorRuns()).slice(before);
-    expect(added.length).toBeGreaterThan(0);
-    expect(added).toEqual(added.map(() => null));
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("cc:sess-unregistered:ghost");
+    expect((await decisionExecutorRuns()).slice(before)).toEqual([]);
   });
 
   it("control: a registered --harness-run id reaches the decision executor_run unchanged", async () => {

@@ -3,28 +3,17 @@
  * resolution, and misc CLI-adapter helpers (retry-command reconstruction,
  * numeric flag validation).
  *
- * ⛔ This header formerly asserted that no business logic lived here and that
- * this module performed no IO — both were already false before this comment
- * was corrected: `resolveActor`/`resolveActorWithSource`/
- * `detectWorktreeDerivedActor` (SPEC-104) encode genuine actor-resolution
- * PRECEDENCE RULES (a decision, not terminal I/O), and that same trio
- * performs real filesystem IO (`existsSync`/`readFileSync`/`statSync`) plus
- * `process.stderr.write` advisories. DB discovery (`findLoreDbPath` et al.)
- * ALSO used to live in this file — genuinely relocated now (see below), not
- * merely re-described — but its departure does not by itself make the
- * remaining claims true, which is why they are corrected rather than just
- * trimmed (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D6:
- * a header recording a property that stopped being true is the failure class
- * this correction closes).
+ * ⛔ This module holds no actor-resolution rule: `resolveActor` only reads the
+ * identity the entry resolved (`inv.identity`, BR-1055). DB discovery
+ * (`findLoreDbPath` et al.) lives in `corpus-resolution.ts` (see below)
+ * (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D6).
  *
  * Public surface:
  *   - exitCode() / formatError() / formatErrorFor() — error presentation
  *   - buildRetryCommandLine() — the `Retry:` line of the declared write-contention
  *     message, built from the Invocation (`argv`, `execPath`, `isCompiled`) by the caller;
  *     `formatErrorFor(inv, error)` passes it to formatError as `opts.retryCommand`
- *   - resolveActor() / resolveActorWithSource() / resolveActorWithIdentitySource()
- *     / detectWorktreeDerivedActor() — actor-identity
- *     resolution (SPEC-051, SPEC-104)
+ *   - resolveActor() — the invocation's known-party name (or the refusal)
  *   - parsePositiveIntArg() — numeric CLI flag validation
  *   - formatTable() / formatTree() / formatNavigation() / relativeTime() — output helpers
  *   - formatShortId() — the ONE shared ULID short-id renderer (head+tail,
@@ -42,17 +31,13 @@
  * relocated there too; neither is re-exported from here because nothing
  * imports either of them from this module.
  *
- * Side-effect class: MIXED, not pure — most of this module (the format-
- * prefixed renderers, relativeTime, exitCode, formatError) is pure
- * presentation, but actor resolution performs real filesystem IO and stderr
- * advisories (see above). No `process.exit` anywhere in this
- * file — that left with DB discovery.
+ * Side-effect class: pure presentation and argument checks. No `process.exit`
+ * anywhere in this file — that left with DB discovery.
  *
  * Source: SPEC-003 §5, SPEC-051, SPEC-104
  */
 
-import { existsSync, readFileSync, statSync } from "fs";
-import { basename, join, dirname, resolve as resolvePath } from "path";
+import { basename } from "path";
 import { z } from "zod";
 import {
   evidenceEntrySchema,
@@ -61,13 +46,11 @@ import {
   isClaimStale,
   isInvalidated,
 } from "@lore/core";
-import { resolveActorWithWorktree } from "@lore/core/node";
-import type { ActorSource as CoreActorSource } from "@lore/core/node";
-import type { DocRecord, Invocation, LoreError, OsUser, ReviewJudgment, ValidityCarrier } from "@lore/core";
+import { UnknownPartyError } from "@lore/core/node";
+import type { DocRecord, Invocation, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import { describeSoftDeleted } from "../../service/soft-delete-window.js";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
-import type { CliIo } from "./output.js";
 
 /** `Retry:` line of the write-contention message when the caller supplied none: names the action, reads nothing ambient. */
 const WRITE_CONTENTION_GENERIC_RETRY = "re-run the same lore command";
@@ -433,243 +416,22 @@ export function buildRetryCommandLine(inv: Pick<Invocation, "argv" | "execPath" 
 // ─── Actor Resolution ───────────────────────────────────────────────────────
 
 /**
- * `@lore/core/node`'s `resolveActorWithSource` (SPEC-079 G2 relocation) covers
- * three precedence tiers: explicit `--by` > SPEC-071 session tier > OS
- * username. The environment never supplies a name (BR-1055). SPEC-104 adds a
- * CLI-adapter-ONLY tier between session and OS username: when every named
- * tier is exhausted (core falls all the way to its own `"os-fallback"`
- * result) AND the caller's `cwd` sits inside a LINKED worktree with a
- * resolvable branch HEAD, the actor derives deterministically as
- * `agent:<branch>` (source `"worktree-derived"`) instead of the untraceable
- * OS username.
+ * The name the invocation writes under: its known party's name (an agent run's `agent:session-<8>`, or the person's
+ * name from the open human session). The ONE CLI path to an author name (BR-1055): it reads `inv.identity`, which
+ * the entry resolved once from the run and the human session — never `--by`, the environment, the working copy
+ * or the computer's user name.
  *
- * ⛔ Actor resolution answers WHO, never WHICH RUN: the session INSTANCE is
- * captured as its own claim field (`TaskClaim.session_id`,
- * `TaskWorkflowService.claim` → `resolveClaimSessionId`), never smuggled into
- * the identity string. Do NOT "fix" a session-collapse report by reordering
- * these tiers.
- *
- * This module now defines its OWN `resolveActorWithSource` (shadowing, not
- * re-exporting, `@lore/core/node`'s function of the same name) plus its OWN
- * wider `ActorSource`/`ResolvedActor` types (a superset of the core module's,
- * adding `"worktree-derived"`). Deliberately scoped here: `CorpusService`,
- * `gate-bypass-audit.ts`, and MCP's `tools.ts` import `resolveActorWithSource`
- * directly from `@lore/core/node` and are UNCHANGED by this addition
- * (SPEC-104 §Scope: "MCP surface unaffected" — MCP tools require an explicit
- * `by` already; the other two callers are out of scope). Only the CLI's own
- * `resolveActor` / `resolveActorWithIdentitySource` (and every command built
- * on them, including `claim.ts`) gain the new tier.
- *
- * `@lore/core/node`'s narrower `ActorSource` (the type `ClaimOpts.identitySource`
- * is declared against, in `packages/lore/src/service/task-workflow-service.ts`)
- * is intentionally left unwidened here: SPEC-104 T1's declared file anchors
- * are `adapters/cli/utils.ts` + `adapters/cli/commands/claim.ts` only —
- * widening a shared core type is a separate, deliberately out-of-anchor
- * concern. `commands/claim.ts` bridges the gap with a single documented cast
- * at its one call site — functionally inert, since
- * `gate-predicates.ts::actorIdentityGuard` only ever compares
- * `candidateIdentitySource` against the `"os-fallback"` literal; every OTHER
- * string (this one included) is already an automatic pass, identical to
- * `"explicit"`/`"env"`/`"session"` today.
- */
-export type ActorSource = CoreActorSource | "worktree-derived";
-
-/** This module's own `ResolvedActor` — see the `ActorSource` doc above. */
-export interface ResolvedActor {
-  readonly actor: string;
-  readonly source: ActorSource;
-}
-
-/**
- * Filesystem-only linked-worktree detector (SPEC-104 D2) — NEVER spawns a
- * `git` subprocess. Walks `startDir` upward looking for a `.git` entry:
- *   - a DIRECTORY marks the MAIN checkout (git never uses a `.git` FILE at a
- *     primary checkout root) — not a linked worktree, returns `undefined`.
- *   - a regular FILE holds git's own `gitdir: <path>` linked-worktree pointer
- *     (a stable, documented git internal contract) — read that path's own
- *     `HEAD` file; `ref: refs/heads/<branch>` → `agent:<branch>` (branch
- *     VERBATIM, including `/` — e.g. `feature/x` → `agent:feature/x`, no
- *     sanitization: matches the existing `agent:<branch-or-slug>` convention
- *     other tooling already assumes, SPEC-104 §Scope).
- *
- * Fails OPEN — returns `undefined`, NEVER throws (D3) — on every anomaly: no
- * `.git` found before the filesystem root, a `.git` file that isn't
- * `gitdir: `-prefixed, a `gitdir:` pointer whose `HEAD` is missing/unreadable,
- * or a DETACHED HEAD (`HEAD` holds a bare SHA, not a `ref: refs/heads/...`
- * line) — every one of these is the caller's cue to fall through to the
- * existing OS-username tier, unchanged.
- *
- * @param startDir - directory to start the upward walk from (the invocation's
- *   `cwd`; tests pass a fixture directory instead of mutating global cwd)
- * @returns `agent:<branch>` when a linked worktree with a resolvable branch
- *   HEAD is found; `undefined` otherwise (never throws)
+ * @param inv - the invocation (`identity` is read)
+ * @returns the known party's name; never empty
+ * @throws {UnknownPartyError} when the invocation has no known party (exit 4 through `run-cli.ts::dispatch`);
+ *   a write must not proceed unnamed
  * @example
- *   detectWorktreeDerivedActor("/repo/.worktrees/trace-layer") // => "agent:trace-layer"
- *   detectWorktreeDerivedActor("/repo")                        // => undefined (main checkout)
+ *   resolveActor(inv) // => "agent:session-3de02220" (attested run) or "dana" (human session)
  */
-export function detectWorktreeDerivedActor(startDir: string): string | undefined {
-  try {
-    let dir = startDir;
-    for (;;) {
-      const gitPath = join(dir, ".git");
-      if (existsSync(gitPath)) {
-        const stat = statSync(gitPath);
-        if (!stat.isFile()) {
-          // A directory (main checkout) — or some other non-file shape git
-          // never produces here. Either way, not a linked worktree.
-          return undefined;
-        }
-        const pointerLine = readFileSync(gitPath, "utf8").trim();
-        const gitdirMatch = /^gitdir:\s*(.+)$/.exec(pointerLine);
-        if (gitdirMatch === null) return undefined;
-        const gitDirRaw = gitdirMatch[1]?.trim();
-        if (gitDirRaw === undefined || gitDirRaw === "") return undefined;
-        const gitDirPath = resolvePath(dir, gitDirRaw);
-        const headPath = join(gitDirPath, "HEAD");
-        if (!existsSync(headPath)) return undefined;
-        const headLine = readFileSync(headPath, "utf8").trim();
-        const branchMatch = /^ref:\s*refs\/heads\/(.+)$/.exec(headLine);
-        if (branchMatch === null) return undefined; // detached HEAD, or malformed
-        const branch = branchMatch[1]?.trim();
-        return branch !== undefined && branch !== "" ? `agent:${branch}` : undefined;
-      }
-      const parent = dirname(dir);
-      if (parent === dir) return undefined; // reached filesystem root, no .git found
-      dir = parent;
-    }
-  } catch {
-    // reason: D3 — actor resolution must never crash a lore command; any
-    // unexpected IO failure (permission error, a race with a concurrent
-    // `git worktree remove`, etc.) degrades to "not a linked worktree".
-    return undefined;
-  }
-}
-
-/**
- * This module's OWN `resolveActorWithSource` — see the header doc above for
- * why it shadows (rather than re-exports) `@lore/core/node`'s function of the
- * same name. Delegates every named tier (explicit/env/session/os-fallback) to
- * the core function unchanged (AC-ACTOR-2); ONLY when core falls all the way
- * to `"os-fallback"` does this wrapper attempt worktree derivation,
- * overriding the result on a hit (AC-ACTOR-1) and returning the core result
- * byte-identical on a miss (AC-ACTOR-3, AC-ACTOR-4).
- *
- * @param explicit - Value of the --by flag, if the user passed one
- * @param env - Environment map (the invocation's `env`); tests pass a
- *   literal object, matching the core function's own testing seam
- * @param cwd - Directory to detect worktree membership from (the
- *   invocation's `cwd`); tests pass a fixture directory instead of mutating
- *   global cwd
- * @param user - The invocation's recorded OS account lookup (`inv.user`): the os-fallback tier's value
- * @throws {OsUserLookupError} when the OS tier is the one selected and `user` is a failure
- * @returns `{actor, source}` — `source: "worktree-derived"` only when every
- *   named tier was exhausted AND `cwd` resolved to a linked worktree with a
- *   resolvable branch HEAD
- * @example
- *   resolveActorWithSource(undefined, {}, "/repo/.worktrees/trace-layer")
- *   // => {actor: "agent:trace-layer", source: "worktree-derived"}
- * @example
- *   resolveActorWithSource(undefined, {}, "/repo") // main checkout
- *   // => {actor: "<OS username>", source: "os-fallback"}
- */
-export function resolveActorWithSource(
-  explicit: string | undefined,
-  env: Readonly<Record<string, string | undefined>>,
-  cwd: string,
-  user: OsUser,
-): ResolvedActor {
-  return resolveActorWithWorktree(explicit, env, user, () => detectWorktreeDerivedActor(cwd));
-}
-
-// reason: module-level once-per-process guard (retro `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
-// AC-AUDIT-ACTOR-1) — a batch command (e.g. `lore review --pending`) calling
-// resolveActor once per doc must warn exactly once per process, not once per call.
-let warnedActorFallback = false;
-
-/**
- * Test-only: reset the once-per-process OS-fallback advisory guard so a test
- * can assert the advisory fires again in a fresh "process" (vitest runs all
- * cases in one real process, so the guard would otherwise leak across tests).
- * Never called from production code.
- */
-export function resetActorFallbackWarningForTests(): void {
-  warnedActorFallback = false;
-}
-
-/**
- * Resolve the acting user identity for `claim` / `release` / `evidence` commands.
- * Resolution order (first non-empty wins):
- *   1. --by flag (explicit, always wins)
- *   2. session tier (`$CLAUDE_CODE_SESSION_ID` / `$CLAUDE_SESSION_ID` — SPEC-069
- *      F1 — mapped to `agent:session-<8-char sanitized id prefix>`; a value
- *      that sanitizes to empty falls through to the OS-username tier instead
- *      of throwing, see the try/catch in `resolveActorWithSource` above.
- *      session distinctness is also captured separately as
- *      `TaskClaim.session_id`)
- *   3. worktree-derived `agent:<branch>` (SPEC-104 — see
- *      `detectWorktreeDerivedActor`'s doc above)
- *   4. OS username (os.userInfo().username)
- *
- * When resolution falls all the way to the OS-username tier — no --by,
- * no session id, and cwd is NOT inside a linked worktree with a
- * resolvable branch HEAD — emits a ONCE-PER-PROCESS non-blocking advisory to
- * stderr naming the fix (retro `knowledge-session-process-review-2026-07-22-spec-062-064-continu`:
- * OS-username actors were landing silently in the corpus audit trail, untraceable
- * to any agent). Deliberately does NOT fire on an explicit --by,
- * or worktree-derived value — those are traceable identities, not the
- * untraceable default this advisory targets (SPEC-104 AC-ACTOR-1). The
- * advisory is a pure side effect; the returned string and every caller's exit
- * code are unaffected.
- *
- * @param explicit - Value of the --by flag, if the user passed one
- * @param env - the Invocation's environment (`inv.env`)
- * @param cwd - the Invocation's working directory (`inv.cwd`)
- * @param user - the Invocation's recorded OS account lookup (`inv.user`)
- * @returns Resolved actor identity string (never empty — OS username is always available)
- * @example
- *   resolveActor(undefined, inv.env, inv.cwd, inv.user) // => session actor, worktree-derived agent:<branch>, or OS username
- *   resolveActor("alice", inv.env, inv.cwd, inv.user) // => "alice" (never warns)
- */
-export function resolveActor(io: CliIo, explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: OsUser): string {
-  return resolveActorWithIdentitySource(io, explicit, env, cwd, user).actor;
-}
-
-/**
- * `resolveActor`'s full-fidelity sibling (spec claim-time-actor-identity-
- * guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) — same resolution
- * chain, same once-per-process OS-fallback advisory, but returns the FULL
- * `{actor, source}` pair instead of discarding `source`. `commands/claim.ts`
- * uses this (not bare `resolveActor`) to thread `ClaimOpts.identitySource`
- * into the claim-time actor-identity-collision guard — every OTHER caller
- * (`release`/`evidence`/`anchor`/etc.) keeps calling plain `resolveActor`
- * unchanged, since only `claim` needs the resolution tier.
- *
- * @param explicit - Value of the --by flag, if the user passed one
- * @param env - Environment map (SPEC-104; the invocation's `env`); tests
- *   pass a literal object, matching `resolveActorWithSource`'s own testing seam
- * @param cwd - Directory to detect worktree membership from (SPEC-104; the
- *   invocation's `cwd`; tests pass a fixture directory)
- * @returns `{actor, source}` — `actor` matches `resolveActor(explicit)` exactly
- * @example
- *   resolveActorWithIdentitySource(undefined) // => {actor: "<OS username>", source: "os-fallback"} (warns once)
- *   resolveActorWithIdentitySource("alice")   // => {actor: "alice", source: "explicit"} (never warns)
- */
-export function resolveActorWithIdentitySource(io: CliIo, 
-  explicit: string | undefined,
-  env: Readonly<Record<string, string | undefined>>,
-  cwd: string,
-  user: OsUser,
-): ResolvedActor {
-  const resolved = resolveActorWithSource(explicit, env, cwd, user);
-  if (resolved.source === "os-fallback" && !warnedActorFallback) {
-    warnedActorFallback = true;
-    io.stderr.write(
-      `⚠ actor resolved to OS username "${resolved.actor}" — corpus writes under this identity ` +
-        "aren't traceable to an agent. Install the agent integration (`lore setup`) so writes " +
-        "carry an attested run.\n",
-    );
-  }
-  return resolved;
+export function resolveActor(inv: Pick<Invocation, "identity">): string {
+  const { identity } = inv;
+  if (identity.claimed === null) throw new UnknownPartyError(identity.unresolvedReason);
+  return identity.claimed;
 }
 
 // ─── Numeric Flag Validation (BUG-006/007/008/012 audit) ───────────────────

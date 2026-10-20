@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, storeError, type LoreError, type Result } from "@lore/core";
 
 /** Directory name of the attempt ledger inside the corpus directory. */
 export const ATTEMPT_LEDGER_DIR = "integrate-attempts";
@@ -36,7 +36,7 @@ const AttemptRecordSchema = z
     /** main as this attempt saw it. */
     base: z.string().min(1),
     started_at: z.string().min(1),
-    outcome: z.enum(["landed", "lost_race", "floor_failed", "conflict"]),
+    outcome: z.enum(["landed", "lost_race", "floor_failed", "snapshot_migrate_failed", "conflict"]),
     merge_ms: z.number().int().nonnegative(),
     /** `null` when the attempt ended (a conflict) before the snapshot. */
     corpus_snapshot_ms: z.number().int().nonnegative().nullable(),
@@ -68,10 +68,6 @@ export function medianMs(values: readonly number[]): number | null {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? (sorted[mid] as number) : Math.round(((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2);
-}
-
-function storeError(message: string, cause: unknown): LoreError {
-  return { code: "STORE_ERROR", message, ...(cause instanceof Error ? { cause } : {}) };
 }
 
 export class IntegrateAttemptLedger {

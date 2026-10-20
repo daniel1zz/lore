@@ -154,6 +154,7 @@ import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { applyMigration026 } from "./migrations/migration-026.js";
+import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -807,6 +808,12 @@ export class SQLiteStore implements StoreInterface {
       // step rolls back, leaves schema 25 and throws MigrationFailedError naming the step and this corpus path.
       applyMigration026(this.db, this.corpusPath);
     }
+
+    if (currentVersion < 27 && 27 <= ceiling) {
+      // reason: migration-027 only moves user_version (claims compare runs only; the expiry of run-less leases is
+      // the `lore migrate schema` command's own data step, see migration-027.ts).
+      this.db.exec(MIGRATION_027_SQL);
+    }
   }
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
@@ -1019,7 +1026,7 @@ export class SQLiteStore implements StoreInterface {
 
       if (!existingRow) {
         this.db.run("ROLLBACK");
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(existingRow);
@@ -1419,7 +1426,7 @@ export class SQLiteStore implements StoreInterface {
         .get(id) as DocRow | null;
 
       if (!existingRow) {
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(existingRow);
@@ -1480,7 +1487,7 @@ export class SQLiteStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and the UPDATE (race) — treat as not found
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -1602,6 +1609,7 @@ export class SQLiteStore implements StoreInterface {
           from: link.from_id,
           to: link.to_id,
           type: link.link_type,
+          rule: "BR-949",
         });
       }
       return wrapStoreError(e);
@@ -2319,6 +2327,7 @@ export class SQLiteStore implements StoreInterface {
         );
         if (refusal !== null) {
           this.db.run("ROLLBACK");
+          /** @lore-site BR-260 */
           return err(refusal);
         }
       }
@@ -2668,7 +2677,7 @@ export class SQLiteStore implements StoreInterface {
         .get(ruleId) as { leaf_doc_id: string } | null;
       if (!registryRow) {
         this.db.run("ROLLBACK");
-        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+        return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-640" });
       }
       if (registryRow.leaf_doc_id !== fromLeaf.id) {
         this.db.run("ROLLBACK");
@@ -2677,6 +2686,7 @@ export class SQLiteStore implements StoreInterface {
           field: "fromLeaf.id",
           message: `rule ${ruleId} is registered to leaf ${registryRow.leaf_doc_id}, not ${fromLeaf.id}`,
           value: fromLeaf.id,
+          rule: "BR-640",
         });
       }
       const nowIso = new Date().toISOString();
@@ -2749,6 +2759,7 @@ export class SQLiteStore implements StoreInterface {
         isExemptionActive({ doc_id: row.doc_id, ac_id: row.ac_id, expires_at: existing.expires_at }, cap.now, satisfied)
       ) {
         this.db.run("ROLLBACK");
+        /** @lore-site BR-971 */
         return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
       }
       if (existing !== null) {
@@ -2762,6 +2773,7 @@ export class SQLiteStore implements StoreInterface {
       const activeCount = unexpired.filter((r) => isExemptionActive(r, cap.now, satisfied)).length;
       if (activeCount >= cap.maxActive) {
         this.db.run("ROLLBACK");
+        /** @lore-site BR-971 */
         return err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive));
       }
       this.db

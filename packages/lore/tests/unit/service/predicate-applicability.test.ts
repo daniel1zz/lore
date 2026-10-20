@@ -146,7 +146,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
   // PredicateResult (e.g. noAnchorOverlap's own pass) is completely unaffected —
   // `isNotApplicable` returns false and never throws on it.
   it("REGRESSION: an unrelated predicate's PredicateResult (noAnchorOverlap) is never notApplicable", () => {
-    const pass = noAnchorOverlap("agent:t1", ["src/a"], []);
+    const pass = noAnchorOverlap(["src/a"], []);
     expect(pass).toEqual({ ok: true });
     expect(isNotApplicable(pass)).toBe(false);
   });

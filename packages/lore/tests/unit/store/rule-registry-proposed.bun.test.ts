@@ -25,6 +25,7 @@ import { TursoStore } from "../../../src/store/turso-store.js";
 import { MIGRATION_015_SQL } from "../../../src/store/migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "../../../src/store/migrations/migration-018.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 let counter = 0;
 function doc(type: "spec" | "baseline", label: string, extra: Record<string, unknown>, status: DocRecord["status"] = "draft"): DocRecord {
@@ -252,7 +253,7 @@ describe("migration-018 (SQLite)", () => {
       { id: "BR-2", lifecycle: "retired" },
     ]);
     expect(() => insertRow(upgraded.getDatabase(), "BR-3", 3, "proposed")).not.toThrow();
-    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
     upgraded.close();
   });
 

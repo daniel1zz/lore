@@ -411,7 +411,7 @@ export default defineLoreCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+              const by = resolveActor(inv);
               const result = await service.dropChecklistItem(args.phase as string, args.id as string, {
                 by,
                 reason: args.reason as string,
@@ -448,7 +448,7 @@ export default defineLoreCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+              const by = resolveActor(inv);
               const result = await service.checkChecklistItem(args.phase as string, args.id as string, { by });
 
               if (!result.ok) {
@@ -530,7 +530,7 @@ export default defineLoreCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+              const by = resolveActor(inv);
               const result = await service.addTrackNote(args.phase as string, {
                 id: ulid(),
                 note: args.note as string,

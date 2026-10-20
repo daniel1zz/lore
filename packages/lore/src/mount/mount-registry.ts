@@ -227,6 +227,7 @@ export function createMountRegistry<TApp = unknown>(): MountRegistry<TApp> {
       // the interface doc's "ordered close() fan-out" contract) — a future
       // App variant with an async close() would still be awaited here since
       // `Promise.resolve(x)` is a no-op for non-thenable return values.
+      /** @lore-site BR-869 */
       await Promise.resolve((entry.app as { close: () => void }).close());
     }
   }

@@ -1,6 +1,6 @@
 /**
  * lore audit [<doc>] [--actor <a>] [--action <x>] [--since <t>] [--limit <n>] [--json]
- * lore audit --verify [--since <t>] [--json]
+ * lore audit --verify [--json]
  * lore audit anchor [--json]
  * lore audit arm [--confirm] [--json]
  *
@@ -10,14 +10,14 @@
  *     judgment summary when action="judge").
  *   - `lore audit --actor <a> --action <x> --since <t>` — filtered query (maps
  *     1:1 to AuditFilters); `<doc>` and filters may be combined.
- *   - `lore audit --verify [--since <t>]` — completeness oracle PLUS a
+ *   - `lore audit --verify` — completeness oracle over EVERY version (no date
+ *     skips any; each is audited, reconstructed or missing) PLUS a
  *     whole-table chain-integrity walk and (when `.lore/audit-anchor.json`
  *     exists) an external-anchor cross-check: exit 0 iff all three are
  *     clean, exit 4 otherwise (itemized misses / the first chain break /
- *     an anchor mismatch). `--since` overrides the configured
- *     `audit.verify_since` watermark for the COMPLETENESS join only — the
- *     chain walk is never bounded by it (SPEC-079 G3, see AuditService's
- *     own `@invariant`).
+ *     an anchor mismatch). `--since` is refused here (exit 2): the per-run
+ *     cut-off is removed; history that predates the audit writers is
+ *     recorded once by `lore migrate audit-backfill`.
  *   - `lore audit anchor [--json]` — pins the current chain head
  *     `(head_id, head_hash, entry_count)` to `.lore/audit-anchor.json` at
  *     the corpus root (git-tracked — see the root `.gitignore` exception),
@@ -111,7 +111,7 @@ export default defineLoreCommand({
     },
     since: {
       type: "string",
-      description: "ISO 8601 — only entries at/after this time (query mode) or verify watermark override",
+      description: "ISO 8601 — only entries at/after this time (query mode only; refused with --verify)",
     },
     limit: {
       type: "string",
@@ -148,7 +148,7 @@ export default defineLoreCommand({
           return 1;
         }
         const result = args.confirm
-          ? await stateBinding.arm({ actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() })
+          ? await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() })
           : await stateBinding.reportImpact();
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -217,6 +217,12 @@ export default defineLoreCommand({
 
       // ── --verify branch ─────────────────────────────────────────────────
       if (args.verify) {
+        // reason: the per-run cut-off option is removed — no date bounds verification (use `lore migrate audit-backfill`
+        // for history that predates the audit writers). A silently ignored --since would read as a bounded check.
+        if (args.since !== undefined) {
+          inv.io.stderr.write("Error: --since is not accepted with --verify: verification checks every version. History that predates the audit writers is recorded by `lore migrate audit-backfill --apply`.\n");
+          return 2;
+        }
         // reason: INT-T5 — the anchor file is tracked, so it is read from the same invoking working tree it is written to.
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv.io, inv));
         if (!anchorRoot.ok) {
@@ -231,7 +237,6 @@ export default defineLoreCommand({
         const anchor = anchorRead.value;
 
         const result = await app.auditService.verify({
-          ...(args.since !== undefined ? { since: args.since } : {}),
           ...(anchor !== undefined ? { anchor } : {}),
         });
         if (!result.ok) {
@@ -239,17 +244,17 @@ export default defineLoreCommand({
           return exitCode(result.error);
         }
 
-        const { clean, misses, since, chain, anchor: anchorResult } = result.value;
+        const { clean, misses, audited, reconstructed, chain, anchor: anchorResult } = result.value;
 
         if (args.json) {
-          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { clean, misses, since, chain, anchor: anchorResult } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { clean, misses, audited, reconstructed, chain, anchor: anchorResult } }, null, 2));
           return clean ? 0 : 4;
         }
 
         if (misses.length === 0) {
-          printLine(inv.io.stdout, `Audit trail is complete since ${since} — no missing entries.`);
+          printLine(inv.io.stdout, `Audit trail is complete — every version has an entry (${audited} audited, ${reconstructed} reconstructed).`);
         } else {
-          printLine(inv.io.stdout, `Audit trail is INCOMPLETE since ${since} — ${misses.length} missing entr${misses.length === 1 ? "y" : "ies"}:`);
+          printLine(inv.io.stdout, `Audit trail is INCOMPLETE — ${misses.length} missing entr${misses.length === 1 ? "y" : "ies"} (${audited} audited, ${reconstructed} reconstructed):`);
           const headers = ["Doc ID", "Version", "Action", "Created At"];
           const rows = misses.map((m: AuditMiss) => [m.doc_id, `v${m.version}`, m.action, m.created_at]);
           printLine(inv.io.stdout, formatTable(headers, rows));

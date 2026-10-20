@@ -21,7 +21,7 @@
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on AC-AP-2
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext, actedStore, liveIo } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, actedStore, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -149,7 +149,7 @@ async function judge(docId: string): Promise<void> {
 async function callMcp(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> {
   const tool = tools[name];
   if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-  const res = await tool.handler(args, {});
+  const res = await tool.handler({ harness_run: LIVE_TEST_RUN, ...args }, {});
   const first = res.content[0];
   if (first === undefined || first.type !== "text") throw new Error("expected text content");
   return { isError: res.isError === true, text: first.text };

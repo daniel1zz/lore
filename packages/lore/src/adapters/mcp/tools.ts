@@ -204,7 +204,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
 import { runWithAuditSurface } from "../../store/audit-surface.js";
 import { assertRegisteredToolsMatchNames, type LoreMcpToolName } from "./tool-names.js";
-import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
+import { McpCallScope, requireCallIdentity } from "./call-scope.js";
 import type { Invocation, LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent, CAPTURE_TAIL_CHARS } from "@lore/core";
@@ -255,7 +255,7 @@ import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/
 // `process.cwd()` — see `resolveMcpCorpusProvenance`'s own header below.
 import { checkForeignCorpusWrite, foreignCorpusWriteRefusalError } from "../../service/foreign-corpus-write-guard.js";
 import { resolveCorpus } from "../cli/corpus-resolution.js";
-import { OsUserLookupError } from "@lore/core/node";
+import { UnknownPartyError } from "@lore/core/node";
 // reason: SPEC-102 — resolveActorWithSource lives in @lore/core/node (node:os
 // only, no bun:sqlite) — safe to import here without breaking this file's
 // vitest-reachability (mirrors this module's own precedent of lazy-importing
@@ -833,9 +833,8 @@ export const LoreAssessSchema = z.object({
  * Input schema for lore_audit (SPEC-035 §2).
  * Query mode (default): `id_or_slug`/`actor`/`action`/`since`/`limit` map to
  * `AuditFilters` — all optional, combinable. Verify mode (`verify: true`): runs
- * the versions⋈audit completeness oracle instead; `since` overrides the
- * configured `audit.verify_since` watermark for this call only; the other query
- * filters are ignored in this mode.
+ * the versions⋈audit completeness oracle instead, over every version; `since` is
+ * refused in this mode (the cut-off is retired); the other query filters are ignored.
  */
 export const LoreAuditSchema = z.object({
   id_or_slug: z.string().optional(),
@@ -1504,13 +1503,13 @@ function registerToolImpl<T>(
         if ("by" in shape && typeof rest["by"] === "string") resolved["by"] = rest["by"];
         else if (context.identity.claimed !== null) resolved["by"] = context.identity.claimed;
         else {
-          // reason: an unnamed call (OS user lookup failed, no other name) has no `by` to give. A tool that never reads
-          // `by` (a read) proceeds; one that needs an actor reads it and `McpCallScope.run` ends the call with the error.
+          // reason: a call with no `harness_run` has no known party and so no `by` to give. A tool that never reads
+          // `by` (a read) proceeds; one that needs an actor reads it and `McpCallScope.run` ends the call with the refusal.
           const { unresolvedReason } = context.identity;
           Object.defineProperty(resolved, "by", {
             enumerable: true,
             get: (): string => {
-              throw new OsUserLookupError(unresolvedReason);
+              throw new UnknownPartyError(unresolvedReason);
             },
           });
         }
@@ -2135,11 +2134,11 @@ export function registerTools(
     // from the kind="get" row `corpusService.get` above already fired
     // (a different consumption pattern — the whole navigation bundle, not a
     // single doc read). A no-op when trace.enabled resolves false.
-    // reason: a trace row needs an actor; the server's identity has none when its OS user lookup failed. The trace is
+    // reason: a trace row needs an actor; the server's identity has none unless a known party started it. The trace is
     // advisory observability (fire-and-forget, SPEC-102), not a write the tool depends on, so the read proceeds and the
     // response says the trace was not recorded and why (never silent, never a guessed actor).
     const traceNotRecorded =
-      inv.identity.claimed === null ? `trace not recorded: OS user lookup failed: ${inv.identity.unresolvedReason}` : undefined;
+      inv.identity.claimed === null ? `trace not recorded: no known party: ${inv.identity.unresolvedReason}` : undefined;
     if (inv.identity.claimed !== null) app.traceRecorder?.recordContextBundle(inv.identity.claimed);
 
     return textContent({
@@ -2217,11 +2216,6 @@ export function registerTools(
       ...(args.machine !== undefined ? { machine: args.machine } : {}),
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
       ...(args.corpus_scope !== undefined ? { corpusScope: args.corpus_scope } : {}),
-      // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-      // AC-IDENTITY-REJECT — the real source of the name: the tier the server's own name
-      // chain resolved it from — so an OS-user fallback name is still the
-      // "os-fallback" tier `actorIdentityGuard` reacts to.
-      identitySource: actorSourceOfName(callIdentity.claimedSource),
       steal: args.steal === true,
       // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
       // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
@@ -2782,7 +2776,14 @@ export function registerTools(
       if (args.verify === true) {
         // reason: the MCP server is long-lived, so the full-chain verdict runs off its loop (worker per persistent
         // store) and reads the anchor file — the same verdict `lore audit --verify` reports.
-        const result = await app.auditVerifyRunner.verify(args.since !== undefined ? { since: args.since } : undefined);
+        if (args.since !== undefined) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: "since",
+            message: "since is not accepted with verify: verification checks every version. History that predates the audit writers is recorded by `lore migrate audit-backfill --apply`.",
+          });
+        }
+        const result = await app.auditVerifyRunner.verify();
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }
@@ -3011,7 +3012,7 @@ export function registerTools(
             ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
             ...(args.by !== undefined ? { by: args.by } : {}),
           },
-          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user, io: inv.io },
+          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, identity: inv.identity, io: inv.io },
         );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
@@ -3449,14 +3450,11 @@ export function registerTools(
         }
 
         // The actor is the call identity's resolved name (no MCP caller names itself —
-        // BR-1055) and
-        // its source is that name's REAL source, mirroring how the CLI resolves its own
-        // `actorSource` before threading it through `GithubFilingContext.actor`.
+        // BR-1055), threaded through `GithubFilingContext.actor`.
         // This module does NO actor resolution of its own (report-issue-
         // wiring.ts's own header) — never build the actor from anything else here.
-        const callIdentity = requireCallIdentity(scope);
+        requireCallIdentity(scope);
         const actor = args.by;
-        const actorSource = actorSourceOfName(callIdentity.claimedSource);
 
         const fileResult = await fileGithubIssue(
           {
@@ -3477,7 +3475,6 @@ export function registerTools(
             consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
             corpusService: app.corpusService,
             actor,
-            actorSource,
             home: inv.paths.home,
             env: inv.env,
           },

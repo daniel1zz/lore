@@ -288,7 +288,7 @@ export default defineLoreCommand({
     if (args.doc === "backfill-ledger") {
       const { app } = loadLoreApp({ inv });
       try {
-        const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+        const actor = resolveActor(inv);
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -367,7 +367,7 @@ export default defineLoreCommand({
         }
       }
 
-      const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const actor = resolveActor(inv);
 
       // ─── SPEC-044: staleness probing branch ─────────────────────────────────
       if (isStaleness) {

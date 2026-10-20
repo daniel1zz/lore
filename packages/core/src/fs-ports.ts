@@ -185,6 +185,7 @@ export function outsideRootsError(path: string, roots: readonly string[]): LoreE
     field: "path",
     message: `refusing to write ${path} — it is outside the write roots [${roots.join(", ")}]; nothing was written.`,
     value: path,
+    rule: "BR-1177",
   };
 }
 

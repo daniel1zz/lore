@@ -864,9 +864,8 @@ export class PhaseWorkflowService {
     phase: DocRecord,
     siblings: readonly DocRecord[],
     nowIso: string,
-    candidateSessionId?: string,
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
-    return buildEffectiveAnchorGateContext(this.store, by, phase, siblings, nowIso, this.claimTtlMinutes, candidateSessionId);
+    return buildEffectiveAnchorGateContext(this.store, by, phase, siblings, nowIso, this.claimTtlMinutes);
   }
 
   /**
@@ -931,7 +930,7 @@ export class PhaseWorkflowService {
     // existing-claim staleness check below share the exact same "now".
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId, opts.harnessRun ?? null);
+    const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso, opts.harnessRun ?? null);
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaimRecord(phase);
@@ -947,9 +946,10 @@ export class PhaseWorkflowService {
         new Map(),
       );
       if (!staleResult.ok) return staleResult;
-      const holder = buildClaimHolder(phase, existingClaim, staleResult.value);
+      const holder = buildClaimHolder(existingClaim, staleResult.value);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
+        /** @lore-site BR-1040 */
         return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
       }
       carryForward = decision.kind === "refresh";
@@ -972,18 +972,17 @@ export class PhaseWorkflowService {
         // forward on a refresh — inheriting it would fabricate same-session
         // evidence for a run that never measured one.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
-        // reason: BR-1040/BR-1042 — a new claim ALWAYS stores the key (null when unattested).
+        // reason: BR-1040 — the claim names the run that took it; the store refuses one that does not (BR-1352).
         harness_run: claimant.harnessRun,
       },
       carryForward,
     );
     const newExtra: Record<string, unknown> = { ...phase.extra, claim: newClaim };
 
-    const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
+    const previousHolderRun = existingClaim === undefined ? undefined : (existingClaim.harness_run ?? null);
     const takeoverNote =
-      existingClaim !== undefined &&
-      (existingClaim.by !== opts.by || (previousHolderRun !== undefined && (previousHolderRun ?? null) !== claimant.harnessRun))
-        ? ` (previous holder: ${existingClaim.by}${previousHolderRun === undefined ? "" : `, run ${describeClaimRun(previousHolderRun)}`}; claiming run ${describeClaimRun(claimant.harnessRun)})`
+      existingClaim !== undefined && previousHolderRun !== claimant.harnessRun
+        ? ` (previous holder: ${existingClaim.by}, run ${describeClaimRun(previousHolderRun)}; claiming run ${describeClaimRun(claimant.harnessRun)})`
         : claimant.harnessRun !== null
           ? ` (run ${claimant.harnessRun})`
           : "";
@@ -1004,7 +1003,7 @@ export class PhaseWorkflowService {
     // serialization ⇒ the LATER committer's post-write re-check always observes the
     // earlier committer's already-persisted claim ⇒ at least one side always
     // self-rolls-back; both may roll back on close timing — accepted, loud, retriable).
-    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId, opts.harnessRun ?? null);
+    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso, opts.harnessRun ?? null);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -1106,7 +1105,7 @@ export class PhaseWorkflowService {
     const nowIso = now();
     const releaser = buildClaimParty(opts);
     // reason: BR-1043 — see TaskWorkflowService._releaseImpl; stale=false so a stale holder still releases itself.
-    const holder = buildClaimHolder(phase, existingClaim, false);
+    const holder = buildClaimHolder(existingClaim, false);
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
       return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
@@ -1115,7 +1114,7 @@ export class PhaseWorkflowService {
     const newExtra: Record<string, unknown> = { ...phase.extra };
     delete newExtra["claim"];
 
-    const heldRunNote = holder.legacy ? "" : `, run ${describeClaimRun(holder.harnessRun)}`;
+    const heldRunNote = `, run ${describeClaimRun(holder.harnessRun)}`;
     const forcedNote = !isHolder
       ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
       : "";
@@ -1127,7 +1126,7 @@ export class PhaseWorkflowService {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
-      ...(holder.legacy ? {} : { previous_run: holder.harnessRun }),
+      previous_run: holder.harnessRun,
       harness_run: releaser.harnessRun,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
@@ -1204,9 +1203,9 @@ export class PhaseWorkflowService {
         new Map(),
       );
       if (!staleResult.ok) return staleResult;
-      const holder = buildClaimHolder(phase, claim, staleResult.value);
+      const holder = buildClaimHolder(claim, staleResult.value);
       if (hasClaimConflict(holder, buildClaimParty(opts)).kind === "conflict") {
-        const runNote = holder.legacy ? "" : ` (run ${describeClaimRun(holder.harnessRun)})`;
+        const runNote = ` (run ${describeClaimRun(holder.harnessRun)})`;
         return err({
           code: "VALIDATION_ERROR",
           field: "extra.claim",
@@ -1661,7 +1660,7 @@ export class PhaseWorkflowService {
         if (
           docClaim !== undefined &&
           hasClaimConflict(
-            buildClaimHolder(other, otherClaim, false),
+            buildClaimHolder(otherClaim, false),
             buildClaimParty({ by: docClaim.by, harnessRun: (docClaim.harness_run ?? null) as RunId | null }),
           ).kind === "refresh"
         ) {
@@ -1714,21 +1713,12 @@ export class PhaseWorkflowService {
    * `checkpoint-registry.ts` reusing the SAME checkpoint-agnostic predicate functions).
    * Mirrors `TaskWorkflowService.enforceClaimGate` exactly except for the checkpoint id.
    *
-   * @param sessionId - The claiming run's CAPTURED session discriminator (from
-   *   {@link resolveClaimSessionId} over this service's injected `processEnv`), or
-   *   `undefined` when this run genuinely has none. Threaded as a PARAMETER, never
-   *   read ambiently here, so the predicate compares the SAME fact `_claimImpl` is
-   *   about to persist — `noAnchorOverlap` exempts a same-`by` sibling only on a
-   *   PROVEN-equal session and refuses `ANCHOR_OVERLAP_SESSION_UNMEASURED` when
-   *   either side lacks one, so a `undefined` passed here still reaches the
-   *   fail-safe refusal by design
-   *   (task-phaseworkflowservice-claim-captures-no-session-id-so-every AC-3).
+   * @param candidateRun - The claimant's run; `noAnchorOverlap` compares holders by it (BR-1056).
    */
   private async enforceClaimGate(
     phase: DocRecord,
     by: string,
     nowIso: string,
-    sessionId?: string,
     candidateRun: string | null = null,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
@@ -1742,13 +1732,13 @@ export class PhaseWorkflowService {
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (phase.parent_id === null) {
-      const anchorCtx = await this.buildAnchorGateContext(by, phase, [], nowIso, sessionId);
+      const anchorCtx = await this.buildAnchorGateContext(by, phase, [], nowIso);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
       const bundleResult = await this.gate.getPlanBundle(phase.parent_id);
       if (!bundleResult.ok) return bundleResult;
-      const anchorCtx = await this.buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, sessionId);
+      const anchorCtx = await this.buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
     }

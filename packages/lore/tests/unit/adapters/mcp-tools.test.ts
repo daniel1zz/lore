@@ -266,6 +266,19 @@ describe("lore_create", () => {
   });
 });
 
+// ─── lore_audit ───────────────────────────────────────────────────────────────
+
+describe("lore_audit verify", () => {
+  it("NEGATIVE: the per-run cut-off `since` is refused with a VALIDATION_ERROR naming the backfill; nothing is verified", async () => {
+    const result = await getToolHandler(server, "lore_audit")({ verify: true, since: "2030-01-01T00:00:00Z" });
+    expect(result.isError).toBe(true);
+    const error = parseResult(result) as { code: string; field?: string; message: string };
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.field).toBe("since");
+    expect(error.message).toContain("lore migrate audit-backfill --apply");
+  });
+});
+
 // ─── lore_get ─────────────────────────────────────────────────────────────────
 
 describe("lore_get", () => {

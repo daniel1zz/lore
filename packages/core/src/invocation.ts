@@ -4,7 +4,7 @@
  *
  * Purpose: the single value the program entry builds once and every layer below RECEIVES, so no layer
  * reads `process.env` / `process.cwd()` / the home directory itself.
- * Public surface: {@link Invocation}, {@link InvocationWriter}, {@link InvocationPaths}, {@link InvocationReader}, {@link OsUser}.
+ * Public surface: {@link Invocation}, {@link InvocationWriter}, {@link InvocationPaths}, {@link InvocationReader}.
  * Invariants:
  *   - Pure types, no Node import (browser-safe barrel, AS-4). The resolver is `resolveInvocation` in
  *     `@lore/core/node` (`invocation-node.ts`), the ONE core file allowed to read ambient state.
@@ -23,13 +23,6 @@ export interface InvocationWriter {
   /** `true` when the writer is an interactive terminal (a command may then show a progress spinner); absent otherwise. */
   readonly isTTY?: boolean | undefined;
 }
-
-/**
- * The OS account name lookup, recorded as the entry's outcome. The lookup can throw (no passwd entry for the uid,
- * e.g. in a container), so the entry stores the failure as a value; actor resolution fails loud only when the
- * OS-username tier is the one selected.
- */
-export type OsUser = { readonly ok: true; readonly name: string } | { readonly ok: false; readonly reason: string };
 
 /**
  * The input of one invocation as a structural async stream of chunks (`process.stdin` satisfies it). Node-free on
@@ -61,12 +54,10 @@ export type Invocation = Readonly<{
   argv: readonly string[];
   paths: InvocationPaths;
   host: string;
-  /** The OS account lookup of the running process (the os-fallback tier of actor resolution), success or failure. */
-  user: OsUser;
   execPath: string;
   /** True inside the `bun build --compile` binary (`Bun.main` under `/$bunfs/`). */
   isCompiled: boolean;
-  /** Who this invocation is (run vouched for + claimed name); unverified until the store verifies it. */
+  /** Who this invocation is (the known party's run and name, or why there is none); unverified until the store verifies its run. */
   identity: InvocationIdentity;
   /** The run's streams: the two writers, the input, and whether the input is an interactive terminal (resolved once at the entry). */
   io: Readonly<{ stdout: InvocationWriter; stderr: InvocationWriter; stdin: InvocationReader; stdinIsTTY: boolean }>;

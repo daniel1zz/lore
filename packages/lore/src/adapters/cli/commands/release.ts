@@ -90,7 +90,7 @@ export default defineLoreCommand({
         exitCli(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv);
       const releaseOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.

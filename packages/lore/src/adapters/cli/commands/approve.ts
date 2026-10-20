@@ -59,7 +59,7 @@ export default defineLoreCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const reviewer = resolveActor(inv);
       const result = await app.reviewService.approve(args.id as DocId, {
         reviewer,
         ...(typeof args["override-judgment"] === "string"

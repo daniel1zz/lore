@@ -21,11 +21,8 @@
  *   a CLI-invoked oracle, not a hot instrumented path — mirrors VersionService, which
  *   is also un-instrumented).
  * @invariant SPEC-079 G3 — `verify()`'s chain-integrity walk covers the ENTIRE
- *   `audit` table in `id` ASC order via `store.listAuditChain()`, regardless of
- *   the `since` watermark that bounds the completeness join. A hash chain is
- *   only meaningful end-to-end: bounding it by `since` would let an attacker
- *   rewrite history strictly before the watermark undetected on every future
- *   run. The external anchor (`.lore/audit-anchor.json`, written by
+ *   `audit` table in `id` ASC order via `store.listAuditChain()`. A hash chain is
+ *   only meaningful end-to-end. The external anchor (`.lore/audit-anchor.json`, written by
  *   `lore audit anchor`, read and passed in by the CLI as `opts.anchor`) is
  *   the ONLY thing that pins the chain against a full-history rewrite/rewind —
  *   see `checkAuditAnchor`'s doc comment.
@@ -51,10 +48,11 @@
  *   create/update/approve/reject/restore (VERIFIABLE_VERSION_ACTIONS) — `delete`
  *   is excluded (SPEC-035 §2 lists it out of the anchor set) even though
  *   CorpusService.delete also stamps `details.version` on its audit entry.
- * @invariant The `since` watermark bounds BOTH sides of the join (versions rows via
- *   `listVersionKeys(since)`, audit rows via `queryAudit({since})`) — pre-watermark
- *   holes (pre-SPEC-035 TaskWorkflow silence, v1-migration imports) are never
- *   reported as misses (D5).
+ * @invariant NO date bounds the join: every versions row is checked, however old. History that predates
+ *   the audit writers is made explicit once by `lore migrate audit-backfill`, which appends hash-chained
+ *   {@link AUDIT_BACKFILL_ACTION} entries marked `reconstructed`; verification then reports each versions row as
+ *   audited (an original entry), reconstructed (only a backfill entry) or missing. Supersedes SPEC-035 D5's
+ *   `audit.verify_since` cut-off.
  *
  * Side-effect class: IO (reads via StoreInterface only — never writes)
  *
@@ -63,7 +61,7 @@
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { DocId, VersionAction } from "@lore/core";
-import type { AuditChainEntry, AuditFilters, StoreInterface } from "../store/store-interface.js";
+import type { AuditChainEntry, AuditFilters, StoreInterface, VersionKey } from "../store/store-interface.js";
 import type { AuditEntry } from "@lore/core";
 import { computeAuditEntryHash } from "../store/store-shared.js";
 
@@ -74,6 +72,12 @@ import { computeAuditEntryHash } from "../store/store-shared.js";
  * (SPEC-035 §2). `delete` is deliberately excluded from this set — see
  * {@link AuditService.verify}'s JSDoc @invariant.
  */
+/**
+ * The audit action `lore migrate audit-backfill` writes for a version that predates the audit writers. It satisfies
+ * every verifiable family (see {@link VERSION_ACTION_AUDIT_FAMILY}) but is counted as RECONSTRUCTED, never audited.
+ */
+export const AUDIT_BACKFILL_ACTION = "audit-backfill";
+
 const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
   "create",
   "update",
@@ -114,8 +118,9 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  * practice, but the type stays total rather than partial.
  */
 const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<string>>> = {
-  create: new Set(["create"]),
+  create: new Set(["create", AUDIT_BACKFILL_ACTION]),
   update: new Set([
+    AUDIT_BACKFILL_ACTION,
     "update",
     "claim",
     "release",
@@ -129,9 +134,9 @@ const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<st
     "tree-fix",
     "ordinal-backfill",
   ]),
-  approve: new Set(["approve"]),
-  reject: new Set(["reject"]),
-  restore: new Set(["restore"]),
+  approve: new Set(["approve", AUDIT_BACKFILL_ACTION]),
+  reject: new Set(["reject", AUDIT_BACKFILL_ACTION]),
+  restore: new Set(["restore", AUDIT_BACKFILL_ACTION]),
   delete: new Set(),
   undelete: new Set(),
 };
@@ -289,16 +294,63 @@ export function checkAuditAnchor(
   return { status: "clean", head_id: anchor.head_id, head_hash: anchor.head_hash };
 }
 
+/** How every verifiable versions row stands against the audit table: audited, reconstructed or missing. */
+export interface VersionReconciliation {
+  /** Versions rows explained by an original audit entry of their action family. */
+  audited: number;
+  /** Versions rows explained ONLY by an {@link AUDIT_BACKFILL_ACTION} entry (`lore migrate audit-backfill`). */
+  reconstructed: number;
+  /** Versions rows no audit entry explains. */
+  misses: AuditMiss[];
+}
+
+/**
+ * The completeness join, pure: every verifiable versions row is looked up by `(doc_id, details.version)` in the audit
+ * entries and its action family ({@link VERSION_ACTION_AUDIT_FAMILY}). No date bounds it. Shared by
+ * {@link AuditService.verify} and the backfill (which reconstructs exactly the `misses`).
+ *
+ * @param versions - versions rows (any action; non-verifiable ones such as `delete` are skipped)
+ * @param audit - every audit entry
+ */
+export function reconcileVersions(versions: readonly VersionKey[], audit: readonly AuditEntry[]): VersionReconciliation {
+  // reason: build the (doc_id, version) -> {audit actions seen} index once — O(audit) — rather than querying per
+  // versions row. The join key is (doc_id, version) PLUS the action family, never bare version equality (which would
+  // let an unrelated action like "judge" satisfy a missing create/update/approve/reject/restore entry).
+  const actionsByPair = new Map<string, Set<string>>();
+  for (const entry of audit) {
+    if (entry.doc_id === undefined) continue;
+    const detailVersion = entry.details?.["version"];
+    if (typeof detailVersion !== "number") continue;
+    const key = `${entry.doc_id}::${detailVersion}`;
+    const actions = actionsByPair.get(key) ?? new Set<string>();
+    actions.add(entry.action);
+    actionsByPair.set(key, actions);
+  }
+
+  let audited = 0;
+  let reconstructed = 0;
+  const misses: AuditMiss[] = [];
+  for (const v of versions) {
+    if (!VERIFIABLE_VERSION_ACTIONS.has(v.action)) continue;
+    const seen = actionsByPair.get(`${v.doc_id}::${v.version}`);
+    const family = VERSION_ACTION_AUDIT_FAMILY[v.action];
+    const original = seen !== undefined && [...family].some((a) => a !== AUDIT_BACKFILL_ACTION && seen.has(a));
+    if (original) audited++;
+    else if (seen?.has(AUDIT_BACKFILL_ACTION) === true) reconstructed++;
+    else misses.push({ doc_id: v.doc_id, version: v.version, action: v.action, created_at: v.created_at });
+  }
+  return { audited, reconstructed, misses };
+}
+
 /** Result of {@link AuditService.verify}. */
 export interface AuditVerifyResult {
   clean: boolean;
   misses: AuditMiss[];
-  /** The watermark this verify pass was bounded by — surfaced for CLI/MCP display. */
-  since: string;
-  /**
-   * Whole-table hash-chain-integrity walk (SPEC-079 G3) — NOT bounded by
-   * `since`; see {@link AuditService}'s class-level `@invariant`.
-   */
+  /** Versions rows explained by an original audit entry. */
+  audited: number;
+  /** Versions rows explained only by a backfill entry — history reconstructed by `lore migrate audit-backfill`. */
+  reconstructed: number;
+  /** Whole-table hash-chain-integrity walk (SPEC-079 G3); backfill entries are chained like any audit row. */
   chain: AuditChainVerifyResult;
   /**
    * External-anchor cross-check (SPEC-079 G3) — `{status: "absent"}` when
@@ -311,14 +363,6 @@ export interface AuditVerifyResult {
 /** Options for {@link AuditService.verify}. */
 export interface VerifyOpts {
   /**
-   * ISO 8601 watermark override — versions rows older than this are excluded from
-   * the reconcile walk (D5). Optional: defaults to the constructor-resolved
-   * {@link AuditService.verifySince} when omitted, mirroring how `TaskWorkflowService`
-   * exposes `claimTtlMinutes` as a public readonly resolved-at-construction value
-   * while still allowing per-call overrides (e.g. `--since` on `lore audit --verify`).
-   */
-  since?: string;
-  /**
    * The parsed `.lore/audit-anchor.json` head ref, if the CLI found one on
    * disk — see {@link AuditAnchorRef}. Omitted → the anchor cross-check
    * reports `{status: "absent"}`, never a silent pass.
@@ -329,24 +373,8 @@ export interface VerifyOpts {
 // ─── AuditService ────────────────────────────────────────────────────────────
 
 export class AuditService {
-  /**
-   * Public (not just internal) so CLI/MCP callers can display the effective
-   * watermark without re-resolving config — same shape as
-   * `TaskWorkflowService.claimTtlMinutes`.
-   */
-  readonly verifySince: string;
-
-  /**
-   * @param store - Storage abstraction (same instance passed to every other service)
-   * @param config - `{ verifySince }` — see `resolveAuditVerifySince` in @lore/core
-   *   (composition-root resolved, mirroring `TaskWorkflowService`'s `claimTtlMinutes`)
-   */
-  constructor(
-    private readonly store: StoreInterface,
-    config: { verifySince: string },
-  ) {
-    this.verifySince = config.verifySince;
-  }
+  /** @param store - Storage abstraction (same instance passed to every other service) */
+  constructor(private readonly store: StoreInterface) {}
 
   /**
    * Thin delegation to `store.queryAudit(filters)` — the query half of the audit
@@ -360,26 +388,20 @@ export class AuditService {
   }
 
   /**
-   * Completeness oracle: for every `versions` row whose action is in
-   * {@link VERIFIABLE_VERSION_ACTIONS} and whose `created_at >= opts.since`, demand
-   * at least one audit entry sharing `(doc_id, details.version)` WHOSE ACTION IS A
-   * MEMBER OF THE VERSIONS ROW'S ACTION FAMILY (`VERSION_ACTION_AUDIT_FAMILY` — see
-   * @invariant above). Order-independent — the join key is a version number, never a
-   * timestamp window (D9) — but it is action-family-aware, not action-agnostic: an
-   * audit entry from an unrelated action family (e.g. `"judge"`) sharing the same
-   * version never satisfies the oracle.
+   * Completeness oracle: for EVERY `versions` row whose action is in
+   * {@link VERIFIABLE_VERSION_ACTIONS} (no date skips any), demand at least one audit
+   * entry sharing `(doc_id, details.version)` WHOSE ACTION IS A MEMBER OF THE VERSIONS
+   * ROW'S ACTION FAMILY (`VERSION_ACTION_AUDIT_FAMILY`, see {@link reconcileVersions}).
+   * Order-independent — the join key is a version number, never a timestamp window (D9).
+   * Each row is reported as audited, reconstructed (only a backfill entry) or missing.
    *
-   * SPEC-079 G3: ALSO recomputes the whole-table hash chain
-   * ({@link walkAuditChain}, unbounded by `since` — see this class's own
-   * `@invariant`) and, when `opts.anchor` is supplied, cross-checks it against
-   * the chain ({@link checkAuditAnchor}). `clean` is the conjunction of all
-   * three: `misses.length === 0 AND chain.clean AND anchor.status !==
-   * "anchor_mismatch"` — a corpus can be version-complete yet still report
-   * `clean: false` on a chain break or anchor mismatch, and vice versa.
+   * SPEC-079 G3: ALSO recomputes the whole-table hash chain ({@link walkAuditChain})
+   * and, when `opts.anchor` is supplied, cross-checks it against the chain
+   * ({@link checkAuditAnchor}). `clean` is the conjunction of all three:
+   * `misses.length === 0 AND chain.clean AND anchor.status !== "anchor_mismatch"`.
    *
-   * @param opts - `{ since?, anchor? }` — `since` overrides the completeness
-   *   watermark (defaults to `this.verifySince`); `anchor` is the parsed
-   *   `.lore/audit-anchor.json` head ref, if the CLI found one on disk.
+   * @param opts - `{ anchor? }` — the parsed `.lore/audit-anchor.json` head ref, if the
+   *   CLI found one on disk.
    * @returns Result<AuditVerifyResult, LoreError>
    *
    * @example
@@ -391,48 +413,16 @@ export class AuditService {
    * }
    */
   async verify(opts?: VerifyOpts): Promise<Result<AuditVerifyResult, LoreError>> {
-    const since = opts?.since ?? this.verifySince;
-
     // reason: the join uses four columns of a versions row; `listVersionKeys` reads only those (from a covering
     // index), never the row's content/extra snapshot, so this step's cost does not grow with document size.
-    const versionsResult = await this.store.listVersionKeys(since);
+    const versionsResult = await this.store.listVersionKeys();
     if (!versionsResult.ok) return versionsResult;
 
-    const candidates = versionsResult.value.filter(
-      (v) => VERIFIABLE_VERSION_ACTIONS.has(v.action) && v.created_at >= since,
-    );
+    const auditResult = await this.store.queryAudit({});
+    if (!auditResult.ok) return auditResult;
+    const { audited, reconstructed, misses } = reconcileVersions(versionsResult.value, auditResult.value);
 
-    let misses: AuditMiss[] = [];
-    if (candidates.length > 0) {
-      const auditResult = await this.store.queryAudit({ since });
-      if (!auditResult.ok) return auditResult;
-
-      // reason: build the (doc_id, version) -> {audit actions seen} index once —
-      // O(audit) — rather than querying per-versions-row (O(versions * audit)). See
-      // @invariant above re: the join key being (doc_id, version) PLUS an action-family
-      // check, never bare version-equality (which would let an unrelated action like
-      // "judge" incidentally satisfy a missing create/update/approve/reject/restore entry).
-      const auditActionsByPair = new Map<string, Set<string>>();
-      for (const entry of auditResult.value) {
-        if (entry.doc_id === undefined) continue;
-        const detailVersion = entry.details?.["version"];
-        if (typeof detailVersion === "number") {
-          const key = `${entry.doc_id}::${detailVersion}`;
-          const actions = auditActionsByPair.get(key) ?? new Set<string>();
-          actions.add(entry.action);
-          auditActionsByPair.set(key, actions);
-        }
-      }
-
-      misses = candidates.filter((v) => {
-        const family = VERSION_ACTION_AUDIT_FAMILY[v.action];
-        const seenActions = auditActionsByPair.get(`${v.doc_id}::${v.version}`);
-        return !(seenActions !== undefined && [...family].some((a) => seenActions.has(a)));
-      }).map((v) => ({ doc_id: v.doc_id, version: v.version, action: v.action, created_at: v.created_at }));
-    }
-
-    // SPEC-079 G3 — the chain walk covers the WHOLE table, never bounded by
-    // `since` (see this class's `@invariant`).
+    // SPEC-079 G3 — the chain walk covers the WHOLE table (see this class's `@invariant`).
     const chainResult = await this.store.listAuditChain();
     if (!chainResult.ok) return chainResult;
 
@@ -441,7 +431,7 @@ export class AuditService {
 
     const clean = misses.length === 0 && chain.clean && anchor.status !== "anchor_mismatch";
 
-    return ok({ clean, misses, since, chain, anchor });
+    return ok({ clean, misses, audited, reconstructed, chain, anchor });
   }
 
   /**
@@ -464,6 +454,7 @@ export class AuditService {
         code: "VALIDATION_ERROR",
         field: "audit_chain",
         message: "Cannot anchor: the audit table is empty — nothing to pin a trust root to.",
+        rule: "BR-479",
       });
     }
 
@@ -476,6 +467,7 @@ export class AuditService {
         code: "VALIDATION_ERROR",
         field: "audit_chain",
         message: `Cannot anchor: chain head (audit row id ${head.id}) has no entry_hash — run \`lore audit --verify\` to locate the break first.`,
+        rule: "BR-479",
       });
     }
 

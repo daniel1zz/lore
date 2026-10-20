@@ -213,6 +213,7 @@ export function assertSeatEntryReady(report: SeatReadyReportLike): Result<void, 
     field: "gate:seat-entry:anchor-conflict",
     message: `Seat entry blocked: open anchor conflict(s) — ${detail}`,
     value: report.anchor_conflicts,
+    rule: "BR-369",
   });
 }
 

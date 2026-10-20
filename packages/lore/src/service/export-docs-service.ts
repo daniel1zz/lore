@@ -460,6 +460,7 @@ export class ExportDocsService {
         code: "VALIDATION_ERROR",
         field: "parent_id",
         message: `Cycle detected in parent_id chain involving docs: ${cycles.join(", ")}`,
+        rule: "BR-785",
       });
     }
 
@@ -654,6 +655,7 @@ export class ExportDocsService {
         // the file untouched (reason: never auto-resolved without explicit opt-in).
         if (!opts.force) {
           report.drift.push(mapping.file_path);
+          /** @lore-site BR-784 */
           this.warn(`⚠ drift: ${mapping.file_path}`);
           if (scalarStale) {
             // Frontmatter is ALSO stale, but fixing it here would require rewriting the body
@@ -873,6 +875,7 @@ async function buildOrExtendIndex(
         unnumbered.map((d) => `${d.type} "${d.title}" (id ${d.id})`).join("; ") +
         `. Run \`lore migrate ordinals --apply\` to number them, then export again.`,
       value: unnumbered.map((d) => d.id),
+      rule: "BR-1332",
     });
   }
 
@@ -1181,6 +1184,7 @@ function reconcileOrdinalMappings(
       `(the file at the recomputed path — same path or a fresh one — will be unconditionally ` +
       `rewritten this run, see ExportReport.identity_repaired)`;
     repairLog.push(line);
+    /** @lore-site BR-783 */
     warn(`⚠ export-index ordinal-reconcile: ${line}`);
   }
 
@@ -1269,6 +1273,7 @@ function retireDeletedDocMappings(
       `but resolves to a SOFT-DELETED corpus doc — retiring the mapping; the orphaned mirror ` +
       `file itself is left for pruneOrphanMirrorFiles to remove`;
     repairLog.push(line);
+    /** @lore-site BR-787 */
     warn(`⚠ export-index deleted-doc-retire: ${line}`);
   }
 
@@ -1346,6 +1351,7 @@ function repairCollisions(warn: WarnSink, index: ExportIndex, projectDir: string
           `${lostMapping?.human_id ?? "?"} / ${filePath} (collided with doc ${canonicalId}) — ` +
           `reallocating a new human_id + file_path`,
       );
+      /** @lore-site BR-783 */
       warn(`⚠ export-index self-heal: ${repairLog[repairLog.length - 1]}`);
     }
   }
@@ -1393,6 +1399,7 @@ function repairDuplicateHumanIds(warn: WarnSink, index: ExportIndex, docById: Re
         `duplicate-human-id: doc ${id} ("${docById.get(id)!.title}") shared ${humanId} with doc ` +
         `${canonicalId} (was ${lost?.file_path ?? "?"}) — reallocating a new human_id + file_path`;
       repairLog.push(line);
+      /** @lore-site BR-783 */
       warn(`⚠ export-index duplicate-human-id: ${line}`);
     }
   }
@@ -1934,12 +1941,14 @@ function writeFileExclusive(
         code: "STORE_ERROR",
         message: `concurrent write conflict on ${relFilePath} — retry export-docs`,
         ...(e instanceof Error ? { cause: e } : {}),
+        rule: "BR-785",
       });
     }
     return err({
       code: "STORE_ERROR",
       message: `cannot open ${relFilePath} for writing: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-785",
     });
   }
 
@@ -1951,6 +1960,7 @@ function writeFileExclusive(
       code: "STORE_ERROR",
       message: `write failed for ${relFilePath}: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-785",
     });
   }
 
@@ -1961,6 +1971,7 @@ function writeFileExclusive(
       code: "STORE_ERROR",
       message: `close failed for ${relFilePath}: ${e instanceof Error ? e.message : String(e)}`,
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-785",
     });
   }
 

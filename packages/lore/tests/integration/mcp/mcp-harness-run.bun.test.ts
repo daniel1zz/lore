@@ -73,6 +73,16 @@ function auditRows(dbPath: string, docId: string): Record<string, unknown>[] {
   }
 }
 
+/** Every audit row of the corpus (a refused write must leave this exactly as it was). */
+function allAuditRows(dbPath: string): Record<string, unknown>[] {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.query("SELECT * FROM audit ORDER BY rowid").all() as Record<string, unknown>[];
+  } finally {
+    db.close();
+  }
+}
+
 interface ToolResult {
   isError?: boolean;
   content: { type: string; text: string }[];
@@ -168,23 +178,21 @@ describe("AC-RID-7 MCP harness_run attestation (real server, tools/list + tools/
     expect(rowsB.every((r) => r["harness_run"] === RUN_2)).toBe(true);
   });
 
-  it("lore_create without harness_run and without by succeeds and is stored unattested", async () => {
+  it("lore_create without harness_run is REFUSED naming both remedies and writes nothing (BR-1351)", async () => {
+    const before = allAuditRows(dbPath).length;
     const res = await call("lore_create", { type: "plan", title: "Unattested via MCP" });
-    expect(res.isError).not.toBe(true);
-    const id = (JSON.parse(textOf(res)) as { id: string }).id;
-    const rows = auditRows(dbPath, id);
-    expect(rows.length).toBeGreaterThan(0);
-    // The column must exist (migration 016) and be NULL: an absent column = attribution not implemented.
-    expect(rows.every((r) => "harness_run" in r && r["harness_run"] === null)).toBe(true);
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("lore session start --human");
+    expect(textOf(res)).toContain("lore setup");
+    expect(allAuditRows(dbPath)).toHaveLength(before);
   });
 
-  it("lore_create with an unknown harness_run is kept, stored unattested, never refused (BR-1035)", async () => {
+  it("lore_create with an unknown harness_run is REFUSED, never downgraded to an unattested write (BR-1351)", async () => {
+    const before = allAuditRows(dbPath).length;
     const res = await call("lore_create", { type: "plan", title: "Unknown run", harness_run: "cc:never-registered" });
-    expect(res.isError).not.toBe(true);
-    const id = (JSON.parse(textOf(res)) as { id: string }).id;
-    const rows = auditRows(dbPath, id);
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => "harness_run" in r && r["harness_run"] === null)).toBe(true);
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("cc:never-registered");
+    expect(allAuditRows(dbPath)).toHaveLength(before);
   });
 
   it("lore_claim with harness_run R1 and no by claims the task", async () => {

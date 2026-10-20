@@ -34,6 +34,7 @@ import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js"
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -89,9 +90,6 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   const worktree = join(worktreesRoot, BRANCH);
   run(repo, "worktree", "add", "-q", "-b", BRANCH, worktree, "main");
   const realWorktree = realpathSync(worktree);
-  writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
-  run(realWorktree, "add", "own-file.txt");
-  run(realWorktree, "commit", "-q", "-m", "feat: the branch's own work");
 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -122,9 +120,13 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
     "2026-10-19T09:00:00.000Z",
   );
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
-  const claim = await svc.claim(task.value.id, { by: "alice", worktree: realWorktree });
+  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: realWorktree });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   claiming = false;
+  // reason: BR-1353 — a first claim starts from main, so the branch's own work is committed AFTER the claim.
+  writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
+  run(realWorktree, "add", "own-file.txt");
+  run(realWorktree, "commit", "-q", "-m", "feat: the branch's own work");
   return { repo, worktree: realWorktree, svc, store, taskId: task.value.id };
 }
 
@@ -153,7 +155,7 @@ async function landAndFinish(f: Fixture, withRecorder: boolean) {
   expect(run(f.repo, "log", "-1", "--format=%s", "main").startsWith(`merge(${BRANCH})`)).toBe(true);
   const afterLand = await f.store.find(f.taskId);
   const landing = afterLand.ok && afterLand.value !== null ? afterLand.value.extra["landing"] : "unreadable";
-  const done = await f.svc.done(f.taskId, { by: "alice" });
+  const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
   return { mergeSha, landing, done };
 }
 
