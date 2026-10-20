@@ -355,8 +355,7 @@ describe("classifyConfigEffect", () => {
     expect(classifyConfigEffect("telemetry.enabled")).toBe("restart_required");
   });
 
-  it("REGRESSION: everything else — audit.*/verify.*/defaults.* — stays live", () => {
-    expect(classifyConfigEffect("audit.verify_since")).toBe("live");
+  it("REGRESSION: everything else — verify.*/defaults.* — stays live", () => {
     expect(classifyConfigEffect("verify.default_timeout_ms")).toBe("live");
     expect(classifyConfigEffect("defaults.claim_ttl_minutes")).toBe("live");
   });

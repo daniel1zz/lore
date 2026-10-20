@@ -134,11 +134,11 @@ async function wireRig(kind: "sqlite" | "turso", dbPath: string): Promise<Rig> {
     corpusService: new CorpusService(store, lock, telemetry),
     apiKeyStore: new ApiKeyStore(authDb),
     sessionStore: new SessionStore(authDb),
-    auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditService: new AuditService(store),
     // reason: the same factory the composition roots call, with the store kind the rig is opened on.
     auditVerifyRunner: buildAuditVerifyRunner(
       kind === "sqlite" ? { kind: "sqlite", dbPath } : { kind: "turso", localPath: dbPath },
-      { verifySince: FAR_PAST, anchorRoot: join(dbPath, "..", "..") },
+      { anchorRoot: join(dbPath, "..", "..") },
     ),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
@@ -242,7 +242,7 @@ describe("the worker runner (real Worker)", () => {
       const fixture = await seedAuditVerifyCorpus(sub, kind, { docs: 4, versionsPerDoc: 5, contentChars: 64, extraAuditRows: 3 });
       const runner = buildAuditVerifyRunner(
         kind === "sqlite" ? { kind, dbPath: fixture.dbPath } : { kind, localPath: fixture.dbPath },
-        { verifySince: FAR_PAST, anchorRoot: sub },
+        { anchorRoot: sub },
       );
       expect(runner.mode).toBe("worker");
 
@@ -262,7 +262,7 @@ describe("the worker runner (real Worker)", () => {
   }
 
   it("a corpus the worker cannot open fails the request with the worker's own message; nothing runs in-loop", async () => {
-    const runner = buildAuditVerifyRunner({ kind: "sqlite", dbPath: join(dir, "no-such-dir", "lore.db") }, { verifySince: FAR_PAST, anchorRoot: dir });
+    const runner = buildAuditVerifyRunner({ kind: "sqlite", dbPath: join(dir, "no-such-dir", "lore.db") }, { anchorRoot: dir });
     const r = await runner.verify();
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -277,7 +277,7 @@ describe("the worker runner (real Worker)", () => {
     const stamp = (before.query("PRAGMA data_version").get() as { data_version: number }).data_version;
     const countBefore = (before.query("SELECT COUNT(*) AS n FROM audit").get() as { n: number }).n;
     before.close();
-    const r = await buildAuditVerifyRunner({ kind: "sqlite", dbPath: fixture.dbPath }, { verifySince: FAR_PAST, anchorRoot: sub }).verify();
+    const r = await buildAuditVerifyRunner({ kind: "sqlite", dbPath: fixture.dbPath }, { anchorRoot: sub }).verify();
     expect(r.ok).toBe(true);
     const after = new Database(fixture.dbPath, { readonly: true });
     expect((after.query("SELECT COUNT(*) AS n FROM audit").get() as { n: number }).n).toBe(countBefore);

@@ -47,7 +47,6 @@ import { DOC_TYPE_ROLE_MAP, err } from "@lore/core";
 import { ulid } from "ulidx";
 import { actedStore } from "../../live-invocation.js";
 
-const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -315,7 +314,7 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const tcs = new TreeCheckService(store);
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     // Exactly ONE prd root — a second one would give the orphaned plan below two
     // equally-valid candidate parents, making fix() skip it ("0-or-many candidates")
@@ -346,7 +345,7 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
       expect(fixResult.value.fixed.some((f) => f.id === plan.id)).toBe(true);
     }
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(true);
