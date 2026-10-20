@@ -47,7 +47,6 @@ import { DOC_TYPE_ROLE_MAP, err } from "@lore/core";
 import { ulid } from "ulidx";
 import { actedStore } from "../../live-invocation.js";
 
-const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -346,7 +345,7 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
       expect(fixResult.value.fixed.some((f) => f.id === plan.id)).toBe(true);
     }
 
-    const result = await auditService.verify({ since: FAR_PAST });
+    const result = await auditService.verify();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.clean).toBe(true);
