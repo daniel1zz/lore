@@ -124,6 +124,15 @@ lore sync-docs [--from <dir>] [--dry-run]    # backfill disk .md spec files → 
 - MCP (preferred for agents): `lore --mcp-server` — {{lore:mcp_tool_count}} `lore_*` tools: full-field CRUD, review/judgment (`lore_review`, `lore_pending` with `include_judgments`), task workflow (`lore_claim` / `lore_release` / `lore_evidence_add` / `lore_ready` — `by` is required explicitly), `lore_assess`, `lore_audit`. 
 - HTTP API: `lore serve` + `lore agent create --name <agent>` to issue API keys (`lore agent list|revoke`).
 
+## Who can write
+
+Every write is made by a known party; there are two ways to be one.
+
+- An agent: its writes carry the run its integration attests. Install the integration with `lore setup`. A process inside an agent harness never starts a human session.
+- A person working by hand: run `lore session start --human <name>` once per checkout. Writes from that checkout are then recorded as `<name>` until `lore session end`. `lore session show` (no id) names the open session; `lore session end` closes it (exit 3 if none is open). A second `start` while one is open is refused.
+
+With neither, writes are refused (exit 4); reads still work.
+
 ## Conventions
 
 - One corpus per team workspace; back up = copy `.lore/lore.db`.
