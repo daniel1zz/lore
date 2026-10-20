@@ -28,9 +28,9 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
-import { resolveActorWithSource } from "@lore/core/node";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { liveWriteActor, actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -102,14 +102,10 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     expect(result.value).toHaveLength(1);
     const entry = result.value[0] as AuditEntry;
     expect(entry.action).toBe("create");
-    // SPEC-079 G2 (actor fidelity) — the audit entry's actor is now the
-    // resolved actor (opts.by > $LORE_ACTOR > session tier > OS username),
-    // never the literal "system". `createPlan` passes no `by`, so the
-    // expected value is whatever the SAME env-chain resolution yields at
-    // test time (this test never mutates process.env, so it's stable within
-    // a single run — see audit-actor-fidelity.test.ts for the full env-chain
-    // coverage this asymmetry is dedicated to).
-    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, liveInvocation().user).actor);
+    // SPEC-079 G2 (actor fidelity) — the audit entry's actor is the write context's known-party name, never the
+    // literal "system". `createPlan` passes no `by`, so the expected value is the name the store was declared with
+    // (`actedStore` -> `liveWriteActor()`).
+    expect(entry.actor).toBe(liveWriteActor());
     expect(entry.details?.["version"]).toBe(1);
   });
 
@@ -351,7 +347,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(claimResult.ok).toBe(true);
 
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
@@ -369,7 +365,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     });
     expect(evidenceResult.ok).toBe(true);
 
-    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
 
     // Sanity: the versions rows for these three writes really do carry action "update",

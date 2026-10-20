@@ -9,9 +9,10 @@ import { warnSinkOf } from "../../service/warn-sink.js";
 import { randomUUID } from "node:crypto";
 
 import type { App } from "../../app.js";
-import { authenticateRequest, extractSessionCookie, ALLOWED_ORIGINS } from "./auth.js";
+import { authenticateRequest, extractSessionCookie, ALLOWED_ORIGINS, type ActorContext } from "./auth.js";
+import { dispatchUnderRequestParty } from "./request-identity.js";
 import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
-import { jsonError, corsPreflightResponse, applyCorsOrigin } from "./middleware.js";
+import { jsonError, corsPreflightResponse, applyCorsOrigin, loreErrorToStatus } from "./middleware.js";
 import { createMachineAuthStores, type MachineAuthStores } from "./machine-auth.js";
 import { handleGetProjects } from "./projects-route.js";
 import { createDashboardHandler, type DashboardServingConfig } from "./static-serving.js";
@@ -36,6 +37,23 @@ function dispatchWithAuditSurface(
     throw new Error("authenticated actor has no callerSurface - cannot attribute the audit surface");
   }
   return runWithAuditSurface(actor.callerSurface, dispatch);
+}
+
+/**
+ * Dispatch an authenticated request's route handling as its party (BR-1055, spec-every-write-is-made-by-a-known-party-
+ * an-attested-agent-run): a write is made by the bearer key's name or the dashboard login under a run registered for
+ * it, never by the serve process's own identity. A write whose party cannot be registered is answered with that error
+ * and nothing is written.
+ */
+async function dispatchAsRequestParty(
+  app: App,
+  actor: ActorContext,
+  req: Request,
+  dispatch: () => Promise<Response | null>,
+): Promise<Response | null> {
+  const outcome = await dispatchUnderRequestParty(app, actor, req.method, () => dispatchWithAuditSurface(actor, dispatch));
+  if (!outcome.ok) return jsonError(outcome.error, loreErrorToStatus(outcome.error));
+  return outcome.value;
 }
 
 export interface HttpConfig {
@@ -244,7 +262,7 @@ async function dispatchProjectRequest(
     strippedUrl.pathname = rest;
 
     const mountedApp = entry.app;
-    const response = await dispatchWithAuditSurface(actor, () =>
+    const response = await dispatchAsRequestParty(mountedApp, actor, req, () =>
       handleApiRoute(req, strippedUrl, mountedApp, actor, getMachineAuth, allowedOrigins),
     );
     if (response === null) {
@@ -421,7 +439,7 @@ export function startHttpServer(app: App, config: HttpConfig): ReturnType<typeof
           );
         }
 
-        const response = await dispatchWithAuditSurface(actor, () =>
+        const response = await dispatchAsRequestParty(app, actor, req, () =>
           handleApiRoute(req, url, app, actor, getMachineAuth, allowedOrigins),
         );
 

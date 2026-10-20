@@ -19,6 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scrubIdentityEnv } from "../helpers/test-run-identity.js";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
@@ -188,6 +189,30 @@ describe("lore migrate audit-backfill (AC b)", () => {
     expect(applied.stdout).toContain("(earliest audit entry)");
     expect(applied.stdout).toContain("1 version(s) recorded as reconstructed");
     expect(runLore(["audit", "--verify"], dir).exitCode).toBe(0);
+  });
+
+  it("NEGATIVE: with no known party the run is refused (exit 4) naming `lore session start --human` and `lore setup`, and writes nothing", () => {
+    seedUnauditedVersion(2, "2026-01-02T00:00:00.000Z");
+    const configBefore = readFileSync(configPath(), "utf8");
+    const auditBefore = auditCount();
+
+    // reason: a spawn "as nobody": no harness-run flag, none of the identity variables, and the test run's spawn rewrite
+    // (scripts/test-known-party-spawn.ts) opted out of giving it a registered run.
+    const asNobody = (args: string[]): RunResult => {
+      const env: Record<string, string | undefined> = { ...scrubIdentityEnv(process.env), HOME: dir, EDITOR: "true", LORE_TEST_IDENTITY: "none" };
+      const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], { cwd: dir, env, timeout: 100_000 });
+      return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
+    };
+
+    for (const args of [["migrate", "audit-backfill", "--apply"], ["migrate", "audit-backfill"]]) {
+      const refused = asNobody(args);
+      expect(refused.exitCode, `${refused.stdout}${refused.stderr}`).toBe(4);
+      expect(refused.stderr).toContain("lore session start --human");
+      expect(refused.stderr).toContain("lore setup");
+      expect(refused.stderr).not.toContain("Storage failure");
+    }
+    expect(auditCount()).toBe(auditBefore);
+    expect(readFileSync(configPath(), "utf8")).toBe(configBefore);
   });
 
   it("STATE: --apply removes only the retired config setting (every other byte kept)", () => {

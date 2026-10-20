@@ -53,6 +53,7 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { GateDependencies } from "../../../src/service/gate-enforcer.js";
 import type { CreateDocInput, DocRecord, DocType, LoreConfig } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Shared interleave helper ─────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const planId = await createTopLevelPlan(corpusService);
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1" });
+    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.extra["claim"]).toMatchObject({ by: "agent:t1" });
@@ -166,11 +167,11 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     // CAS write commits, a concurrent actor agent:t1 claims the anchor-overlapping
     // Task Two. This is exactly the race a pre-write-only gate cannot see.
     interleaveFirstUpdate(store, taskOne.id, async () => {
-      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1" });
+      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2" });
+    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -199,18 +200,18 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
 
     // agent:t9 claims Task Two far in the past — will be stale by the time Task One
     // is claimed/refreshed at T=120min+ later (TTL=120).
-    await taskWorkflowService.claim(taskTwo.id, { by: "agent:t9" }, () => "2026-07-11T06:00:00.000Z");
+    await taskWorkflowService.claim(taskTwo.id, { by: "agent:t9", harnessRun: runOfName("agent:t9") }, () => "2026-07-11T06:00:00.000Z");
 
     const first = await taskWorkflowService.claim(
       taskOne.id,
-      { by: "agent:t1" },
+      { by: "agent:t1", harnessRun: runOfName("agent:t1") },
       () => "2026-07-11T09:00:00.000Z",
     );
     expect(first.ok).toBe(true);
 
     const refresh = await taskWorkflowService.claim(
       taskOne.id,
-      { by: "agent:t1" },
+      { by: "agent:t1", harnessRun: runOfName("agent:t1") },
       () => "2026-07-11T09:30:00.000Z",
     );
     expect(refresh.ok).toBe(true);
@@ -234,10 +235,10 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
     const taskTwo = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1" });
+    const first = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1" });
+    const second = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.extra["claim"]).toMatchObject({ by: "agent:t1" });
@@ -254,9 +255,9 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const planId = await createTopLevelPlan(corpusService);
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1" });
+    const first = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
-    const second = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1" });
+    const second = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(second.ok).toBe(true);
 
     const doc = await store.find(taskOne.id);
@@ -280,11 +281,11 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const taskTwo = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
     interleaveFirstUpdate(store, taskOne.id, async () => {
-      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1" });
+      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2" });
+    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(result.ok).toBe(true); // anchor_overlap disabled — both claims coexist, as configured
 
     const doc = await store.find(taskOne.id);
@@ -302,11 +303,11 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const taskTwo = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
     interleaveFirstUpdate(store, taskOne.id, async () => {
-      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1" });
+      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2" });
+    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(result.ok).toBe(true);
 
     const doc = await store.find(taskOne.id);
@@ -406,7 +407,7 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     await mustInsert(store, makePlanRecord());
     await mustInsert(store, makePhaseRecord({ extra: { file_anchors: ["src/a"] } }));
 
-    const result = await phaseWorkflowService.claim("phase-one", { by: "agent:p1" });
+    const result = await phaseWorkflowService.claim("phase-one", { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(result.ok).toBe(true);
   });
 
@@ -426,11 +427,11 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     );
 
     interleaveFirstUpdate(store, phaseOne.id, async () => {
-      const claimTwo = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1" });
+      const claimTwo = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1", harnessRun: runOfName("agent:p1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p2" });
+    const result = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p2", harnessRun: runOfName("agent:p2") });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -469,10 +470,10 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
       }),
     );
 
-    const first = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1" });
+    const first = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(first.ok).toBe(true);
 
-    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1" });
+    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(second.ok).toBe(true);
 
     // BOTH claims live, both carrying the one captured session instance.
@@ -484,12 +485,9 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     });
   });
 
-  // STATE (control) — the SAME pair with NO session env is still refused with the
-  // explicit not-measured marker rather than silently permitted (a permit is
-  // indistinguishable from a truthful no-conflict — the exact silence the governing
-  // ADR's Q2 forbids). Without this control the test above would also pass under a
-  // restored blanket same-`by` exemption, the very proxy that was retired.
-  it("STATE: the same pair with NO measured session is still refused as session-not-measured", async () => {
+  // STATE (control) — the SAME name under a DIFFERENT run is refused as a foreign run (BR-1056): without this
+  // control the test above would also pass under a restored blanket same-`by` exemption, the proxy that was retired.
+  it("STATE: the same name under ANOTHER run is still refused as a foreign run", async () => {
     const { store, phaseWorkflowService } = makePhaseServices(undefined, /* withGate */ true, {});
     await mustInsert(store, makePlanRecord());
     const phaseOne = await mustInsert(store, makePhaseRecord({ extra: { file_anchors: ["src/a"] } }));
@@ -503,14 +501,14 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
       }),
     );
 
-    const first = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1" });
+    const first = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1", harnessRun: runOfName("run-one") });
     expect(first.ok).toBe(true);
 
-    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1" });
+    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1", harnessRun: runOfName("run-two") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect((second.error as { field?: string }).field).toBe("gate:phase-claim:anchor-overlap");
-    expect(JSON.stringify(second.error)).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
+    expect(JSON.stringify(second.error)).toContain("ANCHOR_OVERLAP");
 
     // The refused claim persisted nothing — phase one is still unclaimed.
     const doc = await store.find(phaseOne.id);
@@ -524,9 +522,9 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     await mustInsert(store, makePlanRecord());
     const phaseOne = await mustInsert(store, makePhaseRecord({ extra: { file_anchors: ["src/a"] } }));
 
-    const first = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1" });
+    const first = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(first.ok).toBe(true);
-    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1" });
+    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1", harnessRun: runOfName("agent:p1") });
     expect(second.ok).toBe(true);
   });
 
@@ -546,11 +544,11 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     );
 
     interleaveFirstUpdate(store, phaseOne.id, async () => {
-      const claimTwo = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1" });
+      const claimTwo = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1", harnessRun: runOfName("agent:p1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p2" });
+    const result = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p2", harnessRun: runOfName("agent:p2") });
     expect(result.ok).toBe(true);
 
     const doc = await store.find(phaseOne.id);

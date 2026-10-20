@@ -1,24 +1,22 @@
 // @spawns packages/lore/src/index.ts
 /**
- * RED: claim conflicts are decided by harness RUN, on BOTH the task and the phase claim path.
+ * Claim conflicts are decided by harness RUN ONLY, on BOTH the task and the phase claim path.
  *
  * @spec_ref AC-RID-12
  *   spec-run-identity-slice-1-harness-attested-runs-attested D1 (global `--harness-run <id>`
  *   flag, stripped at the CLI entry) / D2 (run ids `cc:<session>`) / D6 (`hasClaimConflict`:
- *   two different runs, or exactly one side unattested => conflict; same run => refresh; both
- *   unattested => compare by name; stale => takeover) / D11; BR-1040, BR-1041.
- *
- * Today both services compare `existingClaim.by === opts.by`. Every case where the verdict
- * depends on the RUN and not on the name therefore fails; the cases where both parties are
- * unattested (by-name comparison) are controls that must stay green.
+ *   two different runs => conflict; same run => refresh; stale => takeover) / D11; BR-1040, BR-1041.
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4: claims compare runs only)
+ *   spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 4: claims compare runs, never names
+ *   (BR-1040, BR-1043, BR-1056, BR-130). A lease that names no run belongs to nobody and conflicts with everyone.
  *
  * The same scenarios run for a task target and a phase target (`describe.each`): the
  * 2026-08-03 incident fixed one path only, so a single-path pass proves nothing.
  *
  * Never touches the repo's own `.lore/` — one mkdtemp corpus per file (`lore init`).
  *
- * Coverage: HAPPY (refresh, takeover, steal) / NEGATIVE (R2, unattested, attested-vs-unattested)
- *           / BOUNDARY (stale takeover) / STATE (stored harness_run key) / REGRESSION (by-name).
+ * Coverage: HAPPY (refresh, takeover, steal) / NEGATIVE (a second run under the SAME name, a run-less lease) /
+ *           BOUNDARY (stale takeover) / STATE (stored harness_run key) / REGRESSION (a name never decides).
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -34,7 +32,9 @@ import {
   createCorpus,
   getClaim,
   latestHistory,
+  minutesAgo,
   registerRun,
+  seedClaim,
   type Corpus,
   type Kind,
 } from "./support/claim-run-fixture.js";
@@ -57,11 +57,19 @@ afterAll(() => {
 });
 
 describe.each(KINDS)("claim conflict by run — %s claim path", (kind: Kind) => {
-  async function heldBy(run: string | undefined, by: string = NAME): Promise<string> {
+  async function heldBy(run: string, by: string = NAME): Promise<string> {
     const target = await corpus.newTarget(kind);
-    if (run !== undefined) registerRun(corpus.dir, run);
-    const first = claim(corpus.dir, target, by, { ...(run !== undefined ? { run } : {}) });
+    registerRun(corpus.dir, run);
+    const first = claim(corpus.dir, target, by, { run });
     expect(first.exitCode).toBe(0);
+    return target;
+  }
+
+  /** A fresh lease written by something that named no run (the shape every claim had before runs were compared). */
+  async function heldByNoRun(by: string = NAME): Promise<string> {
+    const target = await corpus.newTarget(kind);
+    seedClaim(corpus.dir, target, { by, at: minutesAgo(5) });
+    expect(getClaim(corpus.dir, target)).not.toHaveProperty("harness_run");
     return target;
   }
 
@@ -87,7 +95,7 @@ describe.each(KINDS)("claim conflict by run — %s claim path", (kind: Kind) => 
     expect(r.stderr).toContain(R1);
   });
 
-  it("refuses a claimant with no attestation against a fresh claim by R1, naming R1, even with the SAME name", async () => {
+  it("refuses a claimant running as ANOTHER session's run against a fresh claim by R1, naming R1, even with the SAME name", async () => {
     const target = await heldBy(R1);
 
     const r = claim(corpus.dir, target, NAME);
@@ -97,16 +105,16 @@ describe.each(KINDS)("claim conflict by run — %s claim path", (kind: Kind) => 
     expect(getClaim(corpus.dir, target)?.harness_run).toBe(R1);
   });
 
-  it("refuses an attested claimant against a fresh UNATTESTED holder, even with the SAME name", async () => {
-    const target = await heldBy(undefined);
+  it("a lease that names no run belongs to nobody: even a claimant with the holder's SAME name is refused, naming the holder", async () => {
+    const target = await heldByNoRun(NAME);
     registerRun(corpus.dir, R1);
 
     const r = claim(corpus.dir, target, NAME, { run: R1 });
 
     expect(r.exitCode).toBe(CLAIM_CONFLICT_EXIT);
+    expect(r.stderr).toContain(NAME);
     expect(r.stderr).toMatch(AGE);
-    const stored = getClaim(corpus.dir, target);
-    expect(stored?.harness_run ?? null).toBeNull();
+    expect(getClaim(corpus.dir, target)).not.toHaveProperty("harness_run");
   });
 
   it("refreshes: R1 claiming again advances the lease timestamp and keeps R1 as the holder", async () => {
@@ -142,14 +150,15 @@ describe.each(KINDS)("claim conflict by run — %s claim path", (kind: Kind) => 
     expect(getClaim(corpus.dir, target)?.harness_run).toBe(R2);
   });
 
-  it("takes over a STALE claim by R1 for an unattested claimant without --steal (stale rule beats run rule)", async () => {
-    const target = await heldBy(R1);
-    ageClaim(corpus.dir, target, 600);
+  it("takes over a STALE lease that names no run without --steal (stale rule beats run rule)", async () => {
+    const target = await corpus.newTarget(kind);
+    seedClaim(corpus.dir, target, { by: NAME, at: minutesAgo(600) });
+    registerRun(corpus.dir, R2);
 
-    const r = claim(corpus.dir, target, OTHER_NAME);
+    const r = claim(corpus.dir, target, OTHER_NAME, { run: R2 });
 
     expect(r.exitCode).toBe(0);
-    expect(getClaim(corpus.dir, target)?.harness_run ?? null).toBeNull();
+    expect(getClaim(corpus.dir, target)?.harness_run).toBe(R2);
   });
 
   it("--steal by R2 over R1's fresh claim succeeds and the history names R1 as previous and R2 as new", async () => {
@@ -165,30 +174,11 @@ describe.each(KINDS)("claim conflict by run — %s claim path", (kind: Kind) => 
     expect(history).toContain(R2);
   });
 
-  it("stores the claiming run on the claim as a harness_run key; an unattested claim stores the key as null, not absent", async () => {
-    const attested = await heldBy(R1);
-    const unattested = await heldBy(undefined, OTHER_NAME);
+  it("every claim stores the claiming run as a harness_run key (never absent, never null)", async () => {
+    const first = await heldBy(R1);
+    const second = await heldBy(R2, OTHER_NAME);
 
-    expect(getClaim(corpus.dir, attested)).toHaveProperty("harness_run", R1);
-    expect(getClaim(corpus.dir, unattested)).toHaveProperty("harness_run", null);
-  });
-
-  // ── Controls: neither side attested => compare by name, exactly as before (green today) ──
-
-  it("CONTROL: two unattested parties with the SAME name — the second claim refreshes", async () => {
-    const target = await heldBy(undefined);
-
-    const r = claim(corpus.dir, target, NAME);
-
-    expect(r.exitCode).toBe(0);
-  });
-
-  it("CONTROL: two unattested parties with DIFFERENT names — the second claim is refused naming the holder", async () => {
-    const target = await heldBy(undefined);
-
-    const r = claim(corpus.dir, target, OTHER_NAME);
-
-    expect(r.exitCode).toBe(CLAIM_CONFLICT_EXIT);
-    expect(r.stderr).toContain(NAME);
+    expect(getClaim(corpus.dir, first)).toHaveProperty("harness_run", R1);
+    expect(getClaim(corpus.dir, second)).toHaveProperty("harness_run", R2);
   });
 });

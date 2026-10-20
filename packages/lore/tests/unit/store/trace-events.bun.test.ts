@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -51,7 +52,7 @@ describe("migration-011 (trace_events) — schema (AC-TRACE-1)", () => {
     // the head — a fresh store runs every migration up to it, not just
     // through migration-011. This test's own concern (trace_events + its
     // four indexes) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
 
     const tables = (
       db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]
@@ -308,7 +309,7 @@ describe("AC-TRACE-7: Turso isolation — local-only trace writes", () => {
       // (never `this.client`) — proves migration-011 lands identically on a
       // replica-shaped local file, independent of any remote Turso state.
       const localTraceStore = actedStore(new SQLiteStore(replicaPath));
-      expect(userVersion(localTraceStore.getDatabase())).toBe(26);
+      expect(userVersion(localTraceStore.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
 
       const insertResult = await localTraceStore.insertTraceEvent({
         ts: "2026-07-28T00:00:00.000Z",

@@ -402,7 +402,7 @@ export default defineLoreCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const acIds = normalizeRepeatableFlag(args.ac);
-      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv);
       const allowNewCommands = args["allow-new-commands"] === true;
 
       // reason: SPEC-039 §M2 trust-hardening advisory — `lore verify` shells out to

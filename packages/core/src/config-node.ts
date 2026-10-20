@@ -46,6 +46,7 @@ import {
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
+import { removeRetiredActorIdentityGate, RETIRED_ACTOR_IDENTITY_FIELD } from "./retired-actor-identity-migration.js";
 
 /** The invocation environment the global-config path resolvers read (`Invocation.env`). */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
@@ -94,7 +95,8 @@ export interface ConfigKeysMigration {
 
 /**
  * The explicit, one-time rename of retired config keys in `<dir>/.lore/config.yaml` (`lore migrate config-keys`):
- * currently `workflow.gates."plan-close".prd_sync` -> `cited_rule_check` (BL-D3). Only the key text changes; every
+ * `workflow.gates."plan-close".prd_sync` -> `cited_rule_check` (BL-D3), and the removal of the retired
+ * retired claim-time identity setting of the `task-claim` gate (claims compare runs only). Only those keys change; every
  * other byte of the file is identical. The write is atomic (temp file in the same directory, then rename). A second
  * run finds no old key and changes nothing.
  *
@@ -111,13 +113,26 @@ export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKey
     const raw = readFileSync(file, "utf8");
     const renamed = renamePrdSyncConfigKey(raw);
     if (!renamed.ok) return renamed;
-    if (renamed.value === undefined) return ok({ file, renamed: false, written: false, notice: undefined });
-    const notice =
-      `${file}: workflow.gates."plan-close".prd_sync renamed to workflow.gates."plan-close".cited_rule_check ` +
-      `(enabled: ${String(renamed.value.enabled)} kept)`;
+    const afterRename = renamed.value?.text ?? raw;
+    const removed = removeRetiredActorIdentityGate(afterRename);
+    if (!removed.ok) return removed;
+    if (renamed.value === undefined && removed.value === undefined) {
+      return ok({ file, renamed: false, written: false, notice: undefined });
+    }
+    const notices: string[] = [];
+    if (renamed.value !== undefined) {
+      notices.push(
+        `${file}: workflow.gates."plan-close".prd_sync renamed to workflow.gates."plan-close".cited_rule_check ` +
+          `(enabled: ${String(renamed.value.enabled)} kept)`,
+      );
+    }
+    if (removed.value !== undefined) {
+      notices.push(`${file}: ${RETIRED_ACTOR_IDENTITY_FIELD} removed (claims compare runs only; the setting no longer exists)`);
+    }
+    const notice = notices.join("\n");
     if (!apply) return ok({ file, renamed: true, written: false, notice });
     const tempPath = `${file}.migrating-${process.pid}`;
-    writeFileSync(tempPath, renamed.value.text, "utf8");
+    writeFileSync(tempPath, removed.value?.text ?? afterRename, "utf8");
     renameSync(tempPath, file);
     return ok({ file, renamed: true, written: true, notice });
   } catch (e) {

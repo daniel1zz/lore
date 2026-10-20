@@ -1,12 +1,13 @@
 /**
- * `noAnchorOverlap` / `findAnchorOverlapConflict` compare holders by RUN (BR-1056).
+ * `noAnchorOverlap` / `findAnchorOverlapConflict` compare holders by RUN ONLY (BR-1056, BR-1040).
  *
  * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 3.
+ * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4)
  *
- * Coverage: NEGATIVE (two runs sharing a name; exactly one side attested) / HAPPY (the same run is one holder) /
- * REGRESSION (neither side attested keeps the name+session comparison; a stale sibling never conflicts) /
- * BOUNDARY (an absent `harness_run` key counts as no run).
+ * Coverage: NEGATIVE (two runs sharing a name; a missing run on either side) / HAPPY (the same run is one holder) /
+ * REGRESSION (a stale or non-overlapping sibling never conflicts) / BOUNDARY (an absent `harness_run` key counts as
+ * no run; no run equals no run is NOT one holder).
  */
 
 import { describe, expect, it } from "vitest";
@@ -19,37 +20,38 @@ function sibling(overrides: Partial<SiblingClaimInfo> = {}): SiblingClaimInfo {
 }
 
 describe("noAnchorOverlap decides by run", () => {
-  it("NEGATIVE: two runs that share a derived name conflict even with an identical session id", () => {
-    const result = findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: "cc:one", session_id: "3de02220" })], "3de02220", "cc:two");
-
-    expect(result?.kind).toBe("foreign-run");
-    expect(noAnchorOverlap(NAME, ["src/a"], [sibling({ harness_run: "cc:one" })], "3de02220", "cc:two").ok).toBe(false);
+  it("NEGATIVE: two runs that share a derived name conflict", () => {
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: "cc:one" })], "cc:two")?.kind).toBe("foreign-run");
+    expect(noAnchorOverlap(["src/a"], [sibling({ harness_run: "cc:one" })], "cc:two").ok).toBe(false);
   });
 
-  it("NEGATIVE: an unattested claimant against a run-holding sibling is a different holder", () => {
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: "cc:one", session_id: "3de02220" })], "3de02220", null)?.kind).toBe("foreign-run");
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: "cc:one" })], "3de02220")?.kind).toBe("foreign-run");
+  it("NEGATIVE: a claimant with no run against a run-holding sibling is a different holder", () => {
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: "cc:one" })], null)?.kind).toBe("foreign-run");
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: "cc:one" })])?.kind).toBe("foreign-run");
   });
 
-  it("NEGATIVE: an attested claimant against an unattested sibling is a different holder", () => {
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: null, session_id: "3de02220" })], "3de02220", "cc:one")?.kind).toBe("foreign-run");
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling()], "3de02220", "cc:one")?.kind).toBe("foreign-run");
+  it("NEGATIVE: a claimant with a run against a sibling whose lease names no run is a different holder", () => {
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: null })], "cc:one")?.kind).toBe("foreign-run");
+    expect(findAnchorOverlapConflict(["src/a"], [sibling()], "cc:one")?.kind).toBe("foreign-run");
   });
 
-  it("HAPPY: the same run is one holder, whatever the session facts say", () => {
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: "cc:one" })], undefined, "cc:one")).toBeUndefined();
-    expect(noAnchorOverlap(NAME, ["src/a"], [sibling({ harness_run: "cc:one" })], undefined, "cc:one")).toEqual({ ok: true });
+  it("BOUNDARY: no run on either side is NOT one holder: a shared name never makes them one", () => {
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: null })], null)?.kind).toBe("foreign-run");
+    expect(findAnchorOverlapConflict(["src/a"], [sibling()])?.kind).toBe("foreign-run");
   });
 
-  it("REGRESSION: with no run on either side the name-and-session comparison is unchanged", () => {
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ session_id: "3de02220" })], "3de02220")).toBeUndefined();
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ session_id: "7ab19c04" })], "3de02220")?.kind).toBe("foreign-session");
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling()], "3de02220")?.kind).toBe("session-not-measured");
-    expect(findAnchorOverlapConflict("agent:other", ["src/a"], [sibling({ harness_run: null })], undefined, null)?.kind).toBe("foreign-actor");
+  it("HAPPY: the same run is one holder", () => {
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: "cc:one" })], "cc:one")).toBeUndefined();
+    expect(noAnchorOverlap(["src/a"], [sibling({ harness_run: "cc:one" })], "cc:one")).toEqual({ ok: true });
   });
 
   it("REGRESSION: a stale or non-overlapping sibling never conflicts, run or not", () => {
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: "cc:one", stale: true })], undefined, "cc:two")).toBeUndefined();
-    expect(findAnchorOverlapConflict(NAME, ["src/a"], [sibling({ harness_run: "cc:one", anchors: ["src/zzz"] })], undefined, "cc:two")).toBeUndefined();
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: "cc:one", stale: true })], "cc:two")).toBeUndefined();
+    expect(findAnchorOverlapConflict(["src/a"], [sibling({ harness_run: "cc:one", anchors: ["src/zzz"] })], "cc:two")).toBeUndefined();
+  });
+
+  it("REGRESSION: a candidate declaring no anchors conflicts with nothing", () => {
+    expect(findAnchorOverlapConflict([], [sibling({ harness_run: "cc:one" })], "cc:two")).toBeUndefined();
+    expect(noAnchorOverlap(undefined, [sibling({ harness_run: "cc:one" })], "cc:two")).toEqual({ ok: true });
   });
 });

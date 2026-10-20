@@ -28,6 +28,7 @@ import { runSchemaMigration } from "../../src/service/integrate-service.js";
 import type { RunId } from "@lore/core";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { claimBranchTask } from "../helpers/claim-branch-task.js";
+import { scrubIdentityEnv } from "../helpers/test-run-identity.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -208,7 +209,10 @@ class Fixture {
 
   /** `lore integrate` as the party `run` (Bun.spawnSync, so no inherited party): `--harness-run <run>`, or no run at all when `run` is undefined. */
   integrateAs(branch: string, session: string, run: string | undefined): RunResult {
-    const env: Record<string, string | undefined> = { ...this.env(session) };
+    // reason: with no run to name, the spawn must be nobody: the test run's spawn rewrite gives every `lore` start a registered
+    // agent run unless it opts out (`LORE_TEST_IDENTITY=none`), and no identity variable may name a writer.
+    const env: Record<string, string | undefined> =
+      run === undefined ? { ...scrubIdentityEnv(this.env(session)), LORE_TEST_IDENTITY: "none" } : { ...this.env(session) };
     const flag = run === undefined ? [] : ["--harness-run", run];
     const proc = Bun.spawnSync(["bun", "run", INDEX_TS, "integrate", branch, "--session", session, ...flag], { cwd: this.repo, env });
     return { out: `${proc.stdout.toString()}${proc.stderr.toString()}`, exitCode: proc.exitCode ?? 1 };

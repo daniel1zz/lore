@@ -67,7 +67,6 @@ export interface EditScopeDeps {
     candidate: DocRecord,
     siblings: readonly DocRecord[],
     nowIso: string,
-    candidateSessionId?: string,
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>>;
   addAnchors(slug: string, anchors: string[], opts: { by: string; source?: string }): Promise<Result<DocRecord, LoreError>>;
   ignoreProbe: IgnoreProbeFn;
@@ -323,13 +322,11 @@ export async function declareEditPath(deps: EditScopeDeps, input: DeclareEditPat
   // reason: the candidate carries ONLY the new path, so a sibling's overlap with the task's EXISTING anchors (already
   // vetted at claim time) is not re-reported as this declare's conflict.
   const candidate: DocRecord = { ...taskDoc.value, extra: { ...taskDoc.value.extra, file_anchors: [rel] } };
-  const context = await deps.buildSiblingContext(holder.by, candidate, all.value, deps.now(), holder.session_id);
+  const context = await deps.buildSiblingContext(holder.by, candidate, all.value, deps.now());
   if (!context.ok) return context;
   const conflict: AnchorOverlapConflict | undefined = findAnchorOverlapConflict(
-    holder.by,
     [rel],
     narrowDirectoryHolds(deps, context.value.siblingClaims ?? [], input.workingCopy),
-    holder.session_id,
     holder.harness_run ?? null,
   );
   if (conflict !== undefined) {

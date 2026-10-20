@@ -533,7 +533,7 @@ export default defineLoreCommand({
             return exitCode(taskInputResult.error);
           }
 
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const createResult = await app.corpusService.create(taskInputResult.value, { by });
 
           if (!createResult.ok) {
@@ -765,7 +765,7 @@ export default defineLoreCommand({
             resolvedPointer = { [requiredPointer.extraKey]: pointerDoc.id };
           }
 
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const nowIso = new Date().toISOString();
           const existingIssueReport = issueDoc.extra["issue_report"] as Record<string, unknown>;
           // reason: RMW merge — spread the FULL existing extra first so every

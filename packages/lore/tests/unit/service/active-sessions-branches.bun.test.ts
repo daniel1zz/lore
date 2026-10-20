@@ -39,6 +39,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -122,7 +123,7 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:t1", worktree: repoRoot });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1"), worktree: repoRoot });
     expect(claimResult.ok).toBe(true);
 
     const bootstrap = await sessionService.bootstrap("agent:t1");
@@ -138,7 +139,7 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t2", worktree: repoRoot });
+    await taskWorkflowService.claim(taskId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), worktree: repoRoot });
 
     const bootstrap = await sessionService.bootstrap("agent:t2");
     expect(bootstrap.ok).toBe(true);
@@ -154,9 +155,9 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     const { taskId: taskA } = await createPlanAndTask(corpusService, "Task A");
     const { taskId: taskB } = await createPlanAndTask(corpusService, "Task B");
 
-    expect((await taskWorkflowService.claim(taskA, { by: "agent:t3", worktree: repoRoot })).ok).toBe(true);
+    expect((await taskWorkflowService.claim(taskA, { by: "agent:t3", harnessRun: runOfName("agent:t3"), worktree: repoRoot })).ok).toBe(true);
     // one working copy carries one unlanded task: the second claim is refused and writes nothing
-    expect((await taskWorkflowService.claim(taskB, { by: "agent:t3", worktree: repoRoot })).ok).toBe(false);
+    expect((await taskWorkflowService.claim(taskB, { by: "agent:t3", harnessRun: runOfName("agent:t3"), worktree: repoRoot })).ok).toBe(false);
 
     const bootstrap = await sessionService.bootstrap("agent:t3");
     expect(bootstrap.ok).toBe(true);
@@ -172,7 +173,7 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     const { taskId } = await createPlanAndTask(corpusService);
     const fakeWorktree = "/definitely/does/not/exist/lore-ac-own-3";
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t4", worktree: fakeWorktree });
+    await taskWorkflowService.claim(taskId, { by: "agent:t4", harnessRun: runOfName("agent:t4"), worktree: fakeWorktree });
 
     const bootstrap = await sessionService.bootstrap("agent:t4");
     expect(bootstrap.ok).toBe(true);
@@ -187,14 +188,14 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t5", worktree: repoRoot });
+    await taskWorkflowService.claim(taskId, { by: "agent:t5", harnessRun: runOfName("agent:t5"), worktree: repoRoot });
     let bootstrap = await sessionService.bootstrap("agent:t5");
     expect(bootstrap.ok).toBe(true);
     if (bootstrap.ok) {
       expect(findSessionByWorktree(bootstrap.value.active_sessions, repoRoot)).toBeDefined();
     }
 
-    await taskWorkflowService.release(taskId, { by: "agent:t5" });
+    await taskWorkflowService.release(taskId, { by: "agent:t5", harnessRun: runOfName("agent:t5") });
     bootstrap = await sessionService.bootstrap("agent:t5");
     expect(bootstrap.ok).toBe(true);
     if (!bootstrap.ok) return;

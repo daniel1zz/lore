@@ -18,7 +18,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { isatty } from "node:tty";
-import type { Invocation } from "@lore/core";
+import { isAgentRunId, type Invocation } from "@lore/core";
 import { generateNonce, type HumanChannelOutcome, type HumanChannelPorts, type HumanTerminal, type ProcessEntry } from "../service/human-channel.js";
 
 const MAX_PS_BYTES = 64 * 1024 * 1024;
@@ -102,7 +102,9 @@ export function createProductionHumanChannelPorts(inv: Invocation, overrides: Pa
       const args = inv.argv;
       // reason: the UNVERIFIED id is deliberate here; surfacing an unregistered run makes the channel refuse, the safe direction (BR-1035).
       const harnessRun = inv.identity.harnessRun;
-      return harnessRun != null ? [...args, "--harness-run", String(harnessRun)] : args;
+      // reason: only an AGENT run is an agent identity; a person's own run (`human:...` of their open session) is exactly who
+      // answers this channel, so surfacing it would refuse every human (BR-1350).
+      return harnessRun != null && isAgentRunId(String(harnessRun)) ? [...args, "--harness-run", String(harnessRun)] : args;
     },
     selfPid: () => process.pid,
     readProcessTable: () => readLiveProcessTable(inv.cwd),

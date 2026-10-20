@@ -142,7 +142,7 @@ export default defineLoreCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const result = await requirePlanExemptionService(app).exemptAttestation(
             args.plan as string,
             { reason: checked.reason, kind: checked.kind, by },
@@ -187,7 +187,7 @@ export default defineLoreCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const result = await requirePlanExemptionService(app).setIntegrationBranch(args.plan as string, {
             branch: args.branch as string,
             by,
@@ -227,7 +227,7 @@ export default defineLoreCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const result = await requirePlanExemptionService(app).exemptAssessmentFreshness(
             args.plan as string,
             { reason: checked.reason, by },

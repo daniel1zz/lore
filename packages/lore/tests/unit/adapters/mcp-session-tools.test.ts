@@ -76,7 +76,8 @@ import {
 } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput } from "@lore/core";
-import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
+import { asSessionActor, sessionActorFor, sessionIdFor } from "../../helpers/session-actor.js";
+import type { RunId } from "@lore/core";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools-feed.test.ts) ────────────────────
@@ -327,8 +328,9 @@ describe("lore_handoff", () => {
 
       // reason: this IS what commands/handoff.ts's `run()` calls after validation —
       // the CLI's --json `data` field for an equivalent write against the same corpus state.
-      // The MCP call is unattested (no harness_run), so the equivalent CLI-shaped write names no run either.
-      const cliShapeResult = await sessionService.writeHandoff(input, undefined, { run: null });
+      // The MCP call runs as the server's invocation identity (the agent run of that session), so the equivalent CLI-shaped
+      // write names the same run (a write is always made by a known party, BR-1351).
+      const cliShapeResult = await sessionService.writeHandoff(input, undefined, { run: `cc:${sessionIdFor("claude")}` as RunId });
       if (!cliShapeResult.ok) throw new Error(JSON.stringify(cliShapeResult.error));
 
       expect(mcpData.doc.extra).toEqual(cliShapeResult.value.extra);

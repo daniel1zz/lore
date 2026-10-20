@@ -37,9 +37,10 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
 - **No MCP write tool declares `by`** (AC-ROI-1, BR-1055) — only the read-side filters `lore_feed`/`lore_bootstrap` do (pinned in `adapters/read-side-by-filters.ts`). Every object schema is registered `.strict()` (the one refine-wrapped read tool, `lore_rule_find`, never took `by`), so a caller naming `by` (or `reviewer`) is REFUSED, never stripped. Every write tool takes an optional
   `harness_run` (spec-run-identity-slice-1). A schema that declares
   `harness_run` is an ATTESTED tool: `call-scope.ts::McpCallScope.run` builds ONE
-  identity per call (from `harness_run` alone; the name is the server's session/OS tier), opens a
-  call-scoped App via `App.forWriteContext` (store wrapped for that identity,
-  run verified once), runs the handler, closes it. Handlers get `by`/`recorded_by`
+  identity per call (from `harness_run` alone; the name derives from that run, and a call
+  without one has no known party: its writes are refused, its reads proceed), opens a
+  call-scoped App via `App.forWriteContext` (store wrapped for that identity; the run is
+  verified at the first write and an unregistered run is refused), runs the handler, closes it. Handlers get `by`/`recorded_by`
   FILLED from the call's resolved name and never see `harness_run`; claim/release
   read the verified run from `requireCallIdentity`. One call = one identity, so a
   `lore_batch` stamps every operation alike. The long-lived server's env is never

@@ -114,7 +114,6 @@ import {
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
   noAnchorOverlap,
-  actorIdentityGuard,
   acQuantifiable,
   acCountMeetsFloor,
   uatP0Accepted,
@@ -134,7 +133,6 @@ import {
   type AcCiteRuleStates,
   findAnchorOverlapConflict,
   ANCHOR_OVERLAP_FIELD,
-  ACTOR_IDENTITY_FIELD,
   AC_QUANTIFIABLE_FIELD,
   NO_ACCEPTANCE_CRITERIA_REASON,
   DEFAULT_MIN_ACS,
@@ -149,7 +147,6 @@ import {
   CITED_RULE_STATE_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
   isNotApplicable,
-  type AnchorOverlapConflictKind,
   type PredicateResult,
   type ApplicablePredicateResult,
   type SiblingClaimInfo,
@@ -400,49 +397,10 @@ export interface GateContext {
    */
   readonly anchorOverlapEnabled?: boolean;
   /**
-   * How `candidateBy` was resolved (spec claim-time-actor-identity-guard-zero-
-   * evidence-release-advis, AC-IDENTITY-REJECT) — populated UNCONDITIONALLY by
-   * a caller that resolved it (`TaskWorkflowService.enforceClaimGate` from
-   * `ClaimOpts.identitySource`); `undefined` for every caller that doesn't
-   * (`PhaseWorkflowService`, `lore gate task-claim`'s CLI pre-flight dry-run) —
-   * `actorIdentityGuard` treats `undefined` as an automatic pass, same as any
-   * non-`"os-fallback"` value. A plain `string`, not the `ActorSource` type
-   * (`@lore/core/node`) — this module stays free of that Node-only import
-   * (mirrors `gate-predicates.ts`'s own `OS_DEFAULT_IDENTITY_SOURCE` JSDoc).
-   */
-  readonly candidateIdentitySource?: string;
-  /** The candidate claim's own `worktree` (SPEC-042 D2), consumed by `actorIdentityGuard`. */
-  readonly candidateWorktree?: string;
-  /** The candidate claim's own `machine` (SPEC-042 D2), consumed by `actorIdentityGuard`. */
-  readonly candidateMachine?: string;
-  /**
-   * The claiming SESSION INSTANCE — the `TaskClaim.session_id` the caller
-   * captured for the claim it is about to write
-   * (task-two-concurrent-orchestrators-both-resolve-to-agent-main §Required fix
-   * 1/3), consumed by `noAnchorOverlap`/`findAnchorOverlapConflict`.
-   *
-   * ABSENT means "this side's session was never measured", which makes every
-   * same-`by` overlap a NOT-MEASURED refusal rather than a permit — so a caller
-   * that CAN measure it and forgets to thread it does not silently weaken the
-   * gate, it makes it stricter (the fail-safe direction). Populated by
-   * `TaskWorkflowService.enforceClaimGate` and by `lore gate task-claim`'s CLI
-   * pre-flight (parity with the real claim); NOT yet by the phase-claim surfaces
-   * — `PhaseWorkflowService.claim` does not capture a session id at all, so
-   * threading one there would make the pre-flight and the real claim disagree.
-   */
-  readonly candidateSessionId?: string;
-  /**
-   * The claimant's attested run (BR-1056), `null`/absent = unattested. `noAnchorOverlap` compares holders by
-   * run whenever either side carries one. Populated by the claim services and `lore gate task-claim`.
+   * The claimant's run (BR-1056), `null`/absent = no run. `noAnchorOverlap` compares holders by run only; a missing
+   * run is never equal to another missing run. Populated by the claim services and `lore gate task-claim`.
    */
   readonly candidateRun?: string | null;
-  /**
-   * `workflow.gates."task-claim".actor_identity.enabled` resolved by the
-   * CALLER (AC-IDENTITY-ESCAPE) — `false` skips `actorIdentityGuard` entirely,
-   * leaving `noAnchorOverlap`/`upstreamApproved` untouched. Absent means
-   * enabled (same default philosophy as `anchorOverlapEnabled`).
-   */
-  readonly actorIdentityEnabled?: boolean;
 
   // -- task-create: check() (spec-declaring-ac-scope-is-required-at-task-creation-so-the) --
   /**
@@ -1237,37 +1195,11 @@ export function planPromoteReachabilityAdvisory(ctx: GateContext): string | null
  * short-circuit `checkPlanPromote` also uses. See this module's fourth
  * invariant for why these two predicates deliberately do NOT share one
  * short-circuit.
- *
- * `actorIdentityGuard` (spec claim-time-actor-identity-guard-zero-evidence-
- * release-advis, AC-IDENTITY-REJECT) runs alongside `noAnchorOverlap`,
- * subject only to its own `ctx.actorIdentityEnabled` knob (AC-IDENTITY-
- * ESCAPE) — NOT gated by `hasSpecParent` either, same rationale: a top-level/
- * prd-parented plan is exactly where orchestrator discipline was previously
- * the ONLY protection against the identity-collapse failure mode.
  */
 function checkTaskClaim(ctx: GateContext): PredicateResult[] {
   const results: PredicateResult[] = [];
   if (ctx.anchorOverlapEnabled !== false) {
-    results.push(
-      noAnchorOverlap(
-        ctx.candidateBy,
-        ctx.candidateAnchors,
-        ctx.siblingClaims,
-        ctx.candidateSessionId,
-        ctx.candidateRun,
-      ),
-    );
-  }
-  if (ctx.actorIdentityEnabled !== false) {
-    results.push(
-      actorIdentityGuard(
-        ctx.candidateBy,
-        ctx.candidateIdentitySource,
-        ctx.candidateWorktree,
-        ctx.candidateMachine,
-        ctx.siblingClaims,
-      ),
-    );
+    results.push(noAnchorOverlap(ctx.candidateAnchors, ctx.siblingClaims, ctx.candidateRun));
   }
   if (ctx.hasSpecParent === true) {
     results.push(upstreamApproved(ctx.parentSpec, "spec"));
@@ -1385,21 +1317,16 @@ function feedAnchorOverlap(
   failures: PredicateResult[],
   checkpointLabel: string,
 ): string {
-  const conflict = findAnchorOverlapConflict(
-    ctx.candidateBy,
-    ctx.candidateAnchors,
-    ctx.siblingClaims,
-    ctx.candidateSessionId,
-    ctx.candidateRun,
-  );
+  const conflict = findAnchorOverlapConflict(ctx.candidateAnchors, ctx.siblingClaims, ctx.candidateRun);
   let conflictLine = "(no specific conflicting sibling could be identified)";
   if (conflict !== undefined) {
-    const { sibling, pairs, kind } = conflict;
+    const { sibling, pairs } = conflict;
     const pathsStr = pairs.map(([a, b]) => `${a} × ${b}`).join(", ");
     conflictLine =
       `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by ${sibling.by}. ` +
       `Overlapping paths: ${pathsStr}. ` +
-      `${renderSessionVerdictLine(kind, ctx.candidateSessionId, sibling.session_id, ctx.candidateRun, sibling.harness_run)} ` +
+      `Held by a DIFFERENT run (this run: ${ctx.candidateRun ?? "(none)"}, holder's run: ` +
+      `${sibling.harness_run ?? "(none)"}) — a shared name does not make two runs one holder. ` +
       `Recovery: \`lore release ${sibling.slug} --force\`; sessions register their own run via the ` +
       `agent integration (\`lore setup\`).`;
   }
@@ -1407,91 +1334,8 @@ function feedAnchorOverlap(
     ruleSource: "corpus (sibling task claims)",
     ruleMarkdown:
       `Required for ${checkpointLabel}: declared file_anchors must not overlap a FRESH claim held ` +
-      `by a different SESSION on another task in the same plan (a shared actor string is not ` +
-      `evidence of a shared session). ${conflictLine}`,
-    missing: selectFailures(failures).map((f) => f.reason),
-  });
-  return renderFeedingPack(pack);
-}
-
-/**
- * The one sentence explaining WHICH of the three conflict kinds
- * `findAnchorOverlapConflict` found — so the refusal distinguishes "provably a
- * different session" from "could not tell", the distinction
- * task-two-concurrent-orchestrators-both-resolve-to-agent-main §Silence requires
- * the gate to SAY rather than resolve silently in the permissive direction.
- *
- * @param kind - The conflict classification.
- * @param candidateSessionId - The claiming side's captured session id, if any.
- * @param siblingSessionId - The sibling claim's recorded session id, if any.
- * @returns A sentence naming the measured/unmeasured session facts.
- */
-function renderSessionVerdictLine(
-  kind: AnchorOverlapConflictKind,
-  candidateSessionId: string | undefined,
-  siblingSessionId: string | undefined,
-  candidateRun?: string | null,
-  siblingRun?: string | null,
-): string {
-  switch (kind) {
-    case "foreign-run":
-      return (
-        `Held by a DIFFERENT run (this run: ${candidateRun ?? "(unattested)"}, holder's run: ` +
-        `${siblingRun ?? "(unattested)"}) — a shared name does not make two runs one holder.`
-      );
-    case "foreign-actor":
-      return "Held by a DIFFERENT actor.";
-    case "foreign-session":
-      return (
-        `Same actor, DIFFERENT session instance (this session: ${candidateSessionId ?? "(none)"}, ` +
-        `holder's session: ${siblingSessionId ?? "(none)"}) — two concurrent sessions can share one ` +
-        `name, so the anchor mutex applies.`
-      );
-    case "session-not-measured":
-      return (
-        `Same actor, and the session instance is NOT MEASURED on at least one side (this session: ` +
-        `${candidateSessionId ?? "(not measured)"}, holder's session: ` +
-        `${siblingSessionId ?? "(not measured)"}) — not evidence of one session, so this ` +
-        `claim is refused. Re-claim it from its own session, or release it.`
-      );
-  }
-}
-
-/**
- * Renders the actor-identity-collision-specific feeding pack (spec claim-time-
- * actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) —
- * names the conflicting sibling's slug/holder/worktree and the concrete
- * recovery (install the agent integration, `lore setup`, so each session registers its own run).
- * Mirrors `feedAnchorOverlap`'s "recompute the offending sibling from ctx"
- * shape — pointers only, never sibling body content.
- *
- * @param checkpointLabel - `"task-claim"` or `"phase-claim"` (SPEC-056 D2/D7),
- *   threaded through so one function renders both checkpoints' label.
- */
-function feedActorIdentity(
-  ctx: GateContext,
-  failures: PredicateResult[],
-  checkpointLabel: string,
-): string {
-  let conflictLine = "(no specific conflicting sibling could be identified)";
-  for (const sibling of ctx.siblingClaims ?? []) {
-    if (sibling.stale) continue;
-    if (sibling.by !== ctx.candidateBy) continue;
-    conflictLine =
-      `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by the SAME untraceable ` +
-      `identity "${sibling.by}" from a different worktree/machine (worktree: ` +
-      `${sibling.worktree ?? "(unknown)"}). ` +
-      `Recovery: install the agent integration (\`lore setup\`) so THIS session registers its own run, ` +
-      `then retry the claim.`;
-    break;
-  }
-  const pack = buildFeedingPack({
-    ruleSource: "corpus (sibling task claims)",
-    ruleMarkdown:
-      `Required for ${checkpointLabel}: an actor resolved via the untraceable OS-username ` +
-      `fallback must not collide with a FRESH claim held under the IDENTICAL "by" from a ` +
-      `different worktree/machine in the same plan — that pattern means two DIFFERENT sessions ` +
-      `silently collapsed onto one identity (SPEC-042 D10). ${conflictLine}`,
+      `by a different RUN on another task in the same plan (a shared actor string is not ` +
+      `evidence of a shared run). ${conflictLine}`,
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);
@@ -1500,10 +1344,7 @@ function feedActorIdentity(
 /**
  * `task-claim`'s (and, since SPEC-056 D2/D7, `phase-claim`'s) feeding message —
  * dispatches to {@link feedAnchorOverlap} when the anchor-overlap predicate
- * failed (SPEC-042 D5 — its own dedicated, conflict-detail-bearing message),
- * to {@link feedActorIdentity} when the actor-identity predicate failed (AC-
- * IDENTITY-REJECT — checked SECOND, after anchor-overlap, so a claim failing
- * BOTH keeps anchor-overlap's pre-existing message, REGRESSION-safe), else
+ * failed (SPEC-042 D5 — its own dedicated, conflict-detail-bearing message), else
  * falls back to the upstream-spec-approval message. Checkpoint-agnostic
  * (`checkpointLabel` threaded through) so `feedTaskClaim`/`feedPhaseClaim`
  * below are both thin one-line wrappers over this shared implementation —
@@ -1518,10 +1359,6 @@ function feedTaskOrPhaseClaim(
   const anchorFailed = failures.some((f) => !f.ok && f.field === ANCHOR_OVERLAP_FIELD);
   if (anchorFailed) {
     return feedAnchorOverlap(ctx, failures, checkpointLabel);
-  }
-  const identityFailed = failures.some((f) => !f.ok && f.field === ACTOR_IDENTITY_FIELD);
-  if (identityFailed) {
-    return feedActorIdentity(ctx, failures, checkpointLabel);
   }
   return feedUpstreamSpecCheckpoint(
     ctx,
@@ -2701,10 +2538,9 @@ function feedAcCite(ctx: GateContext, _failures: PredicateResult[]): string {
 }
 
 /**
- * Builds the `candidateBy` / `candidateAnchors` / `siblingClaims` /
- * `candidateSessionId` set `task-claim`'s `noAnchorOverlap` predicate consumes
- * (SPEC-042 §Design Decisions D5, extended by
- * task-two-concurrent-orchestrators-both-resolve-to-agent-main) — co-located
+ * Builds the `candidateBy` / `candidateAnchors` / `siblingClaims`
+ * set `task-claim`'s `noAnchorOverlap` predicate consumes
+ * (SPEC-042 §Design Decisions D5, run-keyed by BR-1056) — co-located
  * with {@link buildUpstreamSpecContext} per the
  * same "SSOT ctx-builder both `lore gate task-claim` and the service-layer
  * `GateEnforcer` caller build from" rationale. Populated from a plan bundle's
@@ -2723,13 +2559,6 @@ function feedAcCite(ctx: GateContext, _failures: PredicateResult[]): string {
  *   including `candidateTask` itself — filtered out below).
  * @param nowIso - Caller-supplied current time (D10 — never Date.now() here).
  * @param ttlMinutes - Claim TTL in minutes, forwarded to `isClaimStale`.
- * @param candidateSessionId - The claiming session's captured
- *   `TaskClaim.session_id` (see {@link GateContext.candidateSessionId}).
- *   Deliberately a PARAMETER, never read from `process.env` inside this builder:
- *   an ambient read here would make every gate unit test's verdict depend on
- *   whether the test process happens to run under a Claude Code session — a
- *   machine-dependent oracle, which is worse than no oracle. The SERVICE captures
- *   it (`TaskWorkflowService.claim`) and hands it down.
  */
 export function buildAnchorGateContext(
   candidateBy: string,
@@ -2737,8 +2566,7 @@ export function buildAnchorGateContext(
   siblingTasks: DocRecord[],
   nowIso: string,
   ttlMinutes: number,
-  candidateSessionId?: string,
-): Pick<GateContext, "candidateBy" | "candidateAnchors" | "siblingClaims" | "candidateSessionId"> {
+): Pick<GateContext, "candidateBy" | "candidateAnchors" | "siblingClaims"> {
   const candidateAnchors = extractFileAnchors(candidateTask);
   const siblingClaims: SiblingClaimInfo[] = [];
   for (const sibling of siblingTasks) {
@@ -2752,29 +2580,13 @@ export function buildAnchorGateContext(
       at: claim.at,
       stale: isClaimStale(claim, nowIso, ttlMinutes),
       anchors: extractFileAnchors(sibling),
-      // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-      // AC-IDENTITY-REJECT — `actorIdentityGuard` needs each sibling's own
-      // worktree/machine to establish "different execution context"; omitted
-      // (not `undefined`-valued) when the sibling's own claim never declared
-      // one, matching `TaskClaim`'s own optional-field shape (`@lore/core`).
       ...(claim.worktree !== undefined ? { worktree: claim.worktree } : {}),
-      ...(claim.machine !== undefined ? { machine: claim.machine } : {}),
-      // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main —
-      // `noAnchorOverlap` compares SESSION instances, not actor strings. Omitted
-      // (never `undefined`-valued, `exactOptionalPropertyTypes`) when the
-      // sibling's claim predates session capture; `compareClaimSessions` then
-      // reaches "not-measured", which REFUSES rather than permits.
-      ...(claim.session_id !== undefined ? { session_id: claim.session_id } : {}),
-      // reason: BR-1056 — `noAnchorOverlap` compares holders by RUN; absent key (legacy) stays absent.
+      // reason: BR-1056 — `noAnchorOverlap` compares holders by RUN; a lease with no run stays without one and
+      // conflicts with everyone.
       ...(claim.harness_run !== undefined ? { harness_run: claim.harness_run } : {}),
     });
   }
-  return {
-    candidateBy,
-    candidateAnchors,
-    siblingClaims,
-    ...(candidateSessionId !== undefined ? { candidateSessionId } : {}),
-  };
+  return { candidateBy, candidateAnchors, siblingClaims };
 }
 
 /**

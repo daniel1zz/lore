@@ -42,6 +42,7 @@ import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.j
 import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -109,7 +110,7 @@ describe("migration-004 (widen links.link_type CHECK to accept 'governs') — at
     // user_version is 12, not 4.
     // migration-004's own concern (the widened links.link_type CHECK) is
     // asserted below via the 'governs' insert, unaffected.
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
 
     insertDoc(db, "01HGOVERNSSKILL00000001", "skill-doc");
     insertDoc(db, "01HGOVERNSARTIFACT00001", "artifact-doc");
