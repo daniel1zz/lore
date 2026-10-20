@@ -55,7 +55,7 @@ const recordCommand = defineLoreCommand({
         inv.io.stderr.write(`Error: could not read/parse --json-file: ${(e as Error).message}\n`);
         return 2;
       }
-      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv);
       const result = await app.uatService.record(String(args.plan), payload, { by });
       if (!result.ok) {
         if (args.json) {

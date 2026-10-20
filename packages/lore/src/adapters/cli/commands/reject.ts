@@ -47,7 +47,7 @@ export default defineLoreCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const reviewer = resolveActor(inv);
       const opts: Record<string, unknown> = { reviewer };
       if (args.reason !== undefined) opts["reason"] = args.reason;
 

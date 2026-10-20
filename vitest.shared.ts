@@ -96,6 +96,12 @@ export function createConfig(selection: { include: readonly string[]; exclude: r
         // reason: route fs / fs/promises / child_process through the declared-input recorder (AC-TG-7,
         // scripts/test-read-log.ts explains why an alias and not a patch).
         ...readRecorderAliases(fileURLToPath(new URL(".", import.meta.url))),
+        // reason: a test that composes the App as the live test run and then writes needs that run registered in its
+        // corpus file (an unregistered run is refused, BR-1351); scripts/test-app-shim.ts registers it after `createApp`.
+        // Only specifiers ending in `src/app[.js]` match: modules inside packages/lore/src import `./app.js`-style paths
+        // and get the real module.
+        // The pattern spans the WHOLE specifier (vite replaces only the matched part of a regex `find`).
+        { find: /^(?:\.{1,2}\/)+(?:packages\/lore\/)?src\/app(?:\.js)?$/, replacement: fileURLToPath(new URL("./scripts/test-app-shim.ts", import.meta.url)) },
         // reason: dashboard src uses "@/" path alias; root vitest must resolve it to
         // packages/dashboard/src/ for component tests to find ui primitives. SPEC-015 §4 M6.
         { find: /^@\//, replacement: fileURLToPath(new URL("./packages/dashboard/src/", import.meta.url)) },

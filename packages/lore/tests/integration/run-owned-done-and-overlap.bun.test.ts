@@ -26,12 +26,11 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
-import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { cleanupWorktrees, commitAll, makeWorktree } from "./support/run-end-fixture.js";
 import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { createLiveApp } from "../helpers/live-app.js";
 
 setDefaultTimeout(120_000);
 
@@ -47,7 +46,7 @@ let sessionCounter = 0;
 beforeEach(async () => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-run-owned-done-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-  (createApp(dbPath(), undefined, liveAmbient(), liveWriteContext()) as App).close();
+  createLiveApp(dbPath()).close();
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(tmpDir, ["override-attestation"]);
@@ -67,7 +66,7 @@ function dbPath(): string {
 }
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
-  const app = createApp(dbPath(), undefined, liveAmbient(), liveWriteContext()) as App;
+  const app = createLiveApp(dbPath());
   try {
     return await fn(app);
   } finally {
@@ -202,16 +201,18 @@ describe("lore done decides the holder by run (spec-run-only-write-identity-and-
     expect(errorText(refused)).toContain(runA);
   });
 
-  it("REGRESSION: both sides unattested compare by name (a different name refused, the same name archives)", async () => {
-    const { taskIds } = await createPlanWithTasks([[], []]);
-    expect((await claimAs(taskIds[0]!, "agent:legacy-a", null)).ok).toBe(true);
-    expect((await claimAs(taskIds[1]!, "agent:legacy-b", null)).ok).toBe(true);
+  it("REGRESSION: a claim that names no run is refused by the store (BR-1352), so no name-only holder can ever be archived by another name-only caller", async () => {
+    const { taskIds } = await createPlanWithTasks([[]]);
 
-    const foreign = await doneAs(taskIds[0]!, "agent:legacy-b", null);
-    const own = await doneAs(taskIds[1]!, "agent:legacy-b", null);
+    const refused = await claimAs(taskIds[0]!, "agent:legacy-a", null);
 
-    expect(foreign.ok).toBe(false);
-    expect(own.ok).toBe(true);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.error.code).toBe("VALIDATION_ERROR");
+      expect((refused.error as { field?: string }).field).toBe("extra.claim.harness_run");
+    }
+    // Nothing was written: the task is still unclaimed.
+    expect((await fetchTask(taskIds[0]!)).extra["claim"]).toBeUndefined();
   });
 
   it("BOUNDARY: a fresh claim whose run has ended with a clean worktree no longer blocks another run's done", async () => {

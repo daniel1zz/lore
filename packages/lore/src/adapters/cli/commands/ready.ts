@@ -170,17 +170,9 @@ function formatSessionLine(session: ReadySession): string {
   return `  - ${session.by}${location}${session_id}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
 }
 
-/**
- * Render one anchor-conflict advisory line. `session_verdict` is present only when
- * the holder shares the conflicting task's own actor string — without it, a
- * same-actor conflict reads as a self-contradiction ("conflicts with myself")
- * rather than as the cross-session collision it is
- * (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
- */
+/** Render one anchor-conflict advisory line: the task, the holder of the overlapping claim and the overlapping paths. */
 function formatAnchorConflictLine(conflict: AnchorConflict): string {
-  const session =
-    conflict.session_verdict !== undefined ? ` (same actor, session: ${conflict.session_verdict})` : "";
-  return `  - ${conflict.task_slug} conflicts with ${conflict.holder}${session} on: ${conflict.paths.join(", ")}`;
+  return `  - ${conflict.task_slug} conflicts with ${conflict.holder} on: ${conflict.paths.join(", ")}`;
 }
 
 export default defineLoreCommand({

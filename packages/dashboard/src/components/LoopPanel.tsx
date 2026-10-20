@@ -47,7 +47,7 @@ function AuditVerifyChip({ data, isLoading, error }: AuditVerifyChipProps): Reac
     );
   }
   return (
-    <Badge variant="destructive" className="text-xs" title={`Since ${data.since}`}>
+    <Badge variant="destructive" className="text-xs" title={`${data.audited} audited, ${data.reconstructed} reconstructed`}>
       {data.misses.length} miss{data.misses.length === 1 ? "" : "es"}
     </Badge>
   );

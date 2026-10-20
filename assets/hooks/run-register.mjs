@@ -25,7 +25,8 @@
  *
  * Exit status is 0 on every path, so a registration fault can never block a
  * session or a helper. The fault is not swallowed: the single additionalContext
- * line tells the session why its writes will be unattested.
+ * line tells the session why its writes will be refused (a write naming an
+ * unregistered run is refused, never recorded unattested).
  *
  * ## Invariant: this file holds no grammar (spec D10)
  *
@@ -60,7 +61,7 @@ const CHILD_OUTPUT_BYTE_CEILING = 16 * 1024 * 1024;
  * @returns {never}
  */
 function reportAndExit(eventName, reason) {
-  const text = `run-register: ${reason}; this run's writes will be unattested`.replace(/\s*[\r\n]+\s*/g, ' ');
+  const text = `run-register: ${reason}; this run's writes will be refused until it is registered (see \`lore setup\`)`.replace(/\s*[\r\n]+\s*/g, ' ');
   process.stdout.write(
     `${JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: text } })}\n`,
   );

@@ -70,8 +70,9 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
   it("writes exactly ONE gate_skipped audit entry with correct checkpoint/actor/target/mechanism", async () => {
     const stderrSpy = spyStderr();
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    // the session tier of the port-less actor fallback reads the injected env (5th arg), not the process
-    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, undefined, process.env, liveWarn());
+    // the gate row's actor is the wired port's name (the invocation's known party); the process env (a session id, a
+    // LORE_ACTOR decoy) names nobody, and a port-less enforcer cannot name an actor at all
+    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "agent:session-9a7e5c1b", process.env, liveWarn());
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,

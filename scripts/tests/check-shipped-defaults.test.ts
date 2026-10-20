@@ -558,8 +558,6 @@ context:
     root:
       max_lines: 220
       max_bytes: 24576
-audit:
-  verify_since: "2026-07-06T12:02:00Z"
 verify:
   default_timeout_ms: 900000
 workflow:

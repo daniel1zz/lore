@@ -97,12 +97,12 @@ async function makeTestServer(): Promise<TestContext> {
     taskWorkflowService: null as unknown as App["taskWorkflowService"],
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(docStore, new NoOpTelemetry()),
-    auditService: new AuditService(docStore, { verifySince: FAR_PAST }),
+    auditService: new AuditService(docStore),
     // reason: this stub composes an in-memory-style App, so verify runs in-loop (the runner choice is by store kind);
     // the anchor root has no `.lore/audit-anchor.json`, so the anchor reads as absent.
     auditVerifyRunner: buildAuditVerifyRunner(
-      { kind: "memory", auditService: new AuditService(docStore, { verifySince: FAR_PAST }) },
-      { verifySince: FAR_PAST, anchorRoot: "/nonexistent-lore-anchor-root" },
+      { kind: "memory", auditService: new AuditService(docStore) },
+      { anchorRoot: "/nonexistent-lore-anchor-root" },
     ),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

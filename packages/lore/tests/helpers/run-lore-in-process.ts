@@ -31,9 +31,10 @@
 import type { CommandDef } from "citty";
 import { Readable } from "node:stream";
 import { RunIdentityArgumentError } from "@lore/core/node";
-import type { Invocation, InvocationReader, OsUser } from "@lore/core";
+import type { Invocation, InvocationReader } from "@lore/core";
 import { runCli } from "../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "./test-invocation";
+import { registerTestRun, testRunIdFor } from "./test-run-identity";
 
 /** Environment bag, same shape as `process.env`. */
 export type InProcessEnv = Readonly<Record<string, string | undefined>>;
@@ -48,8 +49,13 @@ export interface InProcessRunOptions {
   readonly env?: InProcessEnv;
   /** Test seam, forwarded to `runCli`: rewrite each command tree before strict/delivery wrapping. */
   readonly transformCommand?: (name: string, command: CommandDef<any>) => CommandDef<any> | Promise<CommandDef<any>>;
-  /** The OS account lookup the run records (default: the real user); a failure makes a run with no other name unnamed. */
-  readonly osUser?: OsUser;
+  /**
+   * Who the run is. `"test-run"` (default): an agent run, registered in the corpus under `cwd` first, exactly what the
+   * installed hooks do (the run is the one the run's `--harness-run` / `CLAUDE_CODE_SESSION_ID` names, else
+   * `DEFAULT_TEST_RUN`). `"none"`: the run carries no run and resolves its identity as the binary would (a human
+   * session under `home`, else no known party): what a test of the REFUSAL, or of a human session, uses.
+   */
+  readonly identity?: "test-run" | "none";
   /** The run's input (what a prompt reads); default: an empty stream. */
   readonly stdin?: InvocationReader;
   /** Whether the run's input is an interactive terminal; default: `false`, so a prompt command takes its non-interactive path. */
@@ -121,7 +127,7 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
       cwd: options.cwd,
       env,
       home,
-      ...(options.osUser === undefined ? {} : { osUser: options.osUser }),
+      ...(options.identity === undefined ? {} : { identity: options.identity }),
       // reason: a run has no terminal and no input unless a test gives it one: an empty, non-TTY stdin.
       io: {
         stdout: { write: (text) => out.push(text) },
@@ -143,5 +149,8 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
     err.push(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
     exitCode = 1;
   }
+  // reason: `init` creates the corpus the run is registered in, so the registration the invocation builder attempted before
+  // it found no corpus; register now so the NEXT command (and any replica copied from this file) finds the run known.
+  if (options.identity !== "none" && args[0] === "init" && exitCode === 0) registerTestRun(options.cwd, testRunIdFor(args, env));
   return { stdout: out.join(""), stderr: err.join(""), exitCode };
 }

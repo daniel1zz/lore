@@ -614,16 +614,23 @@ async function handleGetPhaseStatus(planIdOrSlug: string, app: App): Promise<Res
 }
 
 /**
- * GET /api/audit/verify[?since=<ISO8601>] — versions⋈audit completeness oracle.
- * `since` overrides the configured `audit.verify_since` watermark for this call
- * only (mirrors `lore audit --verify --since`); omitted, `AuditService.verify`
- * falls back to its constructor-resolved watermark.
+ * GET /api/audit/verify — versions⋈audit completeness oracle over every version. The
+ * per-call `since` option is removed (as `lore audit --verify --since`): a request carrying it is refused 422.
  */
 async function handleAuditVerify(url: URL, app: App): Promise<Response> {
-  const since = url.searchParams.get("since");
+  if (url.searchParams.has("since")) {
+    return jsonError(
+      {
+        code: "VALIDATION_ERROR",
+        field: "since",
+        message: "since is not accepted: verification checks every version. History that predates the audit writers is recorded by `lore migrate audit-backfill --apply`.",
+      },
+      422,
+    );
+  }
   // reason: the full-chain verdict runs off the serving loop (worker per persistent store) and reads the anchor file,
   // so a dashboard "clean" means what `lore audit --verify` means.
-  const result = await app.auditVerifyRunner.verify(since !== null ? { since } : undefined);
+  const result = await app.auditVerifyRunner.verify();
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value);
 }

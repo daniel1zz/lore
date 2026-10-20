@@ -67,6 +67,7 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 // ─── Real-git fixture helpers (no fakes — see module MOCK RISK note) ────────
 
@@ -163,7 +164,7 @@ describe("HAPPY — clean worktree is unaffected; dirty worktree refuses evidenc
     const taskId = await createPlanAndTask(corpusService);
     const cleanDir = makeCleanRepo();
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: cleanDir });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: cleanDir });
     expect(claimResult.ok).toBe(true);
 
     const result = await taskWorkflowService.addEvidence(taskId, evidence());
@@ -175,7 +176,7 @@ describe("HAPPY — clean worktree is unaffected; dirty worktree refuses evidenc
     const taskId = await createPlanAndTask(corpusService);
     const dirtyDir = makeDirtyRepo();
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: dirtyDir });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: dirtyDir });
     expect(claimResult.ok).toBe(true);
 
     const result = await taskWorkflowService.addEvidence(taskId, evidence());
@@ -197,8 +198,8 @@ describe("HAPPY — clean worktree is unaffected; dirty worktree refuses evidenc
     const taskId = await createPlanAndTask(corpusService);
     const cleanDir = makeCleanRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", worktree: cleanDir });
-    const result = await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: cleanDir });
+    const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(true);
   });
 });
@@ -211,7 +212,7 @@ describe("NEGATIVE — a dirty worktree is NOT checked for fail/expected-fail ev
     const taskId = await createPlanAndTask(corpusService);
     const dirtyDir = makeDirtyRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", worktree: dirtyDir });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: dirtyDir });
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ result: "fail", output_tail: "assertion failed at line 12" }),
@@ -224,7 +225,7 @@ describe("NEGATIVE — a dirty worktree is NOT checked for fail/expected-fail ev
     const taskId = await createPlanAndTask(corpusService);
     const dirtyDir = makeDirtyRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", worktree: dirtyDir });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: dirtyDir });
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ result: "expected-fail", output_tail: "not implemented yet" }),
@@ -260,7 +261,7 @@ describe("BOUNDARY — rankDirtyPathsByAnchors orders anchor-matching paths firs
     // — wait, the anchor here is "other.ts", so add that file too, dirty.
     writeFileSync(join(dirtyDir, "other.ts"), "export const y = 2;\n");
 
-    await taskWorkflowService.claim(taskId, { by: "alice", worktree: dirtyDir });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: dirtyDir });
     const result = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -312,7 +313,7 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
     const taskId = await createPlanAndTask(corpusService);
     const nonRepo = makeNonRepoDir();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", worktree: nonRepo });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: nonRepo });
     const result = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(result.ok).toBe(true);
   });
@@ -322,7 +323,7 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
     const taskId = await createPlanAndTask(corpusService);
     const nonRepoCwd = makeNonRepoDir();
 
-    await taskWorkflowService.claim(taskId, { by: "alice" }); // no --worktree at all
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree at all
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ callerCwd: nonRepoCwd }),
@@ -366,7 +367,7 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     const taskId = await createPlanAndTask(corpusService);
     const realRepoCwd = makeCleanRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice" }); // no --worktree
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ callerCwd: realRepoCwd }),
@@ -385,8 +386,8 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     const taskId = await createPlanAndTask(corpusService);
     const realRepoCwd = makeCleanRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice" }); // no --worktree
-    const result = await taskWorkflowService.release(taskId, { by: "alice", callerCwd: realRepoCwd });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree
+    const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice"), callerCwd: realRepoCwd });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     if (result.error.code !== "VALIDATION_ERROR") {
@@ -400,8 +401,8 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     const taskId = await createPlanAndTask(corpusService);
     const nonRepoCwd = makeNonRepoDir();
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const result = await taskWorkflowService.release(taskId, { by: "alice", callerCwd: nonRepoCwd });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice"), callerCwd: nonRepoCwd });
     expect(result.ok).toBe(true);
   });
 
@@ -409,8 +410,8 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const result = await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(true);
   });
 });
@@ -423,8 +424,8 @@ describe("REGRESSION — release's check is unconditional; pre-existing zero-evi
     const taskId = await createPlanAndTask(corpusService);
     const dirtyDir = makeDirtyRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", worktree: dirtyDir });
-    const result = await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: dirtyDir });
+    const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     if (result.error.code !== "VALIDATION_ERROR") {
@@ -437,8 +438,8 @@ describe("REGRESSION — release's check is unconditional; pre-existing zero-evi
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" });
-    const result = await taskWorkflowService.release(taskId, { by: "alice" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect("claim" in result.value.extra).toBe(false);

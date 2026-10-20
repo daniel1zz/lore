@@ -113,7 +113,7 @@ describe("verify: cost independent of stored payload size", () => {
     dirs.push(dir);
     const fixture = await seedAuditVerifyCorpus(dir, "sqlite", { ...SHAPE, contentChars });
     const store = new SQLiteStore(fixture.dbPath);
-    return { service: new AuditService(store, { verifySince: "2000-01-01T00:00:00.000Z" }), close: () => store.close() };
+    return { service: new AuditService(store), close: () => store.close() };
   }
 
   async function timeOnce(service: AuditService): Promise<number> {
@@ -156,7 +156,7 @@ describe("verify: completeness verdict is unchanged by the narrow read", () => {
       raw.close();
       const store = new SQLiteStore(fixture.dbPath);
       try {
-        const r = await new AuditService(store, { verifySince: "2000-01-01T00:00:00.000Z" }).verify();
+        const r = await new AuditService(store).verify();
         if (!r.ok) throw new Error("verify failed");
         expect(r.value.misses).toEqual([
           expect.objectContaining({ doc_id: "01FIXTURE00000000000000001", version: 2, action: "update" }),

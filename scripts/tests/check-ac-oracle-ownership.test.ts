@@ -27,6 +27,54 @@ const CHECKER = join(REPO_ROOT, "scripts", "check-ac-oracle-ownership.ts");
 const cmd = (p: string): string => `bunx vitest run ${p}`;
 const exists = (...present: string[]) => (p: string) => present.includes(p);
 
+describe("check-ac-oracle-ownership — superseded criteria are not live (#313)", () => {
+  it("REGRESSION: a superseded criterion naming a missing file yields no finding", () => {
+    const r = evaluateOwnership(
+      [{ spec: "spec-a", id: "AC-A-1", command: cmd("scripts/tests/gone.test.ts"), superseded: true }],
+      [],
+      exists(),
+    );
+    expect(r.findings).toEqual([]);
+    expect(r.ledgered).toEqual([]);
+  });
+
+  it("NEGATIVE: a live criterion naming a missing file still yields missing-owner-file", () => {
+    const r = evaluateOwnership(
+      [
+        { spec: "spec-a", id: "AC-A-1", command: cmd("scripts/tests/gone.test.ts"), superseded: true },
+        { spec: "spec-a", id: "AC-A-2", command: cmd("scripts/tests/gone.test.ts") },
+      ],
+      [],
+      exists(),
+    );
+    expect(r.findings).toEqual([{ rule: "missing-owner-file", spec: "spec-a", acId: "AC-A-2", path: "scripts/tests/gone.test.ts" }]);
+  });
+
+  it("BOUNDARY: a test file referencing only a superseded AC id is not reported as owned by it", () => {
+    const f = "scripts/tests/a.test.ts";
+    const r = evaluateOwnership(
+      [{ spec: "spec-a", id: "AC-A-1", command: cmd(f), superseded: true }],
+      [{ path: f, content: 'it("AC-A-1 retired", () => {});' }],
+      exists(f),
+    );
+    expect(r.findings).toEqual([]);
+    expect(r.scannedScriptAcs).toBe(0);
+  });
+
+  it("BOUNDARY: a superseded duplicate id does not make a live id ambiguous", () => {
+    const f = "scripts/tests/shared.test.ts";
+    const r = evaluateOwnership(
+      [
+        { spec: "spec-a", id: "AC-SD-1", command: cmd(f) },
+        { spec: "spec-b", id: "AC-SD-1", command: cmd(f), superseded: true },
+      ],
+      [{ path: f, content: 'it("AC-SD-1 works", () => {});' }],
+      exists(f),
+    );
+    expect(r.findings).toEqual([]);
+  });
+});
+
 describe("check-ac-oracle-ownership — AC-TG-5 pure rules", () => {
   it("HAPPY: every script AC owns one existing file and nothing is ambiguous -> no findings", () => {
     const r = evaluateOwnership(

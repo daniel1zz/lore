@@ -77,8 +77,7 @@ import { CHECKPOINT_PRODUCED_TYPE } from "../../../src/flows/feed-flow.js";
 // tests/unit/adapters/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
-const APP_TS = join(PACKAGE_ROOT, "src", "app.ts");
-const LIVE_TS = join(PACKAGE_ROOT, "tests", "live-invocation.ts");
+const LIVE_APP_TS = join(PACKAGE_ROOT, "tests", "helpers", "live-app.ts");
 
 interface RunResult {
   readonly stdout: string;
@@ -137,13 +136,13 @@ function discoveryScopeFor(checkpoint: string): string {
 function seedSkillDocs(dbPath: string, scriptDir: string, specs: readonly SeedSpec[]): void {
   const scriptPath = join(scriptDir, "seed-skills.ts");
   const scriptSource = `
-import { createApp } from ${JSON.stringify(APP_TS)};
-import { liveAmbient, liveWriteContext } from ${JSON.stringify(LIVE_TS)};
+import { createLiveApp } from ${JSON.stringify(LIVE_APP_TS)};
 
 const dbPath = process.argv[2];
 const specs = JSON.parse(process.argv[3]);
 
-const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
+// reason: this child is a plain bun process (no test-run app shim), so the live test run is registered by createLiveApp.
+const app = createLiveApp(dbPath);
 try {
   for (const spec of specs) {
     const createResult = await app.corpusService.create({
