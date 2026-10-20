@@ -13,7 +13,8 @@
  *      the project's offline recording `gh` stub (`github-report-fixture.ts`; the stub dir is the whole PATH of the
  *      spawn). The retired SQLite `feedback.upstream.{corpus_path,root_prd}` shape is refused by `report-issue`
  *      with exit 4 and is no longer used.
- *   2. A "fixing" doc: a planless `--adhoc` task walked through `draft -> approved[-> active -> archived]`.
+ *   2. A "fixing" doc: a `knowledge` doc walked through `draft -> approved[-> active -> archived]` (a task could
+ *      not be archived here without an attested pass, a red run, or a human-granted override).
  *   3. A `resolves` link from the fixing doc to the issue task, via the cookie-gated dashboard write route
  *      `POST /api/dashboard/docs/:id/links` (the same path the dashboard's own `LinksPanel` uses).
  *
@@ -41,13 +42,13 @@ import {
 } from "./github-report-fixture.js";
 
 /**
- * Creates a planless `--adhoc` "fixing" doc and walks it through `draft -> approved[-> active -> archived]`.
+ * Creates a "fixing" doc (type `knowledge`) and walks it through `draft -> approved[-> active -> archived]`.
  * `finalStatus: "approved"` stops before `active` (the "resolving" case: an in-edge exists, no source doc is
  * terminal yet); `"archived"` reaches a terminal status (the "fixed" case).
  */
 function createFixingDoc(corpusRoot: string, title: string, finalStatus: "approved" | "archived"): string {
   const created = runLoreJson<{ ok: true; data: { id: string } }>(
-    ["create", "task", "--title", title, "--content", "fixes the defect", "--adhoc"],
+    ["create", "knowledge", "--title", title, "--content", "fixes the defect", "--sub-type", "reference"],
     corpusRoot,
   );
   const fixId = created.data.id;
@@ -62,9 +63,12 @@ function createFixingDoc(corpusRoot: string, title: string, finalStatus: "approv
     if (activeResult.status !== 0) {
       throw new Error(`Failed to activate fixing doc ${fixId}: ${activeResult.stderr}`);
     }
+    // A task cannot be archived without an attested pass plus a red run (and the override for both needs a human
+    // decision), so the fixing doc is a `knowledge` doc: a `resolves` edge accepts any source doc type, and a
+    // knowledge doc reaches `archived` through plain status transitions.
     const archivedResult = runLore(["set", fixId, "--status", "archived"], corpusRoot);
     if (archivedResult.status !== 0) {
-      throw new Error(`Failed to archive fixing doc ${fixId}: ${archivedResult.stderr}`);
+      throw new Error(`Failed to archive fixing doc ${fixId}: ${archivedResult.stderr}${archivedResult.stdout}`);
     }
   }
 
