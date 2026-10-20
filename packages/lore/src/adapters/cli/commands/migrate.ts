@@ -161,13 +161,13 @@ export default defineLoreCommand({
         }
         return exitCode(result.error);
       }
-      const { file, found, declaredCutoff, configWritten, backfill } = result.value;
+      const { file, found, configWritten, backfill } = result.value;
       const count = backfill.reconstructed.length;
       if (args.json) {
         printLine(
           inv.io.stdout,
           JSON.stringify(
-            { ok: true, data: { applied: apply, file, found, declared_cutoff: declaredCutoff ?? null, config_written: configWritten, boundary: backfill.boundary, run: backfill.run, reconstructed: backfill.reconstructed } },
+            { ok: true, data: { applied: apply, file, found, config_written: configWritten, boundary: backfill.boundary, boundary_source: backfill.boundarySource, run: backfill.run, reconstructed: backfill.reconstructed } },
             null,
             2,
           ),
@@ -179,10 +179,15 @@ export default defineLoreCommand({
       printLine(
         inv.io.stdout,
         found
-          ? `${file}: audit.verify_since: ${String(declaredCutoff)} ${configWritten ? "removed" : "would be removed"}`
+          ? `${file}: audit.verify_since (retired; its value is not read) ${configWritten ? "removed" : "would be removed"}`
           : `${file}: no audit.verify_since setting`,
       );
-      printLine(inv.io.stdout, `Versions recorded before ${backfill.boundary} without an audit entry predate the audit writers.`);
+      printLine(
+        inv.io.stdout,
+        backfill.boundary === null
+          ? `Boundary: none (${backfill.boundarySource}: the audit trail is empty, so no version can be shown to predate the audit writers).`
+          : `Boundary: ${backfill.boundary} (${backfill.boundarySource}). The first entry that names a version: earlier entries cannot be joined to one. Versions recorded before it without an audit entry predate the audit writers.`,
+      );
       printLine(
         inv.io.stdout,
         apply
