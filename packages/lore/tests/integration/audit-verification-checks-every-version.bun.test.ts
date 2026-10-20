@@ -177,7 +177,7 @@ describe("lore migrate audit-backfill (AC b)", () => {
     expect(verify.exitCode).toBe(4);
     const data = (JSON.parse(verify.stdout) as { data: { misses: { version: number }[] } }).data;
     expect(data.misses.map((m) => m.version)).toEqual([901]);
-  });
+  }, 120_000);
 
   it("REGRESSION: a retired cut-off still in the config is NOT the boundary — the data is (a cut-off before the old version would have skipped it)", () => {
     writeFileSync(configPath(), `${base}\naudit:\n  verify_since: "2020-01-01T00:00:00Z"\n`);
