@@ -91,7 +91,7 @@ describe("AC-HID-4: the retired setting is refused", () => {
   });
 
   it("the strict config schema refuses the retired key as an unknown key, naming it", () => {
-    const parsed = loadConfigFromString(`project:\n  name: demo\n${RETIRED_BLOCK}`);
+    const parsed = loadConfigFromString(`project:\n  name: demo\n  author: owner\n${RETIRED_BLOCK}`);
 
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) {
@@ -99,7 +99,7 @@ describe("AC-HID-4: the retired setting is refused", () => {
       expect(JSON.stringify(parsed.error)).toContain(RETIRED_KEY);
     }
     // The control: the same config without the key parses.
-    expect(loadConfigFromString("project:\n  name: demo\n").ok).toBe(true);
+    expect(loadConfigFromString("project:\n  name: demo\n  author: owner\n").ok).toBe(true);
   });
 
   it("a project config carrying the key is not rewritten by any command but `migrate config-keys`", () => {
