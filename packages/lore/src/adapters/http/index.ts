@@ -5,6 +5,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import type { HumanSessionBinding } from "@lore/core/node";
 import { warnSinkOf } from "../../service/warn-sink.js";
 import { randomUUID } from "node:crypto";
 
@@ -49,14 +50,41 @@ async function dispatchAsRequestParty(
   app: App,
   actor: ActorContext,
   req: Request,
-  dispatch: () => Promise<Response | null>,
+  checkout: string,
+  humanWrites: HumanWritesConfig | undefined,
+  dispatch: (actorForRoutes: ActorContext) => Promise<Response | null>,
 ): Promise<Response | null> {
-  const outcome = await dispatchUnderRequestParty(app, actor, req.method, () => dispatchWithAuditSurface(actor, dispatch));
+  // reason: the human session is looked up per write (not captured at start-up) so `lore session start|end` takes
+  // effect on the running dashboard without a restart.
+  const humanSessionOf = humanWrites === undefined ? undefined : () => humanWrites.humanSessionOf(checkout);
+  const outcome = await dispatchUnderRequestParty(
+    app,
+    actor,
+    req.method,
+    (actorForRoutes) => dispatchWithAuditSurface(actorForRoutes, () => dispatch(actorForRoutes)),
+    humanSessionOf,
+  );
   if (!outcome.ok) return jsonError(outcome.error, loreErrorToStatus(outcome.error));
   return outcome.value;
 }
 
+/**
+ * How the LOCAL dashboard names the person behind a cookie write (GitHub #324, BR-1350/BR-1351): the human session
+ * open in the checkout the write lands in, never the cookie key's owner.
+ */
+export interface HumanWritesConfig {
+  /** The checkout the launch project's (unprefixed) requests write into; a mounted project uses its own entry path. */
+  readonly checkoutRoot: string;
+  /** The open human session of a checkout (`resolveHumanSessionBinding`), or `null`; called once per cookie write. */
+  readonly humanSessionOf: (checkout: string) => HumanSessionBinding | null;
+}
+
 export interface HttpConfig {
+  /**
+   * Set by `lore dashboard`: cookie writes are made by the checkout's open human session (refused with none).
+   * Omitted (`lore serve`): a cookie write is made by the login's owner under a `dashboard` run.
+   */
+  humanWrites?: HumanWritesConfig;
   port?: number;
   host?: string;
   /**
@@ -212,6 +240,7 @@ async function dispatchProjectRequest(
   primaryApp: App,
   getMachineAuth: () => MachineAuthStores,
   allowedOrigins: readonly string[],
+  humanWrites: HumanWritesConfig | undefined,
 ): Promise<Response> {
   const { name, rest } = match;
   const entry = mountRegistry.resolve(name);
@@ -262,8 +291,8 @@ async function dispatchProjectRequest(
     strippedUrl.pathname = rest;
 
     const mountedApp = entry.app;
-    const response = await dispatchAsRequestParty(mountedApp, actor, req, () =>
-      handleApiRoute(req, strippedUrl, mountedApp, actor, getMachineAuth, allowedOrigins),
+    const response = await dispatchAsRequestParty(mountedApp, actor, req, entry.path, humanWrites, (actorForRoutes) =>
+      handleApiRoute(req, strippedUrl, mountedApp, actorForRoutes, getMachineAuth, allowedOrigins),
     );
     if (response === null) {
       return jsonError(
@@ -409,7 +438,7 @@ export function startHttpServer(app: App, config: HttpConfig): ReturnType<typeof
         if (mountRegistry !== undefined) {
           const projectMatch = matchProjectPrefix(url.pathname);
           if (projectMatch !== null) {
-            const response = await dispatchProjectRequest(req, url, projectMatch, mountRegistry, app, getMachineAuth, allowedOrigins);
+            const response = await dispatchProjectRequest(req, url, projectMatch, mountRegistry, app, getMachineAuth, allowedOrigins, config.humanWrites);
             return applyCorsOrigin(response, origin, allowedOrigins);
           }
         }
@@ -439,8 +468,9 @@ export function startHttpServer(app: App, config: HttpConfig): ReturnType<typeof
           );
         }
 
-        const response = await dispatchAsRequestParty(app, actor, req, () =>
-          handleApiRoute(req, url, app, actor, getMachineAuth, allowedOrigins),
+        const launchCheckout = config.humanWrites?.checkoutRoot ?? "";
+        const response = await dispatchAsRequestParty(app, actor, req, launchCheckout, config.humanWrites, (actorForRoutes) =>
+          handleApiRoute(req, url, app, actorForRoutes, getMachineAuth, allowedOrigins),
         );
 
         if (response === null) {

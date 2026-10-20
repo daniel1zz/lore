@@ -87,10 +87,10 @@ describe("ensureLocalApiKey — happy path", () => {
     expect(readFileSync(filePath, "utf8")).toBe(expectedKey);
   });
 
-  it("calls store.create with name='dashboard-local' and owner='admin'", async () => {
+  it("calls store.create with name='dashboard-local' and a placeholder owner that is no person (GitHub #324)", async () => {
     const store = makeSuccessStore();
     await ensureLocalApiKey(liveIo(), store, tmpDir);
-    expect(store.create).toHaveBeenCalledWith("dashboard-local", "admin");
+    expect(store.create).toHaveBeenCalledWith("dashboard-local", "dashboard-local");
     expect(store.create).toHaveBeenCalledTimes(1);
   });
 });

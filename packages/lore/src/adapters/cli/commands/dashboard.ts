@@ -100,6 +100,8 @@ import { createMountRegistry } from "../../../mount/mount-registry.js";
 import type { MountRegistry } from "../../../mount/types.js";
 import { createDashboardTeardown, registerDashboardShutdownSignals, type KillableChild } from "../dashboard-lifecycle.js";
 import type { Invocation } from "@lore/core";
+import type { HumanWritesConfig } from "../../http/index.js";
+import { resolveHumanSessionBinding } from "../human-session-file.js";
 import { invocationOf } from "../command-invocation.js";
 import { registerServerForInvocation } from "../live-server-registry.js";
 import type { CliIo } from "../output.js";
@@ -109,6 +111,19 @@ export { ensureLocalApiKey } from "../local-key.js";
 export type { LocalApiKeyCreator } from "../local-key.js";
 
 // ─── Shared helpers (both topologies) ───────────────────────────────────────────
+
+/**
+ * The server's write-party policy for the local dashboard (GitHub #324): a cookie write is made by the person whose
+ * human session (`lore session start --human <name>`) is open in the checkout it lands in, read per write.
+ *
+ * @param checkoutRoot - the launch project's root (the directory holding `.lore/lore.db`)
+ */
+function humanWritesOf(inv: Invocation, checkoutRoot: string): HumanWritesConfig {
+  return {
+    checkoutRoot,
+    humanSessionOf: (checkout) => resolveHumanSessionBinding(inv.env, inv.paths.home, checkout),
+  };
+}
 
 /** No Vite child exists in packaged mode — this satisfies `DashboardShutdownDeps.vite`
  * (a required field, shared by both topologies' teardown) without forking a second
@@ -371,7 +386,7 @@ async function runPackagedMode(
   // `startHttpServer` boot `lore serve` does, so it inherits §D5's HTTP
   // exemption for the foreign-corpus-write guard verbatim. See serve.ts's own
   // call site for the lockout this prevents.
-  const { app } = loadLoreApp({ surface: "http", inv });
+  const { app, dbPath } = loadLoreApp({ surface: "http", inv });
   const machineAuth = createMachineAuthStores({ baseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
   // GAP-1 fix (see this file's header): ensure the machine-scope "dashboard-local"
@@ -393,6 +408,7 @@ async function runPackagedMode(
     io: inv.io,
     machineAuth,
     allowedOrigins,
+    humanWrites: humanWritesOf(inv, dirname(dirname(dbPath))),
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
     dashboard: {
       assets: () => resolveAssets(inv),
@@ -599,6 +615,7 @@ async function runDevMode(
     io: inv.io,
     machineAuth,
     allowedOrigins,
+    humanWrites: humanWritesOf(inv, projectRoot),
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
   });
 
