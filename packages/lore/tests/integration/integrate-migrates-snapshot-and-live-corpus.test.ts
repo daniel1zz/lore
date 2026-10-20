@@ -18,7 +18,7 @@
  * (inside `.claude/worktrees/` = the floor's snapshot; otherwise the live corpus).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,14 +177,11 @@ class Fixture {
     return name;
   }
 
-  integrate(branch: string, session: string): Promise<RunResult> {
-    return new Promise((resolve) => {
-      const child = spawn("bun", ["run", INDEX_TS, "integrate", branch, "--session", session], { cwd: this.repo, env: this.env(session) });
-      let out = "";
-      child.stdout.on("data", (c: Buffer) => (out += c.toString()));
-      child.stderr.on("data", (c: Buffer) => (out += c.toString()));
-      child.on("close", (code) => resolve({ out, exitCode: code ?? 1 }));
-    });
+  /** `lore integrate` as the registered run `cc:<session>` (integrate refuses a configured migrate_command without an attested caller run). */
+  async integrate(branch: string, session: string): Promise<RunResult> {
+    const run = `cc:${session}`;
+    await this.registerRun(run);
+    return this.integrateAs(branch, session, run);
   }
 
   /** Registers `run` in this repo's corpus (the same `insertRun` the agent integration uses), so `--harness-run <run>` verifies. */
@@ -211,8 +208,7 @@ class Fixture {
 
   /** `lore integrate` as the party `run` (Bun.spawnSync, so no inherited party): `--harness-run <run>`, or no run at all when `run` is undefined. */
   integrateAs(branch: string, session: string, run: string | undefined): RunResult {
-    const env: Record<string, string | undefined> = { ...this.env() };
-    delete env.CLAUDE_CODE_SESSION_ID;
+    const env: Record<string, string | undefined> = { ...this.env(session) };
     const flag = run === undefined ? [] : ["--harness-run", run];
     const proc = Bun.spawnSync(["bun", "run", INDEX_TS, "integrate", branch, "--session", session, ...flag], { cwd: this.repo, env });
     return { out: `${proc.stdout.toString()}${proc.stderr.toString()}`, exitCode: proc.exitCode ?? 1 };
