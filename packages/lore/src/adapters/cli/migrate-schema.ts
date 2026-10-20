@@ -25,6 +25,7 @@ import { printLine } from "./output.js";
 import { findLoreDbPath, formatErrorFor, resolveActor } from "./utils.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import { bareDocWriter } from "../../service/corpus-service.js";
+import { withVerifiedWriteContext } from "../../store/write-context-store.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { probeSchemaVersion } from "../../store/schema-probe.js";
 import { isSchemaBehind, pendingMigrationVersions } from "../../store/schema-behind.js";
@@ -109,7 +110,10 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
     const durationMs = Date.now() - startedAt;
     // The schema is current once the store opened, so the audit row rides the one write route (bare writer: this
     // command never builds the app, which refuses the very corpus it repairs).
-    const audited = await bareDocWriter(store).appendAudit({
+    // reason: the upgrade is a write made by the invocation's known party: its audit row names the caller's VERIFIED run
+    // (an unregistered run stamps NULL with one warning), which is how `lore integrate`'s migrate child carries the caller.
+    const stamped = withVerifiedWriteContext(store, inv.identity, (line) => printLine(inv.io.stderr, line));
+    const audited = await bareDocWriter(stamped).appendAudit({
       by: actor,
       sessionId: MIGRATE_SCHEMA_AUDIT_SESSION_ID,
       action: "migrate_schema",

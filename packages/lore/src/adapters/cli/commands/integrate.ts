@@ -236,6 +236,13 @@ export default defineLoreCommand({
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
+      // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
+      // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
+      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+        inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
+        return exitCode(verifiedIdentity.error);
+      }
       const corpusDir = dirname(resolvePath(dbPath));
       const projectRoot = dirname(corpusDir);
       const mainRoot = mainCheckoutRoot(runGit, projectRoot);
@@ -278,6 +285,7 @@ export default defineLoreCommand({
         floorCommand: config?.workflow?.integrate?.floor_command,
         postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
         migrateCommand: config?.workflow?.integrate?.migrate_command,
+        harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
       if (!result.ok) {
