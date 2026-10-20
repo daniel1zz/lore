@@ -81,7 +81,7 @@ test.describe("SPEC-078 multi-project isolation", () => {
     expect(body.ok).toBe(false);
   });
 
-  test("an approve + doc edit addressed to A lands in A while B's doc set is byte-unchanged", async () => {
+  test("an approve + locked-record edit addressed to A lands in A while B's doc set is byte-unchanged", async () => {
     const bBeforeRes = await page.request.get(`${API_ORIGIN}/api/p/project-b/api/docs`);
     const bBefore: unknown = await bBeforeRes.json();
 
@@ -99,16 +99,20 @@ test.describe("SPEC-078 multi-project isolation", () => {
       `${API_ORIGIN}/api/p/project-a/api/dashboard/docs/${fixture.seed.a.draftSpecId}`,
       { headers: { "Content-Type": "application/json" }, data: { content: editedContent } },
     );
-    expect(editRes.ok()).toBe(true);
+    // reason: a spec is a RECORD (documents-are-living-or-records): once approved, A's own
+    // `record-edit` gate refuses a content edit with RECORD_LOCKED instead of demoting it to
+    // draft the way a living doc (a plan) is. The old expectation (edit lands, auto-demote)
+    // described a spec before that gate existed (GitHub #321). The refusal itself proves the
+    // PATCH reached A's gate-armed write path, and A's doc must be untouched afterwards.
+    expect(editRes.status()).toBe(422);
+    const editBody = (await editRes.json()) as { ok: boolean; error?: { code: string; field?: string } };
+    expect(editBody.ok).toBe(false);
+    expect(editBody.error?.field).toBe("gate:record-edit");
 
-    // Confirm the write actually landed in A. Editing content on an `approved` doc
-    // auto-demotes it to `draft` (documented lifecycle rule, root CLAUDE.md "Document
-    // Lifecycle") — asserting THAT demotion fired is itself stronger proof the edit
-    // really landed than asserting a status that would just carry over unchanged.
     const aDocRes = await page.request.get(`${API_ORIGIN}/api/p/project-a/api/docs/${fixture.seed.a.draftSpecId}`);
     const aDocBody = (await aDocRes.json()) as { data: { doc: { content: string; status: string } } };
-    expect(aDocBody.data.doc.content).toContain(editedMarker);
-    expect(aDocBody.data.doc.status).toBe("draft");
+    expect(aDocBody.data.doc.content).not.toContain(editedMarker);
+    expect(aDocBody.data.doc.status).toBe("approved");
 
     // B's ENTIRE doc set is byte-unchanged by A's write.
     const bAfterRes = await page.request.get(`${API_ORIGIN}/api/p/project-b/api/docs`);

@@ -22,9 +22,30 @@
  *           AC-DASH-WRITE-7, AC-DASH-WRITE-8, AC-DASH-WRITE-10, AC-DH-6, AC-DH-7
  */
 
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test, expect, type Page } from "@playwright/test";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const API_ORIGIN = "http://localhost:8787";
+const SEED_JUDGMENT_SCRIPT = join(__dirname, "seed-judgment.ts");
+
+/**
+ * Seed an approve judgment pinned to `docVersion` (BR-281: the `review-judgment` gate
+ * refuses approve without an independent judgment of the CURRENT version, and no dashboard
+ * UI produces one — same fixture route `adjudication.pw.ts` uses).
+ */
+function seedApproveJudgment(docId: string, docVersion: number): void {
+  const dbPath = process.env.LORE_E2E_DB_PATH;
+  if (dbPath === undefined) {
+    throw new Error("LORE_E2E_DB_PATH is not set — global-setup.ts must run before this suite.");
+  }
+  const payload = { docId, docVersion, decision: "approve", confidence: 0.9, blockingQuestions: [] };
+  execFileSync("bun", [SEED_JUDGMENT_SCRIPT, dbPath, JSON.stringify(payload)], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -159,6 +180,8 @@ test.describe("SPEC-022 dashboard write flow", () => {
 
   test("approve: status pill dropdown transitions draft -> approved", async () => {
     await expect(page.getByRole("button", { name: /^Status: draft/ })).toBeVisible();
+
+    seedApproveJudgment(docId, await readDisplayedVersion());
 
     await page.getByRole("button", { name: /^Status: draft/ }).click();
     // AC-DASH-WRITE-4: dropdown only lists getAllowedTransitions("draft") = [in-review, approved].
