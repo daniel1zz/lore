@@ -27,7 +27,6 @@
  */
 import { appendFileSync, existsSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import { err, isDenyCapableHookCheck, ok, storeError, validationError, type DocId, type DocRecord, type LoreError, type Result } from "@lore/core";
-import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { BATCH_ERROR_AUDIT_ACTION, findAnomalies, parseBatchError, type BatchErrorView, type CompletePlanView } from "./plan-acceptance-view.js";
 import { join, sep } from "node:path";
 import { z } from "zod";
@@ -271,7 +270,9 @@ export class CheckStatsService {
   /**
    * Plan acceptance (BR-1379 "Self-measurement"): per accepted (archived, once complete) plan the time from complete to
    * accepted, and the anomalies (complete, not accepted, not awaiting an unresolved owner decision, over 24 h).
-   * Accepted time is the plan's archive write (the batch's close); complete time is the plan's stored `progress.at`.
+   * Accepted time is the plan's archive write (the batch's close); complete time is when a task write last made the
+   * plan's progress complete (its `plan-progress` audit row). A plan with no such write before its archive (archived
+   * before progress tracking, or only backfilled) is not measured.
    *
    * @param listComplete - see {@link completePlanViews}
    */
@@ -283,15 +284,16 @@ export class CheckStatsService {
     if (!archived.ok) return archived;
     const accepted: AcceptedPlanLine[] = [];
     for (const plan of archived.value) {
-      const progress = readStoredPlanProgress(plan.extra);
-      if (progress === null || progress.state !== "complete") continue;
       const closed = await this.closeTimeOf(plan);
       if (!closed.ok) return closed;
+      const completeAt = await this.completeTimeOf(plan, closed.value.at);
+      if (!completeAt.ok) return completeAt;
+      if (completeAt.value === null) continue;
       accepted.push({
         plan_slug: plan.slug,
-        complete_at: progress.at,
+        complete_at: completeAt.value,
         accepted_at: closed.value.at,
-        complete_to_accepted_ms: Date.parse(closed.value.at) - Date.parse(progress.at),
+        complete_to_accepted_ms: Date.parse(closed.value.at) - Date.parse(completeAt.value),
       });
     }
     accepted.sort((a, b) => a.plan_slug.localeCompare(b.plan_slug));
@@ -302,6 +304,25 @@ export class CheckStatsService {
       ...(p.lastError !== undefined ? { last_error: p.lastError } : {}),
     }));
     return ok({ accepted, anomalies });
+  }
+
+  /**
+   * When progress last became complete through a task write at or before `beforeIso`: the start of the final run of
+   * `plan-progress` audit rows that say complete. `null` when no such row exists.
+   */
+  private async completeTimeOf(plan: DocRecord, beforeIso: string): Promise<Result<string | null, LoreError>> {
+    const audit = await this.deps.store.queryAudit({ doc_id: plan.id, action: "update" });
+    if (!audit.ok) return audit;
+    const rows = audit.value
+      .filter((e) => e.details?.["operation"] === "plan-progress" && e.timestamp <= beforeIso)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    let runStart: string | null = null;
+    for (const row of rows) {
+      const state = (row.details?.["progress"] as { state?: unknown } | undefined)?.state;
+      if (state !== "complete") runStart = null;
+      else if (runStart === null) runStart = row.timestamp;
+    }
+    return ok(runStart);
   }
 
   private async closeTimeOf(plan: DocRecord): Promise<Result<{ at: string; source: "audit" | "updated_at" }, LoreError>> {

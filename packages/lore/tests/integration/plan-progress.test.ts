@@ -1161,6 +1161,60 @@ describe.each(KINDS)("lease and retry — the store lease verbs, %s store", (kin
   });
 });
 
+async function appendProgressAudit(store: InMemoryStore, planId: string, offsetMs: number, state: "complete" | "in-progress"): Promise<void> {
+  const at = new Date(T0 + offsetMs).toISOString();
+  await store.appendAuditEntry({ timestamp: at, actor: "t", session_id: planId, action: "update", doc_id: planId, details: { operation: "plan-progress", progress: { state, open: state === "complete" ? 0 : 1, total: 1, at } } });
+}
+
+async function archivePlan(store: InMemoryStore, plan: { id: string; slug: string; title: string; extra: Record<string, unknown> }, at: string): Promise<void> {
+  const moved = await store.updateWithProvenance(
+    plan.id as never,
+    { status: "archived", version: 2, updated_at: at },
+    { expected_version: 1 },
+    { doc_id: plan.id, version: 2, content: "", extra: plan.extra, status: "archived", title: plan.title, action: "update", created_at: at, created_by: "t", slug: plan.slug } as never,
+    { timestamp: at, actor: "t", session_id: plan.id, action: "update", doc_id: plan.id, details: { version: 2, patch: { status: "archived" } } } as never,
+  );
+  if (!moved.ok) throw new Error(JSON.stringify(moved.error));
+}
+
+describe("plan acceptance measures only plans completed by a task write before acceptance (AC-PCR-6)", () => {
+  const nowIso = (offsetMs = 0): string => new Date(T0 + offsetMs).toISOString();
+  const HOUR = 3_600_000;
+
+  it("NEGATIVE: a plan archived before its progress.at (backfilled) is not listed in Plan acceptance", async () => {
+    const store = new InMemoryStore();
+    const service = new CheckStatsService({ store, now: () => nowIso() });
+    const plan = await seed(store, rawDoc("plan", "Old archived", { progress: { state: "complete", open: 0, total: 1, at: nowIso(-1 * HOUR) } }, "active"));
+    await archivePlan(store, plan, nowIso(-30 * HOUR));
+    const report = await service.acceptance(async () => ok([]));
+    if (!report.ok) throw new Error(JSON.stringify(report.error));
+    expect(report.value.accepted).toEqual([]);
+  });
+
+  it("HAPPY: a plan completed by a task write then accepted shows the exact duration", async () => {
+    const store = new InMemoryStore();
+    const service = new CheckStatsService({ store, now: () => nowIso() });
+    const plan = await seed(store, rawDoc("plan", "Measured", { progress: { state: "complete", open: 0, total: 1, at: nowIso(-9 * HOUR) } }, "active"));
+    await appendProgressAudit(store, plan.id, -12 * HOUR, "complete");
+    await appendProgressAudit(store, plan.id, -11 * HOUR, "in-progress");
+    await appendProgressAudit(store, plan.id, -9 * HOUR, "complete");
+    await archivePlan(store, plan, nowIso(-8 * HOUR));
+    const report = await service.acceptance(async () => ok([]));
+    if (!report.ok) throw new Error(JSON.stringify(report.error));
+    expect(report.value.accepted).toEqual([{ plan_slug: plan.slug, complete_at: nowIso(-9 * HOUR), accepted_at: nowIso(-8 * HOUR), complete_to_accepted_ms: HOUR }]);
+  });
+
+  it("REGRESSION: the 24 h anomaly rule is unchanged (over 24 h flagged, exactly 24 h not)", async () => {
+    const service = new CheckStatsService({ store: new InMemoryStore(), now: () => nowIso() });
+    const report = await service.acceptance(async () => ok([
+      { plan: "over", planId: "i1", completeAt: nowIso(-24 * HOUR - 1), awaitingOwner: false },
+      { plan: "exact", planId: "i2", completeAt: nowIso(-24 * HOUR), awaitingOwner: false },
+    ]));
+    if (!report.ok) throw new Error(JSON.stringify(report.error));
+    expect(report.value.anomalies.map((a) => a.plan_slug)).toEqual(["over"]);
+  });
+});
+
 describe("visible and measured — bootstrap complete line, checks stats time-to-accepted and anomalies (AC-PCR-6)", () => {
   const nowIso = (offsetMs = 0): string => new Date(T0 + offsetMs).toISOString();
   const HOUR = 3_600_000;
@@ -1227,6 +1281,7 @@ describe("visible and measured — bootstrap complete line, checks stats time-to
     const service = new CheckStatsService({ store, now: () => nowIso() });
     const plan = await seed(store, rawDoc("plan", "Accepted", { progress: { state: "complete", open: 0, total: 1, at: nowIso(-10 * HOUR) } }, "active"));
     const archivedAt = nowIso(-4 * HOUR);
+    await appendProgressAudit(store, plan.id, -10 * HOUR, "complete");
     const moved = await store.updateWithProvenance(
       plan.id,
       { status: "archived", version: 2, updated_at: archivedAt },
