@@ -141,9 +141,9 @@ describe("AC-ASK-1 harness records the answer", () => {
     expect(question.question).toContain(`Lore decision #${id}`);
     expect(question.question).toMatch(/\[ask [A-Z2-9]{8}\]/);
     expect(question.question).toContain("What:");
-    expect(question.options.map((o) => o.label)).toEqual(["Accept", "Reject"]);
-    expect(question.options[1]?.description).toContain("the change is not needed yet");
-    expect(question.options[0]?.description).not.toContain("the change is not needed yet");
+    expect(question.options.map((o) => o.label)).toEqual(["Reject (Recommended)", "Accept"]);
+    expect(question.options[0]?.description.startsWith("the change is not needed yet")).toBe(true);
+    expect(question.options[1]?.description).not.toContain("the change is not needed yet");
     expect(question.multiSelect).toBe(false);
     // the human-facing text points at the in-session path, never at a terminal command
     expect(lore(corpus, ["pending"]).stdout).toContain("lore pending --ask");
@@ -179,6 +179,39 @@ describe("AC-ASK-1 harness records the answer", () => {
     const human = (await readLog(corpus)).filter((r) => r.channel === "human-tty");
     expect(human).toHaveLength(1);
     expect(human[0]?.verdict).toBe("refuse");
+  }, 240_000);
+});
+
+describe("AC-ASK-1 harness records the answer: recommendation order, marker, language", () => {
+  it("the recommended option comes first with the language's marker, no boilerplate reject line, no dashboard text, and the hash still verifies", async () => {
+    const corpus = newCorpus("lore-ask1m-");
+    const id = openLoosening(corpus, "stash-drop");
+
+    const en = questionOf(ask(corpus, ["--recommend", `${id}=accept:it is the change you asked for`]), id);
+    expect(en.options.map((o) => o.label)).toEqual(["Accept (Recommended)", "Reject"]);
+    expect(en.options[0]?.description.startsWith("it is the change you asked for")).toBe(true);
+    expect(en.question).not.toContain("Lore's measured recommendation: reject (human-always");
+    expect(en.question).not.toContain("start the dashboard");
+    expect(en.question).not.toContain("Details:");
+
+    const zh = questionOf(ask(corpus, ["--recommend", `${id}=accept:这正是你要的改动`, "--lang", "zh"]), id);
+    expect(zh.options.map((o) => o.label)).toEqual(["接受（推荐）", "拒绝"]);
+    expect(zh.options[0]?.description.startsWith("这正是你要的改动")).toBe(true);
+    expect(zh.question).toContain("内容：");
+    expect(zh.question).toContain("如果接受：");
+    expect(zh.question).toContain("你接受吗？");
+    expect(zh.question).not.toContain("What:");
+    expect(zh.question).not.toContain("start the dashboard");
+
+    const bad = lore(corpus, ["pending", "--ask", "--lang", "fr"]);
+    expect(bad.exitCode).toBe(2);
+
+    // the reordered, labelled question verifies through the hook and records the answer
+    const hook = runAskHook(corpus, payloadOf(corpus, [zh], answerFor(zh, "接受（推荐）")));
+    expect(hook.exitCode, hook.stderr).toBe(0);
+    expect(hook.stdout).toContain(`decision ${id} accepted`);
+    expect(loosenAgain(corpus, "stash-drop").exitCode).toBe(0);
+    expect(thresholdOf(corpus, "stash-drop")).toBe(0.5);
   }, 240_000);
 });
 
