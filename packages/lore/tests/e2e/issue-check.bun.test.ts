@@ -279,6 +279,18 @@ function insertResolvesLink(tmpDir: string, fromId: string, toId: string, create
   }
 }
 
+/** Sets a fixture doc's `status` column directly on the throwaway corpus (no lifecycle gate; same standing as `mergeExtra`). */
+function forceDocStatus(tmpDir: string, id: string, status: string): void {
+  const db = new Database(dbPath(tmpDir));
+  try {
+    db.query("UPDATE docs SET status = ? WHERE id = ?").run(status, id);
+    const row = db.query("SELECT status FROM docs WHERE id = ?").get(id) as { status: string } | undefined;
+    if (row?.status !== status) throw new Error(`forceDocStatus: doc ${id} did not take status ${status}`);
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Merges `patch` into a task's stored `extra` JSON column directly (no CLI
  * verb writes arbitrary `extra.issue_report` — SPEC-072's `report-issue`
@@ -413,7 +425,9 @@ describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
   });
 
   it("AC-ICL-6: STATE — archiving the issue task itself leaves the verdict unchanged (still consistent)", async () => {
-    await setStatus(tmpDir, issueTask.slug, "archived"); // task type: draft -> archived is a valid direct edge
+    // `set --status archived` on a task now stops at the attested-pass floor (a task archives through `lore done`), and
+    // this test's subject is the check-issues verdict, not that floor: archive the throwaway fixture row directly.
+    forceDocStatus(tmpDir, issueTask.id, "archived");
 
     const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);

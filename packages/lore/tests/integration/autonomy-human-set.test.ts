@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decide, OPERATION_CLASS_REGISTRY, ok, seedGovernedThresholds, type AutonomyFacts } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version.js";
 import { verifyDecisionChain } from "../../src/store/decision-log.js";
 import { DecisionService } from "../../src/service/decision-service.js";
 import { createOverrideDecisionPort, OVERRIDE_MEASURED_FACTS } from "../../src/service/override-decision.js";
@@ -173,7 +174,7 @@ describe("AC-LG-8 three human classes: migration 032 widens the verdict CHECK wi
       const final = await upgraded.listDecisionLog();
       expect(final.ok && verifyDecisionChain(final.value)).toEqual({ clean: true, checked: 3 });
       expect(() => upgraded.getDatabase().run("UPDATE decision_log SET score = 1")).toThrow(); // append-only trigger re-armed
-      expect(upgraded.getDatabase().query("PRAGMA user_version").get()).toEqual({ user_version: 35 });
+      expect(upgraded.getDatabase().query("PRAGMA user_version").get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
     } finally {
       upgraded.close();
     }
