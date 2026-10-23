@@ -137,9 +137,9 @@ describe("autonomy set --tier milestone / --retire: loosenings wait for a human"
     expect(Object.keys(shownClasses(corpus))).not.toContain("old-normal");
   }, 120_000);
 
-  // AC-ASK-1: an approval binds to the changed class entry, not the whole record version.
+  // an approval binds to the changed class entry, not the whole record version.
   for (const order of [["override-judgment", "report-issue"], ["report-issue", "override-judgment"]] as const) {
-    it(`AC-ASK-1: two approved loosenings of different classes both apply, order ${order.join(" then ")}`, async () => {
+    it(`two approved loosenings of different classes both apply, order ${order.join(" then ")}`, async () => {
       const corpus = await newStaleCorpus("lore-batch-");
       const argsOf = (id: string): string[] => (id === "report-issue" ? ["autonomy", "set", id, "--retire"] : ["autonomy", "set", id, "--tier", "milestone"]);
       const pending = order.map((id) => {
@@ -161,7 +161,7 @@ describe("autonomy set --tier milestone / --retire: loosenings wait for a human"
     }, 300_000);
   }
 
-  it("AC-ASK-1: a loosening whose SAME class entry changed after approval is refused as stale (new pending decision)", async () => {
+  it("a loosening whose SAME class entry changed after approval is refused as stale (new pending decision)", async () => {
     const corpus = await newStaleCorpus("lore-batch-stale-");
     const first = lore(corpus, ["autonomy", "set", "override-judgment", "--tier", "milestone"]);
     expect((await runDecide(corpus, pendingIdOf(first.stderr), "accept")).code).toBe(0);
