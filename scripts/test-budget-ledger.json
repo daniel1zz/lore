@@ -46,13 +46,6 @@
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
     },
     {
-      "path": "packages/lore/tests/integration/cli/assess-ai.bun.test.ts",
-      "titleFingerprint": "shells `git diff HEAD~1..HEAD` and the resulting diff reaches the judge prompt",
-      "spawnCount": 5,
-      "line": 260,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
       "path": "packages/lore/tests/integration/cli/migrate-phases.test.ts",
       "titleFingerprint": "AC-PHASE-10.CLI.S1: after migration, lore get shows legacy_phase set, extra.phase gone",
       "spawnCount": 3,

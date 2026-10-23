@@ -6,7 +6,7 @@ mode: static
 ---
 ## CLOSE — feedback loop + memory hygiene
 
-- Plan fully done → `lore assess <plan>...` (or `--where`): the milestone review, seven dimensions each pass | fail | na with a reason and a reference. Closing the plan requires a passing review of its CURRENT state (any later plan or task edit makes it stale: assess again) and nothing else.
+- Plan fully done → `lore assess <plan>`.
 - Spec implementation landed → `lore anchor add <spec> <impl-path[#Symbol]>` (a test file also takes `<test-path>#"describe or it title"`); declare anchors after landing, not during planning.
 - Superseded knowledge → `lore invalidate <doc> --superseded-by <new> --reason "<why>"`; never leave it stale.
 - A lesson (an incident, a correction, a near miss) is finished only when it changes a mechanism: in the same turn, create or link the spec, plan, task or rule whose end-state design makes it unable to recur — not a guard on the old design — or say why none fits. "Noted for next time" is not a disposition, and a retro is not one either (it is read only when searched). Whether you do this is not enforced; the design you produce is (the approval judge's design_necessity).

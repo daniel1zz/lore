@@ -140,7 +140,7 @@ afterEach(() => {
 });
 
 describe("milestone review gates close", () => {
-  it("milestone review gates close: a plan with no review is refused (exit 4, BR-1372) and stays open", () => {
+  it("milestone review gates close: a plan with no review is refused (exit 4, BR-1372) and stays open", { timeout: 300_000 }, () => {
     const { plan } = makePlan("No review");
     const refused = close(plan);
     expect(refused.exitCode).toBe(4);
@@ -150,7 +150,7 @@ describe("milestone review gates close", () => {
     expect(statusOf(plan)).toBe("approved");
   });
 
-  it("milestone review gates close: a passing current review closes the plan with no exemption and no other predicate", () => {
+  it("milestone review gates close: a passing current review closes the plan with no exemption and no other predicate", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Passing");
     const review = assessRows([plan]);
     expect(review.exitCode, review.stderr).toBe(0);
@@ -162,7 +162,7 @@ describe("milestone review gates close", () => {
     expect(statusOf(plan)).toBe("archived");
   });
 
-  it("milestone review gates close: a failing dimension refuses the close even though the review is current", () => {
+  it("milestone review gates close: a failing dimension refuses the close even though the review is current", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Failing");
     installJudge(
       judgeAnswer({ security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection" } }),
@@ -179,7 +179,7 @@ describe("milestone review gates close", () => {
     expect(statusOf(plan)).toBe("approved");
   });
 
-  it("milestone review gates close: design_necessity without a reference is a fail whatever the judge said", () => {
+  it("milestone review gates close: design_necessity without a reference is a fail whatever the judge said", { timeout: 300_000 }, () => {
     const { plan } = makePlan("No reference");
     installJudge(
       judgeAnswer({ design_necessity: { verdict: "pass", reason: "needed", reference: "" } }),
@@ -191,7 +191,7 @@ describe("milestone review gates close", () => {
     expect(close(plan).exitCode).toBe(4);
   });
 
-  it("milestone review gates close: a task changed after the review makes it stale; a new review makes it current", () => {
+  it("milestone review gates close: a task changed after the review makes it stale; a new review makes it current", { timeout: 300_000 }, () => {
     const { plan, task } = makePlan("Stale");
     expect(assessRows([plan]).exitCode).toBe(0);
     addPass(task);
@@ -204,7 +204,7 @@ describe("milestone review gates close", () => {
     expect(closed.exitCode, closed.stderr).toBe(0);
   });
 
-  it("milestone review gates close: a plan with no tasks has nothing to review and closes", () => {
+  it("milestone review gates close: a plan with no tasks has nothing to review and closes", { timeout: 300_000 }, () => {
     counter += 1;
     const plan = slugOf(runLore(["create", "plan", "--title", `Empty ${counter}`, "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir).stdout);
     expect(runLore(["set", plan, "--status", "approved"], tmpDir).exitCode).toBe(0);
@@ -217,7 +217,7 @@ describe("milestone review gates close", () => {
     expect(statusOf(plan)).toBe("archived");
   });
 
-  it("milestone review gates close: batch assess gives one row per plan, a failing row does not stop the others, exit 1", () => {
+  it("milestone review gates close: batch assess gives one row per plan, a failing row does not stop the others, exit 1", { timeout: 300_000 }, () => {
     const good = makePlan("Good batch");
     const bad = makePlan("FAILMARK batch");
     installJudge(
@@ -239,7 +239,7 @@ describe("milestone review gates close", () => {
     expect(close(bad.plan).exitCode).toBe(4);
   });
 
-  it("milestone review gates close: usage errors exit 2 and store nothing", () => {
+  it("milestone review gates close: usage errors exit 2 and store nothing", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Usage");
     expect(runLore(["assess"], tmpDir).exitCode).toBe(2);
     expect(runLore(["assess", plan, "--where", "type=plan"], tmpDir).exitCode).toBe(2);
@@ -248,7 +248,7 @@ describe("milestone review gates close", () => {
     expect(close(plan).stderr).toContain("MILESTONE_REVIEW_MISSING");
   });
 
-  it("milestone review gates close: an unparsable judge answer stores no review and the plan stays unclosable", () => {
+  it("milestone review gates close: an unparsable judge answer stores no review and the plan stays unclosable", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Garbage");
     installJudge("not json at all", "not json at all");
     const review = assessRows([plan]);
@@ -258,14 +258,14 @@ describe("milestone review gates close", () => {
     expect(close(plan).stderr).toContain("MILESTONE_REVIEW_MISSING");
   });
 
-  it("milestone review gates close: a review cannot be forged through lore create", () => {
+  it("milestone review gates close: a review cannot be forged through lore create", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Forged");
     const forged = runLore(["create", "knowledge", "--title", "Forged review", "--sub-type", "milestone-review", "--parent", plan, "--content", "x", "--no-ai"], tmpDir);
     expect(forged.exitCode).not.toBe(0);
     expect(close(plan).stderr).toContain("MILESTONE_REVIEW_MISSING");
   });
 
-  it("milestone review gates close: the plan-level exemption commands no longer exist", () => {
+  it("milestone review gates close: the plan-level exemption commands no longer exist", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Exempt");
     for (const sub of ["exempt-attestation", "exempt-assessment-freshness"]) {
       const r = runLore(["plan", sub, plan, "--reason", "because", "--kind", "other"], tmpDir);
