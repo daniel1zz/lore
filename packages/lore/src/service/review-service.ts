@@ -43,7 +43,6 @@ import { ownProposedRules } from "./rule-changes.js";
 import {
   buildUpstreamSpecContext,
   countScriptModeAcceptanceCriteria,
-  isJudgmentEscalatedDenial,
   type GateContext,
 } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
@@ -216,15 +215,10 @@ export interface ApproveResult extends DocRecord {
 
 /** What {@link ReviewService.approve} decided to promote for a baseline node (see `planBaselinePromotion`). */
 interface BaselinePromotionPlan {
-  /** The pending revisions promoted: exactly the ones a review saw (or the one `--item` named). */
+  /** The pending revisions promoted: all pending revisions (or the one `--item` named). */
   readonly selected: readonly PendingItem[];
   /** The node as it reads once the selection is promoted: what the approval gates measure. */
   readonly gateDoc: DocRecord;
-}
-
-/** A pending revision judged by a review: per item, the revision id the review's version held. */
-interface ReviewedRevisions {
-  readonly revisions: ReadonlyMap<string, string>;
 }
 
 /** Result of {@link ReviewService.rejectItem}. */
@@ -283,15 +277,12 @@ export class ReviewService {
    *   (see `enforceJudgmentRequiredGate`'s own guard), byte-identical to pre-SPEC-103
    *   behavior. Only `app.ts`'s composition root wires the real instance.
    * @param judgmentRequiredTypes - OPTIONAL SPEC-103 M2 resolved config value
-   *   (`resolveJudgmentRequiredTypes`, `@lore/core`, default `["spec","adr"]`) — which
-   *   `DocType`s the `review-judgment` checkpoint's `reject`/`NO_JUDGMENT`/provenance-
-   *   collision outcomes apply to. A `JUDGMENT_ESCALATED` outcome is NOT type-scoped:
-   *   it blocks approval for every doc type whenever this list is non-empty
-   *   (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1, see
-   *   `enforceJudgmentRequiredGate`). Absent/`undefined` (every bare unit-test
-   *   construction) → treated as `[]`, which is M2's TOTAL kill switch (escalate
-   *   included, D3) — same "absent in bare tests, present in production" DI shape as
-   *   every other optional constructor dependency on this class.
+   *   (`resolveJudgmentRequiredTypes`, `@lore/core`, default `["spec","adr"]`) — the
+   *   ONLY `DocType`s whose approval consults `review_judgments` (BR-1369); every other
+   *   type approves without reading them. Absent/`undefined` (every bare unit-test
+   *   construction) → treated as `[]`, the total kill switch — same "absent in bare
+   *   tests, present in production" DI shape as every other optional constructor
+   *   dependency on this class.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -521,34 +512,14 @@ export class ReviewService {
    * entirely in `checkReviewJudgment` (`checkpoint-registry.ts`).
    *
    * A no-op (`ok(undefined)`) when: this service has no `gate`/`judgmentService`
-   * wired (bare test construction, byte-identical to pre-SPEC-103 behavior), OR
-   * `judgmentRequiredTypes` is EMPTY (M2's total kill switch, AC-TIER-7/AC-ESC-3 —
-   * checked FIRST, ahead of the escalate path below, so an operator who turned M2
-   * off gets it off for every decision including `escalate`).
+   * wired (bare test construction), OR `doc.type` is not in `judgmentRequiredTypes`
+   * (default `["spec","adr"]`, BR-1369). An empty list is the total kill switch.
    *
-   * @invariant spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1 — for a
-   *   `doc.type` OUTSIDE `judgmentRequiredTypes` (and a non-empty list), exactly ONE
-   *   denial propagates: `JUDGMENT_ESCALATED`. An escalate asserts an outstanding
-   *   HUMAN decision and carries the questions, so filing it away silently is the
-   *   measured harm this gate exists to prevent. The other three outcomes stay
-   *   SUPPRESSED for such types — `JUDGMENT_REJECTED` (a judge disagreeing with a
-   *   record of what happened must not hold event capture hostage), `NO_JUDGMENT`
-   *   (propagating it would require a judgment before ANY knowledge doc could be
-   *   approved — far beyond what the governing ADR authorises), and
-   *   `JUDGMENT_PROVENANCE_COLLISION` (the same precondition, one step in).
-   *   The verdict itself is never re-derived here: the type filter is applied to the
-   *   PREDICATE's outcome via `isJudgmentEscalatedDenial`, keeping
-   *   `checkReviewJudgment` the single decision authority (D2).
-   * @invariant same spec, D5 — for an ungated type the question is "is ANY independent
-   *   current-version decision an `escalate`?", NOT "is the WORST one?". An escalate
-   *   PRESENT blocks even when a `reject` accompanies it on the same version
-   *   (reachable: `lore review` does not bump the version, so two runs against one
-   *   version can disagree). Enforced by narrowing the decision VECTOR handed to the
-   *   predicate for such types, not by reinterpreting its verdict — adding a weaker,
-   *   deliberately-suppressible signal must never destroy a stronger one, and a
-   *   control defeatable by adding noise is not a control. Unchanged by this: gated
-   *   types (the same pair still blocks on the REJECT — the anti-lottery rule) and the
-   *   `[]` kill switch, which still short-circuits above (D3).
+   * @invariant BR-1369 — a type OUTSIDE `judgmentRequiredTypes` (plan, task, knowledge,
+   *   baseline node) never consults `review_judgments`: no `reject`, no `escalate`, no
+   *   missing judgment blocks it. Milestone review (`lore assess`) is where those
+   *   documents are judged. For a listed type the worst independent current-version
+   *   decision wins (D3) and `checkReviewJudgment` stays the single decision authority.
    *
    * @param doc - The doc `approve()` is about to transition to "approved" — read at
    *   its CURRENT (pre-write) version, the version judgments are matched against.
@@ -557,17 +528,12 @@ export class ReviewService {
     if (this.gate === undefined || this.judgmentService === undefined) {
       return ok(undefined);
     }
-    const requiredTypes = this.judgmentRequiredTypes ?? [];
-    // reason: D3 — the documented `judgment_required_types: []` kill switch
-    // short-circuits BEFORE the escalate path, so an empty list stays byte-identical
-    // to pre-SPEC-103 behavior for EVERY decision. The pre-existing AC-TIER-7 test
-    // covers only "[] + no judgment at all" and would NOT catch an escalate leaking
-    // past an empty list — `review-judgment-escalate-scope.test.ts`'s AC-ESC-3 is
-    // that guard, and it fails if this early return is moved below the enforce call.
-    if (requiredTypes.length === 0) {
+    // reason: BR-1369 — a type outside `judgment_required_types` NEVER consults `review_judgments`: it returns here,
+    // before the judgments are read, so no reject, no escalate and no missing judgment can block it. An empty list is
+    // the same rule for every type (the documented kill switch). Do NOT move this below the `listFor` read.
+    if (!(this.judgmentRequiredTypes ?? []).includes(doc.type)) {
       return ok(undefined);
     }
-    const typeIsGated = requiredTypes.includes(doc.type);
 
     const judgmentsResult = await this.judgmentService.listFor(doc.id, "review");
     if (!judgmentsResult.ok) return judgmentsResult;
@@ -605,24 +571,9 @@ export class ReviewService {
       }
     }
 
-    // reason: D5 — for an UNGATED type the question is "is ANY independent
-    // current-version decision an `escalate`?", never "is the WORST one?". Narrowing
-    // the vector to the only verdict that is policy-relevant for such types is what
-    // makes those two questions coincide: worst-decision-wins over an escalate-only
-    // vector yields `escalate` whenever one is present, so a co-recorded `reject`
-    // (suppressible opinion for these types, D1) can no longer out-rank and thereby
-    // DESTROY the escalate. The gated path keeps the FULL vector — there,
-    // worst-decision-wins is the anti-lottery rule and a reject must never be
-    // out-rolled. `checkReviewJudgment` stays the single decision authority either
-    // way (D2): the service selects which decisions are in policy scope for the
-    // type, the predicate alone decides what they mean.
-    const policyScopedDecisions = typeIsGated
-      ? independentDecisions
-      : independentDecisions.filter((decision) => decision === "escalate");
-
     const ctx: GateContext = {
       targetIdOrSlug: doc.slug,
-      reviewJudgmentDecisions: policyScopedDecisions,
+      reviewJudgmentDecisions: independentDecisions,
       reviewJudgmentProvenanceCollision: provenanceCollision,
       reviewJudgmentTruncatedApproval: truncatedApproval,
       reviewJudgmentBlockingQuestions: blockingQuestions,
@@ -630,16 +581,7 @@ export class ReviewService {
       // note; `doc.id` is the RESOLVED doc's real id, never its slug.
       targetDocId: doc.id,
     };
-    const enforceResult = this.gate.enforcer.enforce("review-judgment", ctx);
-    if (enforceResult.ok || typeIsGated) return enforceResult;
-    // D1 — an ungated type: only the escalate verdict escapes the type list. With the
-    // vector narrowed above, the remaining reachable denials are `NO_JUDGMENT` (no
-    // escalate present) and `JUDGMENT_PROVENANCE_COLLISION` (a colliding judgment and
-    // no independent escalate) — both suppressed here, which is exactly D1's
-    // precondition half (AC-ESC-7). Kept as an explicit filter rather than an
-    // `includes("escalate")` branch so the PREDICATE's outcome, not a service-side
-    // re-derivation, remains what decides.
-    return isJudgmentEscalatedDenial(enforceResult.error) ? enforceResult : ok(undefined);
+    return this.gate.enforcer.enforce("review-judgment", ctx);
   }
 
   /**
@@ -933,7 +875,7 @@ export class ReviewService {
     // node as it will read (its declared commands, its judgment) and a refusal writes nothing.
     let baselinePlan: BaselinePromotionPlan | undefined;
     if (baselinePending) {
-      const planned = await this.planBaselinePromotion(doc, opts?.item, overriddenJudgmentId !== undefined || overrodeNoJudgment);
+      const planned = await this.planBaselinePromotion(doc, opts?.item);
       if (!planned.ok) return planned;
       baselinePlan = planned.value;
     }
@@ -1049,39 +991,12 @@ export class ReviewService {
   }
 
   /**
-   * The pending revisions the latest review of `doc` saw: per item, the revision id its version held. Read from that
-   * version's own stored snapshot, so a judgment needs no extra column to be bound to revisions.
-   *
-   * @returns an empty map when no usable review exists or its version can no longer be read: nothing was seen.
-   */
-  private async reviewedRevisionsOf(doc: DocRecord): Promise<Result<ReviewedRevisions, LoreError>> {
-    if (this.judgmentService === undefined) return ok({ revisions: new Map() });
-    const judgments = await this.judgmentService.listFor(doc.id, "review");
-    if (!judgments.ok) return judgments;
-    // reason: BR-269 — a truncated approve never counts as having seen the whole node (same rule the judgment gate applies).
-    const usable = judgments.value.filter((j) => !(j.decision === "approve" && j.truncated === true));
-    const latest = [...usable].sort((a, b) => b.doc_version - a.doc_version || b.created_at.localeCompare(a.created_at))[0];
-    if (latest === undefined) return ok({ revisions: new Map() });
-    const versions = await this.store.findVersions(doc.id, { limit: 500 });
-    if (!versions.ok) return versions;
-    const snapshot = versions.value.find((v) => v.version === latest.doc_version);
-    if (snapshot === undefined) return ok({ revisions: new Map() });
-    return ok({ revisions: new Map(listPendingItems(snapshot.extra).map((p) => [p.item, p.revisionId])) });
-  }
-
-  /**
-   * Decide which pending revisions of `doc` an approval promotes (BR-1338): exactly the revisions a review saw.
-   *   - a revision whose item the review saw with ANOTHER revision id was rewritten after the review: refused, named;
-   *   - a revision of an item the review never saw (written after it) is not promoted and stays pending, unless it is
-   *     the one `--item` names, which is then refused;
-   *   - `item` narrows the selection to that one item; items not selected are untouched.
-   * An override (`--override-judgment` / `--override-no-judgment`, already decided by the autonomy port) or a service
-   * with no judgment store skips the binding: every candidate is promoted.
+   * Decide which pending revisions of `doc` an approval promotes (BR-1338, BR-1369): every pending revision, or the one
+   * `--item` names. A baseline node is never bound to a review judgment (BR-1369), so nothing is held back for "not seen".
    */
   private async planBaselinePromotion(
     doc: DocRecord,
     item: string | undefined,
-    skipBinding: boolean,
   ): Promise<Result<BaselinePromotionPlan, LoreError>> {
     const pending = listPendingItems(doc.extra);
     let candidates: readonly PendingItem[] = pending;
@@ -1100,74 +1015,24 @@ export class ReviewService {
       }
     }
 
-    // reason: `workflow.review.judgment_required_types: []` is the documented kill switch of the review judgment (absent in a
-    // bare construction): with no review required there is no review to bind an approval to, so the approval promotes
-    // what it names. With the default list a review is required for baseline nodes too: an approval needs one that saw it.
-    const bound = !skipBinding && this.judgmentService !== undefined && (this.judgmentRequiredTypes?.length ?? 0) > 0;
-    const reviewed = bound ? await this.reviewedRevisionsOf(doc) : undefined;
-    if (reviewed !== undefined && !reviewed.ok) return reviewed;
-    const selected: PendingItem[] = [];
-    const unseen: PendingItem[] = [];
-    const rewritten: Array<{ item: PendingItem; reviewedId: string }> = [];
-    for (const candidate of candidates) {
-      const seen = reviewed?.ok === true ? reviewed.value.revisions.get(candidate.item) : candidate.revisionId;
-      if (seen === candidate.revisionId) selected.push(candidate);
-      else if (seen === undefined) unseen.push(candidate);
-      else rewritten.push({ item: candidate, reviewedId: seen });
-    }
-    if (rewritten.length > 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "item",
-        message:
-          `${rewritten.map((r) => `${r.item.item} (revision ${r.item.revisionId}, the review saw ${r.reviewedId})`).join("; ")} on ${doc.slug} ` +
-          `changed after the review that saw it: nothing was approved. Review it again (\`lore review ${doc.slug}\`) and approve what that review saw`,
-        value: rewritten.map((r) => r.item.item),
-        rule: "BR-1338",
-      });
-    }
-    if (item !== undefined && unseen.length > 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "item",
-        message: `${unseen.map((u) => u.item).join(", ")} on ${doc.slug} was not seen by any review: run \`lore review ${doc.slug}\`, then approve it`,
-        value: unseen.map((u) => u.item),
-        rule: "BR-1338",
-      });
-    }
+    const selected: PendingItem[] = candidates.slice();
     if (selected.length === 0) {
       return err({
         code: "VALIDATION_ERROR",
         field: "item",
-        message:
-          `no pending revision of ${doc.slug} was seen by a review (pending: ${pending.map((p) => p.item).join(", ")}): ` +
-          `run \`lore review ${doc.slug}\`, then approve`,
+        message: `${doc.slug} holds no pending revision to approve`,
         value: pending.map((p) => p.item),
         rule: "BR-1338",
       });
     }
     const promotion = promoteItems(doc, selected.map((s) => s.item));
-    const reviewedVersion = await this.reviewedVersionOf(doc, bound);
-    if (!reviewedVersion.ok) return reviewedVersion;
     const gateDoc: DocRecord = {
       ...doc,
       extra: promotion.extra,
       ...(promotion.title !== undefined ? { title: promotion.title } : {}),
       ...(promotion.content !== undefined ? { content: promotion.content } : {}),
-      // reason: the judgment gate matches judgments on the doc version they were made against; a baseline node's version
-      // moves with every pending write, so it is measured at the version the review saw.
-      version: reviewedVersion.value ?? doc.version,
     };
     return ok({ selected, gateDoc });
-  }
-
-  /** The doc version the latest usable review was made against, or `undefined` when the approval is not bound to one. */
-  private async reviewedVersionOf(doc: DocRecord, bound: boolean): Promise<Result<number | undefined, LoreError>> {
-    if (!bound || this.judgmentService === undefined) return ok(undefined);
-    const judgments = await this.judgmentService.listFor(doc.id, "review");
-    if (!judgments.ok) return judgments;
-    const versions = judgments.value.filter((j) => !(j.decision === "approve" && j.truncated === true)).map((j) => j.doc_version);
-    return ok(versions.length === 0 ? undefined : Math.max(...versions));
   }
 
   /**
