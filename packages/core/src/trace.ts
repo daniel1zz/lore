@@ -24,12 +24,12 @@ import { z } from "zod";
 
 /**
  * The currently-known `trace_events.kind` values (SPEC-102 §Acceptance
- * Criteria, §Scope). Read instrumentation: `get`/`search`/`feed`/
- * `context_bundle`. Deny instrumentation: `gate_deny` (SPEC-102 D7 — recorded
+ * Criteria, §Scope). Read instrumentation: `search`/`feed`/
+ * `context_bundle` (a doc `get` is COUNTED per day, never a row: BR-1373). Deny instrumentation: `gate_deny` (SPEC-102 D7 — recorded
  * at BOTH the hook layer and the service layer, disambiguated by
  * `details.layer`, never a separate kind per layer).
  */
-export const TRACE_EVENT_KINDS = ["get", "search", "feed", "context_bundle", "gate_deny"] as const;
+export const TRACE_EVENT_KINDS = ["search", "feed", "context_bundle", "gate_deny"] as const;
 
 /** One of {@link TRACE_EVENT_KINDS} — the `trace_events.kind` column's currently-known value set. */
 export type TraceEventKind = (typeof TRACE_EVENT_KINDS)[number];

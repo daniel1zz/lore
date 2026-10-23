@@ -1848,7 +1848,7 @@ function createAppUnscoped(
     // TraceRecorder call site (CorpusService/GateEnforcer) already treats
     // this as "untraced", byte-identical to pre-SPEC-102 behavior.
     const traceRecorder = traceEnabled
-      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
+      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), sqliteStore.incrementReadCount.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
       : undefined;
     // reason: SPEC-102 §Migration Strategy — fire-and-forget from the
     // CALLER's perspective (loader.ts never awaits `pruneTrigger()`, so a
@@ -1976,7 +1976,7 @@ function createAppUnscoped(
     const localTraceStore = traceEnabled ? new SQLiteStore(dbPath) : undefined;
     const traceRecorder =
       localTraceStore !== undefined
-        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
+        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), localTraceStore.incrementReadCount.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
         : undefined;
     // reason: SPEC-102 §Migration Strategy — same fire-and-forget-from-the-
     // CALLER's-perspective shape as the SQLite branch, bound to the SEPARATE

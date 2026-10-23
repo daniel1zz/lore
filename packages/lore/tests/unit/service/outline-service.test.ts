@@ -739,13 +739,13 @@ describe("OutlineService.resolve", () => {
         countTraceEventsByKind: (window) => store.countTraceEventsByKind(window),
         countTraceDenyByCheckpoint: (window) => store.countTraceDenyByCheckpoint(window),
         countTraceZeroHitSearches: (window) => store.countTraceZeroHitSearches(window),
-        countNeverReadDocs: (window) => store.countNeverReadDocs(window),
         // reason: spec-a-write-side-fact-with-no-read-side-address-counts-with-no
         // §Scope M1 — new required StoreInterface methods (the member lists the
         // two counts above are now DERIVED from); mechanical addition (same class
         // of fix as every other explicit delegate above).
         listTraceZeroHitSearches: (window, opts) => store.listTraceZeroHitSearches(window, opts),
-        listNeverReadDocs: (window) => store.listNeverReadDocs(window),
+        incrementReadCount: (day) => store.incrementReadCount(day),
+        listReadCounts: (sinceDay) => store.listReadCounts(sinceDay),
         listTraceGateDenies: (window) => store.listTraceGateDenies(window),
         listTraceRawSearchQueries: (window) => store.listTraceRawSearchQueries(window),
         pruneTraceEvents: (cutoffIso, batchSize) => store.pruneTraceEvents(cutoffIso, batchSize),

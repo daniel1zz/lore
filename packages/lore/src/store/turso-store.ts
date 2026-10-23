@@ -83,6 +83,7 @@ import {
   SELECT_SPEC_EXTRAS_SQL,
 } from "./migrations/migration-029.js";
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
+import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -121,7 +122,6 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
-  NeverReadDoc,
   SearchHit,
   ProposedRuleWrite,
   RuleLeafPatch,
@@ -132,6 +132,7 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
@@ -990,6 +991,11 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_030_SQL);
+      }
+
+      if (currentVersion < 31) {
+        // reason: migration-031 creates the per-day read counter and deletes every per-read `get` trace row (BR-1373).
+        await this.client.executeMultiple(MIGRATION_031_SQL);
       }
     })();
 
@@ -3710,25 +3716,6 @@ export class TursoStore implements StoreInterface {
     }
   }
 
-  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
-    try {
-      await this.ensureReady();
-      const rs = await this.client.execute({
-        sql: `SELECT id, slug FROM docs
-              WHERE deleted_at IS NULL
-              AND id NOT IN (
-                SELECT DISTINCT doc_id FROM trace_events
-                WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
-              )
-              ORDER BY slug ASC, id ASC`,
-        args: [window.since],
-      });
-      return ok(rs.rows.map((row) => ({ id: rowStr(row, "id"), slug: rowStr(row, "slug") })));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
   async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
     // reason: DERIVED from the member list, never a second COUNT(*) — see
     // StoreInterface.countTraceZeroHitSearches's own ⛔ note.
@@ -3737,11 +3724,31 @@ export class TursoStore implements StoreInterface {
     return ok(listResult.value.length);
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
-    // reason: DERIVED from the member list — see listNeverReadDocs above.
-    const listResult = await this.listNeverReadDocs(window);
-    if (!listResult.ok) return listResult;
-    return ok(listResult.value.length);
+  async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: ONE atomic upsert (BR-1373) — a read-then-write pair would lose concurrent increments.
+      await this.client.execute({
+        sql: "INSERT INTO trace_read_counts (day, count) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count = count + 1",
+        args: [day],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT day, count FROM trace_read_counts WHERE day >= ? ORDER BY day ASC",
+        args: [sinceDay],
+      });
+      return ok(rs.rows.map((row) => ({ day: rowStr(row, "day"), count: Number(row["count"]) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
