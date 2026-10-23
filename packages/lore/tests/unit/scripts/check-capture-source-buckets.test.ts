@@ -417,6 +417,7 @@ const PINNED_REAL_SITES: readonly string[] = [
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/phase-workflow-service.ts|_addEvidenceImpl",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|_addEvidenceImpl",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|isRunnerCaptured",
+  "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|isRunnerProducedRow",
   "exempt-by-shape|stamp_verdict|raw-field-read|packages/core/src/stamp-binding.ts|classifyEvidenceStamps>(anonymous)",
   "exempt-by-shape|stamp_verdict|raw-field-read|packages/lore/src/adapters/http/index.ts|resolveDashboardHealthStamp",
   "exempt-by-shape|stamp_verdict|raw-field-read|packages/lore/src/service/stamp-binding-reader.ts|measureRadiusByDoc>(anonymous)",
