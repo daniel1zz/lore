@@ -287,6 +287,7 @@ import {
 } from "../cli/evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../evidence-capture.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
+import { resolveBulkSelector } from "../../service/bulk-lifecycle-service.js";
 import { existsSync } from "node:fs";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -590,6 +591,35 @@ export const LoreReopenSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
   reason: z.string(),
+});
+
+/**
+ * Input schema for lore_bulk: the MCP peer of `lore bulk` (BR-1366). `ids` XOR `where` selects (`where` is the CLI's
+ * `key=value,key=value` text; an id may be `slug@version` to pin the version a preview showed); `apply: false`
+ * (default) previews, `apply: true` writes one audited row each. `reason` is required to apply archive/deprecate/close.
+ */
+export const LoreBulkSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  verb: z.enum(["archive", "deprecate", "close", "done"]),
+  ids: z.array(z.string().min(1)).optional(),
+  where: z.string().optional(),
+  apply: z.boolean().default(false),
+  reason: z.string().optional(),
+});
+
+/** Input schema for lore_done: the MCP peer of `lore done` for a task, with the same two audited escape hatches. */
+export const LoreDoneSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  id_or_slug: z.string(),
+  override_attestation: z.string().optional().describe("Audited reason for archiving without a runner-attested pass"),
+  declare_no_new_tests: z.string().optional().describe("Audited reason for archiving a declared-scope task with no red evidence"),
+});
+
+/** Input schema for lore_reject: the MCP peer of `lore reject <id> [--reason]` (a draft or in-review document). */
+export const LoreRejectSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  id_or_slug: z.string(),
+  reason: z.string().optional(),
 });
 
 /**
@@ -965,7 +995,7 @@ export const LoreInvalidateSchema = z.object({
 export const LoreHandoffSchema = handoffExtraSchema
   // reason: the trail-derived fields are computed by `SessionService.writeHandoff` from the call's session
   // trail (D16); a caller cannot name them, so they are not part of the tool's input.
-  .omit({ by: true, changed_files: true, changed_files_measured: true, trail_gaps: true })
+  .omit({ by: true, changed_files: true, changed_files_measured: true, changed_files_overflow: true, trail_gaps: true })
   .extend({
   harness_run: HARNESS_RUN_FIELD,
 });
@@ -2094,6 +2124,60 @@ export function registerTools(
       return textContent({ doc: result.value });
     },
   );
+
+  // lore_bulk — the same BulkLifecycleService as `lore bulk`; same selector, preview/apply and per-row result (BR-1366).
+  registerToolWithArgs(
+    server,
+    "lore_bulk",
+    "Move many documents through one lifecycle verb (archive|deprecate|close|done): preview by default, apply:true writes one audited row each; a row that fails (stale version, gate refusal) fails alone",
+    LoreBulkSchema,
+    async (args) => {
+      const selector = resolveBulkSelector(args.ids, args.where);
+      if (!selector.ok) return errorContent(selector.error);
+      // reason: through the call scope like every other write tool, so the writes carry THIS call's attested identity.
+      const service = scope.service("bulkLifecycleService");
+      if (!args.apply) {
+        const preview = await service.preview(selector.value, args.verb);
+        if (!preview.ok) return errorContent(preview.error);
+        return textContent({ mode: "preview", verb: args.verb, rows: preview.value });
+      }
+      const applied = await service.apply(selector.value, args.verb, {
+        by: args.by,
+        ...(args.reason !== undefined ? { reason: args.reason } : {}),
+        source: "mcp",
+      });
+      if (!applied.ok) return errorContent(applied.error);
+      return textContent({ mode: "apply", verb: args.verb, rows: applied.value });
+    },
+  );
+
+  // lore_done — the same TaskWorkflowService.done as `lore done`; every floor applies, the two escapes are audited.
+  registerToolWithArgs(
+    server,
+    "lore_done",
+    "Archive a task through the evidence floors (runner-attested pass required unless override_attestation gives an audited reason)",
+    LoreDoneSchema,
+    async (args) => {
+      const result = await taskWorkflowService.done(args.id_or_slug, {
+        by: args.by,
+        source: "mcp",
+        ...(args.override_attestation !== undefined ? { overrideReason: args.override_attestation } : {}),
+        ...(args.declare_no_new_tests !== undefined ? { noNewTestsReason: args.declare_no_new_tests } : {}),
+      });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ doc: result.value.task, already_done: result.value.already_done, transitions: result.value.transitions });
+    },
+  );
+
+  // lore_reject — the same ReviewService.reject as `lore reject`.
+  registerToolWithArgs(server, "lore_reject", "Reject a draft or in-review document, recording the reason in the audit log", LoreRejectSchema, async (args) => {
+    const result = await reviewService.reject(args.id_or_slug, {
+      reviewer: args.by,
+      ...(args.reason !== undefined ? { reason: args.reason } : {}),
+    });
+    if (!result.ok) return errorContent(result.error);
+    return textContent({ doc: result.value });
+  });
 
   // lore_ac_supersede — the same service method as `lore ac supersede` (retires a criterion; never declares one).
   registerToolWithArgs(

@@ -62,7 +62,8 @@ describe("migration-011 (trace_events) — schema (AC-TRACE-1)", () => {
     const indexes = indexNames(db);
     expect(indexes).toContain("idx_trace_kind_ts");
     expect(indexes).toContain("idx_trace_kind_actor");
-    expect(indexes).toContain("idx_trace_doc");
+    // reason: migration-031 dropped idx_trace_doc with the per-read `get` rows it served (BR-1373).
+    expect(indexes).not.toContain("idx_trace_doc");
     expect(indexes).toContain("idx_trace_ts");
 
     store.close();
@@ -247,37 +248,30 @@ describe("StoreInterface trace methods (SQLiteStore)", () => {
     expect(secondPrune.value).toBe(0);
   });
 
-  it("HAPPY: countNeverReadDocs excludes docs with a kind='get' trace row since the window, and excludes soft-deleted docs", async () => {
-    const now = "2026-07-28T00:00:00.000Z";
-    const insertDoc = (id: string, deletedAt: string | null) =>
-      store.getDatabase().run(
-        `INSERT INTO docs
-           (id, slug, type, role, title, status, priority, content,
-            parent_id, extra, tags, version, created_at, updated_at,
-            created_by, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, `spec-${id}`, "spec", "spec", "T", "draft", "medium", "c", null, "{}", "[]", 1, now, now, "agent:test", deletedAt],
-      );
+  it("HAPPY: incrementReadCount upserts one row per day and listReadCounts returns them oldest first from sinceDay (BR-1373)", async () => {
+    for (const day of ["2026-07-28", "2026-07-28", "2026-07-29", "2026-07-28"]) {
+      const result = await store.incrementReadCount(day);
+      expect(result.ok).toBe(true);
+    }
 
-    insertDoc("01READ0000000000000000001", null);
-    insertDoc("01UNREAD00000000000000002", null);
-    insertDoc("01DELETED000000000000003", "2026-07-27T00:00:00.000Z");
+    const all = await store.listReadCounts("2026-01-01");
+    expect(all.ok).toBe(true);
+    if (!all.ok) return;
+    expect(all.value).toEqual([
+      { day: "2026-07-28", count: 3 },
+      { day: "2026-07-29", count: 1 },
+    ]);
 
-    await store.insertTraceEvent({
-      ts: now,
-      actor: "agent:test",
-      surface: "agent",
-      session_id: "s1",
-      kind: "get",
-      doc_id: "01READ0000000000000000001",
-      details: {},
-    });
+    const later = await store.listReadCounts("2026-07-29");
+    expect(later.ok).toBe(true);
+    if (!later.ok) return;
+    expect(later.value).toEqual([{ day: "2026-07-29", count: 1 }]);
 
-    const result = await store.countNeverReadDocs({ since: "2026-01-01T00:00:00.000Z" });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    // Only 01UNREAD... counts — 01READ... was read, 01DELETED... is soft-deleted.
-    expect(result.value).toBe(1);
+    // A read writes no trace_events row.
+    const counts = await store.countTraceEventsByKind({ since: "2000-01-01T00:00:00.000Z" });
+    expect(counts.ok).toBe(true);
+    if (!counts.ok) return;
+    expect(counts.value).toEqual({});
   });
 });
 

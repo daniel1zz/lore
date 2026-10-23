@@ -931,7 +931,7 @@ export class SessionService {
    * only the trail may say what changed. Never throws — an unreadable trail is "not measured" with its reason.
    */
   private withTrailChangedFiles(handoff: HandoffExtra, caller: HandoffCaller): HandoffExtra {
-    const { changed_files: _dropFiles, changed_files_measured: _dropMeasured, trail_gaps: _dropGaps, ...base } = handoff;
+    const { changed_files: _dropFiles, changed_files_measured: _dropMeasured, changed_files_overflow: _dropOverflow, trail_gaps: _dropGaps, ...base } = handoff;
     let trail: SessionTrail | null = null;
     let reason: string;
     if (caller.run === null) {

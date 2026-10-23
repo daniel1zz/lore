@@ -571,6 +571,12 @@ export interface DoneOpts {
    */
   noNewTestsReason?: string;
   /**
+   * Free-text justification for this close (`lore bulk done --reason`, spec-lean-governance-batch-verbs-judgment-only-at-
+   * milestones BR-1366): written verbatim to every lifecycle step's audit entry as `details.reason`. Unlike
+   * {@link overrideReason} it relaxes NO floor — it is a note, never an escape hatch. Absent adds no key.
+   */
+  reason?: string;
+  /**
    * The caller's harness session id (`CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID`, resolved by the CLI) — the
    * "mine" side of the worktree-removal test's owned-or-abandoned clause (spec-one-worktree-removal-test-for-the-
    * guard-lore-done-and-a D2). Absent = unknown: never the owner of anything.
@@ -4405,6 +4411,7 @@ export class TaskWorkflowService {
           // precedent in evidence-precheck.ts).
           ...(overrideReason !== undefined ? { overrideReason } : {}),
           ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
         },
       );
       if (!stepResult.ok) return stepResult;
@@ -5958,7 +5965,7 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    escapes: { overrideReason?: string; noNewTestsReason?: string } = {},
+    escapes: { overrideReason?: string; noNewTestsReason?: string; reason?: string } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const written = await this.writer.writeDoc({
       doc: task,
@@ -5977,6 +5984,7 @@ export class TaskWorkflowService {
         ...(escapes.noNewTestsReason !== undefined
           ? { no_new_tests_reason: escapes.noNewTestsReason, no_new_tests_declared: true }
           : {}),
+        ...(escapes.reason !== undefined ? { reason: escapes.reason } : {}),
       },
       auditSessionId: `done-${task.id}`,
       lock: "none",

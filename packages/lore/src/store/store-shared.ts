@@ -377,6 +377,13 @@ export interface TraceEventRecord extends TraceEventInput {
   id: number;
 }
 
+/** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
+export interface ReadDayCount {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+  count: number;
+}
+
 /**
  * The lower bound every trace-stats query is scoped to (SPEC-102 §Access
  * Patterns & Indexes) — mirrors `CalibrationWindowFilter`'s "always bounded"

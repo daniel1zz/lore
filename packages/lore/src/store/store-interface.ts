@@ -277,37 +277,19 @@ export type {
   TraceDenyByCheckpoint,
   TraceEventInput,
   TraceEventRecord,
+  ReadDayCount,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
   TraceStatsWindow,
 } from "./store-shared.js";
 import type {
+  ReadDayCount,
   TraceDenyByCheckpoint,
   TraceEventInput,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
   TraceStatsWindow,
 } from "./store-shared.js";
-
-/**
- * One never-read doc, as returned by {@link StoreInterface.listNeverReadDocs}.
- *
- * A store-layer READ PROJECTION (not a persisted row shape — those live in
- * `store-shared.ts`), so it is declared beside the interface method that
- * produces it, mirroring {@link CalibrationRecordWithPromptVersion}'s
- * precedent in this module.
- *
- * @invariant `slug` ships in the SAME payload as `id`, never as a follow-up
- *   lookup: "168 docs were never read" is an unactionable number, and a bare
- *   list of ULIDs is very nearly as unactionable — deciding to archive,
- *   rewrite, or investigate "this one was SUPPOSED to be read" all need the
- *   human-readable identity in hand.
- * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
- */
-export interface NeverReadDoc {
-  id: DocId;
-  slug: Slug;
-}
 
 /**
  * One zero-hit search row, as returned by
@@ -1303,15 +1285,6 @@ export interface StoreInterface {
   ): Promise<Result<TraceZeroHitSearch[], LoreError>>;
 
   /**
-   * Every non-deleted doc with NO `kind='get'` trace row since `window.since`
-   * (idx_trace_doc), ordered by slug for a deterministic, diff-stable list —
-   * the MEMBER LIST behind `lore trace stats`'s `never_read_docs_count`.
-   *
-   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
-   */
-  listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>>;
-
-  /**
    * Count of `kind='search'` rows with `hit_count = 0`, since `window.since`.
    *
    * ⛔ DERIVED from {@link listTraceZeroHitSearches}'s length in EVERY
@@ -1322,12 +1295,14 @@ export interface StoreInterface {
   countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
 
   /**
-   * Count of non-deleted docs with NO `kind='get'` trace row since `window.since`.
-   *
-   * ⛔ DERIVED from {@link listNeverReadDocs}'s length in EVERY implementation —
-   * see {@link countTraceZeroHitSearches} for why a second tally is forbidden.
+   * Add one read to the per-day counter for `day` (`YYYY-MM-DD`, UTC) with ONE atomic upsert
+   * (`INSERT ... ON CONFLICT(day) DO UPDATE SET count = count + 1`), so concurrent readers lose nothing.
+   * A read writes no `trace_events` row (BR-1373).
    */
-  countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
+  incrementReadCount(day: string): Promise<Result<void, LoreError>>;
+
+  /** Per-day read counts for days at/after `sinceDay` (`YYYY-MM-DD`), oldest day first. Days with no reads are absent. */
+  listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>>;
 
   /** Every `gate_deny` row since `window.since`, for the deny→retry-success gap's read-side audit join (idx_trace_kind_actor). Computed by the caller — never stored. */
   listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>>;

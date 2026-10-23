@@ -14,7 +14,7 @@ import type { DocRecord, ReviewBundle, CheckResult } from "@lore/core";
 const BUDGETS = { max_context_chars: 4000 };
 const NOW = "2026-02-01T00:00:00.000Z";
 const CHECKS: CheckResult[] = [{ check: "schema", outcome: "pass" }];
-// The ACTIVE version must carry the four parts (AC-BLC-5); v2 is frozen and tested separately below.
+// The ACTIVE version must carry the four parts (AC-BLC-5); v3-v6 are frozen and tested separately below.
 const v2 = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
 
 function makeBaselineBundle(extra: Record<string, unknown>): ReviewBundle {
@@ -111,7 +111,6 @@ describe("AC-BLC-5 — judge sees architecture standard four parts", () => {
 });
 
 describe("AC-BLC-5 — prompt version freeze", () => {
-  const frozenV2 = REVIEW_TEMPLATES["v2"]!;
   const v3 = REVIEW_TEMPLATES["v3"]!;
 
   it("STATE: the active version is a registered template, at or after v5", () => {
@@ -119,25 +118,14 @@ describe("AC-BLC-5 — prompt version freeze", () => {
     expect(Number(REVIEW_PROMPT_VERSION.slice(1))).toBeGreaterThanOrEqual(5);
   });
 
-  it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts, no examples line)", () => {
+  it("HAPPY: v3 shows a standard node's four parts; with those lines stripped no four-part key remains", () => {
     const bundle = standardNode([standardRule(1)]);
-    const out = frozenV2(bundle, CHECKS, BUDGETS, NOW).prompt;
-    // Pre-fix block: the rule line is the last entry line before the closing fence.
-    expect(out).toContain(
-      "rules (1):\n- AS-1 [confidence=established, lifecycle=live, enforced_by=prompt-only]: standard statement 1\n```\n",
-    );
-    for (const key of ["current_reality", "target_rule", "current_exceptions", "migration"]) {
-      expect(out).not.toContain(key);
-    }
-  });
-
-  it("HAPPY: v3 equals v2 plus exactly the four-part lines", () => {
-    const bundle = standardNode([standardRule(1)]);
-    const v2Out = frozenV2(bundle, CHECKS, BUDGETS, NOW).prompt;
     const v3Out = v3(bundle, CHECKS, BUDGETS, NOW).prompt;
     expect(v3Out).toContain("current_reality: REALITY-1-x");
     const stripped = v3Out.replace(/\n {2}(current_reality|target_rule|current_exceptions|migration): [^\n]*/g, "");
-    expect(stripped).toBe(v2Out);
+    for (const key of ["current_reality", "target_rule", "current_exceptions", "migration"]) {
+      expect(stripped).not.toContain(key);
+    }
   });
 
   it("HAPPY: v6 equals v5 for a standard node plus exactly the rules' examples lines (D9, BR-960); v5 shows none", () => {
@@ -147,13 +135,5 @@ describe("AC-BLC-5 — prompt version freeze", () => {
     expect(v5Out).not.toContain("examples:");
     expect(v6Out).toContain("\n  examples: e");
     expect(v6Out.replace(/\n {2}examples: [^\n]*/g, "")).toBe(v5Out);
-  });
-
-  it("REGRESSION: v2 and v3 are byte-identical for a business leaf", () => {
-    const leaf = makeBaselineBundle({
-      node: "leaf",
-      rules: [{ id: "BR-1", statement: "s", confidence: "established", enforced_by: "guaranteed", examples: ["e"], lifecycle: "live" }],
-    });
-    expect(v3(leaf, CHECKS, BUDGETS, NOW).prompt).toBe(frozenV2(leaf, CHECKS, BUDGETS, NOW).prompt);
   });
 });

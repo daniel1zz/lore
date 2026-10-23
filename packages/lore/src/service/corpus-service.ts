@@ -309,6 +309,11 @@ export interface WriteActorOpts {
 export interface SetOptions extends WriteActorOpts {
   readonly expectedVersion?: number;
   readonly correction?: { readonly reason: string };
+  /**
+   * Free-text justification of this write (`lore bulk --reason`, BR-1366): written verbatim to the update audit row as
+   * `details.reason`. A note only — it relaxes no gate. Unlike `correction.reason` it needs no locked record.
+   */
+  readonly reason?: string;
 }
 
 /**
@@ -2718,16 +2723,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     const startMs = Date.now();
     const result = await this._getImpl(idOrSlug, _opts);
     this.recordTelemetryEvent("get", startMs, result, { idOrSlug });
-    // reason: SPEC-102 — fire-and-forget trace row AFTER the store call
-    // succeeds, never before and never on a failed lookup (a NOT_FOUND/
-    // STORE_ERROR result records nothing — "get" traces a REAL doc read).
-    // `traceRecorder` is absent in every bare test construction, mirroring
-    // `gateEnforcer`'s identical optional-DI shape.
-    if (result.ok && this.traceRecorder !== undefined) {
-      // reason: a read is never refused for identity (BR-1351): with no known party the advisory trace row is skipped.
-      const traceActor = findTraceActorFor(this.store);
-      if (traceActor !== undefined) this.traceRecorder.recordGet(traceActor, result.value.doc.id);
-    }
+    // reason: BR-1373 — a successful read is COUNTED into the per-day counter (never a trace row), AFTER the store
+    // call succeeds and never on a failed lookup. The counter is anonymous, so no actor is needed. `traceRecorder`
+    // is absent in every bare test construction, mirroring `gateEnforcer`'s identical optional-DI shape.
+    if (result.ok && this.traceRecorder !== undefined) this.traceRecorder.recordRead();
     return result;
   }
 
@@ -3865,6 +3864,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           new_version: newVersion,
           version: newVersion,
           ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
+          ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
         },
       },
       abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,

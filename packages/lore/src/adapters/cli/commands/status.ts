@@ -1040,6 +1040,10 @@ export default defineLoreCommand({
       type: "boolean",
       description: "Check tree against lore.tree.yaml blueprint",
     },
+    detail: {
+      type: "boolean",
+      description: "Print the rows of list-shaped findings (e.g. each criterion with a missing oracle file); without it they print as counts",
+    },
     fix: {
       type: "boolean",
       description: "Apply --check-tree fixes for orphan/misplaced drift",
@@ -2103,7 +2107,13 @@ export default defineLoreCommand({
         `Criteria with a missing oracle file: ${acOracleFileMissingCount} (not measured once any pass is on record — ` +
           "see spec-evidence-identity-an-attested-row-counts-only-for-the)",
       );
-      for (const member of oracleFileMissingMembers) printLine(inv.io.stdout, `  ${member}`);
+      // reason: BR-1371 — a list-shaped finding prints its count; the rows are opt-in (`--detail`), since 108 of them
+      // made the default `lore status` 22 KB.
+      if (args.detail === true) {
+        for (const member of oracleFileMissingMembers) printLine(inv.io.stdout, `  ${member}`);
+      } else if (oracleFileMissingMembers.length > 0) {
+        printLine(inv.io.stdout, `  (${oracleFileMissingMembers.length} rows: lore status --detail)`);
+      }
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
       // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —

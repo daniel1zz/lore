@@ -37,6 +37,9 @@ import type { TraceEventInput } from "../../../src/store/store-interface.js";
 import type { LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+/** A read-counter port for tests that exercise only the insert port. */
+const noopIncrement = (_day: string): Promise<Result<void, LoreError>> => Promise.resolve({ ok: true, value: undefined });
+
 function makeStore() {
   return actedStore(new InMemoryStore());
 }
@@ -71,33 +74,32 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
     else process.env["LORE_ACTOR"] = originalActor;
   });
 
-  it("HAPPY: CorpusService.get with a wired recorder inserts a kind=get row with correct actor/surface/doc_id", async () => {
+  it("HAPPY: CorpusService.get with a wired recorder COUNTS the read per day and inserts NO trace row (BR-1373)", async () => {
     const store = makeStore();
-    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
+    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), store.incrementReadCount.bind(store), () => "agent");
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, undefined, recorder);
 
     const createResult = await service.create({ type: "prd", title: "Trace Me" });
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
-    const getResult = await service.get(createResult.value.id);
-    expect(getResult.ok).toBe(true);
-
-    // reason: fire-and-forget insert is synchronous inside InMemoryStore (no
-    // real IO) but STILL routed through a Promise chain — flush one microtask
-    // tick so the .then() continuation (if any) has settled before asserting.
+    expect((await service.get(createResult.value.id)).ok).toBe(true);
+    expect((await service.get(createResult.value.id)).ok).toBe(true);
     await Promise.resolve();
 
     const { kinds } = await allTraceRows(store);
-    expect(kinds["get"]).toBe(1);
+    expect(kinds["get"]).toBeUndefined();
 
-    const raw = await store.countTraceEventsByKind({ since: "2000-01-01T00:00:00.000Z" });
-    expect(raw.ok).toBe(true);
+    const reads = await store.listReadCounts("2000-01-01");
+    expect(reads.ok).toBe(true);
+    if (!reads.ok) return;
+    expect(reads.value.reduce((sum, row) => sum + row.count, 0)).toBe(2);
+    expect(reads.value[0]?.day).toBe(new Date().toISOString().slice(0, 10));
   });
 
   it("HAPPY: CorpusService.search with a wired recorder inserts a kind=search row with correct hit_count (post SPEC-043 filtering)", async () => {
     const store = makeStore();
-    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "cli");
+    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), store.incrementReadCount.bind(store), () => "cli");
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, undefined, recorder);
 
     await service.create({ type: "prd", title: "Searchable Widget Factory" });
@@ -119,7 +121,7 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
     expect(zeroHit.value).toBe(0);
   });
 
-  it("STATE: bare CorpusService construction (no traceRecorder wired) inserts ZERO trace rows on get/search", async () => {
+  it("STATE: bare CorpusService construction (no traceRecorder wired) inserts ZERO trace rows and counts no read on get/search", async () => {
     const store = makeStore();
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))); // no traceRecorder — mirrors every pre-existing unit test construction
 
@@ -134,11 +136,13 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
     const { kinds } = await allTraceRows(store);
     expect(kinds["get"]).toBeUndefined();
     expect(kinds["search"]).toBeUndefined();
+    const reads = await store.listReadCounts("2000-01-01");
+    expect(reads.ok && reads.value).toEqual([]);
   });
 
   it("HAPPY: CorpusService.get does NOT trace a failed lookup (DOC_NOT_FOUND)", async () => {
     const store = makeStore();
-    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
+    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), store.incrementReadCount.bind(store), () => "agent");
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, undefined, recorder);
 
     const getResult = await service.get("01NONEXISTENT00000000001");
@@ -149,26 +153,29 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
     expect(kinds["get"]).toBeUndefined();
   });
 
-  it("BOUNDARY: a malformed candidate event (empty actor, fails Zod at the recorder seam) is swallowed, never inserted, never thrown", async () => {
+  it("ERROR: a read-counter port that THROWS, REJECTS or returns err() is swallowed — recordRead never throws", async () => {
     const store = makeStore();
-    // reason: getSurface returning an empty actor is impossible via the real
-    // resolveActorWithSource chain (never empty), so this directly exercises
-    // TraceRecorder's public API with a deliberately-invalid actor to prove
-    // the Zod guard, not CorpusService's actor-resolution path.
-    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
-
-    expect(() => recorder.recordGet("", "01DOC00000000000000000001")).not.toThrow();
-    await Promise.resolve();
-
-    const { kinds } = await allTraceRows(store);
-    expect(kinds["get"]).toBeUndefined();
+    const failing: ((day: string) => Promise<Result<void, LoreError>>)[] = [
+      () => {
+        throw new Error("simulated synchronous counter failure");
+      },
+      () => Promise.reject(new Error("simulated async counter failure")),
+      () => Promise.resolve({ ok: false, error: { code: "STORE_ERROR", message: "simulated store failure" } }),
+    ];
+    const warnings: string[] = [];
+    for (const port of failing) {
+      const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), port, () => "agent", (line) => warnings.push(line));
+      expect(() => recorder.recordRead()).not.toThrow();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(warnings).toHaveLength(3);
   });
 });
 
 describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () => {
   it("HAPPY: a service-layer gate deny inserts a kind=gate_deny row with checkpoint/predicates_failed/layer=service", async () => {
     const store = makeStore();
-    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
+    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), store.incrementReadCount.bind(store), () => "agent");
     const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
@@ -199,7 +206,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
 
   it("HAPPY: enforce() does NOT fire a deny trace when every predicate passes", async () => {
     const store = makeStore();
-    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
+    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), store.incrementReadCount.bind(store), () => "agent");
     const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
@@ -232,7 +239,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const throwingInsert = (_event: TraceEventInput): Promise<Result<void, LoreError>> => {
       throw new Error("simulated synchronous port failure");
     };
-    const recorder = new TraceRecorder(throwingInsert, () => "agent");
+    const recorder = new TraceRecorder(throwingInsert, noopIncrement, () => "agent");
     const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     let result: ReturnType<typeof enforcer.enforce> | undefined;
@@ -249,12 +256,12 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     expect((result.error as { field?: string }).field).toBe("gate:spec-create");
   });
 
-  it("ERROR: a recorder whose insert port THROWS SYNCHRONOUSLY does not alter CorpusService.get's own Result", async () => {
+  it("ERROR: a recorder whose read-counter port THROWS SYNCHRONOUSLY does not alter CorpusService.get's own Result", async () => {
     const store = makeStore();
-    const throwingInsert = (_event: TraceEventInput): Promise<Result<void, LoreError>> => {
+    const throwingCounter = (_day: string): Promise<Result<void, LoreError>> => {
       throw new Error("simulated synchronous port failure");
     };
-    const recorder = new TraceRecorder(throwingInsert, () => "agent");
+    const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), throwingCounter, () => "agent");
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, undefined, recorder);
 
     const createResult = await service.create({ type: "prd", title: "Untouched By Failure" });
@@ -281,7 +288,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
   it("REGRESSION: a recorder whose insert port returns a REJECTED PROMISE (not a sync throw) is also swallowed — enforce()'s Result is unaffected", async () => {
     const rejectingInsert = (_event: TraceEventInput): Promise<Result<void, LoreError>> =>
       Promise.reject(new Error("simulated async port failure"));
-    const recorder = new TraceRecorder(rejectingInsert, () => "agent");
+    const recorder = new TraceRecorder(rejectingInsert, noopIncrement, () => "agent");
     const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
@@ -299,7 +306,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
   it("REGRESSION: a recorder whose insert port resolves ok(false)-shaped err() Result is swallowed — enforce()'s Result is unaffected", async () => {
     const erroringInsert = (_event: TraceEventInput): Promise<Result<void, LoreError>> =>
       Promise.resolve({ ok: false, error: { code: "STORE_ERROR", message: "simulated store failure" } });
-    const recorder = new TraceRecorder(erroringInsert, () => "agent");
+    const recorder = new TraceRecorder(erroringInsert, noopIncrement, () => "agent");
     const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {

@@ -14,8 +14,7 @@
  * bootstrap-injection-provenance.test.ts): no assertion keys off a
  * hand-typed remembered substring. Containment checks against
  * RESUME_COVERAGE_FLOOR derive their expected tokens from OTHER exported
- * constants (RESUME_DISPOSITION_DONE, RESUME_DISPOSITION_DEFERRED_PREFIX,
- * the two id prefixes) or from independent lone tokens
+ * constants (the two id prefixes) or from independent lone tokens
  * ("disposition"/"session") rather than a copied multi-word phrase — the
  * contiguous-substring false-oracle vector this repo's CLAUDE.md
  * dogfood-eval-log already tracks.
@@ -56,9 +55,6 @@ import {
   RESUME_ITEM_ID_PREFIX_KEY_DECISION,
   RESUME_ITEM_ID_PREFIX_NEXT_STEP,
   formatResumeItemId,
-  RESUME_DISPOSITION_MARKER,
-  RESUME_DISPOSITION_DONE,
-  RESUME_DISPOSITION_DEFERRED_PREFIX,
   renderResumeCoverageCardinalityLine,
   BOOTSTRAP_RESUME_CLOSURE_KEYS,
 } from "../../src/session.js";
@@ -77,11 +73,11 @@ describe("HAPPY — RESUME_COVERAGE_FLOOR / RESUME_SCOPE_CLOSURE distinctness", 
     expect(RESUME_COVERAGE_FLOOR).not.toBe(RESUME_SCOPE_CLOSURE);
   });
 
-  it("HAPPY: RESUME_COVERAGE_FLOOR states the per-item accounting obligation, derived from the exported disposition tokens and id prefixes (not a hand-copied phrase)", () => {
+  it("HAPPY: RESUME_COVERAGE_FLOOR states the per-item accounting obligation, derived from the exported id prefixes and lone tokens (not a hand-copied phrase)", () => {
     expect(RESUME_COVERAGE_FLOOR).toContain(RESUME_ITEM_ID_PREFIX_KEY_DECISION);
     expect(RESUME_COVERAGE_FLOOR).toContain(RESUME_ITEM_ID_PREFIX_NEXT_STEP);
-    expect(RESUME_COVERAGE_FLOOR).toContain(RESUME_DISPOSITION_DONE);
-    expect(RESUME_COVERAGE_FLOOR).toContain(RESUME_DISPOSITION_DEFERRED_PREFIX);
+    expect(RESUME_COVERAGE_FLOOR).toContain("done");
+    expect(RESUME_COVERAGE_FLOOR).toContain("deferred:");
     // Lone, independent tokens (D7) — not a remembered multi-word phrase.
     expect(RESUME_COVERAGE_FLOOR.toLowerCase()).toContain("disposition");
     expect(RESUME_COVERAGE_FLOOR.toLowerCase()).toContain("session");
@@ -101,20 +97,6 @@ describe("HAPPY — item-id prefixes + formatResumeItemId", () => {
     expect(formatResumeItemId(RESUME_ITEM_ID_PREFIX_KEY_DECISION, 1)).toBe("KD1");
     expect(formatResumeItemId(RESUME_ITEM_ID_PREFIX_KEY_DECISION, 4)).toBe("KD4");
     expect(formatResumeItemId(RESUME_ITEM_ID_PREFIX_NEXT_STEP, 6)).toBe("NS6");
-  });
-});
-
-describe("HAPPY — disposition grammar vocabulary", () => {
-  it("HAPPY: RESUME_DISPOSITION_MARKER is modeled on the **[DOC_SYNC]** shape — bold-wrapped bracket literal", () => {
-    expect(RESUME_DISPOSITION_MARKER.startsWith("**[")).toBe(true);
-    expect(RESUME_DISPOSITION_MARKER.endsWith("]**")).toBe(true);
-    expect(RESUME_DISPOSITION_MARKER.length).toBeGreaterThan(0);
-  });
-
-  it("HAPPY: the two accepted disposition tokens are exactly 'done' and 'deferred:'", () => {
-    expect(RESUME_DISPOSITION_DONE).toBe("done");
-    expect(RESUME_DISPOSITION_DEFERRED_PREFIX).toBe("deferred:");
-    expect(RESUME_DISPOSITION_DEFERRED_PREFIX.endsWith(":")).toBe(true);
   });
 });
 

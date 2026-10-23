@@ -78,7 +78,6 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
-  NeverReadDoc,
   SearchHit,
   ProposedRuleWrite,
   RuleLeafPatch,
@@ -89,6 +88,7 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
@@ -158,6 +158,7 @@ import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
 import { applyMigration028 } from "./migrations/migration-028.js";
 import { applyMigration029 } from "./migrations/migration-029.js";
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
+import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -854,6 +855,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 31 && 31 <= ceiling) {
+      // reason: migration-031 creates the per-day read counter and deletes every per-read `get` trace row in ONE
+      // BEGIN/COMMIT (BR-1373); a failure rolls back and leaves schema 30.
+      try {
+        this.db.exec(MIGRATION_031_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-030 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3334,29 +3350,6 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
-    try {
-      // reason: SPEC-102 §Access Patterns "never-read docs" — non-deleted
-      // docs with no kind='get' trace row since the window start. idx_trace_doc
-      // (partial, doc_id IS NOT NULL) backs the inner subquery. ORDER BY slug
-      // (unique, id-tiebroken) makes the member list diff-stable across runs.
-      const rows = this.db
-        .query(
-          `SELECT id, slug FROM docs
-           WHERE deleted_at IS NULL
-           AND id NOT IN (
-             SELECT DISTINCT doc_id FROM trace_events
-             WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
-           )
-           ORDER BY slug ASC, id ASC`,
-        )
-        .all(window.since) as { id: string; slug: string }[];
-      return ok(rows.map((row) => ({ id: row.id, slug: row.slug })));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
   async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
     // reason: DERIVED from the member list, never a second COUNT(*) — see
     // StoreInterface.countTraceZeroHitSearches's own ⛔ note. The privacy
@@ -3366,11 +3359,28 @@ export class SQLiteStore implements StoreInterface {
     return ok(listResult.value.length);
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
-    // reason: DERIVED from the member list — see listNeverReadDocs above.
-    const listResult = await this.listNeverReadDocs(window);
-    if (!listResult.ok) return listResult;
-    return ok(listResult.value.length);
+  async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
+    try {
+      // reason: ONE atomic upsert (BR-1373) — a read-then-write pair would lose concurrent increments.
+      this.db.run(
+        "INSERT INTO trace_read_counts (day, count) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count = count + 1",
+        [day],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
+    try {
+      const rows = this.db
+        .query("SELECT day, count FROM trace_read_counts WHERE day >= ? ORDER BY day ASC")
+        .all(sinceDay) as { day: string; count: number | bigint }[];
+      return ok(rows.map((row) => ({ day: row.day, count: Number(row.count) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {

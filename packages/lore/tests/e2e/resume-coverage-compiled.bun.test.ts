@@ -142,9 +142,6 @@ import {
   HOOK_REGISTRATIONS,
   renderResumeCoverageCardinalityLine,
   RESUME_COVERAGE_FLOOR,
-  RESUME_DISPOSITION_DEFERRED_PREFIX,
-  RESUME_DISPOSITION_DONE,
-  RESUME_DISPOSITION_MARKER,
   RESUME_ITEM_ID_PREFIX_KEY_DECISION,
   RESUME_ITEM_ID_PREFIX_NEXT_STEP,
   RESUME_SCOPE_CLOSURE,
@@ -696,18 +693,14 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     const rules = refreshedFeedRulesFile("lore-t4-boundary-rules-");
     expect(rules.length).toBeGreaterThan(0); // D15: refresh must have written the rules file
     // The obligation no longer rides the always-loaded rules file; the skill reference is its surface.
-    expect(rules).not.toContain(RESUME_DISPOSITION_MARKER);
     for (const surface of [feedSection]) {
       for (const prefix of [RESUME_ITEM_ID_PREFIX_KEY_DECISION, RESUME_ITEM_ID_PREFIX_NEXT_STEP]) {
         expect(surface).toContain(`\`${prefix}<n>\``);
       }
 
-      // Both accepted dispositions, composed from the exported grammar the verb
-      // parses — so a consumer following this prose emits what the verb accepts.
-      expect(surface).toContain(`${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DONE}`);
-      expect(surface).toContain(
-        `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>`,
-      );
+      // Both accepted dispositions are named (the Stop-time parser is gone; the obligation is prose only).
+      expect(surface).toContain("<item-id>: done");
+      expect(surface).toContain("<item-id>: deferred:<reason>");
       // The obligation is ACCOUNTING, not completion (D5) — pinned as a token so
       // a future rewrite cannot quietly turn it into a completion demand.
       expect(surface).toContain("ACCOUNT, not to complete");

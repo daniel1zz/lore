@@ -39,7 +39,6 @@ import type {
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   AcCiteRow,
-  NeverReadDoc,
   RuleDependsRow,
   ProposedRuleWrite,
   RuleLeafPatch,
@@ -50,6 +49,7 @@ import type {
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
+  ReadDayCount,
   TraceEventInput,
   TraceEventRecord,
   TraceGateDenyEvent,
@@ -127,6 +127,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly calibrationRecords: CalibrationRecord[] = [];
   /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
   private readonly traceEvents: TraceEventRecord[] = [];
+  /** BR-1373 — mirrors `trace_read_counts`: UTC day -> reads that day. */
+  private readonly readCounts = new Map<string, number>();
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
   private readonly runs = new Map<string, RunRecord>();
   /** Mirrors `runs.ended_at` / `runs.end_reason` (migration-017); absent key = open run. */
@@ -1579,23 +1581,6 @@ export class InMemoryStore implements StoreInterface {
     return ok(rows);
   }
 
-  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
-    const readDocIds = new Set(
-      this.traceEvents
-        .filter((e) => e.kind === "get" && e.doc_id !== undefined && e.ts >= window.since)
-        .map((e) => e.doc_id as string),
-    );
-    const rows: NeverReadDoc[] = [];
-    for (const doc of this.docs.values()) {
-      if (doc.deleted_at !== null) continue;
-      if (readDocIds.has(doc.id)) continue;
-      rows.push({ id: doc.id, slug: doc.slug });
-    }
-    // Matches SQLiteStore/TursoStore's `ORDER BY slug ASC, id ASC`.
-    rows.sort((a, b) => a.slug.localeCompare(b.slug) || a.id.localeCompare(b.id));
-    return ok(rows);
-  }
-
   async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
     // reason: DERIVED from the member list, never a second tally — see
     // StoreInterface.countTraceZeroHitSearches's own ⛔ note.
@@ -1604,11 +1589,17 @@ export class InMemoryStore implements StoreInterface {
     return ok(listResult.value.length);
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
-    // reason: DERIVED from the member list — see listNeverReadDocs above.
-    const listResult = await this.listNeverReadDocs(window);
-    if (!listResult.ok) return listResult;
-    return ok(listResult.value.length);
+  async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
+    this.readCounts.set(day, (this.readCounts.get(day) ?? 0) + 1);
+    return ok(undefined);
+  }
+
+  async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
+    const rows = [...this.readCounts.entries()]
+      .filter(([day]) => day >= sinceDay)
+      .map(([day, count]) => ({ day, count }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+    return ok(rows);
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {

@@ -141,6 +141,7 @@ import { GhResolutionLabelPort } from "./service/resolution-label-port.js";
 import { GhRunner, createNodeGhExecFile } from "./service/gh-runner.js";
 import { GhIssueCloser } from "./service/issue-closer-port.js";
 import { IssueCloseOnArchive } from "./service/issue-close-on-archive.js";
+import { BulkLifecycleService } from "./service/bulk-lifecycle-service.js";
 import { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "./adapters/cli/report-issue-wiring.js";
 
 export interface App {
@@ -150,6 +151,10 @@ export interface App {
    */
   warn: WarnSink;
   corpusService: CorpusService;
+  /** `lore bulk` / MCP `lore_bulk`: many documents through one gated lifecycle verb, preview then apply (BR-1366). */
+  // reason: optional like `acService`/`phaseWorkflowService` — hand-built App test stubs stay valid; both composition
+  // roots always wire it, and the CLI/MCP adapters read it through `requireBulkLifecycleService`.
+  bulkLifecycleService?: BulkLifecycleService;
   reviewService: ReviewService;
   versionService: VersionService;
   outlineService: OutlineService;
@@ -954,6 +959,7 @@ function buildAppFromSqlite(
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
+    bulkLifecycleService: new BulkLifecycleService(corpusService, taskWorkflowService),
     ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
@@ -1369,6 +1375,7 @@ function buildAppFromTurso(
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
+    bulkLifecycleService: new BulkLifecycleService(corpusService, taskWorkflowService),
     ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
@@ -1841,7 +1848,7 @@ function createAppUnscoped(
     // TraceRecorder call site (CorpusService/GateEnforcer) already treats
     // this as "untraced", byte-identical to pre-SPEC-102 behavior.
     const traceRecorder = traceEnabled
-      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
+      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), sqliteStore.incrementReadCount.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
       : undefined;
     // reason: SPEC-102 §Migration Strategy — fire-and-forget from the
     // CALLER's perspective (loader.ts never awaits `pruneTrigger()`, so a
@@ -1969,7 +1976,7 @@ function createAppUnscoped(
     const localTraceStore = traceEnabled ? new SQLiteStore(dbPath) : undefined;
     const traceRecorder =
       localTraceStore !== undefined
-        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
+        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), localTraceStore.incrementReadCount.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
         : undefined;
     // reason: SPEC-102 §Migration Strategy — same fire-and-forget-from-the-
     // CALLER's-perspective shape as the SQLite branch, bound to the SEPARATE

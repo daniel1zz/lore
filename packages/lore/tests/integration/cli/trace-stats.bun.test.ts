@@ -130,7 +130,7 @@ interface TraceStatsReport {
   counts_by_kind: Record<string, number>;
   deny_by_checkpoint: { checkpoint: string; layer: string; count: number }[];
   zero_hit_search_count: number;
-  never_read_docs_count: number;
+  reads: { total: number; by_day: { day: string; count: number }[] };
   deny_retry_gap: { checkpoint: string; denies: number; retried_success: number }[];
 }
 
@@ -173,11 +173,11 @@ describe("AC-TRACE-4: lore trace stats --json aggregates counts-by-kind/deny-by-
     expect(statsResult.exitCode).toBe(0);
     const report = (JSON.parse(statsResult.stdout) as JsonEnvelope<TraceStatsReport>).data;
 
-    expect(report.counts_by_kind["get"]).toBeGreaterThanOrEqual(1);
+    // BR-1373: a read is counted per day, never logged as a row.
+    expect(report.counts_by_kind["get"]).toBeUndefined();
+    expect(report.reads.total).toBe(1);
     expect(report.counts_by_kind["search"]).toBe(2);
     expect(report.zero_hit_search_count).toBe(1);
-    // Exactly docB — docA was read, and lore init/create seed no other docs.
-    expect(report.never_read_docs_count).toBe(1);
   });
 
   it("HAPPY: --raw-queries includes the literal query text; omitted by default", () => {
@@ -269,9 +269,10 @@ describe("AC-TRACE-6: running lore trace stats twice yields identical trace_even
     tmpDir = mkdtempSync(join(tmpdir(), "lore-trace-norecursion-"));
     initCorpus(tmpDir);
 
-    const doc = createPrd(tmpDir, "Norecursion Doc");
-    const getResult = runLore(["get", doc.id], tmpDir);
-    expect(getResult.exitCode).toBe(0);
+    createPrd(tmpDir, "Norecursion Doc");
+    // reason: a `get` writes no trace row any more (BR-1373); a search is a kind that still does.
+    const searchResult = runLore(["search", "Norecursion", "--json"], tmpDir);
+    expect(searchResult.exitCode).toBe(0);
 
     const countBefore = traceEventCount(tmpDir);
     expect(countBefore).toBeGreaterThan(0);
