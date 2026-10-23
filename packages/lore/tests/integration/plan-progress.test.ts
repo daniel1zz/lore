@@ -1177,6 +1177,63 @@ async function archivePlan(store: InMemoryStore, plan: { id: string; slug: strin
   if (!moved.ok) throw new Error(JSON.stringify(moved.error));
 }
 
+describe("an unfileable stored review means needs review; one plan never blocks the others (AC-PCR-5)", () => {
+  /** A complete plan whose stored review failed regression on a measured run but lacks suite_failing_files. */
+  async function worldWithBadRecord(): Promise<{ world: World; bad: WorldPlan; good: WorldPlan }> {
+    const world = new World();
+    const bad = world.add(makeWorldPlan("p-bad"));
+    const good = world.add(makeWorldPlan("p-good"));
+    bad.failing = ["regression"];
+    bad.regressionFiles = ["a.test.ts"];
+    await world.judge("p-bad"); // stores the incomplete review (no suite_failing_files)
+    world.judgeCalls = [];
+    world.suiteFailingFiles = ["a.test.ts"]; // the re-review stores a complete one
+    return { world, bad, good };
+  }
+
+  it("HAPPY: the trigger set holds both plans (the bad one as needs-review) and never errors for one plan's record", async () => {
+    const { world } = await worldWithBadRecord();
+    const set = await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet();
+    expect(set).toEqual({ ok: true, value: [{ plan: "p-bad", need: "review" }, { plan: "p-good", need: "review" }] });
+  });
+
+  it("ERROR: the batch records an audit row for the bad plan only, re-reviews it with a complete review, and processes the other plan normally", async () => {
+    const { world, bad } = await worldWithBadRecord();
+    const run = await world.runner().runBatch(["p-bad", "p-good"], world.ports("batch-1"));
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => [r.plan, r.outcome, r.reviewed])).toEqual([["p-bad", "accepted-with-known-defects", true], ["p-good", "accepted", true]]);
+    expect(world.errors).toHaveLength(1);
+    expect(world.errors[0]).toMatchObject({ planSlug: "p-bad", stage: "review" });
+    expect(world.errors[0]?.message).toContain("suite_failing_files");
+    expect(bad.docs).toHaveLength(2);
+    expect(bad.docs[1]?.extra["milestone_review"]).toMatchObject({ causes: { suite_failing_files: ["a.test.ts"] } });
+    expect(world.issues.filed).toBe(1);
+  });
+
+  it("STATE: a retry of only the filing never loops on an unfileable review (it routes to re-review)", async () => {
+    const { world } = await worldWithBadRecord();
+    await world.runner().runBatch(["p-bad"], world.ports("batch-1", { filing: undefined }));
+    // the first batch re-reviewed (complete review stored) but could not file; the next one retries only the filing
+    const second = await world.runner().runBatch(["p-bad"], world.ports("batch-2"));
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted-with-known-defects", reviewed: false });
+    expect(world.judgeCalls).toEqual(["p-bad"]);
+  });
+
+  it("REGRESSION: bootstrap's complete line and checks stats still render; the bad plan counts as awaiting review with its problem as the last review error", async () => {
+    const { world } = await worldWithBadRecord();
+    const lister = buildCompletePlanLister(new ReviewTriggerService(world.triggerDeps({ leaseLive: false })));
+    const service = new CheckStatsService({ store: new InMemoryStore(), now: () => new Date(T0).toISOString() });
+    const views = await service.completePlanViews(lister);
+    if (!views.ok) throw new Error(JSON.stringify(views.error));
+    const lines = formatCompleteLines(summarizeComplete(views.value, T0));
+    expect(lines[0]).toContain("complete 2 (awaiting review 2, awaiting owner 0");
+    expect(lines[1]).toContain("last review error: p-bad review:");
+    expect(lines[1]).toContain("suite_failing_files");
+    const stats = await service.acceptance(lister);
+    expect(stats.ok).toBe(true);
+  });
+});
+
 describe("plan acceptance measures only plans completed by a task write before acceptance (AC-PCR-6)", () => {
   const nowIso = (offsetMs = 0): string => new Date(T0 + offsetMs).toISOString();
   const HOUR = 3_600_000;
