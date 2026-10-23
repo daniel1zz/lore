@@ -173,7 +173,7 @@ describe("AC-LG-8 three human classes: migration 032 widens the verdict CHECK wi
       const final = await upgraded.listDecisionLog();
       expect(final.ok && verifyDecisionChain(final.value)).toEqual({ clean: true, checked: 3 });
       expect(() => upgraded.getDatabase().run("UPDATE decision_log SET score = 1")).toThrow(); // append-only trigger re-armed
-      expect(upgraded.getDatabase().query("PRAGMA user_version").get()).toEqual({ user_version: 32 });
+      expect(upgraded.getDatabase().query("PRAGMA user_version").get()).toEqual({ user_version: 33 });
     } finally {
       upgraded.close();
     }
