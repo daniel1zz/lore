@@ -392,6 +392,7 @@ const DECLARED_FILES_IN_SCOPE = [
   // stop-turn-review turn-state producers (issue #156)
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
+  "hooks/post-ask-decide.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
   // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
@@ -405,6 +406,7 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/run-register.mjs",
   // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
   "hooks/run-end.mjs",
+  "hooks/lib/check-outcome.mjs",
   "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
   // pre-helper-foreign-working-copy-gate (isolated helper writing into a foreign git working copy, BR-1092; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)

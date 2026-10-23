@@ -98,7 +98,7 @@ fi
 lore status --check-autonomy-thresholds
 code=$?
 if [ "$code" -ne 0 ]; then
-  echo "pre-push: autonomy threshold integrity check failed (exit $code) — the threshold record was edited outside lore (lore status --check-autonomy-thresholds names it; a human restores trust with lore pending / lore decide), or push with --no-verify" >&2
+  echo "pre-push: autonomy threshold integrity check failed (exit $code) — the threshold record was edited outside lore (lore status --check-autonomy-thresholds names it; the human restores trust by answering the question lore pending --ask writes, in the agent session), or push with --no-verify" >&2
   exit 1
 fi
 lore autonomy verify-pushed-heads --record

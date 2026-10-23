@@ -83,6 +83,7 @@ describe("AC-CTX-3 init/refresh idempotence with D15 lore rules files", () => {
     // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules): the four promoted main-audience static fragments ship too.
     expect(names).toEqual([
       "lore-ac-design.md",
+      "lore-ask-then-execute.md",
       "lore-corpus-workflow-close.md",
       "lore-corpus-workflow-execute.md",
       "lore-corpus-workflow-feed.md",

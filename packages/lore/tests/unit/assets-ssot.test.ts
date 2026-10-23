@@ -405,6 +405,7 @@ const DECLARED_FILES = [
   // stop-turn-review turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
+  "hooks/post-ask-decide.mjs",
   // stop-turn-review (turn-end review of the main session, spec-interception-moves-off-every-tool-call-one-turn-end-review;
   // in HOOK_REGISTRATIONS on Stop; replaced stop-doc-sync.mjs and claude-md-guard.sh)
   "hooks/stop-turn-review.mjs",
@@ -465,6 +466,8 @@ const DECLARED_FILES = [
   "context/evidence-attestation.md",
   "context/dispatch-bundle.md",
   "context/worktree-dispatch.md",
+  // spec-human-decisions-are-asked-in-the-session-and-recorded-by (AC-ASK-3, BR-1375): the ask-then-execute rule
+  "context/ask-then-execute.md",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",

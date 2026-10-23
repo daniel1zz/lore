@@ -374,7 +374,10 @@ describe("AC-AU-3 human channel", () => {
     expect(Object.keys(row ?? {})).not.toContain("nonce");
     const text = runLore(["pending"]);
     expect(text.stdout).toContain("half-list");
-    expect(text.stdout).toMatch(new RegExp(`lore decide ${id} --accept\\|--reject`));
+    // BR-1374: the answer path is the in-session question, never a terminal command
+    expect(text.stdout).toContain(`decision ${id}`);
+    expect(text.stdout).toContain("lore pending --ask");
+    expect(text.stdout).not.toContain("lore decide");
   });
 });
 
