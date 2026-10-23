@@ -119,8 +119,15 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
     mustLore(["evidence", task, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row"], dir, null, ACTOR_Y);
     const since = new Date().toISOString();
     // the session names the holder; the decoy env value (Z) must not take part in resolution.
-    const r = lore(["done", task, "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"], dir, ACTOR_Z, ACTOR_Y);
-    expect(r.exitCode).toBe(0);
+    // the no-new-tests floor wants a runner-produced red run; a hand-typed row never counts, so the audited declaration
+    // clears it, and `--override-attestation` clears the attested-pass floor (the two floors are independent).
+    const r = lore(
+      ["done", task, "--declare-no-new-tests", "retired-variable fixture: a throwaway task adds no test", "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"],
+      dir,
+      ACTOR_Z,
+      ACTOR_Y,
+    );
+    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     const rows = await auditSince(since);
     // the process really did several writes, so "no mention" is not just "one write -> no mention"
     expect(rows.filter((row) => row.actor === ACTOR_Y_SESSION).length).toBeGreaterThanOrEqual(3);
