@@ -1006,25 +1006,25 @@ describe("batch outcomes — one main red issue per suite run, issue titles keep
     expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-sub-a->101", "p-sub-b->101"]);
   });
 
-  it("REGRESSION: a finding summary naming AC-CS-3 and BR-641 keeps both ids in the issue title, with [fp:<12hex>]", () => {
-    const finding = { plan: "p", dimension: "security", reason: "AC-CS-3 and BR-641 are violated by the token store", reference: "", reviewSlug: "r" } as const;
+  it("REGRESSION: a finding summary naming AC-ZZ-3 and BR-99999 keeps both ids in the issue title, with [fp:<12hex>]", () => {
+    const finding = { plan: "p", dimension: "security", reason: "AC-ZZ-3 and BR-99999 are violated by the token store", reference: "", reviewSlug: "r" } as const;
     const title = issueTitleOf(causeOf(finding));
-    expect(title).toContain("AC-CS-3");
-    expect(title).toContain("BR-641");
+    expect(title).toContain("AC-ZZ-3");
+    expect(title).toContain("BR-99999");
     expect(title).toMatch(/\[fp:[0-9a-f]{12}\]$/);
   });
 
   it("STATE: two findings differing only in ids share one fingerprint, yet each title keeps its own ids", () => {
     const base = { plan: "p", dimension: "security", reference: "", reviewSlug: "r" } as const;
-    const one = causeOf({ ...base, reason: "AC-CS-3 and BR-641 are violated" });
-    const two = causeOf({ ...base, reason: "AC-CS-9 and BR-12 are violated" });
+    const one = causeOf({ ...base, reason: "AC-ZZ-3 and BR-99999 are violated" });
+    const two = causeOf({ ...base, reason: "AC-ZZ-9 and BR-99998 are violated" });
     expect(two.fingerprint).toBe(one.fingerprint);
-    expect(issueTitleOf(one)).toContain("AC-CS-3");
-    expect(issueTitleOf(two)).toContain("AC-CS-9");
+    expect(issueTitleOf(one)).toContain("AC-ZZ-3");
+    expect(issueTitleOf(two)).toContain("AC-ZZ-9");
   });
 
   it("BOUNDARY: a long summary is truncated in the title and the tag still ends it", () => {
-    const cause = causeOf({ plan: "p", dimension: "security", reason: `AC-CS-3 ${"x".repeat(500)}`, reference: "", reviewSlug: "r" });
+    const cause = causeOf({ plan: "p", dimension: "security", reason: `AC-ZZ-3 ${"x".repeat(500)}`, reference: "", reviewSlug: "r" });
     const title = issueTitleOf(cause);
     expect(title.length).toBeLessThan(200);
     expect(title.endsWith(`[fp:${cause.short}]`)).toBe(true);
