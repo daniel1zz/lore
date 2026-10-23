@@ -301,10 +301,12 @@ function expandShippedBody(fm: unknown, rawFile: string, rawBody: string, file: 
   const bodyLineOffset = rawFile.slice(0, rawFile.length - rawBody.length).split("\n").length - 1;
   const fragment: Fragment = { frontmatter: fm as FragmentFrontmatter, body: rawBody, layer: "shipped", path: file, bodyLineOffset };
   // reason: the fixture projects set no workflow.integrate.floor_command, so `integrate_floor` renders its "not set" text.
+  const variables = configVariableValues({}, {}, "rules:project");
+  if (!variables.ok) throw new Error(`config variables failed: ${JSON.stringify(variables.error)}`);
   const result = expandFragments(
     [fragment],
     "rules:project",
-    { invocation: configVariableValues({}, {}, "rules:project") },
+    { invocation: variables.value },
     LORE_CONTEXT_VARIABLES,
   );
   if (!result.ok) throw new Error(`shipped fragment ${file} failed to expand: ${JSON.stringify(result.error)}`);

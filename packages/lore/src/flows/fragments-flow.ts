@@ -32,7 +32,7 @@
 import { z } from "zod";
 import {
   HOOK_BANNER_CAP,
-  LANGUAGE_NAMES,
+  languageName,
   resolveContextConfig,
   type ContextConfigLayer,
   type Fragment,
@@ -195,10 +195,15 @@ function selectSafely(
     const selected = selectFragments(all, { outlet, ...(agentType !== undefined ? { agentType } : {}), config });
     // reason: the ONE expansion point of this flow - render, check (caps, duplicates), rules/skills drift all read
     // the selection through here, so they measure the same expanded text (D10).
+    const variables = configVariableValues(deps.globalConfig, deps.projectConfig, outlet);
+    if (!variables.ok) {
+      const { message } = variables.error as { message: string };
+      return { ok: false, error: { code: "VALIDATION_ERROR", message } };
+    }
     const expanded = expandFragments(
       selected,
       outlet,
-      { invocation: configVariableValues(deps.globalConfig, deps.projectConfig, outlet) },
+      { invocation: variables.value },
       LORE_CONTEXT_VARIABLES,
     );
     if (!expanded.ok) {
@@ -522,15 +527,16 @@ async function checkLanguageDrift(deps: FragmentsFlowDeps): Promise<CheckFinding
 
   for (const { target, code, layer } of targets) {
     if (code === undefined) continue;
-    const expected = (LANGUAGE_NAMES as Readonly<Record<string, string>>)[code];
-    if (expected === undefined) {
+    const named = languageName(code, "context.language", layer);
+    if (!named.ok) {
       findings.push({
         kind: "language_unknown",
         code: "VALIDATION_ERROR",
-        message: `${layer} context.language "${code}" is not a known code (known: ${Object.keys(LANGUAGE_NAMES).join(", ")})`,
+        message: (named.error as { message: string }).message,
       });
       continue;
     }
+    const expected = named.value;
     const raw = await deps.fs.readFile(target.path);
     if (raw === null) continue; // no settings file: nothing is set, so nothing disagrees
     let actual: string | undefined;

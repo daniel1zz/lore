@@ -177,6 +177,8 @@ export const ContextFragmentsSettingsSchema = z
   .object({
     /** ISO-ish language code (`zh`/`en`/`ja`); absent = no language fragment selected. */
     language: z.string().min(1).optional(),
+    /** Language code of the documents lore writes (`{{lore:artifact_language}}`); absent = unset, never defaulted. */
+    artifact_language: z.string().min(1).optional(),
     fragments: z
       .object({
         /** Fragment ids excluded from selection at the outlets this layer reaches. */
@@ -1143,6 +1145,8 @@ export const contextConfigSchema = z
   .object({
     /** Context-fragment language code (spec-context-fragments D3). Absent = none. */
     language: z.string().min(1).optional(),
+    /** Language code of the documents lore writes (`{{lore:artifact_language}}`); absent = unset, never defaulted. */
+    artifact_language: ContextFragmentsSettingsSchema.shape.artifact_language,
     /** Context-fragment controls (D11): `disable` lists fragment ids to drop at project-reaching outlets. */
     fragments: ContextFragmentsSettingsSchema.shape.fragments,
     memory_files: z

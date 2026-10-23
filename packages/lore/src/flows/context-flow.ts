@@ -658,11 +658,13 @@ async function selectScopeFragments(
         outlet,
         config: resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet),
       });
+      const variables = configVariableValues(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet);
+      if (!variables.ok) return variables;
       // reason: expansion happens BEFORE any render/fingerprint/budget check, through the one shared helper.
       const expanded = expandFragments(
         selected,
         outlet,
-        { invocation: configVariableValues(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet) },
+        { invocation: variables.value },
         LORE_CONTEXT_VARIABLES,
       );
       return expanded.ok ? ok([...expanded.value]) : expanded;
