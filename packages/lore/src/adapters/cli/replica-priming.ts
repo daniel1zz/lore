@@ -21,7 +21,7 @@ import { dirname } from "node:path";
 import { resolveSyncCredentials } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
 import { exitCli } from "./cli-exit.js";
-import { findLoreDbPathQuiet, type CorpusLocator } from "./corpus-resolution.js";
+import { findLoreDbPathForPriming, type CorpusLocator } from "./corpus-resolution.js";
 import { printLine } from "./output.js";
 import type { CliIo } from "./output.js";
 
@@ -65,7 +65,7 @@ export async function primeReplicaClientForProject(
  * @throws CliExit (exit 1) when that corpus has sync enabled and the client cannot be loaded
  */
 export async function primeReplicaClientWhenSyncEnabled(io: CliIo, locator: CorpusLocator): Promise<void> {
-  const dbPath = findLoreDbPathQuiet(io, locator);
+  const dbPath = findLoreDbPathForPriming(locator);
   if (dbPath === undefined) return;
   await primeReplicaClientForProject(dbPath, io, locator.env);
 }
