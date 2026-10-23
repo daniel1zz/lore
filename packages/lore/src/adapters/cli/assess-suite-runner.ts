@@ -97,9 +97,15 @@ export function resolveDirectImports(root: string, file: string): string[] {
  *
  * @param cwd - any directory inside the project's checkout
  * @param env - the environment the commands run with
+ * @param inWorktree - optional work done in the SAME throwaway worktree after the measurement
  * @returns a port whose `run` measures main's HEAD once per call; never throws
  */
-export function createGitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv): SuiteRunnerPort {
+export function createGitSuiteRunner(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  /** Awaited after the suite was measured while the throwaway worktree still exists (stale-evidence refresh). */
+  inWorktree?: (root: string, commit: string) => Promise<void>,
+): SuiteRunnerPort {
   return {
     run: async (): Promise<Result<SuiteRun, LoreError>> => {
       const top = spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
@@ -113,7 +119,9 @@ export function createGitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv): Suite
       try {
         const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repoRoot, env);
         if (added.status !== 0) return notMeasured(`could not create the throwaway worktree: ${added.output.trim()}`);
-        return ok(measure(scratch, commit, env));
+        const measured = measure(scratch, commit, env);
+        if (inWorktree !== undefined) await inWorktree(scratch, commit);
+        return ok(measured);
       } catch (cause) {
         return err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
       } finally {

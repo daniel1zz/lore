@@ -142,7 +142,7 @@ describe("rule state ignores superseded criteria", () => {
     expect(full.ok && full.value.rules[0]?.state).toBe("stale");
     expect(full.ok && full.value.rules[0]?.inputs.map((i) => i.ac_id)).toEqual(["AC-A-1", "AC-B-1"]);
     const cited = await w.cs.getCitedRuleStates(w.specA);
-    expect(cited.ok && cited.value).toEqual([{ rule_id: "BR-7", state: "stale" }]);
+    expect(cited.ok && cited.value).toEqual([{ rule_id: "BR-7", state: "stale", citing_acs: ["AC-A-1"] }]);
   });
 
   it("with AC-A-1 superseded the rule is verified, only the superseding criterion is an input, and the review's cited-rule read reports it verified", async () => {

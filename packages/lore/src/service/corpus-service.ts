@@ -4731,6 +4731,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     }
     const cited = new Set(parsed.data.flatMap((criterion) => criterion.cites ?? []));
     if (cited.size === 0) return ok([]);
+    const citingAcs = (ruleId: string): string[] =>
+      parsed.data.filter((criterion) => criterion.superseded_by === undefined && (criterion.cites ?? []).includes(ruleId)).map((c) => c.id);
     const full = await ruleState.full();
     if (!full.ok) return full;
     return ok(
@@ -4740,6 +4742,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           rule_id: rule.rule_id,
           state: rule.state,
           ...(rule.unknown_reason !== undefined ? { unknown_reason: rule.unknown_reason } : {}),
+          ...(rule.state === "stale" ? { citing_acs: citingAcs(rule.rule_id) } : {}),
         })),
     );
   }

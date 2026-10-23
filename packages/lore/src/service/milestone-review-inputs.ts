@@ -5,15 +5,16 @@
  * Purpose: the pure half of the two measured inputs of a review. (1) The plan-close chain plus the full test suite run
  *   ONCE for a whole `lore assess` batch on main's HEAD (`SuiteRun`); each plan's regression dimension reads it, and a
  *   failing test file counts against a plan only when the plan's landed diff touched that file or a file it imports
- *   directly. (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `stale`; `unknown` is n/a.
+ *   directly. (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
+ *   `unknown` and `unverified` are n/a with the reason, and stale evidence is re-verified once per batch beforehand.
  * Public surface: SuiteRun, SuiteCommandResult, FailingTestFile, parseFailingTestFiles, touchedFilesOfDiff,
- *   attributeSuiteFailures, renderSuiteSection, applyRegressionFloor, applySnapshotRule, SuiteRunnerPort.
+ *   attributeSuiteFailures, renderSuiteSection, applyRegressionFloor, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport,
+ *   SuiteRunnerPort.
  * Invariants:
  *   - A suite that was not measured is `status: "not_measured"` with a reason; it is never read as a pass.
  *   - Attribution never guesses: with no landed diff nothing is attributed to the plan (and the section says why).
  *   - The regression floor only ever TURNS a verdict into fail (attributed failing file); it never promotes a fail.
- *   - The snapshot rule only ever turns a verdict into na (no stale cited rule); a stale cited rule leaves the judge's
- *     verdict untouched.
+ *   - The snapshot rule turns a verdict into fail only for a contradicted rule, and into na when none is contradicted.
  * Side-effect class: pure (no IO, no clock).
  *
  * Reference: Kayenta automated canary analysis (one shared baseline run judged against every candidate).
@@ -170,34 +171,95 @@ export function applyRegressionFloor(
   };
 }
 
+/** Why a non-contradicted state is not a disagreement between document and code (BR-984 state definitions). */
+function nonDisagreementNote(row: CitedRuleStateRow): string {
+  switch (row.state) {
+    case "stale":
+      return `${row.rule_id} (stale: a code anchor changed after its last attested pass; the document and code are not shown to disagree)`;
+    case "unknown":
+      return `${row.rule_id} (unknown: ${row.unknown_reason ?? "unknown"})`;
+    case "unverified":
+      return `${row.rule_id} (unverified: no attested run of its citing criterion)`;
+    default:
+      return `${row.rule_id} (${row.state})`;
+  }
+}
+
 /**
- * snapshot_accuracy fails only on a `stale` cited rule: with none stale, a `fail` becomes `na`, and a rule set that is
- * only `unknown` is `na`, each with the reason.
+ * snapshot_accuracy fails ONLY on a `contradicted` cited rule (a failing run of the citing AC). Any contradicted rule
+ * makes the dimension a fail whatever the judge said; otherwise a judged `fail`, or a rule set with no `verified` rule
+ * (all stale / unknown / unverified), is `na` with each rule's reason. Stale is "not re-run since the code changed",
+ * never "disagrees" (Bazel action cache: a changed-input entry is re-executed, not treated as a wrong result).
  *
  * @param dimensions - the judge's judgments
- * @param cited - the cited rules' states as measured
+ * @param cited - the cited rules' states as measured (after the batch's stale re-verification)
  */
 export function applySnapshotRule(
   dimensions: LlmMilestoneOutput["dimensions"],
   cited: readonly CitedRuleStateRow[],
 ): LlmMilestoneOutput["dimensions"] {
-  if (cited.some((r) => r.state === "stale")) return dimensions;
-  const unknown = cited.filter((r) => r.state === "unknown");
   const judged = dimensions.snapshot_accuracy;
-  const onlyUnknown = cited.length > 0 && unknown.length === cited.length;
-  if (judged.verdict !== "fail" && !onlyUnknown) return dimensions;
-  const unknownText =
-    unknown.length === 0
-      ? "no cited rule is stale"
-      : `no cited rule is stale; unknown: ${unknown.map((r) => `${r.rule_id} (${r.unknown_reason ?? "unknown"})`).join(", ")}`;
+  const contradicted = cited.filter((r) => r.state === "contradicted");
+  if (contradicted.length > 0) {
+    const ids = contradicted.map((r) => r.rule_id).join(", ");
+    return {
+      ...dimensions,
+      snapshot_accuracy: {
+        verdict: "fail",
+        reason:
+          judged.verdict === "fail"
+            ? `contradicted cited rule(s): ${ids} (${judged.reason})`
+            : `contradicted cited rule(s): ${ids}; the citing criterion fails now (judge said: ${judged.reason})`,
+        reference: judged.reference.length > 0 ? judged.reference : "Bazel action cache",
+      },
+    };
+  }
+  const notVerified = cited.filter((r) => r.state !== "verified");
+  const noneVerified = cited.length > 0 && notVerified.length === cited.length;
+  if (judged.verdict !== "fail" && !noneVerified) return dimensions;
+  const note =
+    notVerified.length === 0
+      ? "no cited rule is contradicted"
+      : `no cited rule is contradicted; not verified: ${notVerified.map(nonDisagreementNote).join(", ")}`;
   return {
     ...dimensions,
     snapshot_accuracy: {
       verdict: "na",
-      reason: judged.verdict === "fail" ? `${unknownText} (judge said: ${judged.reason})` : `${unknownText} (${judged.reason})`,
+      reason: judged.verdict === "fail" ? `${note} (judge said: ${judged.reason})` : `${note} (${judged.reason})`,
       reference: judged.reference,
     },
   };
+}
+
+/**
+ * The citing acceptance criteria of every stale cited rule, deduplicated and sorted.
+ *
+ * @param cited - the cited rules' states
+ * @returns AC ids to re-verify; a stale rule with no known citing AC contributes none
+ */
+export function staleCitingAcIds(cited: readonly CitedRuleStateRow[]): string[] {
+  const ids = new Set<string>();
+  for (const row of cited) {
+    if (row.state !== "stale") continue;
+    for (const acId of row.citing_acs ?? []) ids.add(acId);
+  }
+  return [...ids].sort();
+}
+
+/**
+ * The port that re-runs acceptance criteria through the trusted `lore verify` runner (attested evidence) in the
+ * batch's throwaway main worktree; `adapters/cli/assess-stale-refresh.ts` is the real one.
+ */
+export interface StaleAcRefresherPort {
+  /** Runs `acIds` of `planRef`'s spec once and records attested evidence; an `err` leaves those rules stale. */
+  readonly runAcs: (planRef: string, acIds: readonly string[]) => Promise<Result<void, LoreError>>;
+}
+
+/** What one batch refresh did. */
+export interface StaleRefreshReport {
+  readonly ran: readonly { readonly plan: string; readonly acIds: readonly string[] }[];
+  /** Plans whose refresh failed; their stale rules stay stale (n/a), named here so the caller can say so. */
+  readonly failures: readonly { readonly plan: string; readonly acIds: readonly string[]; readonly message: string }[];
 }
 
 /** One GitHub issue as the plan-close coverage check sees it. */

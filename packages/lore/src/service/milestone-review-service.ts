@@ -48,6 +48,9 @@ import {
   attributeSuiteFailures,
   renderSuiteSection,
   touchedFilesOfDiff,
+  staleCitingAcIds,
+  type StaleAcRefresherPort,
+  type StaleRefreshReport,
   type SuiteRun,
 } from "./milestone-review-inputs.js";
 
@@ -117,6 +120,44 @@ export class MilestoneReviewService {
   constructor(private readonly deps: MilestoneReviewDeps) {}
 
   /**
+   * Re-verifies stale cited evidence ONCE for a whole batch, before any plan is judged (Part D). Collects the citing
+   * criteria of every stale cited rule across `planRefs`, deduplicated per (spec, criterion), and runs each through the
+   * trusted runner port; the next `review` call recomputes rule state from the fresh attested evidence.
+   *
+   * @param planRefs - the batch's plans (unresolvable plans and plans without a spec are skipped; `review` reports them)
+   * @param refresher - the trusted-runner port (the `lore verify` path in the batch's throwaway main worktree)
+   * @returns `ok(report)`; a port failure is recorded in `report.failures` (its rules stay stale, hence n/a), never
+   *   thrown; `err` only when a cited-rule read fails
+   */
+  async refreshStaleCitedRules(
+    planRefs: readonly string[],
+    refresher: StaleAcRefresherPort,
+  ): Promise<Result<StaleRefreshReport, LoreError>> {
+    const claimed = new Set<string>();
+    const byPlan = new Map<string, string[]>();
+    for (const planRef of planRefs) {
+      const bundle = await this.deps.getPlanBundle(planRef);
+      if (!bundle.ok || bundle.value.spec === undefined) continue;
+      const cited = await this.deps.getCitedRuleStates(bundle.value.spec);
+      if (!cited.ok) return cited;
+      for (const acId of staleCitingAcIds(cited.value)) {
+        const key = `${bundle.value.spec.slug}#${acId}`;
+        if (claimed.has(key)) continue;
+        claimed.add(key);
+        byPlan.set(planRef, [...(byPlan.get(planRef) ?? []), acId]);
+      }
+    }
+    const ran: { plan: string; acIds: readonly string[] }[] = [];
+    const failures: { plan: string; acIds: readonly string[]; message: string }[] = [];
+    for (const [plan, acIds] of byPlan) {
+      const result = await refresher.runAcs(plan, acIds);
+      if (result.ok) ran.push({ plan, acIds });
+      else failures.push({ plan, acIds, message: "message" in result.error ? result.error.message : result.error.code });
+    }
+    return ok({ ran, failures });
+  }
+
+  /**
    * Reviews one plan and stores the review.
    *
    * @param planRef - plan id or slug
@@ -177,7 +218,7 @@ export class MilestoneReviewService {
     const judged = await this.judgeWithRetry(prompt, bundle.plan.title);
     if (!judged.ok) return judged;
     // reason: both measured inputs are applied AFTER the judge so it cannot waive them (Part D): an attributed
-    // failing test file fails regression; with no stale cited rule snapshot_accuracy is n/a, never a fail.
+    // failing test file fails regression; snapshot_accuracy fails only on a contradicted cited rule.
     const dimensions = applySnapshotRule(
       applyRegressionFloor(
         applyDeterministicDimensionRules(judged.value.dimensions),
