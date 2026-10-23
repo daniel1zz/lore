@@ -66,7 +66,7 @@ function businessRoots(): string[] {
 
 /** Pure. The CLI arguments of one root's coverage read; only the landing (`--changed`) read counts pending declarations (BR-1368). */
 export function coverageArgs(root: string, includePending: boolean): string[] {
-  return ["baseline", "coverage", root, "--commands-only", "--json", ];
+  return ["baseline", "coverage", root, "--commands-only", "--json", ...(includePending ? ["--include-pending"] : [])];
 }
 
 function coverageOf(root: string, includePending: boolean): CoverageData {
