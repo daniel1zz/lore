@@ -19,6 +19,7 @@
  * The logic lives in `BulkLifecycleService`; this file only parses flags and renders. MCP twin: `lore_bulk`.
  */
 
+import type { LoreError } from "@lore/core";
 import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, resolveActor } from "../utils.js";
@@ -31,6 +32,11 @@ import {
   isBulkVerb,
   resolveBulkSelector,
 } from "../../../service/bulk-lifecycle-service.js";
+
+/** A BR-1366 usage refusal (unknown --where plan, ...) exits 2 like every other usage error; the rest keep `exitCode`. */
+function bulkExitCode(error: LoreError): number {
+  return error.code === "VALIDATION_ERROR" && "rule" in error && error.rule === "BR-1366" ? 2 : exitCode(error);
+}
 
 export default defineLoreCommand({
   meta: {
@@ -75,7 +81,7 @@ export default defineLoreCommand({
         const preview = await service.preview(selector.value, verb);
         if (!preview.ok) {
           inv.io.stderr.write(formatErrorFor(inv, preview.error) + "\n");
-          return exitCode(preview.error);
+          return bulkExitCode(preview.error);
         }
         if (args.json === true) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { mode: "preview", verb, rows: preview.value } }, null, 2));
@@ -101,7 +107,7 @@ export default defineLoreCommand({
       });
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        return exitCode(result.error);
+        return bulkExitCode(result.error);
       }
       if (args.json === true) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { mode: "apply", verb, rows: result.value } }, null, 2));
