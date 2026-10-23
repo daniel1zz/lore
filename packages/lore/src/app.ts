@@ -969,7 +969,9 @@ function buildAppFromSqlite(
   // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
-  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService);
+  // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
+  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
+  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
@@ -978,7 +980,6 @@ function buildAppFromSqlite(
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
-  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     warn: warnSinkOf(ambient.io.stderr),
@@ -1405,7 +1406,9 @@ function buildAppFromTurso(
   // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
-  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService);
+  // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
+  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
+  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
@@ -1414,7 +1417,6 @@ function buildAppFromTurso(
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
-  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     warn: warnSinkOf(ambient.io.stderr),
@@ -2169,11 +2171,11 @@ function buildRetiredAcService(
   store: StoreInterface & ConstructorParameters<typeof DecisionService>[0]["store"],
   recordLockService: RecordLockService,
   corpusService: CorpusService,
+  ruleChanges: RuleChangeService,
 ): RetiredAcService {
   const acs = new AcService(store, recordLockService, undefined, corpusService);
-  // reason: rejecting a deprecation also revives the proposed rule ids it abandoned; the plan comes from the same
-  // rule-change writer corpus uses for the abandonment (an own instance: this service never imports another).
-  const ruleChanges = new RuleChangeService(store, recordLockService, corpusService);
+  // reason: rejecting a deprecation also revives the proposed rule ids it abandoned; the plan comes from the root's
+  // own rule-change writer (the one corpus uses for the abandonment), passed in so no second one is composed here.
   return new RetiredAcService({
     store,
     decisions: new DecisionService({ store, executorRun: null }),

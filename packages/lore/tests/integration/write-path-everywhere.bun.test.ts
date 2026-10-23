@@ -157,9 +157,6 @@ describe("AC-DCL-5 static scan — only corpus-service.ts and store/* call a sto
 
   it("REGRESSION: app.ts composes corpusService into each of the migrated services in BOTH composition roots", () => {
     const app = readFileSync(join(SRC_ROOT, "app.ts"), "utf8");
-    // RuleChangeService is composed a third time inside buildRetiredAcService (AC-LG-12: its own writer instance, still
-    // over corpusService); every other service appears once per createApp root.
-    const EXTRA_COMPOSITIONS: Readonly<Record<string, number>> = { RuleChangeService: 1 };
     const wired: Array<[string, RegExp]> = [
       ["TaskWorkflowService", /worktreeRemovalService,\n\s+corpusService,\n\s+\);/g],
       ["JudgmentService", /new JudgmentService\(store, telemetry, corpusService\)/g],
@@ -175,9 +172,7 @@ describe("AC-DCL-5 static scan — only corpus-service.ts and store/* call a sto
       ["state-binding occupancy port", /buildStateBindingOccupancyPort\(corpusService\)/g],
     ];
     for (const [name, pattern] of wired) {
-      expect(app.match(pattern)?.length ?? 0, `${name} must be composed over corpusService in both createApp roots`).toBe(
-        2 + (EXTRA_COMPOSITIONS[name] ?? 0),
-      );
+      expect(app.match(pattern)?.length ?? 0, `${name} must be composed over corpusService in both createApp roots`).toBe(2);
     }
     expect(app).toContain("new IssueCloseOnArchive(store, closer, repo, undefined, app.corpusService)");
     const phaseWiring = readFileSync(join(SRC_ROOT, "adapters", "cli", "phase-wiring.ts"), "utf8");
