@@ -186,7 +186,7 @@ describe("lore_assess — milestone review HAPPY (BR-1372)", () => {
   });
 });
 
-describe("lore_assess — retired ACs (AC-LG-12, same fields as the CLI)", () => {
+describe("lore_assess — retired ACs (same fields as the CLI)", () => {
   const retired = [{ kind: "superseded" as const, spec: "old-spec", ac: "AC-OLD-1", reason: "feature removed", at: "2026-10-23T00:00:00.000Z", superseded_by: "new-spec:AC-NEW-1" }];
 
   it("a pending retirement adds retired_acs and pending_decision to the payload", async () => {

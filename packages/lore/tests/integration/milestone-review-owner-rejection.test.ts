@@ -2,7 +2,7 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/**
 /**
- * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D; AC-LG-12; BR-1372, BR-1307)
+ * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D; BR-1372, BR-1307)
  *
  * The owner's rejection of a retired-AC confirmation restores a spec deprecated during the plan exactly: its previous
  * status AND the proposed rule ids its deprecation abandoned (#337). Throwaway corpus per test (`mkdtemp` + `lore init`,
