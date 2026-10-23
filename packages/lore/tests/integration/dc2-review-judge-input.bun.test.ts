@@ -35,7 +35,6 @@ import type { DocRecord, ReviewBundle } from "@lore/core";
 import { saveConfig } from "@lore/core/node";
 import { REVIEW_PROMPT_VERSION, REVIEW_TEMPLATES } from "../../src/ai/review-template";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 
 const ID = "spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-9";
 const LAST_LINE = "LAST-LINE-OF-THE-SPEC-BODY-4000-CHARS";
@@ -189,7 +188,6 @@ beforeAll(async () => {
     },
   } as never);
   setMode("ok");
-  await loosenOverrideClasses(dir, ["override-judgment"]);
   patchLoreConfig(
     dir,
     [

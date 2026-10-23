@@ -4,6 +4,7 @@
  * Purpose: turn lore-measured facts about an operation into auto | escalate | refuse.
  * Public surface: decide, autonomyFactsSchema, AutonomyFacts, AutonomyDecision, AutonomyVerdict.
  * Invariants:
+ *   - A milestone-tier class always answers `milestone`: never auto, never a pending human decision (BR-1370).
  *   - Hard rules run BEFORE any score: human-always tier -> escalate; R = irreversible-external
  *     -> escalate; R = irreversible-local with blast radius beyond the own session -> escalate.
  *     A hard-rule escalation reports score 0 (its effective authority) and names the rule in `reasons`.
@@ -50,7 +51,7 @@ export const autonomyFactsSchema = z
   .strict();
 export type AutonomyFacts = z.infer<typeof autonomyFactsSchema>;
 
-export type AutonomyVerdict = "auto" | "escalate" | "refuse";
+export type AutonomyVerdict = "auto" | "escalate" | "refuse" | "milestone";
 
 /** Numeric factor values actually used; J is present only when it entered the minimum. */
 export type AutonomyFactorScores = {
@@ -114,6 +115,13 @@ export function decide(
     return refuse(classId, subject, `malformed facts at "${issue?.path.join(".") ?? ""}": ${issue?.message ?? "invalid"}`);
   }
   const measured = parsed.data;
+
+  if (operationClass.tier === "milestone") {
+    return {
+      verdict: "milestone", class: classId, subject, score: 0, threshold: null, factors: { ...ZERO_FACTORS },
+      reasons: [`class "${classId}" is decided by the milestone review: recorded now, never auto-applied, no pending human decision`],
+    };
+  }
 
   if (operationClass.tier === "human-always") {
     return {

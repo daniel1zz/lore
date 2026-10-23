@@ -12,7 +12,7 @@
  *   - `entry_hash` is computed store-side only, inside the transaction that reads the chain head; callers
  *     (DecisionRecordInput) cannot supply hashes.
  *   - Effective verdict: the latest `human-tty` record wins (auto = accept, refuse = reject); otherwise the WORST
- *     over `machine` records (refuse > escalate > auto). `agent-asserted` records never take part.
+ *     over `machine` records (refuse > escalate > milestone > auto). `agent-asserted` records never take part.
  *   - `superseded` (migration 023, AU-T16) rows are CLOSING MARKERS of a pending decision whose subject is gone or was
  *     re-decided on a newer version. They are not decisions: effectiveDecisionVerdict ignores them, and anything that
  *     counts, calibrates or SAMPLES auto decisions (AU-T8 outcome calibration, 1-in-10 sampling) must select
@@ -31,7 +31,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /** `superseded` (migration 023) is a CLOSING record, not a decision: see the invariants above. */
-export type DecisionVerdict = "auto" | "escalate" | "refuse" | "superseded";
+export type DecisionVerdict = "auto" | "escalate" | "refuse" | "superseded" | "milestone";
 /** `human-tty` is produced only by the human channel (AU-T3); `agent-asserted` never takes precedence. */
 export type DecisionChannel = "machine" | "human-tty" | "agent-asserted";
 
@@ -180,7 +180,9 @@ export interface EffectiveDecisionVerdict {
   readonly record_id: number;
 }
 
-const SEVERITY: Readonly<Record<DecidedVerdict, number>> = { auto: 0, escalate: 1, refuse: 2 };
+// reason: `milestone` (migration 032, BR-1370) binds like an escalation (the guarded action does not run) but opens no
+// pending decision — only an `escalate` row does (service/pending-decisions.ts); do not collapse it into `escalate`.
+const SEVERITY: Readonly<Record<DecidedVerdict, number>> = { auto: 0, milestone: 1, escalate: 2, refuse: 3 };
 
 /**
  * Effective verdict for one (class, subject_id, subject_version) over `rows` (any superset; other keys ignored).

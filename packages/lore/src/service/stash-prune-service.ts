@@ -10,7 +10,8 @@
  *     the very same commit sha. An archive failure aborts the whole apply (nothing further is dropped) and is
  *     returned as err(STORE_ERROR) — never swallowed, never turned into a "kept" row.
  *   - Factors come from facts lore measured in THIS call (INV-2): R = loss-free-by-proof only after the archive
- *     ref was verified; B from run attribution; E = lore-evaluated; C = computed by DecisionService
+ *     ref was verified; B = unprovable-owner-made-recoverable for every stash (the archive ref makes it recoverable
+ *     whoever owns it, so a verified archive is auto with no pending decision, BR-1370); E = lore-evaluated; C = computed by DecisionService
  *     from the class's recorded outcomes (AC-AU-8; no caller can supply a value).
  *   - Attribution (AU-T20): an owner is PROVEN, never inferred from an unrelated open claim. A stash on a
  *     `worktree-agent-<agentId>` branch belongs to that agent's runs (by agent_ref) and to open task claims that
@@ -199,12 +200,10 @@ export class StashPruneService {
   }
 
   private async decideAndMaybeDrop(facts: StashFacts, archiveRef: string): Promise<Result<StashOutcome, LoreError>> {
-    const measured = await this.buildDecisionFacts(facts.attribution);
-    if (!measured.ok) return measured;
     const decided = await this.deps.decisions.decide(
       STASH_DROP_CLASS,
       { id: facts.sha, version: stashDecisionVersion(facts.sha, facts.attribution) },
-      measured.value,
+      this.buildDecisionFacts(),
       buildStashDropDetail(facts, archiveRef),
     );
     if (!decided.ok) return decided;
@@ -223,21 +222,13 @@ export class StashPruneService {
     return ok({ kind: "dropped", archive_ref: archiveRef, score: decision.score });
   }
 
-  /** Facts decide() may use: only what lore measured above. C is NOT among them: DecisionService computes it (AC-AU-8). */
-  private async buildDecisionFacts(attribution: StashAttribution): Promise<Result<AutonomyFacts, LoreError>> {
-    const blast =
-      attribution.state === "live"
-        ? ("other-live-actor" as const)
-        : attribution.state === "ended"
-          ? ("own-or-ended-run" as const)
-          : attribution.state === "no-provable-owner"
-            ? ("unprovable-owner-made-recoverable" as const)
-            : undefined;
-    return ok({
-      recoverability: "loss-free-by-proof",
-      evidence: "lore-evaluated",
-      ...(blast !== undefined ? { blast } : {}),
-    });
+  /**
+   * Facts decide() may use: only what lore measured above. C is NOT among them: DecisionService computes it (AC-AU-8).
+   * reason: an archived stash is recoverable by ANY session whoever owns it, so the owner's liveness no longer lowers B
+   * (a live owner used to escalate forever; BR-1370, AC-LG-8). Attribution stays in the report and the decision detail.
+   */
+  private buildDecisionFacts(): AutonomyFacts {
+    return { recoverability: "loss-free-by-proof", evidence: "lore-evaluated", blast: "unprovable-owner-made-recoverable" };
   }
 
   /** Drop exactly the stash commit `sha`, re-resolving its current index first. */

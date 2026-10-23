@@ -35,5 +35,5 @@
  * originally sited alongside).
  */
 
-/** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`). */
-export const LATEST_SCHEMA_VERSION = 31;
+/** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`; 032 = decision_log `milestone` verdict). */
+export const LATEST_SCHEMA_VERSION = 32;

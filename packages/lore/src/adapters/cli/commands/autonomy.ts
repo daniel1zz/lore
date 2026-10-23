@@ -59,8 +59,8 @@ function fail(inv: Invocation, error: LoreError): number {
 
 function renderGoverned(governed: GovernedAutonomy): string {
   const rows = Object.entries(governed.record.classes).map(([id, c]) =>
-    c.tier === "human-always"
-      ? [id, "human-always", "-", "-", "-", String(c.usesJudge)]
+    c.tier !== "normal"
+      ? [id, c.tier, "-", "-", "-", String(c.usesJudge)]
       : [id, "normal", String(c.threshold), String(c.priorConfidence), c.declaredRecoverability, String(c.usesJudge)],
   );
   const table = formatTable(["class", "tier", "threshold", "prior C", "declared R", "judge"], rows);

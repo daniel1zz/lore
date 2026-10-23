@@ -52,7 +52,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 up).
@@ -326,7 +325,6 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
     await initCorpus(tmpDir);
     // AU-T7: the override is decided; this test's subject is the audited escape, so the class is loosened the
     // documented way (human-tty governance decision), never by a bypass in product code.
-    await loosenOverrideClasses(tmpDir, ["override-judgment"]);
     const prd = await createPrd(tmpDir);
     const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Overridden");
 
@@ -359,7 +357,6 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
     await initCorpus(tmpDir);
     // AU-T7: the override is decided; this test's subject is the audited escape, so the class is loosened the
     // documented way (human-tty governance decision), never by a bypass in product code.
-    await loosenOverrideClasses(tmpDir, ["override-judgment"]);
     const prd = await createPrd(tmpDir);
     const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Never Judged");
 

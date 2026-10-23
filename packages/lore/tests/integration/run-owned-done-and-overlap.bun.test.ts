@@ -29,7 +29,6 @@ import { tmpdir } from "os";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { cleanupWorktrees, commitAll, makeWorktree } from "./support/run-end-fixture.js";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { createLiveApp } from "../helpers/live-app.js";
 
 setDefaultTimeout(120_000);
@@ -49,7 +48,6 @@ beforeEach(async () => {
   createLiveApp(dbPath()).close();
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(tmpDir, ["override-attestation"]);
   originalCwd = process.cwd();
   process.chdir(tmpDir);
 });

@@ -84,6 +84,7 @@ import {
 } from "./migrations/migration-029.js";
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
+import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -996,6 +997,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 31) {
         // reason: migration-031 creates the per-day read counter and deletes every per-read `get` trace row (BR-1373).
         await this.client.executeMultiple(MIGRATION_031_SQL);
+      }
+
+      if (currentVersion < 32) {
+        // reason: migration-032 rebuilds decision_log with the verdict CHECK widened to 'milestone' (BR-1370, AC-LG-8).
+        await this.client.executeMultiple(MIGRATION_032_SQL);
       }
     })();
 

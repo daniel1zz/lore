@@ -20,7 +20,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
@@ -130,7 +129,6 @@ beforeAll(async () => {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
   // The record-edit gate would refuse an edit of an approved record before it could demote; switch it off.
   patchLoreConfig(dir, `workflow:\n  gates:\n    record-edit:\n      enabled: false\n`);
   // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
