@@ -34,14 +34,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
-import { installShippedGuard } from "../support/main-guard-repo.js";
 
 setDefaultTimeout(300_000);
 
@@ -56,6 +54,8 @@ const REGISTERED = "cc:registered-session-1";
 const NAME_SESSION_ID = "0a3e0001-aaaa-bbbb-cccc-111111111111";
 const NAME = "agent:session-0a3e0001";
 const NAME_ENV = { CLAUDE_CODE_SESSION_ID: NAME_SESSION_ID };
+/** The run a session-tier write is attributed to when no --harness-run is named (the session's own run). */
+const SESSION_RUN = `cc:${NAME_SESSION_ID}`;
 // BR-1055: LORE_ACTOR is ignored; a writer without --by is named through the session tier.
 const SESSION_ID = "5e55100a-aaaa-bbbb-cccc-111111111111";
 const SESSION_NAME = "agent:session-5e55100a";
@@ -155,112 +155,87 @@ function newTask(dir: string, title: string): string {
   return JSON.parse(mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" }).stdout).data.slug as string;
 }
 
-// ─── Unknown run id: write succeeds, stored unattested, one warning naming the id ───
+// ─── Unknown run id: the write is refused and writes nothing (AC-HID-1 superseded AC-RID-8's "stored unattested") ───
 
-describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
+/** Rows and versions written since `since`, whoever wrote them: a refused write must leave both empty. */
+async function writtenSince(dir: string, since: string): Promise<{ audit: AuditEntry[]; versions: VersionRecord[] }> {
+  return { audit: await auditSince(dir, since), versions: await versionsSince(dir, since) };
+}
+
+describe("AC-RID-8 (superseded by AC-HID-1): --harness-run naming an unregistered run id is refused", () => {
   let dir = "";
   let task = "";
 
   beforeAll(async () => {
     dir = corpusDir("unattested-unknown-");
-    // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
-  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
     task = newTask(dir, "Unattested claim target");
   });
 
-  it("a claim succeeds (exit 0): an unknown run id never refuses a write", () => {
+  it("a claim is refused (exit 4): an unknown run id is never downgraded to an unattested write", () => {
     const r = lore(["--harness-run", GHOST_A, "claim", task], dir, NAME_ENV);
-    expect(r.exitCode).toBe(0);
+    expect(r.exitCode).toBe(4);
   });
 
-  it("the claim's audit row stores harness_run NULL, keeps name N, and records the name's source (flag)", async () => {
+  it("the refused claim writes no audit row and no version, and the task stays unclaimed", async () => {
     const t2 = newTask(dir, "Unattested claim two");
     const since = new Date().toISOString();
-    mustLore(["--harness-run", GHOST_A, "claim", t2], dir, NAME_ENV);
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME);
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) {
-      expect(harnessRunOf(row) ?? null).toBeNull();
-      expect(JSON.stringify(row)).toContain("session");
-    }
+    const r = lore(["--harness-run", GHOST_A, "claim", t2], dir, NAME_ENV);
+    expect(r.exitCode).toBe(4);
+    const written = await writtenSince(dir, since);
+    expect(written.audit).toEqual([]);
+    expect(written.versions).toEqual([]);
+    const got = (JSON.parse(mustLore(["get", t2, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: unknown } }; extra?: { claim?: unknown } } }).data;
+    expect(got.doc?.extra?.claim ?? got.extra?.claim ?? null).toBeNull();
   });
 
-  it("the claim's version rows also store harness_run NULL (no run is invented for the version history)", async () => {
-    const t3 = newTask(dir, "Unattested claim three");
-    const since = new Date().toISOString();
-    mustLore(["--harness-run", GHOST_A, "claim", t3], dir, NAME_ENV);
-    const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
-    expect(versions.length).toBeGreaterThan(0);
-    for (const v of versions) expect(harnessRunOf(v) ?? null).toBeNull();
-  });
-
-  it("stderr carries exactly ONE line naming the unknown id", () => {
+  it("stderr names the unknown id and both remedies", () => {
     const t4 = newTask(dir, "Unattested claim four");
     const r = lore(["--harness-run", GHOST_A, "claim", t4], dir, NAME_ENV);
-    expect(r.exitCode).toBe(0);
-    expect(warningLinesNaming(r.stderr, GHOST_A)).toHaveLength(1);
+    expect(r.exitCode).toBe(4);
+    expect(warningLinesNaming(r.stderr, GHOST_A).length).toBeGreaterThan(0);
+    expect(r.stderr).toContain("lore session start --human");
+    expect(r.stderr).toContain("lore setup");
   });
 
-  it("a different unknown id is named in its own warning (the message is not a hardcoded id)", () => {
+  it("a different unknown id is named in its own refusal (the message is not a hardcoded id)", () => {
     const t5 = newTask(dir, "Unattested claim five");
     const r = lore(["--harness-run", GHOST_B, "claim", t5], dir, NAME_ENV);
-    expect(r.exitCode).toBe(0);
-    expect(warningLinesNaming(r.stderr, GHOST_B)).toHaveLength(1);
+    expect(r.exitCode).toBe(4);
+    expect(warningLinesNaming(r.stderr, GHOST_B).length).toBeGreaterThan(0);
     expect(r.stderr).not.toContain(GHOST_A);
   });
 
-  it("a doc create names the writer from the session tier (a set $LORE_ACTOR is ignored) and stores NULL", async () => {
+  it("a doc create under an unknown run id is refused and writes nothing under either name ($LORE_ACTOR is ignored)", async () => {
     const since = new Date().toISOString();
     const r = lore(["--harness-run", GHOST_A, "create", "knowledge", "--sub-type", "reference", "--title", "Unattested via session", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME });
-    expect(r.exitCode).toBe(0);
-    const all = await auditSince(dir, since);
-    expect(all.filter((row) => row.actor === NAME)).toEqual([]);
-    const rows = all.filter((row) => row.actor === SESSION_NAME);
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) {
-      expect(harnessRunOf(row) ?? null).toBeNull();
-    }
+    expect(r.exitCode).toBe(4);
+    const written = await writtenSince(dir, since);
+    expect(written.audit).toEqual([]);
+    expect(written.versions).toEqual([]);
   });
 
-  it("a write that produces several rows (lore done walks several lifecycle steps) still prints exactly one warning", () => {
+  it("a multi-row write (lore done) under an unknown run id is refused before any lifecycle step is written", async () => {
     const t6 = newTask(dir, "Unattested multi-row done");
-    // Runner-produced rows (`--capture` spawns the command and checks its exit code). The runner only accepts a
-    // red whose output carries a real test-runner summary, so the fixture runs two real `bun test` files: one
-    // that fails (clears the no-new-tests floor) and one that passes (clears the attested-pass floor).
-    // The floors stay armed; the fixture earns `done` instead of overriding it.
-    writeFileSync(join(dir, "red.fixture.test.ts"), 'import { expect, test } from "bun:test";\ntest("red fixture", () => expect(1).toBe(2));\n');
-    writeFileSync(join(dir, "green.fixture.test.ts"), 'import { expect, test } from "bun:test";\ntest("green fixture", () => expect(1).toBe(1));\n');
-    // `evidence --result pass` refuses a claim with no recorded worktree and a worktree with uncommitted changes,
-    // so the claim names the fixture repo and the two fixture test files are committed first.
-    // The corpus (.lore/) and the fake HOME state (Library/) live inside the fixture repo; ignore them.
-    writeFileSync(join(dir, ".gitignore"), ".lore/\nLibrary/\n.claude/\n");
-    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
-    execFileSync("git", ["add", ".gitignore", "red.fixture.test.ts", "green.fixture.test.ts"], { cwd: dir });
-    execFileSync("git", ["commit", "-q", "-m", "fixture tests"], { cwd: dir });
-    // `lore done` needs the landing `lore integrate` records (BR-1291): the task's branch holds nothing past main, so
-    // integrate finds it already integrated and records the landing on its claimant
-    execFileSync("git", ["branch", "unattested-branch", "main"], { cwd: dir });
-    mustLore(["claim", t6, "--worktree", "unattested-branch"], dir, NAME_ENV);
-    execFileSync("git", ["checkout", "-q", "--detach", "main"], { cwd: dir }); // the shared checkout is a detached view of main
-    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
-    mustLore(["integrate", "unattested-branch", "--session", "unattested-session"], dir, NAME_ENV);
-    mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./red.fixture.test.ts 2>&1", "--result", "expected-fail", "--capture"], dir, NAME_ENV);
-    mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./green.fixture.test.ts 2>&1", "--result", "pass", "--capture"], dir, NAME_ENV);
+    mustLore(["claim", t6], dir, NAME_ENV);
+    const since = new Date().toISOString();
     const r = lore(["--harness-run", GHOST_A, "done", t6], dir, NAME_ENV);
-    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
-    expect(warningLinesNaming(r.stderr, GHOST_A)).toHaveLength(1);
+    expect(r.exitCode, r.stderr + r.stdout).toBe(4);
+    expect(warningLinesNaming(r.stderr, GHOST_A).length).toBeGreaterThan(0);
+    const written = await writtenSince(dir, since);
+    expect(written.audit).toEqual([]);
+    expect(written.versions).toEqual([]);
   }, 120_000);
 
-  it("the registered-run control: a registered id is stamped and draws no warning", async () => {
+  it("the registered-run control: a registered id is accepted and stamped on every row it writes", async () => {
     await registerRun(dir, REGISTERED);
     const t7 = newTask(dir, "Registered control");
     const since = new Date().toISOString();
     const r = lore(["--harness-run", REGISTERED, "claim", t7], dir, NAME_ENV);
-    expect(r.exitCode).toBe(0);
+    expect(r.exitCode, r.stderr).toBe(0);
     expect(warningLinesNaming(r.stderr, REGISTERED)).toHaveLength(0);
-    const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
+    const rows = (await auditSince(dir, since)).filter((row) => harnessRunOf(row) === REGISTERED);
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(harnessRunOf(row)).toBe(REGISTERED);
+    for (const row of await auditSince(dir, since)) expect(harnessRunOf(row)).toBe(REGISTERED);
   });
 });
 
@@ -273,14 +248,14 @@ describe("AC-RID-8: no --harness-run at all", () => {
     dir = corpusDir("unattested-absent-");
   });
 
-  it("a write with no flag succeeds and stores harness_run NULL with the resolved name", async () => {
+  it("a write with no flag succeeds and stamps the session's own run with the resolved name", async () => {
     const t = newTask(dir, "No flag target");
     const since = new Date().toISOString();
     const r = lore(["claim", t], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(harnessRunOf(row) ?? null).toBeNull();
+    for (const row of rows) expect(harnessRunOf(row)).toBe(SESSION_RUN);
   });
 
   it("prints no run warning when no run was named", () => {
@@ -290,16 +265,16 @@ describe("AC-RID-8: no --harness-run at all", () => {
     expect(runWarningLines(r.stderr)).toEqual([]);
   });
 
-  it("the version rows of an unflagged write store harness_run NULL", async () => {
+  it("the version rows of an unflagged write carry the session's own run", async () => {
     const t = newTask(dir, "No flag version target");
     const since = new Date().toISOString();
     mustLore(["claim", t], dir, NAME_ENV);
     const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
     expect(versions.length).toBeGreaterThan(0);
-    for (const v of versions) expect(harnessRunOf(v) ?? null).toBeNull();
+    for (const v of versions) expect(harnessRunOf(v)).toBe(SESSION_RUN);
   });
 
-  it("no run is guessed: with a run registered in the corpus, an unflagged write still stores NULL", async () => {
+  it("no run is guessed: with another run registered in the corpus, an unflagged write still stamps the session's own run", async () => {
     await registerRun(dir, REGISTERED);
     const t = newTask(dir, "Registered but not named");
     const since = new Date().toISOString();
@@ -307,9 +282,9 @@ describe("AC-RID-8: no --harness-run at all", () => {
     expect(r.exitCode).toBe(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(harnessRunOf(row) ?? null).toBeNull();
+    for (const row of rows) expect(harnessRunOf(row)).toBe(SESSION_RUN);
     const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
-    for (const v of versions) expect(harnessRunOf(v) ?? null).toBeNull();
+    for (const v of versions) expect(harnessRunOf(v)).toBe(SESSION_RUN);
   });
 
   it("a name that was given is never replaced by the OS user name as author", async () => {
@@ -376,27 +351,32 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
 
 // ─── Regression: an unregistered run decides a claim as UNATTESTED, one answer for the whole operation ───
 
-describe("AC-RID-8 regression: claim by an unregistered --harness-run is decided and stored unattested", () => {
+describe("AC-RID-8 regression (AC-HID-1): a claim by an unregistered --harness-run is refused, then the same session claims on its own run", () => {
   let dir = "";
 
   beforeAll(() => {
     dir = corpusDir("unattested-claim-decision-");
   });
 
-  it("stores claim.harness_run null, warns exactly once, and a same-name unattested claim refreshes (BR-1040)", () => {
+  it("the refused claim stores no claim, and the same session's own-run claim afterwards succeeds and refreshes (BR-1040)", () => {
     const task = newTask(dir, "Unregistered run claim");
     const first = lore(["--harness-run", GHOST_A, "claim", task], dir, NAME_ENV);
-    expect(first.exitCode).toBe(0);
-    expect(warningLinesNaming(first.stderr, GHOST_A)).toHaveLength(1);
-    const got = (JSON.parse(mustLore(["get", task, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: Record<string, unknown> } }; extra?: { claim?: Record<string, unknown> } } }).data;
-    const claim = got.doc?.extra?.claim ?? got.extra?.claim;
-    if (claim === undefined) throw new Error("claimed task has no extra.claim in `lore get --json`");
-    expect(claim["harness_run"] ?? null).toBeNull();
-    expect(JSON.stringify(claim)).not.toContain(GHOST_A);
-    // two unattested parties with the same name compare by name: the second claim refreshes the lease
+    expect(first.exitCode).toBe(4);
+    const readClaim = (): Record<string, unknown> | undefined => {
+      const got = (JSON.parse(mustLore(["get", task, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: Record<string, unknown> } }; extra?: { claim?: Record<string, unknown> } } }).data;
+      return got.doc?.extra?.claim ?? got.extra?.claim;
+    };
+    expect(readClaim() ?? null).toBeNull();
+    // the same session claiming on its own run (no flag) is accepted; a repeat by the same run refreshes the lease
     const second = lore(["claim", task], dir, NAME_ENV);
-    expect(second.exitCode).toBe(0);
-    expect(second.stderr).not.toContain("CLAIM_CONFLICT");
+    expect(second.exitCode, second.stderr).toBe(0);
+    const claim = readClaim();
+    if (claim === undefined) throw new Error("claimed task has no extra.claim in `lore get --json`");
+    expect(claim["harness_run"]).toBe(SESSION_RUN);
+    expect(JSON.stringify(claim)).not.toContain(GHOST_A);
+    const third = lore(["claim", task], dir, NAME_ENV);
+    expect(third.exitCode, third.stderr).toBe(0);
+    expect(third.stderr).not.toContain("CLAIM_CONFLICT");
   });
 });
 
