@@ -24,6 +24,7 @@ import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirS
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { renderRepoRules } from "../../../../scripts/render-repo-rules";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -32,7 +33,9 @@ const RULES_DIR = join(".claude", "rules");
 const TARGET = "lore-worktree-dispatch.md";
 
 function lore(args: string[], cwd: string): { exitCode: number; out: string } {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd, env: { ...process.env, HOME: cwd } });
+  // reason: HOME must lie OUTSIDE the fixture repo. With HOME = the repo, the user scope's rules dir (`$HOME/.claude/rules`)
+  // IS the project's `.claude/rules`, so every project rules file is reported "extra" versus the (empty) user selection.
+  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd, env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO } });
   return { exitCode: proc.exitCode ?? 1, out: `${proc.stdout.toString()}${proc.stderr.toString()}` };
 }
 
@@ -65,7 +68,8 @@ describe("render-repo-rules — rules files are a pure function of their fragmen
     expect(result.unowned).toEqual([]);
     expect(result.rewritten.length).toBeGreaterThan(0);
     expect(existsSync(join(repo, RULES_DIR, TARGET))).toBe(true);
-    expect(lore(["fragments", "check"], repo).exitCode).toBe(0);
+    const check = lore(["fragments", "check"], repo);
+    expect(check.exitCode, check.out).toBe(0);
   }, 120_000);
 
   it("REGRESSION (control): a clean tree is left unchanged by a second run", async () => {
