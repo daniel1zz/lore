@@ -3,10 +3,10 @@ id: KN-257
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — lifecycle archival (cascade + sweep + surfacing) (2026-08-01)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-23
 tags: []
 parent: PLAN-089
 links:

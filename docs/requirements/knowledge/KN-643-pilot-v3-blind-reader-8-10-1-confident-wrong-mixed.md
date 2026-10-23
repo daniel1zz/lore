@@ -3,10 +3,10 @@ id: KN-643
 type: knowledge
 role: knowledge
 title: "Pilot v3 blind reader: 8/10, 1 confident-wrong (mixed-runner guard absent from baseline)"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-174
 ---

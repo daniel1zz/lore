@@ -3,10 +3,10 @@ id: KN-611
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline slice 2c: C7 fidelity sampling command and BL-15 resume rule diff (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-168
 links:

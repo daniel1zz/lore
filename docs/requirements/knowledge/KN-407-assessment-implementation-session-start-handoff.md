@@ -3,10 +3,10 @@ id: KN-407
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — session-start handoff neutrality (2026-07-27)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: []
 parent: PLAN-117
 links:

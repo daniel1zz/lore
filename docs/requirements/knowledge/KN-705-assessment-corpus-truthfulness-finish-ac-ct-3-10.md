@@ -3,10 +3,10 @@ id: KN-705
 type: knowledge
 role: knowledge
 title: "Assessment: Corpus truthfulness: finish AC-CT-3..10 (never implemented) (2026-10-18)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-202
 links:

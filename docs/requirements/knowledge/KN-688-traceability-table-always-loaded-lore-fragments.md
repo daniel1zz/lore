@@ -3,10 +3,10 @@ id: KN-688
 type: knowledge
 role: knowledge
 title: "Traceability table: always-loaded lore fragments, b049f0ab to the rule-only wording"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: [fragments, traceability]
 ---
 Traceability table for spec-always-loaded-lore-fragments-state-the-rule-only-reasoning: every clause of the ten fragments at b049f0ab (verbatim in knowledge-always-loaded-lore-fragments-verbatim-source-before) mapped to the current text, per the lore-context-optimizer workflow.

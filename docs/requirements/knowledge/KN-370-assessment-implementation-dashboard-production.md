@@ -3,10 +3,10 @@ id: KN-370
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — dashboard production packaging (F5a one-command lore dashboard) (2026-07-28)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PLAN-112
 links:

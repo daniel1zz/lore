@@ -3,10 +3,10 @@ id: KN-405
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-084 corpus-allocated ordinal identity (interface-first) (2026-07-27)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: []
 parent: PLAN-120
 links:

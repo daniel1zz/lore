@@ -3,10 +3,10 @@ id: KN-039
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-040 Implementation — assessment dimension framework v2 (2026-07-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-10
-updated: 2026-07-14
+updated: 2026-10-23
 tags: []
 parent: PLAN-020
 links:

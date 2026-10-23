@@ -3,10 +3,10 @@ id: KN-250
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — resume-ticket coverage floor: blocking channel, arming provenance, cross-turn idempotence (2026-08-01)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-23
 tags: []
 parent: PLAN-086
 links:

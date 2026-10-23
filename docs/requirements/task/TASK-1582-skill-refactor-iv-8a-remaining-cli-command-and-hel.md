@@ -3,7 +3,7 @@ id: TASK-1582
 type: task
 role: plan
 title: "[Skill:refactor] IV-8a remaining CLI command and helper ambient reads; delete the invocation-scope bridge"
-status: draft
+status: archived
 priority: medium
 phase: "P4 migration"
 created: 2026-10-18

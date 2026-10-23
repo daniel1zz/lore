@@ -3,10 +3,10 @@ id: KN-666
 type: knowledge
 role: knowledge
 title: "Assessment: Context fragments: config-driven layered rule injection (2026-10-07)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: []
 parent: PLAN-150
 links:

@@ -3,10 +3,10 @@ id: KN-653
 type: knowledge
 role: knowledge
 title: "Pilot v2 citation coverage pass: 59 falsifying citations, 6 corrected rules, 32 downgrades"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-173
 ---

@@ -3,10 +3,10 @@ id: KN-540
 type: knowledge
 role: knowledge
 title: "Assessment: Collapse the retired-shape refusal to one definition and strengthen the exit-code-only green control (2026-08-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-143
 links:

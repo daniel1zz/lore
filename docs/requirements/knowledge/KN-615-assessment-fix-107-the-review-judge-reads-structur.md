@@ -3,10 +3,10 @@ id: KN-615
 type: knowledge
 role: knowledge
 title: "Assessment: Fix #107: the review judge reads structured parts of the document (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-171
 links:

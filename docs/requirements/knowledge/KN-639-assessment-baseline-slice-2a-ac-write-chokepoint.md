@@ -3,10 +3,10 @@ id: KN-639
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline slice 2a: AC write chokepoint, claim-scoped corpus authoring, indexes, completeness census, citation gate, rule read path (2026-10-08)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-178
 links:

@@ -3,10 +3,10 @@ id: KN-659
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline slice 1: rules, citations, rule state, specification-branch pilot (2026-10-07)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: []
 parent: PLAN-172
 links:

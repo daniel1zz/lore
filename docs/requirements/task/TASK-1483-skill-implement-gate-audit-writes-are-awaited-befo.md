@@ -3,10 +3,10 @@ id: TASK-1483
 type: task
 role: plan
 title: "[Skill:implement] Gate audit writes are awaited before the store closes (deny path loses its audit row)"
-status: draft
+status: deprecated
 priority: high
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-197
 plan: PLAN-197

@@ -3,10 +3,10 @@ id: KN-648
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline pilot v2: migration method v2 on the specification branch (2026-10-08)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-173
 links:

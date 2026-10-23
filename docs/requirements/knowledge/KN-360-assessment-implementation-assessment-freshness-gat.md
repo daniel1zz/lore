@@ -3,10 +3,10 @@ id: KN-360
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — assessment freshness gate (SPEC-106) (2026-07-28)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PLAN-110
 links:

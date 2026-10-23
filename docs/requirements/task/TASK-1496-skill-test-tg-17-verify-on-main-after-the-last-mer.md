@@ -3,11 +3,11 @@ id: TASK-1496
 type: task
 role: plan
 title: "[Skill:test] TG-17 verify on main after the last merge"
-status: draft
+status: deprecated
 priority: high
 phase: "Phase 5: cadence"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-201
 plan: PLAN-201

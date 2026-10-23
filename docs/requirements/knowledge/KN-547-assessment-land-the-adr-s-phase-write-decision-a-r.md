@@ -3,10 +3,10 @@ id: KN-547
 type: knowledge
 role: knowledge
 title: "Assessment: Land the ADR's phase-write decision: a red-first parity suite, then version-logging in all three PhaseService writers (2026-08-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-142
 links:

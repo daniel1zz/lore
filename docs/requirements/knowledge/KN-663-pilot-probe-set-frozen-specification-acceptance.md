@@ -3,10 +3,10 @@ id: KN-663
 type: knowledge
 role: knowledge
 title: "Pilot probe set (frozen) — specification & acceptance"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: [baseline, pilot-probe]
 parent: PLAN-172
 links:

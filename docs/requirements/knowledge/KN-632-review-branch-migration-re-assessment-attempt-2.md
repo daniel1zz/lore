@@ -3,10 +3,10 @@ id: KN-632
 type: knowledge
 role: knowledge
 title: "Review-branch migration re-assessment (attempt 2) against AC-BLS2-16"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-177
 ---

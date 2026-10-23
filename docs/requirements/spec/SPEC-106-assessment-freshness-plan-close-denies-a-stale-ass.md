@@ -3,10 +3,10 @@ id: SPEC-106
 type: spec
 role: spec
 title: "Assessment freshness — plan-close denies a stale assessment"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-28
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 links:
   - {id: SPEC-094, type: implements}

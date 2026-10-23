@@ -3,10 +3,10 @@ id: KN-633
 type: knowledge
 role: knowledge
 title: "Corpus-only control on both review-branch probes: baseline leads by 1.0 and 1.5"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-177
 ---

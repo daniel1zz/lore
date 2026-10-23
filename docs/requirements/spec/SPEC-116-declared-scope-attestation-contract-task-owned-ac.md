@@ -6,7 +6,7 @@ title: "Declared-scope attestation contract: task-owned ac_scope, intersection b
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 links:
   - {id: ADR-018, type: implements}
@@ -90,12 +90,12 @@ The shared fixture for AC-VS-1/2 is a spec declaring exactly 3 script-mode crite
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-declared-scope.test.ts -t 'out of scope ac refuses preflight'
 - [⚑] [script] AC-VS-5: an empty ac_scope array exits 4 and stderr contains the literal 'declares no acceptance criterion', a literal absent from the AC-VS-3 message
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-declared-scope.test.ts -t 'empty scope distinct from absent'
-- [⚑] [script] AC-VS-8: lore gate plan-close --explain prints a known_false_pass for the coverage predicate containing the literal 'plan-wide run'
+- [⊖] [script] AC-VS-8: lore gate plan-close --explain prints a known_false_pass for the coverage predicate containing the literal 'plan-wide run'
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-close-known-false-pass.bun.test.ts -t 'coverage predicate records its false pass'
   other_command=3
 - [⚑] [script] AC-VS-6: for a fixture whose tasks carry evidence but declare no scope, DeclaredScopeCoverage reports declared_acs empty and scope_undeclared true while exercised_acs is non-empty, AND the coverage conjunct returns notApplicable with reason scope-undeclared rather than ok, so the undeclared fixture cannot pass vacuously
   script: test — bunx vitest run packages/core/src/evidence-panel.test.ts -t 'exercised versus declared scope'
-- [⚑] [script] AC-VS-7: on a two-task fixture where task A carries attested entries covering every declared-scope AC and task B carries evidence of which none is attested, with no minRatio configured, attestationFloor returns ok and the summary lists task B in zero_attested_tasks
+- [⊖] [script] AC-VS-7: on a two-task fixture where task A carries attested entries covering every declared-scope AC and task B carries evidence of which none is attested, with no minRatio configured, attestationFloor returns ok and the summary lists task B in zero_attested_tasks
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t 'condition one reported not blocking'
 - [⚑] [script] AC-VS-9: lore scope rm of an evidenced id exits 4 with stderr containing 'cannot remove ac_scope id(s) with recorded evidence' and the id still present afterwards, for a task and for a phase, while removing a non-evidenced id from the same fixture exits 0 and the id is gone
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-scope-writer.bun.test.ts -t 'evidenced removal blocked non-evidenced allowed'

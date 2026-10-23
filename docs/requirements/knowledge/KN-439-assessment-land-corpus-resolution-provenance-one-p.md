@@ -3,10 +3,10 @@ id: KN-439
 type: knowledge
 role: knowledge
 title: "Assessment: Land corpus-resolution provenance: one pure resolver, one boundary detector, and a foreign-write guard keyed on declared intent (2026-08-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-128
 links:

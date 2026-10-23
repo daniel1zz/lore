@@ -3,10 +3,10 @@ id: KN-707
 type: knowledge
 role: knowledge
 title: "Assessment: Site-map maintenance keeps approval; owned-by is checked (2026-10-18)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-207
 links:

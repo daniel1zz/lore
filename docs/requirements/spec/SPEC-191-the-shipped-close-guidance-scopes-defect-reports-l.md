@@ -6,7 +6,7 @@ title: "The shipped CLOSE guidance scopes defect reports: lore defects only, one
 status: approved
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-20
 tags: []
 ---
 ## Overview/Goal
@@ -30,7 +30,7 @@ Structured criterion AC-ISCOPE-1 (`lore ac add`).
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-ISCOPE-1: assets/context/corpus-workflow-4-close.md's report-issue bullet contains 'one root cause' and names this repository's own upkeep as plan/task work, not a report; the repo's compiled .claude/rules/lore-corpus-workflow-close.md is byte-identical to a fresh render of that fragment; and 'lore fragments check' exits exactly 0
+- [⊖] [script] AC-ISCOPE-1: assets/context/corpus-workflow-4-close.md's report-issue bullet contains 'one root cause' and names this repository's own upkeep as plan/task work, not a report; the repo's compiled .claude/rules/lore-corpus-workflow-close.md is byte-identical to a fresh render of that fragment; and 'lore fragments check' exits exactly 0
   script: test — bunx vitest run packages/lore/tests/unit/context/report-issue-scope-fragment.test.ts
 
 ## Code anchors

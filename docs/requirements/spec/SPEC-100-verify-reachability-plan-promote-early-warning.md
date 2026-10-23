@@ -6,7 +6,7 @@ title: "Verify reachability — plan-promote early warning, reachability-aware a
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 links:
   - {id: SPEC-094, type: implements}
@@ -51,9 +51,9 @@ Structured via `lore ac add` (script-mode, oracle-bound). Sketch: (1) `verifyRea
 - [⚑] [script] AC-VRW-1: verifyReachability truth table (>=4 cases: parent-not-spec / no-script-acs / reachable / boundary zero-AC) plus plan-promote advisory presence when unreachable and absence when reachable, with gate verdict asserted unchanged in both branches; suite exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-reachability.test.ts
   other_command=1
-- [⚑] [script] AC-VRW-2: feedAttestationFloor reachable branch byte-identical to pre-change text (regression pin) and unreachable branch contains zero occurrences of the string 'Recovery: run' + names both real options (parent-spec script ACs, typed exemption); suite exits 0
+- [⊖] [script] AC-VRW-2: feedAttestationFloor reachable branch byte-identical to pre-change text (regression pin) and unreachable branch contains zero occurrences of the string 'Recovery: run' + names both real options (parent-spec script ACs, typed exemption); suite exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/feed-attestation-reachability.test.ts
-- [⚑] [script] AC-VRW-3: attestationExemptKindSchema accepts all 4 enum members and rejects >=2 invalid values; checkPlanClose denies exemption missing kind and passes exemption with valid kind (4-row outcome table); suite exits 0
+- [⊖] [script] AC-VRW-3: attestationExemptKindSchema accepts all 4 enum members and rejects >=2 invalid values; checkPlanClose denies exemption missing kind and passes exemption with valid kind (4-row outcome table); suite exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-exempt-kind.test.ts
 - [⚑] [script] AC-VRW-4: bun run typecheck exits 0 across all packages
   script: tsc — bun run typecheck

@@ -3,10 +3,10 @@ id: KN-533
 type: knowledge
 role: knowledge
 title: "Assessment: Retire SPEC-146's split debt — repoint the eight stale claude-md-check references, one of them a live error message (2026-08-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-141
 links:

@@ -3,7 +3,7 @@ id: TASK-1594
 type: task
 role: plan
 title: "[Skill:fix] AU-T17 autonomy-run-reap test (1) failed once on a process-timing assertion; also (4b) timed out once under load"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1d: apply on main"
 created: 2026-10-18

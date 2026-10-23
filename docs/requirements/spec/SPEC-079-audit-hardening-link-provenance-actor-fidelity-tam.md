@@ -6,7 +6,7 @@ title: "Audit hardening: link provenance + actor fidelity + tamper-evident hash 
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-10-17
+updated: 2026-10-20
 tags: []
 ---
 # SPEC-079 — Audit hardening: relationship provenance + actor fidelity + tamper-evident hash chain
@@ -150,4 +150,3 @@ are part of the contract — implementers create exactly these paths:
 - packages/lore/src/store/store-shared.ts#computeAuditEntryHash
 - packages/lore/src/store/migrations/migration-009.ts
 - packages/lore/src/service/audit-service.ts#walkAuditChain
-- packages/core/src/actor-resolution-node.ts

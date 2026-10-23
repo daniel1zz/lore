@@ -11017,18 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01KYEN80YH9F95KVTEPMJKHRBX": {
-      "human_id": "SPEC-202",
-      "file_path": "docs/requirements/spec/SPEC-202-extension-hooks-system-direction-pointer-only-no.md"
-    },
-    "01KYEN857ZRXXQJN58YTTCVE4F": {
-      "human_id": "SPEC-203",
-      "file_path": "docs/requirements/spec/SPEC-203-dashboard-multi-project-single-instance-switcher-o.md"
-    },
-    "01KYEN83SNWBSPY495FRHVM0XM": {
-      "human_id": "SPEC-204",
-      "file_path": "docs/requirements/spec/SPEC-204-dashboard-console-adjudication-cockpit-re-centered.md"
-    },
     "01M520AC77944YHDTC3E5FANBY": {
       "human_id": "KN-702",
       "file_path": "docs/requirements/knowledge/KN-702-evicted-from-the-store-module-doc-lazy-libsql-load.md"
@@ -11196,10 +11184,6 @@
     "01M52CB1W128NNR5AZ3VFG7XK9": {
       "human_id": "TASK-1505",
       "file_path": "docs/requirements/task/TASK-1505-skill-research-tg-1-runner-and-binary-execution-ad.md"
-    },
-    "01M4APBSGVFFX67X04RSR6GDMZ": {
-      "human_id": "SPEC-205",
-      "file_path": "docs/requirements/spec/SPEC-205-product-baseline-architecture-trees-the-product-s.md"
     },
     "01M52SMXVE645DD4Q0HV8FD04X": {
       "human_id": "ADR-048",
@@ -11377,10 +11361,6 @@
       "human_id": "TASK-1542",
       "file_path": "docs/requirements/task/TASK-1542-skill-fix-tg-35-two-new-test-files-reference-ac-ct.md"
     },
-    "01KYEN82CATW2VDHSB9RR9XTQG": {
-      "human_id": "SPEC-206",
-      "file_path": "docs/requirements/spec/SPEC-206-upstream-issue-feedback-loop-consumer-reported-def.md"
-    },
     "01M56MXNS4956Q34VFX959CMCC": {
       "human_id": "SPEC-197",
       "file_path": "docs/requirements/spec/SPEC-197-autonomy-phase-1-decision-function-human-channel-l.md"
@@ -11456,10 +11436,6 @@
     "01M56J01QTBBJJ617FBPK149Y1": {
       "human_id": "TASK-1557",
       "file_path": "docs/requirements/task/TASK-1557-skill-fix-cl-2-agents-stop-producing-stashes-track.md"
-    },
-    "01KYEN7WD20P4EV6ZHKTZD60JP": {
-      "human_id": "SPEC-207",
-      "file_path": "docs/requirements/spec/SPEC-207-session-layer-multi-session-collaboration-context.md"
     },
     "01M56NZ5XJ4MY3FV6XC66Z2K0J": {
       "human_id": "PLAN-206",
@@ -11597,14 +11573,6 @@
       "human_id": "TASK-1581",
       "file_path": "docs/requirements/task/TASK-1581-skill-fix-tg-37-check-shipped-defaults-no-lore-con.md"
     },
-    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
-      "human_id": "SPEC-208",
-      "file_path": "docs/requirements/spec/SPEC-208-phase-execution-model-plan-phase-checklist-superse.md"
-    },
-    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
-      "human_id": "SPEC-209",
-      "file_path": "docs/requirements/spec/SPEC-209-memory-hygiene-knowledge-trustworthiness-over-time.md"
-    },
     "01M5727QNBNXT24V92FA5YK930": {
       "human_id": "TASK-1582",
       "file_path": "docs/requirements/task/TASK-1582-skill-refactor-iv-8a-remaining-cli-command-and-hel.md"
@@ -11657,10 +11625,6 @@
       "human_id": "TASK-1592",
       "file_path": "docs/requirements/task/TASK-1592-skill-perf-tg-40-full-one-runner-suite-714-9-s-on.md"
     },
-    "01KYENED6N2NT4Y5GQT67ECBY5": {
-      "human_id": "SPEC-210",
-      "file_path": "docs/requirements/spec/SPEC-210-output-contract-document-taxonomy-domain-overview.md"
-    },
     "01M57ES0J08FXRSVE0D6N8FYWW": {
       "human_id": "TASK-1593",
       "file_path": "docs/requirements/task/TASK-1593-skill-baseline-tg-43-add-the-rule-tg-41-s-14-ac.md"
@@ -11709,9 +11673,1917 @@
       "human_id": "TASK-1602",
       "file_path": "docs/requirements/task/TASK-1602-skill-implement-dn5-2-lore-rule-propose-amend-rewo.md"
     },
-    "01KYEN7XX5J25PEY9X11SH836G": {
+    "01M5KTG42HW6C1GW62HKQZDF9P": {
+      "human_id": "SPEC-233",
+      "file_path": "docs/requirements/spec/SPEC-233-lean-governance-batch-verbs-judgment-only-at-miles.md"
+    },
+    "01M5KZP1ZJW8KZMGZNTA73G196": {
+      "human_id": "SPEC-234",
+      "file_path": "docs/requirements/spec/SPEC-234-human-decisions-are-asked-in-the-session-and-recor.md"
+    },
+    "01M5KKH68QZ9RVTT2S4G9KMXSS": {
+      "human_id": "SPEC-232",
+      "file_path": "docs/requirements/spec/SPEC-232-holder-addresses-hold-on-every-store-and-a-holder.md"
+    },
+    "01M5C6X39YTX6MQM7WC4B91T8P": {
+      "human_id": "SPEC-231",
+      "file_path": "docs/requirements/spec/SPEC-231-runs-carry-their-messaging-address-holder-listings.md"
+    },
+    "01M5C6VSS4YH2G5FMTMAFBS87D": {
+      "human_id": "SPEC-230",
+      "file_path": "docs/requirements/spec/SPEC-230-every-refusal-carries-its-rule-as-a-required-type.md"
+    },
+    "01M5AB5FDBRN7HZAVZG36XT9V2": {
+      "human_id": "SPEC-226",
+      "file_path": "docs/requirements/spec/SPEC-226-landing-does-the-bookkeeping-claims-start-from-mai.md"
+    },
+    "01M5A80YV13N18JVBYN68SBFA1": {
+      "human_id": "SPEC-225",
+      "file_path": "docs/requirements/spec/SPEC-225-every-write-is-made-by-a-known-party-an-attested-a.md"
+    },
+    "01M5C44N5FG9NQSRQ3ZZW9E6FY": {
+      "human_id": "SPEC-228",
+      "file_path": "docs/requirements/spec/SPEC-228-the-write-spec-rule-ships-with-the-binary-lore-ini.md"
+    },
+    "01M5AB8S09PEK6S5BVJFZG9YQ4": {
+      "human_id": "SPEC-227",
+      "file_path": "docs/requirements/spec/SPEC-227-issues-state-problems-on-github-tasks-state-execut.md"
+    },
+    "01M5A1ZR7CGGTEF878EA8K1PY9": {
+      "human_id": "SPEC-220",
+      "file_path": "docs/requirements/spec/SPEC-220-baseline-approval-is-per-item-an-edit-adds-a-pendi.md"
+    },
+    "01M5A28A4X88GP1X5V1C0ZAMM2": {
+      "human_id": "SPEC-221",
+      "file_path": "docs/requirements/spec/SPEC-221-refusal-sites-declare-their-rule-in-code-the-rule.md"
+    },
+    "01M5C4DJSXTM5N4ABFAZSR35MN": {
+      "human_id": "SPEC-229",
+      "file_path": "docs/requirements/spec/SPEC-229-at-integrate-an-unlanded-change-holds-a-path-only.md"
+    },
+    "01M59KW8XHC1W1QV29RH4EW1J5": {
+      "human_id": "SPEC-214",
+      "file_path": "docs/requirements/spec/SPEC-214-defect-clusters-round-2-part-a-sessions-seats-setu.md"
+    },
+    "01M5A502BK7JX5TC0BQ9S3490C": {
+      "human_id": "SPEC-223",
+      "file_path": "docs/requirements/spec/SPEC-223-a-branch-s-own-diff-is-judged-at-integrate-the-tur.md"
+    },
+    "01M5A2KGP4HWNHZHCYBYFKRSHS": {
+      "human_id": "SPEC-222",
+      "file_path": "docs/requirements/spec/SPEC-222-no-working-copy-can-check-out-main-the-main-ref-gu.md"
+    },
+    "01M57MJ8Q284Q5866NMJARF0RD": {
+      "human_id": "SPEC-203",
+      "file_path": "docs/requirements/spec/SPEC-203-main-advances-only-through-lore-integrate-per-sess.md"
+    },
+    "01M5A09NAWHDP7C033TRDXSS6M": {
+      "human_id": "SPEC-218",
+      "file_path": "docs/requirements/spec/SPEC-218-baseline-coverage-refuses-only-undeclared-commands.md"
+    },
+    "01M590TFY4RR0SD86NYR2K2XBM": {
+      "human_id": "SPEC-207",
+      "file_path": "docs/requirements/spec/SPEC-207-baseline-coverage-cannot-silently-regress-one-prog.md"
+    },
+    "01M5A1HMX1NJDQ6MND2C9GPHAX": {
+      "human_id": "SPEC-219",
+      "file_path": "docs/requirements/spec/SPEC-219-a-task-is-archived-only-on-a-landing-lore-recorded.md"
+    },
+    "01M5962SWE02XNCMAB7BA4RQZA": {
+      "human_id": "SPEC-209",
+      "file_path": "docs/requirements/spec/SPEC-209-defect-clusters-round-1-done-floors-judge-real-run.md"
+    },
+    "01M59KWBA0XXBE6DKH1A6J71NQ": {
+      "human_id": "SPEC-216",
+      "file_path": "docs/requirements/spec/SPEC-216-defect-clusters-round-2-part-c-criterion-data-demo.md"
+    },
+    "01M59KWCK0SAQ0J11F2W752HV7": {
+      "human_id": "SPEC-217",
+      "file_path": "docs/requirements/spec/SPEC-217-defect-clusters-round-2-part-d-store-selection-run.md"
+    },
+    "01M59KWA2T41K3B9EK0RYHG0ER": {
+      "human_id": "SPEC-215",
+      "file_path": "docs/requirements/spec/SPEC-215-defect-clusters-round-2-part-b-review-pending-queu.md"
+    },
+    "01M59HK97WYGR85ZNMS1Z6DVEM": {
+      "human_id": "SPEC-212",
+      "file_path": "docs/requirements/spec/SPEC-212-github-owns-issue-report-state-no-mirror-task-work.md"
+    },
+    "01M57NF1QYSAN18F34CWMQJCCD": {
+      "human_id": "SPEC-205",
+      "file_path": "docs/requirements/spec/SPEC-205-module-index-lists-only-folders-with-a-memory-file.md"
+    },
+    "01M59FADAMQ99H6X1DQTX7WFRG": {
       "human_id": "SPEC-211",
-      "file_path": "docs/requirements/spec/SPEC-211-distribution-adoption-phased-spike-gated-one-step.md"
+      "file_path": "docs/requirements/spec/SPEC-211-no-module-writes-around-the-write-path-the-remaini.md"
+    },
+    "01M59E2ZY6BNW4FND6CEG2FMRC": {
+      "human_id": "SPEC-210",
+      "file_path": "docs/requirements/spec/SPEC-210-prose-about-code-is-bound-to-what-it-describes-one.md"
+    },
+    "01M595XRFWNZR6M41W077A2J0M": {
+      "human_id": "SPEC-208",
+      "file_path": "docs/requirements/spec/SPEC-208-one-baseline-map-call-maps-many-sites-of-a-leaf-as.md"
+    },
+    "01M58MYHGC7AZJ78911A9EZEZZ": {
+      "human_id": "SPEC-206",
+      "file_path": "docs/requirements/spec/SPEC-206-human-review-surface-decisions-audit-items-and-pen.md"
+    },
+    "01M57NBKGDT8XSHMFBCC57V9Y0": {
+      "human_id": "SPEC-204",
+      "file_path": "docs/requirements/spec/SPEC-204-process-state-end-state-one-invocation-per-entry-r.md"
+    },
+    "01M57KK5K9CGSXGG4KT0RSMCBF": {
+      "human_id": "SPEC-202",
+      "file_path": "docs/requirements/spec/SPEC-202-a-retro-lesson-names-the-mechanism-that-stops-it-r.md"
+    },
+    "01M5KS5JPRK25JC394R1VZEHK2": {
+      "human_id": "ADR-058",
+      "file_path": "docs/requirements/adr/ADR-058-ai-decision-standard-four-checks-references-from-e.md"
+    },
+    "01M5C6QXTQDMAQD5R9NW3WHVY9": {
+      "human_id": "ADR-057",
+      "file_path": "docs/requirements/adr/ADR-057-a-refusal-carries-its-rule-as-a-required-field-typ.md"
+    },
+    "01M5A9SP9KTMWFDE3AS6WZ0RA9": {
+      "human_id": "ADR-056",
+      "file_path": "docs/requirements/adr/ADR-056-issues-state-problems-and-live-only-on-github-task.md"
+    },
+    "01M5A24KGA15NCABY81FFYK9NN": {
+      "human_id": "ADR-055",
+      "file_path": "docs/requirements/adr/ADR-055-facts-live-once-next-to-what-they-describe-corpus.md"
+    },
+    "01M5A00Z95W85T317EJ3DW8BSH": {
+      "human_id": "ADR-054",
+      "file_path": "docs/requirements/adr/ADR-054-a-structural-gate-refuses-only-what-an-excuse-cann.md"
+    },
+    "01M59HK2KKQH8952EKXMZX53CP": {
+      "human_id": "ADR-053",
+      "file_path": "docs/requirements/adr/ADR-053-github-owns-issue-report-state-the-corpus-owns-onl.md"
+    },
+    "01M57M171RWDZVS475P2KX5N3W": {
+      "human_id": "ADR-052",
+      "file_path": "docs/requirements/adr/ADR-052-main-advances-only-by-lore-integrate-per-session.md"
+    },
+    "01M5M6ZKQC20J8XMVG5CMAMYSJ": {
+      "human_id": "KN-709",
+      "file_path": "docs/requirements/knowledge/KN-709-milestone-review-p0-requirement-coverage-falsifyin.md"
+    },
+    "01M5M6Y9HKHSBTM12FXEKTJS94": {
+      "human_id": "KN-710",
+      "file_path": "docs/requirements/knowledge/KN-710-milestone-review-baseline-close-out-fixes.md"
+    },
+    "01M5M6X309EX6BC9AF3DAXPNCQ": {
+      "human_id": "KN-711",
+      "file_path": "docs/requirements/knowledge/KN-711-milestone-review-baseline-slice-3b.md"
+    },
+    "01M5M6VFG777PG52M9WFSBTDYB": {
+      "human_id": "KN-712",
+      "file_path": "docs/requirements/knowledge/KN-712-milestone-review-fresh-install-probe-fixes.md"
+    },
+    "01M5M6T7G8NQFG6QW9FGA2JQZP": {
+      "human_id": "KN-713",
+      "file_path": "docs/requirements/knowledge/KN-713-milestone-review-run-identity-slice-1-harness.md"
+    },
+    "01M5M6RDATCP9W1QP3TZQFVWZ5": {
+      "human_id": "KN-714",
+      "file_path": "docs/requirements/knowledge/KN-714-milestone-review-a-spec-carries-its-rule-changes-t.md"
+    },
+    "01M5M6NYMYQ7E9B57E9WG48G66": {
+      "human_id": "KN-715",
+      "file_path": "docs/requirements/knowledge/KN-715-milestone-review-evidence-identity-count-only-equa.md"
+    },
+    "01M5M6M40C7Y196SCFRBXQWQP1": {
+      "human_id": "KN-716",
+      "file_path": "docs/requirements/knowledge/KN-716-milestone-review-autonomy-phase-1-decision-functio.md"
+    },
+    "01M5M6J5SQH48ZZRQ5RVJ5FXRN": {
+      "human_id": "KN-717",
+      "file_path": "docs/requirements/knowledge/KN-717-milestone-review-the-approval-judge-rejects-patch.md"
+    },
+    "01M5M6GQGFPH0XCDTQYTVMPC32": {
+      "human_id": "KN-718",
+      "file_path": "docs/requirements/knowledge/KN-718-milestone-review-design-necessity-rule-v5.md"
+    },
+    "01M5M6FBDX9F5PJ796PHXC1HT9": {
+      "human_id": "KN-719",
+      "file_path": "docs/requirements/knowledge/KN-719-milestone-review-dashboard-execution-surface-activ.md"
+    },
+    "01M5M6E6PGBEAF2KB2CVVAYASR": {
+      "human_id": "KN-720",
+      "file_path": "docs/requirements/knowledge/KN-720-milestone-review-audit-verify-reads-only-the-keys.md"
+    },
+    "01M5M6C46TJP55CAR3ZC01REZR": {
+      "human_id": "KN-721",
+      "file_path": "docs/requirements/knowledge/KN-721-milestone-review-test-runs-own-their-temp-dir-one.md"
+    },
+    "01M5M6APWV88JJRGPEEAT46GT8": {
+      "human_id": "KN-722",
+      "file_path": "docs/requirements/knowledge/KN-722-milestone-review-defect-clusters-round-1.md"
+    },
+    "01M5M697NRSHK6Z9JYB81G3NWD": {
+      "human_id": "KN-723",
+      "file_path": "docs/requirements/knowledge/KN-723-milestone-review-bind-prose-to-code-resolver-and.md"
+    },
+    "01M5M67R080ZSGE7MTVPXHZXAJ": {
+      "human_id": "KN-724",
+      "file_path": "docs/requirements/knowledge/KN-724-milestone-review-write-path-everywhere.md"
+    },
+    "01M5M65ZT0B2QPJX1EBP4ZBEMH": {
+      "human_id": "KN-725",
+      "file_path": "docs/requirements/knowledge/KN-725-milestone-review-known-party-writes-attested-runs.md"
+    },
+    "01M5M64K04DC5ZTCKW572BWF4D": {
+      "human_id": "KN-726",
+      "file_path": "docs/requirements/knowledge/KN-726-milestone-review-per-item-baseline-approval-pendin.md"
+    },
+    "01M5M62ZWZVB4Q59A0FB6G42FZ": {
+      "human_id": "KN-727",
+      "file_path": "docs/requirements/knowledge/KN-727-milestone-review-runs-carry-their-messaging-addres.md"
+    },
+    "01M5M61PRWY08AFPX7Z8STNZWM": {
+      "human_id": "KN-728",
+      "file_path": "docs/requirements/knowledge/KN-728-milestone-review-lean-governance-batch-verbs.md"
+    },
+    "01M5M347VDGCR9X9PFH88S4EMP": {
+      "human_id": "KN-729",
+      "file_path": "docs/requirements/knowledge/KN-729-milestone-review-p0-requirement-coverage-falsifyin.md"
+    },
+    "01M5M32RBFC8NR7FTNH4XCAS3H": {
+      "human_id": "KN-730",
+      "file_path": "docs/requirements/knowledge/KN-730-milestone-review-baseline-close-out-fixes.md"
+    },
+    "01M5M31EPK5X8WJ3YE008Y90C2": {
+      "human_id": "KN-731",
+      "file_path": "docs/requirements/knowledge/KN-731-milestone-review-baseline-slice-3b.md"
+    },
+    "01M5M2Z9Z3DNPVC5JJ4BD0Q891": {
+      "human_id": "KN-732",
+      "file_path": "docs/requirements/knowledge/KN-732-milestone-review-fresh-install-probe-fixes.md"
+    },
+    "01M5M2Y7XESZ5PMX0SK76HJN76": {
+      "human_id": "KN-733",
+      "file_path": "docs/requirements/knowledge/KN-733-milestone-review-run-identity-slice-1-harness.md"
+    },
+    "01M5M2VWNQPXF4RBV33RB54RD8": {
+      "human_id": "KN-734",
+      "file_path": "docs/requirements/knowledge/KN-734-milestone-review-a-spec-carries-its-rule-changes-t.md"
+    },
+    "01M5M2SBNWY32N8M63X960Q8KB": {
+      "human_id": "KN-735",
+      "file_path": "docs/requirements/knowledge/KN-735-milestone-review-evidence-identity-count-only-equa.md"
+    },
+    "01M5M2QJGA7VW4J5XHKQ6GSFT3": {
+      "human_id": "KN-736",
+      "file_path": "docs/requirements/knowledge/KN-736-milestone-review-autonomy-phase-1-decision-functio.md"
+    },
+    "01M5M2N9T08031SDNJPF7ACR3R": {
+      "human_id": "KN-737",
+      "file_path": "docs/requirements/knowledge/KN-737-milestone-review-the-approval-judge-rejects-patch.md"
+    },
+    "01M5M2K9JY5Y12KWV2CMZEEX0C": {
+      "human_id": "KN-738",
+      "file_path": "docs/requirements/knowledge/KN-738-milestone-review-design-necessity-rule-v5.md"
+    },
+    "01M5M2H9WPYCP6T7PH51956J8A": {
+      "human_id": "KN-739",
+      "file_path": "docs/requirements/knowledge/KN-739-milestone-review-dashboard-execution-surface-activ.md"
+    },
+    "01M5M2FQN2Y9NK1GFQMNJFGSEY": {
+      "human_id": "KN-740",
+      "file_path": "docs/requirements/knowledge/KN-740-milestone-review-audit-verify-reads-only-the-keys.md"
+    },
+    "01M5M2DBM7B8DDGNDGK47A5NN4": {
+      "human_id": "KN-741",
+      "file_path": "docs/requirements/knowledge/KN-741-milestone-review-test-runs-own-their-temp-dir-one.md"
+    },
+    "01M5M2B6HV216QQG7HA5GSJK7Z": {
+      "human_id": "KN-742",
+      "file_path": "docs/requirements/knowledge/KN-742-milestone-review-defect-clusters-round-1.md"
+    },
+    "01M5M29B07D2E6WQ8MMG40FVDC": {
+      "human_id": "KN-743",
+      "file_path": "docs/requirements/knowledge/KN-743-milestone-review-bind-prose-to-code-resolver-and.md"
+    },
+    "01M5M278N1BE9C17KY9BTQFZEP": {
+      "human_id": "KN-744",
+      "file_path": "docs/requirements/knowledge/KN-744-milestone-review-write-path-everywhere.md"
+    },
+    "01M5M2571EN53MMVJP5WACAD5R": {
+      "human_id": "KN-745",
+      "file_path": "docs/requirements/knowledge/KN-745-milestone-review-known-party-writes-attested-runs.md"
+    },
+    "01M5M23NJ9V5Z3FE8H7JFAVY80": {
+      "human_id": "KN-746",
+      "file_path": "docs/requirements/knowledge/KN-746-milestone-review-per-item-baseline-approval-pendin.md"
+    },
+    "01M5M21KFFPJHPBVV34443GNZJ": {
+      "human_id": "KN-747",
+      "file_path": "docs/requirements/knowledge/KN-747-milestone-review-runs-carry-their-messaging-addres.md"
+    },
+    "01M5CGK9Y9P8V4SM7EA2PZW2X2": {
+      "human_id": "KN-748",
+      "file_path": "docs/requirements/knowledge/KN-748-assessment-runs-carry-their-messaging-address-hold.md"
+    },
+    "01M5CCPFDVDVKNRP20RHBHBTP5": {
+      "human_id": "KN-749",
+      "file_path": "docs/requirements/knowledge/KN-749-assessment-d3b-landing-does-the-bookkeeping-2026-1.md"
+    },
+    "01M5C7HY5NY6R2YTMBTXHRBNDC": {
+      "human_id": "KN-750",
+      "file_path": "docs/requirements/knowledge/KN-750-assessment-issues-on-github-tasks-execute-shipped.md"
+    },
+    "01M5AASNZHJJ5BY2880S1ENN7R": {
+      "human_id": "KN-751",
+      "file_path": "docs/requirements/knowledge/KN-751-assessment-d3a-judge-a-branch-s-own-diff-at-integr.md"
+    },
+    "01M5AA2P2D2E05F4JMPWNA39MW": {
+      "human_id": "KN-752",
+      "file_path": "docs/requirements/knowledge/KN-752-assessment-d3a-judge-a-branch-s-own-diff-at-integr.md"
+    },
+    "01M5A9FJD8QPGW1A4SBF67X8MH": {
+      "human_id": "KN-753",
+      "file_path": "docs/requirements/knowledge/KN-753-assessment-baseline-coverage-refuse-only-undeclare.md"
+    },
+    "01M5A9A0BZK4H4MTVWV0ZCZ9KR": {
+      "human_id": "KN-754",
+      "file_path": "docs/requirements/knowledge/KN-754-assessment-main-ref-guard-owns-checkout-of-main.md"
+    },
+    "01M5A98SE7AJ7EA4PEDY7RVVET": {
+      "human_id": "KN-755",
+      "file_path": "docs/requirements/knowledge/KN-755-assessment-main-ref-guard-owns-checkout-of-main.md"
+    },
+    "01M5A8ZE1X4ZMJC8YTVA4V77PH": {
+      "human_id": "KN-756",
+      "file_path": "docs/requirements/knowledge/KN-756-assessment-land-recorded-archival-and-one-unlanded.md"
+    },
+    "01M5A8TV5TB2X2K3C4RPERGFSA": {
+      "human_id": "KN-757",
+      "file_path": "docs/requirements/knowledge/KN-757-assessment-baseline-coverage-refuse-only-undeclare.md"
+    },
+    "01M5A8SZ59GEWTVH1WCN5VBF9C": {
+      "human_id": "KN-758",
+      "file_path": "docs/requirements/knowledge/KN-758-assessment-land-recorded-archival-and-one-unlanded.md"
+    },
+    "01M5A64B31540QX8DZF4XTV21E": {
+      "human_id": "KN-759",
+      "file_path": "docs/requirements/knowledge/KN-759-assessment-land-recorded-archival-and-one-unlanded.md"
+    },
+    "01M59KFXA084AV33BMW5K18V39": {
+      "human_id": "KN-760",
+      "file_path": "docs/requirements/knowledge/KN-760-assessment-human-review-surface-decision-detail.md"
+    },
+    "01M59KEG89W712RWZM1ST387XQ": {
+      "human_id": "KN-761",
+      "file_path": "docs/requirements/knowledge/KN-761-assessment-defect-clusters-round-1-2026-10-19.md"
+    },
+    "01M59KDA5XH846F5R2JZ1EWD61": {
+      "human_id": "KN-762",
+      "file_path": "docs/requirements/knowledge/KN-762-assessment-write-path-everywhere-2026-10-19.md"
+    },
+    "01M59K6KH7Q6EX2TTR9ACNGG19": {
+      "human_id": "KN-763",
+      "file_path": "docs/requirements/knowledge/KN-763-assessment-bind-prose-to-code-resolver-and-reverse.md"
+    },
+    "01M59GEKGA12YY748GNYX1YFV8": {
+      "human_id": "KN-764",
+      "file_path": "docs/requirements/knowledge/KN-764-assessment-defect-clusters-round-1-2026-10-19.md"
+    },
+    "01M59ERHZFQ3DENNBR46EZW7Y5": {
+      "human_id": "KN-765",
+      "file_path": "docs/requirements/knowledge/KN-765-assessment-complete-coverage-integrate-floor-2026.md"
+    },
+    "01M59B3ZVMKDCPE5YCY6E2XPYT": {
+      "human_id": "KN-766",
+      "file_path": "docs/requirements/knowledge/KN-766-assessment-batch-baseline-map-one-version-per-leaf.md"
+    },
+    "01M58SWTZTCJ8976N22RADDXSM": {
+      "human_id": "KN-767",
+      "file_path": "docs/requirements/knowledge/KN-767-assessment-human-review-surface-decision-detail.md"
+    },
+    "01M58SGQE08KS6847B0QYSWVK1": {
+      "human_id": "KN-768",
+      "file_path": "docs/requirements/knowledge/KN-768-assessment-process-state-end-state-2026-10-19.md"
+    },
+    "01M57YKFYM57AN9TVMVN2983Q9": {
+      "human_id": "KN-769",
+      "file_path": "docs/requirements/knowledge/KN-769-assessment-main-advances-only-through-lore-integra.md"
+    },
+    "01M57YC7NC26BV5FJQ3HMGFFKV": {
+      "human_id": "KN-770",
+      "file_path": "docs/requirements/knowledge/KN-770-assessment-main-advances-only-through-lore-integra.md"
+    },
+    "01M57Y6CQ0S03AACV4VJ8FQ840": {
+      "human_id": "KN-771",
+      "file_path": "docs/requirements/knowledge/KN-771-assessment-main-advances-only-through-lore-integra.md"
+    },
+    "01M57Y4N22NZG5GJ85JYZN26V5": {
+      "human_id": "KN-772",
+      "file_path": "docs/requirements/knowledge/KN-772-assessment-main-advances-only-through-lore-integra.md"
+    },
+    "01M57WKFNCSGRD2GKCASPNZ3EK": {
+      "human_id": "KN-773",
+      "file_path": "docs/requirements/knowledge/KN-773-assessment-main-advances-only-through-lore-integra.md"
+    },
+    "01M57S7WTKNYRSZ43JXKV6GWG9": {
+      "human_id": "KN-774",
+      "file_path": "docs/requirements/knowledge/KN-774-assessment-module-index-lists-only-folders-with-a.md"
+    },
+    "01M57S53WT9HHCJ6BHV0QKDBM9": {
+      "human_id": "KN-775",
+      "file_path": "docs/requirements/knowledge/KN-775-assessment-module-index-lists-only-folders-with-a.md"
+    },
+    "01M57R4H03FPTZ0PN4Z1K5Y728": {
+      "human_id": "KN-776",
+      "file_path": "docs/requirements/knowledge/KN-776-assessment-cleanup-closes-itself-lore-done-removes.md"
+    },
+    "01M57QM138GN514YWN8PHYQZR3": {
+      "human_id": "KN-777",
+      "file_path": "docs/requirements/knowledge/KN-777-assessment-module-index-lists-only-folders-with-a.md"
+    },
+    "01M57QJS73JBJ6G0M0R5CXJA3G": {
+      "human_id": "KN-778",
+      "file_path": "docs/requirements/knowledge/KN-778-assessment-cleanup-closes-itself-lore-done-removes.md"
+    },
+    "01M57J9AGQPD8JXYFASEBG4FXP": {
+      "human_id": "KN-779",
+      "file_path": "docs/requirements/knowledge/KN-779-assessment-design-necessity-rule-v5-2026-10-18.md"
+    },
+    "01M57J8081W1B3EXTPK9P2N5V4": {
+      "human_id": "KN-780",
+      "file_path": "docs/requirements/knowledge/KN-780-assessment-the-approval-judge-rejects-patch-shaped.md"
+    },
+    "01M57HFY2ZFN6JHSVM43W8PVFQ": {
+      "human_id": "KN-781",
+      "file_path": "docs/requirements/knowledge/KN-781-assessment-evidence-identity-count-only-equal-comm.md"
+    },
+    "01M5M1Z1QE0ZX27MJXK1TSXKM0": {
+      "human_id": "KN-782",
+      "file_path": "docs/requirements/knowledge/KN-782-milestone-review-write-path-everywhere.md"
+    },
+    "01M5KS8X5R6CYNWDMASWD784FN": {
+      "human_id": "KN-783",
+      "file_path": "docs/requirements/knowledge/KN-783-inventory-2026-10-23-checks-gates-human-stop-point.md"
+    },
+    "01M5KMDZG1CB7Z7MB7323VVZ8D": {
+      "human_id": "KN-784",
+      "file_path": "docs/requirements/knowledge/KN-784-handoff-agent-session-c1ffea04.md"
+    },
+    "01M5KKZMZ8T24S9B2HQ2QCNSRN": {
+      "human_id": "KN-785",
+      "file_path": "docs/requirements/knowledge/KN-785-rq-unruled-refusals-classification-and-draft-rules.md"
+    },
+    "01M5KKMDCW9BBFS3PF3ZHJZE9V": {
+      "human_id": "KN-786",
+      "file_path": "docs/requirements/knowledge/KN-786-handoff-agent-session-a979eecd.md"
+    },
+    "01M5KKM00CBFD0ZZJ60P92AMPS": {
+      "human_id": "KN-787",
+      "file_path": "docs/requirements/knowledge/KN-787-handoff-agent-session-b2737a57.md"
+    },
+    "01M5KKKK949SBXX560J1TVPAR1": {
+      "human_id": "KN-788",
+      "file_path": "docs/requirements/knowledge/KN-788-handoff-agent-session-95a34914.md"
+    },
+    "01M5CBWW1TSYMBX1CB7Q3R2KF8": {
+      "human_id": "KN-789",
+      "file_path": "docs/requirements/knowledge/KN-789-evicted-from-the-cli-adapter-module-doc-exit-codes.md"
+    },
+    "01M5CAEASWYDRSJZNW31P0B5VW": {
+      "human_id": "KN-790",
+      "file_path": "docs/requirements/knowledge/KN-790-baseline-site-map-mappings-as-of-2026-10-20-labell.md"
+    },
+    "01M5AATD252KHSXMJ0F1515ZXM": {
+      "human_id": "KN-791",
+      "file_path": "docs/requirements/knowledge/KN-791-handoff-agent-session-c1ffea04.md"
+    },
+    "01M5A40VJVS21Y3ETNAA16W0BG": {
+      "human_id": "KN-792",
+      "file_path": "docs/requirements/knowledge/KN-792-duplicate-slug-existing-id-names-the-doc-that-alre.md"
+    },
+    "01M59MMBMQY74BEVA5QFTVTZC0": {
+      "human_id": "KN-793",
+      "file_path": "docs/requirements/knowledge/KN-793-measured-cost-of-a-lore-integrate-attempt-2026-10.md"
+    },
+    "01M596VE2MWSBV31JBXVAJ8KWT": {
+      "human_id": "KN-794",
+      "file_path": "docs/requirements/knowledge/KN-794-cli-run-returns-its-exit-code-mechanism-evicted-fr.md"
+    },
+    "01M57KKDVZKTPXW8R16A00KWGH": {
+      "human_id": "KN-795",
+      "file_path": "docs/requirements/knowledge/KN-795-tg-46-reverted-a-test-run-private-tree-copy-guarde.md"
+    },
+    "01M5KTS355WZT9FG24MKC3DSE5": {
+      "human_id": "PLAN-211",
+      "file_path": "docs/requirements/plan/PLAN-211-lean-governance-batch-verbs-milestone-only-judgmen.md"
+    },
+    "01M5KZXS2N7RV55AQ938QAXMER": {
+      "human_id": "PLAN-212",
+      "file_path": "docs/requirements/plan/PLAN-212-in-session-human-decisions-lore-writes-the-questio.md"
+    },
+    "01M5C6Y2M1SZ68B37K351MQPPM": {
+      "human_id": "PLAN-213",
+      "file_path": "docs/requirements/plan/PLAN-213-runs-carry-their-messaging-address-holder-listings.md"
+    },
+    "01M5AB7M1TARWWN2DZ2CPV0FY9": {
+      "human_id": "PLAN-214",
+      "file_path": "docs/requirements/plan/PLAN-214-d3b-landing-does-the-bookkeeping.md"
+    },
+    "01M5ABCK40HR87P8XP7N6B6YCA": {
+      "human_id": "PLAN-215",
+      "file_path": "docs/requirements/plan/PLAN-215-issues-on-github-tasks-execute-shipped-close-guida.md"
+    },
+    "01M5C70000R092EVGVRB61SWK6": {
+      "human_id": "PLAN-216",
+      "file_path": "docs/requirements/plan/PLAN-216-rq-every-refusal-carries-its-rule-required-type-ch.md"
+    },
+    "01M5A58HR4K3GB4Z342YJP3E2D": {
+      "human_id": "PLAN-217",
+      "file_path": "docs/requirements/plan/PLAN-217-d3a-judge-a-branch-s-own-diff-at-integrate-remove.md"
+    },
+    "01M5A0KNBV64G4AK2K7W65ARQZ": {
+      "human_id": "PLAN-218",
+      "file_path": "docs/requirements/plan/PLAN-218-baseline-coverage-refuse-only-undeclared-commands.md"
+    },
+    "01M5A91KNQCD4NNYVSB6BEQBS5": {
+      "human_id": "PLAN-219",
+      "file_path": "docs/requirements/plan/PLAN-219-per-item-baseline-approval-pending-revisions-appro.md"
+    },
+    "01M5A1TERBPHM7225NM2SRCRH2": {
+      "human_id": "PLAN-220",
+      "file_path": "docs/requirements/plan/PLAN-220-land-recorded-archival-and-one-unlanded-task-per-w.md"
+    },
+    "01M5A8BYV20BV24CPHV319RXN6": {
+      "human_id": "PLAN-221",
+      "file_path": "docs/requirements/plan/PLAN-221-known-party-writes-attested-runs-and-registered-hu.md"
+    },
+    "01M5A42F34D2KAD2GXGMHDCSCG": {
+      "human_id": "PLAN-222",
+      "file_path": "docs/requirements/plan/PLAN-222-d1-refusal-sites-declare-their-rule-in-code.md"
+    },
+    "01M5A33JVQ2CS3F6TFVAAVHSRZ": {
+      "human_id": "PLAN-223",
+      "file_path": "docs/requirements/plan/PLAN-223-main-ref-guard-owns-checkout-of-main-integrate-req.md"
+    },
+    "01M59HY0WY0AKMENBBK9QZC8WC": {
+      "human_id": "PLAN-224",
+      "file_path": "docs/requirements/plan/PLAN-224-github-owns-issue-report-state.md"
+    },
+    "01M59MH1K5RH9E7JHQQ5VPGCP1": {
+      "human_id": "PLAN-225",
+      "file_path": "docs/requirements/plan/PLAN-225-defect-clusters-round-2-part-d.md"
+    },
+    "01M59MH0TZ1YW4FSTZYZB52R1B": {
+      "human_id": "PLAN-226",
+      "file_path": "docs/requirements/plan/PLAN-226-defect-clusters-round-2-part-c.md"
+    },
+    "01M59MH07ZGM9QB6B55MYTEPY0": {
+      "human_id": "PLAN-227",
+      "file_path": "docs/requirements/plan/PLAN-227-defect-clusters-round-2-part-b.md"
+    },
+    "01M59MGZN4MH9NMNZMXFFENZ1T": {
+      "human_id": "PLAN-228",
+      "file_path": "docs/requirements/plan/PLAN-228-defect-clusters-round-2-part-a.md"
+    },
+    "01M59FBEQDBFEA3332YAZVBHXD": {
+      "human_id": "PLAN-229",
+      "file_path": "docs/requirements/plan/PLAN-229-write-path-everywhere.md"
+    },
+    "01M591F7BBPDEKD8CN5SM1CXWJ": {
+      "human_id": "PLAN-230",
+      "file_path": "docs/requirements/plan/PLAN-230-complete-coverage-integrate-floor.md"
+    },
+    "01M59E47ZEMQB36KPM9RRPQH2W": {
+      "human_id": "PLAN-231",
+      "file_path": "docs/requirements/plan/PLAN-231-bind-prose-to-code-resolver-and-reverse-index-edit.md"
+    },
+    "01M595YMVTD637E9DXNJE21RN5": {
+      "human_id": "PLAN-232",
+      "file_path": "docs/requirements/plan/PLAN-232-batch-baseline-map-one-version-per-leaf-per-mappin.md"
+    },
+    "01M5966C211HQ2WRE6ADAZ3DJY": {
+      "human_id": "PLAN-233",
+      "file_path": "docs/requirements/plan/PLAN-233-defect-clusters-round-1.md"
+    },
+    "01M595MRCRCK4EGMZY7KKZP8N6": {
+      "human_id": "PLAN-234",
+      "file_path": "docs/requirements/plan/PLAN-234-test-runs-own-their-temp-dir-one-run-root-holds-ho.md"
+    },
+    "01M595KYG3M3T0MT45GSXP5QJJ": {
+      "human_id": "PLAN-235",
+      "file_path": "docs/requirements/plan/PLAN-235-audit-verify-reads-only-the-keys-it-joins-runs-off.md"
+    },
+    "01M595BP268YBPND4YCKG3NQS4": {
+      "human_id": "PLAN-236",
+      "file_path": "docs/requirements/plan/PLAN-236-dashboard-execution-surface-active-plan-selector-a.md"
+    },
+    "01M58N2K39AP9Z338HN8S98XG9": {
+      "human_id": "PLAN-237",
+      "file_path": "docs/requirements/plan/PLAN-237-human-review-surface-decision-detail-dashboard-nee.md"
+    },
+    "01M57MQFAK18CBK75K7P56AQGZ": {
+      "human_id": "PLAN-238",
+      "file_path": "docs/requirements/plan/PLAN-238-main-advances-only-through-lore-integrate.md"
+    },
+    "01M57NHS8W80XBA8W8F88GEY3J": {
+      "human_id": "PLAN-239",
+      "file_path": "docs/requirements/plan/PLAN-239-module-index-lists-only-folders-with-a-memory-file.md"
+    },
+    "01M57NVM00MTG536ABRT8A3X43": {
+      "human_id": "PLAN-240",
+      "file_path": "docs/requirements/plan/PLAN-240-process-state-end-state.md"
+    },
+    "01M57KVYA7DJ3H67MN6RC5WX3X": {
+      "human_id": "PLAN-241",
+      "file_path": "docs/requirements/plan/PLAN-241-a-retro-lesson-names-its-mechanism.md"
+    },
+    "01M5M8N1QS5SE0QFXYRNQ4N89W": {
+      "human_id": "TASK-1603",
+      "file_path": "docs/requirements/task/TASK-1603-g4-replica-priming-resolves-the-corpus-only-for-co.md"
+    },
+    "01M5M81VNJN87Q7M27X1Y8E1BF": {
+      "human_id": "TASK-1604",
+      "file_path": "docs/requirements/task/TASK-1604-d5-snapshot-accuracy-fails-only-on-contradicted-ru.md"
+    },
+    "01M5M8N28X3H3PCXPS2PVNZYWS": {
+      "human_id": "TASK-1605",
+      "file_path": "docs/requirements/task/TASK-1605-g5-migration-029-handles-legacy-schemas-sync-push.md"
+    },
+    "01M5M8N019JT31GP3Y0Y6R82ME": {
+      "human_id": "TASK-1606",
+      "file_path": "docs/requirements/task/TASK-1606-g1-tests-pinning-behaviour-removed-today-follow-th.md"
+    },
+    "01M5M8N16GKN534QA5BBXF8PKF": {
+      "human_id": "TASK-1607",
+      "file_path": "docs/requirements/task/TASK-1607-g3-prose-pins-module-claude-md-under-the-floor-mir.md"
+    },
+    "01M5M8N0NEPN9AN0V92GSZ3WAH": {
+      "human_id": "TASK-1608",
+      "file_path": "docs/requirements/task/TASK-1608-g2-read-only-paths-record-no-outcome-check-stats-u.md"
+    },
+    "01M5M8N2TB8D63E043BPPJPQQF": {
+      "human_id": "TASK-1609",
+      "file_path": "docs/requirements/task/TASK-1609-g6-pre-existing-red-test-fixtures-and-the-unclassi.md"
+    },
+    "01M5M4NT5NW7XES5MX5PDXRDFP": {
+      "human_id": "TASK-1610",
+      "file_path": "docs/requirements/task/TASK-1610-f2-a-governance-loosen-approval-binds-to-the-chang.md"
+    },
+    "01M5M3NNRRD2MEP84WDRW4TMX0": {
+      "human_id": "TASK-1611",
+      "file_path": "docs/requirements/task/TASK-1611-d4-review-inputs-measured-once-per-batch-full-suit.md"
+    },
+    "01M5M3FNY692XR7PTMZ3ZFGQ3K": {
+      "human_id": "TASK-1612",
+      "file_path": "docs/requirements/task/TASK-1612-f1b-the-recommended-option-comes-first-with-a-reco.md"
+    },
+    "01M5M0VZZH3JCYKEFFEECBXNFD": {
+      "human_id": "TASK-1613",
+      "file_path": "docs/requirements/task/TASK-1613-d3-remove-the-legacy-plan-outcome-assessment-archi.md"
+    },
+    "01M5KZY41482E3H6ZK6532Q16K": {
+      "human_id": "TASK-1614",
+      "file_path": "docs/requirements/task/TASK-1614-f1-lore-pending-ask-writes-the-question-the-postto.md"
+    },
+    "01M5KTVB67JN9S86QHMRA9XCC4": {
+      "human_id": "TASK-1615",
+      "file_path": "docs/requirements/task/TASK-1615-d1-lore-assess-is-the-binding-seven-dimension-mile.md"
+    },
+    "01M5KTVBWVZVXBWJMPQGZ4J45H": {
+      "human_id": "TASK-1616",
+      "file_path": "docs/requirements/task/TASK-1616-d2-every-retained-check-records-its-outcome-lore-c.md"
+    },
+    "01M5M15EJD1CQJFE4TJ4JXA5C5": {
+      "human_id": "TASK-1617",
+      "file_path": "docs/requirements/task/TASK-1617-b6b-landing-coverage-accepts-a-pending-declaration.md"
+    },
+    "01M5KZGFCA34Z8SQME5Q0Y5CG0": {
+      "human_id": "TASK-1618",
+      "file_path": "docs/requirements/task/TASK-1618-b6-three-checks-that-caught-real-defects-return-to.md"
+    },
+    "01M5KTTYTPGYWESQCSKY146GMD": {
+      "human_id": "TASK-1619",
+      "file_path": "docs/requirements/task/TASK-1619-b4-human-always-is-exactly-push-force-archive-ref.md"
+    },
+    "01M5KWQ0TAA8PJJ2R41E10NG23": {
+      "human_id": "TASK-1620",
+      "file_path": "docs/requirements/task/TASK-1620-a2-bulk-where-gains-plan-slug-terminal-status-docu.md"
+    },
+    "01M5KWY3445KQW8KZSPKYFR3FS": {
+      "human_id": "TASK-1621",
+      "file_path": "docs/requirements/task/TASK-1621-b3b-untrack-the-self-referencing-node-modules-syml.md"
+    },
+    "01M5KTTY47BFZCB2ANJWT3WT7J": {
+      "human_id": "TASK-1622",
+      "file_path": "docs/requirements/task/TASK-1622-b3-remove-hooks-serving-neither-q1-nor-q2-bound-pr.md"
+    },
+    "01M57MXR52QTAADERV2JZN6MT5": {
+      "human_id": "TASK-1623",
+      "file_path": "docs/requirements/task/TASK-1623-skill-investigate-au-t18-run-reap-tests-6c-and-con.md"
+    },
+    "01M5A4BMWRARKFVH3FFNNKBYZ5": {
+      "human_id": "TASK-1624",
+      "file_path": "docs/requirements/task/TASK-1624-applying-a-deprecated-spec-has-nothing-to-retire-r.md"
+    },
+    "01M5KTTZHT3VJGYN1T1CQQJX8M": {
+      "human_id": "TASK-1625",
+      "file_path": "docs/requirements/task/TASK-1625-b5-reads-are-counted-per-day-not-logged-per-row.md"
+    },
+    "01M5KTV098V9T2P4W8F2NAWTMY": {
+      "human_id": "TASK-1626",
+      "file_path": "docs/requirements/task/TASK-1626-c1-bounded-handoff-150-files-one-per-line-rest-gro.md"
+    },
+    "01M5KTTVZX9MKBT6V7K0S3YFVG": {
+      "human_id": "TASK-1627",
+      "file_path": "docs/requirements/task/TASK-1627-a1-lore-bulk-preview-apply-batch-verbs-draft-depre.md"
+    },
+    "01M5KTV119KJNGZ8P7RHHKGKT9": {
+      "human_id": "TASK-1628",
+      "file_path": "docs/requirements/task/TASK-1628-c2-bounded-command-output-bootstrap-3kb-help-fits.md"
+    },
+    "01M5KTTXDJGTF4DZG0B5TY3THX": {
+      "human_id": "TASK-1629",
+      "file_path": "docs/requirements/task/TASK-1629-b2-approve-needs-a-judgment-only-for-spec-and-adr.md"
+    },
+    "01M5KTTWPV8ASC6PCZBQXX4TVP": {
+      "human_id": "TASK-1630",
+      "file_path": "docs/requirements/task/TASK-1630-b1-lean-integrate-floor-install-build-typecheck-on.md"
+    },
+    "01M5KKGX77FYANRDE6KXM72YMX": {
+      "human_id": "TASK-1631",
+      "file_path": "docs/requirements/task/TASK-1631-rq-l7-label-the-files-bia-t2-held-mcp-tools-ts-com.md"
+    },
+    "01M5CKZS8JXEASJDEMAB94ZH7E": {
+      "human_id": "TASK-1632",
+      "file_path": "docs/requirements/task/TASK-1632-every-test-reaching-approve-nodes-cli-ts-declares.md"
+    },
+    "01M5CKYFGCKWGER2V270SSTS43": {
+      "human_id": "TASK-1633",
+      "file_path": "docs/requirements/task/TASK-1633-13-test-files-that-import-helpers-cli-live-rule-ts.md"
+    },
+    "01M5A9287W6057E67TWGW3KHMQ": {
+      "human_id": "TASK-1634",
+      "file_path": "docs/requirements/task/TASK-1634-baseline-writes-add-pending-revisions-review-appro.md"
+    },
+    "01M5C6ZCRD9W4MB9F4FCCNCR16": {
+      "human_id": "TASK-1635",
+      "file_path": "docs/requirements/task/TASK-1635-holder-listings-show-the-holding-run-s-messaging-a.md"
+    },
+    "01M5CGEZ7XVHEFYSXA40GZQZ48": {
+      "human_id": "TASK-1636",
+      "file_path": "docs/requirements/task/TASK-1636-stop-turn-review-counts-a-subagent-worktree-s-comm.md"
+    },
+    "01M5CFZSNKP2RH3KCNZKVEPEMM": {
+      "human_id": "TASK-1637",
+      "file_path": "docs/requirements/task/TASK-1637-lore-evidence-capture-and-lore-release-run-from-a.md"
+    },
+    "01M5CFZFA330WDJBNGS20JX1QB": {
+      "human_id": "TASK-1638",
+      "file_path": "docs/requirements/task/TASK-1638-lore-claim-worktree-accepts-a-value-that-resolves.md"
+    },
+    "01M5CBVPVNP15R72CH9PAKZ7G9": {
+      "human_id": "TASK-1639",
+      "file_path": "docs/requirements/task/TASK-1639-dashboard-e2e-global-setups-write-as-a-registered.md"
+    },
+    "01M5CFNJB188950A9944BWA3H6": {
+      "human_id": "TASK-1640",
+      "file_path": "docs/requirements/task/TASK-1640-lore-integrate-s-post-landing-done-check-reports-a.md"
+    },
+    "01M5C6ZC4BA99HG7F1K8ERDC7K": {
+      "human_id": "TASK-1641",
+      "file_path": "docs/requirements/task/TASK-1641-runs-record-their-messaging-address-on-every-regis.md"
+    },
+    "01M5CD2H03NP4CS8Q67HW7CA5E": {
+      "human_id": "TASK-1642",
+      "file_path": "docs/requirements/task/TASK-1642-dashboard-e2e-seeds-create-specs-without-a-parent.md"
+    },
+    "01M5CE12CMKXYBWXTDGZHXPHEV": {
+      "human_id": "TASK-1643",
+      "file_path": "docs/requirements/task/TASK-1643-local-dashboard-writes-are-made-by-the-checkout-s.md"
+    },
+    "01M5CECYC8SW6B9NQ4PBEP7RNB": {
+      "human_id": "TASK-1644",
+      "file_path": "docs/requirements/task/TASK-1644-rq-d-internal-error-with-rule-defect-tooling-drops.md"
+    },
+    "01M5CENM1K3YFB8C8C6TYDMTC9": {
+      "human_id": "TASK-1645",
+      "file_path": "docs/requirements/task/TASK-1645-stop-turn-review-blames-the-turn-for-anchor-drift.md"
+    },
+    "01M5CDN1SE2FVY1YHY3W5FPVAZ": {
+      "human_id": "TASK-1646",
+      "file_path": "docs/requirements/task/TASK-1646-a-schema-upgrade-promotes-pending-revisions-that-a.md"
+    },
+    "01M5CE1QS2NT1W9XGC55DHEFTH": {
+      "human_id": "TASK-1647",
+      "file_path": "docs/requirements/task/TASK-1647-dashboard-multi-project-e2e-setup-reads-the-server.md"
+    },
+    "01M5CE07EH4DE5FVR7CXY8H6AT": {
+      "human_id": "TASK-1648",
+      "file_path": "docs/requirements/task/TASK-1648-dashboard-cookie-writes-are-attributed-to-the-hard.md"
+    },
+    "01M5CDX14M4RSY3VHJCYDQ97CE": {
+      "human_id": "TASK-1649",
+      "file_path": "docs/requirements/task/TASK-1649-the-edit-time-anchor-hook-declares-scratch-files-a.md"
+    },
+    "01M5CD2E8B0K3HVF16TB2MBZNH": {
+      "human_id": "TASK-1650",
+      "file_path": "docs/requirements/task/TASK-1650-dashboard-issues-e2e-specs-exercise-the-current-gi.md"
+    },
+    "01M5CDW2RB5FRR20F2KFCYRD6N": {
+      "human_id": "TASK-1651",
+      "file_path": "docs/requirements/task/TASK-1651-evidence-capture-records-a-playwright-pass-but-ref.md"
+    },
+    "01M5CBVJ7WW8ZJDE6BJDNAR539": {
+      "human_id": "TASK-1652",
+      "file_path": "docs/requirements/task/TASK-1652-rq-l1-label-refusals-in-packages-lore-src-service.md"
+    },
+    "01M5CDMRWPEJP379NRD6KQPNKW": {
+      "human_id": "TASK-1653",
+      "file_path": "docs/requirements/task/TASK-1653-migration-028-turned-rule-changes-already-landed-b.md"
+    },
+    "01M5CBVJX3MPBZVM501QXNWM4R": {
+      "human_id": "TASK-1654",
+      "file_path": "docs/requirements/task/TASK-1654-rq-l2-label-refusals-in-packages-lore-src-service.md"
+    },
+    "01M5CD3F347ETT3WJWPA864SVQ": {
+      "human_id": "TASK-1655",
+      "file_path": "docs/requirements/task/TASK-1655-report-issue-from-a-helper-worktree-creates-the-gi.md"
+    },
+    "01M5CD28RABV0VT0V7HBVFE290": {
+      "human_id": "TASK-1656",
+      "file_path": "docs/requirements/task/TASK-1656-dashboard-e2e-browse-ux-pw-ts-seeds-a-spec-with-pa.md"
+    },
+    "01M5CD251MQ3YCA76H53Q0PMEP": {
+      "human_id": "TASK-1657",
+      "file_path": "docs/requirements/task/TASK-1657-dashboard-issues-spec-ts-and-issues-resolution-spe.md"
+    },
+    "01M5CBVN25ARFVMFEECK01YFHR": {
+      "human_id": "TASK-1658",
+      "file_path": "docs/requirements/task/TASK-1658-rq-l5-label-refusals-in-packages-lore-src-adapters.md"
+    },
+    "01M5CBVM9APQJPCJ04YF84SJQF": {
+      "human_id": "TASK-1659",
+      "file_path": "docs/requirements/task/TASK-1659-rq-l4-label-refusals-in-packages-core-src-distribu.md"
+    },
+    "01M5CBVNQGM4ZQYB75512908Q2": {
+      "human_id": "TASK-1660",
+      "file_path": "docs/requirements/task/TASK-1660-rq-l6-label-refusals-in-scripts-ai-flows-and-their.md"
+    },
+    "01M5AB7ZC171D5QFTBHM8QGP66": {
+      "human_id": "TASK-1661",
+      "file_path": "docs/requirements/task/TASK-1661-d3b-a-a-first-claim-starts-from-main-claim-prints.md"
+    },
+    "01M5CBVKJF5YB72RFCS9Q86NTR": {
+      "human_id": "TASK-1662",
+      "file_path": "docs/requirements/task/TASK-1662-rq-l3-label-refusals-in-packages-lore-src-store-an.md"
+    },
+    "01M5CC3NE62PX8YPHCREZC8X8S": {
+      "human_id": "TASK-1663",
+      "file_path": "docs/requirements/task/TASK-1663-my-config-writing-tests-patch-the-seeded-config-in.md"
+    },
+    "01M5A91YGXRE705QARZ8DZGZMD": {
+      "human_id": "TASK-1664",
+      "file_path": "docs/requirements/task/TASK-1664-baseline-items-carry-approved-and-pending-versions.md"
+    },
+    "01M5CC53VK20N5750C9EW2M13V": {
+      "human_id": "TASK-1665",
+      "file_path": "docs/requirements/task/TASK-1665-removing-a-leaf-s-command-declaration-is-refused-e.md"
+    },
+    "01M5CC3WV22E7TA5RPDDAAKEBA": {
+      "human_id": "TASK-1666",
+      "file_path": "docs/requirements/task/TASK-1666-lb-definition-of-done-writes-config-yaml-by-append.md"
+    },
+    "01M5CC3QAS7Q9F5YDSJ7QDNS6R": {
+      "human_id": "TASK-1667",
+      "file_path": "docs/requirements/task/TASK-1667-a-first-claim-is-refused-for-tasks-of-a-plan-with.md"
+    },
+    "01M5CBVYHP9K40P6W2TEKDCB2B": {
+      "human_id": "TASK-1668",
+      "file_path": "docs/requirements/task/TASK-1668-rq-4-chokepoints-pass-the-predicate-s-rule-through.md"
+    },
+    "01M5CBN4D5ARSZCW3P35QN3RBB": {
+      "human_id": "TASK-1669",
+      "file_path": "docs/requirements/task/TASK-1669-adapters-cli-claude-md-back-under-its-16384-byte-c.md"
+    },
+    "01M5AEA6PJQ8W2Q0XVMRRDA5W1": {
+      "human_id": "TASK-1670",
+      "file_path": "docs/requirements/task/TASK-1670-tests-still-assert-task-anchors-reject-symbol-scop.md"
+    },
+    "01M5CBVGX7PDJZ1VM3SB9TQNTJ": {
+      "human_id": "TASK-1671",
+      "file_path": "docs/requirements/task/TASK-1671-dashboard-playwright-global-setup-writes-to-its-co.md"
+    },
+    "01M5C46D03A5YA7MKEJJZGFVBR": {
+      "human_id": "TASK-1672",
+      "file_path": "docs/requirements/task/TASK-1672-the-write-spec-rule-ships-with-the-binary-init-see.md"
+    },
+    "01M5C708CS8V1AAK6BR1JMRASA": {
+      "human_id": "TASK-1673",
+      "file_path": "docs/requirements/task/TASK-1673-rq-1-loreerror-rule-required-and-typed-by-code-flo.md"
+    },
+    "01M5CBNTNVVG5F6HMAAD60D3EM": {
+      "human_id": "TASK-1674",
+      "file_path": "docs/requirements/task/TASK-1674-the-integrate-floor-lets-a-module-claude-md-land-o.md"
+    },
+    "01M59MJ1JQM4EG6ZCXXGZ21Z34": {
+      "human_id": "TASK-1675",
+      "file_path": "docs/requirements/task/TASK-1675-skill-fix-dc2-5-lore-init-is-one-atomic-scaffold-t.md"
+    },
+    "01M59Y7CZKXKZEDYJSXTXM1CBF": {
+      "human_id": "TASK-1676",
+      "file_path": "docs/requirements/task/TASK-1676-skill-fix-an-unparsable-project-config-is-silently.md"
+    },
+    "01M5AB8007XS3ZKNWQHX5QSKH5": {
+      "human_id": "TASK-1677",
+      "file_path": "docs/requirements/task/TASK-1677-d3b-b-park-releases-a-hold-anchors-follow-moved-fi.md"
+    },
+    "01M5CAW0JYJWYTZBC50QRRKYGZ": {
+      "human_id": "TASK-1678",
+      "file_path": "docs/requirements/task/TASK-1678-shipped-text-states-the-known-party-rule-refused.md"
+    },
+    "01M5CB7HX3XBKJC4QH9PZ70KRG": {
+      "human_id": "TASK-1679",
+      "file_path": "docs/requirements/task/TASK-1679-a-racing-claim-is-written-first-and-rolled-back-on.md"
+    },
+    "01M5CB7CA4EPYZT3K4GY0YB2RT": {
+      "human_id": "TASK-1680",
+      "file_path": "docs/requirements/task/TASK-1680-worktree-occupancy-still-treats-a-claim-that-names.md"
+    },
+    "01M5C709099SP9QTM6A3TD8PNN": {
+      "human_id": "TASK-1681",
+      "file_path": "docs/requirements/task/TASK-1681-rq-c-remove-the-site-census-baseline-sites-site-co.md"
+    },
+    "01M5A8CQ3A0M07NNJWKKV3A4YG": {
+      "human_id": "TASK-1682",
+      "file_path": "docs/requirements/task/TASK-1682-identity-resolves-only-to-a-run-a-human-session-an.md"
+    },
+    "01M5A8D7H2QGK1M9R24SZMADCR": {
+      "human_id": "TASK-1683",
+      "file_path": "docs/requirements/task/TASK-1683-claims-compare-runs-only-the-store-refuses-a-run-l.md"
+    },
+    "01M5A4346ABH67NXK01RN0JCK4": {
+      "human_id": "TASK-1684",
+      "file_path": "docs/requirements/task/TASK-1684-d1-1-refusal-sites-declare-their-rule-in-code-code.md"
+    },
+    "01M5CA2WAGZ0G4T05CSX5134TP": {
+      "human_id": "TASK-1685",
+      "file_path": "docs/requirements/task/TASK-1685-audit-backfill-appends-its-reconstructed-entries-t.md"
+    },
+    "01M5C95QANQH0JYCH3MK15G68J": {
+      "human_id": "TASK-1686",
+      "file_path": "docs/requirements/task/TASK-1686-check-ac-oracle-ownership-checks-only-live-criteri.md"
+    },
+    "01M5C94VWVEC3BREE45EF5T8JJ": {
+      "human_id": "TASK-1687",
+      "file_path": "docs/requirements/task/TASK-1687-check-ac-oracle-ownership-reports-superseded-crite.md"
+    },
+    "01M5C8CFV0QE2TP39NFGEZ30K9": {
+      "human_id": "TASK-1688",
+      "file_path": "docs/requirements/task/TASK-1688-integrate-reads-the-migrate-child-s-json-report-fr.md"
+    },
+    "01M5C8CAYYKJDXP3RY3S4J2NMN": {
+      "human_id": "TASK-1689",
+      "file_path": "docs/requirements/task/TASK-1689-the-harness-run-rewriter-misses-lore-invoked-after.md"
+    },
+    "01M5C7F8YR5RBH9EY8X22BKFXF": {
+      "human_id": "TASK-1690",
+      "file_path": "docs/requirements/task/TASK-1690-lore-integrate-runs-its-migrate-child-as-the-calle.md"
+    },
+    "01M5C7KN1C2TWCYK7Y3T6GXSBE": {
+      "human_id": "TASK-1691",
+      "file_path": "docs/requirements/task/TASK-1691-spec-issues-state-problems-on-github-tasks-state-e.md"
+    },
+    "01M5ABCM9Z5RXWJMKWJ8JW052A": {
+      "human_id": "TASK-1692",
+      "file_path": "docs/requirements/task/TASK-1692-igh-t1-close-guidance-and-root-claude-md-file-ever.md"
+    },
+    "01M5C7FW8JS9BSXQXY2JJ34KAS": {
+      "human_id": "TASK-1693",
+      "file_path": "docs/requirements/task/TASK-1693-lore-integrate-s-migrate-child-carries-no-attested.md"
+    },
+    "01M5C54X3Z617DZAWG0W1HNE85": {
+      "human_id": "TASK-1694",
+      "file_path": "docs/requirements/task/TASK-1694-audit-backfill-takes-its-boundary-from-the-data-ve.md"
+    },
+    "01M59Q54XEV3A4YECJ14A8W9E9": {
+      "human_id": "TASK-1695",
+      "file_path": "docs/requirements/task/TASK-1695-audit-verification-checks-every-version-pre-writer.md"
+    },
+    "01M5AA3RM9GE9ZPX6R5G2M0G37": {
+      "human_id": "TASK-1696",
+      "file_path": "docs/requirements/task/TASK-1696-after-explicit-only-schema-upgrades-lore-integrate.md"
+    },
+    "01M5C41EBKDHGW5YJZA2SQWA9V": {
+      "human_id": "TASK-1697",
+      "file_path": "docs/requirements/task/TASK-1697-own-diff-landing-gate-holds-a-path-only-while-its.md"
+    },
+    "01M5C4VG26C8MWJAMMBBTCN7YG": {
+      "human_id": "TASK-1698",
+      "file_path": "docs/requirements/task/TASK-1698-symbol-scoped-anchors-hold-a-whole-class-editing-o.md"
+    },
+    "01M5AFZE8Y5CQS7666KBGRPYAT": {
+      "human_id": "TASK-1699",
+      "file_path": "docs/requirements/task/TASK-1699-land-br-1346-holder-scope-alone-a-holder-holds-wha.md"
+    },
+    "01M5AED08K73S6TZVSVMQJ4SSD": {
+      "human_id": "TASK-1700",
+      "file_path": "docs/requirements/task/TASK-1700-a-directory-anchor-holds-the-whole-directory-at-cl.md"
+    },
+    "01M5AD71N9E5X6PSN9P1FHW9E7": {
+      "human_id": "TASK-1701",
+      "file_path": "docs/requirements/task/TASK-1701-a-generated-file-as-a-claim-anchor-serializes-ever.md"
+    },
+    "01M5AD59QHMD78NKKT2DJNDCW7": {
+      "human_id": "TASK-1702",
+      "file_path": "docs/requirements/task/TASK-1702-run-owned-done-and-overlap-boundary-case-is-red-on.md"
+    },
+    "01M5A6G700ZSHB5RGR6XE47S6A": {
+      "human_id": "TASK-1703",
+      "file_path": "docs/requirements/task/TASK-1703-lore-ac-supersede-reports-requires-by-spec-ac-id-f.md"
+    },
+    "01M5A4JRWQZVR0SP8R1REPVS05": {
+      "human_id": "TASK-1704",
+      "file_path": "docs/requirements/task/TASK-1704-the-unfiltered-test-file-done-floor-ignores-attest.md"
+    },
+    "01M5A8KPN6TYW1QYCTS9VSQNXJ": {
+      "human_id": "TASK-1705",
+      "file_path": "docs/requirements/task/TASK-1705-a-released-claim-still-reads-as-locked-and-blocks.md"
+    },
+    "01M5A9DRDEWT55694PDQ0Y5KNK": {
+      "human_id": "TASK-1706",
+      "file_path": "docs/requirements/task/TASK-1706-a-corpus-only-task-with-a-captured-pass-can-never.md"
+    },
+    "01M5A7YK54RHJNEPPAJG7RRW2M": {
+      "human_id": "TASK-1707",
+      "file_path": "docs/requirements/task/TASK-1707-a-corpus-writing-script-ignores-unknown-arguments.md"
+    },
+    "01M5A46S435BA9FXM2SYGP8EX6": {
+      "human_id": "TASK-1708",
+      "file_path": "docs/requirements/task/TASK-1708-the-memory-file-floor-step-passes-a-module-file-th.md"
+    },
+    "01M5AB5BG4JHXGM6FKGZKMX13J": {
+      "human_id": "TASK-1709",
+      "file_path": "docs/requirements/task/TASK-1709-the-unfiltered-test-file-done-floor-ignores-attest.md"
+    },
+    "01M5AB50GMZWPKX9Y5SR4JGT0P": {
+      "human_id": "TASK-1710",
+      "file_path": "docs/requirements/task/TASK-1710-a-released-claim-still-reads-as-locked-claimed-and.md"
+    },
+    "01M5AB4NG1WG8VZFCBBH8M3TNJ": {
+      "human_id": "TASK-1711",
+      "file_path": "docs/requirements/task/TASK-1711-a-corpus-only-task-with-a-captured-pass-can-never.md"
+    },
+    "01M5AB4918W1Y2HETE486C8KD6": {
+      "human_id": "TASK-1712",
+      "file_path": "docs/requirements/task/TASK-1712-a-corpus-writing-script-ignores-unknown-arguments.md"
+    },
+    "01M5AB3XKTJMC7DGZHH77ZA51J": {
+      "human_id": "TASK-1713",
+      "file_path": "docs/requirements/task/TASK-1713-the-memory-file-floor-step-passes-a-module-claude.md"
+    },
+    "01M5AAZWKD2RE2NBPZCWXH81AR": {
+      "human_id": "TASK-1714",
+      "file_path": "docs/requirements/task/TASK-1714-br-1346-lets-a-paused-unclaimed-task-with-an-unlan.md"
+    },
+    "01M5A58WGGGSXYQAEG720ZXYBV": {
+      "human_id": "TASK-1715",
+      "file_path": "docs/requirements/task/TASK-1715-d3a-b-remove-the-turn-end-helper-review-one-shared.md"
+    },
+    "01M5A58X8ARTXG720V0843G7MZ": {
+      "human_id": "TASK-1716",
+      "file_path": "docs/requirements/task/TASK-1716-d3a-a-at-lore-integrate-refuse-a-branch-s-own-diff.md"
+    },
+    "01M5AA8Q1H9Y83TBBSAYBZTGRP": {
+      "human_id": "TASK-1717",
+      "file_path": "docs/requirements/task/TASK-1717-own-diff-fixture-claims-inherit-the-ambient-sessio.md"
+    },
+    "01M5A8SEKZHN4T4EV4GGZVAPBE": {
+      "human_id": "TASK-1718",
+      "file_path": "docs/requirements/task/TASK-1718-ac-bls2-13-still-requires-per-site-zero-coverage-g.md"
+    },
+    "01M5A93DRBSMRRBX4BV5BQATDT": {
+      "human_id": "TASK-1719",
+      "file_path": "docs/requirements/task/TASK-1719-rule-state-still-counts-superseded-criteria-so-pla.md"
+    },
+    "01M5A344MVF1SF28NY5ZZTT1X5": {
+      "human_id": "TASK-1720",
+      "file_path": "docs/requirements/task/TASK-1720-retire-superseded-integrate-criteria-apply-the-mai.md"
+    },
+    "01M5A1WRJZ21GNPJMX43W09WP0": {
+      "human_id": "TASK-1721",
+      "file_path": "docs/requirements/task/TASK-1721-checking-out-main-in-a-nested-worktree-blocks-ever.md"
+    },
+    "01M5A342BP48W1PMQXVNMNNRN9": {
+      "human_id": "TASK-1722",
+      "file_path": "docs/requirements/task/TASK-1722-the-main-ref-guard-refuses-checkout-of-main-integr.md"
+    },
+    "01M591F9YR09674BVYAXN4RVBC": {
+      "human_id": "TASK-1723",
+      "file_path": "docs/requirements/task/TASK-1723-root-coverage-reports-undeclared-commands-and-name.md"
+    },
+    "01M5A0Q0047300RH8ZR5Y0ENSQ": {
+      "human_id": "TASK-1724",
+      "file_path": "docs/requirements/task/TASK-1724-coverage-exits-1-only-for-undeclared-commands-the.md"
+    },
+    "01M5A0Q269A5KBRG18KA2DRT19": {
+      "human_id": "TASK-1725",
+      "file_path": "docs/requirements/task/TASK-1725-strip-and-count-scripts-for-site-map-excuse-entrie.md"
+    },
+    "01M5A1TT4FT3WZ3P029CFG4JZX": {
+      "human_id": "TASK-1726",
+      "file_path": "docs/requirements/task/TASK-1726-archival-requires-a-recorded-landing-integrate-rec.md"
+    },
+    "01M5A56NTMGVDC55QXKY46EXCE": {
+      "human_id": "TASK-1727",
+      "file_path": "docs/requirements/task/TASK-1727-ac-lrd-3-test-pins-an-explicit-claimant-identity-s.md"
+    },
+    "01M5A8SZYSK1QRWKG23GPBDZ44": {
+      "human_id": "TASK-1728",
+      "file_path": "docs/requirements/task/TASK-1728-lore-done-s-no-new-tests-refusal-suggests-a-captur.md"
+    },
+    "01M5A0Q3A0C23K33J9J5KAJ4ZQ": {
+      "human_id": "TASK-1729",
+      "file_path": "docs/requirements/task/TASK-1729-strip-excuses-from-the-corpus-retire-criteria-on-r.md"
+    },
+    "01M5A6GV5H5KV0PZ14DNYZNQPD": {
+      "human_id": "TASK-1730",
+      "file_path": "docs/requirements/task/TASK-1730-lore-bootstrap-names-only-the-business-baseline-ro.md"
+    },
+    "01M5A65CSF2YY659XCNWWZBKMA": {
+      "human_id": "TASK-1731",
+      "file_path": "docs/requirements/task/TASK-1731-landing-follow-ups-no-history-walk-for-an-already.md"
+    },
+    "01M5A0Q17HQ78QG614QH28VM7A": {
+      "human_id": "TASK-1732",
+      "file_path": "docs/requirements/task/TASK-1732-a-site-map-takes-br-n-values-only-completeness-gua.md"
+    },
+    "01M5A85NCBPATCKDG3KRXQ4F8R": {
+      "human_id": "TASK-1733",
+      "file_path": "docs/requirements/task/TASK-1733-the-ac-dc2-4-uninstall-reversal-test-assumes-a-con.md"
+    },
+    "01M5A85YX2BJ6C5YKPJ62WZ1SM": {
+      "human_id": "TASK-1734",
+      "file_path": "docs/requirements/task/TASK-1734-root-claude-md-architecture-pointer-names-base-095.md"
+    },
+    "01M5A6GW8FAEQHQH4EKZYRS6SS": {
+      "human_id": "TASK-1735",
+      "file_path": "docs/requirements/task/TASK-1735-module-claude-md-files-do-not-link-their-architect.md"
+    },
+    "01M5A85ZF1KGHQDCXQ99FZCG9G": {
+      "human_id": "TASK-1736",
+      "file_path": "docs/requirements/task/TASK-1736-mirror-human-ids-diverge-from-lore-get-spec-205-na.md"
+    },
+    "01M5A6GX3EXKGC1T3GCZNKK2RF": {
+      "human_id": "TASK-1737",
+      "file_path": "docs/requirements/task/TASK-1737-shipped-guidance-teaches-lore-evidence-result-pass.md"
+    },
+    "01M5A6CPWF9YM17JDPR00650WF": {
+      "human_id": "TASK-1738",
+      "file_path": "docs/requirements/task/TASK-1738-test-file-reads-a-shared-fixed-report-path-so-conc.md"
+    },
+    "01M5A6K2MGAYN1C90ZJYJPNVDQ": {
+      "human_id": "TASK-1739",
+      "file_path": "docs/requirements/task/TASK-1739-integrate-lands-a-branch-that-deletes-or-renames-a.md"
+    },
+    "01M5A5D348NFEYM7YS1TFT92VG": {
+      "human_id": "TASK-1740",
+      "file_path": "docs/requirements/task/TASK-1740-a-draft-spec-cannot-drop-a-rule-it-proposed-withdr.md"
+    },
+    "01M5A5RG6VXK0SG5TJS34H3YX6": {
+      "human_id": "TASK-1741",
+      "file_path": "docs/requirements/task/TASK-1741-claim-side-effects-never-skip-silently-the-commit.md"
+    },
+    "01M5A4J0VXN9X1KWY8GBZWEJC2": {
+      "human_id": "TASK-1742",
+      "file_path": "docs/requirements/task/TASK-1742-delete-the-docman-era-files-under-docs-outside-doc.md"
+    },
+    "01M5A4J0443KQASJZ40VKYF914": {
+      "human_id": "TASK-1743",
+      "file_path": "docs/requirements/task/TASK-1743-root-claude-md-names-the-architecture-tree-base-09.md"
+    },
+    "01M5A4B802SJRWY2J71RSQM3S4": {
+      "human_id": "TASK-1744",
+      "file_path": "docs/requirements/task/TASK-1744-turn-end-helper-review-never-converges-a-timed-out.md"
+    },
+    "01M5A41JRS3T8Q802WMRHXQSVJ": {
+      "human_id": "TASK-1745",
+      "file_path": "docs/requirements/task/TASK-1745-two-ac-dc2-19-census-tests-reach-the-repository-co.md"
+    },
+    "01M5A4BM54MZJ8YJ2SFM94JZWJ": {
+      "human_id": "TASK-1746",
+      "file_path": "docs/requirements/task/TASK-1746-a-numbered-kind-document-gets-its-number-at-creati.md"
+    },
+    "01M5A43QJE63EHMGE4EDT27JJW": {
+      "human_id": "TASK-1747",
+      "file_path": "docs/requirements/task/TASK-1747-d1-2-rule-to-site-index-on-rule-show-rule-set-and.md"
+    },
+    "01M5A46RHMKDTJYXYSHKPZAM8Q": {
+      "human_id": "TASK-1748",
+      "file_path": "docs/requirements/task/TASK-1748-the-store-module-memory-file-is-over-its-byte-ceil.md"
+    },
+    "01M5A3N0R6JT0G98M73ZJ7HZMA": {
+      "human_id": "TASK-1749",
+      "file_path": "docs/requirements/task/TASK-1749-skill-fix-lore-migrate-schema-writes-its-audit-row.md"
+    },
+    "01M59N16AAR2QB42JJYPXHWP06": {
+      "human_id": "TASK-1750",
+      "file_path": "docs/requirements/task/TASK-1750-export-never-falls-back-to-a-title-name-for-an-unn.md"
+    },
+    "01M59MN7NX8ST8MF35A7PA7S22": {
+      "human_id": "TASK-1751",
+      "file_path": "docs/requirements/task/TASK-1751-deprecating-a-spec-retires-its-proposed-rule-ids-i.md"
+    },
+    "01M59WVRKTEAP03XSZFJ519KKB": {
+      "human_id": "TASK-1752",
+      "file_path": "docs/requirements/task/TASK-1752-skill-fix-the-edit-time-gate-locks-whole-files-so.md"
+    },
+    "01M5A0J8MN5AZWK628RTMW4PNA": {
+      "human_id": "TASK-1753",
+      "file_path": "docs/requirements/task/TASK-1753-a-version-guarded-store-update-decides-its-outcome.md"
+    },
+    "01M59ZXP51ZM4R3A31C66557XB": {
+      "human_id": "TASK-1754",
+      "file_path": "docs/requirements/task/TASK-1754-skill-implement-corpus-schema-upgrades-run-only-th.md"
+    },
+    "01M59MJ7TSZS0CQHRTPRJES9HR": {
+      "human_id": "TASK-1755",
+      "file_path": "docs/requirements/task/TASK-1755-skill-fix-dc2-9-the-judge-sees-the-whole-document.md"
+    },
+    "01M59MJ98D0ZNTGB1K0XA119EX": {
+      "human_id": "TASK-1756",
+      "file_path": "docs/requirements/task/TASK-1756-skill-fix-dc2-18-every-demotion-is-announced-and-t.md"
+    },
+    "01M59HZ05J3JYG2RQGQS9FSRAB": {
+      "human_id": "TASK-1757",
+      "file_path": "docs/requirements/task/TASK-1757-skill-implement-gs-t10-one-time-lore-issues-migrat.md"
+    },
+    "01M59HYXHHEV6AV4TM1VW10KP7": {
+      "human_id": "TASK-1758",
+      "file_path": "docs/requirements/task/TASK-1758-skill-refactor-gs-t8-status-check-issues-counts-pl.md"
+    },
+    "01M59N38CDXFNVPXM9FRM57E2P": {
+      "human_id": "TASK-1759",
+      "file_path": "docs/requirements/task/TASK-1759-drift-check-decides-exported-names-by-parsing-the.md"
+    },
+    "01M59N35THPWH8SZG8SBDPR5G6": {
+      "human_id": "TASK-1760",
+      "file_path": "docs/requirements/task/TASK-1760-a-stored-code-anchor-the-drift-check-cannot-read-i.md"
+    },
+    "01M59MJ5CQHXXWH2VDW0DVE5H9": {
+      "human_id": "TASK-1761",
+      "file_path": "docs/requirements/task/TASK-1761-skill-fix-dc2-22-with-sync-enabled-every-route-rea.md"
+    },
+    "01M59XQBXG2WZ37YAVSYZZP58Z": {
+      "human_id": "TASK-1762",
+      "file_path": "docs/requirements/task/TASK-1762-skill-fix-a-superseded-criterion-is-still-counted.md"
+    },
+    "01M59Y9V44ERE35SJ1CB9VPAWP": {
+      "human_id": "TASK-1763",
+      "file_path": "docs/requirements/task/TASK-1763-dashboard-build-runs-the-installed-router-cli-inst.md"
+    },
+    "01M59HYW2DSH1JA3B9JF5Q7GAS": {
+      "human_id": "TASK-1764",
+      "file_path": "docs/requirements/task/TASK-1764-skill-refactor-gs-t6-adopt-creates-a-carrier-task.md"
+    },
+    "01M59MJ2DYW0B0AY8BPPR6GTQ4": {
+      "human_id": "TASK-1765",
+      "file_path": "docs/requirements/task/TASK-1765-skill-fix-dc2-6-a-deleted-document-is-not-addressa.md"
+    },
+    "01M59HYYTAHMJ4NW6QQP35MCDN": {
+      "human_id": "TASK-1766",
+      "file_path": "docs/requirements/task/TASK-1766-skill-refactor-gs-t9-http-issue-route-and-dashboar.md"
+    },
+    "01M59QRC5E30CMM3482F0R7637": {
+      "human_id": "TASK-1767",
+      "file_path": "docs/requirements/task/TASK-1767-skill-fix-burn-the-baseline-coverage-debt-ledger-t.md"
+    },
+    "01M59MJ0Q3HN0FS16R4ENTGFTW": {
+      "human_id": "TASK-1768",
+      "file_path": "docs/requirements/task/TASK-1768-skill-fix-dc2-4-project-uninstall-reverses-everyth.md"
+    },
+    "01M59T057AZKPQC6F7R8Z0SEYC": {
+      "human_id": "TASK-1769",
+      "file_path": "docs/requirements/task/TASK-1769-removing-a-site-mapping-is-refused-while-main-stil.md"
+    },
+    "01M59XK2AKY90V5WNZB4QSQVMA": {
+      "human_id": "TASK-1770",
+      "file_path": "docs/requirements/task/TASK-1770-coverage-floor-prints-failing-pairs-last-so-a-boun.md"
+    },
+    "01M59Q53H0MA084V76SF7C9W4G": {
+      "human_id": "TASK-1771",
+      "file_path": "docs/requirements/task/TASK-1771-memory-file-limits-are-always-enforced-the-warn-ad.md"
+    },
+    "01M59HYTD2DTX50FHFVG36F412": {
+      "human_id": "TASK-1772",
+      "file_path": "docs/requirements/task/TASK-1772-skill-refactor-gs-t5-lore-issues-live-only-push-on.md"
+    },
+    "01M59XQSF6MG7J4QMZ8MJXNPJ1": {
+      "human_id": "TASK-1773",
+      "file_path": "docs/requirements/task/TASK-1773-skill-fix-assess-output-prints-the-prompt-version.md"
+    },
+    "01M59MJ42MQRDYQBT3YFYGT8GQ": {
+      "human_id": "TASK-1774",
+      "file_path": "docs/requirements/task/TASK-1774-skill-fix-dc2-15-a-single-criterion-can-be-superse.md"
+    },
+    "01M59MJ37J6S1KYS00PGNNA623": {
+      "human_id": "TASK-1775",
+      "file_path": "docs/requirements/task/TASK-1775-skill-fix-dc2-10-review-command-output-states-what.md"
+    },
+    "01M59V3X5X5RXYFXEE04WWTWD8": {
+      "human_id": "TASK-1776",
+      "file_path": "docs/requirements/task/TASK-1776-skill-fix-write-unattested-test-is-red-on-main-its.md"
+    },
+    "01M59RMXTZA6P79B1ZBF8R7TN4": {
+      "human_id": "TASK-1777",
+      "file_path": "docs/requirements/task/TASK-1777-skill-fix-landing-lookup-never-matches-claimed-nam.md"
+    },
+    "01M59R7BEPDTHFV1FBTGKVN5G9": {
+      "human_id": "TASK-1778",
+      "file_path": "docs/requirements/task/TASK-1778-skill-fix-a-blocks-edge-in-a-feature-branch-plan-i.md"
+    },
+    "01M59PH4XTV6VKTSRPP2K002XK": {
+      "human_id": "TASK-1779",
+      "file_path": "docs/requirements/task/TASK-1779-remove-the-retired-outline-write-verbs-instead-of.md"
+    },
+    "01M59TQWPQWY2CJ29YC30D95E3": {
+      "human_id": "TASK-1780",
+      "file_path": "docs/requirements/task/TASK-1780-skill-fix-the-edit-time-scope-file-blocks-worktree.md"
+    },
+    "01M59MHRSQPW8XHGZ985C7G1P4": {
+      "human_id": "TASK-1781",
+      "file_path": "docs/requirements/task/TASK-1781-skill-fix-dc2-19-the-site-census-records-where-it.md"
+    },
+    "01M59MHTSXBPSAN904G344KAFE": {
+      "human_id": "TASK-1782",
+      "file_path": "docs/requirements/task/TASK-1782-skill-fix-dc2-24-a-run-records-what-it-was-given-a.md"
+    },
+    "01M59RY835TV6EY7R401J50ZKE": {
+      "human_id": "TASK-1783",
+      "file_path": "docs/requirements/task/TASK-1783-skill-fix-seat-list-judges-merged-against-a-litera.md"
+    },
+    "01M59MHQV2C7BS1Y4A54SQ2ZMX": {
+      "human_id": "TASK-1784",
+      "file_path": "docs/requirements/task/TASK-1784-skill-fix-dc2-14-a-criterion-detail-that-belongs-t.md"
+    },
+    "01M59MHNWRRN1WS82QN1P1V7VV": {
+      "human_id": "TASK-1785",
+      "file_path": "docs/requirements/task/TASK-1785-skill-fix-dc2-11-the-review-queue-includes-in-revi.md"
+    },
+    "01M59HYRVC9Q7KZZ1HQWKPEJXE": {
+      "human_id": "TASK-1786",
+      "file_path": "docs/requirements/task/TASK-1786-skill-refactor-gs-t4-close-on-archive-keyed-on-car.md"
+    },
+    "01M59MHN1307G6TPZ6S0A9SGDP": {
+      "human_id": "TASK-1787",
+      "file_path": "docs/requirements/task/TASK-1787-skill-fix-dc2-8-lore-set-validates-titles-and-prot.md"
+    },
+    "01M59MHSWD0AM85FW2X5BSV7YM": {
+      "human_id": "TASK-1788",
+      "file_path": "docs/requirements/task/TASK-1788-skill-fix-dc2-21-the-red-step-lives-in-the-impleme.md"
+    },
+    "01M59MHYTA8RD63H25T7GBVJC8": {
+      "human_id": "TASK-1789",
+      "file_path": "docs/requirements/task/TASK-1789-skill-fix-dc2-29-the-dashboard-reports-an-unreadab.md"
+    },
+    "01M59MHWRJNDX249W4MGA46JEX": {
+      "human_id": "TASK-1790",
+      "file_path": "docs/requirements/task/TASK-1790-skill-fix-dc2-27-lore-fragments-check-covers-every.md"
+    },
+    "01M59MHXSEP5Q9Z9QYVX87GWFN": {
+      "human_id": "TASK-1791",
+      "file_path": "docs/requirements/task/TASK-1791-skill-fix-dc2-28-lore-agent-uses-one-argument-styl.md"
+    },
+    "01M59PAWT3GSY2XV3BVNF7HNTP": {
+      "human_id": "TASK-1792",
+      "file_path": "docs/requirements/task/TASK-1792-skill-fix-an-owned-by-site-mapping-that-points-at.md"
+    },
+    "01M59QC16B3VWBX5V5X8GHNE7M": {
+      "human_id": "TASK-1793",
+      "file_path": "docs/requirements/task/TASK-1793-skill-fix-setup-service-hook-registration-test-is.md"
+    },
+    "01M59QC0J95MXM2W0DSRPAKVY8": {
+      "human_id": "TASK-1794",
+      "file_path": "docs/requirements/task/TASK-1794-skill-fix-baseline-adopt-from-a-linked-worktree-wr.md"
+    },
+    "01M59HYQG649HNPQG7GHQR63SE": {
+      "human_id": "TASK-1795",
+      "file_path": "docs/requirements/task/TASK-1795-skill-refactor-gs-t3-total-issue-status-derivation.md"
+    },
+    "01M59Q9JVGS4401HAWG6FPCG4A": {
+      "human_id": "TASK-1796",
+      "file_path": "docs/requirements/task/TASK-1796-a-second-integrate-in-the-same-session-s-integrati.md"
+    },
+    "01M59MMQ6X54296EDR4KZBGBBY": {
+      "human_id": "TASK-1797",
+      "file_path": "docs/requirements/task/TASK-1797-check-ac-oracle-ownership-scans-only-what-changed.md"
+    },
+    "01M59AND7J5ZX10M20C9BDS7J8": {
+      "human_id": "TASK-1798",
+      "file_path": "docs/requirements/task/TASK-1798-integrate-adr-and-dispatch-rule-name-the-configure.md"
+    },
+    "01M59PGY3D5KZXGT7P9FE3EECF": {
+      "human_id": "TASK-1799",
+      "file_path": "docs/requirements/task/TASK-1799-claude-dir-variable-golden-includes-the-foreign-wo.md"
+    },
+    "01M59HYNWTC86TYZH4V9Q4555Z": {
+      "human_id": "TASK-1800",
+      "file_path": "docs/requirements/task/TASK-1800-skill-refactor-gs-t1-carrier-schema-extra-issues-i.md"
+    },
+    "01M59MHM3HHPJYBHZPKG42ZQRR": {
+      "human_id": "TASK-1801",
+      "file_path": "docs/requirements/task/TASK-1801-skill-fix-dc2-3-install-check-and-flag-validation.md"
+    },
+    "01M59MHK9CT0P9C5PTCYQSJ681": {
+      "human_id": "TASK-1802",
+      "file_path": "docs/requirements/task/TASK-1802-skill-fix-dc2-2-a-seat-is-a-plan-s-seat-and-removi.md"
+    },
+    "01M59KJMEEWFPTHDPASJRBATSB": {
+      "human_id": "TASK-1803",
+      "file_path": "docs/requirements/task/TASK-1803-skill-fix-a-task-s-commit-range-is-recorded-at-lan.md"
+    },
+    "01M59HZFH8D9VS9N45HG1NCFWF": {
+      "human_id": "TASK-1804",
+      "file_path": "docs/requirements/task/TASK-1804-approving-a-baseline-leaf-refuses-while-it-declare.md"
+    },
+    "01M59MHVS2GA7RGQ086K8EJ5GS": {
+      "human_id": "TASK-1805",
+      "file_path": "docs/requirements/task/TASK-1805-skill-fix-dc2-26-lore-context-says-what-it-did-and.md"
+    },
+    "01M59MHPT350S5VAZDHBEPNRTS": {
+      "human_id": "TASK-1806",
+      "file_path": "docs/requirements/task/TASK-1806-skill-fix-dc2-13-a-citation-can-be-repaired-withou.md"
+    },
+    "01M59MG82H4V21SKCCA2TPSS6V": {
+      "human_id": "TASK-1807",
+      "file_path": "docs/requirements/task/TASK-1807-skill-fix-a-deleted-spec-s-change-set-stops-reserv.md"
+    },
+    "01M59D26GT6KKN09GZGV79SZXZ": {
+      "human_id": "TASK-1808",
+      "file_path": "docs/requirements/task/TASK-1808-skill-implement-edit-time-anchor-gate-a-helper-s-e.md"
+    },
+    "01M59JVJS1GJ1YTMBVGH537BXP": {
+      "human_id": "TASK-1809",
+      "file_path": "docs/requirements/task/TASK-1809-done-floor-accepts-an-anchored-test-file-the-task.md"
+    },
+    "01M59M244PPPD0EMAM3J5B3NR7": {
+      "human_id": "TASK-1810",
+      "file_path": "docs/requirements/task/TASK-1810-plan-close-reports-cited-rules-whose-state-could-n.md"
+    },
+    "01M59PHA5REDWR81MSQXXE0ASZ": {
+      "human_id": "TASK-1811",
+      "file_path": "docs/requirements/task/TASK-1811-citation-gate-checks-every-check-decided-criterion.md"
+    },
+    "01M59HYJSX8YWP49VKERDSGZ54": {
+      "human_id": "TASK-1812",
+      "file_path": "docs/requirements/task/TASK-1812-skill-refactor-gs-t7-filing-creates-no-corpus-docu.md"
+    },
+    "01M59MHZMHG6YP5T5NDF0E2P99": {
+      "human_id": "TASK-1813",
+      "file_path": "docs/requirements/task/TASK-1813-skill-fix-dc2-1-session-snapshot-and-resume-report.md"
+    },
+    "01M59MJ6QEQ81B0VQ59FQRJBAB": {
+      "human_id": "TASK-1814",
+      "file_path": "docs/requirements/task/TASK-1814-skill-fix-dc2-7-one-parent-link-that-always-agrees.md"
+    },
+    "01M59MJA3Q70K643Z2HN81W94Z": {
+      "human_id": "TASK-1815",
+      "file_path": "docs/requirements/task/TASK-1815-skill-fix-dc2-23-every-cli-read-goes-through-the-a.md"
+    },
+    "01M59MJAZ51CQ35SMZFHTDGYZA": {
+      "human_id": "TASK-1816",
+      "file_path": "docs/requirements/task/TASK-1816-skill-fix-dc2-25-a-malformed-requirement-list-or-c.md"
+    },
+    "01M59MJBVMR2S1PNDVQTY2WV7J": {
+      "human_id": "TASK-1817",
+      "file_path": "docs/requirements/task/TASK-1817-skill-fix-dc2-20-the-knowledge-sub-type-set-and-cr.md"
+    },
+    "01M59MJCNWKXGVTDP573REZJCP": {
+      "human_id": "TASK-1818",
+      "file_path": "docs/requirements/task/TASK-1818-skill-fix-dc2-16-every-ac-scope-id-must-be-a-crite.md"
+    },
+    "01M59MK2D48YJEYJD49F07GAMV": {
+      "human_id": "TASK-1819",
+      "file_path": "docs/requirements/task/TASK-1819-skill-fix-dc2-12-the-claim-scoped-corpus-guard-is.md"
+    },
+    "01M59MK1BP6XEYFKYSMVEEWBM1": {
+      "human_id": "TASK-1820",
+      "file_path": "docs/requirements/task/TASK-1820-skill-fix-dc2-17-corpus-criterion-data-corrected-t.md"
+    },
+    "01M59KJKVMY5Z4TDSN52TA6FS6": {
+      "human_id": "TASK-1821",
+      "file_path": "docs/requirements/task/TASK-1821-skill-fix-lore-verify-from-a-linked-worktree-is-re.md"
+    },
+    "01M59HYMMQ58EJHQG3H6DKACK0": {
+      "human_id": "TASK-1822",
+      "file_path": "docs/requirements/task/TASK-1822-skill-fix-gs-t2-complete-pr-free-paginated-issue-l.md"
+    },
+    "01M59K7AEKT26JJJRBD1TCJF2K": {
+      "human_id": "TASK-1823",
+      "file_path": "docs/requirements/task/TASK-1823-integrate-floor-failure-shows-the-failing-step-s-o.md"
+    },
+    "01M59HAP3WF04KWQRF6PSBC2QB": {
+      "human_id": "TASK-1824",
+      "file_path": "docs/requirements/task/TASK-1824-skill-fix-the-one-write-route-honours-claim-scoped.md"
+    },
+    "01M59FBFKH2A5J23S09MRP87NB": {
+      "human_id": "TASK-1825",
+      "file_path": "docs/requirements/task/TASK-1825-skill-refactor-dcl-3b-route-the-17-remaining-modul.md"
+    },
+    "01M59E7R4E1NAY4RKBBRFPKE5V": {
+      "human_id": "TASK-1826",
+      "file_path": "docs/requirements/task/TASK-1826-skill-implement-bind-p3-documented-scripts-carry.md"
+    },
+    "01M59E7NKYMX4E10VE76RDA424": {
+      "human_id": "TASK-1827",
+      "file_path": "docs/requirements/task/TASK-1827-skill-implement-bind-p2-edit-time-notice-of-prose.md"
+    },
+    "01M59E7K2XP2PWVBGHBFDK1V26": {
+      "human_id": "TASK-1828",
+      "file_path": "docs/requirements/task/TASK-1828-skill-implement-bind-p1-one-resolver-for-prose-and.md"
+    },
+    "01M59ESK7GW99GTZ4E5KVWREHA": {
+      "human_id": "TASK-1829",
+      "file_path": "docs/requirements/task/TASK-1829-root-coverage-reports-a-declared-command-that-no-l.md"
+    },
+    "01M59HZ28JEJNPY8VYP67QSN28": {
+      "human_id": "TASK-1830",
+      "file_path": "docs/requirements/task/TASK-1830-skill-refactor-gs-t11-retire-the-old-shape-extra-i.md"
+    },
+    "01M59ANBV4V6MTSZ2ZVH5FSRGM": {
+      "human_id": "TASK-1831",
+      "file_path": "docs/requirements/task/TASK-1831-integrate-records-per-attempt-phase-durations-so-t.md"
+    },
+    "01M59GJJ22BPPSXVVXJCP0813E": {
+      "human_id": "TASK-1832",
+      "file_path": "docs/requirements/task/TASK-1832-refresh-fails-loud-on-a-malformed-package-file-ref.md"
+    },
+    "01M58SXGQ89P9GG79TQETZ9YZY": {
+      "human_id": "TASK-1833",
+      "file_path": "docs/requirements/task/TASK-1833-skill-fix-lore-assess-derives-a-plan-s-diff-withou.md"
+    },
+    "01M596789EZYCY6WJY5YBT2603": {
+      "human_id": "TASK-1834",
+      "file_path": "docs/requirements/task/TASK-1834-skill-fix-dcl-4-one-cwd-aware-shell-command-parser.md"
+    },
+    "01M59676YZE406KG4JZQRWVQKP": {
+      "human_id": "TASK-1835",
+      "file_path": "docs/requirements/task/TASK-1835-skill-fix-dcl-3-every-corpus-write-goes-through-on.md"
+    },
+    "01M59675GJ9PBF0R6J0KKQBT1X": {
+      "human_id": "TASK-1836",
+      "file_path": "docs/requirements/task/TASK-1836-skill-fix-dcl-2-filter-values-validated-by-one-sha.md"
+    },
+    "01M5966RY3ZVVZ792ARBHYPQEX": {
+      "human_id": "TASK-1837",
+      "file_path": "docs/requirements/task/TASK-1837-skill-fix-dcl-1-done-floors-judge-real-runs-on-lan.md"
+    },
+    "01M59AJQ7TDJY6W1W5K9QFRCGK": {
+      "human_id": "TASK-1838",
+      "file_path": "docs/requirements/task/TASK-1838-skill-implement-an-isolated-helper-s-write-edit-ou.md"
+    },
+    "01M58ZM1WGA3FEKJ6N05VRXGCA": {
+      "human_id": "TASK-1839",
+      "file_path": "docs/requirements/task/TASK-1839-design-a-merge-that-adds-an-unmapped-census-site-i.md"
+    },
+    "01M592M28SV44VN6TECMTAW5FW": {
+      "human_id": "TASK-1840",
+      "file_path": "docs/requirements/task/TASK-1840-baseline-map-takes-many-site-mappings-in-one-call.md"
+    },
+    "01M591FAVMQW4B0AZZ55QFKEJE": {
+      "human_id": "TASK-1841",
+      "file_path": "docs/requirements/task/TASK-1841-integrate-floor-refuses-unless-root-coverage-of-th.md"
+    },
+    "01M591F8Y474RN70F83DA7BXSS": {
+      "human_id": "TASK-1842",
+      "file_path": "docs/requirements/task/TASK-1842-one-program-closure-scoped-census-with-output-iden.md"
+    },
+    "01M591G4EAKKJYS7WGGFX747KM": {
+      "human_id": "TASK-1843",
+      "file_path": "docs/requirements/task/TASK-1843-repair-round-2026-10-19-account-for-the-2913-pairs.md"
+    },
+    "01M59CHWWE0H42W85EEEZV3FYA": {
+      "human_id": "TASK-1844",
+      "file_path": "docs/requirements/task/TASK-1844-root-coverage-lists-runnable-commands-statically-s.md"
+    },
+    "01M59C1PCZ9HR43YAQ03MXCN5W": {
+      "human_id": "TASK-1845",
+      "file_path": "docs/requirements/task/TASK-1845-integrate-corpus-snapshot-test-stages-a-genuinely.md"
+    },
+    "01M591X5T8ZC5CZF9E9ECT4JTZ": {
+      "human_id": "TASK-1846",
+      "file_path": "docs/requirements/task/TASK-1846-census-finds-subcommands-built-by-a-factory-functi.md"
+    },
+    "01M59B9P35VM59ARSFZ9JEADQC": {
+      "human_id": "TASK-1847",
+      "file_path": "docs/requirements/task/TASK-1847-plan-close-stale-rule-refusal-names-the-stale-citi.md"
+    },
+    "01M596W96J1Y9AQEMFJAT8Y8B2": {
+      "human_id": "TASK-1848",
+      "file_path": "docs/requirements/task/TASK-1848-integrate-fails-loud-when-git-remote-cannot-list-r.md"
+    },
+    "01M595RYA9EXCPPASXXYY4DWPC": {
+      "human_id": "TASK-1849",
+      "file_path": "docs/requirements/task/TASK-1849-skill-fix-audit-verify-narrow-key-read-with-coveri.md"
+    },
+    "01M596SPA5K273VVHXX1DY7D7M": {
+      "human_id": "TASK-1850",
+      "file_path": "docs/requirements/task/TASK-1850-skill-fix-a-terminal-task-holds-no-claim-by-defini.md"
+    },
+    "01M595YPAE8ZMFAQY7J4FKRJMV": {
+      "human_id": "TASK-1851",
+      "file_path": "docs/requirements/task/TASK-1851-baseline-map-sites-file-many-site-mappings-all-or.md"
+    },
+    "01M595RZ001W1S5A7VSGRKCQ9C": {
+      "human_id": "TASK-1852",
+      "file_path": "docs/requirements/task/TASK-1852-skill-fix-one-run-root-per-test-run-holds-home-and.md"
+    },
+    "01M596DV6VZGFPW16XH1CHYHAR": {
+      "human_id": "TASK-1853",
+      "file_path": "docs/requirements/task/TASK-1853-skill-docs-root-claude-md-and-shipped-agent-text-d.md"
+    },
+    "01M595ECWGXPCBYX2NYHCFBT8B": {
+      "human_id": "TASK-1854",
+      "file_path": "docs/requirements/task/TASK-1854-skill-fix-active-plan-selector-from-one-shared-pre.md"
+    },
+    "01M57MR649GH6X4E0CMCMGRS1Y": {
+      "human_id": "TASK-1855",
+      "file_path": "docs/requirements/task/TASK-1855-skill-implement-shipped-close-rule-a-lesson-is-fin.md"
+    },
+    "01M591HQYZBJ7R78TJRNCHNZNX": {
+      "human_id": "TASK-1856",
+      "file_path": "docs/requirements/task/TASK-1856-skill-fix-a-read-only-agent-s-lore-command-that-wr.md"
+    },
+    "01M5910TDHX1AQG82ZXG5NPXK5": {
+      "human_id": "TASK-1857",
+      "file_path": "docs/requirements/task/TASK-1857-skill-fix-lore-issues-verify-and-sync-disagree-on.md"
+    },
+    "01M5901KR5TCRBRMD4VDXA5E23": {
+      "human_id": "TASK-1858",
+      "file_path": "docs/requirements/task/TASK-1858-skill-implement-hr-t8-show-only-what-a-decision-ad.md"
+    },
+    "01M58SB2RXR9PZRZ7FQNZ332ZH": {
+      "human_id": "TASK-1859",
+      "file_path": "docs/requirements/task/TASK-1859-skill-fix-turn-end-helper-review-handles-a-helper.md"
+    },
+    "01M58N3M6XN96V4QC5HHSBS3AM": {
+      "human_id": "TASK-1860",
+      "file_path": "docs/requirements/task/TASK-1860-skill-implement-hr-t1-decision-detail-field-in-the.md"
+    },
+    "01M58N3QNJDWZ98JNJNTM936TP": {
+      "human_id": "TASK-1861",
+      "file_path": "docs/requirements/task/TASK-1861-skill-implement-hr-t7-lore-decide-and-lore-pending.md"
+    },
+    "01M58N3Q3N0CKZJNCCKX4GR515": {
+      "human_id": "TASK-1862",
+      "file_path": "docs/requirements/task/TASK-1862-skill-implement-hr-t6-dashboard-needs-you-page-dec.md"
+    },
+    "01M58N3PGKCNJ72W1RE5P4PGNS": {
+      "human_id": "TASK-1863",
+      "file_path": "docs/requirements/task/TASK-1863-skill-implement-hr-t5-sign-in-link-keeps-a-same-or.md"
+    },
+    "01M58N3NXSGKVV358MF9RWW6K7": {
+      "human_id": "TASK-1864",
+      "file_path": "docs/requirements/task/TASK-1864-skill-implement-hr-t4-running-dashboard-serve-regi.md"
+    },
+    "01M58N3NB1Q2H62W43GD2YEVC8": {
+      "human_id": "TASK-1865",
+      "file_path": "docs/requirements/task/TASK-1865-skill-implement-hr-t3-read-only-decision-and-audit.md"
+    },
+    "01M58N3MS2VKEFQ27X69SMA7QA": {
+      "human_id": "TASK-1866",
+      "file_path": "docs/requirements/task/TASK-1866-skill-implement-hr-t2-every-other-escalating-produ.md"
+    },
+    "01M57NVPMHE34B7NB12CEX8SRJ": {
+      "human_id": "TASK-1867",
+      "file_path": "docs/requirements/task/TASK-1867-skill-implement-es-c-returned-exit-codes-global-fr.md"
+    },
+    "01M57WTMDZKVZ8DXXGM36VGGF8": {
+      "human_id": "TASK-1868",
+      "file_path": "docs/requirements/task/TASK-1868-skill-fix-es-d-os-user-lookup-failure-is-an-explic.md"
+    },
+    "01M58MMZRFJPYBXBYF66KNQWPR": {
+      "human_id": "TASK-1869",
+      "file_path": "docs/requirements/task/TASK-1869-skill-refactor-es-e-exit-codes-are-required-number.md"
+    },
+    "01M58P815G9DT6NGJW9RK5KSBC": {
+      "human_id": "TASK-1870",
+      "file_path": "docs/requirements/task/TASK-1870-skill-fix-turn-end-helper-review-attributes-a-send.md"
+    },
+    "01M58S3VZFTVE4MKFTKR3K6BN2": {
+      "human_id": "TASK-1871",
+      "file_path": "docs/requirements/task/TASK-1871-skill-debug-lore-evidence-capture-of-bun-run-typec.md"
+    },
+    "01M58QHBD02DGEVWGMJ8AN4WCY": {
+      "human_id": "TASK-1872",
+      "file_path": "docs/requirements/task/TASK-1872-skill-fix-turn-end-helper-review-judges-only-repos.md"
+    },
+    "01M58P5140GZ6CFMVSJ7FH1BRH": {
+      "human_id": "TASK-1873",
+      "file_path": "docs/requirements/task/TASK-1873-skill-fix-the-ownership-check-reads-red-first-acs.md"
+    },
+    "01M58P4ZA7ZQPCH0K09HE5MPC5": {
+      "human_id": "TASK-1874",
+      "file_path": "docs/requirements/task/TASK-1874-skill-fix-int-t12-lore-integrate-runs-the-floor-ag.md"
+    },
+    "01M581460SB5JGDN7GST7V6VRF": {
+      "human_id": "TASK-1875",
+      "file_path": "docs/requirements/task/TASK-1875-skill-implement-es-c2-output-through-inv-io-return.md"
+    },
+    "01M57NVNVGKEMK55KQ234SGBTF": {
+      "human_id": "TASK-1876",
+      "file_path": "docs/requirements/task/TASK-1876-skill-refactor-es-b-invocation-at-every-entry-no-f.md"
+    },
+    "01M57NVN4S0S68TWNW79HQ5XYD": {
+      "human_id": "TASK-1877",
+      "file_path": "docs/requirements/task/TASK-1877-skill-implement-es-a-rules-ownership-by-intact-fin.md"
+    },
+    "01M58M1DWG5BF4NE8ATSSM1EY2": {
+      "human_id": "TASK-1878",
+      "file_path": "docs/requirements/task/TASK-1878-skill-design-mi-t5-the-module-index-count-line-mak.md"
+    },
+    "01M58JMMPBA0N7BMCBPQCHPV0W": {
+      "human_id": "TASK-1879",
+      "file_path": "docs/requirements/task/TASK-1879-skill-fix-au-t28-add-scratch-implementer-temp-dir.md"
+    },
+    "01M58JMNZ9N89RSRRVVZT8AQKF": {
+      "human_id": "TASK-1880",
+      "file_path": "docs/requirements/task/TASK-1880-skill-fix-tg-53-changed-tests-ts-reads-git-answers.md"
+    },
+    "01M58JMNCM75GMH7YEVB49RVP1": {
+      "human_id": "TASK-1881",
+      "file_path": "docs/requirements/task/TASK-1881-skill-test-tg-52-ac-fals-22-s-second-half-tsc-reje.md"
+    },
+    "01M5817P59CTYP8XV2KW4Z8H8D": {
+      "human_id": "TASK-1882",
+      "file_path": "docs/requirements/task/TASK-1882-skill-fix-tg-51-other-test-probes-read-bun-spawnsy.md"
+    },
+    "01M5817NE5CCGJVTRC76ZBPST4": {
+      "human_id": "TASK-1883",
+      "file_path": "docs/requirements/task/TASK-1883-skill-test-tg-50-two-wall-clock-oracles-measure-th.md"
+    },
+    "01M57YMAJF86156TXGS8N0KBP3": {
+      "human_id": "TASK-1884",
+      "file_path": "docs/requirements/task/TASK-1884-skill-design-mi-t4-the-generated-command-table-in.md"
+    },
+    "01M5816EYMC5G24JMC7KFHWRVA": {
+      "human_id": "TASK-1885",
+      "file_path": "docs/requirements/task/TASK-1885-skill-fix-implementer-agent-writes-temp-files-only.md"
+    },
+    "01M5808YM0NYF3ZSA1K9WGE8T1": {
+      "human_id": "TASK-1886",
+      "file_path": "docs/requirements/task/TASK-1886-skill-investigate-tg-49-fts-query-failed-once-at-t.md"
+    },
+    "01M580547486FW7MH5525GAV04": {
+      "human_id": "TASK-1887",
+      "file_path": "docs/requirements/task/TASK-1887-skill-fix-tg-48-repair-7-files-red-in-the-clean-fu.md"
+    },
+    "01M57YPFGTA9DPD726MFMRTSCA": {
+      "human_id": "TASK-1888",
+      "file_path": "docs/requirements/task/TASK-1888-skill-fix-au-t27-a-file-a-co-change-rule-requires.md"
+    },
+    "01M57W8D2R8FG1JPMYW63VKS8A": {
+      "human_id": "TASK-1889",
+      "file_path": "docs/requirements/task/TASK-1889-skill-fix-au-t26-helper-changes-include-commits-me.md"
+    },
+    "01M57S92DQY41M95JQV340N086": {
+      "human_id": "TASK-1890",
+      "file_path": "docs/requirements/task/TASK-1890-skill-fix-int-t8-the-main-ref-hook-does-not-run-in.md"
+    },
+    "01M57S8YE2EY94X1CG1RFMHW2A": {
+      "human_id": "TASK-1891",
+      "file_path": "docs/requirements/task/TASK-1891-skill-fix-int-t6-after-integrate-lands-refresh-the.md"
+    },
+    "01M57R938NZQZ51VARQCZ1QZY8": {
+      "human_id": "TASK-1892",
+      "file_path": "docs/requirements/task/TASK-1892-skill-fix-int-t5-lore-commands-that-write-tracked.md"
+    },
+    "01M57MQZRSCG6XBBB849QBZPH9": {
+      "human_id": "TASK-1893",
+      "file_path": "docs/requirements/task/TASK-1893-skill-deploy-int-t4-adopt-lore-integrate-on-this-r.md"
+    },
+    "01M57MRMVW5WPKF5W982ZWYH30": {
+      "human_id": "TASK-1894",
+      "file_path": "docs/requirements/task/TASK-1894-skill-docs-int-t3-shipped-workflow-integrates-only.md"
+    },
+    "01M57MRM7P2BMM7DCT5MENEJVE": {
+      "human_id": "TASK-1895",
+      "file_path": "docs/requirements/task/TASK-1895-skill-implement-int-t2-main-ref-hook-installed-by.md"
+    },
+    "01M57MR5P28Q8X1V4D8JE5A1SN": {
+      "human_id": "TASK-1896",
+      "file_path": "docs/requirements/task/TASK-1896-skill-implement-int-t1-lore-integrate-per-session.md"
+    },
+    "01M57TSZ2AF98ZJAPPHBDD3HRE": {
+      "human_id": "TASK-1897",
+      "file_path": "docs/requirements/task/TASK-1897-skill-implement-int-t9-run-chain-floor-check-floor.md"
+    },
+    "01M57WSGRDD3CSBM2673DWS4MC": {
+      "human_id": "TASK-1898",
+      "file_path": "docs/requirements/task/TASK-1898-skill-fix-int-t11-after-integrate-refreshes-the-sh.md"
+    },
+    "01M57WM1JR0XAE39JF5HT9FVBR": {
+      "human_id": "TASK-1899",
+      "file_path": "docs/requirements/task/TASK-1899-skill-fix-int-t10-lore-baseline-adopt-still-writes.md"
+    },
+    "01M57W0V7VH67S0GVXGEJS6B23": {
+      "human_id": "TASK-1900",
+      "file_path": "docs/requirements/task/TASK-1900-skill-investigate-au-t25-turn-end-review-charges-h.md"
+    },
+    "01M57TWD2JX690Z9SBWTHSM0F3": {
+      "human_id": "TASK-1901",
+      "file_path": "docs/requirements/task/TASK-1901-skill-fix-au-t24-open-claim-resolution-runs-git-wo.md"
+    },
+    "01M57S90KDJX03A626710BG7XQ": {
+      "human_id": "TASK-1902",
+      "file_path": "docs/requirements/task/TASK-1902-skill-investigate-int-t7-npm-package-may-not-ship.md"
+    },
+    "01M57NJ4VQF1VMTJA5C12H4649": {
+      "human_id": "TASK-1903",
+      "file_path": "docs/requirements/task/TASK-1903-skill-implement-mi-t1-module-index-lists-only-fold.md"
+    },
+    "01M57R7FF41BTP3P5FZ6KDTJCP": {
+      "human_id": "TASK-1904",
+      "file_path": "docs/requirements/task/TASK-1904-skill-fix-mi-t3-refresh-check-labels-section-findi.md"
+    },
+    "01M57RAJ5P14SR7MD9PVPNRXBC": {
+      "human_id": "TASK-1905",
+      "file_path": "docs/requirements/task/TASK-1905-skill-fix-au-t23-open-claim-match-for-helper-revie.md"
+    },
+    "01M57R85M7F7D53PH1ZJ955CKJ": {
+      "human_id": "TASK-1906",
+      "file_path": "docs/requirements/task/TASK-1906-skill-test-tg-47-autopilot-cleanup-path-s-error-ca.md"
+    },
+    "01M57QA9QR41MAXH77JW09070Z": {
+      "human_id": "TASK-1907",
+      "file_path": "docs/requirements/task/TASK-1907-skill-fix-au-t22-helper-review-judges-a-working-co.md"
+    },
+    "01M57NJ6E3TSXR363AWSQFPQPC": {
+      "human_id": "TASK-1908",
+      "file_path": "docs/requirements/task/TASK-1908-skill-docs-mi-t2-refresh-this-repository-s-root-cl.md"
+    },
+    "01M57P9BS7FMKZTD8TZ7G2VW49": {
+      "human_id": "TASK-1909",
+      "file_path": "docs/requirements/task/TASK-1909-skill-fix-au-t21-repair-6-test-files-red-on-main-f.md"
+    },
+    "01M57NM0A170YAMWQW1XSDWCWS": {
+      "human_id": "TASK-1910",
+      "file_path": "docs/requirements/task/TASK-1910-skill-fix-au-t20-a-stash-on-main-is-treated-as-liv.md"
+    },
+    "01M57N6RJPZ7T0F6YTDXNTAHA1": {
+      "human_id": "TASK-1911",
+      "file_path": "docs/requirements/task/TASK-1911-skill-fix-au-t19-turn-end-helper-review-charges-a.md"
+    },
+    "01M57KVZFC1EY6ZCQ5H8P83D3W": {
+      "human_id": "TASK-1912",
+      "file_path": "docs/requirements/task/TASK-1912-skill-implement-rm-1-retro-lessons-contract-dispos.md"
+    },
+    "01M57JBE9C8DPP9TWCYPK6W0FZ": {
+      "human_id": "TASK-1913",
+      "file_path": "docs/requirements/task/TASK-1913-skill-fix-tg-46-test-file-s-repo-write-check-blame.md"
+    },
+    "01M57HHCHGDDYBMXKRQ131PFEA": {
+      "human_id": "TASK-1914",
+      "file_path": "docs/requirements/task/TASK-1914-skill-fix-ei-6-a-criterion-whose-oracle-file-is-mi.md"
+    },
+    "01M4APBSGVFFX67X04RSR6GDMZ": {
+      "human_id": "SPEC-235",
+      "file_path": "docs/requirements/spec/SPEC-235-product-baseline-architecture-trees-the-product-s.md"
+    },
+    "01KYEN82CATW2VDHSB9RR9XTQG": {
+      "human_id": "SPEC-236",
+      "file_path": "docs/requirements/spec/SPEC-236-upstream-issue-feedback-loop-consumer-reported-def.md"
+    },
+    "01KYEN7WD20P4EV6ZHKTZD60JP": {
+      "human_id": "SPEC-237",
+      "file_path": "docs/requirements/spec/SPEC-237-session-layer-multi-session-collaboration-context.md"
+    },
+    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
+      "human_id": "SPEC-238",
+      "file_path": "docs/requirements/spec/SPEC-238-phase-execution-model-plan-phase-checklist-superse.md"
+    },
+    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
+      "human_id": "SPEC-239",
+      "file_path": "docs/requirements/spec/SPEC-239-memory-hygiene-knowledge-trustworthiness-over-time.md"
+    },
+    "01KYENED6N2NT4Y5GQT67ECBY5": {
+      "human_id": "SPEC-240",
+      "file_path": "docs/requirements/spec/SPEC-240-output-contract-document-taxonomy-domain-overview.md"
+    },
+    "01KYEN7XX5J25PEY9X11SH836G": {
+      "human_id": "SPEC-241",
+      "file_path": "docs/requirements/spec/SPEC-241-distribution-adoption-phased-spike-gated-one-step.md"
+    },
+    "01KYEN80YH9F95KVTEPMJKHRBX": {
+      "human_id": "SPEC-242",
+      "file_path": "docs/requirements/spec/SPEC-242-extension-hooks-system-direction-pointer-only-no.md"
+    },
+    "01KYEN857ZRXXQJN58YTTCVE4F": {
+      "human_id": "SPEC-243",
+      "file_path": "docs/requirements/spec/SPEC-243-dashboard-multi-project-single-instance-switcher-o.md"
+    },
+    "01KYEN83SNWBSPY495FRHVM0XM": {
+      "human_id": "SPEC-244",
+      "file_path": "docs/requirements/spec/SPEC-244-dashboard-console-adjudication-cockpit-re-centered.md"
     }
   }
 }

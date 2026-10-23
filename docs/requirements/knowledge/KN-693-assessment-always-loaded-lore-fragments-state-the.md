@@ -3,10 +3,10 @@ id: KN-693
 type: knowledge
 role: knowledge
 title: "Assessment: Always-loaded lore fragments state the rule only (2026-10-16)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-187
 links:

@@ -3,10 +3,10 @@ id: KN-005
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-021 hardening — export collision fixes (2026-07-02)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-02
-updated: 2026-07-02
+updated: 2026-10-23
 tags: []
 parent: PLAN-005
 links:

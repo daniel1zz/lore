@@ -3,10 +3,10 @@ id: SPEC-026
 type: spec
 role: spec
 title: "lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop)"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-02
-updated: 2026-10-10
+updated: 2026-10-23
 tags: [ai, assessment, judge, feedback-loop, workflow]
 ---
 # SPEC-026: `lore assess` — AI plan-outcome assessment
@@ -204,7 +204,3 @@ The closeout task runs `lore assess plan-spec-026-implementation-...` — the fe
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts -t 'PRIMARY ORACLE: excludes every interleaved foreign commit from the prompt sent to the judge'
 - [·] [script] AC-ASSESS-15: When no commit anywhere references any of the plan's task slugs, assess reports a named outcome rather than a silent empty diff presented as audited
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts -t 'BOUNDARY: no commit anywhere references either task slug'
-
-## Code anchors
-
-- packages/lore/src/ai/assess-template.ts

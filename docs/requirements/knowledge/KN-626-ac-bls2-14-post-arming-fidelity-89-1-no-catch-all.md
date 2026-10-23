@@ -3,10 +3,10 @@ id: KN-626
 type: knowledge
 role: knowledge
 title: "AC-BLS2-14 post-arming fidelity: 89.1%, no catch-all rules, 8 unfaithful cites stuck behind the gate"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-176
 ---

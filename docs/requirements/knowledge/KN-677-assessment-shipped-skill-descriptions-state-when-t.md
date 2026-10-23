@@ -3,10 +3,10 @@ id: KN-677
 type: knowledge
 role: knowledge
 title: "Assessment: Shipped skill descriptions state when to use the skill (2026-10-15)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-23
 tags: []
 parent: PLAN-184
 links:

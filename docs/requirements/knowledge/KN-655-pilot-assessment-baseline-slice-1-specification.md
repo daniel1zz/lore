@@ -3,10 +3,10 @@ id: KN-655
 type: knowledge
 role: knowledge
 title: "Pilot assessment: baseline slice 1 specification branch (AC-BLS1-11) — FAIL on both kill lines"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-08
+updated: 2026-10-23
 tags: [baseline, pilot, assessment]
 parent: PLAN-172
 links:

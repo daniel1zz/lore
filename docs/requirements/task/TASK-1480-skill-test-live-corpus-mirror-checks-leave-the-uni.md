@@ -3,11 +3,11 @@ id: TASK-1480
 type: task
 role: plan
 title: "[Skill:test] Live-corpus mirror checks leave the unit suite so a concurrent write cannot turn it red"
-status: draft
+status: deprecated
 priority: medium
 phase: "Phase 1: red main"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-190
 plan: PLAN-190

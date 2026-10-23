@@ -1,0 +1,35 @@
+---
+id: KN-709
+type: knowledge
+role: knowledge
+title: "Milestone review: P0 requirement coverage: falsifying criteria for 8 rules"
+status: approved
+priority: medium
+created: 2026-10-23
+updated: 2026-10-23
+tags: []
+parent: PLAN-166
+links:
+  - {id: PLAN-166, type: informs}
+---
+# Milestone review: FAIL
+
+Fingerprint: plan:01M4K347DB71K2N6KKBS34TFF0@3|tasks:01M4K352H5P7R9K23VKAJAB89E@11,01M4K352WDVCS2RP6A1NDSNFNV@15,01M4K3537MMJG2TTSSVHTK5YKD@12,01M4K353JA6PPMZWJEX4HPGXN5@16,01M4K353X8TJ9QPN25SYQPFGPN@20|landed:none
+Diff: unavailable: every task is archived but none recorded a commit range
+
+| Dimension | Verdict | Reason | Reference |
+|---|---|---|---|
+| correctness_vs_acs | pass | Every AC has a passing run from a trusted runner. AC-P0C-1 (report-issue-body-contract), AC-P0C-2 and AC-P0C-3 (baseline-field-bounds -t BR-613 / -t BR-623), AC-P0C-4 (ac-exempt-grant-refusals), AC-P0C-5 (AdjudicationBar.evidence-summary), AC-P0C-6 (ProjectSwitcher.unusable + mount-registry-all-missing) and AC-P0C-7 (multi-project-isolation.spec.ts) each have an [attested] pass. A self-reported failure of AC-P0C-7 at isolation.spec.ts:91 (approveRes.ok() false) came before two later attested passes. AC-P0C-8 has an attested run marked 'inconclusive' that bundled the vitest and Playwright parity tests. After that, AC-P0C-8 was narrowed to the two vitest files and passed under attestation. The e2e claims (stale If-Match gets 409, audit row carries the source) moved to a new AC-P0C-9 that also has an attested pass. So every BR-996 claim in the Scope table has attested passing coverage. No milestone decisions or overrides are recorded. No diff is available, so this verdict rests on the evidence alone, not the code. | Attested evidence lines for AC-P0C-1..9 in the task records; Google Testing Blog 'hermetic tests' practice of trusting runner-produced results over self-reports |
+| spec_conformance | fail | The landed work differs from the spec in four ways. (1) The spec requires the falsifier discipline: each new test must be shown failing once against a named mutation. Every expected-fail record is [self-reported], and none was produced by a trusted runner. (2) Several Scope claims have no mutation recorded at all: BR-971 'a grant writes no version row'; BR-623 'confidence/enforcement enums refused' and 'a refused rule burns no registry id'; BR-613 refusal on the CorpusService.create path (only the RuleService path at rule-service.ts:460 was mutated); BR-991 'queue offers approve/reject on a zero-evidence doc'. The BR-994 mutation's location is vague ('mount-registry.ts:~190'). (3) The spec says 'AC-P0C-1..8, one per rule'. The work created a ninth criterion, AC-P0C-9, and BR-996 is now split across AC-P0C-8 and AC-P0C-9. No milestone decision records this change. (4) The Goal says `lore status --check-requirements` must report no uncovered P0 requirement. No evidence of that command's output was recorded. Separately, with no landed diff, the 'test-only, no packages/*/src change' invariant and the 'name test files exactly as the AC commands do' invariant cannot be checked. | Spec 'Falsifier discipline' and 'Acceptance Criteria' sections; mutation-testing practice (PIT / Stryker: a test counts only if it kills a mutant) |
+| regression | pass | The plan only adds tests and declares no change to product source. The full-suite run on main at 46ef5e9d failed (`bun run test` exit 1, `check:plan-close` exit 1). The section attributes none of the failing files to this plan: the plan has no derivable diff, so the roughly 60 failing files (migration-0xx, pre-push-trip, StatusPill and others) cannot be tied to it. The behaviour most at risk would be dashboard writes and mount-registry startup. Those are covered by the new tests and by the existing multi-project-isolation e2e, which passed under attestation. Without a diff, the claim that no source changed cannot be confirmed. | Full-suite section of this review; Google code review guide (judge regressions against the change's own diff) |
+| design_necessity | pass | Each technical choice follows a named external practice:
+- A stub `gh` with no network for BR-494 follows test doubles (Meszaros xUnit Test Patterns; Fowler 'Mocks Aren't Stubs').
+- One-line falsifying mutations follow mutation testing (PIT, Stryker).
+- mkdtemp with `lore init`, or InMemoryStore, instead of the repo's .lore/ follows hermetic tests (Google Testing Blog) and in-memory fakes.
+- Running the e2e serially on fixed ports with assertPortFree follows Playwright's guidance on webServer ports and workers.
+- Testing If-Match with 409 on a stale ETag follows HTTP conditional requests (RFC 9110 §13.1.1) and optimistic concurrency control.
+- Checking boundaries at 500/501 and 300/301 follows boundary-value analysis (ISTQB).
+- Floor rounding on the 15-criteria cap is checked by the Math.floor→ceil mutation, which also follows mutation testing. | Meszaros xUnit Test Patterns; PIT/Stryker mutation testing; Google Testing Blog hermetic tests; Playwright webServer docs; RFC 9110 §13.1.1 If-Match; ISTQB boundary-value analysis |
+| snapshot_accuracy | fail | The cited-rule state lists BR-494, BR-991, BR-994 and BR-996 as stale, meaning the document and the code disagree. The spec's 'Code anchors' section still reads 'Declared after landing' and was never filled in. BR-613, BR-623 and BR-971 are unknown (dirty tree), and BR-995 is unknown (no commit recorded). Those count as na, not as failures. The fail comes from the four stale rules. | Cited rule state section (BR-494, BR-991, BR-994, BR-996: stale); docs-as-code practice (Write the Docs) of keeping documentation in step with code |
+| concurrency_safety | pass | The change only adds tests. Tests that touch a corpus use per-test mkdtemp directories or InMemoryStore, so concurrent runs share no state and never write the repo's .lore/. The one shared resource is the fixed ports 8787/5173 used by the multi-project e2e. The Risk Register covers this: assertPortFree fails loudly, and the e2e runs serially. A collision therefore produces a visible failure, not corrupted state. The new parity e2e also asserts the product's optimistic-concurrency guard: a stale If-Match gets 409 on a registered project. | Plan Invariants and Risk Register; RFC 9110 If-Match optimistic concurrency; Playwright single-worker/webServer guidance |
+| security | pass | The plan states that only tests change, and none of the tests adds a path for untrusted input. The BR-494 test uses a stub `gh` with no network, so no real GitHub credential or token is used or logged. Recorded evidence shows no secrets. The tests strengthen existing checks: blank-grantor refusal, a 404-class response for unregistered projects, and the audit source on writes. No diff is available, so the conclusion that no product source changed comes from the plan's invariant and the evidence, not from reading code. | OWASP ASVS V7 (logging/audit) and V4 (access control); test-double isolation per Meszaros xUnit Test Patterns |

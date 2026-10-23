@@ -3,10 +3,10 @@ id: KN-555
 type: knowledge
 role: knowledge
 title: "Assessment: Close the read side: a GitHub-filed defect becomes claimable, on every surface (2026-08-25)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-23
 tags: []
 parent: PLAN-145
 links:

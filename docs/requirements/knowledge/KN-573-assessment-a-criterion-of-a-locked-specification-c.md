@@ -3,10 +3,10 @@ id: KN-573
 type: knowledge
 role: knowledge
 title: "Assessment: A criterion of a locked specification can be fixed as an audited correction (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-158
 links:

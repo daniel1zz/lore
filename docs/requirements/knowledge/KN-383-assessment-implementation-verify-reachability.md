@@ -3,10 +3,10 @@ id: KN-383
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — verify reachability advisory, reachability-aware feeding pack, exemption kind (2026-07-28)"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PLAN-114
 links:

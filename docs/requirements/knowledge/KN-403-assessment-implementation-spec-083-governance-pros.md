@@ -3,10 +3,10 @@ id: KN-403
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-083 governance prose runtime injection (2026-07-26)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-23
 tags: []
 parent: PLAN-119
 links:

@@ -6,7 +6,7 @@ title: "AC-as-code: structured acceptance criteria + oracle binding"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-10-10
+updated: 2026-10-23
 tags: [acceptance, oracle, evidence, assess]
 links:
   - {id: ADR-001, type: implements}
@@ -165,9 +165,9 @@ export function computeAcCoverage(
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts
 - [○] [script] AC-ACODE-3: evidence --ac with undeclared id fails VALIDATION_ERROR (exit 4); declared id records ac_ref and bumps version
   script: test — bunx vitest run packages/lore/tests/integration/cli/task-workflow.test.ts
-- [○] [script] AC-ACODE-4: spec with structured ACs: assess prompt contains AC table (full id set, coverage rows) at ASSESS_PROMPT_VERSION 4; undeclared spec keeps verbatim section byte-identical
+- [⊖] [script] AC-ACODE-4: spec with structured ACs: assess prompt contains AC table (full id set, coverage rows) at ASSESS_PROMPT_VERSION 4; undeclared spec keeps verbatim section byte-identical
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [○] [script] AC-ACODE-5: judge output containing undeclared ac_id errors without creating a knowledge doc and without consuming the corrective retry
+- [⊖] [script] AC-ACODE-5: judge output containing undeclared ac_id errors without creating a knowledge doc and without consuming the corrective retry
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
 - [○] [script] AC-ACODE-6: computeAcCoverage aggregates pass/fail per ac_ref; evidence without ac_ref excluded; empty task set yields all-zero facts
   script: test — bunx vitest run packages/core/src/acceptance.test.ts

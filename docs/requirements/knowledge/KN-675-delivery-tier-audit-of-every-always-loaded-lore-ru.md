@@ -3,10 +3,10 @@ id: KN-675
 type: knowledge
 role: knowledge
 title: "Delivery-tier audit of every always-loaded lore rule: 6 backstopped rules can move to skills, 41 have no mechanism"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-23
 tags: [governance, rules, skills]
 parent: PRD-001
 links:

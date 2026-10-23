@@ -6,7 +6,7 @@ title: "dashboard Issues triage surface: badge, list, in-place adjudication"
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-10-10
+updated: 2026-10-20
 tags: [spec-074, report-issue, dashboard, triage]
 ---
 ## Overview
@@ -32,11 +32,11 @@ Structured via `lore ac add` (AC-074-1..5): 4 Playwright e2e + 1 route-auth test
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-074-1: Seeded 2 incoming reports (filed via the real report-issue CLI from a twin consumer fixture): dashboard nav badge shows 2 and the Issues page lists 2 rows each showing title, reporter_project and reported_at, sorted newest first.
+- [⚑] [script] AC-074-1: Seeded 2 incoming reports (filed via the real report-issue CLI against the recording gh stub): the dashboard nav badge shows 2 and the Issues page lists 2 rows, each showing its title.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-1'
 - [⚑] [script] AC-074-2: In-place approve: approving a report from its detail view drops the badge to 1, and the approved report appears in lore ready --adhoc output (CLI assertion inside the test) while leaving the other report untouched.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-2'
-- [⊘] [script] AC-074-3: In-place reject: rejecting a report requires a non-empty reason (submit disabled or error when empty), drops the badge to 0, and the recorded reason is echoed by the consumer-side report-issue --list row for that report.
+- [⊘] [script] AC-074-3: In-place reject: rejecting a report requires a non-empty reason (submit disabled or error when empty), drops the badge to 0, and the recorded reason appears on that report's audit trail (lore audit <report> --action reject).
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-3'
 - [⚑] [script] AC-074-4: Home card: with open reports present the dashboard home shows an incoming-reports card with the open count and at most 3 most-recent titles linking to the Issues page; with 0 open reports the badge is hidden and the card shows an explicit empty state (not a blank region).
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-4'

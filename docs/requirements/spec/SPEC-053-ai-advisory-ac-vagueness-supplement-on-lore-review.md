@@ -3,10 +3,10 @@ id: SPEC-053
 type: spec
 role: spec
 title: "AI-advisory AC-vagueness supplement on lore review <spec>"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-18
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 # SPEC-053 — AI-advisory AC-vagueness supplement on `lore review <spec>`

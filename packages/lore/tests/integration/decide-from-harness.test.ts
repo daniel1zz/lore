@@ -343,8 +343,7 @@ describe("AC-ASK-3 the rule ships", () => {
     const rulesDir = join(project, ".claude", "rules");
     const rendered = readdirSync(rulesDir).map((f) => readFileSync(join(rulesDir, f), "utf8")).join("\n");
     expect(rendered).toContain("interactive question tool");
-    expect(rendered).toContain("carry out the answer yourself");
-    expect(rendered).toContain("Never tell the human to run a command, open a page or look something up elsewhere");
+    expect(rendered).toContain("BR-1375");
     expect(existsSync(join(rulesDir, "lore-ask-then-execute.md"))).toBe(true);
 
     // no asset (context, skills, agents, hook messages, project files) tells the human to run lore decide in a terminal

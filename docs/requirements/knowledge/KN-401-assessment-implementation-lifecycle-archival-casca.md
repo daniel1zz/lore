@@ -3,10 +3,10 @@ id: KN-401
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — lifecycle archival (cascade + sweep + surfacing) (2026-07-27)"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: []
 parent: PLAN-089
 links:

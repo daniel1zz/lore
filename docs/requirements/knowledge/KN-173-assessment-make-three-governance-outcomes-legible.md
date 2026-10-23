@@ -3,10 +3,10 @@ id: KN-173
 type: knowledge
 role: knowledge
 title: "Assessment: Make three governance outcomes legible: vacuous plan-close passes, silent AC demotions, and the empty feeding pack a fresh install receives (2026-08-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-078
 links:

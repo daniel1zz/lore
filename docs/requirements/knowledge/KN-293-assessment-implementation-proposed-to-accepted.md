@@ -3,10 +3,10 @@ id: KN-293
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — proposed to accepted decision_status writer (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-096
 links:

@@ -3,10 +3,10 @@ id: KN-136
 type: knowledge
 role: knowledge
 title: "Assessment: Plan — SPEC-069 attestation floor + ad-hoc task channel (2026-07-23)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-23
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-055
 links:

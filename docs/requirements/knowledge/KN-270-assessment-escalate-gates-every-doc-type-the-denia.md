@@ -3,10 +3,10 @@ id: KN-270
 type: knowledge
 role: knowledge
 title: "Assessment: escalate gates every doc type + the denial names the questions (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-092
 links:

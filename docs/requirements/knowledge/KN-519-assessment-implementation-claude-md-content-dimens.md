@@ -3,10 +3,10 @@ id: KN-519
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — CLAUDE.md content-dimension checks (split first, then metrics) (2026-08-23)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-23
 tags: []
 parent: PLAN-139
 links:

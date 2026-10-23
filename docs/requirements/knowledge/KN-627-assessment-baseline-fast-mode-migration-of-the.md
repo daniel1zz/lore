@@ -3,10 +3,10 @@ id: KN-627
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline fast-mode migration of the remaining 9 branches, then one cross-branch probe (2026-10-09)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-176
 links:

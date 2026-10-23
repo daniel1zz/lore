@@ -3,10 +3,10 @@ id: KN-380
 type: knowledge
 role: knowledge
 title: "SPEC-104 fallout: changed-tests.ts porcelain-path bug + cli-utils.test.ts worktree-cwd fragility"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PLAN-107
 ---

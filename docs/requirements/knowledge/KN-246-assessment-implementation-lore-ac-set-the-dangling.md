@@ -3,10 +3,10 @@ id: KN-246
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — lore ac set + the dangling-ac_ref detector (2026-08-01)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-23
 tags: []
 parent: PLAN-085
 links:

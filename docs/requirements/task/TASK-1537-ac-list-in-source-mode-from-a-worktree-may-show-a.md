@@ -3,10 +3,10 @@ id: TASK-1537
 type: task
 role: plan
 title: "ac list in source mode from a worktree may show a different evidence view than the binary (unreproduced)"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 parent: PLAN-197
 plan: PLAN-197

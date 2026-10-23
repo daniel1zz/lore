@@ -3,16 +3,16 @@ id: SPEC-126
 type: spec
 role: spec
 title: "Resume-coverage floor — the satisfaction boundaries: a deferral must carry its reason, and a sidechain chain cannot discharge"
-status: approved
+status: deprecated
 priority: high
 created: 2026-08-01
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 links:
   - {id: SPEC-123, type: relates-to}
   - {id: ADR-025, type: relates-to}
   - {id: KN-241, type: relates-to}
-  - {id: SPEC-207, type: implements}
+  - {id: SPEC-237, type: implements}
 ---
 # Resume-coverage floor — the satisfaction boundaries: a deferral must carry its reason, and a sidechain chain cannot discharge
 

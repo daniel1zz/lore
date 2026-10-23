@@ -3,10 +3,10 @@ id: KN-347
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — out-of-box reporting channel (self-provision + SPEC-073 hint unlock) (2026-07-29)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-10-23
 tags: []
 parent: PLAN-105
 links:

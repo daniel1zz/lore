@@ -3,10 +3,10 @@ id: KN-645
 type: knowledge
 role: knowledge
 title: "Pilot v3 execution branch build log: 132 rules, 93 with falsifying citations"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-174
 ---

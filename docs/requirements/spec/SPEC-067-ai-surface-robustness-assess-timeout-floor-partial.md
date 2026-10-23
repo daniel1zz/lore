@@ -6,7 +6,7 @@ title: "AI-surface robustness: assess timeout floor, partial-provider fail-loud,
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 # SPEC-067 — AI-surface robustness: assess timeout floor, partial-provider fail-loud, judge grounding downgrades
@@ -100,12 +100,12 @@ Thresholds live in one exported constant, not scattered literals.
 - [⚑] [script] AC-067-3: A complete provider override builds successfully with the configured timeout value effective
   script: test — bunx vitest run packages/lore/tests/unit/ai/provider-registry-validation.test.ts -t "AC-067-3"
   other_command=1
-- [⚑] [script] AC-067-4: SUPERSEDED 2026-08-01 by spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3: an ungrounded absence-based dimension score is now REMOVED from dimension_scores at finalization, with an unverifiable[] entry naming it added in its place — it is no longer merely confidence-downgraded to low with a stamped reason, and applyGroundingConfidenceDowngrade no longer exists. The oracle below still passes because the tests were retitled 'REGRESSION (superseded AC-067-4)' and updated to assert removal.
+- [⊖] [script] AC-067-4: SUPERSEDED 2026-08-01 by spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3: an ungrounded absence-based dimension score is now REMOVED from dimension_scores at finalization, with an unverifiable[] entry naming it added in its place — it is no longer merely confidence-downgraded to low with a stamped reason, and applyGroundingConfidenceDowngrade no longer exists. The oracle below still passes because the tests were retitled 'REGRESSION (superseded AC-067-4)' and updated to assert removal.
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-finalize-downgrade.test.ts -t "AC-067-4"
   other_command=1
-- [⚑] [script] AC-067-5: Truncation over 25 percent of tasks caps overall confidence at low with degraded_by_truncation true; 100 percent truncation yields verdict inconclusive with no overall_score
+- [⊖] [script] AC-067-5: Truncation over 25 percent of tasks caps overall confidence at low with degraded_by_truncation true; 100 percent truncation yields verdict inconclusive with no overall_score
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-finalize-downgrade.test.ts -t "AC-067-5"
   other_command=1
-- [⚑] [script] AC-067-6: A fully-grounded untruncated judgment passes finalization byte-unchanged (healthy path regression)
+- [⊖] [script] AC-067-6: A fully-grounded untruncated judgment passes finalization byte-unchanged (healthy path regression)
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-finalize-downgrade.test.ts -t "AC-067-6"
   other_command=1

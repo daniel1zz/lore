@@ -3,10 +3,10 @@ id: TASK-1588
 type: task
 role: plan
 title: "39 rule ids are registered to session leaves that no longer list them (status --check-baseline registry-leaf-mismatch)"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-198
 plan: PLAN-198

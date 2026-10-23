@@ -6,68 +6,69 @@ title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
 created: 2026-06-07
-updated: 2026-10-10
+updated: 2026-10-23
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 links:
-  - {id: SPEC-209, type: relates-to}
+  - {id: SPEC-239, type: relates-to}
   - {id: SPEC-094, type: relates-to}
-  - {id: SPEC-207, type: relates-to}
-  - {id: SPEC-201, type: relates-to}
-  - {id: SPEC-208, type: relates-to}
-  - {id: SPEC-202, type: relates-to}
-  - {id: SPEC-206, type: relates-to}
-  - {id: SPEC-204, type: relates-to}
-  - {id: SPEC-203, type: relates-to}
+  - {id: SPEC-237, type: relates-to}
+  - {id: SPEC-241, type: relates-to}
+  - {id: SPEC-238, type: relates-to}
+  - {id: SPEC-242, type: relates-to}
+  - {id: SPEC-236, type: relates-to}
+  - {id: SPEC-244, type: relates-to}
+  - {id: SPEC-243, type: relates-to}
   - {id: SPEC-093, type: relates-to}
-  - {id: SPEC-210, type: relates-to}
+  - {id: SPEC-240, type: relates-to}
 ---
 # Lore — Internal-First AI Team Knowledge Platform
 
 ## 1. Executive Summary
 
-Lore is an AI-native shared knowledge / memory platform for AI-first founding teams (3-5 people + multiple AI agents). A single CLI binary backed by a service layer abstraction delivers a typed, navigable corpus of PRDs, specs, ADRs, plans, and knowledge. **PRD-as-living-root**: every document is reachable through a tree rooted at the product PRD.
+Lore is an AI-native shared knowledge / memory platform for AI-first teams (3-5 people + many concurrent AI agents). A single CLI binary backed by a service layer abstraction delivers a typed, navigable corpus of PRDs, specs, ADRs, plans, and knowledge. **PRD-as-living-root**: every document is reachable through a tree rooted at the product PRD.
 
-**Lore is the sole project context**: every development-lifecycle output (requirements, designs, decisions, plans, execution evidence, assessments) lives in the corpus as a typed document; git-tracked files and dashboards are projections of the corpus, never parallel sources of truth. The dashboard's home surface IS the resolved living PRD. (Enforcement: §13; conformance oracle: `lore status --check-tree`.)
+**Lore is the sole project context**: every development-lifecycle output (requirements, designs, decisions, plans, execution evidence, assessments) lives in the corpus as a typed document; git-tracked files and dashboards are projections of the corpus, never parallel sources of truth. The dashboard's home surface IS the resolved living PRD. (Conformance oracle: `lore status --check-tree`.)
 
 - **Positioning**: Internal-first for 9-12 months, OSS path later. No commercial monetization.
-- **Architecture**: Service layer abstraction — CLI is the first adapter (P1), MCP/HTTP/TUI are mechanical additions (P2/P3).
-- **Strategy**: Protocol-aware App — v1.0 architecture preserves protocol extraction for v2.1+.
-- **Delivery**: 3 phases, each independently usable.
+- **Architecture**: Service layer abstraction — CLI, MCP and HTTP are thin adapters over one service layer.
+- **Strategy**: Protocol-aware app — the architecture keeps a later agent-memory protocol extraction possible.
+- **What it gives an AI**: a context supplement it can pull again and again from the current snapshot, tracking of long tasks across sessions, safe parallel work by many sessions on one project, and an environment that improves itself from its own audit trail.
+- **End goal**: high product quality. Two properties serve it, and every mechanism must serve one of them: **Q1**, the snapshot (corpus + code on main) is always valid and accurate; **Q2**, behaviour is auditable, traceable and fed back into self-improvement. How decisions are made and judged: `adr-ai-decision-standard-four-checks-references-from-excellent`.
 
 ## 2. Problem & Users
 
 **Core problem**: AI dev teams produce knowledge fragmented across per-agent memory, Notion, Linear, local markdown, Slack, and human heads. No shared, navigable, AI-consumable corpus exists.
 
-**Primary users**: AI-first founding team (3-5 people) — PM writes PRDs, engineers write specs/ADRs, AI agents read/write under human review.
+**Primary users**: AI-first team (3-5 people) and the AI sessions working for it — development is done almost entirely by AI, many sessions concurrently, unattended after the opening phase. Humans set direction and decide only what the decision standard reserves for them.
 
 **Secondary users**: Long-running AI agents (Claude Code, Cursor, Codex, Aider) — first-class users, not tool consumers.
 
-**Excluded (v1.0)**: Solo devs (DocMan v1 serves them), enterprises (v2.x), non-technical PMs.
+**Excluded**: Solo devs (DocMan v1 serves them), enterprises (v2.x), non-technical PMs.
 
 ## 3. Goals & Non-Goals
 
 ### Goals
 
-| ID | Goal | Phase |
+| ID | Goal | State |
 |---|---|---|
-| G1 | CLI binary + service layer delivers core surface | P1 |
-| G2 | PRD-as-living-root tree navigable from CLI | P1 |
-| G3 | DocMan v1 import (zero data loss) | P1 |
-| G4 | MCP adapter on same service layer | P2 |
-| G5 | Cloud sync — multi-user multi-device shared corpus | P2 |
-| G6 | HTTP API adapter | P2 |
-| G7 | Internal adoption: 3+ projects, 90%+ new docs in Lore | P2 |
-| G8 | Output contract live: `lore status --check-tree` reports 0 drift on this repo AND every closed plan since v0.5 carries all six stage outputs (§13.2) | P2+, checked at each plan closeout |
-| G9 | Autonomous feedback loop live (§14): R1 — every lifecycle transition audit-traced + ≥1 doc type at `assist`; R2 (data-gated) — human review load ↓≥70%, ≥1 doc type at `auto` on Wilson-bounded agreement data | P2+, R1 committed, R2/R3 contingent (§14.6) |
-| G10 | Session layer live (§15): bootstrap pointer-set + lossless handoff (`/clear` → resume with zero human re-briefing) + session registry with file-anchor claim safety | P2+, committed v0.8 |
-| G11 | Memory hygiene live (§16): bi-temporal invalidation + staleness probes + `lore status --check-drift` with 0 false-negatives on a seeded drift fixture | P2+, committed v0.8 |
-| G12 | Phase execution model live (§18): plans created after the landing spec ships execute via phases; phase completion 100% computed (oracle: P3 unit suite + seeded-corpus fixture); task→phase migration zero data loss (oracle: P7 pre/post reconciliation, idempotent re-run); phases-per-plan distribution tracked at each `lore assess` with the §18 re-open trigger | P2+, landing specs before the v0.11 PRD review |
-| G13 | Two-tier seat model live (§15 S4): `lore seat` covers seat entry / list / resume; seat-aware resume verified over the S4 equivalence-class table (main checkout / seat worktree / task-worktree-under-seat / detached HEAD), 0 counterexamples across all enumerated classes | P2+, landing specs before the v0.11 PRD review |
-| G14 | Upstream issue feedback loop live (§20): a consuming project's agent on ANY machine files a structured defect report via `lore report-issue` into the configured GitHub tracker, while this corpus retains authority over resolution (`adr-a-tracker-is-replaceable-a-corpus-is-not-github-is-the`). The four original R-5 rails are dispositioned rather than carried forward: identity pin → superseded by an authenticated target check (`gh api user` + an explicitly-passed repo, never a git-remote inference); version-skew reject and sync-upstream reject → NOT APPLICABLE on a hosted tracker, which exposes no upstream schema version and no replica state; rate cap → DELETED, because abuse control belongs to the tracker and a cap only refuses honest reporters (measured 2026-08-23: 10 open reports against a ceiling of 10 refused every new report while 6 criticals sat untriaged). The local-SQLite intake this goal originally described was measured structurally unreachable from any other machine, so it never satisfied "a consuming project's agent" at all. Trigger surfaces committed (hints + vendored stanza owner-promoted 2026-07-24) and dashboard Issues triage surface live (F5); ≥1 true defect fixed end-to-end through the loop | P2+ |
-| G15 | Dashboard console first batch live (§21 F1+F2): evidence/AC adjudication context + keyboard triage + judgment drill-down, with route-level usage telemetry recording to the SPEC-012 sink; oracle: keyboard-only component-test loop (incl. editor-focus suppression) + boundary-state component tests + Playwright adjudicate-with-evidence-visible e2e + telemetry enabled/disabled two-branch assert | P2+, committed v0.13 |
-| G16 | Multi-project dashboard live (§22): one instance mounts ≥3 registered projects with one login; switcher performs full context switch with per-project pending badges; two-corpus write-isolation + If-Match-replay e2e (R-12), gate-equivalence e2e (R-13), stale-bleed e2e (R-16), and runtime-degradation test (R-17) pass; registry-less regression incl. the new route-shape pin passes | P2+, committed v0.14 |
+| G1 | CLI binary + service layer delivers core surface | delivered |
+| G2 | PRD-as-living-root tree navigable from CLI | delivered |
+| G3 | DocMan v1 import (zero data loss) | delivered |
+| G4 | MCP adapter on same service layer | delivered |
+| G5 | Cloud sync — multi-user multi-device shared corpus | delivered |
+| G6 | HTTP API adapter | delivered |
+| G7 | Internal adoption: 3+ projects, 90%+ new docs in Lore | delivered |
+| G8 | Output contract live: `lore status --check-tree` reports 0 drift and every closed plan carries its stage outputs | standing, checked at plan close |
+| G9 | Autonomous feedback loop live: every lifecycle transition is audit-traced (Q2); approval is decided by AI at milestones under the four-check standard (`adr-ai-decision-standard-four-checks-references-from-excellent`); quality is measured by escaped defects per landed plan, not by human sign-off | standing |
+| G10 | Session layer live: bootstrap pointer-set + lossless resume (`/clear` → resume with zero human re-briefing) + session registry with file-anchor claim safety | standing |
+| G11 | Memory hygiene live: bi-temporal invalidation + staleness probes + `lore status --check-drift` with 0 false negatives on a seeded drift fixture | standing |
+| G12 | Phase execution model live: plans execute via phases and phase completion is computed, never hand-marked | standing |
+| G13 | Two-tier seat model live: `lore seat` covers seat entry / list / resume, and resume is correct from the main checkout, a seat worktree, a task worktree under a seat and a detached HEAD | standing |
+| G14 | Issue feedback loop live: an agent in any consuming project files a structured defect report into the configured GitHub tracker with `lore report-issue`; GitHub owns issue state; at least one true defect is fixed end-to-end through the loop. Rationale: `adr-a-tracker-is-replaceable-a-corpus-is-not-github-is-the` | standing |
+| G15 | Dashboard console live: evidence/AC adjudication context, keyboard triage and judgment drill-down, with route-level usage telemetry | standing |
+| G16 | Multi-project dashboard live: one instance mounts ≥3 registered projects with one login; switching projects is a full context switch with per-project pending badges and write isolation between corpora | standing |
 
-### Non-Goals (v1.0)
+### Non-Goals
 
 | ID | What | Why |
 |---|---|---|
@@ -75,7 +76,7 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 | NG2 | Enterprise SSO / RBAC | 3-5 people, flat trust + minimal access controls |
 | NG3 | Mobile apps | CLI + web sufficient |
 | NG4 | Public plugin API | OSS phase |
-| NG5 | Protocol RFC | v2.1+ — v1.0 builds reference implementation |
+| NG5 | Protocol RFC | Later; the current product is the reference implementation |
 | NG6 | v1 backward compat | One-shot migrate only |
 | NG7 | Real-time CRDT collab | Pull-sync sufficient |
 | NG8 | Vector/semantic search | FTS5 first |
@@ -83,31 +84,169 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 ## 4. Solution Architecture
 
 ```
-┌─────────┐  ┌─────────┐  ┌──────────┐  ┌─────────┐
-│   CLI   │  │   MCP   │  │   HTTP   │  │   TUI   │
-│  (P1)   │  │  (P2)   │  │  (P2)    │  │  (P3)   │
-└────┬────┘  └────┬────┘  └────┬─────┘  └────┬────┘
-     └────────────┴─────┬──────┴──────────────┘
-                        │
-              ┌─────────▼──────────┐
+┌─────────┐  ┌─────────┐  ┌──────────┐ ◄── ┌───────────┐
+│   CLI   │  │   MCP   │  │   HTTP   │     │ Dashboard │
+└────┬────┘  └────┬────┘  └────┬─────┘     │  (web UI) │
+     └────────────┴──────┬─────┘           └───────────┘
+                         │
+              ┌──────────▼─────────┐
               │    Service Layer   │  ← all business logic here
-              │  → SPEC-001        │
-              └─────────┬──────────┘
-                        │
-              ┌─────────▼──────────┐
+              └──────────┬─────────┘
+                         │
+              ┌──────────▼─────────┐
               │    Storage Layer   │
-              │  (libSQL / Turso)  │
+              │ (SQLite / Turso)   │
               └────────────────────┘
 ```
 
-Adapters are thin I/O mappers — zero business logic duplication.
+Adapters are thin I/O mappers — zero business logic duplication. The dashboard is a client of the HTTP adapter, not an adapter of its own.
 
 ## 5. Module Map
 
-This PRD is the tree root. Each module is a child spec (kind=feature/tech/design, §13.1) with full detail (interfaces, data models, behavior contracts, visual specs). Cross-links between specs are typed relationships.
+This PRD is the tree root. Each module is a child spec (kind=feature/tech/design) with full detail (interfaces, data models, behavior contracts, visual specs). Cross-links between specs are typed relationships.
 
-The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
+The module tree below is rendered live from the corpus, never hand-maintained:
 
+- [knowledge] Context verb family autopilot run — verify task-scoping semantics, legacy-shape upgrade paths, TDD-paired worktree dispatch (archived)
+- [knowledge] Stale in-context snapshot replayed as current state in a cross-plan report — timeless-context bias, mechanized at reporter layer (archived)
+- [knowledge] Session process review — 2026-07-27 context-refresh incident → CTX Phase 4 hardening (archived)
+- [knowledge] Full-system spec compliance audit 2026-07-27 — 85/11/1 verdicts, remediation dispatch, open decisions (archived)
+- [knowledge] Delivery-tier audit of every always-loaded lore rule: 6 backstopped rules can move to skills, 41 have no mechanism (archived)
+- [knowledge] Proposals moved out of the defect channel (2026-10-16 audit, BR-1153) (archived)
+- [adr] AI decision standard: four checks, references from excellent products, checks at milestones (approved)
+- [task] Every test reaching approve-nodes-cli.ts declares it (approved)
+- [task] 13 test files that import helpers/cli-live-rule.ts fail with UndeclaredTestInputError since the per-item approval landing (draft)
+- [task] stop-turn-review counts a subagent worktree's committed branch as main-session source edits after the session's cwd moves into that worktree (draft)
+- [task] lore evidence --capture and lore release run from a checkout other than the claimed worktree are accepted (draft)
+- [task] lore claim --worktree accepts a value that resolves to no worktree (draft)
+- [task] Dashboard e2e global setups write as a registered party (archived)
+- [task] lore integrate's post-landing done check reports a landed branch's new oracle file as missing (checked before the shared checkout is refreshed) (draft)
+- [task] Dashboard e2e seeds create specs without a parent (archived)
+- [task] Local dashboard writes are made by the checkout's registered human session, never the literal admin (archived)
+- [task] stop-turn-review blames the turn for anchor-drift deletions that came from other sessions' landings moving the shared checkout (draft)
+- [task] A schema upgrade promotes pending revisions that a landed spec change set accounts for to approved versions (archived)
+- [task] Dashboard multi-project e2e setup reads the server's ready line right after /health and leaks the server when parsing fails (draft)
+- [task] Dashboard cookie writes are attributed to the hard-coded key owner "admin" (multi-project write-parity e2e red) (draft)
+- [task] The edit-time anchor hook declares scratch files and shell fragments as task anchors (draft)
+- [task] Dashboard issues e2e specs exercise the current GitHub-backed report channel through a fake, not the retired SQLite upstream (archived)
+- [task] evidence --capture records a Playwright pass but refuses a Playwright expected-fail, so a Playwright oracle can never meet red-first (draft)
+- [task] Migration 028 turned rule changes already landed by a spec into pending revisions (draft)
+- [task] report-issue from a helper worktree creates the GitHub issue but fails to create its corpus record (draft)
+- [task] Dashboard e2e browse-ux.pw.ts seeds a spec with parent_id, which the create gate now refuses with 422 VALIDATION_ERROR (draft)
+- [task] Dashboard issues.spec.ts and issues-resolution.spec.ts configure the retired SQLite feedback.upstream.corpus_path, so report-issue exits 4 in every case (draft)
+- [task] My config-writing tests patch the seeded config instead of appending duplicate keys (archived)
+- [task] Removing a leaf's command declaration is refused even when another leaf already declares that command (draft)
+- [task] lb-definition-of-done writes config.yaml by append, red on main after init seeds the template (draft)
+- [task] A first claim is refused for tasks of a plan with an integration branch: BR-1353 counts the integration branch's own commits as foreign (draft)
+- [task] adapters/cli CLAUDE.md back under its 16384-byte ceiling (archived)
+- [task] Tests still assert task anchors reject '#'; symbol-scoped task anchors are the approved grammar (BR-1358) (archived)
+- [task] Dashboard Playwright global setup writes to its corpus with no known party, so every e2e spec fails since writes require one (draft)
+- [task] The write-spec rule ships with the binary: init seeds no document, gate feeding falls back to the shipped asset by name (archived)
+- [task] The integrate floor lets a module CLAUDE.md land over its byte ceiling (draft)
+- [task] [Skill:fix] An unparsable project config is silently ignored; test fixtures append duplicate keys after init (approved)
+- [task] A racing claim is written first and rolled back on conflict, so two racers can both lose (draft)
+- [task] Worktree occupancy still treats a claim that names no run as occupying, a state the store now refuses (draft)
+- [task] Audit backfill appends its reconstructed entries through the write port, not the store directly (archived)
+- [task] check-ac-oracle-ownership checks only live criteria; superseded ones are skipped as verify skips them (archived)
+- [task] check-ac-oracle-ownership reports superseded criteria whose test files were deleted as missing-owner-file (draft)
+- [task] integrate reads the migrate child's --json report from stdout and stderr merged, so any stderr warning breaks it (draft)
+- [task] The harness-run rewriter misses lore invoked after do/then/else, so loop bodies run without an attested run (draft)
+- [task] lore integrate runs its migrate child as the caller's attested run (archived)
+- [task] spec-issues-state-problems-on-github-tasks-state-execution: the close guidance's route separation (lore defects vs the project's own tracker) is tested but not an acceptance criterion (draft)
+- [task] lore integrate's migrate child carries no attested run, so it is refused once writes require a known party (draft)
+- [adr] A refusal carries its rule as a required field; type checking replaces the site census (approved)
+- [task] Audit backfill takes its boundary from the data: versions older than the first audit entry predate the writers; no config cut-off, no built-in date (archived)
+- [task] After explicit-only schema upgrades, lore integrate cannot land a branch that adds a migration: the floor's corpus snapshot stays at the old schema (archived)
+- [task] Own-diff landing gate holds a path only while its holder is still editing: released, committed branches land in any order (archived)
+- [task] Symbol-scoped anchors hold a whole class: editing one method of TaskWorkflowService holds every method of it (draft)
+- [task] Land BR-1346 holder scope alone: a holder holds what its own change touched; directory anchors hold only changed files (draft)
+- [task] A directory anchor holds the whole directory at claim and integrate, but only touched files at edit time: three gates, three meanings (draft)
+- [task] A generated file as a claim anchor serializes every asset change: integrate refuses any branch touching assets-manifest.ts while another task holds it (draft)
+- [task] run-owned-done-and-overlap BOUNDARY case is red on main: done is refused although the fresh claim's run has ended with a clean worktree (draft)
+- [task] lore ac supersede reports 'requires --by <spec>:<AC-ID>' for a well-formed --by value, intermittently (approved)
+- [task] The unfiltered-test-file done floor ignores attested runs made from a verification worktree (deprecated)
+- [task] A released claim still reads as locked and blocks other sessions' anchor edits (deprecated)
+- [task] A corpus-only task with a captured pass can never be archived: evidence demands a worktree claim, done then demands a landing (deprecated)
+- [task] A corpus-writing script ignores unknown arguments, so --help ran the real migration (deprecated)
+- [task] The memory-file floor step passes a module file that status reports over its byte ceiling (deprecated)
+- [task] The unfiltered-test-file done floor ignores attested passes run from a verification worktree (draft)
+- [task] A released claim still reads as locked (claimed), and another session's anchor edit was refused as held by it (draft)
+- [task] A corpus-only task with a captured pass can never be archived: evidence demands a worktree claim, done then demands a landing (draft)
+- [task] A corpus-writing script ignores unknown arguments, so --help runs the real migration (draft)
+- [task] The memory-file floor step passes a module CLAUDE.md that lore status reports over its byte ceiling (draft)
+- [task] BR-1346 lets a paused, unclaimed task with an unlanded branch hold its anchors indefinitely; nothing makes paused work let go (draft)
+- [task] Own-diff fixture claims inherit the ambient session id, so AC-DJ-1/AC-DJ-3 fail under lore verify's env allowlist (archived)
+- [task] AC-BLS2-13 still requires per-site zero coverage gaps, which the coverage ADR retired (archived)
+- [adr] Issues state problems and live only on GitHub; tasks state execution only, including for problems found in this repository (draft)
+- [task] Rule state still counts superseded criteria, so plan-close refuses a stale rule nothing can re-verify (archived)
+- [task] Checking out main in a nested worktree blocks every session's integrate and nothing refuses it at checkout (archived)
+- [task] lore done's no-new-tests refusal suggests a captured red that lore evidence --capture refuses for non-test commands (draft)
+- [task] lore bootstrap names only the business baseline root; the architecture tree root is unreachable from session start (archived)
+- [task] The AC-DC2-4 uninstall-reversal test assumes a context block that init no longer writes (archived)
+- [task] Root CLAUDE.md architecture pointer names BASE-095, which lore get cannot resolve (archived)
+- [task] Module CLAUDE.md files do not link their architecture module cards (BASE-080..091) (archived)
+- [task] Mirror human ids diverge from lore get: SPEC-205 names two different specs; BASE-n is unresolvable (draft)
+- [task] Shipped guidance teaches 'lore evidence --result pass --output-tail-file', which the evidence gate refuses (archived)
+- [task] test:file reads a shared fixed report path, so concurrent runs from different worktrees overwrite each other's verdict (archived)
+- [task] Integrate lands a branch that deletes or renames a path a spec or knowledge doc code-anchors, leaving drift for every session (draft)
+- [task] A draft spec cannot drop a rule it proposed: withdraw refuses a proposed add and only deprecating the whole spec releases it (draft)
+- [task] Delete the DocMan-era files under docs/ outside docs/requirements (archived)
+- [task] Root CLAUDE.md names the architecture tree (BASE-095) as the current-state architecture authority (archived)
+- [task] Turn-end helper review never converges: a timed-out review marks nothing, so the unjudged set only grows (draft)
+- [task] Two AC-DC2-19 census tests reach the repository corpus and are red on main under the test sandbox (archived)
+- [task] The store module memory file is over its byte ceiling on main (archived)
+- [task] [Skill:fix] lore migrate schema writes its audit row around the single write route; two write-path scans are red on main (archived)
+- [task] [Skill:fix] The edit-time gate locks whole files, so disjoint edits to a hotspot like app.ts serialise across sessions (archived)
+- [task] [Skill:implement] Corpus schema upgrades run only through lore migrate schema; every other command refuses an older schema (archived)
+- [adr] Facts live once next to what they describe, corpus changes ride with their branch, and enforcement sits at the merge point (approved)
+- [adr] A structural gate refuses only what an excuse cannot satisfy: undeclared commands refuse, the site census reports (approved)
+- [task] [Skill:fix] A superseded criterion is still counted by coverage and the done floor, and can be superseded only from the CLI (archived)
+- [task] [Skill:fix] Burn the baseline-coverage debt ledger to zero (170 sites revealed by the honest census) (archived)
+- [task] [Skill:fix] Assess output prints the prompt version as vv5 on CLI and MCP (approved)
+- [task] [Skill:fix] write-unattested test is red on main: its lore done fixture no longer clears the done floors (archived)
+- [task] [Skill:fix] Landing lookup never matches: claimed names hold the worktree path, integrate names the merge by branch (archived)
+- [task] [Skill:fix] A blocks edge in a feature-branch plan is met when the blocker landed on the plan's integration branch (archived)
+- [task] [Skill:fix] The edit-time scope file blocks worktree cleanup and escalates a decision on every finished task (archived)
+- [task] [Skill:fix] Seat list judges merged against a literal 'main' while seat remove uses the checked-out base branch (archived)
+- [task] [Skill:fix] An owned-by site mapping that points at a leaf in the lease's scope is authorized on any leaf (archived)
+- [task] [Skill:fix] setup-service hook-registration test is red on main after two hooks landed (archived)
+- [task] [Skill:fix] baseline adopt from a linked worktree writes config then has its audit row refused (half-write) (archived)
+- [task] integrate ADR and dispatch rule name the configured floor and its measured cost (archived)
+- [task] [Skill:fix] A task's commit range is recorded at landing, so a later re-claim cannot replace it (archived)
+- [task] [Skill:fix] A deleted spec's change set stops reserving rules; change-set entries can be withdrawn; foreign refusal names its target kind (archived)
+- [task] [Skill:implement] Edit-time anchor gate: a helper's edit outside its anchors is declared (overlap-checked) or denied before it happens (archived)
+- [task] [Skill:fix] lore verify from a linked worktree is refused on its derived baseline write — regression from DCL-3b (archived)
+- [knowledge] Measured cost of a lore integrate attempt (2026-10-19) (draft)
+- [task] [Skill:fix] The one write route honours claim-scoped corpus authoring (corpus_scope lease) for worktree writes — regression from DCL-3 (archived)
+- [task] integrate records per-attempt phase durations so the floor cost assumption is checkable (archived)
+- [adr] A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT (approved)
+- [task] [Skill:fix] lore assess derives a plan's diff without the main commits its task branches merged in (archived)
+- [task] [Skill:implement] An isolated helper's Write/Edit outside its worktree is refused before it happens (archived)
+- [task] integrate corpus-snapshot test stages a genuinely older schema instead of rewinding user_version (archived)
+- [task] plan-close stale-rule refusal names the stale citing criterion and the command that clears it (archived)
+- [task] [Skill:fix] A terminal task holds no claim by definition; claim and lore gate share one gate-context builder (archived)
+- [task] [Skill:docs] Root CLAUDE.md and shipped agent text describe the retired bun test runner (archived)
+- [task] [Skill:implement] Shipped CLOSE rule: a lesson is finished only when it changes a mechanism (archived)
+- [task] lore approve 的 review「独立性」不校验 actor：改→自审→自批可在单 actor 内闭环 (draft)
+- [task] evidence --ac gate only validates against the plan's direct governing spec, breaking AC traceability across an implements chain (draft)
+- [task] A data-migration criterion whose red state the migration itself destroys cannot satisfy lore done's red-first floor once the red was not recorded as evidence (draft)
+- [task] An AC whose only task is archived without an ac_scope can never get a fresh attested pass (draft)
+- [task] A phase carries only a name, so 'this phase's criteria' is unfalsifiable and an empty phase vacuously satisfies the one implicit condition (draft)
+- [task] Eight of nine red-first rows on an archived plan are self-reported, because the dispatch template prescribed a flag that forecloses attestation (draft)
+- [task] pre-bash-git-safety-gate reports 'could not read the worktree status (git failed)' for git worktree remove $VAR, because it parses the literal segment and never expands shell variables (draft)
+- [task] Landing a spec's rule change set (plan close / lore rule apply) leaves each touched leaf's prose contradicting the new rules, and re-approval does not stop on the judge's reject (draft)
+- [task] lore approve on a doc type outside judgment_required_types says nothing when the latest review judgment is reject (draft)
+- [task] lore reject on an in-review doc moves it to draft without writing a version row, so the version log still shows in-review at the current version (draft)
+- [task] [Skill:fix] A read-only agent's lore command that writes the project corpus is refused at the service layer (draft)
+- [task] [Skill:fix] lore issues --verify and --sync disagree on the same issues, and a GitHub close never reaches the corpus (draft)
+- [task] [Skill:fix] Turn-end helper review handles a helper whose working copy was already removed after landing (archived)
+- [task] [Skill:fix] Turn-end helper review attributes a SendMessage-resumed helper's edits to the claim its worktree holds (archived)
+- [task] [Skill:debug] lore evidence --capture of bun run typecheck exits 1 where the direct run exits 0 (approved)
+- [task] [Skill:fix] Turn-end helper review judges only repository content: gitignored paths are not anchor findings (archived)
+- [task] [Skill:fix] The ownership check reads red-first ACs from the corpus's allow-missing-path declarations; the JSON not-built ledger is deleted (archived)
+- [task] [Skill:fix] INT-T12 lore integrate runs the floor against a snapshot of the corpus so a migration branch can land (archived)
+- [task] [Skill:fix] Implementer agent writes temp files only inside its worktree or a mktemp dir (archived)
+- [adr] Main advances only by lore integrate: per-session integration worktree, compare-and-swap fast-forward, the shared checkout is a read-only view (approved)
 - [task] Hotfix F1 review tree_position rejects every parentless spec (archived)
 - [task] The handoff and UAT carve-out in the foreign-write guard is unnamed in the spec and unasserted by any AC (archived)
 - [adr] Ambient process state is read once at the entry: one resolved Invocation, rooted writes, owned-only prune (approved)
@@ -116,7 +255,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [adr] TG-1 test runner decision: measured comparison of bun-only, vitest-on-Bun and a storage seam, plus compiled-binary test audit (approved)
 - [task] lore done's test-anchor refusal demands an ATTESTED unfiltered pass, but its predicate never checks attestation — an unattested --capture row satisfies it (draft)
 - [task] One unknown key discards the whole .lore/config.yaml and the error then claims nothing was configured: silence, not the non-abort, is the defect (draft)
-- [task] A phase carries only a name, so 'this phase's criteria' is unfalsifiable and an empty phase vacuously satisfies the one implicit condition (draft)
 - [task] review_judgments pins doc_version but nothing re-judges on edit: 227 of 232 judged docs carry a judgment for a version that no longer exists (draft)
 - [task] lore evidence --output-tail keeps the last 4000 chars while vitest prints failures first, so a red's attribution is lost by construction (draft)
 - [task] KNOWLEDGE_SUB_TYPES has three hand-written prose copies, all incomplete, and the test guarding the error message is an alternation that any single member satisfies (draft)
@@ -144,7 +282,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] In-review documents are invisible to lore pending (even --all) and to lore review --pending (draft)
 - [task] lore approve and lore reject act on a soft-deleted document, while lore review reports it as not found (draft)
 - [task] lore review prints the judge prompt version as 'vv2' (double v) (draft)
-- [task] lore reject on an in-review doc moves it to draft without writing a version row, so the version log still shows in-review at the current version (draft)
 - [task] Removing the last acceptance criterion from an approved spec leaves it approved with zero criteria, though approval refuses a spec with zero criteria (draft)
 - [task] lore review <doc> --pending silently ignores the named document and reviews the whole queue (draft)
 - [task] lore pending accepts an unknown --type or an unparseable --since and shows an empty queue with exit 0 (draft)
@@ -175,13 +312,11 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] MCP lore_get does not carry the Implements / Implemented by views that lore get prints (CLI/MCP parity) (draft)
 - [task] An AC citing a retired rule can be re-cited only through lore ac set (which demotes the spec): lore ac cite refuses both adding and removing (draft)
 - [task] Rule verification state ignores architecture standard rules: AS-n rules are citable but lore baseline tree --states / --rule only reads business leaves (draft)
-- [task] An AC whose only task is archived without an ac_scope can never get a fresh attested pass (draft)
 - [task] lore create spec with uncited inline criteria is refused with a hint (lore ac add <slug> ... --cite) for a spec that was never created (draft)
 - [task] lore rule move writes two leaf version rows with no harness_run (draft)
 - [task] CLI renders and RunService open a second SQLiteStore instead of using the App's store (draft)
 - [task] A single acceptance criterion cannot be marked superseded by another spec's criterion, so a retired AC re-verifies green against the new behaviour (draft)
 - [task] lore done prints 'worktree: gone' and skips cleanup when the claim recorded a branch name instead of a path; lore claim --worktree accepts any string (draft)
-- [task] lore approve on a doc type outside judgment_required_types says nothing when the latest review judgment is reject (draft)
 - [task] Migration services rewrite locked records' titles/fields without the record-edit gate (draft)
 - [task] record-lock treats an archived never-approved knowledge record as ever-approved (draft)
 - [task] lore done's per-anchor test floor matches the anchor path literally, so an attested run under (cd packages/lore && bun test tests/...) does not count (draft)
@@ -193,14 +328,12 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] lore rule add|set demotes an approved baseline leaf to draft without saying so on stdout (draft)
 - [task] A baseline rule decided ahead of its implementation has no honest lifecycle value; every review escalates on 'live but not built' (draft)
 - [task] lore done's unfiltered test-file floor ignores the e2e oracle: an attested 'bun run build && … bun test <file>' AC pass never satisfies its own anchor (draft)
-- [task] A data-migration criterion whose red state the migration itself destroys cannot satisfy lore done's red-first floor once the red was not recorded as evidence (draft)
 - [task] plan-promote accepts an AC routed to a phase with zero tasks, so lore verify has no task to attest it on (draft)
 - [task] lore review rejects every not-yet-started task on evidence_completeness, so the pre-claim review verdict carries no signal (draft)
 - [task] lore setup --check reports 'assets in sync' while manifest-tracked files the payload no longer ships are still installed (draft)
 - [task] lore report-issue from a helper agent after lore release files the GitHub issue but its local corpus task is refused (gate:corpus-write:foreign-provenance) (draft)
 - [task] lore init's .lore/.gitignore does not ignore the machine-local project check cache (.lore/.lore-project-check.json) (draft)
 - [task] pre-bash-git-safety-gate classifies git worktree remove of a relative path as UNSAFE ('could not read the worktree status') when the shell cwd is not the repo root (draft)
-- [task] Landing a spec's rule change set (plan close / lore rule apply) leaves each touched leaf's prose contradicting the new rules, and re-approval does not stop on the judge's reject (draft)
 - [task] Malformed {{lore:...}} tokens (e.g. {{lore:Bad}}) pass through expansion silently and can ship (draft)
 - [task] An AC command that starts with an absolute cd silently measures the main checkout under lore verify --falsify and worktree execution roots (draft)
 - [task] A pass evidence row that was later disproved cannot be retracted, so it keeps counting toward its AC's pass total (draft)
@@ -211,7 +344,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] lore worktree sweep marks a worktree an agent is actively using as removable (draft)
 - [task] lore setup records settings.json's sha in the manifest BEFORE applyLanguageProjections writes language into it, so the first install's manifest is wrong and the next run silently rewrites it (draft)
 - [task] ac_scope resolution counts a deprecated spec as a candidate, so an AC id re-declared on its successor spec becomes ambiguous (draft)
-- [task] pre-bash-git-safety-gate reports 'could not read the worktree status (git failed)' for git worktree remove $VAR, because it parses the literal segment and never expands shell variables (draft)
 - [task] A string option whose value starts with -- is rejected as an unknown option (draft)
 - [task] lore agent create takes the name as --name but agent revoke takes it as a positional (draft)
 - [task] lore eval migration imports into the live corpus with the secret scan forced off; --skip-secret-scan is a no-op (draft)
@@ -315,9 +447,7 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] No CLI or MCP read shows which criteria are exempted from the citation gate; lore status prints only a count (draft)
 - [task] A rule proposed in a draft spec's change set cannot be corrected or withdrawn before it lands (draft)
 - [task] No way to edit a plan phase's description after tasks reference it (draft)
-- [knowledge] Proposals moved out of the defect channel (2026-10-16 audit, BR-1153) (draft)
 - [task] Corpus-authoring tasks have no legal executor: the dispatch-isolation gate forces implementers into worktrees, and worktrees are refused corpus writes (gate:corpus-write:foreign-provenance) (draft)
-- [task] Eight of nine red-first rows on an archived plan are self-reported, because the dispatch template prescribed a flag that forecloses attestation (draft)
 - [task] Two service-layer sites construct another service directly instead of receiving it from app.ts (RuleService -> ungated CorpusService, baseline-status -> AcExemptionService) (draft)
 - [task] A trailing fall-through makes a guard-ORDER invariant unfalsifiable: reordering classifyFeedbackUpstream's vendor guard keeps the whole suite green (draft)
 - [task] AC-LL-10 source scan cannot see createAppWithWriteContext (draft)
@@ -374,7 +504,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] task-claim / plan-promote refusal text still says the ancestor spec must be "approved" after active counts (draft)
 - [task] lore run attest-input hard-codes mcp__lore__ prefix: renamed MCP servers still not attested (draft)
 - [knowledge] Root CLAUDE.md tier-2 text: verbatim body before the content-tiers compression (2026-10-15) (approved)
-- [knowledge] Delivery-tier audit of every always-loaded lore rule: 6 backstopped rules can move to skills, 41 have no mechanism (draft)
 - [adr] Helper agent types split only on mechanism-enforced capability; roles are composed per dispatch (approved)
 - [adr] Rule delivery tiers (gate / hook / skill) and optimistic interception at the nearest cheap-repair checkpoint (approved)
 - [task] Pin the CLAUDE.md contract's Content Tiers rule with regression assertions (archived)
@@ -518,7 +647,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] The orphan-branch sweep asks a content question with a SHA predicate, and a red-first test task has no legal terminal state (approved)
 - [knowledge] A worktree without its own bun install silently tests against the main checkout's @lore/core — a false-oracle in both directions (approved)
 - [knowledge] Three mechanism gaps measured while dispatching the GitHub-intake plan: red-first tasks are un-archivable, falsifier declaration demotes a spec, and --merged is unsafe for worktree cleanup (approved)
-- [adr] A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT (approved)
 - [knowledge] A gate at the end of a && chain is never invoked while main is red, and the blast radius my dispatch bundle carried was wrong by 10 sites (approved)
 - [knowledge] Five gaps from landing plan A's type foundation — two same-batch worktrees on a stale base, a compile oracle green under its own falsifier, and a shipped arming constant that never arms downstream (approved)
 - [knowledge] Ten measured gaps from landing plan A wave 1 — and the one that deadlocked the whole plan shape (approved)
@@ -593,7 +721,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] De-vacuuming AC-ACQ-7 exposed three sibling faults it was masking: a withdrawn false-positive bound, an identically vacuous AC-ACQ-6, and a drifted verbatim fixture (draft)
 - [task] AC-ACQ-7 is vacuous by construction and its oracle never reads the corpus, hiding a 5-of-5 false-positive rate in the shipped quantifiability lint's hyphen-boundary matching (archived)
 - [task] MCP lore_create.supersedes still creates-then-fails — the type precheck landed in the CLI command, above the shared flow both surfaces document as the anti-divergence seam (archived)
-- [task] lore approve 的 review「独立性」不校验 actor：改→自审→自批可在单 actor 内闭环 (draft)
 - [task] lore done 的红先行 gate 不读 capture_source：转录文本即可满足 expected-fail 要求 (draft)
 - [task] lore ac add/set 静默把 approved spec 打回 draft，进而阻塞并发批次中后发 task 的 claim (draft)
 - [task] lore done 不检查 AC 的最新 attestation 是否 pass —— task 可在 attested-fail 状态下被归档（不可逆） (draft)
@@ -772,19 +899,14 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] Retro — a green AC over a store-free layer let a schema change ship dead: we reproduced the consumer-reported integration-reachability defect while fixing issues (approved)
 - [task] Reject placeholder command strings at evidence WRITE time (read path must stay tolerant) (archived)
 - [knowledge] Retro — plan-close's recovery text is not executable: omitted exempt_kind, and a merge instruction that collides with dedicated writers (approved)
-- [task] evidence --ac gate only validates against the plan's direct governing spec, breaking AC traceability across an implements chain (draft)
 - [knowledge] Product chain round two: worked examples, decomposition layer, interview instrument, anchored scoring (approved)
 - [adr] Product skill chain: derive features via OST, execute graded validation, benchmark-first (draft)
 - [task] spec-create gate's missing-rule-doc remediation points to a lore dev-repo script (bun scripts/seed-write-spec-rule.ts) that consumers do not have (draft)
 - [task] lore init does not seed the verification-profiles config template despite SPEC-058 D6 documenting verbatim seeding on fresh corpora (draft)
 - [task] Multi-root corpus incoherence: data model allows unlimited parentless PRDs but bare 'lore tree' renders a single root and root-PRD inference picks an arbitrary PRD (draft)
-- [knowledge] Full-system spec compliance audit 2026-07-27 — 85/11/1 verdicts, remediation dispatch, open decisions (draft)
 - [plan] Audit remediation 2026-07-27 — parent-cycle write guard, MDX unknown-component strip, actor-identity guard (archived)
-- [knowledge] Session process review — 2026-07-27 context-refresh incident → CTX Phase 4 hardening (draft)
-- [knowledge] Stale in-context snapshot replayed as current state in a cross-plan report — timeless-context bias, mechanized at reporter layer (draft)
 - [adr] Distribution-first: every improvement names its consumer-delivery surface before it counts as landed (draft)
 - [task] CLI gap: no safe update path for adr extra.decision_status — add lore set --decision-status (draft)
-- [knowledge] Context verb family autopilot run — verify task-scoping semantics, legacy-shape upgrade paths, TDD-paired worktree dispatch (draft)
 - [adr] CLAUDE.md Specs section is pointer-only — per-spec index lines retired to the corpus (approved)
 - [adr] Context capability is a first-class lore verb family — init-context skill retired, CLAUDE.md becomes two-zone (approved)
 - [task] Dogfood pin: root CLAUDE.md must carry the claude-md-contract pointer line (draft)
@@ -877,43 +999,11 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] Retro — e2e corpus-pollution incident (port-squatter absorbed write suite) (approved)
 - [plan] CLI v3 Roadmap — State Alignment + New Surface (archived)
 
-Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `<ChildrenOf />` tag; only structured consumers (the dashboard) render it inline. SPEC-032 makes text projections splice placeholders so §5 reads as a tree everywhere.
+Text readers: run `lore tree <this-prd>`, or use the dashboard tree view. The product's current form is the baseline tree (`baseline-root`); the architecture's is `baseline-lore-architecture`.
 
-## 6. Phased Delivery
+## 6. Delivery State
 
-### Phase 1: CLI + Local Store (M1-3)
-
-Replaces DocMan v1. Service layer + CLI adapter + local SQLite.
-
-| Month | Milestone |
-|---|---|
-| M1 | Tech spike (Bun+SQLite+MDX). Service layer + store. `init`, `create`, `get` |
-| M2 | Full CLI taxonomy. PRD-as-living-root rendering. `list`, `search`, `tree`, `link` |
-| M3 | Review workflow. Version history. Migration v1. **Gate: Lore manages its own corpus** |
-
-**Kill**: P1 not transformative vs DocMan v1 → pause before P2.
-
-### Phase 2: MCP + Sync + Auth + HTTP (M4-6)
-
-Multi-user multi-agent shared corpus.
-
-| Month | Milestone |
-|---|---|
-| M4 | MCP adapter on service layer. Agent credentials. Cloud sync via Turso |
-| M5 | Conflict resolution. Multi-user auth. HTTP API. `lore watch` |
-| M6 | Team adoption: 3+ projects. **Gate: success metrics check** + **output-contract gate: `check-tree` drift = 0; no stage skipped in last 3 closed plans (§13.2)** |
-
-**Kill**: <50% adoption, sync conflicts >1/week, teammate reverts to old tools >1 week.
-
-### Phase 3: Web UI + Polish (M7-9)
-
-Gated on Phase 2 metrics.
-
-| Month | Milestone |
-|---|---|
-| M7 | Read-only web UI: PRD tree, doc detail, search |
-| M8 | Review queue in web. TUI evaluation |
-| M9 | Polish. Internal GA |
+The phase plan this section once held (P1 CLI + local store, P2 MCP + sync + HTTP, P3 web UI) is delivered: CLI, MCP and HTTP adapters, Turso sync and the dashboard all ship in the one `lore` binary. Current work is the set of active plans (`lore bootstrap`); progress is read from the corpus, not from this section.
 
 ## 7. Cross-Cutting Constraints
 
@@ -923,65 +1013,58 @@ Gated on Phase 2 metrics.
 |---|---|---|
 | NFR-1 | CLI cold-start | < 200ms p95 (lazy init) |
 | NFR-2 | Local query (FTS5) | < 50ms p95 / 1k docs |
-| NFR-3 | Sync cycle (P2) | < 2s p95 incremental |
-| NFR-4 | Concurrency (P2) | Optimistic locking, doc-level version vectors. Never silently resolve conflicts |
+| NFR-3 | Sync cycle | < 2s p95 incremental |
+| NFR-4 | Concurrency | Optimistic locking, doc-level version vectors. Never silently resolve conflicts |
 | NFR-5 | Secrets | CLI never logs API keys; corpus excludes .env |
-| NFR-6 | Encryption (P2) | TLS + at-rest mandatory. Client-side E2EE opt-in. Local SQLite encrypted |
+| NFR-6 | Encryption | TLS + at-rest mandatory. Client-side E2EE opt-in. Local SQLite encrypted |
 | NFR-7 | Audit | Append-only, tamper-evident. Writes + auth + sync events. Separate from corpus storage |
-| NFR-8 | A11y (P3) | WCAG 2.1 AA, ARIA tree pattern |
+| NFR-8 | A11y | WCAG 2.1 AA, ARIA tree pattern |
 | NFR-9 | i18n | English first, i18n-ready |
-| NFR-10 | Offline (P2) | Full offline against local SQLite. Token TTL 7 days. Revocation check on reconnect |
+| NFR-10 | Offline | Full offline against local SQLite. Token TTL 7 days. Revocation check on reconnect |
 | NFR-11 | Distribution | Homebrew + npm |
 | NFR-12 | Architecture | Service layer = single source of business logic. Adapters are thin. Protocol-ready interchange format. `src/service/`, `src/store/`, `src/adapters/{cli,mcp,http}/` |
-| NFR-13 | Backup (P2) | Turso managed backups. Soft-delete 30-day window. No permanent delete without human confirm |
-| NFR-14 | Rate limit (P2) | 60 writes/min per agent. Alert at 100/5min |
-| NFR-15 | AI judge calls (§14) | Per-doc prompt bounded by `ai.review.*` char budgets (SPEC-026 `ai.assess.*` precedent). Batch review = ≤N judge calls for N docs, no hidden fan-out. Judge call count + duration recorded in telemetry — cost is visible before it is optimized |
+| NFR-13 | Backup | Turso managed backups. Soft-delete 30-day window. No permanent delete without human confirm |
+| NFR-14 | Rate limit | 60 writes/min per agent on the corpus write path. Alert at 100/5min. (Unlike issue filing, a corpus write storm corrupts the shared snapshot, Q1.) |
+| NFR-15 | AI judge calls | Per-doc prompt bounded by `ai.review.*` char budgets (SPEC-026 `ai.assess.*` precedent). Batch review = ≤N judge calls for N docs, no hidden fan-out. Judge call count + duration recorded in telemetry — cost is visible before it is optimized |
 
 ### Security (cross-cutting)
 
 - **Threat model**: STRIDE across 4 surfaces (CLI local, MCP, sync, web)
-- **Agent containment (P2)**: Rate limit + human confirm for destructive ops + instant revocation + version rollback
+- **Agent containment**: Rate limit + human confirm for destructive ops + instant revocation + version rollback
 - **MDX injection**: Whitelist 7 named components only. Props sanitized. `<Embed>` internal-only. CSP headers on web
-- **Identity**: P1 = local user via config. P2 = API key per agent, server-verified, rotatable/revocable
+- **Identity**: a local user via config, or an API key per agent, server-verified, rotatable/revocable; every write carries an attested run or a registered human session
 
 ## 8. Success Metrics & Kill Criteria
 
-| Metric | Target (month 6) | Measurement |
+| Metric | Target | Measurement |
 |---|---|---|
-| New docs in Lore | ≥ 90% | Weekly count |
-| Active projects | ≥ 3 | `lore status` |
-| Human users | ≥ 3 | Auth records |
-| AI agents writing | ≥ 3 | Agent registry |
-| Lore calls per agent session | ≥ 5 | Telemetry |
-| Context from Lore vs pasted | ≥ 60% | Session logs |
-| Duplicate-decision docs | 0/month | Audit log |
-| Voluntary side-project use | ≥ 1 teammate | Self-report |
+| Escaped defects | falling trend | issues filed against a landed plan within 14 days of plan close, per plan |
+| Rework | falling trend | tasks reopened or fix tasks citing a landed plan |
+| Landing failures | falling trend | typecheck/build failures at `lore integrate` |
+| Human decisions | only the three ADR classes | decision log |
+| Context per session | falling trend | bytes an agent must read (rules, injections, command output) |
+| Checks that never catch | proposed for removal | per-check run and catch counts, ≥30 days and ≥50 runs |
 
-**Kill criteria**: See §6 per-phase gates. Global: if Anthropic/Cursor ships multi-vendor shared memory → decision gate ADR. **Output-contract theater check**: if the contract is bypassed (`--force`, self-approval without review, or a stage skipped) in >30% of plans over any 4-week window → the gates add friction without compliance; trigger a decision-gate ADR to simplify or drop them. **Feedback-loop calibration check (§14.5)**: 8 weeks of shadow with weekly judgment volume <10 or an unreachable Wilson bound → freeze at `assist`, decision-gate ADR, SPEC-036+ not built.
+**Kill criteria**: if Anthropic/Cursor ships multi-vendor shared memory → decision-gate ADR. **Theater check**: a check, gate or review step that serves neither Q1 nor Q2, or catches nothing real over its observation window, is removed rather than kept "just in case".
 
 ## 9. Risks
 
+IDs in sections 3, 9 and 10 are stable addresses; a retired ID is never reused.
+
 | ID | Risk | Sev | Mitigation |
 |---|---|---|---|
-| R1 | Second-system syndrome | H | 3-phase delivery; P1 must be useful standalone |
-| R2 | Multi-agent merge unsolved | H | v1.0 optimistic locking; CRDT only for outline ordering; defer field-level merge |
+| R1 | Second-system syndrome: checks and gates accumulate faster than they catch defects | H | Delete by default; every check names the Q1/Q2 property it serves and counts its catches |
+| R2 | Multi-agent merge unsolved | H | Optimistic locking (version CAS) on every write; CRDT only for outline ordering; no field-level merge |
 | R3 | Turso ops burden | M | Managed tier; StoreInterface abstraction |
-| R4 | Web UI scope creep | LOW | Deferred to P3 SHOULD; HTTP API is the MUST |
-| R5 | v1 migration incomplete | H | FR-10 MUST P1; dry-run + validation before cutover |
 | R6 | Anthropic ships native memory | **H** | Decision gate in kill criteria. Protocol-aware arch ensures corpus model survives as standard |
-| R7 | Bun compile issues | M | M1 tech spike validates; fallback: Deno compile / Node SEA |
 | R8 | Agent write storms | M | Rate limit + review gate + version rollback |
 
 ## 10. Assumptions
 
 | ID | Assumption | Confidence | Validation |
 |---|---|---|---|
-| A1 | Multi-agent shared memory is real pain | M | Consciously unvalidated externally. P1 kill criteria provide early signal |
-| A2 | Web UI adds value vs CLI-only | M | P3 is SHOULD; only built if P2 metrics pass |
-| A3 | PRD-as-living-root scales to 500 docs | M | P1 mockup with real v1 data |
-| A4 | Bun + libSQL/Turso stack works | H | M1 tech spike |
-| A5 | 3-phase delivery achievable solo + AI | M | Phase gates at M3 and M6 |
-| A6 | Weekly lifecycle-decision volume during active development is high enough (≥10/week) to calibrate §14 unlock gates in useful time | M | Measured in R1 shadow mode; §8 feedback-loop kill criterion is the guard |
+| A1 | Multi-agent shared memory is real pain | M | Consciously unvalidated externally; measured by internal use |
+| A3 | PRD-as-living-root scales to the live corpus | M | Measured on this repo's corpus (3k+ docs) |
 
 ## 11. Competitive Landscape (stub)
 
@@ -992,14 +1075,12 @@ Gated on Phase 2 metrics.
 | Standards | `.context`, `llms.txt`, MCP | Structured navigable corpus vs static files |
 | Dead predecessors | Mem.ai, Almanac, Dust.tt, Slab | Internal-first avoids GTM failure; must avoid complexity traps |
 
-**Action**: Complete competitive analysis before design phase.
-
 ## 12. Out of Scope
 
-- v2.1+: Agent-memory protocol RFC (extracted from v1.0 architecture)
-- v2.2+: Enterprise features (SSO, RBAC, audit retention)
-- v2.x: Field-level conflict resolution
-- v3.0: Real-time CRDT collab, mobile, vector search
-- §14 explicit exclusions: code-diff review (owner decision 2026-07-06 — the loop's object is corpus document lifecycle, not git diffs); external workflow-orchestration engines (the loop is built on Lore's own service layer + config, no new runtime dependency); removing the human from the loop entirely (I2 sampling floor is permanent at every autonomy level)
+- Agent-memory protocol RFC (extracted from the current architecture)
+- Enterprise features (SSO, RBAC, audit retention)
+- Field-level conflict resolution
+- Real-time CRDT collab, mobile, vector search
+- External workflow-orchestration engines: the loop is built on Lore's own service layer and config, with no new runtime dependency.
 
 ---

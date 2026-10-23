@@ -3,10 +3,10 @@ id: KN-650
 type: knowledge
 role: knowledge
 title: "Pilot v2 placement: 1.4% kill-line disagreement, 12.9% full-granularity, 68 of 70 ACs out of branch"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-173
 ---

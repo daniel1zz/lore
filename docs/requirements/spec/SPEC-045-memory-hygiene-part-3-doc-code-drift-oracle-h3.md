@@ -6,7 +6,7 @@ title: "Memory hygiene part 3: doc-code drift oracle (H3)"
 status: approved
 priority: high
 created: 2026-07-12
-updated: 2026-10-17
+updated: 2026-10-19
 tags: [memory-hygiene, drift, code-anchors, spec-045]
 ---
 # SPEC-045 — Memory hygiene part 3: doc-code drift oracle (PRD §16 H3)
@@ -330,7 +330,7 @@ here so a reader who remembers the old spelling learns it is gone rather than as
   script: test — bunx vitest run packages/core/tests/code-anchors.test.ts
 - [⚑] [script] AC-DR-2: Service orchestration with in-memory FsProbe: anchors collected across ALL non-deleted specs with status_breakdown; per-unique-path probe dedup (counting-probe: N specs one path -> 1 stat); soft-deleted excluded; unarmed -> {armed:false, consistent:true}; a probe stub that THROWS on one path yields a probe_error drift row while every other anchor still gets checked (no batch abort); service module never imports node:fs (source-text grep oracle)
   script: test — bunx vitest run packages/lore/tests/unit/service/drift-check-service.test.ts
-- [⚑] [script] AC-DR-3: Authoring RMW: addCodeAnchors/removeCodeAnchors write normalized entries preserving spec_kind + acceptance_criteria + every sibling key; CAS via expected_version surfaces CONFLICT on concurrent bump (STATE), never lost-update; invalid grammar (bad identifier, symbol-on-dir, .. path, # on task target) VALIDATION_ERROR naming the anchor; version bumps exactly once; task-target byte-identical (REGRESSION); D6a: _createImpl and set() with malformed extra.code_anchors reject loud, valid pass
+- [⚑] [script] AC-DR-3: Authoring RMW: addCodeAnchors/removeCodeAnchors write normalized entries preserving spec_kind + acceptance_criteria + every sibling key; CAS via expected_version surfaces CONFLICT on concurrent bump (STATE), never lost-update; invalid grammar (bad identifier, symbol-on-dir, .. path) VALIDATION_ERROR naming the anchor; version bumps exactly once; task-target byte-identical (REGRESSION); D6a: _createImpl and set() with malformed extra.code_anchors reject loud, valid pass
   script: test — bunx vitest run packages/lore/tests/unit/service/drift-check-service.test.ts
 - [⚑] [script] AC-DR-4: G11 seeded fixture (budget-conscious: ONE mkdtemp corpus, PRD seeded FIRST then specs via --parent + --code-anchor, sequential file mutations, no per-case re-init): all-verified -> exit 0 consistent; EACH drift class (delete file, rename export, empty dir, never-existing path, dir-anchor on plain file) -> exit 3 with spec slug + anchor + kind + literal repair hint, NO seeded-missing anchor EVER reported consistent; --check-drift --check-tree composed exit = drift-3-wins-over-4 precedence; unarmed -> exit 0 + armed:false; workflow.drift.enabled:false -> exit 0 + explicit disabled note; plain lore status shows store-only armed count with zero probing
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-drift.bun.test.ts

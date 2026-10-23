@@ -3,10 +3,10 @@ id: KN-613
 type: knowledge
 role: knowledge
 title: "Assessment: Fix #104: the site census follows dependency-injected functions (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-169
 links:

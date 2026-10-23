@@ -44,11 +44,11 @@ AC-DN5-1 (v5 current, v1–v4 byte-frozen, rule text carries both lists), AC-DN5
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-DN5-1: The current review prompt version is v5; its design_necessity rule lists the four non-findings (product semantics, interface contract, outside-input validation, acceptance-test safety) and the four findings (own-invariant guard check/scanner/ledger/allowlist, stopgap seam, silent fallback, transitional or phased state) and requires an explicit per-item classification; v1-v4 builders are byte-identical to before.
+- [⚑] [script] AC-DN5-1: The current review prompt version is v5; its design_necessity rule lists the four non-findings (product semantics, interface contract, outside-input validation, acceptance-test safety) and the four findings (own-invariant guard check/scanner/ledger/allowlist, stopgap seam, silent fallback, transitional or phased state) and requires an explicit per-item classification; v1-v4 builders are byte-identical to before.
   script: test — bunx --bun vitest run packages/lore/tests/unit/ai/review-template-v5.test.ts && echo 'AC-DN5-1 PASS: v5 current, v1-v4 frozen'
   other_command=2
-- [·] [script] AC-DN5-3: On an approved spec, lore rule propose <spec> amend <BR-n> --statement <s> --correction <r> rewrites that spec's proposed add entry in place (same id and leaf), keeps the spec approved and writes one version carrying the correction reason; without --correction it exits 4 naming the record-edit gate; for an id that is live or proposed by another spec it exits 4 naming the id.
+- [⚑] [script] AC-DN5-3: On an approved spec, lore rule propose <spec> amend <BR-n> --statement <s> --correction <r> rewrites that spec's proposed add entry in place (same id and leaf), keeps the spec approved and writes one version carrying the correction reason; without --correction it exits 4 naming the record-edit gate; for an id that is live or proposed by another spec it exits 4 naming the id.
   script: test — bunx --bun vitest run packages/lore/tests/integration/rule-propose-amend.test.ts && echo 'AC-DN5-3 PASS: proposed rule amended on a locked spec; non-proposed id refused'
   other_command=2
-- [·] [human] AC-DN5-2: Under prompt v5 the real judge rejects the patch-shaped fixture on design_necessity and raises no design_necessity finding on the corrected end-state fixture, two runs each.
+- [○] [human] AC-DN5-2: Under prompt v5 the real judge rejects the patch-shaped fixture on design_necessity and raises no design_necessity finding on the corrected end-state fixture, two runs each.
   human: Fixtures packages/lore/tests/fixtures/design-necessity/{patch-shaped-spec.md,end-state-spec.md}, end-state corrected per D1 (no legacy/skip state, necessity stated). Throwaway corpus, dist/lore with v5, lore review twice each. Expect patch-shaped: reject with design_necessity naming ledger/ratchet, seam, transitional bridge; end-state: no design_necessity finding in either run.

@@ -3,10 +3,10 @@ id: TASK-1481
 type: task
 role: plan
 title: "[Skill:design] CLAUDE.md eviction requires a corpus write a worktree implementer is refused"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-197
 plan: PLAN-197

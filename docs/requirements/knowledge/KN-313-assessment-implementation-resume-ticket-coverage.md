@@ -3,10 +3,10 @@ id: KN-313
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — resume-ticket coverage floor (ordinal render + Stop-time enforcement) (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-100
 links:

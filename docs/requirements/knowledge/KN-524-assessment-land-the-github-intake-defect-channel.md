@@ -3,10 +3,10 @@ id: KN-524
 type: knowledge
 role: knowledge
 title: "Assessment: Land the GitHub-intake defect channel: runner, cap removal, intake, migration, transport removal, projection (2026-08-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-138
 links:

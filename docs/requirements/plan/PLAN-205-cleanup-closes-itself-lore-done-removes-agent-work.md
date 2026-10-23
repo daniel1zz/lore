@@ -3,7 +3,7 @@ id: PLAN-205
 type: plan
 role: plan
 title: "Cleanup closes itself: lore done removes agent worktrees; agents stop stashing and self-matching waits"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-18
 updated: 2026-10-18

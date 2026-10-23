@@ -3,10 +3,10 @@ id: PLAN-190
 type: plan
 role: plan
 title: "Repository upkeep backlog"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: SPEC-192
 phases:

@@ -3,10 +3,10 @@ id: KN-187
 type: knowledge
 role: knowledge
 title: "Assessment: Land oracle-tier falsifiability: falsified coverage dimension, pipe refusal, unclaimed-oracle check (2026-08-07)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-10-23
 tags: []
 parent: PLAN-081
 links:

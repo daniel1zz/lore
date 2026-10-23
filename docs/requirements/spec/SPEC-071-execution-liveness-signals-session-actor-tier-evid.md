@@ -6,7 +6,7 @@ title: "Execution liveness signals: session actor tier, evidence claim renewal, 
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-10
+updated: 2026-10-20
 tags: []
 ---
 ## Overview/Goal
@@ -104,7 +104,7 @@ Structured ACs are authored via `lore ac add` (script-mode, exit-code oracles). 
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-069-1: Actor precedence chain resolves --by > LORE_ACTOR > session tier (agent:session-<id8> from CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID) > OS username, verified with literal env objects (no process.env mutation); ActorSource gains 'session'
+- [⊖] [script] AC-069-1: Actor precedence chain resolves --by > LORE_ACTOR > session tier (agent:session-<id8> from CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID) > OS username, verified with literal env objects (no process.env mutation); ActorSource gains 'session'
   script: test — bunx vitest run packages/lore/tests/unit/cli/actor-session-tier.test.ts
 - [⚑] [script] AC-069-3: renewClaimForEvidence truth table: same-holder fresh -> renewed at=nowIso with branch/machine/worktree preserved; same-holder stale -> renewed; foreign holder -> null; absent claim -> null; input never mutated
   script: test — bunx vitest run packages/lore/tests/unit/core/renew-claim-for-evidence.test.ts
@@ -118,7 +118,7 @@ Structured ACs are authored via `lore ac add` (script-mode, exit-code oracles). 
   script: tsc — bun run typecheck
 - [⊘] [script] AC-069-8: Both test runners exit 0 (vitest + bun test) — regression floor incl. ~33 bootstrap fixture migrations for the required F3 field
   script: test — bun run test
-- [⚑] [script] AC-069-2: sessionActorFromId produces agent:session-<8-char sanitized prefix>; sanitization collapses non-[a-z0-9-] runs to a single hyphen (sanitizeBranchSegment semantics) with leading/trailing hyphens trimmed; sanitize-to-empty input throws in core (fail-loud, never a bare prefix) and the CLI session tier catches it, degrading to os-fallback
+- [⊖] [script] AC-069-2: sessionActorFromId produces agent:session-<8-char sanitized prefix>; sanitization collapses non-[a-z0-9-] runs to a single hyphen (sanitizeBranchSegment semantics) with leading/trailing hyphens trimmed; sanitize-to-empty input throws in core (fail-loud, never a bare prefix) and the CLI session tier catches it, degrading to os-fallback
   script: test — bunx vitest run packages/lore/tests/unit/core/session-actor.test.ts
 
 ## Code anchors

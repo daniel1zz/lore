@@ -3,10 +3,10 @@ id: KN-651
 type: knowledge
 role: knowledge
 title: "Pilot v2 blind reader: 4.5/10 primary, 4.5/5 in-branch, 0 confident-wrong"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-173
 ---

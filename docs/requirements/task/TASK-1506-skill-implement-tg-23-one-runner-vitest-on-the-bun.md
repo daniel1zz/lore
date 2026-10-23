@@ -19,6 +19,7 @@ links:
   - {id: TASK-1498, type: blocks}
   - {id: TASK-1493, type: blocks}
   - {id: TASK-1496, type: blocks}
+  - {id: TASK-1099, type: resolves}
 ---
 Estimate: XL (one acceptance unit: the suite runs under one runner)
 Approach: Move every test to vitest on the Bun runtime (`bunx --bun vitest run`), vitest version pinned exactly in package.json.

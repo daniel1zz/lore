@@ -3,10 +3,10 @@ id: KN-682
 type: knowledge
 role: knowledge
 title: "Assessment: Move the six checkpoint-backed rules from always-loaded fragments into their skills (2026-10-15)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-23
 tags: []
 parent: PLAN-186
 links:

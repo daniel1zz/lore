@@ -3,10 +3,10 @@ id: KN-646
 type: knowledge
 role: knowledge
 title: "Pilot v3 frozen probe set (10 questions, specification + execution) for the blind reader"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-174
 ---
