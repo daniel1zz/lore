@@ -3593,7 +3593,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (!bundleResult.ok) return bundleResult;
       const reviewDocsResult = await this.listMilestoneReviewDocs(existing.id);
       if (!reviewDocsResult.ok) return reviewDocsResult;
-      const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value);
+      const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
       const milestoneReview =
         measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview) : measuredReview;
       planCloseCtx = { ...planCloseCtx, milestoneReview };

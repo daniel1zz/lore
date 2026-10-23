@@ -68,7 +68,7 @@ function liveAcHashes(spec: Pick<DocRecord, "extra"> | undefined): string[] {
 export function planStateFingerprint(
   plan: Pick<DocRecord, "id" | "version">,
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
-  spec?: Pick<DocRecord, "extra">,
+  spec: Pick<DocRecord, "extra"> | undefined,
 ): string {
   const taskPart = [...tasks]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -121,7 +121,7 @@ export function assessMilestoneCurrency(
   plan: Pick<DocRecord, "id" | "version">,
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
   reviewDocs: readonly DocRecord[],
-  spec?: Pick<DocRecord, "extra">,
+  spec: Pick<DocRecord, "extra"> | undefined,
 ): MilestoneReviewCurrency {
   // reason: a plan with no member task landed no work; `lore assess` refuses to review it, so requiring a review would
   // make an empty plan unclosable. The close reports this as not-applicable (audited), never as a pass.
