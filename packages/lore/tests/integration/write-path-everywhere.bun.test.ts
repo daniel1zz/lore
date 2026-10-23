@@ -3,7 +3,7 @@
  * AC-DCL-5 — NO MODULE WRITES AROUND THE WRITE PATH (spec-no-module-writes-around-the-write-path-the-remaining-17).
  *
  * Completes AC-DCL-3 (single-write-path.bun.test.ts): the 17 modules it had pinned as exceptions — task-workflow, phase-workflow,
- * review, outline-sections-retire, drift-check, phase-checklist, plan-exemption, rule-change, spec-parent-migration, spec-kind, ac,
+ * review, outline-sections-retire, drift-check, phase-checklist, plan-integration-branch, rule-change, spec-parent-migration, spec-kind, ac,
  * issue-close-on-archive, judgment, state-binding, foreign-corpus-write-guard, baseline-adopt, app.ts — now write through
  * `CorpusService` and nothing else does. This file asserts, on throwaway corpora only (mkdtemp, never the repo's `.lore/`):
  *
@@ -41,7 +41,7 @@ import { ReviewService } from "../../src/service/review-service.js";
 import { OutlineSectionsRetireMigrationService } from "../../src/service/outline-sections-retire-migration-service.js";
 import { DriftCheckService } from "../../src/service/drift-check-service.js";
 import { PhaseChecklistService } from "../../src/service/phase-checklist-service.js";
-import { PlanExemptionService } from "../../src/service/plan-exemption-service.js";
+import { PlanIntegrationBranchService } from "../../src/service/plan-integration-branch-service.js";
 import { RuleChangeService } from "../../src/service/rule-change-service.js";
 import { SpecParentMigrationService } from "../../src/service/spec-parent-migration-service.js";
 import { SpecKindService } from "../../src/service/spec-kind-service.js";
@@ -168,7 +168,7 @@ describe("AC-DCL-5 static scan — only corpus-service.ts and store/* call a sto
       ["SpecKindService", /new SpecKindService\(store, corpusService\)/g],
       ["StateBindingService", /new StateBindingService\(store, corpusService\)/g],
       ["AcService", /new AcService\(store, recordLockService, \{ citeGate: citeGateRaw \}, corpusService\)/g],
-      ["PlanExemptionService", /new PlanExemptionService\(store, corpusService\)/g],
+      ["PlanIntegrationBranchService", /new PlanIntegrationBranchService\(store, corpusService\)/g],
       ["state-binding occupancy port", /buildStateBindingOccupancyPort\(corpusService\)/g],
     ];
     for (const [name, pattern] of wired) {
@@ -268,7 +268,7 @@ interface Svc {
   readonly outlineMigration: OutlineSectionsRetireMigrationService;
   readonly driftCheck: DriftCheckService;
   readonly phaseChecklist: PhaseChecklistService;
-  readonly planExemption: PlanExemptionService;
+  readonly planIntegrationBranch: PlanIntegrationBranchService;
   readonly ruleChange: RuleChangeService;
   readonly specParentMigration: SpecParentMigrationService;
   readonly specKind: SpecKindService;
@@ -290,7 +290,7 @@ function buildOwnSvc(store: StoreInterface, lock: RecordLockService, writer: Cor
     outlineMigration: new OutlineSectionsRetireMigrationService(store, writer),
     driftCheck: new DriftCheckService(store, writer),
     phaseChecklist: new PhaseChecklistService(store, writer),
-    planExemption: new PlanExemptionService(store, writer),
+    planIntegrationBranch: new PlanIntegrationBranchService(store, writer),
     ruleChange: new RuleChangeService(store, lock, writer),
     specParentMigration: new SpecParentMigrationService(store, writer),
     specKind: new SpecKindService(store, writer),
@@ -308,7 +308,7 @@ function svcOfApp(app: App): Svc {
     outlineMigration: app.outlineSectionsRetireMigrationService!,
     driftCheck: app.driftCheckService!,
     phaseChecklist: app.phaseChecklistService!,
-    planExemption: app.planExemptionService!,
+    planIntegrationBranch: app.planIntegrationBranchService!,
     ruleChange: app.ruleChangeService!,
     specParentMigration: app.specParentMigrationService!,
     specKind: app.specKindService,
@@ -543,7 +543,7 @@ const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    module: "plan-exemption",
+    module: "plan-integration-branch",
     kind: "versioned",
     auditAction: "update",
     seed: async (w) => {
@@ -551,7 +551,7 @@ const SCENARIOS: readonly Scenario[] = [
       return {
         docIds: [plan.id],
         run: async () =>
-          failureText(await w.svc.planExemption.exemptAttestation(plan.id, { reason: "no oracle exists for this plan", kind: "no-oracle", by: CALLER })),
+          failureText(await w.svc.planIntegrationBranch.setIntegrationBranch(plan.id, { branch: "gs-integration", by: CALLER })),
       };
     },
   },

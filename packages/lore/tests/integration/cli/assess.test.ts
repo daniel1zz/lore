@@ -18,15 +18,13 @@
  *
  * Coverage:
  *   NEGATIVE:   --no-ai always exits 2 (assess has no non-AI mode, AC-ASSESS-9);
- *               --ai and --no-ai together exits 2; zero-task plan exits 4 (AC-ASSESS-8)
- *   BOUNDARY:   --diff + --diff-file mutual exclusivity exits 2 (AC-ASSESS-6) — checked
- *               BEFORE plan resolution, so it fires even for a nonexistent plan id
+ *               --ai and --no-ai together exits 2; zero-task plan is an ERROR row, exit 1 (AC-ASSESS-8)
+ *   BOUNDARY:   a plan with one task passes the zero-task gate and fails later on the provider
  *   ERROR:      n/a here (provider-error paths are in assess-ai.bun.test.ts)
  *   STATE:      n/a here
- *   REGRESSION: the zero-task gate fires even when `--diff`/`--ai` flags are also passed
- *               (gate ordering: mutex checks → plan resolution → zero-task → diff → AI)
+ *   REGRESSION: the zero-task gate fires even when `--ai` is also passed (gate runs before AI)
  *
- * @spec_ref AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9
+ * @spec_ref AC-ASSESS-8, AC-ASSESS-9; spec-lean-governance-batch-verbs-judgment-only-at-milestones (BR-1372)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -146,53 +144,37 @@ describe("lore assess --ai --no-ai together — mutually exclusive", () => {
   });
 });
 
-// ─── --diff + --diff-file mutual exclusivity (AC-ASSESS-6) ──────────────────
-
-describe("lore assess --diff + --diff-file — mutually exclusive (AC-ASSESS-6)", () => {
-  it("AC-ASSESS-6.CLI.N1: exits 2 when both are passed, for an existing plan with tasks", () => {
-    const planSlug = createPlan("Diff Mutex Plan");
-    createTask(planSlug, "Task One");
-
-    const result = runLore(["assess", planSlug, "--diff", "HEAD~1..HEAD", "--diff-file", "/tmp/nonexistent-diff.txt"], tmpDir);
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("mutually exclusive");
-  });
-
-  it("AC-ASSESS-6.CLI.N2: exits 2 even for a NONEXISTENT plan — checked before plan resolution", () => {
-    const result = runLore(
-      ["assess", "plan-does-not-exist-anywhere", "--diff", "HEAD~1..HEAD", "--diff-file", "/tmp/nonexistent-diff.txt"],
-      tmpDir,
-    );
-    expect(result.exitCode).toBe(2);
-  });
-});
-
 // ─── Zero-task plan gate (AC-ASSESS-8) ────────────────────────────────────────
 
 describe("lore assess — zero-task plan (AC-ASSESS-8)", () => {
-  it("AC-ASSESS-8.CLI.N1: exits 4 with VALIDATION_ERROR before any AI call, on a plan with zero tasks", () => {
+  it("AC-ASSESS-8.CLI.N1: a plan with zero tasks is an ERROR row (exit 1, batch contract) before any AI call, naming why", () => {
     const planSlug = createPlan("Empty Plan");
 
-    const result = runLore(["assess", planSlug], tmpDir);
-    expect(result.exitCode).toBe(4);
-    expect(result.stderr).toContain("nothing to assess");
+    const result = runLore(["assess", planSlug, "--json"], tmpDir);
+    expect(result.exitCode).toBe(1);
+    const rows = (JSON.parse(result.stdout) as { data: { rows: Array<{ outcome: string; reason: string }> } }).data.rows;
+    expect(rows[0]?.outcome).toBe("ERROR");
+    expect(rows[0]?.reason).toContain("zero child tasks");
   });
 
   it("AC-ASSESS-8.CLI.N2: the zero-task gate fires even when --ai is explicitly passed (gate runs before AI)", () => {
     const planSlug = createPlan("Empty Plan With AI Flag");
 
     const result = runLore(["assess", planSlug, "--ai"], tmpDir);
-    expect(result.exitCode).toBe(4);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("zero child tasks");
   });
 
-  it("AC-ASSESS-8.CLI.N3: a plan with at least one task does NOT hit the zero-task gate (progresses past validation exit 4)", () => {
+  it("AC-ASSESS-8.CLI.N3: a plan with at least one task does NOT hit the zero-task gate (its row fails later, on the AI provider)", () => {
     const planSlug = createPlan("Non-Empty Plan");
     createTask(planSlug, "A Task");
 
-    // `claude` resolves to the fail-fast stub on PATH (see beforeEach), so this fails
-    // LATER — AI provider failure, exit 6 — NOT exit 4. This is the negative-space
-    // check that AC-ASSESS-8's gate is scoped to zero tasks only.
-    const result = runLore(["assess", planSlug], tmpDir);
-    expect(result.exitCode).not.toBe(4);
+    // `claude` resolves to the fail-fast stub on PATH (see beforeEach), so this row fails
+    // LATER — AI provider failure — NOT on the zero-task gate. This is the negative-space
+    // check that the gate is scoped to zero tasks only.
+    const result = runLore(["assess", planSlug, "--json"], tmpDir);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).not.toContain("zero child tasks");
+    expect(result.stdout).toContain("AI_PROVIDER_ERROR");
   });
 });

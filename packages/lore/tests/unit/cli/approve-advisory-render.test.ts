@@ -33,7 +33,6 @@
  *               stdout free of ADVISORY), exit 0 — the case that used to print it.
  *   REGRESSION: a human-mode-only spec prints exactly ONE advisory line, the reachability one, on stderr.
  *   BOUNDARY:   a resolvable domain doc (an `implements` edge wired) prints nothing extra.
- *   NEGATIVE:   the cited_rule_check knob OFF (the default) prints nothing extra.
  *
  * @spec_ref spec-plan-close-predicates-measure-invariants-an-applicability §D2
  *   Acceptance Criteria AC-PCI-16
@@ -104,19 +103,17 @@ afterEach(() => {
 });
 
 /**
- * Writes `.lore/config.yaml` with `workflow.gates."plan-close".cited_rule_check.enabled`
- * set to `citedRuleCheckEnabled`, and `workflow.review.judgment_required_types: []` —
+ * Writes `.lore/config.yaml` with `workflow.review.judgment_required_types: []` —
  * every scenario below approves >= 1 `spec`-type doc during setup, which
  * SPEC-103 M2 would otherwise block without a fresh review judgment (mirrors
  * `cli-plan-promote-advisory.bun.test.ts`'s / `gate-hooks.bun.test.ts`'s own
  * precedent for neutralizing that UNRELATED gate in a fixture that isn't
  * testing it).
  */
-function writeConfig(dir: string, citedRuleCheckEnabled: boolean): void {
+function writeConfig(dir: string): void {
   const config: LoreConfig = {
     project: { name: "t7-prd-sync-advisory-test", author: "tester" },
     workflow: {
-      gates: { "plan-close": { cited_rule_check: { enabled: citedRuleCheckEnabled } } },
       review: { judgment_required_types: [] },
     },
   } as unknown as LoreConfig;
@@ -209,9 +206,9 @@ function createPlan(dir: string, parentSlug: string, title: string): string {
   return parseSlug(r.stdout);
 }
 
-describe("lore approve — the cited_rule_check advisory channel is retired (AC-PCI-16, BR-984)", () => {
+describe("lore approve — the prd-sync advisory channel is retired (AC-PCI-16, BR-984)", () => {
   it("HAPPY: an unlinked ancestor spec with the knob ON prints no prd-sync advisory on either channel, exit 0", () => {
-    writeConfig(tmpDir, true);
+    writeConfig(tmpDir);
     const prdSlug = createPrd(tmpDir, "T7 Unlinked PRD");
     const specSlug = createSpec(tmpDir, prdSlug, "T7 Unlinked Spec");
     addScriptAc(tmpDir, specSlug);
@@ -229,7 +226,7 @@ describe("lore approve — the cited_rule_check advisory channel is retired (AC-
   });
 
   it("REGRESSION: a human-mode-only spec prints exactly one advisory (reachability) on stderr, never stdout", () => {
-    writeConfig(tmpDir, true);
+    writeConfig(tmpDir);
     const prdSlug = createPrd(tmpDir, "T7 Both-Advisory PRD");
     const specSlug = createSpec(tmpDir, prdSlug, "T7 Both-Advisory Spec");
     addHumanAc(tmpDir, specSlug);
@@ -247,7 +244,7 @@ describe("lore approve — the cited_rule_check advisory channel is retired (AC-
   });
 
   it("BOUNDARY: a resolvable domain doc (implements edge) means the field stays absent — approve prints nothing extra", () => {
-    writeConfig(tmpDir, true);
+    writeConfig(tmpDir);
     const prdSlug = createPrd(tmpDir, "T7 Linked PRD");
     const domainSlug = createSpec(tmpDir, prdSlug, "T7 Domain Doc");
     const specSlug = createSpec(tmpDir, prdSlug, "T7 Linked Feature Spec");
@@ -261,20 +258,5 @@ describe("lore approve — the cited_rule_check advisory channel is retired (AC-
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-  });
-
-  it("NEGATIVE: the cited_rule_check gate knob OFF (default) suppresses the advisory even with no domain doc at all", () => {
-    writeConfig(tmpDir, false);
-    const prdSlug = createPrd(tmpDir, "T7 Knob-Off PRD");
-    const specSlug = createSpec(tmpDir, prdSlug, "T7 Knob-Off Spec");
-    addScriptAc(tmpDir, specSlug);
-    approveDoc(tmpDir, specSlug);
-    const planSlug = createPlan(tmpDir, specSlug, "T7 Plan Under Knob-Off Spec");
-
-    const result = runLore(["approve", planSlug], tmpDir);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(result.stdout).not.toContain("ADVISORY");
   });
 });

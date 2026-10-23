@@ -31,7 +31,6 @@ const SELF = "packages/lore/tests/unit/test-config-writers-scan.test.ts";
 const RAW_WRITE_ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/lore/tests/integration/config-unparsable-loud.bun.test.ts": "writes a deliberately broken config (the BR-926 subject)",
   "packages/lore/tests/integration/ai-config-fail-loud.bun.test.ts": "writes a deliberately schema-invalid ai block (SPEC-030 AC-HJ-3)",
-  "packages/lore/tests/unit/core/cited-rule-check-setting.test.ts": "writes legacy-keyed (retired prd_sync) bytes to test the loader refusal",
   "packages/lore/tests/integration/memory-file-limits-always-enforced.test.ts": "writes retired-key (adoption) and flow-style bytes whose exact text the migration and the refusal are about",
   "packages/lore/tests/integration/setup-user-once-marker.bun.test.ts": "an injected fs-port stub of the unit under test (SetupService), not a write to a real file",
   "scripts/tests/check-shipped-defaults.test.ts": "the checker's INPUT: a config.yaml fixture written exactly as the checker should read it, in a root with no lore init",

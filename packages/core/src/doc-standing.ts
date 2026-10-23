@@ -57,6 +57,7 @@ export const KNOWLEDGE_SUB_TYPE_STANDING: Record<KnowledgeSubType, DocStanding> 
   retro: "record",
   research: "record",
   assessment: "record",
+  "milestone-review": "record",
   handoff: "record",
   uat: "record",
 };

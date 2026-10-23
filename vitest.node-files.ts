@@ -37,7 +37,6 @@ export const NODE_PROJECT_FILES: Readonly<Record<string, string>> = {
   "packages/lore/tests/unit/adapters/mcp-github-filing.test.ts": VI_MOCK_REAL_CALL,
   "packages/lore/tests/unit/service/github-filing-split-write.test.ts": VI_MOCK_REAL_CALL,
   // lore: Bun process-API semantics
-  "packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts": BUN_PROCESS_SEMANTICS,
   "packages/lore/tests/unit/hooks/session-bootstrap-injection.test.ts": BUN_PROCESS_SEMANTICS,
   "packages/lore/tests/unit/service/attestation-head-sha.test.ts": BUN_PROCESS_SEMANTICS,
   // lore: other measured differences

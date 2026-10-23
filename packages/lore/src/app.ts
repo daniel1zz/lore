@@ -100,7 +100,8 @@ import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js"
 import { createRealProcessTablePort } from "./adapters/process-table-port.js";
 import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
-import { PlanExemptionService } from "./service/plan-exemption-service.js";
+import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
+import { MilestoneReviewService } from "./service/milestone-review-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import type { StateBindingOccupancyPort } from "./service/verify-runner-service.js";
@@ -507,12 +508,17 @@ export interface App {
    */
   recordLockService?: RecordLockService;
   /**
-   * PlanExemptionService — the sole writer of a plan's audited plan-close
-   * exemptions (`lore plan exempt-attestation` / `exempt-assessment-freshness`,
-   * SPEC-069 D1 + SPEC-106 D4). Store-only, same optional-DI shape as
+   * PlanIntegrationBranchService — the sole writer of a plan's `extra.integration_branch`
+   * (`lore plan integration-branch`). Store-only, same optional-DI shape as
    * `acService`/`requirementService`; always wired in production.
    */
-  planExemptionService?: PlanExemptionService;
+  planIntegrationBranchService?: PlanIntegrationBranchService;
+  /**
+   * MilestoneReviewService — the sole writer of a plan's milestone review (`lore assess`, BR-1372). Ports only
+   * (plan bundle, cited-rule state, decision log, judge, guarded doc create, link); optional like the other
+   * DI services so bare test stubs stay valid; always wired in production.
+   */
+  milestoneReviewService?: MilestoneReviewService;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -1079,10 +1085,19 @@ function buildAppFromSqlite(
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
-    // reason: PlanExemptionService is store-only, same shape as RequirementService
-    // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
-    // fields, which were gate-read with no authoring surface before it existed.
-    planExemptionService: new PlanExemptionService(store, corpusService),
+    // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
+    // `extra.integration_branch`.
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
+    // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
+    milestoneReviewService: new MilestoneReviewService({
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+      getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
+      listDecisionLog: () => store.listDecisionLog(),
+      judge: aiProviderService.judgeMilestone.bind(aiProviderService),
+      createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
+      link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+    }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
     // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
@@ -1496,10 +1511,19 @@ function buildAppFromTurso(
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
-    // reason: PlanExemptionService is store-only, same shape as RequirementService
-    // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
-    // fields, which were gate-read with no authoring surface before it existed.
-    planExemptionService: new PlanExemptionService(store, corpusService),
+    // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
+    // `extra.integration_branch`.
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
+    // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
+    milestoneReviewService: new MilestoneReviewService({
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+      getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
+      listDecisionLog: () => store.listDecisionLog(),
+      judge: aiProviderService.judgeMilestone.bind(aiProviderService),
+      createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
+      link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+    }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
     // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not

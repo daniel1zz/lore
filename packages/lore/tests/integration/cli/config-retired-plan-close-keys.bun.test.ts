@@ -1,14 +1,15 @@
 // @spawns packages/lore/src/index.ts
 /**
- * The `prd_sync` -> `cited_rule_check` config rename at the CLI (BL-D3, BR-226): the loader refuses, the migration renames.
+ * The retired `workflow.gates."plan-close".cited_rule_check` key at the CLI (BR-1372: plan close is gated by the
+ * milestone review only): the strict schema refuses it, `lore migrate config-keys` removes it.
  *
- * A throwaway repo (`mkdtemp` + `lore init`) whose `.lore/config.yaml` still names `prd_sync`:
- *   - ANY command (`lore status`) refuses with exit 4 and the exact message naming both keys and
- *     `lore migrate config-keys --apply`, from the owning checkout AND from a linked worktree, and writes nothing;
- *   - `lore migrate config-keys` (dry run) reports the rename at exit 0 and writes nothing;
+ * A throwaway repo (`mkdtemp` + `lore init`) whose `.lore/config.yaml` still carries the key:
+ *   - ANY command (`lore status`) refuses with exit 4 naming the key, from the owning checkout AND from a linked
+ *     worktree, and writes nothing;
+ *   - `lore migrate config-keys` (dry run) reports the removal at exit 0 and writes nothing;
  *   - `--apply` from a linked worktree is refused (exit 4, foreign provenance): it never edits another checkout's config;
- *   - `--apply` from the owning checkout renames the key byte-for-byte (only the key text changes), names the file,
- *     exits 0; a rerun is a no-op; `lore status` then runs (exit 0).
+ *   - `--apply` from the owning checkout cuts only the key's lines, names the file, exits 0; a rerun is a no-op;
+ *     `lore status` then runs (exit 0).
  * The repo's own `.lore/` is never touched.
  *
  * Dimensions: NEGATIVE (refusal, foreign apply), BOUNDARY (dry run), HAPPY+STATE (apply bytes), REGRESSION (rerun).
@@ -26,10 +27,7 @@ setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
-const ACTOR = "agent:config-prd-sync-rename-test";
-const REFUSAL =
-  'workflow.gates."plan-close".prd_sync was renamed to workflow.gates."plan-close".cited_rule_check ' +
-  "(it switches the cited-rule check, not outline sync); run `lore migrate config-keys --apply` to rename it in .lore/config.yaml.";
+const ACTOR = "agent:config-retired-plan-close-keys-test";
 
 let dir = "";
 let linked = "";
@@ -58,7 +56,7 @@ beforeAll(() => {
   linked = join(realpathSync(mkdtempSync(join(tmpdir(), "prdsyncrename-wt-"))), "wt");
   git(["worktree", "add", "-q", "-b", "linked", linked]);
   // the retired key is merged into the seeded `workflow:` block (a second `workflow:` key would make the file unparsable, BR-926)
-  patchLoreConfig(dir, "workflow:\n  gates:\n    plan-close:\n      prd_sync:\n        enabled: true\n");
+  patchLoreConfig(dir, "workflow:\n  gates:\n    plan-close:\n      cited_rule_check:\n        enabled: true\n");
   oldText = readFileSync(configPath(), "utf8");
 });
 
@@ -67,20 +65,20 @@ afterAll(() => {
   if (linked !== "") rmSync(join(linked, ".."), { recursive: true, force: true });
 });
 
-describe("prd_sync -> cited_rule_check at the CLI (BL-D3)", () => {
-  it("NEGATIVE: loading an old-key config refuses with exit 4 and the exact text, from the owner and from a linked worktree; nothing is written", () => {
+describe("retired plan-close key cited_rule_check at the CLI (BR-1372)", () => {
+  it("NEGATIVE: loading a config with the retired key refuses with exit 4 naming it, from the owner and from a linked worktree; nothing is written", () => {
     for (const cwd of [dir, linked]) {
       const r = runLore(cwd, ["status"]);
       expect(r.exitCode).toBe(4);
-      expect(r.stderr).toContain(REFUSAL);
+      expect(r.stderr).toContain("cited_rule_check");
       expect(readFileSync(configPath(), "utf8")).toBe(oldText);
     }
   });
 
-  it("BOUNDARY: `migrate config-keys` (dry run) reports the rename at exit 0 and writes nothing", () => {
+  it("BOUNDARY: `migrate config-keys` (dry run) reports the removal at exit 0 and writes nothing", () => {
     const r = runLore(dir, ["migrate", "config-keys"]);
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain(`${configPath()}: workflow.gates."plan-close".prd_sync renamed to workflow.gates."plan-close".cited_rule_check (enabled: true kept)`);
+    expect(r.stdout).toContain(`${configPath()}: workflow.gates."plan-close".cited_rule_check removed`);
     expect(readFileSync(configPath(), "utf8")).toBe(oldText);
   });
 
@@ -91,11 +89,20 @@ describe("prd_sync -> cited_rule_check at the CLI (BL-D3)", () => {
     expect(readFileSync(configPath(), "utf8")).toBe(oldText);
   });
 
-  it("HAPPY+STATE: --apply from the owner renames only the key text, names the file, exits 0; `status` then runs", () => {
+  it("HAPPY+STATE: --apply from the owner cuts only the key's lines, names the file, exits 0; `status` then runs", () => {
     const r = runLore(dir, ["migrate", "config-keys", "--apply"]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain(configPath());
-    expect(readFileSync(configPath(), "utf8")).toBe(oldText.replace("prd_sync", "cited_rule_check"));
+    const after = readFileSync(configPath(), "utf8");
+    expect(after).not.toContain("cited_rule_check");
+    // every surviving line is a line of the old file, in order: only lines were cut
+    const oldLines = oldText.split("\n");
+    let cursor = 0;
+    for (const line of after.split("\n")) {
+      const at = oldLines.indexOf(line, cursor);
+      expect(at, `line survived out of order: ${line}`).toBeGreaterThanOrEqual(0);
+      cursor = at + 1;
+    }
     expect(runLore(dir, ["status"]).exitCode).toBe(0);
   });
 

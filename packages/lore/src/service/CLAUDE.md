@@ -55,7 +55,9 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `OutlineService` | MDX placeholder resolution + `renderResolvedToMarkdown` text-projection splice |
 | `MigrationService` | One-shot v1→v2 import (YAML-frontmatter MD → store) |
 | `TreeCheckService` | Drift detection (missing/extra/misplaced/cycle/orphan/plan-terminality), auto-fix, parent_id↔link reconciliation. ⛔ `plan-terminality` is NOT auto-fixable — repairing it would fire the `plan-close` gate from inside a repair command |
-| `AIProviderService` | Provider dispatch + template render; `assessPlan` (plan judge), `judgeDoc` (review judge) |
+| `AIProviderService` | Provider dispatch + template render; `judgeMilestone` (milestone review provider call), `judgeDoc` (review judge) |
+| `MilestoneReviewService` | `lore assess`/`lore_assess`: judges a plan on seven dimensions and stores the review (`milestone-review` knowledge doc, fingerprint of the plan state it judged); plan close reads it through `milestone-review.ts` (pure fingerprint + currency) — BR-1372 |
+| `PlanIntegrationBranchService` | sole writer of a plan's `extra.integration_branch` (`lore plan integration-branch`) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files |
 | `PhaseService` | add/list/remove/rename/migrate on `plan.extra.phases` |
 | `TaskWorkflowService` | addEvidence/claim/release/done/ready/declareRedFirst — evidence log, advisory claim lease, four-floor archival walk, computed readiness over `blocks` links (own telemetry) |

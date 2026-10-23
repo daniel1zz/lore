@@ -199,53 +199,6 @@ describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-sti
   });
 });
 
-// ─── Site 2: CorpusService.getAssessmentFreshness ────────────────────────────
-
-describe("CorpusService.getAssessmentFreshness (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {
-  it("HAPPY (case H): a diverged P3 member's (T6, filed at P4) recorded evidence activity IS reflected in newestTaskActivityAt", async () => {
-    const store = actedStore(new InMemoryStore());
-    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
-    const p3 = await createPlan(corpusService, null, "P3 Freshness");
-    const p4 = await createPlan(corpusService, null, "P4 Freshness");
-    await createTask(corpusService, p3.id, p3.id, "T5 undiverged P3 member (no activity)");
-    const t6 = await createTask(corpusService, p4.id, p3.id, "T6 diverged P3 member (filed at P4)");
-
-    const evidenceResult = await taskWorkflowService.addEvidence(t6.id, {
-      oracle: "manual",
-      command: "manual check",
-      result: "pass",
-      // reason: a self-reported `pass` must carry a non-empty output_tail since
-      // task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the (82157f3). This
-      // fixture predates that floor — its subject is plan membership, not tail integrity.
-      output_tail: "manual check performed, no defects observed",
-      recorded_by: "alice",
-      capture_source: "self-report",
-    });
-    expect(evidenceResult.ok).toBe(true);
-
-    const freshnessResult = await corpusService.getAssessmentFreshness(p3.id);
-    expect(freshnessResult.ok).toBe(true);
-    if (!freshnessResult.ok) return;
-    expect(
-      freshnessResult.value.newestTaskActivityAt,
-      "T6's evidence-recording activity must be visible to P3's freshness computation",
-    ).toBeDefined();
-  });
-
-  it("CONTROL: a plain plan (parent_id === extra.plan_id) with no task activity at all still reports newestTaskActivityAt as undefined", async () => {
-    const store = actedStore(new InMemoryStore());
-    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const plan = await createPlan(corpusService, null, "Plain Freshness Plan");
-    await createTask(corpusService, plan.id, plan.id, "T1");
-
-    const freshnessResult = await corpusService.getAssessmentFreshness(plan.id);
-    expect(freshnessResult.ok).toBe(true);
-    if (!freshnessResult.ok) return;
-    expect(freshnessResult.value.newestTaskActivityAt).toBeUndefined();
-  });
-});
-
 // ─── Site 3: VerificationProjectionService.resolvePlanTasks (via evidencePanel) ──
 
 describe("VerificationProjectionService.resolvePlanTasks (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {

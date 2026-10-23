@@ -1,5 +1,4 @@
 // @layer service-unmeasured-floor AC-CT-9
-// @reads packages/lore/src/adapters/cli/commands/assess.ts
 // @reads packages/lore/src/adapters/cli/commands/status.ts
 // @spawns git
 /**
@@ -55,13 +54,8 @@ import {
   type RadiusDiffPort,
 } from "../../../src/service/stamp-binding-reader.js";
 import { SpawnGitPort } from "../../../src/service/rule-state-git-port.js";
-import {
-  ATTESTATION_FLOOR_FIELD,
-  ATTESTATION_FLOOR_REASON,
-  attestationFloor,
-  computeStampVerdictDistribution,
-  readStampVerdict,
-} from "../../../src/service/gate-predicates.js";
+import { computeStampVerdictDistribution, readStampVerdict } from "../../../src/service/gate-predicates.js";
+import { ATTESTATION_FLOOR_FIELD, ATTESTATION_FLOOR_REASON, attestationFloor } from "../../helpers/attestation-floor-stand-in.js";
 import {
   computeCaptureSourceDistribution,
   formatStampVerdictLine,
@@ -488,11 +482,13 @@ describe("AC-CT-9 (d): the stamp-verdict distribution", () => {
     for (const reading of readings) expect(distribution[reading]).toBeGreaterThan(0);
   });
 
-  const ADAPTERS = ["assess.ts", "status.ts"].map((file) =>
+  // reason: `lore assess` no longer prints this line (it is the milestone review now, BR-1372, and its correctness
+  // dimension reads the attested evidence itself); `lore status` is the one adapter that renders the distribution.
+  const ADAPTERS = ["status.ts"].map((file) =>
     join(__dirname, "../../../src/adapters/cli/commands", file),
   );
 
-  it("(d) both adapters route through the ONE service method and derive no bucket of their own", () => {
+  it("(d) the adapter routes through the ONE service method and derive no bucket of their own", () => {
     for (const path of ADAPTERS) {
       const source = readFileSync(path, "utf8");
       expect(source, path).toContain("stampVerdictDistribution(");

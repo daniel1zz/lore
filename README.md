@@ -79,7 +79,7 @@ Lore models a four-stage loop. Each stage has real commands, and the gates fire 
 `lore ready <plan>` shows what is claimable and where file anchors collide. `lore claim` takes the lease, `lore verify` runs script-mode acceptance criteria under a trusted runner, `lore release` drops the lease, and `lore done` archives the task — which requires at least one runner-attested pass.
 
 **CLOSE — feed the loop back.**
-`lore assess <plan>` scores how the plan actually landed, `lore anchor add` binds a spec to the code that implements it, `lore invalidate` retires knowledge that was proven wrong, and `lore handoff` writes the ticket the next session resumes from.
+`lore assess <plan>` reviews how the plan actually landed on seven dimensions (closing it requires a pass), `lore anchor add` binds a spec to the code that implements it, `lore invalidate` retires knowledge that was proven wrong, and `lore handoff` writes the ticket the next session resumes from.
 
 ### Gates
 
@@ -87,7 +87,7 @@ Deterministic checkpoints refuse non-conforming writes with `exit 4` plus a "fee
 
 `lore gate --help` is the authoritative list — do not trust a count written down elsewhere, including here. Today it spans spec creation, spec promotion, plan promotion, plan close, task claim, and phase claim. All but `plan-close` also run as a read-only pre-flight (`lore gate <checkpoint> --plan <plan>`); `plan-close`'s predicates fire only on the archival write, and `lore gate plan-close --explain` prints their contract table, including each predicate's known false-pass and false-block deltas.
 
-AI judgment (`lore review`'s AI pass, `lore assess`) is **always advisory** and never blocks. Only deterministic checks block.
+AI judgment is advisory except at two milestones: approving a spec or an ADR needs a current review judgment, and closing a plan needs a passing, current `lore assess` milestone review. Everything else that blocks is a deterministic check.
 
 Disable a checkpoint deliberately via `workflow.gates.<checkpoint>.enabled: false` in `.lore/config.yaml`. (`LORE_GATE_BYPASS=1` affects only the `lore gate` pre-flight command — the write path never honors it.)
 

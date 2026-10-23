@@ -314,7 +314,6 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
     "ac_quantifiable",
     "oracle_coverage",
     "requires_uat",
-    "cited_rule_check",
     "foreign_corpus_write",
   ] as const;
 
@@ -345,8 +344,8 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
    * all five pre-existing names before being trusted here (anchor_overlap ->
    * resolveAnchorOverlapGateEnabled,
    * ac_quantifiable -> resolveAcQuantifiableGateEnabled, oracle_coverage ->
-   * resolveOracleCoverageGateEnabled, requires_uat -> resolveRequiresUatGateEnabled,
-   * cited_rule_check -> resolveCitedRuleCheckGateEnabled). A sixth predicate whose resolver
+   * resolveOracleCoverageGateEnabled, requires_uat -> resolveRequiresUatGateEnabled).
+   * (`cited_rule_check` left the set when plan close became review-only, BR-1372.) A further predicate whose resolver
    * is missing, misnamed, or not re-exported from `@lore/core` is invisible to
    * every ACTUAL caller (gate-enforcer.ts / commands/gate.ts import by this
    * exact name) exactly as it would be invisible to this lookup.
@@ -359,7 +358,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
     return `resolve${pascal}GateEnabled`;
   }
 
-  it("(c) STRUCTURAL SAME-PATH CHECK: GateCheckpointConfigSchema carries exactly six sub-predicate keys as a set, each with the identical .strict() enabled-boolean shape, each reachable through the shared naming-convention dispatch", () => {
+  it("(c) STRUCTURAL SAME-PATH CHECK: GateCheckpointConfigSchema carries exactly five sub-predicate keys as a set, each with the identical .strict() enabled-boolean shape, each reachable through the shared naming-convention dispatch", () => {
     const shape = GateCheckpointConfigSchema.shape as Record<string, z.ZodTypeAny>;
     const actualSubPredicateKeys = Object.keys(shape).filter((k) => k !== "enabled");
 
@@ -370,7 +369,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
     if (!setsMatch) {
       throw new Error(
         `AC-CP-4(c): GateCheckpointConfigSchema's sub-predicate keys are ` +
-          `${JSON.stringify([...actualSet].sort())}, expected exactly the six-key SET ` +
+          `${JSON.stringify([...actualSet].sort())}, expected exactly the five-key SET ` +
           `${JSON.stringify([...expectedSet].sort())}.`,
       );
     }

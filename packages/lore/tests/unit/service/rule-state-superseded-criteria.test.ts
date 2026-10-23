@@ -3,10 +3,11 @@
  * baseline rule's verification state; only its superseding criterion does.
  *
  * Defect: RuleStateService still listed and counted a superseded criterion, so a rule whose old citing
- * criterion went stale read `stale` and `plan-close` (cited-rule-state predicate) refused over a criterion
- * nothing can ever re-verify (`lore verify` skips it). Shared predicate: `isAcSuperseded` (@lore/core).
+ * criterion went stale read `stale`, and the plan's close (then) / its milestone review's snapshot-accuracy input
+ * (now, `CorpusService.getCitedRuleStates`, BR-1372) blamed a criterion nothing can ever re-verify (`lore verify`
+ * skips it). Shared predicate: `isAcSuperseded` (@lore/core).
  *
- * Harness: real InMemoryStore + real RuleStateService + real GateEnforcer/CorpusService (plan-close);
+ * Harness: real InMemoryStore + real RuleStateService + real CorpusService (`getCitedRuleStates`);
  * only the git port is fake (it answers "anchors changed since sha X"). Fixture docs are raw store inserts.
  */
 import { describe, it, expect } from "vitest";
@@ -94,6 +95,7 @@ interface World {
   readonly cs: CorpusService;
   readonly svc: RuleStateService;
   readonly plan: DocRecord;
+  readonly specA: DocRecord;
 }
 
 /**
@@ -102,8 +104,7 @@ interface World {
  */
 async function world(opts: { supersede: boolean }): Promise<World> {
   const store = actedStore(new InMemoryStore());
-  const config = { project: { name: "t", author: "t" }, workflow: { gates: { "plan-close": { cited_rule_check: { enabled: true } } } } } as unknown as LoreConfig;
-  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(config));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const git = new FakeGit();
   const prd = await put(store, rawDoc("prd", "root-prd", {}, null));
   await put(
@@ -131,30 +132,25 @@ async function world(opts: { supersede: boolean }): Promise<World> {
   await put(store, rawDoc("task", "b-task", { plan_id: planB.id, ac_scope: ["AC-B-1"], verification_evidence: [attested("AC-B-1", NEW)] }, planB.id, "draft"));
   const svc = new RuleStateService(store, git);
   cs.setRuleStateService(svc);
-  return { cs, svc, plan };
+  return { cs, svc, plan, specA };
 }
 
 describe("rule state ignores superseded criteria", () => {
-  it("falsifier: WITHOUT the supersede the rule is stale, lists both citing criteria, and plan-close refuses", async () => {
+  it("falsifier: WITHOUT the supersede the rule is stale, lists both citing criteria, and the review's cited-rule read reports it stale", async () => {
     const w = await world({ supersede: false });
     const full = await w.svc.full({ rule: "BR-7" });
     expect(full.ok && full.value.rules[0]?.state).toBe("stale");
     expect(full.ok && full.value.rules[0]?.inputs.map((i) => i.ac_id)).toEqual(["AC-A-1", "AC-B-1"]);
-    const r = await w.cs.set(w.plan.id, { status: "archived" });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.error.code).toBe("VALIDATION_ERROR");
-      expect(JSON.stringify(r.error)).toContain("BR-7");
-      expect(JSON.stringify(r.error).toLowerCase()).toContain("stale");
-    }
+    const cited = await w.cs.getCitedRuleStates(w.specA);
+    expect(cited.ok && cited.value).toEqual([{ rule_id: "BR-7", state: "stale" }]);
   });
 
-  it("with AC-A-1 superseded the rule is verified, only the superseding criterion is an input, and plan-close closes", async () => {
+  it("with AC-A-1 superseded the rule is verified, only the superseding criterion is an input, and the review's cited-rule read reports it verified", async () => {
     const w = await world({ supersede: true });
     const full = await w.svc.full({ rule: "BR-7" });
     expect(full.ok && full.value.rules[0]?.state).toBe("verified");
     expect(full.ok && full.value.rules[0]?.inputs.map((i) => i.ac_id)).toEqual(["AC-B-1"]);
-    const r = await w.cs.set(w.plan.id, { status: "archived" });
-    expect(r.ok).toBe(true);
+    const cited = await w.cs.getCitedRuleStates(w.specA);
+    expect(cited.ok && cited.value).toEqual([{ rule_id: "BR-7", state: "verified" }]);
   });
 });

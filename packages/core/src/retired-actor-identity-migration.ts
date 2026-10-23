@@ -6,8 +6,11 @@
  * rejects it like any unknown key; this module is the ONE place that still names it, so that `lore migrate config-keys`
  * can cut it out of a project config. Nothing reads its value and no loader special-cases it.
  *
+ * It also removes the retired `plan-close` keys (`cited_rule_check`, and `prd_sync` before it): plan close is gated by
+ * the milestone review only (BR-1372), so neither key switches anything. Same cut, same strict-schema refusal.
+ *
  * Public surface: {@link RETIRED_ACTOR_IDENTITY_FIELD}, {@link removeRetiredActorIdentityGate},
- * {@link RetiredActorIdentityRemoval}.
+ * {@link RetiredActorIdentityRemoval}, {@link removeRetiredPlanCloseKey}, {@link RETIRED_PLAN_CLOSE_KEYS}.
  *
  * Invariants:
  *   - Pure and browser-safe: no filesystem, no Node builtin (`config-node.ts` writes the file).
@@ -67,21 +70,53 @@ function contentEndOf(node: unknown): number | undefined {
  *   // => ok({ text: "", value: { enabled: false } })
  */
 export function removeRetiredActorIdentityGate(yamlText: string): Result<RetiredActorIdentityRemoval | undefined, LoreError> {
+  return removeRetiredConfigKey(yamlText, ["workflow", "gates", "task-claim"], "actor_identity", RETIRED_ACTOR_IDENTITY_FIELD);
+}
+
+/** The retired keys of `workflow.gates."plan-close"` that `lore migrate config-keys` removes. */
+export const RETIRED_PLAN_CLOSE_KEYS = ["cited_rule_check", "prd_sync"] as const;
+
+/** The `LoreError.field` / notice label of one retired `plan-close` key. */
+export function retiredPlanCloseField(key: (typeof RETIRED_PLAN_CLOSE_KEYS)[number]): string {
+  return `workflow.gates."plan-close".${key}`;
+}
+
+/**
+ * PURE removal of one retired key of `workflow.gates."plan-close"` from a config text (same line-wise cut as
+ * {@link removeRetiredActorIdentityGate}).
+ *
+ * @param yamlText - the raw config file text
+ * @param key - which retired key to cut
+ * @returns `ok(undefined)` when absent; `ok({text, value})` when present; `err(VALIDATION_ERROR)` for malformed YAML or
+ *   a flow-style placement
+ */
+export function removeRetiredPlanCloseKey(
+  yamlText: string,
+  key: (typeof RETIRED_PLAN_CLOSE_KEYS)[number],
+): Result<RetiredActorIdentityRemoval | undefined, LoreError> {
+  return removeRetiredConfigKey(yamlText, ["workflow", "gates", "plan-close"], key, retiredPlanCloseField(key));
+}
+
+function removeRetiredConfigKey(
+  yamlText: string,
+  chain: readonly string[],
+  key: string,
+  field: string,
+): Result<RetiredActorIdentityRemoval | undefined, LoreError> {
   const doc = yaml.parseDocument(yamlText);
   if (doc.errors.length > 0) {
     return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText } satisfies LoreError);
   }
-  const chain = ["workflow", "gates", "task-claim"] as const;
   const maps: yaml.YAMLMap[] = [];
   for (let depth = 1; depth <= chain.length; depth += 1) {
     const node = doc.getIn(chain.slice(0, depth), true);
     if (!yaml.isMap(node)) return ok(undefined);
     maps.push(node);
   }
-  const taskClaim = maps[maps.length - 1]!;
-  const pair = taskClaim.items.find((item) => yaml.isScalar(item.key) && item.key.value === "actor_identity");
+  const owner = maps[maps.length - 1]!;
+  const pair = owner.items.find((item) => yaml.isScalar(item.key) && item.key.value === key);
   if (pair === undefined) return ok(undefined);
-  const settingValue = doc.getIn([...chain, "actor_identity"], true);
+  const settingValue = doc.getIn([...chain, key], true);
   const value: unknown = yaml.isNode(settingValue) ? settingValue.toJSON() : settingValue;
 
   // The outermost mapping pair whose only content is the setting: cutting it leaves no empty parent mapping.
@@ -99,8 +134,8 @@ export function removeRetiredActorIdentityGate(yamlText: string): Result<Retired
   const handEdit = (reason: string): Result<never, LoreError> =>
     err({
       code: "VALIDATION_ERROR",
-      field: RETIRED_ACTOR_IDENTITY_FIELD,
-      message: `${RETIRED_ACTOR_IDENTITY_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
+      field,
+      message: `${field} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
       value: yamlText,
     } satisfies LoreError);
   const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
