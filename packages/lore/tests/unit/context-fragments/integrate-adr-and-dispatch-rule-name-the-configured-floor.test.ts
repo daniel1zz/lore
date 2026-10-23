@@ -115,8 +115,10 @@ describe("config-derived placeholder values", () => {
   });
 
   it("HAPPY: the unset text names no script and the set text carries the command verbatim", () => {
-    expect(configVariableValues({}, {}, "rules:project")["integrate_floor"]).toBe(integrateFloorText(null));
+    const unset = configVariableValues({}, {}, "rules:project");
+    expect(unset.ok && unset.value["integrate_floor"]).toBe(integrateFloorText(null));
     expect(integrateFloorText(null)).toContain(NOT_CONFIGURED);
-    expect(configVariableValues({}, layer("a && b"), "rules:project")["integrate_floor"]).toBe("set to `a && b`");
+    const set = configVariableValues({}, layer("a && b"), "rules:project");
+    expect(set.ok && set.value["integrate_floor"]).toBe("set to `a && b`");
   });
 });

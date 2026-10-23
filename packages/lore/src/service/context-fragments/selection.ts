@@ -160,9 +160,11 @@ export function selectionToLayer(
     );
   }
   const language = configLayer.context?.language;
+  const artifactLanguage = configLayer.context?.artifact_language;
   return ok({
     context: {
       ...(language === undefined ? {} : { language }),
+      ...(artifactLanguage === undefined ? {} : { artifact_language: artifactLanguage }),
       fragments: { disable: selection.disable },
     },
     ...(configLayer.workflow === undefined ? {} : { workflow: configLayer.workflow }),

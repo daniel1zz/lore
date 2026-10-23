@@ -9,6 +9,8 @@
  */
 import { z } from "zod";
 
+import { err, ok, type LoreError, type Result } from "./errors.js";
+
 // ─── Cap constants (D6, GH #20: hook strings over 10_000 chars are silently truncated) ───
 
 /** Claude Code truncates a hook-emitted string above this many characters. */
@@ -36,6 +38,28 @@ export const LANGUAGE_NAMES = {
   en: "English",
   ja: "Japanese",
 } as const;
+
+/**
+ * Maps a language code to its name (the one lookup behind Claude Code's `language` projection, the drift check
+ * and `{{lore:artifact_language}}`).
+ * @param code language code read from config
+ * @param field config key the code came from (e.g. `context.language`), named in the refusal
+ * @param layer config layer the code came from, named in the refusal
+ * @returns err(VALIDATION_ERROR) naming field, layer and the known codes when `code` is unknown
+ */
+export function languageName(code: string, field: string, layer: "global" | "project"): Result<string, LoreError> {
+  // reason: Object.hasOwn — "constructor"/"toString" must not resolve through the prototype.
+  if (!Object.hasOwn(LANGUAGE_NAMES, code)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field,
+      message: `${layer} ${field} "${code}" is not a known code (known: ${Object.keys(LANGUAGE_NAMES).join(", ")})`,
+      value: code,
+      rule: "BR-828",
+    });
+  }
+  return ok((LANGUAGE_NAMES as Readonly<Record<string, string>>)[code] as string);
+}
 
 // ─── Fragment frontmatter ───
 
@@ -139,6 +163,8 @@ export type OutletId = (typeof OUTLET_IDS)[number];
 export interface ContextConfigLayer {
   readonly context?: {
     readonly language?: string;
+    /** `context.artifact_language`: language code of the documents lore writes. */
+    readonly artifact_language?: string;
     readonly fragments?: { readonly disable?: readonly string[] };
   };
   /** `workflow.integrate.floor_command`: the only workflow key fragment text may name (`{{lore:integrate_floor}}`). */
@@ -242,6 +268,36 @@ export function resolveIntegrateFloor(
     default: {
       const unreachable: never = outlet;
       throw new Error(`resolveIntegrateFloor: unknown outlet ${String(unreachable)}`);
+    }
+  }
+}
+
+/**
+ * The `context.artifact_language` code a fragment rendered for `outlet` may name, with the layer it came from,
+ * or `null` when that outlet's layer sets none. Same layer routing as {@link resolveIntegrateFloor}.
+ */
+export function resolveArtifactLanguage(
+  global: ContextConfigLayer,
+  project: ContextConfigLayer,
+  outlet: OutletId,
+): { readonly code: string; readonly layer: "global" | "project" } | null {
+  const g = global.context?.artifact_language;
+  const p = project.context?.artifact_language;
+  const fromGlobal = g === undefined ? null : ({ code: g, layer: "global" } as const);
+  const fromProject = p === undefined ? null : ({ code: p, layer: "project" } as const);
+  switch (outlet) {
+    case "rules:user":
+    case "skills:user":
+      return fromGlobal;
+    case "rules:project":
+    case "skills:project":
+      return fromProject;
+    case "hook:subagent-start":
+    case "hook:user-prompt":
+      return fromProject ?? fromGlobal;
+    default: {
+      const unreachable: never = outlet;
+      throw new Error(`resolveArtifactLanguage: unknown outlet ${String(unreachable)}`);
     }
   }
 }

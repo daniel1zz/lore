@@ -15,7 +15,13 @@ import {
   CAPTURE_TAIL_CHARS,
   LORE_AGENT_NAMES,
   OUTLET_IDS,
+  err,
+  languageName,
+  ok,
+  resolveArtifactLanguage,
   resolveIntegrateFloor,
+  type LoreError,
+  type Result,
   type ContextConfigLayer,
   type ContextVariable,
   type OutletId,
@@ -66,6 +72,12 @@ export const LORE_CONTEXT_VARIABLES: readonly ContextVariable[] = [
     describe: "The `workflow.integrate.floor_command` the outlet's config layer sets, or the statement that none is configured.",
   },
   {
+    name: "artifact_language",
+    source: "config",
+    outlets: OUTLET_IDS,
+    describe: "The language NAME of `context.artifact_language` (e.g. Chinese) at the outlet's config layer; absent when unset.",
+  },
+  {
     name: "claude_dir",
     source: "invocation",
     outlets: ["setup:settings-hook"],
@@ -88,6 +100,14 @@ export function configVariableValues(
   global: ContextConfigLayer,
   project: ContextConfigLayer,
   outlet: OutletId,
-): Readonly<Record<string, string>> {
-  return { integrate_floor: integrateFloorText(resolveIntegrateFloor(global, project, outlet)) };
+): Result<Readonly<Record<string, string>>, LoreError> {
+  const values: Record<string, string> = { integrate_floor: integrateFloorText(resolveIntegrateFloor(global, project, outlet)) };
+  const artifact = resolveArtifactLanguage(global, project, outlet);
+  // reason: unset leaves the key ABSENT so a fragment naming it fails per BR-1095 - never a default language.
+  if (artifact !== null) {
+    const name = languageName(artifact.code, "context.artifact_language", artifact.layer);
+    if (!name.ok) return err(name.error);
+    values["artifact_language"] = name.value;
+  }
+  return ok(values);
 }

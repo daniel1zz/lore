@@ -18,7 +18,7 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { err, LANGUAGE_NAMES, ok } from "@lore/core";
+import { err, languageName, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 
 /** Minimal file port. `read` returns null ONLY for a missing file; other failures throw. */
@@ -38,17 +38,7 @@ export type LanguageLayer = "global" | "project";
  * @returns err(VALIDATION_ERROR) naming the code and layer when the code is unknown.
  */
 export function resolveLanguageName(code: string, layer: LanguageLayer): Result<string, LoreError> {
-  // reason: Object.hasOwn — "constructor"/"toString" must not resolve through the prototype.
-  if (!Object.hasOwn(LANGUAGE_NAMES, code)) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "context.language",
-      message: `${layer} context.language "${code}" is not a known code (known: ${Object.keys(LANGUAGE_NAMES).join(", ")})`,
-      value: code,
-      rule: "BR-828",
-    });
-  }
-  return ok((LANGUAGE_NAMES as Readonly<Record<string, string>>)[code] as string);
+  return languageName(code, "context.language", layer);
 }
 
 function detectIndent(raw: string): number | string {

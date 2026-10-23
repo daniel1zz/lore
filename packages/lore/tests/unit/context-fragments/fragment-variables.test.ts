@@ -239,7 +239,9 @@ describe("AC-CV-2 fragments without '{{lore:' render byte-identical to the pre-c
 
     for (const source of staticMain) {
       // reason: worktree-dispatch names the configured floor via {{lore:integrate_floor}}; its golden is the render for a project with none set.
-      const result = expandFragments([source], "rules:project", { invocation: configVariableValues({}, {}, "rules:project") }, LORE_CONTEXT_VARIABLES);
+      const variables = configVariableValues({}, {}, "rules:project");
+      if (!variables.ok) throw new Error(`expected ok, got ${JSON.stringify(variables.error)}`);
+      const result = expandFragments([source], "rules:project", { invocation: variables.value }, LORE_CONTEXT_VARIABLES);
       if (!result.ok) throw new Error(`expected ok, got ${JSON.stringify(result.error)}`);
       const render = renderRulesFile(result.value[0] as Fragment);
       expect(render.ok).toBe(true);
