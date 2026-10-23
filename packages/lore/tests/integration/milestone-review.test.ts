@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as core from "@lore/core";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
@@ -272,5 +273,35 @@ describe("milestone review gates close", () => {
       expect(r.exitCode, sub).not.toBe(0);
     }
     expect(close(plan).stderr).toContain("MILESTONE_REVIEW_MISSING");
+  });
+  it("milestone review gates close: no code path parses the legacy assessment schema; an archived legacy assessment shows its raw body", { timeout: 300_000 }, async () => {
+    // The legacy plan-outcome schema, its facts and its renderer are gone from the public surface.
+    const surface = core as Record<string, unknown>;
+    for (const name of ["assessmentResultSchema", "llmAssessmentOutputSchema", "computeAssessmentFacts", "renderAssessmentContent", "computeScopeMismatchWarning"]) {
+      expect(surface[name], name).toBeUndefined();
+    }
+    // A knowledge doc whose sub_type is "assessment" no longer needs (or is checked against) an extra.assessment payload.
+    expect(core.knowledgeExtraSchema.safeParse({ sub_type: "assessment" }).success).toBe(true);
+    expect(core.knowledgeExtraSchema.safeParse({ sub_type: "assessment", assessment: { verdict: 42 } }).success).toBe(true);
+
+    // An archived legacy doc (payload a legacy parse would reject) reads back as its raw body.
+    const created = runLore(["create", "knowledge", "--title", "Legacy plan outcome", "--sub-type", "research", "--content", "RAWBODY legacy assessment text", "--no-ai"], tmpDir);
+    expect(created.exitCode, created.stderr).toBe(0);
+    const slug = slugOf(created.stdout);
+    const { Database } = await import("bun:sqlite");
+    const db = new Database(join(tmpDir, ".lore", "lore.db"));
+    db.run("UPDATE docs SET status = 'archived', extra = ? WHERE slug = ?", [
+      JSON.stringify({ sub_type: "assessment", assessment: { verdict: 42, ac_scores: "not-an-array" } }),
+      slug,
+    ]);
+    db.close();
+    const read = runLore(["get", slug], tmpDir);
+    expect(read.exitCode, read.stderr).toBe(0);
+    expect(read.stdout).toContain("RAWBODY legacy assessment text");
+
+    // Nothing may write a new one.
+    const forged = runLore(["create", "knowledge", "--title", "New assessment", "--sub-type", "assessment", "--content", "x", "--no-ai"], tmpDir);
+    expect(forged.exitCode).not.toBe(0);
+    expect(forged.stderr).toContain("assessment");
   });
 });
