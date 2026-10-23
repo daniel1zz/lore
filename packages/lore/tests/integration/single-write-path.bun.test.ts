@@ -675,7 +675,12 @@ describe("AC-DCL-3 baseline — RuleService", () => {
 describe("AC-DCL-3 phase rename — PhaseService.renamePhase", () => {
   it("HAPPY: each renamed member task gets one version row and one audit row, by the CALLER and RUN; the plan row keeps its internal identity (#44)", async () => {
     const fx = openFixture();
-    const plan = await seed(fx, makeDoc("plan", { status: "active" }));
+    // reason: BR-1379 — the fixture seeds rows raw (no write path), so the plan carries the progress its two seeded
+    // members imply (one open draft, one archived); a plan whose stored progress already matches writes no extra row.
+    const plan = await seed(
+      fx,
+      makeDoc("plan", { status: "active", extra: { progress: { state: "in-progress", open: 1, total: 2, at: "2026-01-01T00:00:00.000Z" } } }),
+    );
     const service = new PhaseService(fx.store, fx.lock, fx.corpus);
     expect((await service.addPhase(plan.id, "alpha")).ok).toBe(true);
     const t1 = await seed(fx, makeDoc("task", { parent_id: plan.id, extra: { plan_id: plan.id, phase: "alpha" } }));

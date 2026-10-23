@@ -108,6 +108,14 @@ import type {
   VersionKey,
 } from "./store-interface.js";
 import {
+  PLAN_MEMBERS_SQL,
+  buildPlanProgressWrite,
+  keepStoredPlanProgress,
+  planIdsAffectedBy,
+  refuseArchivedTerminal,
+  withInitialPlanProgress,
+} from "./plan-progress.js";
+import {
   type AuditChainRow,
   type AuditRow,
   type CalibrationRowWithPromptVersion,
@@ -166,6 +174,7 @@ import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
+import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -922,6 +931,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-033 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 35 && 35 <= ceiling) {
+      // reason: migration-035 backfills `extra.progress` on every plan (BR-1379) in ONE BEGIN/COMMIT; a failure
+      // rolls back and leaves schema 34.
+      try {
+        this.db.exec(MIGRATION_035_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-034 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -2274,10 +2298,12 @@ export class SQLiteStore implements StoreInterface {
    * @see StoreInterface.insertWithProvenance
    */
   async insertWithProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — a plan is born with `extra.progress` (no member yet); applied to doc and v1 snapshot together.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     // `BEGIN IMMEDIATE` gets its OWN try/catch, separate from the body below:
     // a synchronous bun:sqlite throw here (e.g. SQLITE_IOERR_VNODE on a
     // corpus file deleted out from under an open handle — observed live via
@@ -2290,6 +2316,11 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatusSync(doc));
+      if (terminal !== null) {
+        this.db.run("ROLLBACK");
+        return err(terminal);
+      }
       const insertResult = this.insertDocSync(doc);
       if (!insertResult.ok) {
         this.db.run("ROLLBACK");
@@ -2306,6 +2337,12 @@ export class SQLiteStore implements StoreInterface {
       if (!auditResult.ok) {
         this.db.run("ROLLBACK");
         return auditResult;
+      }
+
+      const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(null, insertResult.value), version, doc.id);
+      if (!progressResult.ok) {
+        this.db.run("ROLLBACK");
+        return progressResult;
       }
 
       this.db.run("COMMIT");
@@ -2337,10 +2374,12 @@ export class SQLiteStore implements StoreInterface {
    * never raised that type's MAX).
    */
   async insertWithAllocatedOrdinalAndProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — see insertWithProvenance.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     // `BEGIN IMMEDIATE` gets its OWN try/catch — see insertWithProvenance's
     // identical split for why (a synchronous open-transaction throw means no
     // transaction was ever opened, so the body's ROLLBACK-on-catch must not
@@ -2351,6 +2390,11 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatusSync(doc));
+      if (terminal !== null) {
+        this.db.run("ROLLBACK");
+        return err(terminal);
+      }
       const maxRow = this.db
         .prepare("SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?")
         .get(doc.type) as { maxOrdinal: number | bigint | null };
@@ -2390,6 +2434,12 @@ export class SQLiteStore implements StoreInterface {
         return auditResult;
       }
 
+      const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(null, allocResult.value), version, doc.id);
+      if (!progressResult.ok) {
+        this.db.run("ROLLBACK");
+        return progressResult;
+      }
+
       this.db.run("COMMIT");
       return ok(allocResult.value);
     } catch (e) {
@@ -2409,9 +2459,9 @@ export class SQLiteStore implements StoreInterface {
    */
   async updateWithProvenance(
     id: DocId,
-    patch: Partial<DocRecord>,
+    rawPatch: Partial<DocRecord>,
     opts: UpdateOpts | undefined,
-    version: VersionRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
@@ -2441,6 +2491,20 @@ export class SQLiteStore implements StoreInterface {
           this.db.run("ROLLBACK");
           /** @lore-site BR-260 */
           return err(refusal);
+        }
+      }
+      // reason: BR-1379 — the stored row is read under the write lock: the archived-terminal refusal and the plan's
+      // progress both judge the write against it, and a plan edit that rebuilds `extra` keeps its stored progress.
+      const stored = this.readDocRecordSync(id);
+      const kept =
+        stored === null ? { patch: rawPatch, version: rawVersion } : keepStoredPlanProgress(stored, rawPatch, rawVersion);
+      const patch = kept.patch;
+      const version = kept.version;
+      if (stored !== null) {
+        const terminal = refuseArchivedTerminal(stored, { ...stored, ...patch }, null);
+        if (terminal !== null) {
+          this.db.run("ROLLBACK");
+          return err(terminal);
         }
       }
       const updateResult = this.updateDocSync(id, patch, opts);
@@ -2493,6 +2557,14 @@ export class SQLiteStore implements StoreInterface {
         }
       }
 
+      if (stored !== null) {
+        const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(stored, updateResult.value), version, id);
+        if (!progressResult.ok) {
+          this.db.run("ROLLBACK");
+          return progressResult;
+        }
+      }
+
       this.db.run("COMMIT");
       return ok(updateResult.value);
     } catch (e) {
@@ -2503,6 +2575,55 @@ export class SQLiteStore implements StoreInterface {
       }
       return wrapStoreError(e);
     }
+  }
+
+  /** The stored doc row (deleted or not) as a record, or `null` when absent. Synchronous: callers hold the write lock. */
+  private readDocRecordSync(id: DocId): DocRecord | null {
+    const row = this.db.prepare("SELECT * FROM docs WHERE id = ?").get(id) as DocRow | null;
+    return row === null ? null : rowToDocRecord(row);
+  }
+
+  /** The status of the live plan a task/phase `doc` is being filed under, or `null` when it has no live plan. */
+  private readPlanStatusSync(doc: DocRecord): DocRecord["status"] | null {
+    const planId = planIdsAffectedBy(null, doc)[0];
+    if (planId === undefined) return null;
+    const row = this.db
+      .prepare("SELECT status FROM docs WHERE id = ? AND type = 'plan' AND deleted_at IS NULL")
+      .get(planId) as { status: DocRecord["status"] } | null;
+    return row === null ? null : row.status;
+  }
+
+  /**
+   * BR-1379 — recompute `extra.progress` of each plan in `planIds` from its member rows and, when it changed, write the
+   * plan (CAS on the version read here, version row, audit row) INSIDE the caller's open `BEGIN IMMEDIATE` transaction.
+   * The rows are read after the primary write, under the write lock, so two concurrent finishes serialise and the
+   * second sees the first's committed row. Attribution (actor, run, time) is the primary write's own version row.
+   * Never opens or closes a transaction.
+   */
+  private reconcilePlanProgressSync(
+    planIds: readonly DocId[],
+    primaryVersion: VersionRecord,
+    causeDocId: DocId,
+  ): Result<void, LoreError> {
+    for (const planId of planIds) {
+      const plan = this.readDocRecordSync(planId);
+      if (plan === null || plan.type !== "plan" || plan.deleted_at !== null) continue;
+      const members = this.db.prepare(PLAN_MEMBERS_SQL).all(planId, planId) as Array<{ status: DocRecord["status"] }>;
+      const write = buildPlanProgressWrite(plan, members, {
+        now: primaryVersion.created_at,
+        actor: primaryVersion.created_by,
+        harnessRun: primaryVersion.harness_run ?? null,
+        causeDocId,
+      });
+      if (write === null) continue;
+      const updated = this.updateDocSync(planId, write.patch, { expected_version: write.expectedVersion });
+      if (!updated.ok) return updated;
+      const versioned = this.insertVersionSync(write.version);
+      if (!versioned.ok) return versioned;
+      const audited = this.appendAuditEntrySync(write.audit);
+      if (!audited.ok) return audited;
+    }
+    return ok(undefined);
   }
 
   /**
@@ -2545,6 +2666,7 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      const stored = this.readDocRecordSync(id);
       const deleteResult = this.softDeleteDocSync(id);
       if (!deleteResult.ok) {
         this.db.run("ROLLBACK");
@@ -2561,6 +2683,14 @@ export class SQLiteStore implements StoreInterface {
       if (!auditResult.ok) {
         this.db.run("ROLLBACK");
         return auditResult;
+      }
+
+      if (stored !== null) {
+        const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(stored, null), version, id);
+        if (!progressResult.ok) {
+          this.db.run("ROLLBACK");
+          return progressResult;
+        }
       }
 
       this.db.run("COMMIT");
