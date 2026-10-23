@@ -515,6 +515,7 @@ export class DecisionService {
           pending_id: target.id,
           answer,
           reason: reason ?? null,
+          via: proof.via,
           ancestry: proof.ancestry,
           verified_at: proof.verified_at,
           chain_head: head === null ? null : { head_id: head.head_id, head_hash: head.head_hash, count: head.count },

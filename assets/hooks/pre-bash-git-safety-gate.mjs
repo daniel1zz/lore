@@ -904,9 +904,10 @@ function isCommandPositionMatch(segment, pattern) {
 }
 
 // ── lore-decide-gate (spec-autonomy-phase-1 AC-AU-3, adr-autonomy D7) ─────────
-// `lore decide` is the HUMAN's channel for answering a pending autonomy decision. An agent's Bash call may never
-// run it, whatever the outcome would be: the verb itself refuses non-TTY / agent-ancestry callers, and this rule
-// stops the attempt before it starts. Same command-position matching as the git rules (a quoted mention such as
+// `lore decide` (with or without --from-harness, BR-1374) records a HUMAN's answer to a pending autonomy decision.
+// An agent's Bash call may never run it, whatever the outcome would be: the terminal path refuses non-TTY /
+// agent-ancestry callers, the in-session path is fed only by the PostToolUse hook, and this rule stops the attempt
+// before it starts. Same command-position matching as the git rules (a quoted mention such as
 // `git commit -m "… lore decide …"` or `echo lore decide` never fires). Allows wrappers (`env`, `sudo`, `npx`, …),
 // a path-qualified binary, global flags before the verb, and `bun|node run …/index.(ts|js) decide`.
 // reason: the git refusals below are untouched; this block only ADDS a deny and exits 2 like they do.
@@ -922,10 +923,10 @@ for (const pair of segmentPairs) {
     process.stderr.write(
       `\n⛔ [lore-decide-gate] BLOCKED — rule ${LORE_DECIDE_RULE_NAME}.\n` +
         `Segment : ${target.raw}\n` +
-        `Why     : \`lore decide\` answers a pending decision and is the human's own channel (interactive terminal, ` +
-        `nonce typed back). An agent's Bash call may never run it.\n` +
-        `Safer   : Run \`lore pending\` to read the open decision, tell the user its id, and ask them to run ` +
-        `\`lore decide <id> --accept|--reject\` in their own terminal.\n`,
+        `Why     : \`lore decide\` records a human's answer to a pending decision, with or without --from-harness. ` +
+        `An agent's Bash call may never run it; the human's answer is recorded by the PostToolUse hook.\n` +
+        `Safer   : Run \`lore pending --ask\`, pass each question it prints verbatim to the AskUserQuestion tool, ` +
+        `then carry out the human's answer yourself.\n`,
     );
     process.exit(2);
   }

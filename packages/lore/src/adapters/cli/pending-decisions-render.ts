@@ -6,7 +6,7 @@
  *   Each row also prints its `What:` summary and a `Details:` dashboard link (decision-detail-lines.ts, HR-T7).
  * Invariants:
  *   - Shows id, class, subject, score, factors and the recommended answer; there is no nonce anywhere in the
- *     data (it is generated per `lore decide` invocation and lives only on the controlling terminal).
+ *     data (it is issued by `lore pending --ask` into the question text, or generated per terminal `lore decide` and shown only there).
  *   - A store read failure is returned as err — never rendered as "no open decisions".
  * Side-effect class: IO (opens a store handle on `dbPath`, closed before returning); rendering is pure.
  *
@@ -52,7 +52,7 @@ function formatFactors(factors: Readonly<Record<string, number>>): string {
     .join(" ");
 }
 
-/** Indented What line plus the Details link of one row, under its `lore decide` command. */
+/** Indented What line plus the Details link of one row, under its row of the answer instruction. */
 function detailBlock(row: { readonly detail: string | null }, id: number, detailBase: string | null): string {
   const what = renderDecisionDetailLines(row)[0];
   return `    ${what}\n    ${renderDetailsLine(detailBase, id)}`;
@@ -70,6 +70,6 @@ export function renderPendingDecisions(decisions: readonly PendingDecision[], de
     `${d.recommended} — ${d.recommended_reason}`,
   ]);
   const table = formatTable(["ID", "Class", "Subject", "Score", "Factors", "Recommended"], rows);
-  const commands = decisions.map((d) => `  lore decide ${d.id} --accept|--reject   (human only: interactive terminal, no agent)\n${detailBlock(d, d.id, detailBase)}`).join("\n");
-  return `\nOpen decisions (${decisions.length}):\n${table}\n${commands}`;
+  const commands = decisions.map((d) => `  decision ${d.id}\n${detailBlock(d, d.id, detailBase)}`).join("\n");
+  return `\nOpen decisions (${decisions.length}):\n${table}\n${commands}\nTo answer: run \`lore pending --ask\` and put each question to the human with the interactive question tool; the answer is recorded in this session.`;
 }

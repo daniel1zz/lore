@@ -149,6 +149,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // post-edit-mark.mjs — producer of edited.flag / edited-files.jsonl on every editing tool; stop-turn-review.mjs reads them.
   { file: "post-edit-mark.mjs", runner: "node", event: "PostToolUse", matcher: "Edit|Write|MultiEdit|NotebookEdit" },
 
+  // post-ask-decide.mjs — records the human's in-session answer to a question lore wrote (`lore pending --ask`) via `lore decide --from-harness`; lore verifies the nonce and the exact question text, the hook only pipes the payload (BR-1374).
+  { file: "post-ask-decide.mjs", runner: "node", event: "PostToolUse", matcher: "AskUserQuestion" },
+
   // stop-turn-review.mjs — the one turn-end review of the main session: opt-in source edits and shared-checkout changes; one block listing every finding, silent otherwise.
   { file: "stop-turn-review.mjs", runner: "node", event: "Stop" },
 
@@ -208,6 +211,7 @@ export const HOOK_DENY_CAPABILITY: Readonly<Record<string, boolean>> = {
   "subagent-context.mjs": false,
   "user-prompt-turn-start.mjs": false,
   "post-edit-mark.mjs": false,
+  "post-ask-decide.mjs": false,
   "run-register.mjs": false,
   "run-end.mjs": false,
 };

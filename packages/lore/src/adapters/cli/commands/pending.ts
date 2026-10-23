@@ -33,12 +33,13 @@ import { defineLoreCommand } from "../cli-exit.js";
 
 import { resolveDetailBase } from "../decision-detail-lines.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatErrorFor, formatTable } from "../utils.js";
+import { exitCode, findLoreDbPath, formatErrorFor, formatTable } from "../utils.js";
 import { parseDocTypeFilter, parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
+import { parseRecommendations, runPendingAsk } from "../pending-ask.js";
 import { collectPendingDecisions, renderPendingDecisions } from "../pending-decisions-render.js";
 import { withValidityStatus } from "../../../service/validity-service.js";
-import type { DocType, ReviewJudgment } from "@lore/core";
+import type { DocType, Invocation, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
@@ -48,6 +49,24 @@ import { HIDDEN_CLASSES_TEXT, refuseHiddenTypeWithoutAll } from "../../../servic
 function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number): boolean {
   if (judgment === null) return false;
   return judgment.decision === "escalate" && judgment.doc_version === docVersion;
+}
+
+/** `--ask`: issue one question per open decision and print them as JSON (no pending documents). */
+async function runAsk(inv: Invocation, recommend: unknown): Promise<number> {
+  const raw = recommend === undefined ? [] : Array.isArray(recommend) ? recommend.map(String) : [String(recommend)];
+  const parsed = parseRecommendations(raw);
+  if (!parsed.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, parsed.error) + "\n");
+    return 2;
+  }
+  const dbPath = findLoreDbPath(inv.io, inv);
+  const asked = await runPendingAsk(inv, dbPath, parsed.value);
+  if (!asked.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, asked.error) + "\n");
+    return exitCode(asked.error);
+  }
+  printLine(inv.io.stdout, JSON.stringify({ ok: true, data: asked.value }, null, 2));
+  return 0;
 }
 
 export default defineLoreCommand({
@@ -88,6 +107,16 @@ export default defineLoreCommand({
       type: "boolean",
       description: "Output as JSON",
     },
+    ask: {
+      type: "boolean",
+      description:
+        "BR-1374 — print one AskUserQuestion-ready question per open decision (lore writes the text; JSON on stdout). " +
+        "Pass each question verbatim to the interactive question tool; the PostToolUse hook records the answer.",
+    },
+    recommend: {
+      type: "string",
+      description: "With --ask: the agent's recommendation as <id>=accept|reject:<reason> (repeatable); shown as one labelled line",
+    },
   },
   async run(context): Promise<number> {
     const { args } = context;
@@ -110,6 +139,11 @@ export default defineLoreCommand({
     if (args.since !== undefined) {
       const parsedSince = parseSinceFilter("--since", args.since);
       if (!parsedSince.ok) return refuseFilterValue(inv, parsedSince.error);
+    }
+    if (args.ask === true) return runAsk(inv, args.recommend);
+    if (args.recommend !== undefined) {
+      inv.io.stderr.write("Error: --recommend needs --ask\n");
+      return 2;
     }
     const { app, dbPath } = loadLoreApp({ inv });
     const { repoRoot } = app;

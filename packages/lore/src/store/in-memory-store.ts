@@ -51,6 +51,8 @@ import type {
   TraceDenyByCheckpoint,
   CheckOutcomeInput,
   CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
   ReadDayCount,
   TraceEventInput,
   TraceEventRecord,
@@ -133,6 +135,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly readCounts = new Map<string, number>();
   /** BR-1373 — mirrors `check_outcomes`: one entry per gate/hook run, append-only. */
   private readonly checkOutcomes: CheckOutcomeInput[] = [];
+  /** BR-1374 — mirrors `pending_asks`: lore-issued questions with their single-use nonces, in issue order. */
+  private readonly pendingAsks: Array<PendingAskInput & { used_at: string | null }> = [];
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
   private readonly runs = new Map<string, RunRecord>();
   /** Mirrors `runs.ended_at` / `runs.end_reason` (migration-017); absent key = open run. */
@@ -1609,6 +1613,27 @@ export class InMemoryStore implements StoreInterface {
   async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
     for (const row of rows) this.checkOutcomes.push({ ...row });
     return ok(undefined);
+  }
+
+  async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {
+    if (this.pendingAsks.some((a) => a.nonce === input.nonce)) return err({ code: "STORE_ERROR", message: "pending_asks: duplicate nonce" });
+    this.pendingAsks.push({ ...input, used_at: null });
+    return ok(undefined);
+  }
+
+  async readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>> {
+    const index = this.pendingAsks.findIndex((a) => a.nonce === nonce);
+    if (index < 0) return ok(null);
+    const row = this.pendingAsks[index] as PendingAskInput & { used_at: string | null };
+    const newer = this.pendingAsks.some((a, i) => i > index && a.decision_id === row.decision_id);
+    return ok({ ...row, id: index + 1, is_latest: !newer });
+  }
+
+  async consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>> {
+    const row = this.pendingAsks.find((a) => a.nonce === nonce);
+    if (row === undefined || row.used_at !== null) return ok(false);
+    row.used_at = usedAt;
+    return ok(true);
   }
 
   async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {

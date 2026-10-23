@@ -140,7 +140,7 @@ export function createOverrideDecisionPort(decisions: Pick<DecisionService, "dec
         refused(
           request.summary,
           `Class ${request.classId} scored ${decision.score} against threshold ${decision.threshold ?? "n/a"} (${reasons}).\n` +
-            `Pending decision ${open.id} created; nothing else was written. A human answers it with: lore decide ${open.id} --accept (or --reject); then re-run this same command.`,
+            `Pending decision ${open.id} created; nothing else was written. Ask the human in the session (lore pending --ask, then the interactive question tool); then re-run this same command.`,
           { class: request.classId, subject: request.subject, verdict: "escalate", pending_id: open.id },
         ),
       );
