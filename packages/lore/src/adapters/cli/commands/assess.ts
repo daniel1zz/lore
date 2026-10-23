@@ -50,7 +50,7 @@ import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wir
 import { err, ok, type DocId } from "@lore/core";
 import type { App } from "../../../app.js";
 import { createGitSuiteRunner } from "../assess-suite-runner.js";
-import { createVerifyStaleRefresher } from "../assess-stale-refresh.js";
+import { createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
@@ -245,9 +245,7 @@ export default defineLoreCommand({
           verifyRunner === undefined
             ? undefined
             : async (root: string): Promise<void> => {
-                const refresher = createVerifyStaleRefresher({
-                  verify: verifyRunner,
-                  getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
+                const refresher = createAppStaleRefresher(app, verifyRunner, {
                   executionRoot: root,
                   by: actor,
                   nowIso: () => new Date().toISOString(),

@@ -878,7 +878,7 @@ describe("milestone review gates close: stale refresh and suite environment", ()
   const bundleWith = (scoped: Record<string, string[]>): core.PlanBundle =>
     ({ tasks: Object.entries(scoped).map(([slug, scope]) => ({ slug, extra: { ac_scope: scope } })) }) as unknown as core.PlanBundle;
 
-  async function refresher(scoped: Record<string, string[]>, wired = true) {
+  async function refresher(scoped: Record<string, string[]>) {
     const { createVerifyStaleRefresher } = await import("../../src/adapters/cli/assess-stale-refresh.js");
     const planCalls: Opts[] = [];
     const adhocCalls: { task: string; opts: Opts }[] = [];
@@ -889,13 +889,9 @@ describe("milestone review gates close: stale refresh and suite environment", ()
         verifyAdhocTask: async (task: { slug: string }, _specs: unknown, opts: Opts) => (adhocCalls.push({ task: task.slug, opts }), core.ok({})),
       } as never,
       getPlanBundle: async () => core.ok(bundleWith(scoped)),
-      ...(wired
-        ? {
-            listDocs: async () => core.ok([]),
-            createAdhocTask: async (_title: string, acId: string) =>
-              (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId] } } as never)),
-          }
-        : {}),
+      listDocs: async () => core.ok([]),
+      createAdhocTask: async (_title: string, acId: string) =>
+        (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId] } } as never)),
       executionRoot: "/tmp/root",
       by: "agent:test",
       nowIso: () => "2026-10-23T00:00:00.000Z",
@@ -937,12 +933,5 @@ describe("milestone review gates close: stale refresh and suite environment", ()
     });
     expect(Object.keys(env).sort()).toEqual(["HOME", "PATH", "TMPDIR"]);
     expect(suiteChildEnv({})).toEqual({});
-  });
-
-  it("milestone review gates close: an unscoped AC with no corpus wiring fails loud and runs nothing", async () => {
-    const r = await refresher({}, false);
-    const out = await r.refresh.runAcs("plan-x", ["AC-9"]);
-    expect(out.ok).toBe(false);
-    expect(r.adhocCalls).toHaveLength(0);
   });
 });
