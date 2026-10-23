@@ -29,6 +29,12 @@ import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
+/** A directory that is a git repository: a claim recording it as its worktree is measured through `git worktree list` (BR-1353). */
+function makeRepoDir(path: string): void {
+  mkdirSync(path);
+  execFileSync("git", ["init", "-q", path], { stdio: "ignore" });
+}
+
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
 interface RunResult {
@@ -152,7 +158,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   it("(b2) a claim recorded as an absolute dir D matches a seat worktree that is a symlink to D", async () => {
     const real = join(scratch, "b2-real");
     const link = join(scratch, "b2-link");
-    mkdirSync(real);
+    makeRepoDir(real);
     symlinkSync(real, link);
     const slug = await claimTask(dir, seeded.plan, real);
     expect(claimSlugs(await injection(dir, "other-b2", link))).toEqual([slug]);
@@ -161,7 +167,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   it("(b3) the reverse: a claim recorded as the symlink path matches the real seat path", async () => {
     const real = join(scratch, "b3-real");
     const link = join(scratch, "b3-link");
-    mkdirSync(real);
+    makeRepoDir(real);
     symlinkSync(real, link);
     const slug = await claimTask(dir, seeded.plan, link);
     expect(claimSlugs(await injection(dir, "other-b3", real))).toEqual([slug]);
@@ -169,7 +175,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
 
   it("(b3) a claim recorded with a trailing slash also matches", async () => {
     const real = join(scratch, "b3-slash");
-    mkdirSync(real);
+    makeRepoDir(real);
     const slug = await claimTask(dir, seeded.plan, `${real}/`);
     expect(claimSlugs(await injection(dir, "other-slash", real))).toEqual([slug]);
   });

@@ -53,6 +53,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vite
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
@@ -157,6 +158,8 @@ let planSlug: string;
 
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-anchor-resolve-"));
+  // a claim's recorded worktree is measured through `git worktree list` (BR-1353), so the fixture is a git repository
+  makeCleanTreeRepo(tmpDir);
   await mustRun(["init"], tmpDir);
   disableAllGates(tmpDir);
   // Fixture working tree: one real file and one real directory inside the probe
