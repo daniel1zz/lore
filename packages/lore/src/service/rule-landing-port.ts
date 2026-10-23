@@ -77,4 +77,11 @@ export interface RuleChangeLandingPort {
    * does. An `err` (the plan cannot be made, or a leaf is not writable from here) refuses the deprecation.
    */
   planAbandonment(specRef: string, opts?: RuleApplyOpts): Promise<Result<AbandonmentPlan, LoreError>>;
+
+  /**
+   * Plan, without writing, the reverse of {@link planAbandonment}: the leaf writes that remove the "never landed:
+   * <spec>" tombstones so the spec's proposed ids are proposed again (the owner rejected the deprecation). The
+   * caller commits the plan with the spec's status restore, and the store marks the ids `proposed` in that write.
+   */
+  planRevival(specRef: string, opts?: RuleApplyOpts): Promise<Result<AbandonmentPlan, LoreError>>;
 }

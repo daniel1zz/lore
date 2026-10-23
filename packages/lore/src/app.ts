@@ -2167,12 +2167,15 @@ function buildRetiredAcService(
   corpusService: CorpusService,
 ): RetiredAcService {
   const acs = new AcService(store, recordLockService, undefined, corpusService);
+  // reason: rejecting a deprecation also revives the proposed rule ids it abandoned; the plan comes from the same
+  // rule-change writer corpus uses for the abandonment (an own instance: this service never imports another).
+  const ruleChanges = new RuleChangeService(store, recordLockService, corpusService);
   return new RetiredAcService({
     store,
     decisions: new DecisionService({ store, executorRun: null }),
     listDecisionLog: () => store.listDecisionLog(),
     restoreCriterion: (spec, ac, at, reason) => acs.restoreRetiredCriterion(spec, ac, at, reason),
-    restoreSpecStatus: (spec, status, reason) => acs.restoreDeprecatedSpec(spec, status, reason),
+    restoreSpecStatus: (spec, status, reason) => acs.restoreDeprecatedSpec(spec, status, reason, { planRevival: (slug, by) => ruleChanges.planRevival(slug, { by }) }),
   });
 }
 

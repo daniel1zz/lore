@@ -124,7 +124,9 @@ import {
   type FileExistsPort,
 } from "@lore/core";
 import type { AuditEntry, DocId, DocRecord } from "@lore/core";
-import type { StoreInterface } from "../store/store-interface.js";
+import type { CompanionDocWrite, StoreInterface } from "../store/store-interface.js";
+import { leafPlansToCompanionWrites } from "./rule-leaf-companion-writes.js";
+import type { AbandonmentPlan } from "./rule-landing-port.js";
 import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "./spec-evidence-tasks.js";
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
@@ -1151,13 +1153,25 @@ export class AcService {
     specIdOrSlug: string,
     previousStatus: DocRecord["status"],
     reason: string,
-    opts: { by?: string } = {},
+    opts: { by?: string; planRevival?: (specSlug: string, by: string) => Promise<Result<AbandonmentPlan, LoreError>> } = {},
   ): Promise<Result<boolean, LoreError>> {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
     if (spec.status !== "deprecated" || previousStatus === "deprecated") return ok(false);
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    // reason: the deprecation abandoned the spec's still-proposed rule ids (BR-1307); rejecting it puts them back in
+    // the SAME write as the status, so the spec and its rules are restored together or not at all.
+    let revivalWrites: CompanionDocWrite[] = [];
+    const now = new Date().toISOString();
+    if (opts.planRevival !== undefined) {
+      const revival = await opts.planRevival(spec.slug, actor);
+      if (!revival.ok) return revival;
+      revivalWrites = leafPlansToCompanionWrites(revival.value.leaves, actor, now, true);
+    }
     const written = await this.writer.writeDoc({
+      now,
+      ...(revivalWrites.length > 0 ? { extras: { also_update: revivalWrites } } : {}),
       doc: spec,
       patch: { status: previousStatus },
       action: "restore",
@@ -1165,7 +1179,7 @@ export class AcService {
       auditAction: "update",
       auditDetails: { operation: "retirement-restore", restored_status: previousStatus, reason },
       lock: "none",
-      by: resolveWriteActorFor(this.store, opts.by),
+      by: actor,
     });
     return written.ok ? ok(true) : written;
   }
