@@ -36,6 +36,9 @@ function spawnSetupInFreshHome(): { claudeDir: string; settings: string; status:
   const home = realpathSync(mkdtempSync(join(tmpdir(), "lore-cv7-")));
   homes.push(home);
   const r = spawnSync("bun", [LORE_ENTRY, "setup", "--yes"], {
+    // reason: a linked worktree of this repo resolves to the repo's own corpus, which LORE_TEST_SANDBOX refuses;
+    // the throwaway home is a corpus-free cwd, so the test passes from any checkout, nested worktree included.
+    cwd: home,
     env: { ...process.env, HOME: home },
     encoding: "utf8",
     timeout: 120_000,

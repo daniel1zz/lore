@@ -73,8 +73,7 @@
  *     outside a ticket's scope.
  *   - RESUME_COVERAGE_FLOOR / RESUME_ITEM_ID_PREFIX_KEY_DECISION /
  *     RESUME_ITEM_ID_PREFIX_NEXT_STEP / formatResumeItemId /
- *     RESUME_DISPOSITION_MARKER / RESUME_DISPOSITION_DONE /
- *     RESUME_DISPOSITION_DEFERRED_PREFIX / renderResumeCoverageCardinalityLine
+ *     renderResumeCoverageCardinalityLine
  *     — the resume ticket's LOWER-bound vocabulary
  *     (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D1, D3, D5,
  *     D8, D9). RESUME_SCOPE_CLOSURE above bounds a ticket from ABOVE (do not
@@ -90,19 +89,8 @@
  *     sections, a second implementation of the same SSOT).
  *     `packages/lore/src/flows/feed-flow.ts` appends `RESUME_COVERAGE_FLOOR`
  *     alongside `RESUME_SCOPE_CLOSURE` on the single-record resume-ticket
- *     path only (D10 — never on the `multi_actor` branch). Parsing a
- *     disposition line back into a verdict is sibling T3's job (the
- *     `lore handoff` coverage-check verb, the SOLE parser of that grammar —
- *     D9).
- *   - hasDeferralDestination(reason) / RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX
- *     — spec-resume-coverage-floor-the-satisfaction-boundaries-a S4 (Overview
- *     Hole 3): a deferral REASON (S1) is not itself a DESTINATION — the
- *     predicate recognizes an issue reference or a corpus slug inside the
- *     reason text, and the prefix is the coverage-check verb's distinct
- *     stderr refusal for a reason that names neither. MANDATORY exports per
- *     that spec's Scope section (SPEC-112 D7/D9: the verb composes from
- *     exports, never inline literals) — see the constants' own doc comments,
- *     just above `renderResumeCoverageCardinalityLine`, below.
+ *     path only (D10 — never on the `multi_actor` branch). No verb parses a
+ *     disposition line (the `lore handoff coverage-check` verb and its grammar constants were removed).
  *   - sessionStartMarkerFilename(sessionId) / isSameSessionAuthorship(record,
  *     currentActor, sessionStartIso) — task-verifying-a-handoff-you-just-authored-arms-the-coverage
  *     D1/D2: narrows WHEN the resume-ticket coverage floor above arms.
@@ -191,8 +179,7 @@
  * `renderHandoffContent` — this module — never re-derived or parsed by a
  * consumer), D3 (the lower-bound constant is separate from the upper-bound
  * one), D5 (the obligation is to account, not to complete), D8 (zero
- * cross-process state), D9 (the coverage-check verb is the sole grammar
- * parser; this module only names the disposition tokens), D10 (the floor
+ * cross-process state), D9 (this module only names the disposition tokens; the coverage-check verb that parsed them was removed), D10 (the floor
  * binds on the single-record resume-ticket path only — `feed-flow.ts`'s
  * job, not this module's);
  * task-verifying-a-handoff-you-just-authored-arms-the-coverage §Candidate
@@ -1184,8 +1171,7 @@ export const RESUME_SCOPE_CLOSURE =
 // function's parameter carries only a pre-rendered `content: string`, never
 // the structured arrays). `feed-flow.ts` appends RESUME_COVERAGE_FLOOR
 // alongside RESUME_SCOPE_CLOSURE on the single-record path only (D10).
-// Parsing a disposition line back into a verdict belongs to sibling T3 (the
-// `lore handoff` coverage-check verb, the SOLE parser of this grammar, D9).
+// No verb parses a disposition line any more (the `lore handoff coverage-check` verb was removed).
 
 /**
  * The resume ticket's lower-bound declaration
@@ -1200,8 +1186,7 @@ export const RESUME_SCOPE_CLOSURE =
  * absent") this spec exists to close (D3).
  *
  * @invariant States the ACCOUNTING obligation only (`done` or
- *   `deferred:<reason>` — {@link RESUME_DISPOSITION_DONE} /
- *   {@link RESUME_DISPOSITION_DEFERRED_PREFIX}), never a completion
+ *   `deferred:<reason>`), never a completion
  *   obligation (D5) — a ticket whose items are all legitimately out of this
  *   session's scope still closes cleanly once every item is deferred.
  * @invariant Asserted by AC-RC-3 via `===` identity against this constant,
@@ -1216,8 +1201,7 @@ export const RESUME_COVERAGE_FLOOR =
  * Item-id prefix for one `extra.key_decisions[]` entry (`KD<n>`, 1-based,
  * array order) — spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
  * D1. Exported as a named constant, never inlined at a call site, so the
- * render path (`renderHandoffContent`, this module) and the coverage-check
- * verb (sibling T3, the sole parser of this tag format, D9) cannot drift on
+ * render path (`renderHandoffContent`, this module) and its tests cannot drift on
  * the prefix literal — the same "binary parses a format the binary emitted,
  * no second implementation to drift" discipline D8 states for the grammar as
  * a whole.
@@ -1251,138 +1235,6 @@ export const RESUME_ITEM_ID_PREFIX_NEXT_STEP = "NS";
 export function formatResumeItemId(prefix: string, oneBasedIndex: number): string {
   return `${prefix}${oneBasedIndex}`;
 }
-
-/**
- * The disposition-line marker literal a consumer's per-item accounting is
- * tagged with — modeled directly on the `**[DOC_SYNC]**` shape
- * the retired `assets/hooks/stop-doc-sync.mjs` used (its successor
- * `assets/hooks/stop-turn-review.mjs` keeps the block channel), which this
- * harness measured effective at blocking a turn on an unmet per-turn obligation
- * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, "Precedent
- * for the enforcement shape"). A disposition line is expected to read
- * `${RESUME_DISPOSITION_MARKER} <item-id>: <disposition>` — but this module
- * does not itself write or parse that grammar; it only names the marker so
- * the coverage-check verb (sibling T3, the SOLE parser of this grammar, D9)
- * and this module's own tests key off one literal rather than a hand-typed
- * copy that can drift from what a consumer is actually told to write.
- */
-export const RESUME_DISPOSITION_MARKER = "**[RESUME_DISPOSITION]**";
-
-/**
- * The "fully handled" disposition token
- * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D5) — paired
- * with {@link RESUME_DISPOSITION_DEFERRED_PREFIX} as the two accepted
- * dispositions. A disposition line reads
- * `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DONE}`.
- */
-export const RESUME_DISPOSITION_DONE = "done";
-
-/**
- * The "explicitly out of scope for this session" disposition token prefix
- * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D5) — a
- * consumer appends its own free-text reason after the colon
- * (`deferred:<reason>`). Requiring a reason, rather than accepting a bare
- * `deferred`, costs one line and leaves the reason visible in the
- * transcript — which is what lets the coverage gate arm unconditionally
- * without becoming noise: a ticket whose items are all legitimately out of
- * this session's scope still closes cleanly once every item carries its own
- * deferral reason (D5). A disposition line reads
- * `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>`.
- */
-export const RESUME_DISPOSITION_DEFERRED_PREFIX = "deferred:";
-
-// ─── S4: Deferral Destination (spec-resume-coverage-floor-the-satisfaction-boundaries-a S4, Overview Hole 3) ───
-//
-// S1 (above) made a deferral carry a REASON. It did not make the reason
-// carry a DESTINATION, so `deferred:out of scope for this session` closes
-// an item and the deferred work enters no queue. Measured 2026-08-25 over
-// this corpus's own 139 handoff docs (`extra.handoff.next_steps`): 696
-// next-step items, 458 of them (65.8%) bare prose that parks nothing
-// anywhere. The two constants below close that hole.
-
-/**
- * Recognizes an issue reference inside a deferral reason (S4) — either a
- * bare `#<digits>` mention or a `/issues/<digits>` URL path segment (GitHub's
- * and most trackers' issue-URL shape). Matched ANYWHERE in the reason text,
- * not anchored, so `"...tracked, see issue #42"` still counts. Module-private
- * — only {@link hasDeferralDestination}'s combined predicate is exported,
- * since a caller composing the two patterns independently would be a second
- * implementation of "what counts as a destination" (SPEC-112 D7/D9's own
- * discipline: the grammar lives in exactly one place).
- */
-const DEFERRAL_ISSUE_REFERENCE_PATTERN = /#\d+|\/issues\/\d+(?:[/?#]|$)/;
-
-/**
- * Recognizes a corpus slug inside a deferral reason (S4) — one of the six
- * `DocRecord` type prefixes (`prd|spec|adr|plan|task|knowledge`) followed by
- * `-` and a lowercase kebab tail, the SAME `{type}-{kebab-title}` shape
- * `DocRecord.slug` uses everywhere else in this codebase. Matched as a
- * substring, not anchored, so `"...tracked in task-some-filed-thing"` still
- * counts. Module-private for the same reason
- * {@link DEFERRAL_ISSUE_REFERENCE_PATTERN} is.
- *
- * @invariant GRAMMAR ONLY (S4's recorded known false pass) — this pattern
- *   matches the SHAPE of a slug, never resolves it against the corpus, so a
- *   slug-shaped string naming no real document satisfies it. Resolution
- *   would give this pure module store IO and a network dependency it must
- *   not have (this module's own header: "no IO").
- */
-const DEFERRAL_CORPUS_SLUG_PATTERN = /\b(?:prd|spec|adr|plan|task|knowledge)-[a-z0-9]+(?:-[a-z0-9]+)*/;
-
-/**
- * S4's destination predicate — true iff `reason` (already S1-non-empty, per
- * the caller's own check) names WHERE the deferred work went: an issue
- * reference or a corpus slug. A reason alone is not a destination —
- * `deferred:out of scope for this session` satisfies S1 and fails this
- * predicate, which is exactly Hole 3's measured propagation vector (see this
- * section's own header comment for the 458/696 measurement).
- *
- * Exported so `packages/lore/src/adapters/cli/commands/handoff.ts` — the
- * SOLE parser of this grammar (D9) — composes from this export rather than
- * typing the grammar a second time (SPEC-112 D7/D9); that verb's own call
- * site is pinned to read literally `!hasDeferralDestination(`
- * (task-a-deferral-reason-with-no-destination-must-not-close-its's own
- * falsifier). Pure — no IO, no wall-clock reads, browser-safe (this module's
- * own header: no Node builtin in the default barrel — pure string/regex work
- * only here).
- *
- * @param reason - The trimmed text following `RESUME_DISPOSITION_DEFERRED_PREFIX`.
- * @returns `true` iff `reason` carries a recognized destination token.
- * @example
- * hasDeferralDestination("out of scope for this session"); // => false — reason, no destination
- * @example
- * hasDeferralDestination("out of scope, see issue #5"); // => true — issue reference
- * @example
- * hasDeferralDestination("tracked in task-some-filed-thing"); // => true — corpus slug
- */
-export function hasDeferralDestination(reason: string): boolean {
-  return DEFERRAL_ISSUE_REFERENCE_PATTERN.test(reason) || DEFERRAL_CORPUS_SLUG_PATTERN.test(reason);
-}
-
-/**
- * The stderr presentation prefix for S4's own refusal — "a deferral reason
- * naming no destination" — DISTINCT from S1's bare-deferral prefix
- * (`UNDISPOSITIONED_ITEM_STDERR_PREFIX`, local to `handoff.ts`, see that
- * constant's own doc) on purpose: "no reason given" (S1) and "a reason that
- * parks the work nowhere" (S4) are different operator mistakes with
- * different fixes, and this repo's own first corpus property forbids a
- * verdict that is not injective — a shared prefix would make the two
- * indistinguishable to a consumer parsing stderr.
- *
- * Exported (unlike the two prefixes it is distinct from, which stay local
- * presentation literals in `handoff.ts`) because the Scope section of
- * spec-resume-coverage-floor-the-satisfaction-boundaries-a S4 makes it
- * MANDATORY — the verb must compose the destination grammar AND this prefix
- * from `@lore/core` exports, never inline literals (SPEC-112 D7/D9).
- *
- * @invariant AC-RCS-4 front (b) asserts the stderr the verb ACTUALLY EMITS
- *   `startsWith` this constant AND that this constant is not byte-equal to
- *   the bare-deferral prefix — both conjuncts, since a constants-only
- *   comparison cannot catch a verb that mis-routes a destination failure
- *   through the OTHER prefix.
- */
-export const RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX =
-  "Deferral reason names no destination for resume ticket item: ";
 
 /**
  * Pure cardinality-line renderer
