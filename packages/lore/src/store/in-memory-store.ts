@@ -53,6 +53,8 @@ import type {
   CheckOutcomeStat,
   PendingAskInput,
   PendingAskRecord,
+  LeaseAcquisition,
+  LeaseRecord,
   ReadDayCount,
   TraceEventInput,
   TraceEventRecord,
@@ -1725,6 +1727,33 @@ export class InMemoryStore implements StoreInterface {
   async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
     this.readCounts.set(day, (this.readCounts.get(day) ?? 0) + 1);
     return ok(undefined);
+  }
+
+  private readonly leases = new Map<string, LeaseRecord>();
+
+  async acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>> {
+    const prior = this.leases.get(name);
+    if (prior !== undefined && prior.expires_at > nowIso && prior.holder !== holder) {
+      return ok({ acquired: false, holder: prior.holder, expires_at: prior.expires_at });
+    }
+    this.leases.set(name, { name, holder, expires_at: expiresAtIso });
+    return ok({ acquired: true, tookOver: prior !== undefined && prior.holder !== holder });
+  }
+
+  async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
+    const prior = this.leases.get(name);
+    if (prior === undefined || prior.holder !== holder) return ok(false);
+    this.leases.set(name, { name, holder, expires_at: expiresAtIso });
+    return ok(true);
+  }
+
+  async releaseLease(name: string, holder: string): Promise<Result<void, LoreError>> {
+    if (this.leases.get(name)?.holder === holder) this.leases.delete(name);
+    return ok(undefined);
+  }
+
+  async readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>> {
+    return ok(this.leases.get(name) ?? null);
   }
 
   async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {

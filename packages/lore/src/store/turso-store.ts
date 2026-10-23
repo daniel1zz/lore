@@ -89,6 +89,7 @@ import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
+import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -141,6 +142,8 @@ import type {
   CheckOutcomeStat,
   PendingAskInput,
   PendingAskRecord,
+  LeaseAcquisition,
+  LeaseRecord,
   ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
@@ -1034,6 +1037,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 35) {
         // reason: migration-035 backfills `extra.progress` on every plan (BR-1379).
         await this.client.executeMultiple(MIGRATION_035_SQL);
+      }
+
+      if (currentVersion < 36) {
+        // reason: migration-036 creates review_leases (the review batch's expiring lease, BR-1379).
+        await this.client.executeMultiple(MIGRATION_036_SQL);
       }
     })();
 
@@ -3908,6 +3916,63 @@ export class TursoStore implements StoreInterface {
         args: [day],
       });
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  private async readLeaseRow(name: string): Promise<LeaseRecord | null> {
+    const rs = await this.client.execute({ sql: "SELECT name, holder, expires_at FROM review_leases WHERE name = ?", args: [name] });
+    const row = rs.rows[0];
+    return row === undefined ? null : { name: rowStr(row, "name"), holder: rowStr(row, "holder"), expires_at: rowStr(row, "expires_at") };
+  }
+
+  async acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>> {
+    try {
+      await this.ensureReady();
+      const prior = await this.readLeaseRow(name);
+      // reason: ONE atomic upsert whose WHERE admits only an absent, expired or own row (BR-1379); the outcome is
+      // read from RETURNING rows, never the driver's rowsAffected (see store CLAUDE.md).
+      const taken = await this.client.execute({
+        sql:
+          "INSERT INTO review_leases (name, holder, expires_at) VALUES (?, ?, ?) " +
+          "ON CONFLICT(name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at " +
+          "WHERE review_leases.expires_at <= ? OR review_leases.holder = excluded.holder RETURNING name",
+        args: [name, holder, expiresAtIso, nowIso],
+      });
+      if (taken.rows.length > 0) return ok({ acquired: true, tookOver: prior !== null && prior.holder !== holder });
+      const live = await this.readLeaseRow(name);
+      if (live === null) return err({ code: "STORE_ERROR", message: `review lease ${name} vanished during acquire` });
+      return ok({ acquired: false, holder: live.holder, expires_at: live.expires_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "UPDATE review_leases SET expires_at = ? WHERE name = ? AND holder = ? RETURNING name", args: [expiresAtIso, name, holder] });
+      return ok(rs.rows.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async releaseLease(name: string, holder: string): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({ sql: "DELETE FROM review_leases WHERE name = ? AND holder = ? RETURNING name", args: [name, holder] });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      return ok(await this.readLeaseRow(name));
     } catch (e) {
       return wrapStoreError(e);
     }
