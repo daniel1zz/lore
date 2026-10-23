@@ -179,6 +179,11 @@ function ownerKeys(lines: readonly string[]): (string | null)[] {
 
 type RewriteResult = { readonly kind: "rewritten"; readonly text: string; readonly old: string; readonly next: string } | Exclude<OldFrontmatterMapping, { kind: "migrate" }>;
 
+/** YAML text of frontmatter lines with the CR of a CRLF file dropped (a lone CR inside a flow list breaks the parser). */
+function yamlText(lines: readonly string[]): string {
+  return lines.map((line) => line.replace(/\r$/, "")).join("\n");
+}
+
 /** Pure: decide what one file's text becomes. Never throws. */
 function rewriteFragmentText(text: string): RewriteResult {
   const bom = text.startsWith("﻿") ? "﻿" : "";
@@ -190,7 +195,7 @@ function rewriteFragmentText(text: string): RewriteResult {
 
   let raw: unknown;
   try {
-    raw = parseYaml(fm.join("\n"));
+    raw = parseYaml(yamlText(fm));
   } catch (e) {
     return { kind: "refused", reason: `frontmatter is not valid YAML (${e instanceof Error ? e.message : String(e)})` };
   }
@@ -215,7 +220,7 @@ function rewriteFragmentText(text: string): RewriteResult {
   });
 
   const next = bom + ["---" + (lines[0]?.endsWith("\r") === true ? "\r" : ""), ...kept, ...lines.slice(close)].join("\n");
-  const check = FragmentFrontmatterSchema.safeParse(parseYaml(kept.join("\n")));
+  const check = FragmentFrontmatterSchema.safeParse(parseYaml(yamlText(kept)));
   if (!check.success) {
     const detail = check.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
     return { kind: "refused", reason: `migrated frontmatter would be invalid (${detail})` };

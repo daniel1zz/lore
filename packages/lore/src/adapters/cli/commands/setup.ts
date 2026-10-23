@@ -607,12 +607,22 @@ async function runProjectContextProjection(opts: {
   assetsRoot: string;
   claudeDir: string;
   inv: Invocation;
+  /** Fragment files the automatic migration refused or could not migrate; hidden from the refresh so the rest still render. */
+  heldBackFragments: readonly string[];
 }): Promise<Result<void, LoreError>> {
   const refreshDeps = buildProjectRefreshDeps(opts);
   if (!refreshDeps.ok) return refreshDeps;
+  const realFs = makeRealContextFsPort(opts.repoDir, [opts.repoDir]);
+  const held = new Set(opts.heldBackFragments);
+  // reason: a refused old-format file would make discovery fail loud and block every other rules file; setup reports it
+  // (exit code + stderr) instead, so the refresh must not see it. The file is never rewritten or deleted.
+  const fs: typeof realFs = {
+    ...realFs,
+    listDir: async (path: string) => (await realFs.listDir(path)).filter((name) => !held.has(join(path, name))),
+  };
   const refreshed = await runContextRefresh(
     {
-      fs: makeRealContextFsPort(opts.repoDir, [opts.repoDir]),
+      fs,
       ...refreshDeps.value,
     },
     "",
@@ -779,7 +789,11 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: I
  * when `projectRoot` is a lore project, the project layer. Prints the per-file lines (stderr when stdout carries JSON).
  * Returns the migrate exit code (5 conflict, 4 refused, 0 clean); the caller never stops the rest of setup for it.
  */
-async function migrateFragmentsForSetup(inv: Invocation, json: boolean, projectRoot: string | null): Promise<number> {
+async function migrateFragmentsForSetup(
+  inv: Invocation,
+  json: boolean,
+  projectRoot: string | null,
+): Promise<{ readonly code: number; readonly heldBack: readonly string[] }> {
   return runFragmentsMigration(inv, {
     scopes: projectRoot !== null ? ["user", "project"] : ["user"],
     projectRoot,
@@ -809,7 +823,9 @@ async function runProjectScaffold(opts: {
     // reason: after the confirmation, before the scaffold — it reads the project's fragments (reference context) and
     // the new schema refuses the old format; the rules files are refreshed later in this run.
     onConfirmed: async () => {
-      migrateExit = await migrateFragmentsForSetup(opts.inv, opts.json, resolvedRoot.value);
+      const migrated = await migrateFragmentsForSetup(opts.inv, opts.json, resolvedRoot.value);
+      migrateExit = migrated.code;
+      return migrated.heldBack;
     },
   });
   return combineSetupExit(setupExit, migrateExit);
@@ -822,7 +838,7 @@ async function runProjectScaffoldConfirmed(opts: {
   binPath: string;
   claudeDir: string;
   inv: Invocation;
-  onConfirmed: () => Promise<void>;
+  onConfirmed: () => Promise<readonly string[]>;
 }): Promise<ExitReport> {
   const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
@@ -837,7 +853,7 @@ async function runProjectScaffoldConfirmed(opts: {
       `(.lore/ init, hooks/, lore.tree.yaml, .gitignore, CLAUDE.md, git core.hooksPath).`,
   });
   if (!confirmation.proceed) return confirmation.code;
-  await opts.onConfirmed();
+  const heldBackFragments = await opts.onConfirmed();
 
   const projectAssets =makeRealProjectAssetSource(join(opts.assetsRoot, "project"));
 
@@ -895,7 +911,7 @@ async function runProjectScaffoldConfirmed(opts: {
   // reason: runs only after a scaffold that did not itself fail — a failed scaffold may lack the
   // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
   if (scaffoldReportFailed(result.value)) return 1;
-  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv });
+  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv, heldBackFragments });
   if (!projected.ok) return failWith(opts.inv, projected.error);
   return 0;
 }
@@ -1015,7 +1031,7 @@ async function runInstall(inv: Invocation,
 
   // reason: old-format fragments are refused by the schema (D9), so every setup run migrates them first; a refused or
   // conflicting file never stops the install but becomes the exit code at the end.
-  const migrateExit = await migrateFragmentsForSetup(opts.inv, opts.json, findLoreProjectRoot(opts.inv.cwd));
+  const migrateExit = (await migrateFragmentsForSetup(opts.inv, opts.json, findLoreProjectRoot(opts.inv.cwd))).code;
 
   // reason: the global-layer language lands in `<targetDir>/settings.json`, the very file the install
   // merges hooks into. Handing it to `install` makes the manifest sha the sha of the FINAL bytes (report

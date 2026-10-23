@@ -92,7 +92,8 @@ function syncSeamFromEnv(env: Readonly<Record<string, string | undefined>>): ((p
  * @param inv Invocation (env, home, io).
  * @param opts `scopes` to include; `projectRoot` required when `project` is included; `apply` false = preview;
  *   `sink` receives the per-file lines (stdout normally; stderr when stdout carries JSON).
- * @returns The migrate exit code: 5 conflict, 4 refused, 0 clean, 1 on an IO failure (printed to stderr).
+ * @returns `code`: the migrate exit code (5 conflict, 4 refused, 0 clean, 1 on an IO failure printed to stderr);
+ *   `heldBack`: absolute paths of the refused / conflicting files (setup hides them from its rules refresh).
  */
 export async function runFragmentsMigration(
   inv: Invocation,
@@ -102,7 +103,7 @@ export async function runFragmentsMigration(
     readonly apply: boolean;
     readonly sink?: InvocationWriter;
   },
-): Promise<number> {
+): Promise<{ readonly code: number; readonly heldBack: readonly string[] }> {
   const layers: FragmentLayerDir[] = [];
   for (const scope of opts.scopes) {
     if (scope === "user") layers.push({ scope, dir: join(resolveUserConfigDir(inv.env, inv.paths.home), "context") });
@@ -115,14 +116,16 @@ export async function runFragmentsMigration(
   );
   if (!result.ok) {
     inv.io.stderr.write(`Error: fragment migration failed writing ${result.error.path}: ${result.error.message}\n`);
-    return 1;
+    return { code: 1, heldBack: [] };
   }
   const sink = opts.sink ?? inv.io.stdout;
+  const heldBack: string[] = [];
   for (const outcome of result.value.outcomes) {
     printLine(sink, formatOutcomeLine(outcome));
-    if ((outcome.kind === "refused" || outcome.kind === "conflict") && sink !== inv.io.stderr) {
-      printLine(inv.io.stderr, `lore migrate fragments: ${formatOutcomeLine(outcome)}`);
+    if (outcome.kind === "refused" || outcome.kind === "conflict") {
+      heldBack.push(outcome.path);
+      if (sink !== inv.io.stderr) printLine(inv.io.stderr, `lore migrate fragments: ${formatOutcomeLine(outcome)}`);
     }
   }
-  return result.value.exitCode;
+  return { code: result.value.exitCode, heldBack };
 }

@@ -143,7 +143,7 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: `migrate fragments --scope project` needs a lore project root (no .lore/ found above the current directory).\n");
         return 4;
       }
-      return runFragmentsMigration(inv, { scopes: [scope], projectRoot, apply: args.apply === true });
+      return (await runFragmentsMigration(inv, { scopes: [scope], projectRoot, apply: args.apply === true })).code;
     }
     if (
       args.version !== "v1" &&
