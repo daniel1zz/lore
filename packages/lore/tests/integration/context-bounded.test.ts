@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { formatBootstrapReport, BOOTSTRAP_MAX_BYTES } from "../../src/adapters/cli/commands/bootstrap.js";
-import { boundedJsonPage, DEFAULT_JSON_LIMIT } from "../../src/adapters/cli/commands/list.js";
+import { boundedJsonPage, DEFAULT_JSON_LIMIT } from "../../src/adapters/cli/list-json-page.js";
 import { fitUsageToWidth, formatUnknownCommandUsage } from "../../src/adapters/cli/usage-render.js";
 
 const ENTRY = new URL("../../src/index.ts", import.meta.url).pathname;
