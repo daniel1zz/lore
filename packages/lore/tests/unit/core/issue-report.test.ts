@@ -207,8 +207,8 @@ describe("buildIssueReportExtra", () => {
 // spec-issue-closure-loop-computed-resolution-agent-reachable's "resolves"
 // link-type CHECK widening, so the ceiling is 12).
 describe("LATEST_SCHEMA_VERSION", () => {
-  it("LATEST_SCHEMA_VERSION equals 21 — the highest migration number in sqlite-store.ts's runMigrations chain", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(35);
+  it("LATEST_SCHEMA_VERSION equals 36 — the highest migration number in sqlite-store.ts's runMigrations chain", () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(36);
   });
 
   it("LATEST_SCHEMA_VERSION is importable without touching bun:sqlite (pure module)", () => {
