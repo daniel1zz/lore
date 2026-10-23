@@ -1,8 +1,7 @@
 ---
 id: corpus-workflow-close
 title: "CLOSE — feedback loop + memory hygiene"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## CLOSE — feedback loop + memory hygiene
 

@@ -124,15 +124,15 @@ function composeMessageAddress(harness: string, raw: unknown): { address: string
 /**
  * Composition for a run: what the fragment flow selects, hashed from the fragment FILES.
  * A subagent records its `hook:subagent-start` selection. A main run (no agent type) records the union of the
- * `rules:user` and `rules:project` selections: those are the static fragments its rules files carry into the
- * session (BR-1028), so the record lists what the session was given.
+ * `rules:user` and `rules:project` selections (the launch fragments its rules files carry into the session,
+ * BR-1028) and the `hook:user-prompt` selection (re-injected every turn), so the record lists what the session was given.
  */
 async function computeComposition(agentType: string | undefined, inv: Invocation): Promise<CompositionRecord | { error: string }> {
   const deps = buildFlowDeps(inv.cwd, inv);
   if (!deps.ok) return { error: `${deps.error.code}: ${deps.error.message}` };
   const requests =
     agentType === undefined
-      ? [{ outlet: "rules:user" as const }, { outlet: "rules:project" as const }]
+      ? [{ outlet: "rules:user" as const }, { outlet: "rules:project" as const }, { outlet: "hook:user-prompt" as const }]
       : [{ outlet: "hook:subagent-start" as const, agentType }];
   const byId = new Map<string, string>();
   for (const request of requests) {

@@ -1,15 +1,16 @@
 /**
  * `lore fragments render | check` flows — read-only, hook-facing context-fragment verbs.
- * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D7, D12, D13).
+ * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D7, D12, D13);
+ * spec-fragment-injection-timing-one-inject-enum-a-per-turn (hook:user-prompt, `inject` routing).
  *
  * Public surface:
- *   - runFragmentsRender(deps, opts) — the additionalContext string the helper start outlet
- *     (`hook:subagent-start`) emits. `hook:session-start` is retired (BR-912): its stale-rules notice (BR-909,
+ *   - runFragmentsRender(deps, opts) — the additionalContext string a hook outlet emits
+ *     (`hook:subagent-start`, `hook:user-prompt`). `hook:session-start` is retired (BR-912): its stale-rules notice (BR-909,
  *     BR-910) is gone and the upgrade reminder lives in session-start-resume.mjs.
  *   - runFragmentsCheck(deps) — every outlet × agent type vs caps, lore rules-file and project skill drift,
  *     override refusal, Claude Code `language` drift, plus the rule-store findings (duplicate_line,
  *     selection_unknown_id, selection_in_config, skill_collision; spec-rule-store-... Scope 6) and the
- *     `dynamic_main` finding (BR-1066: a dynamic main-session fragment reaches no outlet);
+ *     `shipped_user_prompt` finding (a shipped fragment may not name the per-turn timing);
  *     findings, never throws. Any finding makes `ok` false (the adapter maps that to exit 4).
  *   - buildHookBanner(error) — pure banner assembly (exported for tests).
  *   - FragmentsFlowDeps, FragmentsFlowError.
@@ -18,7 +19,10 @@
  *   - Read-only: this module has NO write port. Hooks never write rules files or CLAUDE.md (D7, D13, D15).
  *   - Every failure carries a stable `code` (VALIDATION_ERROR | BUDGET_EXCEEDED); nothing is
  *     swallowed — render returns it for the D12 banner, check reports it as a finding.
- *   - Helper-start output is always <= SUBAGENT_FRAGMENT_CAP (render refuses an over-cap block, BR-907).
+ *   - Helper-start output is always <= SUBAGENT_FRAGMENT_CAP and per-turn output <= USER_PROMPT_FRAGMENT_CAP
+ *     (render refuses an over-cap block, BR-907).
+ *   - The per-turn render reaches the main session, so it runs `checkOverrides` and fails on an illegal
+ *     override (helper start does not, BR-911).
  *   - All paths in `deps` are absolute; `deps.fs` is read with them verbatim.
  *   - Layers are discovered ONE AT A TIME so selection / checkOverrides see un-merged
  *     fragments (discoverFragments merges by id, which would hide a cross-layer override).
@@ -60,7 +64,7 @@ import {
 } from "../service/context-fragments/selection.js";
 
 /** Hook outlets `render` serves (`hook:session-start` is retired, BR-912). */
-export const HOOK_OUTLETS = ["hook:subagent-start"] as const;
+export const HOOK_OUTLETS = ["hook:subagent-start", "hook:user-prompt"] as const;
 export type HookOutlet = (typeof HOOK_OUTLETS)[number];
 
 /** Why a flow step failed. `code` is what the D12 banner and `check` findings carry. */
@@ -403,7 +407,7 @@ export interface FragmentsRenderOutput {
 }
 
 /**
- * Render one hook outlet (helper start only; `hook:session-start` is retired, BR-912).
+ * Render one hook outlet (helper start, per-turn; `hook:session-start` is retired, BR-912).
  *
  * @returns ok with the additionalContext string, or the typed error the adapter turns into the D12 banner.
  */
@@ -417,6 +421,13 @@ export async function runFragmentsRender(
   const deps = applied.deps;
   const discovered = await discoverAllLayers(deps);
   if (!discovered.ok) return discovered;
+
+  if (opts.outlet === "hook:user-prompt") {
+    // reason: the per-turn block reaches the main session, where BR-905 ownership governs, so an illegal
+    // override fails the render (banner path); helper start stays lenient (BR-911).
+    const overrides = checkOverrides(discovered.value, { global: deps.globalConfig, project: deps.projectConfig });
+    if (!overrides.ok) return { ok: false, error: { code: "VALIDATION_ERROR", message: overrides.error.message } };
+  }
 
   const selected = selectSafely(discovered.value, deps, opts.outlet, opts.agentType);
   if (!selected.ok) return selected;
@@ -435,7 +446,7 @@ export async function runFragmentsRender(
 
 // ─── check ──────────────────────────────────────────────────────────────────
 
-/** Name of the audience-wildcard "agent type" every check run includes. */
+/** Name of the any-helper "agent type" (a `subagent-start` fragment without `agents`) every check run includes. */
 export const WILDCARD_AGENT_TYPE = "subagent:*";
 
 export type FindingKind =
@@ -444,7 +455,7 @@ export type FindingKind =
   | "cap"
   | "selection"
   | "rules_drift"
-  | "dynamic_main"
+  | "shipped_user_prompt"
   | "duplicate_line"
   | "selection_unknown_id"
   | "selection_in_config"
@@ -478,7 +489,7 @@ export interface FragmentsCheckReport {
   readonly findings: readonly CheckFinding[];
 }
 
-const CHECK_OUTLETS: readonly OutletId[] = ["rules:project", "rules:user", "hook:subagent-start"];
+const CHECK_OUTLETS: readonly OutletId[] = ["rules:project", "rules:user", "hook:user-prompt", "hook:subagent-start"];
 
 const SettingsLanguageSchema = z.object({ language: z.string().optional() }).passthrough();
 
@@ -489,7 +500,7 @@ async function listAgentNames(deps: FragmentsFlowDeps, dir: string): Promise<str
 
 /**
  * Every agent type a `hook:subagent-start` render can be asked for (DC2-27): shipped, user-scope and
- * project agent files, plus each `subagent:<type>` audience a fragment names, then `subagent:*`.
+ * project agent files, plus each type a fragment's `agents` list names, then `subagent:*` (the any-helper row).
  */
 async function enumerateAgentTypes(deps: FragmentsFlowDeps, fragments: readonly Fragment[]): Promise<string[]> {
   const names = new Set<string>();
@@ -497,11 +508,7 @@ async function enumerateAgentTypes(deps: FragmentsFlowDeps, fragments: readonly 
     for (const name of await listAgentNames(deps, dir)) names.add(name);
   }
   for (const fragment of fragments) {
-    for (const audience of fragment.frontmatter.audience) {
-      if (!audience.startsWith("subagent:")) continue;
-      const type = audience.slice("subagent:".length);
-      if (type !== "*" && type !== "") names.add(type);
-    }
+    for (const type of fragment.frontmatter.agents ?? []) names.add(type);
   }
   return [...[...names].sort(), WILDCARD_AGENT_TYPE];
 }
@@ -571,19 +578,17 @@ function checkSelectionIds(
 }
 
 /**
- * BR-1066: a dynamic main-session fragment is refused. Its only delivery path was the retired
- * `hook:session-start` outlet, so it would silently reach no session. Rules-file (`static`) and skill
- * (`delivery: skill`, always static) fragments and helper-audience fragments are unaffected.
+ * Per-turn cost is the user's or the project's choice: a shipped fragment naming `user-prompt` would load
+ * into every lore user's every turn, so it is refused (spec D7).
  */
-function checkDynamicMainFragments(all: readonly Fragment[]): CheckFinding[] {
+function checkShippedUserPrompt(all: readonly Fragment[]): CheckFinding[] {
   const findings: CheckFinding[] = [];
   for (const fragment of all) {
-    const { id, mode, audience } = fragment.frontmatter;
-    if (mode !== "dynamic" || !audience.includes("main")) continue;
+    if (fragment.layer !== "shipped" || !fragment.frontmatter.inject.includes("user-prompt")) continue;
     findings.push({
-      kind: "dynamic_main",
+      kind: "shipped_user_prompt",
       code: "VALIDATION_ERROR",
-      message: `fragment "${id}" (${fragment.path}) is mode: dynamic with audience: main, but the session-start outlet is retired so it reaches no session. Make it mode: static (rules file) or give it a subagent audience.`,
+      message: `shipped fragment "${fragment.frontmatter.id}" (${fragment.path}) names inject: user-prompt; a shipped fragment must not be injected on every turn. Give it launch or subagent-start.`,
     });
   }
   return findings;
@@ -594,7 +599,7 @@ function checkSkillCollisions(shippedSkillNames: readonly string[], all: readonl
   const shipped = new Set(shippedSkillNames);
   const findings: CheckFinding[] = [];
   for (const fragment of all) {
-    if (fragment.frontmatter.delivery !== "skill") continue;
+    if (!fragment.frontmatter.inject.includes("on-demand")) continue;
     const dirName = skillDirName(fragment.frontmatter.id);
     if (!shipped.has(dirName)) continue;
     findings.push({
@@ -652,7 +657,7 @@ export async function runFragmentsCheck(rawDeps: FragmentsFlowDeps): Promise<Fra
     findings.push({
       kind: "no_agent_types",
       code: "VALIDATION_ERROR",
-      message: `no agent files found in ${deps.agentsDir}, ${deps.userAgentsDir} or ${deps.projectAgentsDir}, and no fragment names a subagent audience; the agent-type set to check is empty`,
+      message: `no agent files found in ${deps.agentsDir}, ${deps.userAgentsDir} or ${deps.projectAgentsDir}, and no fragment names an agents filter; the agent-type set to check is empty`,
     });
   }
 
@@ -667,10 +672,10 @@ export async function runFragmentsCheck(rawDeps: FragmentsFlowDeps): Promise<Fra
 
     findings.push(...checkSelectionIds(applied.selections, all));
     findings.push(...checkSkillCollisions(rawDeps.shippedSkillNames, all));
-    findings.push(...checkDynamicMainFragments(all));
+    findings.push(...checkShippedUserPrompt(all));
 
     // Reading groups (BR-1067): what ONE session reads together. Main = both rules outlets
-    // + both skills outlets; each helper type = its own subagent-start row.
+    // + both skills outlets + the per-turn outlet; each helper type = its own subagent-start row.
     const mainFragments: Fragment[] = [];
     const helperGroups: ReadingGroup[] = [];
     for (const skillsOutlet of ["skills:project", "skills:user"] as const) {

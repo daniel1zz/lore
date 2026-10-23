@@ -1,8 +1,7 @@
 ---
 id: ask-then-execute
 title: "Ask the human in the session, then carry out the answer"
-audience: [main, "subagent:*"]
-mode: static
+inject: [launch, subagent-start]
 ---
 ## Ask, then carry out the answer (BR-1375)
 

@@ -14,6 +14,7 @@
  */
 import {
   SUBAGENT_FRAGMENT_CAP,
+  USER_PROMPT_FRAGMENT_CAP,
   err,
   ok,
   type Fragment,
@@ -42,6 +43,8 @@ function getOutletCap(outlet: OutletId): number | null {
   switch (outlet) {
     case "hook:subagent-start":
       return SUBAGENT_FRAGMENT_CAP;
+    case "hook:user-prompt":
+      return USER_PROMPT_FRAGMENT_CAP;
     case "rules:project":
     case "rules:user":
     case "skills:project":

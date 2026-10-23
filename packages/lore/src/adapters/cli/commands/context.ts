@@ -693,7 +693,7 @@ export default defineLoreCommand({
           return 0;
         }
         for (const row of listed.value) {
-          printLine(inv.io.stdout, `${row.selected ? "on " : "off"}  ${row.id}  (${row.layer}, ${row.delivery}, ${row.size} chars)`);
+          printLine(inv.io.stdout, `${row.selected ? "on " : "off"}  ${row.id}  (${row.layer}, ${row.inject.join(",")}, ${row.size} chars)`);
         }
         return 0;
       }

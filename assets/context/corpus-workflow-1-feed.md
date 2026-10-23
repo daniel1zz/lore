@@ -1,8 +1,7 @@
 ---
 id: corpus-workflow-feed
 title: "FEED — pull governance before you produce"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## FEED — pull governance before you produce
 

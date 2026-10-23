@@ -1,8 +1,7 @@
 ---
 id: worktree-dispatch
 title: "Worktree dispatch: lore protocol for parallel implementers"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## Worktree dispatch
 
