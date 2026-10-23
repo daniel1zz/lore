@@ -116,4 +116,6 @@ export interface CitedRuleStateRow {
   readonly rule_id: string;
   readonly state: string;
   readonly unknown_reason?: string;
+  /** Ids of the spec criteria that cite this rule (the ones re-run to refresh a stale rule). */
+  readonly citing_acs?: readonly string[];
 }

@@ -21,7 +21,7 @@ import { truncateDiffByFile } from "./diff-truncation.js";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
 
 /** Stamped on every stored review (`prompt_version`). */
-export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-2";
+export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-3";
 
 /** One task's evidence row as the judge sees it. */
 export interface MilestoneEvidenceLine {
@@ -73,8 +73,10 @@ const DIMENSION_GUIDE: Readonly<Record<(typeof MILESTONE_DIMENSIONS)[number], st
     "external reference you can name is a fail.",
   snapshot_accuracy:
     "Do the documents describe what the code now does? Read the cited-rule state below: fail ONLY for a rule whose " +
-    "state is stale (the document and the code disagree). An unknown rule (no code anchor, dirty tree, no recorded " +
-    "commit) is na, never a fail.",
+    "state is contradicted (a failing run of its citing criterion, so the document and the code disagree). A stale " +
+    "rule only means a code anchor changed since its last attested pass; stale evidence was re-verified before this " +
+    "review, so a rule still shown stale, and an unknown (no code anchor, dirty tree, no recorded commit) or " +
+    "unverified rule, is na, never a fail.",
   concurrency_safety: "Can two sessions, writers or processes doing this at once corrupt state or lose a write?",
   security: "Does the change open a path for untrusted input, leaked credentials or an unchecked privilege?",
 };

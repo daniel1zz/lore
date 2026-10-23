@@ -37,6 +37,7 @@ import { exitCode, formatErrorFor, formatTable, resolveActor } from "../utils.js
 import { classifyFeedbackUpstream, resolveConsumerCorpusRoot, type GithubUpstreamCfg } from "../report-issue-wiring.js";
 import { fileDimensionIssues, type FailedDimensionFinding } from "../assess-file-issues.js";
 import { createGitSuiteRunner } from "../assess-suite-runner.js";
+import { createVerifyStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
@@ -188,7 +189,30 @@ export default defineLoreCommand({
       // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
       let suite: SuiteRun | undefined;
       if (refs.value.length > 0) {
-        const measured = await createGitSuiteRunner(inv.cwd, inv.env).run();
+        // reason: stale cited evidence is re-verified in this SAME throwaway main worktree, once per batch, before any
+        // plan is judged (Part D); a failed refresh leaves its rules stale, which the snapshot rule reads as n/a.
+        const verifyRunner = app.verifyRunnerService;
+        const refreshStale =
+          verifyRunner === undefined
+            ? undefined
+            : async (root: string): Promise<void> => {
+                const refresher = createVerifyStaleRefresher({
+                  verify: verifyRunner,
+                  getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
+                  executionRoot: root,
+                  by: resolveActor(inv),
+                  nowIso: () => new Date().toISOString(),
+                });
+                const refreshed = await reviewService.refreshStaleCitedRules(refs.value, refresher);
+                if (!refreshed.ok) {
+                  inv.io.stderr.write(`Warning: stale cited-rule refresh failed: ${formatErrorFor(inv, refreshed.error)}\n`);
+                  return;
+                }
+                for (const failure of refreshed.value.failures) {
+                  inv.io.stderr.write(`Warning: could not re-verify ${failure.acIds.join(", ")} for ${failure.plan}: ${failure.message}\n`);
+                }
+              };
+        const measured = await createGitSuiteRunner(inv.cwd, inv.env, refreshStale).run();
         suite = measured.ok ? measured.value : { status: "not_measured", reason: formatErrorFor(inv, measured.error) };
       }
 
