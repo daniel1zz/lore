@@ -118,6 +118,23 @@ async function resolveUsageTarget(
 }
 
 /**
+ * The command words of `rawArgs` that resolve to a (sub)command, outermost first: `["phase"]` for `lore phase bogus`.
+ *
+ * @param cmd - the root command
+ * @param rawArgs - the invocation's arguments
+ * @returns the resolved command names, `[]` when the first word is not a subcommand
+ */
+async function resolveCommandPath(cmd: CommandDef<any>, rawArgs: readonly string[]): Promise<string[]> {
+  const subCommands = await resolveMaybe(cmd.subCommands);
+  if (subCommands === undefined) return [];
+  const nameIndex = rawArgs.findIndex((arg) => !arg.startsWith("-"));
+  const name = rawArgs[nameIndex];
+  const subCommand = name === undefined ? undefined : await resolveMaybe(subCommands[name]);
+  if (name === undefined || subCommand === undefined) return [];
+  return [name, ...(await resolveCommandPath(subCommand, rawArgs.slice(nameIndex + 1)))];
+}
+
+/**
  * What citty's `runMain` does, with its three `process.exit` calls turned into return values: `--help` prints usage
  * (0), `--version` prints the version (0), a thrown error prints itself and ends the run with 1 (a `CLIError` also
  * prints usage first). A `CliExit` a command threw is NOT an error: it is passed on to `runCli`, which returns its code.
@@ -153,8 +170,16 @@ async function dispatch(inv: Invocation, main: CommandDef<any>, reported: { code
     }
     const isUsageError = error instanceof Error && error.name === "CLIError";
     if (!isUsageError) printLine(inv.io.stderr, error, "\n");
+    const message = error instanceof Error ? error.message : String(error);
+    if (isUsageError && (error as { code?: unknown }).code === "E_UNKNOWN_COMMAND") {
+      // reason: BR-1371 — an unknown subcommand prints that command's usage line and a pointer to --help, not the
+      // whole help (84 KB at the root).
+      const { formatUnknownCommandUsage } = await import("./usage-render.js");
+      printLine(inv.io.stderr, formatUnknownCommandUsage(await resolveCommandPath(main, rawArgs), message));
+      return 1;
+    }
     if (isUsageError) await renderUsageDoubleDash(inv.io, ...(await resolveUsageTarget(main, rawArgs)));
-    printLine(inv.io.stderr, error instanceof Error ? error.message : String(error));
+    printLine(inv.io.stderr, message);
     return 1;
   }
 }
