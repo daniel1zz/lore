@@ -274,6 +274,9 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
 // is store-shared.ts; this module re-exports so a consumer of
 // StoreInterface's trace methods has ONE import surface for both).
 export type {
+  CheckOutcomeInput,
+  CheckOutcomeKind,
+  CheckOutcomeStat,
   TraceDenyByCheckpoint,
   TraceEventInput,
   TraceEventRecord,
@@ -283,6 +286,8 @@ export type {
   TraceStatsWindow,
 } from "./store-shared.js";
 import type {
+  CheckOutcomeInput,
+  CheckOutcomeStat,
   ReadDayCount,
   TraceDenyByCheckpoint,
   TraceEventInput,
@@ -1303,6 +1308,15 @@ export interface StoreInterface {
 
   /** Per-day read counts for days at/after `sinceDay` (`YYYY-MM-DD`), oldest day first. Days with no reads are absent. */
   listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>>;
+
+  /**
+   * Append one `check_outcomes` row per element of `rows` in ONE write (migration-033, BR-1373). Append-only:
+   * there is no update or delete. An empty array writes nothing.
+   */
+  appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>>;
+
+  /** One aggregate per check id (runs, denials, errors, first/last run, last denial), ordered by check id. */
+  listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>>;
 
   /** Every `gate_deny` row since `window.since`, for the deny→retry-success gap's read-side audit join (idx_trace_kind_actor). Computed by the caller — never stored. */
   listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>>;

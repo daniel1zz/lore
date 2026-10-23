@@ -7,7 +7,7 @@
  *   apiGetPendingReview, apiGetConfig, apiGetMachineConfig,
  *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey,
  *   apiGetReadyReport, apiGetPhaseStatus, apiGetProjects,
- *   apiGetDecisions, apiGetAuditItems, apiGetDecision (HR-T6 read-only Needs-you views); plus a RE-EXPORT of
+ *   apiGetDecisions, apiGetDecision (HR-T6 read-only Needs-you views); plus a RE-EXPORT of
  *   `@lore/core`'s issue-resolution vocabulary as ISSUE_RESOLUTIONS /
  *   IssueResolution (reference-identical — this module constructs no list)
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
@@ -581,7 +581,7 @@ export async function apiGetPendingReview(
   return fetchJson<PendingDocRow[]>(project, `/review/pending${qs}`);
 }
 
-// ─── HR-T6: Needs-you reads (open decisions + audit items) ───────────────────
+// ─── HR-T6: Needs-you reads (open decisions) ───────────────────
 
 /**
  * Mirror of the server's `DecisionDetail` (`@lore/lore` decision-log.ts). The dashboard must not import
@@ -596,9 +596,8 @@ export interface DecisionDetailView {
   on_reject: string;
 }
 
-/** Mirror of the server's `DecisionReadView` — one open decision or one audit item. */
+/** Mirror of the server's `DecisionReadView` — one open decision. */
 export interface DecisionReadView {
-  kind: "decision" | "audit";
   id: number;
   class: string;
   subject_id: string;
@@ -611,12 +610,9 @@ export interface DecisionReadView {
   /** The stored summary, or the exact "no detail recorded (decided before detail existed)" label. */
   summary: string;
   detail: DecisionDetailView | null;
-  /** null for an audit item: nothing was escalated, so nothing recommends an answer. */
   recommendation: { answer: string; reason: string } | null;
   /** Command text only; answering happens in the person's own terminal. */
   answer_commands: { accept: string; reject: string };
-  /** Audit items only: 1-based sample position within the class. */
-  audit_sequence: number | null;
 }
 
 /** GET /api/decisions — every open decision, id ascending. @throws {ApiError} On HTTP or network error. */
@@ -624,12 +620,7 @@ export async function apiGetDecisions(project: string | null): Promise<DecisionR
   return fetchJson<DecisionReadView[]>(project, "/decisions");
 }
 
-/** GET /api/audit-items — every audit item. @throws {ApiError} On HTTP or network error. */
-export async function apiGetAuditItems(project: string | null): Promise<DecisionReadView[]> {
-  return fetchJson<DecisionReadView[]>(project, "/audit-items");
-}
-
-/** GET /api/decisions/:id — one decision or audit item. @throws {ApiError} 404 unknown id, 422 non-numeric id. */
+/** GET /api/decisions/:id — one decision. @throws {ApiError} 404 unknown id, 422 non-numeric id. */
 export async function apiGetDecision(project: string | null, id: string): Promise<DecisionReadView> {
   return fetchJson<DecisionReadView>(project, `/decisions/${encodeURIComponent(id)}`);
 }

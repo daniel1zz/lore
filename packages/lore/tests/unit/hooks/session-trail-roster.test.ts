@@ -96,7 +96,8 @@ describe.each(TRAIL_HOOKS)("AC-ST-12 fail-open: $name", (hook) => {
   it("ERROR: malformed stdin", () => {
     const base = scratch("trail-base-");
     expectSilent(runHook(hook.file, "{not json", env(base), base));
-    expect(readdirSync(base)).toEqual([]);
+    // reason: every hook appends its own outcome row (check-outcomes.jsonl, BR-1373); that is the one allowed file.
+    expect(readdirSync(base).filter((name) => name !== "check-outcomes.jsonl")).toEqual([]);
   });
 
   it("ERROR: missing session_id writes nothing", () => {

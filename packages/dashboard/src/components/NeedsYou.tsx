@@ -1,20 +1,20 @@
 /**
- * NeedsYou — the read-only "Needs you" page: everything waiting for a person, in three sections.
- * Purpose: one place to read open autonomy decisions, audit items and documents awaiting review.
+ * NeedsYou — the read-only "Needs you" page: everything waiting for a person, in two sections.
+ * Purpose: one place to read open autonomy decisions and documents awaiting review.
  *   Answering a decision happens ONLY in the person's own terminal (`lore decide <id> --accept|--reject`);
  *   nothing here writes.
  * Public surface: NeedsYou, NeedsYouProps, NEEDS_YOU_EMPTY_TEXT
  * Invariants:
  *   - Every section stays visible, headed by its exact count; an empty one shows
  *     {@link NEEDS_YOU_EMPTY_TEXT}. A failed fetch shows an error line in that section (never a fake 0).
- *   - Reads only (`apiGetDecisions`, `apiGetAuditItems`, `fetchReviewQueueRows`); imports no mutation module.
+ *   - Reads only (`apiGetDecisions`, `fetchReviewQueueRows`); imports no mutation module.
  *   - Detail links are plain `<a>` (same precedent as PendingPanel) built through `projectPath`.
  * Side-effect class: IO (GET only)
  * Source: spec-human-review-surface-decisions-audit-items-and-pending D3, AC-HR-4
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { apiGetAuditItems, apiGetDecisions } from "@/lib/api";
+import { apiGetDecisions } from "@/lib/api";
 import type { DecisionReadView } from "@/lib/api";
 import { fetchReviewQueueRows } from "@/lib/review-queue";
 import type { ReviewQueueDocRow } from "@/lib/review-queue";
@@ -83,10 +83,6 @@ export function NeedsYou({ project = null }: NeedsYouProps): React.ReactElement 
     queryKey: queryKeys.scope(project, ["needs-you", "decisions"]),
     queryFn: () => apiGetDecisions(project),
   });
-  const audits = useQuery({
-    queryKey: queryKeys.scope(project, ["needs-you", "audit-items"]),
-    queryFn: () => apiGetAuditItems(project),
-  });
   const docs = useQuery({
     queryKey: queryKeys.scope(project, ["needs-you", "documents"]),
     queryFn: () => fetchReviewQueueRows(project),
@@ -94,7 +90,6 @@ export function NeedsYou({ project = null }: NeedsYouProps): React.ReactElement 
 
   function refreshAll(): void {
     void decisions.refetch();
-    void audits.refetch();
     void docs.refetch();
   }
 
@@ -113,13 +108,6 @@ export function NeedsYou({ project = null }: NeedsYouProps): React.ReactElement 
         title="Open decisions"
         hint="The system stopped and is waiting for your answer."
         query={decisions}
-        rowKey={(row) => String(row.id)}
-        renderRow={decisionRow(project)}
-      />
-      <Section
-        title="Audit items"
-        hint="Automatic decisions picked for a spot check. Nothing is blocked."
-        query={audits}
         rowKey={(row) => String(row.id)}
         renderRow={decisionRow(project)}
       />

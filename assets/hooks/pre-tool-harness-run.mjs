@@ -39,6 +39,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-tool-harness-run');
 
 /** Resolved from `PATH`, as for the other blind-pipe hooks. */
 const VERB_BINARY = 'lore';
@@ -74,7 +76,7 @@ try {
 
 let payload;
 try {
-  payload = JSON.parse(rawStdin.toString('utf8'));
+  payload = noteHookCwd(JSON.parse(rawStdin.toString('utf8')));
 } catch {
   process.exit(0);
 }

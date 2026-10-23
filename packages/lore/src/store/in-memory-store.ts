@@ -49,6 +49,8 @@ import type {
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
+  CheckOutcomeInput,
+  CheckOutcomeStat,
   ReadDayCount,
   TraceEventInput,
   TraceEventRecord,
@@ -129,6 +131,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly traceEvents: TraceEventRecord[] = [];
   /** BR-1373 — mirrors `trace_read_counts`: UTC day -> reads that day. */
   private readonly readCounts = new Map<string, number>();
+  /** BR-1373 — mirrors `check_outcomes`: one entry per gate/hook run, append-only. */
+  private readonly checkOutcomes: CheckOutcomeInput[] = [];
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
   private readonly runs = new Map<string, RunRecord>();
   /** Mirrors `runs.ended_at` / `runs.end_reason` (migration-017); absent key = open run. */
@@ -1600,6 +1604,32 @@ export class InMemoryStore implements StoreInterface {
       .map(([day, count]) => ({ day, count }))
       .sort((a, b) => a.day.localeCompare(b.day));
     return ok(rows);
+  }
+
+  async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
+    for (const row of rows) this.checkOutcomes.push({ ...row });
+    return ok(undefined);
+  }
+
+  async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {
+    const byCheck = new Map<string, CheckOutcomeInput[]>();
+    for (const row of this.checkOutcomes) byCheck.set(row.check_id, [...(byCheck.get(row.check_id) ?? []), row]);
+    const stats = [...byCheck.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([check_id, runs]): CheckOutcomeStat => {
+        const times = runs.map((r) => r.ts).sort();
+        const denials = runs.filter((r) => r.outcome === "deny").map((r) => r.ts).sort();
+        return {
+          check_id,
+          runs: runs.length,
+          denials: denials.length,
+          errors: runs.filter((r) => r.outcome === "error").length,
+          first_run: times[0] as string,
+          last_run: times[times.length - 1] as string,
+          last_denial: denials.length === 0 ? null : (denials[denials.length - 1] as string),
+        };
+      });
+    return ok(stats);
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {

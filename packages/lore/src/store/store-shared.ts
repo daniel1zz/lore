@@ -377,6 +377,31 @@ export interface TraceEventRecord extends TraceEventInput {
   id: number;
 }
 
+/** What one run of a gate or hook did (`check_outcomes.outcome`, migration-033, BR-1373). */
+export type CheckOutcomeKind = "pass" | "deny" | "error";
+
+/** One run of one check, as appended to `check_outcomes`. */
+export interface CheckOutcomeInput {
+  /** Stable check id: a gate checkpoint (`gate:task-claim`) or a hook file (`hook:pre-edit-anchor-gate`). */
+  readonly check_id: string;
+  readonly outcome: CheckOutcomeKind;
+  /** ISO 8601 time the check ran. */
+  readonly ts: string;
+}
+
+/** Per-check aggregate over `check_outcomes`. */
+export interface CheckOutcomeStat {
+  readonly check_id: string;
+  readonly runs: number;
+  readonly denials: number;
+  readonly errors: number;
+  /** Earliest recorded run (ISO 8601). */
+  readonly first_run: string;
+  readonly last_run: string;
+  /** Time of the most recent `deny`, or null when the check never denied. */
+  readonly last_denial: string | null;
+}
+
 /** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
 export interface ReadDayCount {
   /** `YYYY-MM-DD`, UTC. */

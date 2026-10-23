@@ -74,6 +74,8 @@ import { getStateBase, resolveSessionId } from './lib/turn-state.mjs';
 import { deriveClaudeCodeRunId } from './lib/run-id.mjs';
 import { extractShellWriteTargets, mayWriteFiles } from './lib/shell-writes.mjs';
 import { isSymbolScannable, locateAll, touchedSymbols } from './lib/top-level-symbols.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-edit-anchor-gate');
 
 /** Tools whose target path this hook checks, with the payload field that carries it. */
 const PATH_FIELD_BY_TOOL = {
@@ -90,7 +92,7 @@ const LORE_BINARY = 'lore';
 
 function readPayload() {
   try {
-    const parsed = JSON.parse(readFileSync(0, 'utf8'));
+    const parsed = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;

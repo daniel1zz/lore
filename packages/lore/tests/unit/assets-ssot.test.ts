@@ -434,6 +434,8 @@ const DECLARED_FILES = [
   "hooks/lib/top-level-symbols.mjs",
   "hooks/lib/shell-writes.mjs",
   "hooks/lib/turn-state.mjs",
+  // every hook's one-line outcome recorder (BR-1373): appends pass|deny|error to the local outcomes file at exit
+  "hooks/lib/check-outcome.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library
   "hooks/session-trail-start.mjs",
   "hooks/subagent-trail.mjs",

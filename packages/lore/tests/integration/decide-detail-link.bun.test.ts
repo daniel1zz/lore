@@ -19,8 +19,7 @@ import type { DecisionDetail } from "../../src/store/decision-log.js";
 import { NO_DETAIL_TEXT } from "../../src/store/decision-log.js";
 import { runDecideFlow } from "../../src/adapters/cli/decide-flow.js";
 import { registerLiveServer, resolveLiveServerRegistryDir } from "../../src/adapters/cli/live-server-registry.js";
-import { renderAuditItems, renderPendingDecisions } from "../../src/adapters/cli/pending-decisions-render.js";
-import type { AuditItem } from "../../src/service/autonomy-calibration-service.js";
+import { renderPendingDecisions } from "../../src/adapters/cli/pending-decisions-render.js";
 import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
 import { actedStore, liveInvocation } from "../live-invocation.js";
 
@@ -148,8 +147,8 @@ describe("AC-HR-6 lore decide prints the detail and a link", () => {
   });
 });
 
-describe("AC-HR-6 lore pending prints a Details line per decision and per audit row", () => {
-  it("AC-HR-6 each open decision and each audit row gets a Details line of the same form", async () => {
+describe("AC-HR-6 lore pending prints a Details line per decision", () => {
+  it("AC-HR-6 each open decision gets a Details line, and no audit block is rendered", async () => {
     const fx = makeFixture();
     const id = await seed(fx, "governance-loosen", "stash-drop.threshold", LOOSEN_DETAIL);
     const store = actedStore(new SQLiteStore(fx.dbPath));
@@ -161,19 +160,14 @@ describe("AC-HR-6 lore pending prints a Details line per decision and per audit 
     } finally {
       store.close();
     }
-    const audit: AuditItem[] = [
-      { id: 9, class: "stash-drop", subject_id: "stash@{2}", subject_version: "v1", decided_at: "2026-10-19T00:00:00.000Z", sequence: 5, score: 0.9, detail: null },
-    ];
-
-    const live = renderPendingDecisions(decisions, LIVE_URL) + renderAuditItems(audit, LIVE_URL);
+    const live = renderPendingDecisions(decisions, LIVE_URL);
     expect(live).toContain(`Details: ${LIVE_URL}/needs-you/decisions/${id}`);
-    expect(live).toContain(`Details: ${LIVE_URL}/needs-you/decisions/9`);
     expect(live).toContain(`What: ${LOOSEN_DETAIL.summary}`);
-    expect(live).toContain(`What: ${NO_DETAIL_TEXT}`);
+    expect(live).not.toContain("Awaiting audit");
 
-    const none = renderPendingDecisions(decisions, null) + renderAuditItems(audit, null);
+    const none = renderPendingDecisions(decisions, null);
     expect(none).toContain(`Details: start the dashboard with \`lore dashboard\`, then open /needs-you/decisions/${id}`);
-    expect(none).toContain("Details: start the dashboard with `lore dashboard`, then open /needs-you/decisions/9");
     expect(none).not.toContain("http");
+    expect(NO_DETAIL_TEXT).toBe("no detail recorded (decided before detail existed)");
   });
 });

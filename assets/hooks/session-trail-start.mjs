@@ -17,6 +17,8 @@
 
 import { readHookPayload, resolveSessionId, getStateBase } from './lib/turn-state.mjs';
 import { recordHelperStart, recordSessionStart } from './lib/session-trail.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:session-trail-start');
 
 try {
   const payload = readHookPayload();

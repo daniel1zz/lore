@@ -1,5 +1,5 @@
 /**
- * AC-HR-3 — the decision / audit-item read routes are authenticated and PURE.
+ * AC-HR-3 — the decision read routes are authenticated and PURE (no audit-item route exists any more).
  *
  * Throwaway in-memory corpus + a real in-process Bun.Server (same harness as feedback-loop-routes.bun.test.ts).
  * Dimensions: HAPPY (cookie + agent key 200, detail/label/factors/commands), NEGATIVE (401, 404, 422),
@@ -75,11 +75,11 @@ interface Ctx {
   detailedId: number;
   /** id of the open decision recorded before detail existed. */
   legacyId: number;
-  /** id of the audit item (10th auto decision of its class). */
-  auditId: number;
+  /** id of the 10th auto decision of its class: an auto decision is never queued, listed or served as open. */
+  autoId: number;
 }
 
-async function seed(store: InMemoryStore): Promise<Pick<Ctx, "staleId" | "detailedId" | "legacyId" | "auditId">> {
+async function seed(store: InMemoryStore): Promise<Pick<Ctx, "staleId" | "detailedId" | "legacyId" | "autoId">> {
   const must = async (input: DecisionRecordInput): Promise<number> => {
     const r = await store.appendDecisionRecord(input);
     if (!r.ok) throw new Error(`seed append failed: ${r.error.code}`);
@@ -96,11 +96,11 @@ async function seed(store: InMemoryStore): Promise<Pick<Ctx, "staleId" | "detail
     }),
   );
   const legacyId = await must(row({ subject_id: "legacy-subject", factors: JSON.stringify({ coverage: 0.7 }), score: 0.7 }));
-  let auditId = 0;
+  let autoId = 0;
   for (let i = 1; i <= 10; i += 1) {
-    auditId = await must(row({ class: "audit-class", subject_id: `auto-${i}`, verdict: "auto", score: 0.9, threshold: 0.5, factors: JSON.stringify({ coverage: 0.9 }) }));
+    autoId = await must(row({ class: "audit-class", subject_id: `auto-${i}`, verdict: "auto", score: 0.9, threshold: 0.5, factors: JSON.stringify({ coverage: 0.9 }) }));
   }
-  return { staleId, detailedId, legacyId, auditId };
+  return { staleId, detailedId, legacyId, autoId };
 }
 
 async function makeCtx(): Promise<Ctx> {
@@ -155,7 +155,6 @@ async function cookieFor(ctx: Ctx): Promise<string> {
 }
 
 interface View {
-  kind: string;
   id: number;
   summary: string;
   detail: Record<string, unknown> | null;
@@ -175,9 +174,9 @@ describe("AC-HR-3 decision read routes", () => {
     ctx.machineAuth.db.close();
   });
 
-  const paths = (c: Ctx): string[] => ["/api/decisions", `/api/decisions/${c.detailedId}`, "/api/audit-items"];
+  const paths = (c: Ctx): string[] => ["/api/decisions", `/api/decisions/${c.detailedId}`];
 
-  it("AC-HR-3 NEGATIVE: 401 with no credentials on all three routes", async () => {
+  it("AC-HR-3 NEGATIVE: 401 with no credentials on both routes", async () => {
     for (const p of paths(ctx)) expect((await fetch(`${ctx.baseUrl}${p}`)).status).toBe(401);
   });
 
@@ -189,7 +188,7 @@ describe("AC-HR-3 decision read routes", () => {
     }
   });
 
-  it("AC-HR-3 STATE: reading all three leaves the row count and chain head unchanged on a corpus with a STALE pending decision", async () => {
+  it("AC-HR-3 STATE: reading both leaves the row count and chain head unchanged on a corpus with a STALE pending decision", async () => {
     const before = await ctx.store.listDecisionLog();
     if (!before.ok) throw new Error("list failed");
     const headBefore = decisionChainHead(before.value);
@@ -218,7 +217,6 @@ describe("AC-HR-3 decision read routes", () => {
   it("AC-HR-3 HAPPY: an open decision serves its detail, factors by name, recommendation and answer commands", async () => {
     const res = await fetch(`${ctx.baseUrl}/api/decisions/${ctx.detailedId}`, { headers: { Authorization: `Bearer ${ctx.rawKey}` } });
     const { data } = (await res.json()) as { data: View };
-    expect(data.kind).toBe("decision");
     expect(data.summary).toBe(DETAIL.summary);
     expect(data.detail).toEqual(DETAIL);
     expect(data.factors).toEqual({ coverage: 0.4, blast_radius: 0.9 });
@@ -234,15 +232,11 @@ describe("AC-HR-3 decision read routes", () => {
     expect(data.detail).toBeNull();
   });
 
-  it("AC-HR-3 HAPPY: an audit item is served by the same route, marked kind=audit, and listed by /api/audit-items", async () => {
+  it("AC-HR-3 NEGATIVE: the 10th auto decision of a class is not served, there is no audit-items route, and the open list holds only open decisions", async () => {
     const auth = { headers: { Authorization: `Bearer ${ctx.rawKey}` } };
-    const one = (await (await fetch(`${ctx.baseUrl}/api/decisions/${ctx.auditId}`, auth)).json()) as { data: View };
-    expect(one.data.kind).toBe("audit");
-    expect(one.data.factors).toEqual({ coverage: 0.9 });
-    expect(one.data.answer_commands.accept).toBe(`lore decide ${ctx.auditId} --accept`);
-    const list = (await (await fetch(`${ctx.baseUrl}/api/audit-items`, auth)).json()) as { data: View[] };
-    expect(list.data.map((v) => v.id)).toEqual([ctx.auditId]);
+    expect((await fetch(`${ctx.baseUrl}/api/decisions/${ctx.autoId}`, auth)).status).toBe(404);
+    expect((await fetch(`${ctx.baseUrl}/api/audit-items`, auth)).status).toBe(404);
     const open = (await (await fetch(`${ctx.baseUrl}/api/decisions`, auth)).json()) as { data: View[] };
-    expect(open.data.map((v) => v.id)).toEqual([ctx.detailedId, ctx.legacyId]); // stale one excluded; audit item is not an open decision
+    expect(open.data.map((v) => v.id)).toEqual([ctx.detailedId, ctx.legacyId]); // stale one excluded; an auto decision is never open
   });
 });

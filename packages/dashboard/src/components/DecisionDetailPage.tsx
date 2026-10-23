@@ -1,5 +1,5 @@
 /**
- * DecisionDetailPage — read-only detail for one open decision or audit item.
+ * DecisionDetailPage — read-only detail for one open decision.
  * Purpose: show, in plain words, what is being asked: summary, before/after (when the change has them),
  *   what accepting and rejecting each do, every factor by name, and the recommendation (none for an audit
  *   item). It prints the exact `lore decide` commands and says answering happens in your own terminal.
@@ -24,7 +24,7 @@ function show(value: unknown): string {
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof ApiError && error.status === 404) return "No decision or audit item with that number exists.";
+  if (error instanceof ApiError && error.status === 404) return "No decision with that number exists.";
   if (error instanceof ApiError && error.status === 422) return "That is not a valid decision number.";
   return "Could not load this decision. Try again.";
 }
@@ -64,12 +64,11 @@ export function DecisionDetailPage({ id, project = null }: DecisionDetailPagePro
     <div className="mx-auto max-w-3xl space-y-5 p-4">
       {back}
       <h1 className="text-2xl font-semibold">
-        {view.kind === "audit" ? "Audit item" : "Decision"} #{view.id}
+        Decision #{view.id}
       </h1>
       <p className="text-base">{view.summary}</p>
       <p className="text-xs text-muted-foreground">
         {view.class} · {view.subject_id} · {view.subject_version}
-        {view.audit_sequence !== null ? ` · sample ${view.audit_sequence}` : ""}
       </p>
 
       {detail !== null && (

@@ -115,7 +115,7 @@ function RootLayout(): React.ReactElement {
             >
               Settings
             </Link>
-            {/* reason: HR-T6 — read-only page listing decisions, audit items and documents waiting for the person. */}
+            {/* reason: HR-T6 — read-only page listing decisions and documents waiting for the person. */}
             <Link
               to={projectPath(project, "/needs-you")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"

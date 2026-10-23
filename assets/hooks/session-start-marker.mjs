@@ -65,6 +65,8 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:session-start-marker');
 
 // reason: DELIBERATE literal duplicate of `@lore/core`'s
 // `sessionStartMarkerFilename` (packages/core/src/session.ts) — see this

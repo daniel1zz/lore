@@ -179,8 +179,7 @@ function renderAutonomyStats(classes: readonly ClassCalibrationStats[]): string 
     c.confidence.toFixed(3),
     c.threshold === null ? "-" : String(c.threshold),
     c.escalating ? "ESCALATING" : "auto",
-    `${c.audit_pending} / ${c.audit_answered}`,
   ]);
-  const headers = ["Class", "Auto decisions", "Stood / Reversed", "Window", "Prior", "C (Wilson LB)", "Threshold", "State", "Audit pending / answered"];
+  const headers = ["Class", "Auto decisions", "Stood / Reversed", "Window", "Prior", "C (Wilson LB)", "Threshold", "State"];
   return `\nAutonomy outcome calibration (C = Wilson lower bound over the last 50 outcomes plus 50 pseudo-outcomes at the prior):\n${formatTable(headers, rows)}`;
 }

@@ -10,10 +10,9 @@
  *     writes nothing to the decision log.
  *   - The nonce exists only inside `confirmHumanNonce` and on the controlling terminal; nothing here prints,
  *     returns or logs it.
- *   - The only writes are `DecisionService.resolvePending` (a blocking escalation) and `DecisionService.resolveAudit`
- *     (a sampling-floor audit item, AC-AU-10); each re-checks that the id is still open. The id space is the decision
- *     log's, so an id is either a pending escalation or an audit item, never both. For an audit item `--accept`
- *     means "the auto decision was RIGHT" (outcome stood) and `--reject` means "WRONG" (outcome reversed).
+ *   - The only write is `DecisionService.resolvePending` (a blocking escalation), which re-checks that the id is
+ *     still open. There is no audit queue of auto decisions to answer (AC-LG-14): an id that is not a pending
+ *     escalation is refused.
  * Side-effect class: IO (opens the corpus DB, the controlling terminal, stdout/stderr).
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-3.
@@ -92,28 +91,8 @@ export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, por
       return exitCode(pending.error);
     }
     if (pending.value === null) {
-      const audit = await service.getAudit(pendingId);
-      if (!audit.ok) {
-        pre.value.terminal.close();
-        io.stderr(formatErrorFor(inv, audit.error) + "\n");
-        return exitCode(audit.error);
-      }
-      if (audit.value === null) {
-        pre.value.terminal.close();
-        return usageRefusal(io, `decision ${pendingId} is not pending and not awaiting audit (see \`lore pending\`)`);
-      }
-      const item = audit.value;
-      const auditAnswer = input.accept ? "right" : "wrong";
-      const auditSummary = `audit decision ${item.id}: auto ${item.class} ${item.subject_id} (${item.subject_version}) was ${auditAnswer.toUpperCase()}`;
-      const auditProof = confirmHumanNonce(ports, pre.value, withDetailLines(auditSummary, item, item.id, inv));
-      if (!auditProof.ok) return usageRefusal(io, auditProof.error.message);
-      const answered = await service.resolveAudit(item.id, auditAnswer, input.reason, auditProof.value);
-      if (!answered.ok) {
-        io.stderr(formatErrorFor(inv, answered.error) + "\n");
-        return exitCode(answered.error);
-      }
-      io.stdout(`Audit of decision ${item.id} recorded: ${auditAnswer === "wrong" ? "reversed" : "stood"} (channel human-tty, record ${answered.value.id}). The audited operation already ran; this only feeds ${item.class}'s calibration.\n`);
-      return 0;
+      pre.value.terminal.close();
+      return usageRefusal(io, `decision ${pendingId} is not pending (see lore pending)`);
     }
     const target = pending.value;
     const summary = `${answer} decision ${target.id}: ${target.class} ${target.subject_id} (${target.subject_version}), score ${target.score}`;
