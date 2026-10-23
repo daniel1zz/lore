@@ -8,23 +8,29 @@
  * Public surface: {@link CheckStatsService}.{stats, quality, ingestHookOutcomes}, {@link deriveRemovalCandidates},
  *   {@link citesAny}, the REMOVAL_* / ESCAPE_WINDOW_DAYS constants, the report types.
  * Invariants:
- *   - A removal candidate has >= REMOVAL_MIN_DAYS between its first and the current time AND >= REMOVAL_MIN_RUNS runs
- *     AND 0 denials (the ADR's observation window). One denial, ever, takes a check off the list.
+ *   - A removal candidate can deny (`isDenyCapableCheck`: a gate checkpoint, or a hook declared deny-capable in
+ *     `@lore/core`'s HOOK_DENY_CAPABILITY) AND has >= REMOVAL_MIN_DAYS between its first and the current time AND
+ *     >= REMOVAL_MIN_RUNS runs AND 0 denials (the ADR's observation window). One denial, ever, takes a check off the
+ *     list. An informational hook shows runs only; "never denied" says nothing about a check that cannot deny.
  *   - An issue counts as escaped only when it was filed at or after the plan closed, no later than
  *     ESCAPE_WINDOW_DAYS days after, and its title or body cites the plan slug or one of the plan's task slugs as a
  *     whole token. An issue without a creation time is a VALIDATION_ERROR, never a guess.
- *   - Hook outcomes arrive through a local JSONL file the hooks append to (no process spawn per hook run). Ingest
- *     claims the file by atomic rename, so two concurrent lore calls never read the same line twice.
+ *   - Hook outcomes arrive through a local JSONL file the hooks append to (no process spawn per hook run). The file is
+ *     shared by every project of the user, so each line carries the hook's `cwd`: ingest takes only lines whose cwd
+ *     is inside this corpus's project root, leaves every other project's lines in the file, and NEVER ingests a line
+ *     without a cwd (such a line is dropped and counted as malformed). Ingest claims the file by atomic rename, so two
+ *     concurrent lore calls never read the same line twice.
  * Side-effect class: IO (store reads/appends; the outcomes file; the injected issue reader).
  *
  * Source: spec-lean-governance-batch-verbs-judgment-only-at-milestones Part D; BR-1373;
  *   adr-ai-decision-standard-four-checks-references-from-excellent (observation window).
  */
-import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync } from "node:fs";
-import { err, ok, storeError, validationError, type DocRecord, type LoreError, type Result } from "@lore/core";
-import { join } from "node:path";
+import { appendFileSync, existsSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
+import { err, isDenyCapableHookCheck, ok, storeError, validationError, type DocRecord, type LoreError, type Result } from "@lore/core";
+import { join, sep } from "node:path";
 import { z } from "zod";
 import type { CheckOutcomeInput, CheckOutcomeStat, StoreInterface } from "../store/store-interface.js";
+import { checkpointRegistry } from "./checkpoint-registry.js";
 
 /** A check must have been observed this many days before "never denied" counts as evidence. */
 export const REMOVAL_MIN_DAYS = 30;
@@ -39,6 +45,8 @@ const DAY_MS = 86_400_000;
 export interface CheckStatLine extends CheckOutcomeStat {
   /** Whole days between the first recorded run and now. */
   readonly observed_days: number;
+  /** False for a check that cannot deny: it is never a removal candidate and its denial columns carry no meaning. */
+  readonly can_deny: boolean;
   readonly removal_candidate: boolean;
 }
 
@@ -81,14 +89,17 @@ export interface QualityReport {
 /** What one ingest of the hook outcomes file did. */
 export interface HookIngestReport {
   readonly ingested: number;
-  /** Lines that were not a valid outcome (a hook bug); counted, never silently dropped. */
+  /** Lines that were not a valid outcome or carried no cwd (a hook bug); counted, never silently dropped. */
   readonly malformed: number;
+  /** Valid lines of other projects, left in the file for their own corpus. */
+  readonly left_for_other_projects: number;
 }
 
 const hookOutcomeLineSchema = z.object({
   check: z.string().min(1),
   outcome: z.enum(["pass", "deny", "error"]),
   ts: z.string().refine((value) => Number.isFinite(Date.parse(value)), "ts must be an ISO 8601 time"),
+  cwd: z.string().min(1),
 });
 
 /**
@@ -108,6 +119,33 @@ export interface CheckStatsDeps {
   readonly now: () => string;
   /** The JSONL file the hooks append to; absent -> `ingestHookOutcomes` is not wired and refuses. */
   readonly hookOutcomesPath?: string;
+  /** This corpus's project root: ingest keeps only hook lines whose cwd is inside it. Required with `hookOutcomesPath`. */
+  readonly projectRoot?: string;
+}
+
+/**
+ * THE deny-capability question for a check id: a `gate:<checkpoint>` of the checkpoint registry, or a `hook:<name>`
+ * declared deny-capable in `@lore/core`. An id naming neither is not deny-capable (never a removal candidate).
+ */
+export function isDenyCapableCheck(checkId: string): boolean {
+  if (checkId.startsWith("gate:")) return Object.hasOwn(checkpointRegistry, checkId.slice("gate:".length));
+  return isDenyCapableHookCheck(checkId) === true;
+}
+
+function realOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    // reason: a cwd that no longer exists (a removed worktree) is still judged by its own text, not dropped.
+    return path;
+  }
+}
+
+/** True when `cwd` is `root` or lies below it (both compared after resolving symlinks). */
+export function isInsideProject(cwd: string, root: string): boolean {
+  const base = realOrSelf(root);
+  const target = realOrSelf(cwd);
+  return target === base || target.startsWith(base.endsWith(sep) ? base : base + sep);
 }
 
 /**
@@ -118,6 +156,7 @@ export interface CheckStatsDeps {
 export function deriveRemovalCandidates(stats: readonly CheckOutcomeStat[], nowIso: string): string[] {
   const nowMs = Date.parse(nowIso);
   return stats
+    .filter((s) => isDenyCapableCheck(s.check_id))
     .filter((s) => s.denials === 0 && s.runs >= REMOVAL_MIN_RUNS && nowMs - Date.parse(s.first_run) >= REMOVAL_MIN_DAYS * DAY_MS)
     .map((s) => s.check_id)
     .sort();
@@ -146,6 +185,7 @@ export class CheckStatsService {
     const checks = listed.value.map((s) => ({
       ...s,
       observed_days: Math.floor((Date.parse(nowIso) - Date.parse(s.first_run)) / DAY_MS),
+      can_deny: isDenyCapableCheck(s.check_id),
       removal_candidate: candidates.has(s.check_id),
     }));
     return ok({ checks, removal_candidates: [...candidates] });
@@ -240,18 +280,23 @@ export class CheckStatsService {
    */
   async ingestHookOutcomes(): Promise<Result<HookIngestReport, LoreError>> {
     const path = this.deps.hookOutcomesPath;
-    if (path === undefined) return err(validationError("hookOutcomesPath", "the hook outcomes file is not wired", undefined, "BR-1373"));
-    if (!existsSync(path)) return ok({ ingested: 0, malformed: 0 });
+    const root = this.deps.projectRoot;
+    if (path === undefined || root === undefined) {
+      return err(validationError("hookOutcomesPath", "the hook outcomes file and the project root must both be wired", undefined, "BR-1373"));
+    }
+    const nothing: HookIngestReport = { ingested: 0, malformed: 0, left_for_other_projects: 0 };
+    if (!existsSync(path)) return ok(nothing);
     const claimed = `${path}.ingest-${process.pid}-${Date.now()}`;
     try {
       renameSync(path, claimed);
     } catch (cause) {
       // reason: another lore call claimed the file between existsSync and rename: it ingests those lines, not us.
-      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return ok({ ingested: 0, malformed: 0 });
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return ok(nothing);
       return err(storeError(`could not claim ${path}: ${String(cause)}`));
     }
     const text = readFileSync(claimed, "utf8");
     const rows: CheckOutcomeInput[] = [];
+    const otherProjects: string[] = [];
     let malformed = 0;
     for (const line of text.split("\n")) {
       if (line.trim() === "") continue;
@@ -262,20 +307,26 @@ export class CheckStatsService {
         malformed += 1;
         continue;
       }
-      const parsed = hookOutcomeLineSchema.safeParse(json);
+      const parsed = hookOutcomeLineSchema.safeParse(json); // a line without a cwd fails here: never ingested
       if (!parsed.success) {
         malformed += 1;
+        continue;
+      }
+      if (!isInsideProject(parsed.data.cwd, root)) {
+        otherProjects.push(line);
         continue;
       }
       rows.push({ check_id: parsed.data.check, outcome: parsed.data.outcome, ts: parsed.data.ts });
     }
     const appended = await this.deps.store.appendCheckOutcomes(rows);
     if (!appended.ok) {
-      appendFileSync(path, text); // put the lines back: a failed ingest loses nothing
+      appendFileSync(path, text); // put every line back: a failed ingest loses nothing
       unlinkSync(claimed);
       return appended;
     }
+    // reason: the other projects' lines go back BEFORE the claim is dropped, so a crash here duplicates nothing and loses nothing a later call cannot redo.
+    if (otherProjects.length > 0) appendFileSync(path, `${otherProjects.join("\n")}\n`);
     unlinkSync(claimed);
-    return ok({ ingested: rows.length, malformed });
+    return ok({ ingested: rows.length, malformed, left_for_other_projects: otherProjects.length });
   }
 }

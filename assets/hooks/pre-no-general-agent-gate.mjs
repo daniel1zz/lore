@@ -7,12 +7,12 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { trackOutcome } from './lib/check-outcome.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
 trackOutcome('hook:pre-no-general-agent-gate');
 
 let payload = {};
 try {
-  payload = JSON.parse(readFileSync(0, 'utf8'));
+  payload = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
 } catch {
   process.exit(0);
 }

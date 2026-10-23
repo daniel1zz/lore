@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { deriveClaudeCodeRunId } from './lib/run-id.mjs';
-import { trackOutcome } from './lib/check-outcome.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
 trackOutcome('hook:run-end');
 
 /** Resolved from `PATH`, same as run-register.mjs; lets tests substitute a stub. */
@@ -51,7 +51,7 @@ function failOpen(reason) {
 
 let payload;
 try {
-  payload = JSON.parse(readFileSync(0, 'utf8'));
+  payload = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
 } catch (cause) {
   failOpen(`malformed hook payload on stdin (${String(cause)})`);
 }

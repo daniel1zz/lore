@@ -90,10 +90,17 @@ export default defineLoreCommand({
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: stats.value }, null, 2));
             return 0;
           }
-          const rows = stats.value.checks.map((c) => [c.check_id, String(c.runs), String(c.denials), String(c.errors), c.last_denial ?? "never"]);
+          // reason: an informational check cannot deny, so its denial columns would read as "never caught" when the truth is "cannot catch".
+          const rows = stats.value.checks.map((c) => [
+            c.check_id,
+            String(c.runs),
+            c.can_deny ? String(c.denials) : "-",
+            String(c.errors),
+            c.can_deny ? (c.last_denial ?? "never") : "- (informational)",
+          ]);
           printLine(inv.io.stdout, "Checks:");
           printLine(inv.io.stdout, rows.length > 0 ? formatTable(["Check", "Runs", "Denials", "Errors", "Last denial"], rows) : "  (no outcomes recorded yet)");
-          printLine(inv.io.stdout, "\nRemoval candidates (>= 30 days observed, >= 50 runs, 0 denials):");
+          printLine(inv.io.stdout, "\nRemoval candidates (checks that can deny: >= 30 days observed, >= 50 runs, 0 denials):");
           printLine(inv.io.stdout, stats.value.removal_candidates.length > 0 ? stats.value.removal_candidates.map((id) => `  - ${id}`).join("\n") : "  (none)");
           return 0;
         } finally {

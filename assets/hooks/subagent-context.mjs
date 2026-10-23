@@ -24,7 +24,7 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { trackOutcome } from './lib/check-outcome.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
 trackOutcome('hook:subagent-context');
 
 const SPAWN_TIMEOUT_MS = 8000;
@@ -32,7 +32,7 @@ const SPAWN_TIMEOUT_MS = 8000;
 // stdin parse: a bad payload degrades to defaults, never to a crash.
 let payload = {};
 try {
-  const parsed = JSON.parse(readFileSync(0, 'utf8'));
+  const parsed = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
   if (parsed !== null && typeof parsed === 'object') payload = parsed;
 } catch {
   // proceed with empty payload; the envelope below is still emitted

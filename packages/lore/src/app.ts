@@ -1156,6 +1156,7 @@ function buildAppFromSqlite(
       store,
       now: () => new Date().toISOString(),
       hookOutcomesPath: hookOutcomesFilePath(ambient.env, homedir()),
+      projectRoot: repoRoot,
     }),
     // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
     // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
@@ -1559,6 +1560,7 @@ function buildAppFromTurso(
       store,
       now: () => new Date().toISOString(),
       hookOutcomesPath: hookOutcomesFilePath(ambient.env, homedir()),
+      projectRoot: repoRoot,
     }),
     // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
     // CorpusService/gateEnforcer above, so commands/gate.ts can fire the

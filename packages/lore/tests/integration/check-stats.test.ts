@@ -1,6 +1,7 @@
 // @spawns packages/lore/src/index.ts
 // @spawns assets/hooks/pre-no-general-agent-gate.mjs
 // @reads packages/lore/src/service/**
+// @reads assets/hooks
 /**
  * AC-LG-13 / AC-LG-14 oracle — checks count their catches; quality is measured, not sampled (BR-1373).
  *
@@ -8,24 +9,26 @@
  * halves; the repo's own `.lore/` is never touched. The issue tracker is a fake reader.
  *
  * Dimensions:
- *   HAPPY:      a gate run and a hook run each append one outcome row; stats sums runs/denials/last denial; the real
+ *   HAPPY:      a gate run and a hook run each append one outcome row (hooks with their cwd); stats sums runs/denials/last denial; the real
  *               hook file lands in `lore checks stats` through the ingest.
  *   NEGATIVE:   a check with one denial is never a removal candidate; an issue filed on day 15, before close, or citing
  *               only a longer slug is not escaped; an undated issue is refused.
  *   BOUNDARY:   exactly 30 days and 50 runs is a candidate; 29 days or 49 runs is not; day 14 counts, day 15 does not.
  *   ERROR:      a failing issue reader is returned, never read as "0 escaped"; malformed hook lines are counted.
- *   STATE:      ingest claims the file (a second ingest finds nothing); a failed append puts the lines back.
+ *   STATE:      ingest claims the file (a second ingest finds nothing); a failed append puts the lines back; two corpora
+ *               sharing one file each ingest only the lines whose cwd is inside their own project root.
+ *   CAPABILITY: only a check that can deny is ever a removal candidate; informational hooks show runs only.
  *   REGRESSION: no auto decision is ever queued for audit: 50 auto decisions leave `lore pending` with no audit block.
  *
  * @spec_ref AC-LG-13
  * @spec_ref AC-LG-14
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { err, ok, storeError, type DocId, type DocRecord } from "@lore/core";
+import { HOOK_DENY_CAPABILITY, HOOK_REGISTRATIONS, err, ok, storeError, type DocId, type DocRecord } from "@lore/core";
 import * as calibration from "../../src/service/autonomy-calibration-service.js";
 import { AutonomyCalibrationService } from "../../src/service/autonomy-calibration-service.js";
 import {
@@ -36,6 +39,8 @@ import {
   citesAny,
   deriveRemovalCandidates,
   hookOutcomesFilePath,
+  isDenyCapableCheck,
+  isInsideProject,
   type EscapeIssue,
 } from "../../src/service/check-stats-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
@@ -142,19 +147,23 @@ describe("checks count catches (AC-LG-13)", () => {
     expect([REMOVAL_MIN_DAYS, REMOVAL_MIN_RUNS]).toEqual([30, 50]);
     const store = new InMemoryStore();
     const rows = [
-      ...runs("gate:never-caught", 60, isoDaysBefore(NOW, 40), 39),
-      ...runs("gate:caught-once", 60, isoDaysBefore(NOW, 40), 39, [17]),
-      ...runs("gate:too-young", 60, isoDaysBefore(NOW, 10), 9),
-      ...runs("gate:too-few-runs", 49, isoDaysBefore(NOW, 40), 39),
-      ...runs("gate:exactly-at-bounds", 50, isoDaysBefore(NOW, 30), 29),
-      ...runs("gate:one-day-short", 50, isoDaysBefore(NOW, 29), 28),
+      ...runs("gate:task-claim", 60, isoDaysBefore(NOW, 40), 39), // never caught
+      ...runs("gate:plan-close", 60, isoDaysBefore(NOW, 40), 39, [17]), // caught once
+      ...runs("gate:spec-create", 60, isoDaysBefore(NOW, 10), 9), // too young
+      ...runs("gate:spec-promote", 49, isoDaysBefore(NOW, 40), 39), // too few runs
+      ...runs("gate:plan-promote", 50, isoDaysBefore(NOW, 30), 29), // exactly at both bounds
+      ...runs("gate:phase-claim", 50, isoDaysBefore(NOW, 29), 28), // one day short
+      ...runs("hook:run-register", 60, isoDaysBefore(NOW, 40), 39), // informational: cannot deny
+      ...runs("hook:pre-bash-git-safety-gate", 60, isoDaysBefore(NOW, 40), 39), // a deny-capable hook never caught
     ];
     await store.appendCheckOutcomes(rows);
     const stats = await new CheckStatsService({ store, now: () => NOW }).stats();
     expect(stats.ok).toBe(true);
     if (!stats.ok) return;
-    expect(stats.value.removal_candidates).toEqual(["gate:exactly-at-bounds", "gate:never-caught"]);
-    const caught = stats.value.checks.find((c) => c.check_id === "gate:caught-once");
+    expect(stats.value.removal_candidates).toEqual(["gate:plan-promote", "gate:task-claim", "hook:pre-bash-git-safety-gate"]);
+    const informational = stats.value.checks.find((c) => c.check_id === "hook:run-register");
+    expect(informational).toMatchObject({ runs: 60, can_deny: false, removal_candidate: false });
+    const caught = stats.value.checks.find((c) => c.check_id === "gate:plan-close");
     expect(caught).toMatchObject({ denials: 1, removal_candidate: false });
     expect(caught?.last_denial).not.toBeNull();
     expect(deriveRemovalCandidates([], NOW)).toEqual([]);
@@ -163,15 +172,17 @@ describe("checks count catches (AC-LG-13)", () => {
   it("checks count catches: a shipped hook records pass and deny through its real exit code, with no lore process", () => {
     const state = tempDir("lore-hook-state-");
     const env = { PATH: process.env["PATH"] ?? "", HOME: state, CLAUDE_STATE_BASE_OVERRIDE: state };
-    const run = (payload: unknown) => spawnSync("node", [HOOK], { input: JSON.stringify(payload), env, encoding: "utf8" });
-    expect(run({ tool_name: "Agent", tool_input: { subagent_type: "lore-reader" } }).status).toBe(0);
-    expect(run({ tool_name: "Agent", tool_input: {} }).status).toBe(2);
+    const run = (payload: unknown) => spawnSync("node", [HOOK], { input: JSON.stringify(payload), env, cwd: state, encoding: "utf8" });
+    expect(run({ tool_name: "Agent", tool_input: { subagent_type: "lore-reader" }, cwd: "/work/project-a" }).status).toBe(0);
+    expect(run({ tool_name: "Agent", tool_input: {} }).status).toBe(2); // no cwd in the payload: falls back to the process cwd
     const file = hookOutcomesFilePath({ CLAUDE_STATE_BASE_OVERRIDE: state }, "/unused-home");
-    const lines = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { check: string; outcome: string; ts: string });
+    const lines = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { check: string; outcome: string; ts: string; cwd: string });
     expect(lines.map((l) => [l.check, l.outcome])).toEqual([
       ["hook:pre-no-general-agent-gate", "pass"],
       ["hook:pre-no-general-agent-gate", "deny"],
     ]);
+    expect(lines[0]?.cwd).toBe("/work/project-a"); // the payload's cwd
+    expect(lines[1]?.cwd).toBe(realpathSync(state)); // the fallback: process.cwd()
     expect(Number.isFinite(Date.parse(lines[0]?.ts ?? ""))).toBe(true);
   });
 
@@ -202,20 +213,21 @@ describe("checks count catches (AC-LG-13)", () => {
     writeFileSync(
       path,
       [
-        JSON.stringify({ check: "hook:x", outcome: "pass", ts: "2026-10-20T00:00:00.000Z" }),
-        JSON.stringify({ check: "hook:x", outcome: "deny", ts: "2026-10-21T00:00:00.000Z" }),
+        JSON.stringify({ check: "hook:x", outcome: "pass", ts: "2026-10-20T00:00:00.000Z", cwd: dir }),
+        JSON.stringify({ check: "hook:x", outcome: "deny", ts: "2026-10-21T00:00:00.000Z", cwd: join(dir, "nested") }),
         "not json",
-        JSON.stringify({ check: "hook:x", outcome: "maybe", ts: "2026-10-21T00:00:00.000Z" }),
+        JSON.stringify({ check: "hook:x", outcome: "maybe", ts: "2026-10-21T00:00:00.000Z", cwd: dir }),
+        JSON.stringify({ check: "hook:x", outcome: "deny", ts: "2026-10-21T00:00:00.000Z" }), // no cwd: never ingested
         "",
       ].join("\n"),
     );
     const store = new InMemoryStore();
-    const service = new CheckStatsService({ store, now: () => NOW, hookOutcomesPath: path });
+    const service = new CheckStatsService({ store, now: () => NOW, hookOutcomesPath: path, projectRoot: dir });
     const first = await service.ingestHookOutcomes();
-    expect(first.ok && first.value).toEqual({ ingested: 2, malformed: 2 });
+    expect(first.ok && first.value).toEqual({ ingested: 2, malformed: 3, left_for_other_projects: 0 });
     expect(existsSync(path)).toBe(false);
     const second = await service.ingestHookOutcomes();
-    expect(second.ok && second.value).toEqual({ ingested: 0, malformed: 0 });
+    expect(second.ok && second.value).toEqual({ ingested: 0, malformed: 0, left_for_other_projects: 0 });
     const stats = await service.stats();
     expect(stats.ok && stats.value.checks).toMatchObject([{ check_id: "hook:x", runs: 2, denials: 1, last_denial: "2026-10-21T00:00:00.000Z" }]);
   });
@@ -223,29 +235,87 @@ describe("checks count catches (AC-LG-13)", () => {
   it("checks count catches: a failed append puts the claimed lines back, so nothing is lost", async () => {
     const dir = tempDir("lore-ingest-fail-");
     const path = join(dir, "check-outcomes.jsonl");
-    const line = JSON.stringify({ check: "hook:x", outcome: "deny", ts: "2026-10-21T00:00:00.000Z" });
+    const line = JSON.stringify({ check: "hook:x", outcome: "deny", ts: "2026-10-21T00:00:00.000Z", cwd: dir });
     writeFileSync(path, `${line}\n`);
     const store = new InMemoryStore();
     store.appendCheckOutcomes = async () => err(storeError("locked"));
-    const result = await new CheckStatsService({ store, now: () => NOW, hookOutcomesPath: path }).ingestHookOutcomes();
+    const result = await new CheckStatsService({ store, now: () => NOW, hookOutcomesPath: path, projectRoot: dir }).ingestHookOutcomes();
     expect(result.ok).toBe(false);
     expect(readFileSync(path, "utf8")).toBe(`${line}\n`);
+  });
+
+  it("checks count catches: two corpora sharing one outcomes file each ingest only the lines whose cwd is inside their own project; the other's lines stay in the file", async () => {
+    const base = tempDir("lore-two-corpora-");
+    const rootA = join(base, "project-a");
+    const rootB = join(base, "project-b");
+    mkdirSync(join(rootA, "src"), { recursive: true });
+    mkdirSync(rootB, { recursive: true });
+    const path = join(base, "check-outcomes.jsonl");
+    const line = (check: string, outcome: string, cwd: string, day: number) => JSON.stringify({ check, outcome, ts: `2026-10-${String(day).padStart(2, "0")}T00:00:00.000Z`, cwd });
+    writeFileSync(
+      path,
+      [
+        line("hook:pre-bash-git-safety-gate", "pass", rootA, 1),
+        line("hook:pre-bash-git-safety-gate", "deny", rootB, 2),
+        line("hook:pre-edit-anchor-gate", "pass", join(rootA, "src"), 3),
+        line("hook:pre-bash-git-safety-gate", "pass", rootB, 4),
+        line("hook:pre-edit-anchor-gate", "deny", `${rootA}-sibling`, 5), // a sibling directory sharing a name prefix is NOT inside project-a
+      ].join("\n") + "\n",
+    );
+    const storeA = new InMemoryStore();
+    const storeB = new InMemoryStore();
+    const a = new CheckStatsService({ store: storeA, now: () => NOW, hookOutcomesPath: path, projectRoot: rootA });
+    const b = new CheckStatsService({ store: storeB, now: () => NOW, hookOutcomesPath: path, projectRoot: rootB });
+
+    const firstA = await a.ingestHookOutcomes();
+    expect(firstA.ok && firstA.value).toEqual({ ingested: 2, malformed: 0, left_for_other_projects: 3 });
+    const statsA = await a.stats();
+    expect(statsA.ok && statsA.value.checks.map((c) => [c.check_id, c.runs, c.denials])).toEqual([
+      ["hook:pre-bash-git-safety-gate", 1, 0],
+      ["hook:pre-edit-anchor-gate", 1, 0],
+    ]);
+    expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(3); // B's two lines and the sibling's one remain
+
+    const firstB = await b.ingestHookOutcomes();
+    expect(firstB.ok && firstB.value).toEqual({ ingested: 2, malformed: 0, left_for_other_projects: 1 });
+    const statsB = await b.stats();
+    expect(statsB.ok && statsB.value.checks.map((c) => [c.check_id, c.runs, c.denials])).toEqual([["hook:pre-bash-git-safety-gate", 2, 1]]);
+    expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(1); // only the sibling's line is left, for its own project
+
+    expect(isInsideProject(rootA, rootA)).toBe(true);
+    expect(isInsideProject(`${rootA}-sibling`, rootA)).toBe(false);
+  });
+
+  it("checks count catches: only a check that can deny is deny-capable; every shipped hook file declares it, and every registered hook is declared", () => {
+    expect(isDenyCapableCheck("gate:task-claim")).toBe(true);
+    expect(isDenyCapableCheck("gate:not-a-checkpoint")).toBe(false);
+    expect(isDenyCapableCheck("hook:pre-edit-anchor-gate")).toBe(true);
+    expect(isDenyCapableCheck("hook:run-register")).toBe(false);
+    expect(isDenyCapableCheck("hook:session-start-resume")).toBe(false);
+    expect(isDenyCapableCheck("hook:no-such-hook")).toBe(false);
+    expect(isDenyCapableCheck("something-else")).toBe(false);
+    const shipped = readdirSync(join(REPO_ROOT, "assets", "hooks")).filter((f) => f.endsWith(".mjs")).sort();
+    expect(Object.keys(HOOK_DENY_CAPABILITY).sort()).toEqual(shipped);
+    for (const registration of HOOK_REGISTRATIONS) expect(Object.hasOwn(HOOK_DENY_CAPABILITY, registration.file)).toBe(true);
   });
 
   it("checks count catches: through the real CLI, hook rows written before the call show up in `lore checks stats --json`", () => {
     const corpus = newCorpus("lore-checks-cli-");
     const file = join(corpus.dir, ".claude", "session-state", "check-outcomes.jsonl"); // HOME is the corpus dir in the helper
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify({ check: "hook:cli-probe", outcome: "deny", ts: "2026-10-22T00:00:00.000Z" })}\n`);
+    const mine = JSON.stringify({ check: "hook:pre-edit-anchor-gate", outcome: "deny", ts: "2026-10-22T00:00:00.000Z", cwd: corpus.dir });
+    const foreign = JSON.stringify({ check: "hook:pre-bash-git-safety-gate", outcome: "deny", ts: "2026-10-22T00:00:00.000Z", cwd: "/somewhere/else/entirely" });
+    writeFileSync(file, `${mine}\n${foreign}\n`);
     const out = lore(corpus, ["checks", "stats", "--json"]);
     expect(out.exitCode, out.stderr).toBe(0);
     const json = JSON.parse(out.stdout) as { data: { checks: Array<{ check_id: string; runs: number; denials: number; last_denial: string }>; removal_candidates: string[] } };
-    expect(json.data.checks).toMatchObject([{ check_id: "hook:cli-probe", runs: 1, denials: 1, last_denial: "2026-10-22T00:00:00.000Z" }]);
+    expect(json.data.checks).toMatchObject([{ check_id: "hook:pre-edit-anchor-gate", runs: 1, denials: 1, last_denial: "2026-10-22T00:00:00.000Z" }]);
+    expect(readFileSync(file, "utf8").trim()).toBe(foreign); // another project's line stays for its own corpus
     expect(json.data.removal_candidates).toEqual([]);
     const text = lore(corpus, ["checks", "stats"]);
     expect(text.exitCode).toBe(0);
     expect(text.stdout).toContain("Removal candidates");
-    expect(text.stdout).toContain("hook:cli-probe");
+    expect(text.stdout).toContain("hook:pre-edit-anchor-gate");
   }, 180_000);
 });
 

@@ -43,7 +43,7 @@
 
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { trackOutcome } from './lib/check-outcome.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
 trackOutcome('hook:subagent-stop-commit-guard');
 
 /** Allow termination. Used for every non-blocking path, including all failures. */
@@ -73,7 +73,7 @@ function git(cwd, args) {
 
 let payload;
 try {
-  payload = JSON.parse(readFileSync(0, "utf8"));
+  payload = noteHookCwd(JSON.parse(readFileSync(0, "utf8")));
 } catch {
   allow(); // unreadable/malformed stdin — never our call to block
 }

@@ -184,6 +184,47 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   { file: "pre-edit-anchor-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash" },
 ] as const;
 
+/**
+ * Whether each shipped hook file CAN deny (exit 2 or a JSON `decision: "block"`), keyed by file name under
+ * `assets/hooks/`. THE one declaration of deny capability for hooks (BR-1373): `lore checks stats` lists a check as a
+ * removal candidate only when it can deny, because an informational hook (SessionStart context, run register/end,
+ * trail writers, the harness-run rewriter) can never "catch" anything and 0 denials says nothing about it.
+ * Covers every file in `assets/hooks/*.mjs`, registered or not (the orchestration-policy gates are not in
+ * {@link HOOK_REGISTRATIONS} but do deny); a test pins that set equality in both directions.
+ */
+export const HOOK_DENY_CAPABILITY: Readonly<Record<string, boolean>> = {
+  "pre-bash-git-safety-gate.mjs": true,
+  "pre-no-general-agent-gate.mjs": true,
+  "pre-dispatch-isolation-gate.mjs": true,
+  "pre-helper-foreign-working-copy-gate.mjs": true,
+  "pre-edit-anchor-gate.mjs": true,
+  "subagent-stop-commit-guard.mjs": true,
+  "stop-turn-review.mjs": true,
+  "pre-tool-harness-run.mjs": false,
+  "session-start-resume.mjs": false,
+  "session-start-marker.mjs": false,
+  "session-trail-start.mjs": false,
+  "subagent-trail.mjs": false,
+  "subagent-context.mjs": false,
+  "user-prompt-turn-start.mjs": false,
+  "post-edit-mark.mjs": false,
+  "run-register.mjs": false,
+  "run-end.mjs": false,
+};
+
+/**
+ * Whether the hook check id `hook:<file name without .mjs>` can deny.
+ *
+ * @returns `true` / `false` for a declared hook; `null` for an id naming no shipped hook (the caller decides; the
+ *   stats treat it as not deny-capable and say so).
+ * @example isDenyCapableHookCheck("hook:run-register") // false
+ */
+export function isDenyCapableHookCheck(checkId: string): boolean | null {
+  if (!checkId.startsWith("hook:")) return null;
+  const file = `${checkId.slice("hook:".length)}.mjs`;
+  return Object.hasOwn(HOOK_DENY_CAPABILITY, file) ? (HOOK_DENY_CAPABILITY[file] as boolean) : null;
+}
+
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */
 function stripTrailingSlash(dir: string): string {
   return dir.endsWith("/") ? dir.slice(0, -1) : dir;
