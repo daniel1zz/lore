@@ -28,14 +28,14 @@
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-3, AC-PCR-4, AC-PCR-5, BR-1379)
  */
 
-import { failedDimensions, ok, type DocRecord, type LoreError, type PlanBundle, type Result } from "@lore/core";
+import { failedDimensions, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
 import type { SuiteRun } from "./milestone-review-inputs.js";
 import { retirementSubjectId } from "./retired-ac-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
-import { fingerprintTag, rootCauseOf, type FailedFinding } from "./root-cause-fingerprint.js";
+import { fingerprintTag, rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
 import { leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
 
 // reason: the constant lives in the pure acceptance view (bootstrap and checks stats read the same rows); re-exported so existing importers keep one name.
@@ -60,6 +60,8 @@ export interface PlanReviewFacts {
   readonly ownerPending: boolean;
   /** The latest review failed and some failed finding has no open linked issue yet. */
   readonly filingIncomplete: boolean;
+  /** The stored review at the current fingerprint cannot be filed (see {@link unfileableReviewError}): it is not a valid review. */
+  readonly unfileableReview?: string;
 }
 
 /**
@@ -72,6 +74,8 @@ export interface PlanReviewFacts {
 export function classifyPlan(facts: PlanReviewFacts): PlanReviewNeed {
   if (facts.progressState !== "complete" || facts.status === "archived" || facts.status === "deprecated") return "none";
   if (facts.latest === undefined || facts.latest.fingerprint !== facts.fingerprint) return "review";
+  // reason: a stored review that cannot be filed is not a review (spec "Error"; #349): the next batch judges the plan again.
+  if (facts.unfileableReview !== undefined) return "review";
   if (facts.latest.retiredCount > 0) return facts.ownerPending ? "awaiting-owner" : "owner-resolved";
   if (facts.latest.overall === "fail" && facts.filingIncomplete) return "filing";
   return "close";
@@ -110,6 +114,8 @@ export interface CompletePlanEntry {
   readonly need: Exclude<PlanReviewNeed, "none">;
   /** The stored `progress.at` of the write that made the plan complete. */
   readonly completeAt: string;
+  /** Why the plan's stored review is not a valid review (unfileable), when that is why it needs a review. */
+  readonly reviewProblem?: string;
 }
 
 /** What the landing's start did. */
@@ -205,7 +211,7 @@ export class ReviewTriggerService {
       const facts = await planFactsOf(this.deps, bundle.value, progress.state, pending.value);
       if (!facts.ok) return facts;
       const need = classifyPlan(facts.value);
-      if (need !== "none") set.push({ plan: plan.slug, planId: plan.id, need, completeAt: progress.at });
+      if (need !== "none") set.push({ plan: plan.slug, planId: plan.id, need, completeAt: progress.at, ...(facts.value.unfileableReview !== undefined ? { reviewProblem: facts.value.unfileableReview } : {}) });
     }
     return ok(set);
   }
@@ -295,6 +301,14 @@ export class ReviewBatchRunner {
     if (!docs.ok) return fail("review", fingerprint, docs.error, false);
     let latest = selectLatestMilestoneReview(docs.value);
     let reviewed = false;
+    if (latest !== undefined && latest.review.fingerprint === fingerprint) {
+      // reason: an unfileable stored review is recorded for THIS plan (audit row) and then re-judged, never retried as a filing forever (#349).
+      const unfileable = unfileableReviewError(planSlug, latest.doc.slug, latest.review);
+      if (unfileable !== undefined) {
+        await ports.recordError({ planId, planSlug, fingerprint, stage: "review", message: messageOf(unfileable), at: ports.now() });
+        latest = undefined;
+      }
+    }
     if (latest === undefined || latest.review.fingerprint !== fingerprint) {
       const suite = await measureOnce();
       const judged = await ports.reviewPlan(ref, suite);
@@ -357,21 +371,43 @@ async function planFactsOf(
     const base = { status: bundle.plan.status, progressState, fingerprint, ownerPending: pending.has(retirementSubjectId(bundle.plan.slug)) };
     if (latest === undefined) return ok({ ...base, filingIncomplete: false });
     let filingIncomplete = false;
+    let unfileableReview: string | undefined;
     if (latest.review.fingerprint === fingerprint && latest.review.overall === "fail") {
-      const titles = await deps.linkedOpenIssueTitles(bundle.plan.id);
-      if (!titles.ok) return titles;
-      const needed: string[] = [];
-      for (const dimension of failedDimensions(latest.review.dimensions)) {
-        const cause = rootCauseOf({ plan: bundle.plan.slug, dimension, reason: latest.review.dimensions[dimension].reason, reference: latest.review.dimensions[dimension].reference, reviewSlug: latest.doc.slug, causes: latest.review.causes });
-        if (!cause.ok) return cause;
-        needed.push(fingerprintTag(cause.value.short));
+      const unfileable = unfileableReviewError(bundle.plan.slug, latest.doc.slug, latest.review);
+      if (unfileable !== undefined) unfileableReview = messageOf(unfileable);
+      else {
+        const titles = await deps.linkedOpenIssueTitles(bundle.plan.id);
+        if (!titles.ok) return titles;
+        const tags = fileableTags(bundle.plan.slug, latest.doc.slug, latest.review);
+        filingIncomplete = tags.some((tag) => !titles.value.some((t) => t.includes(tag)));
       }
-      filingIncomplete = needed.some((tag) => !titles.value.some((t) => t.includes(tag)));
     }
     return ok({
       ...base,
       latest: { fingerprint: latest.review.fingerprint, overall: latest.review.overall, retiredCount: latest.review.retired_acs?.length ?? 0 },
       filingIncomplete,
+      ...(unfileableReview !== undefined ? { unfileableReview } : {}),
     });
   }
+}
+
+/** The root-cause results of a stored review's failed dimensions, one per dimension. */
+function causesOfReview(planSlug: string, reviewSlug: string, review: MilestoneReview): Result<RootCause, LoreError>[] {
+  return failedDimensions(review.dimensions).map((dimension) =>
+    rootCauseOf({ plan: planSlug, dimension, reason: review.dimensions[dimension].reason, reference: review.dimensions[dimension].reference, reviewSlug, causes: review.causes }),
+  );
+}
+
+/**
+ * The reason a stored review cannot be filed (a failed regression without `suite_failing_files`), or `undefined`.
+ * Per-plan by construction: the filing site keeps its loud error; classification only turns it into "needs review".
+ */
+export function unfileableReviewError(planSlug: string, reviewSlug: string, review: MilestoneReview): LoreError | undefined {
+  for (const cause of causesOfReview(planSlug, reviewSlug, review)) if (!cause.ok) return cause.error;
+  return undefined;
+}
+
+/** The fingerprint tags a fileable failing review needs an open issue for. */
+function fileableTags(planSlug: string, reviewSlug: string, review: MilestoneReview): string[] {
+  return causesOfReview(planSlug, reviewSlug, review).flatMap((cause) => (cause.ok ? [fingerprintTag(cause.value.short)] : []));
 }

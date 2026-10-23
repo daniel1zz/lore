@@ -89,7 +89,9 @@ export interface QualityReport {
 }
 
 /** Reads the complete, unarchived plans (id, slug, complete time, awaiting-owner flag); bound by the adapter to the review trigger service. */
-export type ListCompletePlans = () => Promise<Result<readonly Omit<CompletePlanView, "lastError">[], LoreError>>;
+/** One complete plan from the trigger classification; `reviewProblem` is why its stored review is not a valid review. */
+export type ListedCompletePlan = Omit<CompletePlanView, "lastError"> & { readonly reviewProblem?: string };
+export type ListCompletePlans = () => Promise<Result<readonly ListedCompletePlan[], LoreError>>;
 
 /** One accepted plan's line in `lore checks stats`. */
 export interface AcceptedPlanLine {
@@ -262,7 +264,10 @@ export class CheckStatsService {
         .map(parseBatchError)
         .filter((e): e is BatchErrorView => e !== undefined)
         .sort((a, b) => b.at.localeCompare(a.at))[0];
-      views.push({ ...entry, ...(lastError !== undefined ? { lastError } : {}) });
+      const { reviewProblem, ...view } = entry;
+      // reason: an unfileable stored review has no audit row until the batch runs; show it as the plan's last review error meanwhile (#349).
+      const shown = lastError ?? (reviewProblem !== undefined ? { plan: entry.plan, stage: "review", message: reviewProblem, at: entry.completeAt } : undefined);
+      views.push({ ...view, ...(shown !== undefined ? { lastError: shown } : {}) });
     }
     return ok(views);
   }
