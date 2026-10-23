@@ -125,8 +125,7 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
       title: "Archived Plan",
       content: "# Plan",
     } as CreateDocInput);
-    const archiveResult = await store.update(archivedPlan.id, { status: "archived" });
-    if (!archiveResult.ok) throw new Error(JSON.stringify(archiveResult.error));
+    // reason: BR-1379 — archived is terminal, so the plan's task is created BEFORE the plan is archived.
     await mustCreate(corpusService, {
       type: "task",
       title: "Archived Plan's Task",
@@ -134,6 +133,8 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
       content: "# Task",
       extra: { plan_id: archivedPlan.id },
     } as CreateDocInput);
+    const archiveResult = await store.update(archivedPlan.id, { status: "archived" });
+    if (!archiveResult.ok) throw new Error(JSON.stringify(archiveResult.error));
 
     store.findLinksByToIdsCallCount = 0;
     const result = await sessionService.bootstrap("alice");

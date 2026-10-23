@@ -22,6 +22,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { docTypeSchema, getAllowedTransitions, isValidTransition } from "@lore/core";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 import { liveInvocation, liveAmbient, actedStore, liveWriteContext } from "../live-invocation.js";
 import { createApp, type App } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
@@ -468,11 +469,12 @@ describe("bulk lifecycle: mcp parity", () => {
   it("mcp parity: lore archive --apply exits 1 when a candidate failed (INVALID_TRANSITION), 0 when none did", () => {
     patchLoreConfig(tmpDir, 'workflow:\n  gates:\n    "plan-close":\n      enabled: false\n');
     expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
-    expect(runLore(["set", planSlug, "--status", "archived"], tmpDir).exitCode).toBe(0);
-    // A straggler created after the plan closed is an R4 candidate; in-review -> archived is not a legal step.
+    // An open task under an archived plan is an R4 candidate; in-review -> archived is not a legal step. BR-1379 no
+    // longer lets the write path create it under an archived plan, so the plan is archived directly afterwards.
     const straggler = createTask("Straggler in review");
     addAttestedPass(straggler);
     expect(runLore(["set", straggler, "--status", "in-review"], tmpDir).exitCode).toBe(0);
+    archivePlanWithoutCascade(tmpDir, planSlug);
     expect(runLore(["archive", "--sweep"], tmpDir).exitCode).toBe(3);
 
     const apply = runLore(["archive", "--apply"], tmpDir);

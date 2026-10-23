@@ -74,6 +74,7 @@ import { MIGRATION_031_SQL } from "../../../src/store/migrations/migration-031.j
 import { MIGRATION_032_SQL } from "../../../src/store/migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "../../../src/store/migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "../../../src/store/migrations/migration-034.js";
+import { MIGRATION_035_SQL } from "../../../src/store/migrations/migration-035.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 import { actedStore } from "../../live-invocation.js";
 
@@ -314,6 +315,7 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   await client.executeMultiple(MIGRATION_032_SQL);
   await client.executeMultiple(MIGRATION_033_SQL);
   await client.executeMultiple(MIGRATION_034_SQL);
+  await client.executeMultiple(MIGRATION_035_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL
