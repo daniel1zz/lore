@@ -1,6 +1,9 @@
 /**
  * TraceRecorder — fire-and-forget read/deny observability writer (SPEC-102).
  *
+ * A doc READ is counted, never logged per row (BR-1373, AC-LG-9): `recordRead` bumps the per-day counter with
+ * one atomic upsert and writes NO `trace_events` row. Every other kind still writes one row.
+ *
  * Mirrors `gate-enforcer.ts`'s `recordGateSkip` DI port EXACTLY (module header
  * of that file documents the pattern this one repeats): an OPTIONAL
  * constructor dependency, absent in every bare test construction (`new
@@ -50,6 +53,12 @@ import type { TraceEventInput } from "../store/store-interface.js";
  */
 export type InsertTraceEvent = (event: TraceEventInput) => Promise<Result<void, LoreError>>;
 
+/**
+ * Narrow injected port for counting one read — bound to `store.incrementReadCount` in `app.ts`. Takes the UTC day
+ * (`YYYY-MM-DD`); the store performs ONE atomic upsert (BR-1373).
+ */
+export type IncrementReadCount = (day: string) => Promise<Result<void, LoreError>>;
+
 /** Fixed `session_id` sentinel for a `search` trace row — no natural target doc. */
 const SEARCH_SESSION_ID = "trace-search";
 /** Fixed `session_id` sentinel for a `feed` trace row — no single target doc (may serve several). */
@@ -65,6 +74,7 @@ export type TraceGateDenyLayer = "hook" | "service";
 export class TraceRecorder {
   /**
    * @param insert - `store.insertTraceEvent.bind(store)` in production.
+   * @param incrementReadCount - The per-day read counter port; a read writes no `trace_events` row.
    * @param getSurface - Reads the CURRENT caller surface at fire time (not
    *   construction time) — bound to the SAME mutable `_callerSurface` closure
    *   variable `app.ts`'s `buildAppFromSqlite`/`buildAppFromTurso` already
@@ -75,20 +85,33 @@ export class TraceRecorder {
    */
   constructor(
     private readonly insert: InsertTraceEvent,
+    /** Counts one read into the per-day counter (BR-1373) — `store.incrementReadCount.bind(store)` in production. */
+    private readonly incrementReadCount: IncrementReadCount,
     private readonly getSurface: () => CallerSurface,
     /** Where a failed best-effort write is reported; absent (bare test construction) -> not printed anywhere. */
     private readonly warnSink: WarnSink = discardWarnings,
   ) {}
 
-  /** Records a doc read (SPEC-102 §Scope — `CorpusService.get`). */
-  recordGet(actor: string, docId: string): void {
-    this.fire({
-      actor,
-      kind: "get",
-      doc_id: docId,
-      session_id: docId,
-      details: {},
-    });
+  /**
+   * Counts a doc read (SPEC-102 §Scope — `CorpusService.get`) into the per-day counter. Writes NO
+   * `trace_events` row (BR-1373); the counter is bumped by one atomic upsert in the store, so concurrent
+   * readers lose nothing. Same fire-and-forget contract as every `record*` method.
+   */
+  recordRead(): void {
+    try {
+      Promise.resolve(this.incrementReadCount(new Date().toISOString().slice(0, 10)))
+        .then((result) => {
+          if (!result.ok) {
+            this.warn("get", "message" in result.error ? result.error.message : result.error.code);
+          }
+        })
+        .catch((error: unknown) => {
+          this.warn("get", error instanceof Error ? error.message : String(error));
+        });
+    } catch (error) {
+      // reason: a port that throws SYNCHRONOUSLY never reaches the `.catch` above (same guard as `fire`).
+      this.warn("get", error instanceof Error ? error.message : String(error));
+    }
   }
 
   /** Records a full-text search (SPEC-102 §Scope — `CorpusService.search`). */

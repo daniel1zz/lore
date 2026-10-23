@@ -45,8 +45,8 @@ import { tmpdir } from "os";
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 
-/** Both fields the spec requires to be registered (§Scope M1). */
-const REGISTERED_FIELDS = ["never_read_docs_count", "zero_hit_search_count"] as const;
+/** The field registered after BR-1373 removed the never-read-docs report (its `get` rows no longer exist). */
+const REGISTERED_FIELDS = ["zero_hit_search_count"] as const;
 
 interface RunResult {
   readonly stdout: string;
@@ -125,6 +125,8 @@ describe("AC-RR-2: an unregistered --enumerate field is refused by name with exi
     initCorpus(tmpDir);
 
     expectRefusedByName(tmpDir, "never_read_docs");
+    // reason: BR-1373 — removed with the per-read rows it was computed from; it must be refused, not answered empty.
+    expectRefusedByName(tmpDir, "never_read_docs_count");
     expectRefusedByName(tmpDir, "zero_hit_search");
   }, 60_000);
 

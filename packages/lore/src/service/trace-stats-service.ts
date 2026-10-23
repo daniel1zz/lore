@@ -22,7 +22,7 @@
 
 import { ok, type AuditEntry, type LoreError, type Result } from "@lore/core";
 import type {
-  NeverReadDoc,
+  ReadDayCount,
   StoreInterface,
   TraceDenyByCheckpoint,
   TraceGateDenyEvent,
@@ -64,7 +64,8 @@ export interface TraceStatsReport {
   counts_by_kind: Record<string, number>;
   deny_by_checkpoint: TraceDenyByCheckpoint[];
   zero_hit_search_count: number;
-  never_read_docs_count: number;
+  /** Reads from the per-day counter (BR-1373) — reads are counted, never logged per row, so `counts_by_kind` has no `get`. */
+  reads: { total: number; by_day: ReadDayCount[] };
   deny_retry_gap: TraceDenyRetryGap[];
   /** Present ONLY when `opts.includeRawQueries` was true (SPEC-102 §Security & Privacy). */
   raw_search_queries?: TraceRawSearchQuery[];
@@ -103,7 +104,6 @@ export type TraceStatsCountField = Extract<keyof TraceStatsReport, `${string}_co
  *   an identity, never a reconciliation.
  */
 export type TraceStatsEnumeration =
-  | { field: "never_read_docs_count"; count: number; members: NeverReadDoc[] }
   | { field: "zero_hit_search_count"; count: number; members: TraceZeroHitSearch[] };
 
 /**
@@ -116,19 +116,19 @@ export class TraceStatsService {
   async stats(opts: TraceStatsOpts): Promise<Result<TraceStatsReport, LoreError>> {
     const window = { since: opts.since };
 
-    // reason: M1 — the two scalar counts below are read as MEMBER LISTS and
-    // reported as `list.length`. ⛔ Never restore the dedicated counting calls
-    // (`countTraceZeroHitSearches`/`countNeverReadDocs`): a separately-tallied
+    // reason: M1 — the scalar count below is read as a MEMBER LIST and
+    // reported as `list.length`. ⛔ Never restore the dedicated counting call
+    // (`countTraceZeroHitSearches`): a separately-tallied
     // number can drift from the list `--enumerate <field>` prints and nothing
     // would notice, which is the defect this mechanism removes. The zero-hit
     // read deliberately omits `includeRawQueries` — a LENGTH never needs query
     // text, so the report cannot leak it even under `--raw-queries`.
-    const [countsResult, denyResult, zeroHitResult, neverReadResult, gateDeniesResult, auditResult] =
+    const [countsResult, denyResult, zeroHitResult, readsResult, gateDeniesResult, auditResult] =
       await Promise.all([
         this.store.countTraceEventsByKind(window),
         this.store.countTraceDenyByCheckpoint(window),
         this.store.listTraceZeroHitSearches(window),
-        this.store.listNeverReadDocs(window),
+        this.store.listReadCounts(opts.since.slice(0, 10)),
         this.store.listTraceGateDenies(window),
         this.store.queryAudit({ since: opts.since }),
       ]);
@@ -136,7 +136,7 @@ export class TraceStatsService {
     if (!countsResult.ok) return countsResult;
     if (!denyResult.ok) return denyResult;
     if (!zeroHitResult.ok) return zeroHitResult;
-    if (!neverReadResult.ok) return neverReadResult;
+    if (!readsResult.ok) return readsResult;
     if (!gateDeniesResult.ok) return gateDeniesResult;
     if (!auditResult.ok) return auditResult;
 
@@ -145,7 +145,10 @@ export class TraceStatsService {
       counts_by_kind: countsResult.value,
       deny_by_checkpoint: denyResult.value,
       zero_hit_search_count: zeroHitResult.value.length,
-      never_read_docs_count: neverReadResult.value.length,
+      reads: {
+        total: readsResult.value.reduce((sum, row) => sum + row.count, 0),
+        by_day: readsResult.value,
+      },
       deny_retry_gap: computeDenyRetryGap(gateDeniesResult.value, auditResult.value),
     };
 
@@ -156,28 +159,6 @@ export class TraceStatsService {
     }
 
     return ok(report);
-  }
-
-  /**
-   * Member list behind {@link TraceStatsReport.never_read_docs_count} — every
-   * non-deleted doc with no `kind='get'` trace row in `opts.since`'s window,
-   * each carrying its slug so the answer is actionable without a second lookup.
-   *
-   * @param opts - Same window as {@link stats}; `includeRawQueries` is ignored
-   *   here (a never-read doc has no query text to withhold).
-   * @returns The list plus `count = list.length` — ⛔ never an independent tally.
-   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
-   */
-  async enumerateNeverReadDocs(
-    opts: TraceStatsOpts,
-  ): Promise<Result<TraceStatsEnumeration, LoreError>> {
-    const listResult = await this.store.listNeverReadDocs({ since: opts.since });
-    if (!listResult.ok) return listResult;
-    return ok({
-      field: "never_read_docs_count",
-      count: listResult.value.length,
-      members: listResult.value,
-    });
   }
 
   /**
