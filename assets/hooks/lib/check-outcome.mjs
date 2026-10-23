@@ -3,7 +3,7 @@
  * `lore checks stats` can show whether a hook ever caught anything (spec-lean-governance-batch-verbs-judgment-only-
  * at-milestones Part D, AC-LG-13; BR-1373).
  *
- * Public surface: `trackOutcome(checkId)`, `noteHookCwd(payload)`, `markDeny()`, `outcomesFilePath(env, home)`.
+ * Public surface: `trackOutcome(checkId)`, `noteHookCwd(payload)`, `markDeny()`, `skipOutcome()`, `outcomesFilePath(env, home)`.
  * Side-effect class: one synchronous append to a local JSONL file when the process exits.
  *
  * ## Invariants
@@ -37,8 +37,17 @@ export function outcomesFilePath(env, home) {
 }
 
 let denied = false;
+let skipped = false;
 let registered = false;
 let payloadCwd;
+
+/**
+ * Drops this run's outcome row: for a run that had nothing to check (a payload with no usable session id), so the
+ * hook leaves no file behind in a state base it was never meant to write to.
+ */
+export function skipOutcome() {
+  skipped = true;
+}
 
 /** Marks this run as a deny for a hook that blocks through JSON output and still exits 0. */
 export function markDeny() {
@@ -68,6 +77,7 @@ export function trackOutcome(checkId) {
   if (registered) return;
   registered = true;
   process.on('exit', (code) => {
+    if (skipped) return;
     const outcome = denied || code === 2 ? 'deny' : code === 0 ? 'pass' : 'error';
     try {
       const path = outcomesFilePath(process.env, homedir());
