@@ -73,7 +73,7 @@ const MINI_SOURCES: Readonly<Record<string, string>> = {
   [`${MINI_CLI}/lib/other.ts`]: `import { err } from "./result.js";\nexport function checkOther() {\n  return err({ code: "BETA_BAD" });\n}\n`,
   [`${MINI_CLI}/commands/alpha.ts`]: `import { checkShared } from "../lib/shared.js";\nexport default { run() { return checkShared(); } };\n`,
   [`${MINI_CLI}/commands/beta.ts`]: `import { checkOther } from "../lib/other.js";\nexport default { run() { return checkOther(); } };\n`,
-  "package.json": JSON.stringify({ name: "mini-checkout", private: true }),
+  "package.json": JSON.stringify({ name: "mini-checkout", private: true, scripts: { install: "true", build: "true", typecheck: "true" } }),
 };
 
 export async function buildMiniCorpus(opts: { autoApprove?: boolean } = {}): Promise<MiniCorpus> {

@@ -61,6 +61,10 @@ function legacyDb(path: string): void {
   // rebuilds it, so the upgrade chain needs that table with every column 026 copies, plus the `docs` table its
   // doc_id references.
   db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT, version INTEGER)"); // 027 reads the baseline columns (no row here)
+  // reason: migration-030 adds `runs.message_address`, so the table it alters must exist (one column is enough).
+  db.exec("CREATE TABLE runs (id TEXT PRIMARY KEY)");
+  // reason: migration-031 deletes the per-read `get` trace rows, so `trace_events` (with its `kind`) must exist.
+  db.exec("CREATE TABLE trace_events (id INTEGER PRIMARY KEY, kind TEXT)");
   db.exec(
     "CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', extra TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', change_summary TEXT, slug TEXT, harness_run TEXT)",
   );

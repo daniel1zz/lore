@@ -344,8 +344,8 @@ const CLOSED_AT = "2026-10-01T00:00:00.000Z";
 
 async function seedClosedPlan(store: InMemoryStore): Promise<void> {
   await store.insert(doc({ id: PLAN_ID, slug: "plan-alpha", type: "plan", status: "archived", updated_at: "2026-10-05T00:00:00.000Z" }));
-  await store.insert(doc({ id: "01TASKONE" as DocId, slug: "task-one", type: "task", parent_id: PLAN_ID, status: "archived" }));
-  await store.insert(doc({ id: "01TASKTWO" as DocId, slug: "task-two", type: "task", parent_id: PLAN_ID, status: "archived" }));
+  await store.insert(doc({ id: "01TASKONE" as DocId, slug: "task-one", type: "task", parent_id: PLAN_ID, extra: { plan_id: PLAN_ID }, status: "archived" }));
+  await store.insert(doc({ id: "01TASKTWO" as DocId, slug: "task-two", type: "task", parent_id: PLAN_ID, extra: { plan_id: PLAN_ID }, status: "archived" }));
   await store.appendAuditEntry({ timestamp: CLOSED_AT, actor: "tester", session_id: "s", action: "update", doc_id: PLAN_ID, details: { patch: { status: "archived" }, version: 2 } });
   // a still-open plan must never appear
   await store.insert(doc({ id: "01PLANOPEN" as DocId, slug: "plan-open", type: "plan", status: "active" }));

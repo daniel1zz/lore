@@ -63,6 +63,17 @@ import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.j
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "../../../src/store/migrations/migration-021.js";
 import { MIGRATION_022_SQL } from "../../../src/store/migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "../../../src/store/migrations/migration-023.js";
+import { MIGRATION_024_SQL } from "../../../src/store/migrations/migration-024.js";
+import { MIGRATION_025_SQL } from "../../../src/store/migrations/migration-025.js";
+import { MIGRATION_026_SQL } from "../../../src/store/migrations/migration-026.js";
+import { MIGRATION_027_SQL } from "../../../src/store/migrations/migration-027.js";
+import { MIGRATION_028_SQL } from "../../../src/store/migrations/migration-028.js";
+import { MIGRATION_029_SQL } from "../../../src/store/migrations/migration-029.js";
+import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "../../../src/store/migrations/migration-030.js";
+import { MIGRATION_031_SQL } from "../../../src/store/migrations/migration-031.js";
+import { MIGRATION_032_SQL } from "../../../src/store/migrations/migration-032.js";
+import { MIGRATION_033_SQL } from "../../../src/store/migrations/migration-033.js";
+import { MIGRATION_034_SQL } from "../../../src/store/migrations/migration-034.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 import { actedStore } from "../../live-invocation.js";
 
@@ -286,6 +297,23 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   await client.executeMultiple(MIGRATION_022_SQL);
   // migration-023 (decision_log verdict CHECK widened to admit superseded) is one BEGIN/COMMIT string; mirrored for the parity guard.
   await client.executeMultiple(MIGRATION_023_SQL);
+  await client.executeMultiple(MIGRATION_024_SQL);
+  await client.executeMultiple(MIGRATION_025_SQL);
+  await client.executeMultiple(MIGRATION_026_SQL);
+  await client.executeMultiple(MIGRATION_027_SQL);
+  // reason: 028 and 029 convert / promote baseline nodes row by row (turso-store.ts runs them in an interactive
+  // transaction); the remote fixture holds no baseline node, so only their user_version bumps apply here.
+  await client.executeMultiple(MIGRATION_028_SQL);
+  await client.executeMultiple(MIGRATION_029_SQL);
+  for (const { table, column, ddl } of MIGRATION_030_ADD_COLUMNS) {
+    const info = await client.execute(`PRAGMA table_info(${table})`);
+    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
+  }
+  await client.executeMultiple(MIGRATION_030_SQL);
+  await client.executeMultiple(MIGRATION_031_SQL);
+  await client.executeMultiple(MIGRATION_032_SQL);
+  await client.executeMultiple(MIGRATION_033_SQL);
+  await client.executeMultiple(MIGRATION_034_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

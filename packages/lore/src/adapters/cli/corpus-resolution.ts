@@ -377,3 +377,26 @@ export function findLoreDbPath(io: CliIo, locator: CorpusLocator): string {
 export function findLoreDbPathQuiet(io: CliIo, locator: CorpusLocator): string | undefined {
   return definiteCorpusPath(io, locator);
 }
+
+/**
+ * The priming probe's resolution: the same corpus path {@link findLoreDbPathQuiet} finds, but a corpus the test
+ * sandbox refuses is reported as a miss (`undefined`) instead of ending the run with exit 4.
+ *
+ * reason: replica priming runs for EVERY command, including corpus-free ones (`--help`, `governance`, `setup --check`),
+ * and only reads the config to decide whether to load the sync client. Refusing there broke every sandboxed test that
+ * spawns lore at the repo root. The refusal is not weakened: a command that really opens the corpus still goes through
+ * {@link resolveCorpus} in `loadLoreApp` and exits 4 there (corpus-free-commands.test.ts pins both halves).
+ *
+ * @param locator - the run's `cwd` + `env` (an `Invocation` works)
+ * @returns the `.lore/lore.db` path, or `undefined` when none is confirmed or the sandbox refuses it
+ */
+export function findLoreDbPathForPriming(locator: CorpusLocator): string | undefined {
+  const resolved = resolveCorpusProvenance({
+    cwd: locator.cwd,
+    probeExists: existsSync,
+    gitFacts: gatherCorpusGitFacts(locator.cwd),
+  });
+  if (resolved === undefined || resolved.provenance === "undetermined") return undefined;
+  if (findSandboxRefusal(resolved.path, locator.env) !== undefined) return undefined;
+  return resolved.path;
+}

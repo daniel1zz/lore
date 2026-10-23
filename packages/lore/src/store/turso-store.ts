@@ -80,7 +80,8 @@ import {
   promotedNodeBindings,
   promotedVersionBindings,
   promotionAuditEntry,
-  SELECT_SPEC_EXTRAS_SQL,
+  DOCS_TABLE_INFO_SQL,
+  specExtrasSqlFor,
 } from "./migrations/migration-029.js";
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
@@ -948,7 +949,8 @@ export class TursoStore implements StoreInterface {
         let step = "begin transaction";
         const tx = await this.client.transaction("write");
         try {
-          const specRs = await tx.execute(SELECT_SPEC_EXTRAS_SQL);
+          const docsInfo = await tx.execute(DOCS_TABLE_INFO_SQL);
+          const specRs = await tx.execute(specExtrasSqlFor(docsInfo.rows.some((r) => rowStr(r, "name") === "deleted_at")));
           const landed = collectLandedChanges(specRs.rows.map((row) => ({ slug: rowStr(row, "slug"), extra: rowStr(row, "extra") })));
           const nodes = await tx.execute(SELECT_BASELINE_NODES_SQL);
           for (const row of nodes.rows) {

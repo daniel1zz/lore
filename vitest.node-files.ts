@@ -44,5 +44,4 @@ export const NODE_PROJECT_FILES: Readonly<Record<string, string>> = {
     "the /proc fallback and the no-lsof PATH case give different answers under Bun (the PATH half is the same runtime-PATH-mutation difference as above)",
   "packages/lore/tests/unit/service/attested-red.test.ts": UNDIAGNOSED,
   "packages/lore/tests/unit/service/setup-service.test.ts": UNDIAGNOSED,
-  "packages/lore/tests/unit/service/ai-provider-service-assess-reproducible-unknown-version.test.ts": UNDIAGNOSED,
 };

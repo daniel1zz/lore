@@ -485,7 +485,9 @@ function runHelp(cmdPath: readonly string[]): string {
     encoding: "utf8",
     timeout: 20000,
     maxBuffer: 5 * 1024 * 1024,
-    env: { ...process.env, CLAUDECODE: "1" },
+    // reason: BR-1371 fits help to 100 columns off a TTY, which wraps the USAGE pipe list and cuts it at a word
+    // boundary ("...|r\n  eject"); the parser below needs the list on one line, so ask for a width nothing exceeds.
+    env: { ...process.env, CLAUDECODE: "1", COLUMNS: "1000" },
   });
   if (result.status !== 0 || typeof result.stdout !== "string") {
     throw new Error(

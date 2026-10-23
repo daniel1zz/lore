@@ -153,12 +153,15 @@ describe("in-memory store parity (AC-MA-2)", () => {
   });
 });
 
+// migration-030.ts adds runs.message_address; a fixture "one behind" is pinned to that migration, not to the moving latest.
+const MESSAGE_ADDRESS_MIGRATION = 30;
+
 describe("migration adds runs.message_address (AC-MA-2)", () => {
-  it("a corpus one schema version behind migrates to the latest with a nullable column", () => {
+  it("a corpus one schema version behind the migration that adds the column (030) migrates to the latest with a nullable column", () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-m-address-"));
     try {
       const dbPath = join(dir, "c.db");
-      const old = new SQLiteStore(dbPath, { schemaCeiling: LATEST_SCHEMA_VERSION - 1 });
+      const old = new SQLiteStore(dbPath, { schemaCeiling: MESSAGE_ADDRESS_MIGRATION - 1 });
       const before = (old.getDatabase().query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
       expect(before).not.toContain("message_address");
       old.close();

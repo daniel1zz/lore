@@ -109,15 +109,9 @@ describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 
     expect(assetHook).toContain("lore audit --verify");
   });
 
-  // RED (AC-CMC-4, spec-project-claude-md-content-contract-governance-injected):
-  // the paired implementation task (task-skill-implement-pre-push-pair-check-
-  // step-assets-manifest) has not landed as of this test's authoring — neither
-  // hook copy invokes `lore status --check-claude-md` yet, confirmed empirically
-  // against this worktree's on-disk hook files. This case is therefore RED now
-  // and flips GREEN once that task appends the check-claude-md step to both
-  // copies (mirroring the audit --verify case immediately above, which pins the
-  // SAME invariant for the SPEC-080/081 G5 step).
-  it("NEGATIVE: neither hook copy invokes `--check-claude-md` or the prose-pin checker (AC-LG-7 supersedes the AC-CMC-4 pin; memory-file budgets are check:memory-files)", () => {
+  // The pre-push hook no longer runs the CLAUDE.md content check or the prose-pin
+  // checker (removed on purpose; memory-file budgets are check:memory-files).
+  it("NEGATIVE: neither hook copy invokes `--check-claude-md` or the prose-pin checker (memory-file budgets are check:memory-files)", () => {
     for (const hook of [readFileSync(REPO_HOOK_PATH, "utf8"), readFileSync(ASSET_HOOK_PATH, "utf8")]) {
       expect(hook).not.toContain("--check-claude-md");
       expect(hook).not.toContain("check-prose-pins");
