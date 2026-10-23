@@ -222,7 +222,13 @@ describe("lore done decides the holder by run (spec-run-only-write-identity-and-
 
     const done = await doneAs(taskIds[0]!, SHARED_NAME, runB);
 
-    expect(done.ok).toBe(true);
+    // The claim names a worktree, so `done` also needs the landing `lore integrate` records (BR-1291); this fixture lands
+    // nothing. The holder check runs before that floor, so the refusal that remains is the landing floor's, and it names
+    // neither the ended run nor a fresh claim: the ended run's claim no longer holds the task against run B.
+    expect(done.ok).toBe(false);
+    expect(errorText(done)).toContain("[floor: not-landed]");
+    expect(errorText(done)).not.toContain(runA);
+    expect(errorText(done)).not.toContain("fresh claim");
   });
 });
 
