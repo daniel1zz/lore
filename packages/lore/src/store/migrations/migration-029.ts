@@ -13,7 +13,7 @@
  *   Every other pending revision (no landed entry, or content that differs from it) is left untouched.
  *
  * Public surface: {@link planLandedPromotion}, {@link collectLandedChanges}, {@link applyMigration029},
- *   {@link MIGRATION_029_SQL}, {@link SELECT_SPEC_EXTRAS_SQL}, {@link PromotionPlan}, {@link LandedChange}.
+ *   {@link MIGRATION_029_SQL}, {@link SELECT_SPEC_EXTRAS_SQL}, {@link specExtrasSqlFor}, {@link PromotionPlan}, {@link LandedChange}.
  * Invariants:
  *   - The planner is pure; the SQLite runner here and the Turso runner in `turso-store.ts` share it and the SQL
  *     constants, so the two stores cannot promote differently.
@@ -162,6 +162,15 @@ export function planLandedPromotion(node: BaselineNodeRow, landed: ReadonlyMap<s
 
 /** Every live spec, for the landed-change index. */
 export const SELECT_SPEC_EXTRAS_SQL = "SELECT slug, extra FROM docs WHERE type = 'spec' AND deleted_at IS NULL ORDER BY slug";
+/** The same read for a legacy `docs` table that predates the `deleted_at` column (no soft delete existed, so every row is live). */
+export const SELECT_SPEC_EXTRAS_LEGACY_SQL = "SELECT slug, extra FROM docs WHERE type = 'spec' ORDER BY slug";
+/** `PRAGMA table_info(docs)`, so a runner can tell which of the two reads above its schema supports. */
+export const DOCS_TABLE_INFO_SQL = "PRAGMA table_info(docs)";
+
+/** The spec read that fits a `docs` table with (`true`) or without (`false`) the `deleted_at` column. */
+export function specExtrasSqlFor(hasDeletedAt: boolean): string {
+  return hasDeletedAt ? SELECT_SPEC_EXTRAS_SQL : SELECT_SPEC_EXTRAS_LEGACY_SQL;
+}
 
 /** Audit action of a promoted node; in the `update` family of `VERSION_ACTION_AUDIT_FAMILY` (audit-service.ts). */
 export const MIGRATION_029_AUDIT_ACTION = "migrate-schema-029";
@@ -225,7 +234,8 @@ export function applyMigration029(db: Migration029Database, corpusPath: string, 
   let current = "begin transaction";
   try {
     db.exec("BEGIN IMMEDIATE;");
-    const landed = collectLandedChanges(db.query(SELECT_SPEC_EXTRAS_SQL).all() as { slug: string; extra: string }[]);
+    const hasDeletedAt = (db.query(DOCS_TABLE_INFO_SQL).all() as { name: string }[]).some((column) => column.name === "deleted_at");
+    const landed = collectLandedChanges(db.query(specExtrasSqlFor(hasDeletedAt)).all() as { slug: string; extra: string }[]);
     const nodes = db.query(SELECT_BASELINE_NODES_SQL).all() as BaselineNodeRow[];
     for (const node of nodes) {
       current = `promote landed changes on baseline node ${node.slug}`;
