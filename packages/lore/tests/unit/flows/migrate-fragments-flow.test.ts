@@ -113,24 +113,6 @@ describe("migrateFragments", () => {
     expect(r.ok && r.value.outcomes[0]?.kind).toBe("refused");
   });
 
-  it("a file changed between read and write is a conflict (exit 5) left as the concurrent writer wrote it; others still migrate", async () => {
-    const fs = memoryFs({ "/d/a.md": old(["audience: [main]"]), "/d/b.md": old(["audience: [main]"]) });
-    const theirs = "---\nid: x\ntitle: T\ninject: [launch]\n---\nconcurrent\n";
-    const r = await migrateFragments(
-      {
-        fs,
-        beforeWrite: async (path) => {
-          if (path === "/d/a.md") fs.files[path] = theirs;
-        },
-      },
-      { layers: layer, apply: true },
-    );
-    expect(r.ok && r.value.exitCode).toBe(5);
-    expect(fs.files["/d/a.md"]).toBe(theirs);
-    expect(fs.files["/d/b.md"]).toContain("inject: [launch]");
-    expect(fs.writes).toEqual(["/d/b.md"]);
-  });
-
   it("reports a failed write as WRITE_FAILED naming the path", async () => {
     const fs = memoryFs({ "/d/a.md": old(["audience: [main]"]) });
     fs.writeFile = async () => {
@@ -147,5 +129,26 @@ describe("migrateFragments", () => {
     const r = await migrateFragments({ fs }, { layers: layer, apply: true });
     expect(JSON.stringify(r)).toContain('"migrated"');
     expect(fs.files["/d/a.md"]).toBe("﻿---\r\nid: x\r\ntitle: T\r\ninject: [launch]\r\n---\r\nBody\r\n");
+  });
+});
+
+describe("AC-IT-5 concurrent change", () => {
+  it("a file changed between the flow's read and its write (injected beforeWrite) is a conflict with exit 5 and keeps the concurrent writer's bytes; other files still migrate", async () => {
+    const fs = memoryFs({ "/d/a.md": old(["audience: [main]"]), "/d/b.md": old(["audience: [main]"]) });
+    const theirs = "---\nid: x\ntitle: T\ninject: [launch]\n---\nconcurrent\n";
+    const r = await migrateFragments(
+      {
+        fs,
+        beforeWrite: async (path) => {
+          if (path === "/d/a.md") fs.files[path] = theirs;
+        },
+      },
+      { layers: layer, apply: true },
+    );
+    expect(r.ok && r.value.exitCode).toBe(5);
+    expect(r.ok && r.value.outcomes[0]?.kind).toBe("conflict");
+    expect(fs.files["/d/a.md"]).toBe(theirs);
+    expect(fs.files["/d/b.md"]).toContain("inject: [launch]");
+    expect(fs.writes).toEqual(["/d/b.md"]);
   });
 });

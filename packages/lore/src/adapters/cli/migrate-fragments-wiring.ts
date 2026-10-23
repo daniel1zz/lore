@@ -64,28 +64,6 @@ function makeRealMigrateFs(): MigrateFragmentsFs {
   };
 }
 
-async function waitForFile(path: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!existsSync(path)) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
-
-/**
- * reason: compiled-binary e2e cannot otherwise interleave a concurrent writer between the flow's read and write
- * (AC-IT-5). With `LORE_MIGRATE_FRAGMENTS_SYNC_DIR=<dir>` the flow creates `<dir>/reached` before its precondition
- * re-read and blocks until `<dir>/go` exists (30 s cap, then fails loud). Unset in production.
- */
-function syncSeamFromEnv(env: Readonly<Record<string, string | undefined>>): ((path: string) => Promise<void>) | undefined {
-  const dir = env["LORE_MIGRATE_FRAGMENTS_SYNC_DIR"];
-  if (dir === undefined || dir === "") return undefined;
-  return async () => {
-    writeFileSync(join(dir, "reached"), "", "utf8");
-    await waitForFile(join(dir, "go"), 30_000);
-  };
-}
-
 /**
  * Run the fragment migration for the given scopes and print one line per file.
  *
@@ -109,11 +87,7 @@ export async function runFragmentsMigration(
     if (scope === "user") layers.push({ scope, dir: join(resolveUserConfigDir(inv.env, inv.paths.home), "context") });
     else if (opts.projectRoot !== null) layers.push({ scope, dir: join(opts.projectRoot, ".lore", "context") });
   }
-  const beforeWrite = syncSeamFromEnv(inv.env);
-  const result = await migrateFragments(
-    { fs: makeRealMigrateFs(), ...(beforeWrite !== undefined ? { beforeWrite } : {}) },
-    { layers, apply: opts.apply },
-  );
+  const result = await migrateFragments({ fs: makeRealMigrateFs() }, { layers, apply: opts.apply });
   if (!result.ok) {
     inv.io.stderr.write(`Error: fragment migration failed writing ${result.error.path}: ${result.error.message}\n`);
     return { code: 1, heldBack: [] };

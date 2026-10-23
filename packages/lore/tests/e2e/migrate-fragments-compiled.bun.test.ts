@@ -6,9 +6,8 @@
  * One fixture per old shape; user layer (`--scope user`, temp HOME / XDG, no corpus) and project layer
  * (`--scope project`, throwaway `lore init` corpus). Never touches the repo's `.lore/` or the real HOME.
  *
- * Concurrent-change case: the compiled binary is interleaved through the production seam
- * `LORE_MIGRATE_FRAGMENTS_SYNC_DIR` (the flow writes `<dir>/reached` between its read and its precondition re-read, then
- * waits for `<dir>/go`); the flow's own unit test covers the same case through the injected `beforeWrite` dep.
+ * The concurrent-change case (exit 5) is proved in tests/unit/flows/migrate-fragments-flow.test.ts through the
+ * injected `beforeWrite` dependency; the shipped binary carries no seam for it.
  *
  * @spec_ref spec-fragment-injection-timing-one-inject-enum-a-per-turn AC-IT-5
  */
@@ -71,7 +70,7 @@ function makeSandbox(): Sandbox {
   for (const d of [home, xdg, corpus]) mkdirSync(d, { recursive: true });
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
-  for (const k of ["CLAUDE_CONFIG_DIR", "LORE_CONFIG_HOME", "LORE_AI_DEFAULT", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LORE_SETUP_NO_CHECK", "LORE_MIGRATE_FRAGMENTS_SYNC_DIR"]) {
+  for (const k of ["CLAUDE_CONFIG_DIR", "LORE_CONFIG_HOME", "LORE_AI_DEFAULT", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LORE_SETUP_NO_CHECK"]) {
     delete env[k];
   }
   env["HOME"] = home;
@@ -219,33 +218,6 @@ describe("AC-IT-5 lore migrate fragments", () => {
     const sb = makeSandbox();
     const r = run(sb, sb.root, ["migrate", "fragments", "--scope", "project"]);
     expect(r.code).toBe(4);
-  });
-
-  it("a file modified between read and write makes --apply exit exactly 5 and keeps the concurrent writer's bytes", async () => {
-    const sb = makeSandbox();
-    const syncDir = join(sb.root, "sync");
-    mkdirSync(syncDir, { recursive: true });
-    writeFixtures(sb.userCtx, ["mf-main-rules"]);
-    const path = join(sb.userCtx, "mf-main-rules.md");
-    const proc = Bun.spawn([LORE_BIN, "migrate", "fragments", "--scope", "user", "--apply"], {
-      cwd: sb.root,
-      env: { ...sb.env, LORE_MIGRATE_FRAGMENTS_SYNC_DIR: syncDir },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const deadline = Date.now() + 20_000;
-    while (!existsSync(join(syncDir, "reached"))) {
-      if (Date.now() > deadline) throw new Error("migrate never reached its write step");
-      await Bun.sleep(20);
-    }
-    const concurrent = `${fixtureText(FIXTURES[0] as Fixture)}\nedited by someone else\n`;
-    writeFileSync(path, concurrent, "utf8");
-    writeFileSync(join(syncDir, "go"), "", "utf8");
-    const code = await proc.exited;
-    const out = await new Response(proc.stdout).text();
-    expect(code).toBe(5);
-    expect(out).toContain("conflict");
-    expect(readFileSync(path, "utf8")).toBe(concurrent);
   });
 
   describe("lore setup migrates automatically", () => {

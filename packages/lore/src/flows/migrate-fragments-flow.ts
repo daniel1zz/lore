@@ -49,7 +49,7 @@ export interface MigrateFragmentsDeps {
   readonly fs: MigrateFragmentsFs;
   /**
    * Test seam: awaited after the first read and before the precondition re-read of each file about to be written.
-   * Production leaves it undefined, except the adapter wires `LORE_MIGRATE_FRAGMENTS_SYNC_DIR` (compiled e2e only).
+   * Unit tests use it to inject a concurrent writer (AC-IT-5); the adapter never sets it.
    */
   readonly beforeWrite?: (path: string) => Promise<void>;
 }
