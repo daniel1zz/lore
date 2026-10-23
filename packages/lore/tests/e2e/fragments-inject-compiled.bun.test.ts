@@ -105,8 +105,9 @@ describe("AC-IT-7 shipped set uses inject and refreshes/checks clean", () => {
 
   it("AC-IT-7 lore context refresh writes a rules file for every shipped launch fragment and none for agent-rules; fragments check exits 0", () => {
     const sb = makeSandbox();
+    expect(lore(sb, "context", "init").code).toBe(0);
     const refresh = lore(sb, "context", "refresh");
-    expect({ code: refresh.code, err: refresh.stderr }).toEqual({ code: 0, err: refresh.stderr });
+    expect({ code: refresh.code, err: refresh.stderr }).toEqual({ code: 0, err: "" });
     const rulesDir = join(sb.corpus, ".claude", "rules");
     const written = existsSync(rulesDir) ? readdirSync(rulesDir).filter((n) => n.startsWith("lore-")) : [];
     const launch = shippedFragments().filter((f) => f.inject.includes("launch"));
