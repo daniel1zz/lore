@@ -283,8 +283,9 @@ function insertResolvesLink(tmpDir: string, fromId: string, toId: string, create
 function forceDocStatus(tmpDir: string, id: string, status: string): void {
   const db = new Database(dbPath(tmpDir));
   try {
-    const changed = db.query("UPDATE docs SET status = ? WHERE id = ?").run(status, id).changes;
-    if (changed !== 1) throw new Error(`forceDocStatus: doc ${id} not found`);
+    db.query("UPDATE docs SET status = ? WHERE id = ?").run(status, id);
+    const row = db.query("SELECT status FROM docs WHERE id = ?").get(id) as { status: string } | undefined;
+    if (row?.status !== status) throw new Error(`forceDocStatus: doc ${id} did not take status ${status}`);
   } finally {
     db.close();
   }
