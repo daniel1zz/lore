@@ -439,7 +439,7 @@ describe("milestone review gates close", () => {
     expect(stored[2]?.dimensions["regression"]?.verdict).toBe("pass");
   });
 
-  it("milestone review gates close: snapshot_accuracy fails only on a stale cited rule; an unknown rule is n/a with the reason", { timeout: 60_000 }, async () => {
+  it("milestone review gates close: snapshot_accuracy fails only on a contradicted cited rule; stale and unknown are n/a with the reason", { timeout: 60_000 }, async () => {
     const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
     const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
     const plan = { id: "P1", slug: "plan-p1", title: "Plan P1", content: "x", version: 1, extra: {} };
@@ -463,10 +463,78 @@ describe("milestone review gates close", () => {
     expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("na");
     expect(stored[0]?.dimensions["snapshot_accuracy"]?.reason).toContain("no-code-anchors");
     expect(stored[0]?.overall).toBe("pass");
-    cited = [{ rule_id: "BR-1", state: "stale" }, { rule_id: "BR-2", state: "unknown", unknown_reason: "dirty" }];
+    cited = [{ rule_id: "BR-1", state: "contradicted" }, { rule_id: "BR-2", state: "unknown", unknown_reason: "dirty" }];
     expect((await service.review("plan-p1", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
     expect(stored[1]?.dimensions["snapshot_accuracy"]?.verdict).toBe("fail");
     expect(stored[1]?.overall).toBe("fail");
+  });
+
+  /**
+   * AC-LG-12 (BR-1372, Part D): stale cited evidence is re-verified ONCE per batch through the injected trusted-runner
+   * port before any plan is judged; the rule state is then recomputed. `acResult` is what each citing AC "now" does.
+   */
+  async function refreshHarness(acResult: "pass" | "fail") {
+    const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
+    const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
+    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x" };
+    const bundleOf = (slug: string) => ({
+      plan: { id: slug, slug, title: slug, content: "x", version: 1, extra: {} },
+      tasks: [{ id: `T-${slug}`, slug: `task-${slug}`, title: "T", content: "x", status: "archived", version: 1, extra: {} }],
+      spec,
+    });
+    let state = "stale";
+    const ran: { plan: string; acIds: readonly string[] }[] = [];
+    const service = new MilestoneReviewService({
+      getPlanBundle: async (ref: string) => core.ok(bundleOf(ref) as never),
+      getCitedRuleStates: async () => core.ok([{ rule_id: "BR-1", state, ...(state === "stale" ? { citing_acs: ["AC-A"] } : {}) }]),
+      listDecisionLog: async () => core.ok([]),
+      judge: async () => core.ok(judgeAnswer({ snapshot_accuracy: { verdict: "fail", reason: "BR-1 looks stale", reference: "doc drift" } })),
+      createReviewDoc: async (input) => {
+        stored.push((input.extra as { milestone_review: (typeof stored)[number] }).milestone_review);
+        return core.ok({ id: "R1", slug: "review-1" } as never);
+      },
+      link: async () => core.ok(undefined),
+    });
+    const port = {
+      runAcs: async (plan: string, acIds: readonly string[]) => {
+        ran.push({ plan, acIds });
+        state = acResult === "pass" ? "verified" : "contradicted";
+        return core.ok(undefined);
+      },
+    };
+    return { service, stored, ran, port };
+  }
+
+  it("milestone review gates close: a stale rule whose citing AC still passes is re-verified, becomes verified and the dimension passes (AC-LG-12 stale-then-verified)", { timeout: 60_000 }, async () => {
+    const { service, stored, ran, port } = await refreshHarness("pass");
+    const refreshed = await service.refreshStaleCitedRules(["plan-a"], port);
+    expect(refreshed.ok).toBe(true);
+    expect(ran).toEqual([{ plan: "plan-a", acIds: ["AC-A"] }]);
+    expect((await service.review("plan-a", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("na");
+    expect(stored[0]?.overall).toBe("pass");
+  });
+
+  it("milestone review gates close: a stale rule whose citing AC now fails becomes contradicted and the dimension fails (AC-LG-12 stale-then-contradicted)", { timeout: 60_000 }, async () => {
+    const { service, stored, port } = await refreshHarness("fail");
+    expect((await service.refreshStaleCitedRules(["plan-a"], port)).ok).toBe(true);
+    expect((await service.review("plan-a", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("fail");
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.reason).toContain("BR-1");
+    expect(stored[0]?.overall).toBe("fail");
+  });
+
+  it("milestone review gates close: two plans citing the same stale rule run its AC exactly once per batch (AC-LG-12 one run per batch)", { timeout: 60_000 }, async () => {
+    const { service, ran, port } = await refreshHarness("pass");
+    expect((await service.refreshStaleCitedRules(["plan-a", "plan-b"], port)).ok).toBe(true);
+    expect(ran.flatMap((r) => r.acIds)).toEqual(["AC-A"]);
+  });
+
+  it("milestone review gates close: a stale rule left unrefreshed is n/a with its reason, never a fail (AC-LG-12 stale is not a disagreement)", { timeout: 60_000 }, async () => {
+    const { service, stored } = await refreshHarness("pass");
+    expect((await service.review("plan-a", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("na");
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.reason).toContain("stale");
   });
 
   /** A plan whose review fails on `security` and `regression`, with the fake GitHub configured as the upstream. */
