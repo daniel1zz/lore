@@ -787,7 +787,12 @@ describe("milestone review gates close", () => {
 
   it("milestone review gates close: reject restores both ACs and keeps the close refused until the plan is re-planned", { timeout: 300_000 }, () => {
     const { plan, task } = makePlan("Retire reject");
-    const specs = retireTwoAcs(task);
+    // a claimed task stays a locked record, so the retiring run claims a second task of the plan and `task` stays editable
+    const retiringTask = slugOf(
+      runLore(["create", "task", "--title", "Retiring work", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], tmpDir).stdout,
+    );
+    addPass(retiringTask);
+    const specs = retireTwoAcs(retiringTask);
     expect(assessRows([plan]).exitCode).toBe(0);
     answerPending("Reject");
 
@@ -800,7 +805,8 @@ describe("milestone review gates close", () => {
     expect(close(plan).exitCode).toBe(4); // still refused on a second try: restoring is not re-planning
 
     // re-planning: a task change gives the plan a new state, the refusal lifts and the review is stale until re-run
-    expect(runLore(["set", task, "--content", "re-planned after the rejected retirement"], tmpDir).exitCode).toBe(0);
+    const replanned = runLore(["set", task, "--content", "re-planned after the rejected retirement"], tmpDir);
+    expect(replanned.exitCode, replanned.stderr).toBe(0);
     addPass(task);
     expect(assessRows([plan]).exitCode).toBe(0);
     const closed = close(plan);
