@@ -271,9 +271,12 @@ function retireTwoAcs(env: Record<string, string> = {}): { old: string; fresh: s
 }
 
 function acSuperseded(spec: string, acId: string): boolean {
-  const r = runLore(["ac", "list", spec, "--json"], tmpDir);
+  const r = runLore(["get", spec, "--json"], tmpDir);
   expect(r.exitCode, r.stderr).toBe(0);
-  return r.stdout.includes("superseded_by") && new RegExp(`"id":\\s*"${acId}"[^}]*superseded`, "s").test(r.stdout);
+  const doc = (JSON.parse(r.stdout) as { data: { doc: { extra: { acceptance_criteria: { id: string; superseded_by?: unknown }[] } } } }).data.doc;
+  const criterion = doc.extra.acceptance_criteria.find((c) => c.id === acId);
+  expect(criterion, `${acId} exists on ${spec}`).toBeDefined();
+  return criterion?.superseded_by !== undefined;
 }
 
 beforeEach(() => {
