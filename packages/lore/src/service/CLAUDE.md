@@ -4,7 +4,7 @@ Architecture card: `baseline-module-card-service`
 
 ## Purpose
 
-Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`. ~25 services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type validation, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync, task/phase execution workflow, structured acceptance criteria, audit). No thrown exceptions cross this boundary. `GateEnforcer` (`gate-enforcer.ts`) is a cross-cutting, non-store-holding module — see Patterns below for its checkpoint contract.
+Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`. ~25 services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type validation, version snapshots, drift checks, task/phase workflow, acceptance criteria, audit). No thrown exceptions cross this boundary. `GateEnforcer` (`gate-enforcer.ts`) is a cross-cutting, non-store-holding module — see Patterns below for its checkpoint contract.
 
 Full pre-eviction file (mechanism walkthroughs, per-spec design decisions, empirical measurements) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-packages-lore-src-service-2`; the earlier pre-compression state: `knowledge-module-claude-md-snapshot-packages-lore-src-service`.
 
@@ -49,6 +49,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | Service | Responsibility |
 |---|---|
 | `CorpusService` | CRUD, list, search, tree, link/unlink, status, `getPlanBundle`, `getReviewBundle`, `findFeedingSkill`, `resolveDeclaredAcIds` (telemetry-wired) |
+| `BulkLifecycleService` | `lore bulk`/`lore_bulk`: preview/apply one gated verb over many docs; each row CAS'd, fails alone |
 | `ReviewService` | Pending queue, approve, reject; enforces `isValidTransition`; `PendingDoc.slug` always present |
 | `VersionService` | Version log, unified diff (`diff` pkg), restore (append-only) |
 | `OutlineService` | MDX placeholder resolution + `renderResolvedToMarkdown` text-projection splice |

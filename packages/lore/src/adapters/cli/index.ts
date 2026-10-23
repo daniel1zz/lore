@@ -204,6 +204,9 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // archive (spec-lifecycle-archival-plan-close-cascade-deterministic D3) —
     // deterministic sweep/apply verb; see commands/archive.ts's module header.
     archive: () => import("./commands/archive.js"),
+    // bulk (spec-lean-governance-batch-verbs-judgment-only-at-milestones Part A, BR-1366) — many docs through one
+    // gated lifecycle verb, preview then --apply; see commands/bulk.ts's module header.
+    bulk: () => import("./commands/bulk.js"),
     // trace (SPEC-102) — `lore trace stats`, read/deny observability
     // aggregation surface; see commands/trace.ts's module header.
     trace: () => import("./commands/trace.js"),

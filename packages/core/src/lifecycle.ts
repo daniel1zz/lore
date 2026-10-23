@@ -18,7 +18,10 @@ import type { DocStatus, DocType } from "./types.js";
  * Key: from-status, Value: set of allowed to-statuses.
  */
 export const VALID_TRANSITIONS: Readonly<Record<DocStatus, ReadonlySet<DocStatus>>> = {
-  draft: new Set<DocStatus>(["in-review", "approved"]),
+  // reason: draft -> deprecated lets a never-approved doc of ANY type be abandoned (BR-1366, spec-lean-governance-batch-
+  // verbs-judgment-only-at-milestones AC-LG-3); archived and deprecated stay terminal, so archived -> deprecated is
+  // still INVALID_TRANSITION.
+  draft: new Set<DocStatus>(["in-review", "approved", "deprecated"]),
   "in-review": new Set<DocStatus>(["approved", "draft"]),
   approved: new Set<DocStatus>(["active", "archived", "deprecated"]),
   active: new Set<DocStatus>(["archived", "deprecated"]),
