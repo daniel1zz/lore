@@ -32,7 +32,7 @@ import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledg
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementState } from "../../src/service/milestone-review.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
-import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
+import { issueTitleOf, rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
 import { ReviewBatchLease, REVIEW_BATCH_LEASE_NAME, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts, type ReviewTriggerDeps } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
@@ -72,6 +72,13 @@ class FailingVersionStore extends InMemoryStore {
     }
     return super.insertVersion(version);
   }
+}
+
+/** Unwraps a root cause; a test that expects the error calls `rootCauseOf` directly. */
+function causeOf(finding: Parameters<typeof rootCauseOf>[0]) {
+  const cause = rootCauseOf(finding);
+  if (!cause.ok) throw new Error(`unexpected root-cause error: ${JSON.stringify(cause.error)}`);
+  return cause.value;
 }
 
 function openStore(kind: Kind, dir: string, dbPath: string): StoreInterface {
@@ -586,6 +593,8 @@ class World {
   readonly store = new InMemoryStore();
   judgeCalls: string[] = [];
   suiteRuns = 0;
+  /** The failing-file set of the batch's ONE suite run (stored on every review as suite_failing_files). */
+  suiteFailingFiles: string[] = [];
   failJudgeOnce = false;
   now = T0;
   spawns = 0;
@@ -679,7 +688,7 @@ class World {
       dimensions,
       decisions: [],
       ...(plan.retired ? { retired_acs: [{ kind: "superseded" as const, spec: `spec-${plan.slug}`, ac: "AC-W-1", reason: "feature gone", at: "2026-10-02T00:00:00.000Z" }] } : {}),
-      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort() } } : {}),
+      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort(), ...(this.suiteFailingFiles.length > 0 ? { suite_failing_files: [...this.suiteFailingFiles].sort() } : {}) } } : {}),
       prompt_version: "fixture",
       diff_source: "fixture",
     };
@@ -861,12 +870,13 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
       p.failing = ["regression"];
       p.regressionFiles = ["packages/x/tests/b.test.ts", "packages/x/tests/a.test.ts"];
     }
+    world.suiteFailingFiles = ["packages/x/tests/b.test.ts", "packages/x/tests/a.test.ts"];
     const run = await world.runner().runBatch(["p-red-a", "p-red-b"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
     expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects", "accepted-with-known-defects"]);
     expect(world.issues.filed).toBe(1);
     const issue = world.issues.open[0];
-    const cause = rootCauseOf({ plan: "p-red-a", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts"] } });
+    const cause = causeOf({ plan: "p-red-a", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/a.test.ts"], suite_failing_files: ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts"] } });
     expect(issue?.body).toContain(cause.fingerprint);
     expect(issue?.title).toContain(`[fp:${cause.short}]`);
     expect(issue?.title).toContain("main red: packages/x/tests/a.test.ts, packages/x/tests/b.test.ts");
@@ -875,16 +885,34 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(world.suiteRuns).toBe(1);
   });
 
-  it("BOUNDARY: a different failing-file set is a different fingerprint, so a second issue", async () => {
+  it("BOUNDARY: a different suite run (different failing set) is a different fingerprint, so a second issue", async () => {
     const world = new World();
     const a = world.add(makeWorldPlan("p-red-a"));
     const c = world.add(makeWorldPlan("p-red-c"));
     a.failing = ["regression"];
     a.regressionFiles = ["a.test.ts"];
+    world.suiteFailingFiles = ["a.test.ts"];
+    await world.runner().runBatch(["p-red-a"], world.ports("batch-1"));
     c.failing = ["regression"];
     c.regressionFiles = ["c.test.ts"];
-    await world.runner().runBatch(["p-red-a", "p-red-c"], world.ports("batch-1"));
+    world.suiteFailingFiles = ["c.test.ts"];
+    await world.runner().runBatch(["p-red-c"], world.ports("batch-2"));
     expect(world.issues.filed).toBe(2);
+  });
+
+  it("ERROR: a failed regression review without suite_failing_files is a filing error, nothing is filed and the plan stays complete", async () => {
+    const world = new World();
+    const a = world.add(makeWorldPlan("p-red-old"));
+    a.failing = ["regression"];
+    a.regressionFiles = ["a.test.ts"];
+    const run = await world.runner().runBatch(["p-red-old"], world.ports("batch-1"));
+    expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing" });
+    expect(world.issues.filed).toBe(0);
+    expect(a.archived).toBe(false);
+    expect(world.errors.map((e) => e.stage)).toEqual(["filing"]);
+    expect(world.errors[0]?.message).toContain("suite_failing_files");
+    const direct = rootCauseOf({ plan: "p", dimension: "regression", reason: "x", reference: "", reviewSlug: "r", causes: { regression_files: ["a.test.ts"] } });
+    expect(direct.ok).toBe(false);
   });
 
   it("STATE: a second batch hitting the same fingerprint while the issue is open links it and files nothing", async () => {
@@ -892,6 +920,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     const a = world.add(makeWorldPlan("p-red-a"));
     a.failing = ["regression"];
     a.regressionFiles = ["a.test.ts"];
+    world.suiteFailingFiles = ["a.test.ts"];
     await world.runner().runBatch(["p-red-a"], world.ports("batch-1"));
     expect(world.issues.filed).toBe(1);
     const later = world.add(makeWorldPlan("p-red-later"));
@@ -905,13 +934,13 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
 
   it("STATE: the other dimensions group by cited symbols/paths plus the normalised summary, and snapshot_accuracy by contradicted rules", () => {
     const base = { plan: "p", reference: "", reviewSlug: "r" } as const;
-    const one = rootCauseOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (3 places)" });
-    const two = rootCauseOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (7 places)" });
-    const other = rootCauseOf({ ...base, dimension: "security", reason: "`writeToken` in src/auth/store.ts leaks the token" });
+    const one = causeOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (3 places)" });
+    const two = causeOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (7 places)" });
+    const other = causeOf({ ...base, dimension: "security", reason: "`writeToken` in src/auth/store.ts leaks the token" });
     expect(two.fingerprint).toBe(one.fingerprint);
     expect(other.fingerprint).not.toBe(one.fingerprint);
-    const rulesA = rootCauseOf({ ...base, dimension: "snapshot_accuracy", reason: "x", causes: { contradicted_rules: ["BR-2", "BR-1"] } });
-    const rulesB = rootCauseOf({ ...base, dimension: "snapshot_accuracy", reason: "y", causes: { contradicted_rules: ["BR-1", "BR-2"] } });
+    const rulesA = causeOf({ ...base, dimension: "snapshot_accuracy", reason: "x", causes: { contradicted_rules: ["BR-2", "BR-1"] } });
+    const rulesB = causeOf({ ...base, dimension: "snapshot_accuracy", reason: "y", causes: { contradicted_rules: ["BR-1", "BR-2"] } });
     expect(rulesA.fingerprint).toBe(rulesB.fingerprint);
     expect(rulesA.label).toBe("contradicted rules: BR-1, BR-2");
   });
@@ -958,6 +987,47 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing" });
     expect(plan.archived).toBe(false);
     expect(world.errors.map((e) => e.stage)).toEqual(["filing"]);
+  });
+});
+
+describe("batch outcomes — one main red issue per suite run, issue titles keep the original summary (AC-PCR-4)", () => {
+  it("HAPPY: two plans attributed different subsets of ONE failing suite run file ONE main red issue with the full sorted set, linked to both", async () => {
+    const world = new World();
+    const a = world.add(makeWorldPlan("p-sub-a"));
+    const b = world.add(makeWorldPlan("p-sub-b"));
+    world.suiteFailingFiles = ["z.test.ts", "a.test.ts", "m.test.ts"];
+    a.failing = ["regression"];
+    a.regressionFiles = ["a.test.ts"];
+    b.failing = ["regression"];
+    b.regressionFiles = ["m.test.ts", "z.test.ts"];
+    await world.runner().runBatch(["p-sub-a", "p-sub-b"], world.ports("batch-1"));
+    expect(world.issues.filed).toBe(1);
+    expect(world.issues.open[0]?.title).toContain("main red: a.test.ts, m.test.ts, z.test.ts");
+    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-sub-a->101", "p-sub-b->101"]);
+  });
+
+  it("REGRESSION: a finding summary naming AC-ZZ-3 and BR-99999 keeps both ids in the issue title, with [fp:<12hex>]", () => {
+    const finding = { plan: "p", dimension: "security", reason: "AC-ZZ-3 and BR-99999 are violated by the token store", reference: "", reviewSlug: "r" } as const;
+    const title = issueTitleOf(causeOf(finding));
+    expect(title).toContain("AC-ZZ-3");
+    expect(title).toContain("BR-99999");
+    expect(title).toMatch(/\[fp:[0-9a-f]{12}\]$/);
+  });
+
+  it("STATE: two findings differing only in ids share one fingerprint, yet each title keeps its own ids", () => {
+    const base = { plan: "p", dimension: "security", reference: "", reviewSlug: "r" } as const;
+    const one = causeOf({ ...base, reason: "AC-ZZ-3 and BR-99999 are violated" });
+    const two = causeOf({ ...base, reason: "AC-ZZ-9 and BR-99998 are violated" });
+    expect(two.fingerprint).toBe(one.fingerprint);
+    expect(issueTitleOf(one)).toContain("AC-ZZ-3");
+    expect(issueTitleOf(two)).toContain("AC-ZZ-9");
+  });
+
+  it("BOUNDARY: a long summary is truncated in the title and the tag still ends it", () => {
+    const cause = causeOf({ plan: "p", dimension: "security", reason: `AC-ZZ-3 ${"x".repeat(500)}`, reference: "", reviewSlug: "r" });
+    const title = issueTitleOf(cause);
+    expect(title.length).toBeLessThan(200);
+    expect(title.endsWith(`[fp:${cause.short}]`)).toBe(true);
   });
 });
 
@@ -1013,6 +1083,7 @@ describe("lease and retry — renewal, takeover, errors, once per fingerprint, o
     const plan = world.add(makeWorldPlan("p-file-error"));
     plan.failing = ["regression"];
     plan.regressionFiles = ["a.test.ts"];
+    world.suiteFailingFiles = ["a.test.ts"];
     world.issues.failFilingOnce = true;
     const first = await world.runner().runBatch(["p-file-error"], world.ports("batch-1"));
     expect(first.ok && first.value.state === "ran" && first.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing", reviewed: true });

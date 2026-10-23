@@ -100,13 +100,17 @@ export function measuredCauses(
   dimensions: LlmMilestoneOutput["dimensions"],
   attributedFailingFiles: readonly string[],
   cited: readonly CitedRuleStateRow[],
+  suiteFailingFiles: readonly string[] = [],
 ): ReviewCauses | undefined {
   const regression =
     dimensions.regression.verdict === "fail" && attributedFailingFiles.length > 0 ? [...new Set(attributedFailingFiles)].sort() : undefined;
   const contradicted = cited.filter((r) => r.state === "contradicted").map((r) => r.rule_id);
   const rules = dimensions.snapshot_accuracy.verdict === "fail" && contradicted.length > 0 ? [...new Set(contradicted)].sort() : undefined;
   if (regression === undefined && rules === undefined) return undefined;
-  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
+  // reason: BR-1379 / #345 — one failing main suite is ONE root cause, so the whole run's failing set is stored beside
+  // the plan's attributed subset; the fingerprint reads the whole set.
+  const suiteSet = regression !== undefined ? [...new Set(suiteFailingFiles)].sort() : undefined;
+  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(suiteSet !== undefined ? { suite_failing_files: suiteSet } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
 }
 
 /** The `milestone` decisions whose document is the plan, its spec or one of its tasks (newest per class+document). */
@@ -254,7 +258,12 @@ export class MilestoneReviewService {
     if (!retiredResult.ok) return retiredResult;
     // reason: BR-1379 root-cause grouping needs the MEASURED causes of the failed findings (not the judge's prose), and
     // a later batch that only retries filing reads them from the stored review instead of re-judging.
-    const causes = measuredCauses(dimensions, attribution.attributed, citedRulesResult.value);
+    const causes = measuredCauses(
+      dimensions,
+      attribution.attributed,
+      citedRulesResult.value,
+      opts.suite?.status === "measured" ? opts.suite.failing_test_files.map((f) => f.file) : [],
+    );
     const review: MilestoneReview = {
       plan_id: bundle.plan.id,
       ...(retiredResult.value.length > 0 ? { retired_acs: retiredResult.value } : {}),

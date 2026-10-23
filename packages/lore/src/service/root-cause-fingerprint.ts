@@ -7,7 +7,7 @@
  *   {@link FINGERPRINT_TITLE_TAG}, {@link fingerprintTag}.
  * Invariants:
  *   - Fingerprint = SHA-256 of `<dimension>|<cause key>`. Cause key by dimension: `regression` -> the sorted set of
- *     failing test files attributed to the plan ("main red: <files>", one fingerprint for a failing main suite);
+ *     ALL failing test files of the suite run (an attributed regression without that set is an error, never a fallback) ("main red: <files>", one fingerprint for a failing main suite);
  *     `snapshot_accuracy` -> the sorted set of contradicted rule ids; every other dimension (and a regression the
  *     suite did not measure) -> the sorted cited symbols/paths plus the normalised summary.
  *   - The causes come from the MEASURED `causes` stored on the review, never from the judge's prose, whenever the
@@ -19,7 +19,8 @@
  */
 
 import { createHash } from "node:crypto";
-import type { MilestoneDimension, ReviewCauses } from "@lore/core";
+import type { LoreError, MilestoneDimension, ReviewCauses, Result } from "@lore/core";
+import { err, ok } from "@lore/core";
 
 /** One failed dimension of one plan's stored review, as the filing sees it. */
 export interface FailedFinding {
@@ -83,25 +84,40 @@ function digest(dimension: MilestoneDimension, key: string): { fingerprint: stri
  * The root cause of one failed finding.
  *
  * @param finding - a failed dimension with its review's measured causes
+ * @returns the cause, or a VALIDATION_ERROR when a measured failed regression lacks `suite_failing_files`
  * @example
  * rootCauseOf({ plan: "p", dimension: "regression", reason: "x", reference: "", reviewSlug: "r",
- *   causes: { regression_files: ["b.test.ts", "a.test.ts"] } }).label; // => "main red: a.test.ts, b.test.ts"
+ *   causes: { regression_files: ["a.test.ts"], suite_failing_files: ["b.test.ts", "a.test.ts"] } }); // ok, label // => "main red: a.test.ts, b.test.ts"
  */
-export function rootCauseOf(finding: FailedFinding): RootCause {
+export function rootCauseOf(finding: FailedFinding): Result<RootCause, LoreError> {
   const { dimension } = finding;
-  const files = finding.causes?.regression_files;
-  if (dimension === "regression" && files !== undefined && files.length > 0) {
+  // reason: the suite run's WHOLE failing set is the cause (#345). A failed regression finding that has a measured
+  // attribution (regression_files) but no suite_failing_files has no honest identity: the attributed subset would split
+  // one run into several issues, so it fails loud instead of falling back (repo rule: no silent fallback).
+  if (dimension === "regression" && finding.causes?.regression_files !== undefined && finding.causes.regression_files.length > 0) {
+    const files = finding.causes.suite_failing_files;
+    if (files === undefined || files.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "causes.suite_failing_files",
+        message: `the stored review ${finding.reviewSlug} failed regression on a measured suite run but lacks suite_failing_files; it cannot be filed as one main-red issue`,
+        rule: "BR-1379",
+      });
+    }
     const sorted = [...new Set(files)].sort();
-    return { dimension, ...digest(dimension, `files:${sorted.join(",")}`), label: `main red: ${sorted.join(", ")}` };
+    return ok({ dimension, ...digest(dimension, `files:${sorted.join(",")}`), label: `main red: ${sorted.join(", ")}` });
   }
   const rules = finding.causes?.contradicted_rules;
   if (dimension === "snapshot_accuracy" && rules !== undefined && rules.length > 0) {
     const sorted = [...new Set(rules)].sort();
-    return { dimension, ...digest(dimension, `rules:${sorted.join(",")}`), label: `contradicted rules: ${sorted.join(", ")}` };
+    return ok({ dimension, ...digest(dimension, `rules:${sorted.join(",")}`), label: `contradicted rules: ${sorted.join(", ")}` });
   }
   const cited = citedTokens(`${finding.reason}\n${finding.reference}`);
   const summary = normaliseSummary(finding.reason);
-  return { dimension, ...digest(dimension, `cited:${cited.join(",")}|summary:${summary}`), label: summary.slice(0, 80) };
+  // reason: the fingerprint keys on the normalised summary (ids removed) but the label shown in the title is the
+  // finding's ORIGINAL summary, so ids stay readable (#346; Sentry: grouping key is not the display title).
+  const display = finding.reason.replace(/\s+/g, " ").trim().slice(0, 80);
+  return ok({ dimension, ...digest(dimension, `cited:${cited.join(",")}|summary:${summary}`), label: display });
 }
 
 /** The issue title of a root cause: `<dimension>: <label> [fp:<12 hex>]`. */

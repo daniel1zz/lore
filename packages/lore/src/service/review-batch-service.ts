@@ -360,9 +360,12 @@ async function planFactsOf(
     if (latest.review.fingerprint === fingerprint && latest.review.overall === "fail") {
       const titles = await deps.linkedOpenIssueTitles(bundle.plan.id);
       if (!titles.ok) return titles;
-      const needed = failedDimensions(latest.review.dimensions).map((dimension) =>
-        fingerprintTag(rootCauseOf({ plan: bundle.plan.slug, dimension, reason: latest.review.dimensions[dimension].reason, reference: latest.review.dimensions[dimension].reference, reviewSlug: latest.doc.slug, causes: latest.review.causes }).short),
-      );
+      const needed: string[] = [];
+      for (const dimension of failedDimensions(latest.review.dimensions)) {
+        const cause = rootCauseOf({ plan: bundle.plan.slug, dimension, reason: latest.review.dimensions[dimension].reason, reference: latest.review.dimensions[dimension].reference, reviewSlug: latest.doc.slug, causes: latest.review.causes });
+        if (!cause.ok) return cause;
+        needed.push(fingerprintTag(cause.value.short));
+      }
       filingIncomplete = needed.some((tag) => !titles.value.some((t) => t.includes(tag)));
     }
     return ok({
