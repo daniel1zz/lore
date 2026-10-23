@@ -89,6 +89,12 @@ export type RetiredAcRef = z.infer<typeof retiredAcRefSchema>;
 export const reviewCausesSchema = z.object({
   /** Failing suite test files attributed to the plan (the regression finding's root cause), sorted. */
   regression_files: z.array(z.string().min(1)).optional(),
+  /**
+   * EVERY failing test file of the batch's one suite run, sorted (set with `regression_files`). The root-cause
+   * fingerprint of a failing main suite is this whole set, so plans attributed different subsets share one issue.
+   * Absent on a review stored before this field existed.
+   */
+  suite_failing_files: z.array(z.string().min(1)).optional(),
   /** Cited rule ids whose state is contradicted (the snapshot-accuracy finding's root cause), sorted. */
   contradicted_rules: z.array(z.string().min(1)).optional(),
 });
