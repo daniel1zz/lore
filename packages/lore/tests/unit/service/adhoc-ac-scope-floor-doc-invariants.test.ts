@@ -175,7 +175,7 @@ describe("face 1: the no-new-tests floor's keying decision is recorded, and the 
   it("HAPPY: requiresNoNewTestsDeclaration's JSDoc records the presence-not-length keying and names the rejected alternative", () => {
     const block = jsdocBlockAbove(
       readSource(TASK_WORKFLOW_SERVICE),
-      /^function requiresNoNewTestsDeclaration\(/,
+      /^(?:export )?function requiresNoNewTestsDeclaration\(/,
     );
     expect(block).toContain("PRESENCE");
     // The alternative the governing task offered and this slice rejected, named

@@ -1,7 +1,7 @@
 // @spawns vitest.node.config.ts
 // @spawns packages/lore/tests/unit/core/global-config.test.ts
 // @spawns packages/lore/tests/unit/adapters/http/auth-routes.bun.test.ts
-// @spawns packages/lore/tests/integration/hooks/stop-turn-review-cursor.test.ts
+// @spawns packages/lore/tests/integration/hooks/turn-start-snapshot.test.ts
 // @spawns packages/lore/tests/unit/hooks/session-bootstrap-injection.test.ts
 // @spawns packages/lore/tests/unit/adapters/real-process-scan-port.test.ts
 // @spawns packages/lore/tests/unit/service/setup-service.test.ts
@@ -28,7 +28,7 @@ const RUN_TIMEOUT_MS = 240_000;
 const BUN_SELECTION = [
   "packages/lore/tests/unit/core/global-config.test.ts",
   "packages/lore/tests/unit/adapters/http/auth-routes.bun.test.ts",
-  "packages/lore/tests/integration/hooks/stop-turn-review-cursor.test.ts",
+  "packages/lore/tests/integration/hooks/turn-start-snapshot.test.ts",
 ];
 const NODE_SELECTION = [
   "packages/lore/tests/unit/hooks/session-bootstrap-injection.test.ts",
