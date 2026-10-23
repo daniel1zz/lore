@@ -31,6 +31,7 @@ import { join, sep } from "node:path";
 import { z } from "zod";
 import type { CheckOutcomeInput, CheckOutcomeStat, StoreInterface } from "../store/store-interface.js";
 import { checkpointRegistry } from "./checkpoint-registry.js";
+import { isPlanMember } from "./plan-membership.js";
 
 /** A check must have been observed this many days before "never denied" counts as evidence. */
 export const REMOVAL_MIN_DAYS = 30;
@@ -234,7 +235,7 @@ export class CheckStatsService {
     const closed = await this.closeTimeOf(plan);
     if (!closed.ok) return closed;
     const closedMs = Date.parse(closed.value.at);
-    const ownTasks = allTasks.filter((t) => t.parent_id === plan.id);
+    const ownTasks = allTasks.filter((t) => isPlanMember(t, plan.id));
     const slugs = [plan.slug, ...ownTasks.map((t) => t.slug)];
 
     const escaped = issues
