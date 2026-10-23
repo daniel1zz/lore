@@ -32,7 +32,7 @@ import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledg
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementState } from "../../src/service/milestone-review.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
-import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
+import { issueTitleOf, rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
 import { ReviewBatchLease, REVIEW_BATCH_LEASE_NAME, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts, type ReviewTriggerDeps } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
@@ -586,6 +586,8 @@ class World {
   readonly store = new InMemoryStore();
   judgeCalls: string[] = [];
   suiteRuns = 0;
+  /** The failing-file set of the batch's ONE suite run (stored on every review as suite_failing_files). */
+  suiteFailingFiles: string[] = [];
   failJudgeOnce = false;
   now = T0;
   spawns = 0;
@@ -679,7 +681,7 @@ class World {
       dimensions,
       decisions: [],
       ...(plan.retired ? { retired_acs: [{ kind: "superseded" as const, spec: `spec-${plan.slug}`, ac: "AC-W-1", reason: "feature gone", at: "2026-10-02T00:00:00.000Z" }] } : {}),
-      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort() } } : {}),
+      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort(), ...(this.suiteFailingFiles.length > 0 ? { suite_failing_files: [...this.suiteFailingFiles].sort() } : {}) } } : {}),
       prompt_version: "fixture",
       diff_source: "fixture",
     };
@@ -958,6 +960,47 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing" });
     expect(plan.archived).toBe(false);
     expect(world.errors.map((e) => e.stage)).toEqual(["filing"]);
+  });
+});
+
+describe("batch outcomes — one main red issue per suite run, issue titles keep the original summary (AC-PCR-4)", () => {
+  it("HAPPY: two plans attributed different subsets of ONE failing suite run file ONE main red issue with the full sorted set, linked to both", async () => {
+    const world = new World();
+    const a = world.add(makeWorldPlan("p-sub-a"));
+    const b = world.add(makeWorldPlan("p-sub-b"));
+    world.suiteFailingFiles = ["z.test.ts", "a.test.ts", "m.test.ts"];
+    a.failing = ["regression"];
+    a.regressionFiles = ["a.test.ts"];
+    b.failing = ["regression"];
+    b.regressionFiles = ["m.test.ts", "z.test.ts"];
+    await world.runner().runBatch(["p-sub-a", "p-sub-b"], world.ports("batch-1"));
+    expect(world.issues.filed).toBe(1);
+    expect(world.issues.open[0]?.title).toContain("main red: a.test.ts, m.test.ts, z.test.ts");
+    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-sub-a->101", "p-sub-b->101"]);
+  });
+
+  it("REGRESSION: a finding summary naming AC-CS-3 and BR-641 keeps both ids in the issue title, with [fp:<12hex>]", () => {
+    const finding = { plan: "p", dimension: "security", reason: "AC-CS-3 and BR-641 are violated by the token store", reference: "", reviewSlug: "r" } as const;
+    const title = issueTitleOf(rootCauseOf(finding));
+    expect(title).toContain("AC-CS-3");
+    expect(title).toContain("BR-641");
+    expect(title).toMatch(/\[fp:[0-9a-f]{12}\]$/);
+  });
+
+  it("STATE: two findings differing only in ids share one fingerprint, yet each title keeps its own ids", () => {
+    const base = { plan: "p", dimension: "security", reference: "", reviewSlug: "r" } as const;
+    const one = rootCauseOf({ ...base, reason: "AC-CS-3 and BR-641 are violated" });
+    const two = rootCauseOf({ ...base, reason: "AC-CS-9 and BR-12 are violated" });
+    expect(two.fingerprint).toBe(one.fingerprint);
+    expect(issueTitleOf(one)).toContain("AC-CS-3");
+    expect(issueTitleOf(two)).toContain("AC-CS-9");
+  });
+
+  it("BOUNDARY: a long summary is truncated in the title and the tag still ends it", () => {
+    const cause = rootCauseOf({ plan: "p", dimension: "security", reason: `AC-CS-3 ${"x".repeat(500)}`, reference: "", reviewSlug: "r" });
+    const title = issueTitleOf(cause);
+    expect(title.length).toBeLessThan(200);
+    expect(title.endsWith(`[fp:${cause.short}]`)).toBe(true);
   });
 });
 
