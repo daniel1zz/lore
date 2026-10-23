@@ -257,7 +257,7 @@ interface LeafCoverageReport {
  * A leaf declaring no command is measured by the sites that declare its rules (see sitesDeclaringRulesOf); one that owns none is
  * UNMEASURED and NOT ok — completeness of an unmeasured leaf is unproven.
  */
-async function runCoverage(target: string, json: boolean, commandsOnly: boolean, inv: Invocation): Promise<ExitReport> {
+async function runCoverage(target: string, json: boolean, commandsOnly: boolean, includePending: boolean, inv: Invocation): Promise<ExitReport> {
   const { app, dbPath } = loadLoreApp({ inv });
   const store = new SQLiteStore(dbPath);
   try {
@@ -279,7 +279,10 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
     leaves.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
     // reason: every distinct command of every leaf is censused ONCE over one shared program (BR-1248); a per-leaf
     // census rebuilt the program per command (~2.8 s each, 128 commands).
-    const leafCommands = (leaf: DocRecord): string[] => approvedCommandsOf(leaf);
+    // reason: `--include-pending` is the landing floor's mode (BR-1368): a command the branch adds is declared by a pending revision
+    // until the branch lands (approve refuses a command main's tree lacks), so the landing check counts the effective commands; the
+    // plan-close run keeps the approved ones, so a pending declaration that is never approved is still caught at the milestone.
+    const leafCommands = (leaf: DocRecord): string[] => (includePending ? effectiveNodePart(leaf).commands : approvedCommandsOf(leaf));
     // reason: a declared command absent from the analysed tree is REPORTED, never a coverage defect: a branch that adds a command
     // must declare it in the shared corpus before it lands, so every other branch's tree lacks it until then and refusing it would
     // block every other integrate. It also must not surface as a census error (exit 4) from resolveCommandEntry; only an
@@ -773,11 +776,12 @@ export default defineLoreCommand({
         target: { type: "positional", description: "Baseline leaf or branch|root ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
         "commands-only": { type: "boolean", description: "Check only for undeclared commands; never run the site census (the integrate floor's mode)" },
+        "include-pending": { type: "boolean", description: "Count a command declared only by a leaf's pending revision as declared (the landing floor's mode); default measures approved declarations only" },
       },
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        return await runCoverage(args.target as string, args.json === true, args["commands-only"] === true, inv);
+        return await runCoverage(args.target as string, args.json === true, args["commands-only"] === true, args["include-pending"] === true, inv);
       },
     }),
     fidelity: defineLoreCommand({

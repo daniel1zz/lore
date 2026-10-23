@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { addedCommands, mainChanged as baselineChanged, registryChanged, type CoverageData } from "../../../../scripts/check-baseline-coverage";
+import { addedCommands, coverageArgs, mainChanged as baselineChanged, mainFull, registryChanged, type CoverageData } from "../../../../scripts/check-baseline-coverage";
 import { mainChanged as ownershipChanged, type ScriptAc } from "../../../../scripts/check-ac-oracle-ownership";
 import { changedFiles, parseNameStatus, resolveBase, type ChangedFile } from "../../../../scripts/changed-files";
 import { deriveFloorSteps, derivePlanCloseSteps, FLOOR_STEPS, PLAN_CLOSE_STEPS, unlistedChecks } from "../../../../scripts/run-chain";
@@ -162,6 +162,37 @@ describe("lean floor (AC-LG-5)", () => {
       expect(baselineChanged({ changed: () => registry, registryAddedLines: () => '+  newcmd: () => import("./commands/newcmd.js"),\n+  "newcmd"', coverage: () => cov("newcmd") }, () => {})).toBe(1);
       expect(baselineChanged({ changed: () => touchesCommand, registryAddedLines: () => "", coverage: () => cov("stash drop") }, () => {})).toBe(0);
       expect(addedCommands(["ac add", "stash drop"], touchesCommand, "")).toEqual(["ac add"]);
+    });
+
+    // A fake of `lore baseline coverage --commands-only` over one leaf: it reads the CLI arguments the script built, so the verdict
+    // depends on whether the script asked for pending declarations (AC-LG-5, BR-1368).
+    const coverageFake = (added: string, approved: string[], pending: string[]) => (includePending: boolean): CoverageData[] => {
+      const declared = includePending ? [...approved, ...pending] : approved;
+      return cov(...(declared.includes(added) ? [] : [added]));
+    };
+    const asChangedCoverage = (fake: (p: boolean) => CoverageData[]) => (): CoverageData[] => fake(coverageArgs("root", true).includes("--include-pending"));
+
+    it("lean floor: a command the branch adds, declared only in a leaf's pending revision, passes baseline-coverage:changed (exit 0)", () => {
+      const fake = coverageFake("ac brand-new", [], ["ac brand-new"]);
+      expect(coverageArgs("root", true)).toContain("--include-pending");
+      expect(baselineChanged({ changed: () => touchesCommand, registryAddedLines: () => "", coverage: asChangedCoverage(fake) }, () => {})).toBe(0);
+    });
+
+    it("lean floor: a command the branch adds with no declaration anywhere fails baseline-coverage:changed, naming it (exit 1)", () => {
+      const lines: string[] = [];
+      const fake = coverageFake("ac brand-new", [], []);
+      expect(baselineChanged({ changed: () => touchesCommand, registryAddedLines: () => "", coverage: asChangedCoverage(fake) }, (l) => lines.push(l))).toBe(1);
+      expect(lines.join("\n")).toContain("ac brand-new");
+    });
+
+    it("lean floor: the full plan-close coverage run counts approved declarations only, so a pending-only declaration fails it (exit 1)", () => {
+      expect(coverageArgs("root", false)).not.toContain("--include-pending");
+      const asked: boolean[] = [];
+      const fake = coverageFake("ac brand-new", [], ["ac brand-new"]);
+      const lines: string[] = [];
+      expect(mainFull((p) => (asked.push(p), fake(p)), (l) => lines.push(l))).toBe(1);
+      expect(asked).toEqual([false]);
+      expect(lines.join("\n")).toContain("ac brand-new");
     });
 
     it("lean floor: a declared-everything branch passes even when it touched the registry", () => {
