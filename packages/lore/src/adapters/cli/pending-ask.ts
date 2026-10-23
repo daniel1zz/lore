@@ -5,9 +5,11 @@
  * single-use nonce stored beside the decision, and parse the agent's optional `--recommend` lines.
  * Public surface: parseRecommendations, runPendingAsk, AskRecommendation, PendingAskOutput, ASK_QUESTIONS_PER_CALL.
  * Invariants:
- *   - The question text is lore's: id, what (summary), facts (class, subject, version, score, factors), consequence
- *     (`If you accept` / `If you reject`), lore's measured recommendation. The agent's recommendation enters only
- *     through `--recommend` and appears as one labelled line in the matching option's description.
+ *   - The question text is lore's, in the `--lang` language: id, what (summary), facts (class, subject, version, score,
+ *     factors), consequence (`If you accept` / `If you reject`), and lore's measured recommendation only for a class it
+ *     scores (a human-always class has none). No line sends the human elsewhere (BR-1375).
+ *   - The agent's recommendation enters only through `--recommend`: that option comes FIRST, its label ends with the
+ *     language's recommendation marker and its description starts with the reason.
  *   - Every issue draws a new nonce, so a second `lore pending --ask` makes the first one's answers stale.
  *   - The output holds the questions exactly as they must be passed on; changing one character makes the answer refused.
  *   - A `--recommend` naming a decision that is not open is an error (exit 2), never silently dropped.
@@ -16,11 +18,12 @@
 import type { Invocation, LoreError, Result } from "@lore/core";
 import { err, ok, validationError } from "@lore/core";
 import { DecisionService } from "../../service/decision-service.js";
-import { ASK_ACCEPT_LABEL, ASK_DECISION_MARKER, ASK_REJECT_LABEL, askNonceMarker, issuePendingQuestion, type HarnessQuestion } from "../../service/harness-ask.js";
+import { ASK_DECISION_MARKER, askNonceMarker, issuePendingQuestion, type HarnessQuestion } from "../../service/harness-ask.js";
 import type { PendingDecision } from "../../service/pending-decisions.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { wrapStoreError } from "../../store/store-shared.js";
-import { renderDecisionDetailLines, renderDetailsLine, resolveDetailBase } from "./decision-detail-lines.js";
+import { renderDecisionDetailLines } from "./decision-detail-lines.js";
+import { ASK_TEXT, type AskLanguage } from "./pending-ask-text.js";
 
 /** AskUserQuestion takes at most four questions per call. */
 export const ASK_QUESTIONS_PER_CALL = 4;
@@ -54,26 +57,24 @@ export function parseRecommendations(raw: readonly string[]): Result<ReadonlyMap
   return ok(parsed);
 }
 
-function questionFor(pending: PendingDecision, nonce: string, recommendation: AskRecommendation | undefined, detailBase: string | null): HarnessQuestion {
+function questionFor(pending: PendingDecision, nonce: string, recommendation: AskRecommendation | undefined, lang: AskLanguage): HarnessQuestion {
+  const t = ASK_TEXT[lang];
   const factors = Object.entries(pending.factors).map(([name, value]) => `${name}=${value}`).join(" ");
   const text = [
-    `${ASK_DECISION_MARKER}${pending.id} ${askNonceMarker(nonce)}: do you accept it?`,
-    ...renderDecisionDetailLines(pending),
-    `Facts: class ${pending.class}; subject ${pending.subject_id} (${pending.subject_version}); score ${pending.score}${factors === "" ? "" : `; factors ${factors}`}.`,
-    `Lore's measured recommendation: ${pending.recommended} (${pending.recommended_reason}).`,
-    renderDetailsLine(detailBase, pending.id),
+    `${ASK_DECISION_MARKER}${pending.id} ${askNonceMarker(nonce)}: ${t.question}`,
+    ...renderDecisionDetailLines(pending, lang),
+    t.facts({ class: pending.class, subject: pending.subject_id, version: pending.subject_version, score: pending.score, factors }),
+    // reason: a human-always class (threshold null) has no measured scoring; its "reject" line was boilerplate that read as a recommendation (BR-1375 owner feedback 2026-10-23).
+    ...(pending.threshold === null ? [] : [t.measured(pending.recommended, pending.recommended_reason)]),
   ].join("\n");
-  const agentLine = (side: "accept" | "reject"): string =>
-    recommendation !== undefined && recommendation.answer === side ? ` Agent recommendation (not lore's): ${recommendation.reason}` : "";
-  return {
-    question: text,
-    header: `Decision ${pending.id}`.slice(0, 12),
-    options: [
-      { label: ASK_ACCEPT_LABEL, description: `Accept: the operation may proceed when it is re-run.${agentLine("accept")}` },
-      { label: ASK_REJECT_LABEL, description: `Reject: the operation stays refused.${agentLine("reject")}` },
-    ],
-    multiSelect: false,
+  const option = (side: "accept" | "reject"): HarnessQuestion["options"][number] => {
+    const label = side === "accept" ? t.acceptLabel : t.rejectLabel;
+    const description = side === "accept" ? t.acceptDescription : t.rejectDescription;
+    if (recommendation === undefined || recommendation.answer !== side) return { label, description };
+    return { label: `${label} ${t.recommendedMarker}`, description: `${recommendation.reason} ${description}` };
   };
+  const options = recommendation?.answer === "reject" ? [option("reject"), option("accept")] : [option("accept"), option("reject")];
+  return { question: text, header: `Decision ${pending.id}`.slice(0, 12), options, multiSelect: false };
 }
 
 /**
@@ -81,8 +82,14 @@ function questionFor(pending: PendingDecision, nonce: string, recommendation: As
  *
  * @param dbPath - the corpus database
  * @param recommendations - the agent's `--recommend` lines (decision id -> recommendation)
+ * @param lang - the question language
  */
-export async function runPendingAsk(inv: Invocation, dbPath: string, recommendations: ReadonlyMap<number, AskRecommendation>): Promise<Result<PendingAskOutput, LoreError>> {
+export async function runPendingAsk(
+  _inv: Invocation,
+  dbPath: string,
+  recommendations: ReadonlyMap<number, AskRecommendation>,
+  lang: AskLanguage = "en",
+): Promise<Result<PendingAskOutput, LoreError>> {
   let store: SQLiteStore;
   try {
     store = new SQLiteStore(dbPath);
@@ -95,10 +102,9 @@ export async function runPendingAsk(inv: Invocation, dbPath: string, recommendat
     const open = listed.value;
     const unknown = [...recommendations.keys()].filter((id) => !open.some((p) => p.id === id));
     if (unknown.length > 0) return err(validationError("recommend", `no open decision with id ${unknown.join(", ")} (see lore pending)`));
-    const detailBase = resolveDetailBase(inv);
     const questions: HarnessQuestion[] = [];
     for (const pending of open) {
-      const issued = await issuePendingQuestion(store, pending, (nonce) => questionFor(pending, nonce, recommendations.get(pending.id), detailBase), new Date().toISOString());
+      const issued = await issuePendingQuestion(store, pending, (nonce) => questionFor(pending, nonce, recommendations.get(pending.id), lang), new Date().toISOString());
       if (!issued.ok) return issued;
       questions.push(issued.value);
     }

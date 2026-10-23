@@ -17,6 +17,7 @@
  */
 import type { Invocation } from "@lore/core";
 import { decisionDetailSchema, renderDecisionDetailSummary, type DecisionLogRow } from "../../store/decision-log.js";
+import { ASK_TEXT, type AskLanguage } from "./pending-ask-text.js";
 import { readLiveServerUrl, resolveLiveServerRegistryDir } from "./live-server-registry.js";
 
 /** Path of a decision's detail page on the dashboard; the id follows. */
@@ -35,8 +36,9 @@ function describeSide(side: unknown): string {
  * The detail lines of a decision row, in print order, each starting exactly with its label. Always begins with
  * `What: `. Unreadable stored detail yields only the `What:` line carrying the renderer's "unreadable" text.
  */
-export function renderDecisionDetailLines(row: Pick<DecisionLogRow, "detail">): string[] {
-  const lines = [`What: ${renderDecisionDetailSummary(row)}`];
+export function renderDecisionDetailLines(row: Pick<DecisionLogRow, "detail">, lang: AskLanguage = "en"): string[] {
+  const t = ASK_TEXT[lang];
+  const lines = [`${t.what}${renderDecisionDetailSummary(row)}`];
   if (row.detail === null || row.detail === undefined) return lines;
   let json: unknown;
   try {
@@ -47,9 +49,9 @@ export function renderDecisionDetailLines(row: Pick<DecisionLogRow, "detail">): 
   const parsed = decisionDetailSchema.safeParse(json);
   if (!parsed.success) return lines;
   const { change, on_accept, on_reject } = parsed.data;
-  if (change["before"] !== undefined) lines.push(`Before: ${describeSide(change["before"])}`);
-  if (change["after"] !== undefined) lines.push(`After: ${describeSide(change["after"])}`);
-  lines.push(`If you accept: ${on_accept}`, `If you reject: ${on_reject}`);
+  if (change["before"] !== undefined) lines.push(`${t.before}${describeSide(change["before"])}`);
+  if (change["after"] !== undefined) lines.push(`${t.after}${describeSide(change["after"])}`);
+  lines.push(`${t.ifAccept}${on_accept}`, `${t.ifReject}${on_reject}`);
   return lines;
 }
 

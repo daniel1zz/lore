@@ -39,6 +39,21 @@ export const HARNESS_ANSWER_REFUSAL_EXIT = 4;
 export const ASK_ACCEPT_LABEL = "Accept";
 export const ASK_REJECT_LABEL = "Reject";
 
+const ACCEPT_LABELS: readonly string[] = [ASK_ACCEPT_LABEL, "接受"];
+const REJECT_LABELS: readonly string[] = [ASK_REJECT_LABEL, "拒绝"];
+const RECOMMENDED_MARKER = /\s*(\(Recommended\)|（推荐）)$/;
+
+/**
+ * The answer a chosen option label stands for, in either question language, with or without the trailing
+ * recommendation marker; null for anything else (free-text Other, a dismissed question).
+ */
+export function answerOfLabel(chosen: string | undefined): "accept" | "reject" | null {
+  if (chosen === undefined) return null;
+  const bare = chosen.replace(RECOMMENDED_MARKER, "");
+  if (ACCEPT_LABELS.includes(bare)) return "accept";
+  return REJECT_LABELS.includes(bare) ? "reject" : null;
+}
+
 /** Text that opens every lore-written question; the decision id follows. Its absence means "not a lore question". */
 export const ASK_DECISION_MARKER = "Lore decision #";
 
@@ -192,7 +207,7 @@ async function recordOneQuestion(
   if (pending.value.subject_version !== issued.subject_version) return refuse(`decision ${decisionId}: the subject changed since the question was issued`);
 
   const chosen = answers[question.question];
-  const answer = chosen === ASK_ACCEPT_LABEL ? "accept" : chosen === ASK_REJECT_LABEL ? "reject" : null;
+  const answer = answerOfLabel(chosen);
   if (answer === null) return ok({ kind: "pending", line: `${label}: decision ${decisionId} still pending (no Accept or Reject chosen)` });
 
   const consumed = await deps.store.consumePendingAsk(nonce, deps.now());
