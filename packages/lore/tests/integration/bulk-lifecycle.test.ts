@@ -202,6 +202,50 @@ describe("bulk lifecycle: preview then apply", () => {
     expect(statusOf(emptySlug, tmpDir)).toBe("archived");
     expect(applied.exitCode).toBe(0);
   });
+
+  it("preview then apply: --where plan=<slug|id> selects exactly that plan's tasks; an unknown plan exits 2 naming it", () => {
+    const own = [createTask("Own one"), createTask("Own two")];
+    const other = runLore(["create", "plan", "--title", "Other Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir);
+    const otherSlug = slugOf(other.stdout);
+    const foreign = runLore(
+      ["create", "task", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, "--content", "x", "--no-ai"],
+      tmpDir,
+    );
+    const foreignSlug = slugOf(foreign.stdout);
+
+    const bySlug = bulkJson(["deprecate", "--where", `type=task,plan=${planSlug}`], tmpDir);
+    expect(bySlug.exitCode).toBe(3);
+    expect(bySlug.rows.map((r) => r.slug).sort()).toEqual([...own].sort());
+    expect(bySlug.rows.map((r) => r.slug)).not.toContain(foreignSlug);
+
+    const planId = (JSON.parse(runLore(["get", planSlug, "--json"], tmpDir).stdout) as { data: { doc: { id: string } } }).data.doc.id;
+    const byId = bulkJson(["deprecate", "--where", `type=task,plan=${planId}`], tmpDir);
+    expect(byId.rows.map((r) => r.slug).sort()).toEqual([...own].sort());
+
+    // NEGATIVE: an unknown plan is a usage error naming it, never an empty selection.
+    const unknown = runLore(["bulk", "deprecate", "--where", "type=task,plan=plan-no-such-plan"], tmpDir);
+    expect(unknown.exitCode).toBe(2);
+    expect(unknown.stdout + unknown.stderr).toContain("plan-no-such-plan");
+  });
+
+  it("preview then apply: an archived or deprecated document is never a candidate for any verb", () => {
+    const mk = (title: string): string =>
+      slugOf(runLore(["create", "plan", "--title", title, "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir).stdout);
+    const live = [mk("Live A"), mk("Live B")];
+    const archived = [mk("Gone A"), mk("Gone B")];
+    const deprecated = mk("Dead C");
+    for (const s of [...live, ...archived]) expect(runLore(["set", s, "--status", "approved"], tmpDir).exitCode).toBe(0);
+    for (const s of archived) expect(runLore(["set", s, "--status", "archived"], tmpDir).exitCode).toBe(0);
+    expect(runLore(["set", deprecated, "--status", "deprecated"], tmpDir).exitCode).toBe(0);
+    expect(runLore(["set", planSlug, "--status", "deprecated"], tmpDir).exitCode).toBe(0);
+
+    const preview = bulkJson(["close", "--where", "type=plan"], tmpDir);
+    expect(preview.exitCode).toBe(3);
+    expect(preview.rows.map((r) => r.slug).sort()).toEqual([...live].sort());
+    for (const verb of ["archive", "deprecate"]) {
+      expect(bulkJson([verb, "--where", "type=plan"], tmpDir).rows.map((r) => r.slug).sort()).toEqual([...live].sort());
+    }
+  });
 });
 
 describe("bulk lifecycle: row fails alone", () => {
