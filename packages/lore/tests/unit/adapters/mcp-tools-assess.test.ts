@@ -186,6 +186,39 @@ describe("lore_assess — milestone review HAPPY (BR-1372)", () => {
   });
 });
 
+describe("lore_assess — retired ACs (AC-LG-12, same fields as the CLI)", () => {
+  const retired = [{ kind: "superseded" as const, spec: "old-spec", ac: "AC-OLD-1", reason: "feature removed", at: "2026-10-23T00:00:00.000Z", superseded_by: "new-spec:AC-NEW-1" }];
+
+  it("a pending retirement adds retired_acs and pending_decision to the payload", async () => {
+    const { planId } = await createPlanWithTask();
+    app = { ...app, retiredAcService: { settle: async () => ({ ok: true, value: { state: "pending", retired, pendingId: 7 } }) } as unknown as NonNullable<App["retiredAcService"]> };
+    server = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(server, app, undefined, liveInvocation());
+    const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as { retired_acs?: unknown; pending_decision?: unknown };
+    expect(data.retired_acs).toEqual(retired);
+    expect(data.pending_decision).toBe(7);
+  });
+
+  it("a plan with nothing retired carries neither field", async () => {
+    const { planId } = await createPlanWithTask();
+    app = { ...app, retiredAcService: { settle: async () => ({ ok: true, value: { state: "none" } }) } as unknown as NonNullable<App["retiredAcService"]> };
+    server = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(server, app, undefined, liveInvocation());
+    const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as Record<string, unknown>;
+    expect(data["retired_acs"]).toBeUndefined();
+    expect(data["pending_decision"]).toBeUndefined();
+  });
+
+  it("a settle failure is an isError result, never a silent skip", async () => {
+    const { planId } = await createPlanWithTask();
+    app = { ...app, retiredAcService: { settle: async () => ({ ok: false, error: { code: "STORE_ERROR", message: "boom" } }) } as unknown as NonNullable<App["retiredAcService"]> };
+    server = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(server, app, undefined, liveInvocation());
+    const result = await call()({ plan_id_or_slug: planId, ai: true });
+    expect(result.isError).toBe(true);
+  });
+});
+
 describe("lore_assess — NEGATIVE / BOUNDARY / ERROR", () => {
   it("a plan with zero child tasks -> isError VALIDATION_ERROR and no AI call is made", async () => {
     const plan = await corpusService.create({ type: "plan", title: "Empty Plan", content: "goals" } as CreateDocInput);

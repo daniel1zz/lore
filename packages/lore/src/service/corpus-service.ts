@@ -78,6 +78,7 @@ import {
 } from "@lore/core";
 import { requireSpecCitesLiveRule, specCitesLiveRuleInCorpus } from "./spec-approval-citation.js";
 import { ownProposedRules } from "./rule-changes.js";
+import { leafPlansToCompanionWrites } from "./rule-leaf-companion-writes.js";
 import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
@@ -3740,35 +3741,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           value: abandonment.error,
         });
       }
-      abandonmentWrites = abandonment.value.leaves.map((planned) => {
-        const leafVersion = planned.leaf.version + 1;
-        return {
-          id: planned.leaf.id,
-          patch: { extra: planned.extra, status: planned.status, version: leafVersion, updated_at: now },
-          opts: { expected_version: planned.leaf.version },
-          version: {
-            doc_id: planned.leaf.id,
-            version: leafVersion,
-            content: planned.leaf.content,
-            extra: planned.extra,
-            status: planned.status,
-            title: planned.leaf.title,
-            action: "update",
-            created_at: now,
-            created_by: resolvedActor,
-            change_summary: planned.summary,
-            slug: planned.leaf.slug,
-          },
-          audit: {
-            timestamp: now,
-            actor: resolvedActor,
-            session_id: planned.leaf.id,
-            action: "update",
-            doc_id: planned.leaf.id,
-            details: { ...planned.details, version: leafVersion, new_version: leafVersion },
-          },
-        };
-      });
+      abandonmentWrites = leafPlansToCompanionWrites(abandonment.value.leaves, resolvedActor, now, false);
     }
 
     const updateResult = await this.store.updateWithProvenance(

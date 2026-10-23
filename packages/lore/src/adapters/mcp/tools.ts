@@ -225,6 +225,7 @@ import {
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
+import { retirementAssessFields } from "../../service/retired-ac-service.js";
 // spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-11 —
 // `readGithubIssueRef` is pure/store-free (no `gh`/`bun:sqlite` deps, see
 // its own module header), so — unlike `report-issue-wiring.js` below —
@@ -2741,6 +2742,11 @@ export function registerTools(
       const bundleResult = await corpusService.getPlanBundle(args.plan_id_or_slug);
       if (!bundleResult.ok) return errorContent(bundleResult.error);
       const bundle = bundleResult.value;
+      // reason: same as the CLI: the owner's earlier answer is carried out and the one pending decision is raised
+      // BEFORE the review, so the review lists what is still retired.
+      const retirement = app.retiredAcService !== undefined ? await app.retiredAcService.settle(bundle) : undefined;
+      if (retirement !== undefined && !retirement.ok) return errorContent(retirement.error);
+      const { summary: _summary, ...retiredFields } = retirementAssessFields(retirement?.value);
 
       // reason: the MCP server has no Invocation; its cwd is the one the commit derivation runs git in. Read once.
       const repoRoot = inv.cwd;
@@ -2768,6 +2774,7 @@ export function registerTools(
         dimensions: review.dimensions,
         decisions: review.decisions,
         diff_source: diffSource,
+        ...retiredFields,
       });
     },
   );

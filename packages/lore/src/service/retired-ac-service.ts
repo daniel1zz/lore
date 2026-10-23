@@ -20,8 +20,8 @@
  *   - A pending decision is never raised twice for the same subject version.
  * Side-effect class: IO through injected ports (services never import each other; `app.ts` binds the real ones).
  *
- * Limit: a deprecation that also abandoned the spec's still-proposed rules is restored to its status only; the
- *   abandoned rule ids are not revived (re-propose them when re-planning).
+ *   - Rejecting a deprecation restores the spec's status AND revives the proposed rule ids its deprecation abandoned
+ *     (BR-1307), in the same write (`restoreSpecStatus`, bound in `app.ts` through the rule-change planner).
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12)
  */
 
@@ -288,4 +288,33 @@ export class RetiredAcService {
     if (before === undefined) return err(storeError(`${spec.slug} has no version ${String(newVersion - 1)} to read the pre-deprecation status from`));
     return ok(before.status);
   }
+}
+
+/** What `lore assess` / `lore_assess` report about a plan's retired ACs: the one shape both surfaces serialize. */
+export interface RetirementAssessFields {
+  /** ACs retired during the plan (restored ones when the owner rejected); absent when none. */
+  readonly retired_acs?: readonly RetiredAcRef[];
+  /** The one pending owner decision that confirms them (`lore pending --ask`); absent when none is open. */
+  readonly pending_decision?: number;
+  /** One-clause account for the row's reason text; absent when nothing is retired. */
+  readonly summary?: string;
+}
+
+/**
+ * The single serializer of a plan's retirement state for assess output (CLI row and MCP payload alike).
+ *
+ * @param state - from `RetiredAcService.settle`; `undefined` (service not wired) and `none` report nothing
+ */
+export function retirementAssessFields(state: PlanRetirementState | undefined): RetirementAssessFields {
+  if (state === undefined || state.state === "none") return {};
+  const retired = state.state === "rejected" ? state.restored : state.retired;
+  if (retired.length === 0) return {};
+  const count = String(retired.length);
+  const summary =
+    state.state === "pending"
+      ? `${count} retired AC(s) await the owner (decision #${String(state.pendingId)}, lore pending --ask)`
+      : state.state === "rejected"
+        ? `${count} retired AC(s) rejected by the owner and restored`
+        : `${count} retired AC(s) confirmed by the owner`;
+  return { retired_acs: retired, ...(state.state === "pending" ? { pending_decision: state.pendingId } : {}), summary };
 }
