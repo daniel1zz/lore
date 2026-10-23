@@ -81,6 +81,13 @@ import {
   emptyKindsError,
   withoutNullHarnessRun,
 } from "./store-shared.js";
+import {
+  buildPlanProgressWrite,
+  keepStoredPlanProgress,
+  planIdsAffectedBy,
+  refuseArchivedTerminal,
+  withInitialPlanProgress,
+} from "./plan-progress.js";
 import { stampAuditSurface } from "./audit-surface.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
@@ -520,10 +527,15 @@ export class InMemoryStore implements StoreInterface {
    * @see StoreInterface.insertWithProvenance
    */
   async insertWithProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — a plan is born with `extra.progress`; the archived-terminal rule refuses a member of an archived plan.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
+    const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatus(doc));
+    if (terminal !== null) return err(terminal);
+    const chainLength = this.auditChain.length;
     const insertResult = await this.insert(doc);
     if (!insertResult.ok) return insertResult;
 
@@ -540,7 +552,73 @@ export class InMemoryStore implements StoreInterface {
       return auditResult;
     }
 
+    const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(null, insertResult.value), version, doc.id);
+    if (!progressResult.ok) {
+      this.docs.delete(doc.id);
+      this.removeVersionEntry(version);
+      this.auditChain.length = chainLength;
+      return progressResult;
+    }
+
     return ok(insertResult.value);
+  }
+
+  /** The status of the live plan a task/phase `doc` is filed under, or `null` when it has no live plan. */
+  private readPlanStatus(doc: DocRecord): DocRecord["status"] | null {
+    const planId = planIdsAffectedBy(null, doc)[0];
+    if (planId === undefined) return null;
+    const plan = this.docs.get(planId);
+    return plan === undefined || plan.type !== "plan" || (plan.deleted_at ?? null) !== null ? null : plan.status;
+  }
+
+  /**
+   * BR-1379 — recompute `extra.progress` of each plan in `planIds` from its current member rows and write the plan
+   * (CAS, version row, audit row) when it changed. On failure every plan write this call applied is undone (its
+   * snapshot restored, its version row removed); the caller undoes its primary write and the audit chain.
+   */
+  private async reconcilePlanProgress(
+    planIds: readonly DocId[],
+    primaryVersion: VersionRecord,
+    causeDocId: DocId,
+  ): Promise<Result<void, LoreError>> {
+    const applied: Array<{ id: DocId; before: DocRecord; version: VersionRecord }> = [];
+    const undo = (): void => {
+      for (const done of applied) {
+        this.restoreDocSnapshot(done.id, done.before);
+        this.removeVersionEntry(done.version);
+      }
+    };
+    for (const planId of planIds) {
+      const plan = this.docs.get(planId);
+      if (plan === undefined || plan.type !== "plan" || (plan.deleted_at ?? null) !== null) continue;
+      const members = [...this.docs.values()].filter(
+        (doc) => (doc.deleted_at ?? null) === null && planIdsAffectedBy(null, doc).includes(planId),
+      );
+      const write = buildPlanProgressWrite(plan, members, {
+        now: primaryVersion.created_at,
+        actor: primaryVersion.created_by,
+        harnessRun: primaryVersion.harness_run ?? null,
+        causeDocId,
+      });
+      if (write === null) continue;
+      const updated = await this.update(planId, write.patch, { expected_version: write.expectedVersion });
+      if (!updated.ok) {
+        undo();
+        return updated;
+      }
+      applied.push({ id: planId, before: plan, version: write.version });
+      const versioned = await this.insertVersion(write.version);
+      if (!versioned.ok) {
+        undo();
+        return versioned;
+      }
+      const audited = await this.appendAuditEntry(write.audit);
+      if (!audited.ok) {
+        undo();
+        return audited;
+      }
+    }
+    return ok(undefined);
   }
 
   /**
@@ -561,10 +639,15 @@ export class InMemoryStore implements StoreInterface {
    * the SAME candidate on a subsequent call — the ordinal is not burned.
    */
   async insertWithAllocatedOrdinalAndProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — see insertWithProvenance.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
+    const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatus(doc));
+    if (terminal !== null) return err(terminal);
+    const chainLength = this.auditChain.length;
     const allocResult = await this.insertWithAllocatedOrdinal(doc);
     if (!allocResult.ok) return allocResult;
 
@@ -581,6 +664,14 @@ export class InMemoryStore implements StoreInterface {
       return auditResult;
     }
 
+    const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(null, allocResult.value), version, doc.id);
+    if (!progressResult.ok) {
+      this.docs.delete(allocResult.value.id);
+      this.removeVersionEntry(version);
+      this.auditChain.length = chainLength;
+      return progressResult;
+    }
+
     return ok(allocResult.value);
   }
 
@@ -589,13 +680,22 @@ export class InMemoryStore implements StoreInterface {
    */
   async updateWithProvenance(
     id: DocId,
-    patch: Partial<DocRecord>,
+    rawPatch: Partial<DocRecord>,
     opts: UpdateOpts | undefined,
-    version: VersionRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     const before = this.docs.get(id);
+    // reason: BR-1379 — the stored row judges the write: archived-terminal refusal, progress kept across a plan edit,
+    // and the plans whose progress this write changes.
+    const kept = before === undefined ? { patch: rawPatch, version: rawVersion } : keepStoredPlanProgress(before, rawPatch, rawVersion);
+    const patch = kept.patch;
+    const version = kept.version;
+    if (before !== undefined) {
+      const terminal = refuseArchivedTerminal(before, { ...before, ...patch }, null);
+      if (terminal !== null) return err(terminal);
+    }
 
     // reason: the in-memory store has no registry rows for leaves a test inserted directly, so the
     // liveness read is the baseline leaf docs themselves (the doc map is the single source here —
@@ -667,6 +767,20 @@ export class InMemoryStore implements StoreInterface {
       }
     }
 
+    if (before !== undefined) {
+      const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(before, updateResult.value), version, id);
+      if (!progressResult.ok) {
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        for (const done of appliedCompanions) {
+          this.restoreDocSnapshot(done.id, done.before);
+          this.removeVersionEntry(done.version);
+        }
+        this.auditChain.length = chainLength;
+        return progressResult;
+      }
+    }
+
     return ok(updateResult.value);
   }
 
@@ -689,6 +803,7 @@ export class InMemoryStore implements StoreInterface {
     audit: AuditEntry,
   ): Promise<Result<void, LoreError>> {
     const before = this.docs.get(id);
+    const chainLength = this.auditChain.length;
 
     const deleteResult = await this.softDelete(id);
     if (!deleteResult.ok) return deleteResult;
@@ -704,6 +819,16 @@ export class InMemoryStore implements StoreInterface {
       this.restoreDocSnapshot(id, before);
       this.removeVersionEntry(version);
       return auditResult;
+    }
+
+    if (before !== undefined) {
+      const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(before, null), version, id);
+      if (!progressResult.ok) {
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        this.auditChain.length = chainLength;
+        return progressResult;
+      }
     }
 
     return ok(undefined);

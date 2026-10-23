@@ -88,6 +88,7 @@ import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
+import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -197,6 +198,14 @@ import {
   NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
+import {
+  PLAN_MEMBERS_SQL,
+  buildPlanProgressWrite,
+  keepStoredPlanProgress,
+  planIdsAffectedBy,
+  refuseArchivedTerminal,
+  withInitialPlanProgress,
+} from "./plan-progress.js";
 import { stampAuditSurface } from "./audit-surface.js";
 
 // ─── Deferred @libsql/client load (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy) ──
@@ -1020,6 +1029,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 34) {
         // reason: migration-034 creates pending_asks (the lore-written question bound to a single-use nonce, BR-1374).
         await this.client.executeMultiple(MIGRATION_034_SQL);
+      }
+
+      if (currentVersion < 35) {
+        // reason: migration-035 backfills `extra.progress` on every plan (BR-1379).
+        await this.client.executeMultiple(MIGRATION_035_SQL);
       }
     })();
 
@@ -1878,13 +1892,20 @@ export class TursoStore implements StoreInterface {
    * @see StoreInterface.insertWithProvenance
    */
   async insertWithProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — a plan is born with `extra.progress` (no member yet); applied to doc and v1 snapshot together.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     await this.ensureReady();
     const tx = await this.client.transaction("write");
     try {
+      const terminal = refuseArchivedTerminal(null, doc, await this.readPlanStatusTx(tx, doc));
+      if (terminal !== null) {
+        await tx.rollback();
+        return err(terminal);
+      }
       const tagsJson = JSON.stringify(doc.tags);
       // reason: same shadow-column obligation as insert() — mirrors
       // SQLiteStore.insertDocSync (insertWithProvenance there also delegates
@@ -1942,6 +1963,12 @@ export class TursoStore implements StoreInterface {
 
       await this.appendAuditEntryTx(tx, audit);
 
+      const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(null, doc), version, doc.id);
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(doc);
     } catch (e) {
@@ -1982,13 +2009,20 @@ export class TursoStore implements StoreInterface {
    * never raised that type's MAX).
    */
   async insertWithAllocatedOrdinalAndProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — see insertWithProvenance.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     await this.ensureReady();
     const tx = await this.client.transaction("write");
     try {
+      const terminal = refuseArchivedTerminal(null, doc, await this.readPlanStatusTx(tx, doc));
+      if (terminal !== null) {
+        await tx.rollback();
+        return err(terminal);
+      }
       const maxRs = await tx.execute({
         sql: "SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?",
         args: [doc.type] as InValue[],
@@ -2074,6 +2108,17 @@ export class TursoStore implements StoreInterface {
 
       await this.appendAuditEntryTx(tx, audit);
 
+      const progressResult = await this.reconcilePlanProgressTx(
+        tx,
+        planIdsAffectedBy(null, allocResult.value),
+        version,
+        doc.id,
+      );
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(allocResult.value);
     } catch (e) {
@@ -2095,9 +2140,9 @@ export class TursoStore implements StoreInterface {
    */
   async updateWithProvenance(
     id: DocId,
-    patch: Partial<DocRecord>,
+    rawPatch: Partial<DocRecord>,
     opts: UpdateOpts | undefined,
-    version: VersionRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
@@ -2132,6 +2177,14 @@ export class TursoStore implements StoreInterface {
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+      // reason: BR-1379 — the stored row, read inside this transaction, judges the write: archived-terminal refusal,
+      // progress kept across a plan edit, and the plans whose progress this write changes.
+      const { patch, version } = keepStoredPlanProgress(current, rawPatch, rawVersion);
+      const terminal = refuseArchivedTerminal(current, { ...current, ...patch }, null);
+      if (terminal !== null) {
+        await tx.rollback();
+        return err(terminal);
+      }
       const updated: DocRecord = {
         ...current,
         ...patch,
@@ -2334,6 +2387,12 @@ export class TursoStore implements StoreInterface {
         await this.appendAuditEntryTx(tx, companion.audit);
       }
 
+      const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(current, updated), version, id);
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(updated);
     } catch (e) {
@@ -2360,14 +2419,16 @@ export class TursoStore implements StoreInterface {
     const tx = await this.client.transaction("write");
     try {
       const existingRs = await tx.execute({
-        sql: "SELECT id FROM docs WHERE id = ?",
+        sql: "SELECT * FROM docs WHERE id = ?",
         args: [id],
       });
+      const existingRow = existingRs.rows[0];
 
-      if (!existingRs.rows[0]) {
+      if (!existingRow) {
         await tx.rollback();
         return err({ code: "DOC_NOT_FOUND", id });
       }
+      const stored = rowToDocRecord(libsqlRowToDocRow(existingRow));
 
       const now = new Date().toISOString();
       await tx.execute({
@@ -2398,6 +2459,12 @@ export class TursoStore implements StoreInterface {
 
       await this.appendAuditEntryTx(tx, audit);
 
+      const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(stored, null), version, id);
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(undefined);
     } catch (e) {
@@ -2410,6 +2477,83 @@ export class TursoStore implements StoreInterface {
     } finally {
       tx.close();
     }
+  }
+
+  /** The status of the live plan a task/phase `doc` is being filed under, or `null` when it has no live plan. */
+  private async readPlanStatusTx(tx: Transaction, doc: DocRecord): Promise<DocRecord["status"] | null> {
+    const planId = planIdsAffectedBy(null, doc)[0];
+    if (planId === undefined) return null;
+    const rs = await tx.execute({
+      sql: "SELECT status FROM docs WHERE id = ? AND type = 'plan' AND deleted_at IS NULL",
+      args: [planId],
+    });
+    const row = rs.rows[0];
+    return row ? (rowStr(row, "status") as DocRecord["status"]) : null;
+  }
+
+  /**
+   * BR-1379 — recompute `extra.progress` of each plan in `planIds` from its member rows and, when it changed, write the
+   * plan (CAS on the version read here, version row, audit row) INSIDE the caller's open write transaction (twin of
+   * `SQLiteStore.reconcilePlanProgressSync`). Returns the refusal; the caller rolls back.
+   */
+  private async reconcilePlanProgressTx(
+    tx: Transaction,
+    planIds: readonly DocId[],
+    primaryVersion: VersionRecord,
+    causeDocId: DocId,
+  ): Promise<Result<void, LoreError>> {
+    for (const planId of planIds) {
+      const planRs = await tx.execute({ sql: "SELECT * FROM docs WHERE id = ?", args: [planId] });
+      const planRow = planRs.rows[0];
+      if (!planRow) continue;
+      const plan = rowToDocRecord(libsqlRowToDocRow(planRow));
+      if (plan.type !== "plan" || plan.deleted_at !== null) continue;
+      const membersRs = await tx.execute({ sql: PLAN_MEMBERS_SQL, args: [planId, planId] as InValue[] });
+      const members = membersRs.rows.map((row) => ({ status: rowStr(row, "status") as DocRecord["status"] }));
+      const write = buildPlanProgressWrite(plan, members, {
+        now: primaryVersion.created_at,
+        actor: primaryVersion.created_by,
+        harnessRun: primaryVersion.harness_run ?? null,
+        causeDocId,
+      });
+      if (write === null) continue;
+      const updateRs = await tx.execute({
+        sql: "UPDATE docs SET extra = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? RETURNING id",
+        args: [
+          JSON.stringify(write.patch.extra),
+          write.patch.version,
+          write.patch.updated_at,
+          planId,
+          write.expectedVersion,
+        ] as InValue[],
+      });
+      if (updateRs.rows.length === 0) {
+        return err({ code: "STALE_VERSION", id: planId, expected: write.expectedVersion, actual: plan.version });
+      }
+      const version = write.version;
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+          version.slug ?? null,
+          version.harness_run ?? null,
+        ] as InValue[],
+      });
+      await this.appendAuditEntryTx(tx, write.audit);
+    }
+    return ok(undefined);
   }
 
   // ── Links ─────────────────────────────────────────────────────────────
