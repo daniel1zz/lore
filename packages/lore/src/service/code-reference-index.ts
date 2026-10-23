@@ -33,6 +33,7 @@ import {
   type Result,
 } from "@lore/core";
 import { extractCodeReferences } from "./claude-md-admission.js";
+import { createExportReader } from "./export-reader.js";
 
 /** Which kind of document holds a binding. */
 export const REFERENCE_DOCUMENT_KINDS = ["spec", "knowledge", "memory_file", "fragment"] as const;
@@ -255,10 +256,15 @@ export async function prefetchReferenceProbe(
     }
     return entry;
   };
+  // reason: a `path#Symbol` reference is decided by parsing the file's exports (BR-417). Without a reader every symbol
+  // reference came back "not measured" and was reported as reference_unresolved. A followed `export *` target that was
+  // not prefetched reads as null, which the reader reports as not measured (the safe direction), never as a guess.
+  const readExportedNames = createExportReader((path) => observed.get(path)?.content ?? null);
   return {
     stat: (path) => lookup(path).stat,
     readFile: (path) => lookup(path).content,
     listDir: (path) => lookup(path).children,
+    readExportedNames: (path, content) => readExportedNames(path, content),
   };
 }
 
