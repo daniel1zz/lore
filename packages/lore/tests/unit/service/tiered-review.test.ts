@@ -7,7 +7,7 @@
  * CLI-integration half of AC-TIER-4/5/8).
  *
  * Six-dimension coverage:
- *   HAPPY:      ledger create fast-track (assessment/retro/handoff/uat); edit-reset
+ *   HAPPY:      ledger create fast-track (retro/handoff/uat; assessment is refused); edit-reset
  *               atomic re-fast-track; judgment-required approve with a fresh
  *               approve-judgment; pending default filter + --all restore
  *   NEGATIVE:   non-ledger types (spec/adr/prd, knowledge reference/research/ideation)
@@ -170,10 +170,10 @@ function makeNewJudgment(overrides: Partial<NewReviewJudgment> = {}): NewReviewJ
 // ─── AC-TIER-1: ledger create fast-track ──────────────────────────────────────
 
 describe("AC-TIER-1 ledger create fast-track", () => {
-  it("creating knowledge assessment lands approved in the same write with a ledger-fast-track audit row", async () => {
-    const { corpusService, store } = await makeApp();
+  it("creating knowledge assessment is refused: the plan-outcome assessment is retired (BR-1372)", async () => {
+    const { corpusService } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
-    const doc = await mustCreate(corpusService, {
+    const refused = await corpusService.create({
       type: "knowledge",
       title: "Assessment X",
       parent_id: prd.id,
@@ -181,14 +181,10 @@ describe("AC-TIER-1 ledger create fast-track", () => {
       extra: { sub_type: "assessment", assessment: VALID_ASSESSMENT },
     } as CreateDocInput);
 
-    expect(doc.status).toBe("approved");
-    expect(doc.version).toBe(1);
-
-    const auditResult = await store.queryAudit({ doc_id: doc.id });
-    if (!auditResult.ok) throw new Error("queryAudit failed");
-    const createEntry = auditResult.value.find((e) => e.action === "create");
-    expect(createEntry).toBeDefined();
-    expect((createEntry?.details as { auto?: string } | undefined)?.auto).toBe("ledger-fast-track");
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("VALIDATION_ERROR");
+    expect(refused.error.rule).toBe("BR-1372");
   });
 
   it("creating knowledge retro lands approved", async () => {
@@ -364,10 +360,10 @@ describe("AC-TIER-3 pending filter — task + ledger sub_types hidden by default
     } as CreateDocInput);
     const assessment = await mustCreate(corpusService, {
       type: "knowledge",
-      title: "An assessment",
+      title: "A retro",
       parent_id: prd.id,
       content: "# A",
-      extra: { sub_type: "assessment", assessment: VALID_ASSESSMENT },
+      extra: { sub_type: "retro" },
     } as CreateDocInput);
     const ideation = await mustCreate(corpusService, {
       type: "knowledge",
