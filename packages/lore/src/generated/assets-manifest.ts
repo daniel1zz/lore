@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "c2386b7c83ecdaa28d3aee587b0841063ba1295f222bc5cdb7ffce093e7a9b25",
+  tree_digest: "f9b0ed333abf7673af6d1471b61e260fc2a8e08a04d8b9f4a90a236d6b7e2fd0",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -68,7 +68,6 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/lib/shell-writes.mjs", kind: "hook", ownership: "managed", sha256: "6e3568a1c7f0f8c6413cfe38e5fe7f8c50c8d98ddce0e066c2a16856079e9888" },
   { path: "hooks/lib/top-level-symbols.mjs", kind: "hook", ownership: "managed", sha256: "76ffdc1678c73888d84e0b5710fe2b7f7eaf9fef07e181d04d4c83a36f13d87d" },
   { path: "hooks/lib/turn-state.mjs", kind: "hook", ownership: "managed", sha256: "12b8751ce64f46fefee4f6d3e43010ce5346aace5c00281d7ccf64ea5bed319b" },
-  { path: "hooks/post-edit-bindings.mjs", kind: "hook", ownership: "managed", sha256: "18c17d80fc59d3635e46a74f087f4bcc6f1b9fab79ab20886fa9e241911d2309" },
   { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "1c4c5576b4d11f7a04ab2496d038d976fd11e95a93fd14b9fcdb0cfc29718782" },
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "d444b188873345b36264206a54088c9f16e872602b73a84b58d1a6be2dc8e169" },
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "0523ea4e462be20350e483acf232749e3f6a965a42322e12a5d95c311059df8a" },
@@ -79,11 +78,10 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/run-end.mjs", kind: "hook", ownership: "managed", sha256: "3615dadf253fa5ec2142ba8262e6478c5b487752de8699c17f2fd69952d5d60d" },
   { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "b1e0c8ba3f7c99ab81f41894e549441b4fd13fac9158df2bcce3dc8e82fc7503" },
   { path: "hooks/session-start-marker.mjs", kind: "hook", ownership: "managed", sha256: "8ce033f95a90a4f100f72b9f6a84a95cb563f339dbf6418ff1947e693b6ba1e8" },
-  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "822a231c0a4b77eaf13bad1700c3447782d920c7ea4cb19d16c6054109dc57b8" },
+  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "648228e895e14366dde28e6e7b232ad126c78576a1925ca8ee478aa0f4c20966" },
   { path: "hooks/session-trail-start.mjs", kind: "hook", ownership: "managed", sha256: "25a3adfed51be127797c7efdc9e1904321f298c09fb63fb73ebe0dcf5b78d6c5" },
-  { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "4d32d297fc5e5763687327f2c808a8dc327fa78370d918287f237e3a2d4052ce" },
-  { path: "hooks/stop-turn-review.mjs", kind: "hook", ownership: "managed", sha256: "8d3eff0c94f5289f33892fd084369b0c9404203c935bba65da7b73de8ce0feb2" },
-  { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "383beb756e74a7bcaadb884c839bb22d0a5f1c467ba4641e2ab0411eb2eb96be" },
+  { path: "hooks/stop-turn-review.mjs", kind: "hook", ownership: "managed", sha256: "5c040860f86ae2babcf648583515cf6bea72d4fe06bb187e0657859f54adebab" },
+  { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "eaf7c6117787943bc1cfa597ef2d0407fa183463ec10d3208daec9030611d383" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },
   { path: "hooks/subagent-trail.mjs", kind: "hook", ownership: "managed", sha256: "74c0365bdce7dc74093b9103a673c3c4eaa310e5f02a3ff0872b90fb1d6cc794" },
   { path: "hooks/user-prompt-turn-start.mjs", kind: "hook", ownership: "managed", sha256: "794798b431839236ef230be70362008b61409665350eda58a6950f9bedd0e130" },
