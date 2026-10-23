@@ -404,6 +404,7 @@ const DECLARED_FILES = [
   "hooks/session-start-marker.mjs",
   // stop-turn-review turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
   "hooks/user-prompt-turn-start.mjs",
+  "hooks/user-prompt-fragments.mjs",
   "hooks/post-edit-mark.mjs",
   "hooks/post-ask-decide.mjs",
   // stop-turn-review (turn-end review of the main session, spec-interception-moves-off-every-tool-call-one-turn-end-review;

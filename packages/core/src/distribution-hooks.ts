@@ -146,6 +146,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // user-prompt-turn-start.mjs — producer of current-turn.id and turn-start-snapshot.json (opens a turn per user message); stop-turn-review.mjs reads them. Consumer and producers MUST ship together (lore issue #156; pinned by turn-state-producers.test.ts).
   { file: "user-prompt-turn-start.mjs", runner: "node", event: "UserPromptSubmit" },
 
+  // user-prompt-fragments.mjs — per-turn fragment injection (inject: [user-prompt]); fast path prints {} without spawning lore when no fragment names the timing.
+  { file: "user-prompt-fragments.mjs", runner: "node", event: "UserPromptSubmit" },
+
   // post-edit-mark.mjs — producer of edited.flag / edited-files.jsonl on every editing tool; stop-turn-review.mjs reads them.
   { file: "post-edit-mark.mjs", runner: "node", event: "PostToolUse", matcher: "Edit|Write|MultiEdit|NotebookEdit" },
 
@@ -210,6 +213,7 @@ export const HOOK_DENY_CAPABILITY: Readonly<Record<string, boolean>> = {
   "subagent-trail.mjs": false,
   "subagent-context.mjs": false,
   "user-prompt-turn-start.mjs": false,
+  "user-prompt-fragments.mjs": false,
   "post-edit-mark.mjs": false,
   "post-ask-decide.mjs": false,
   "run-register.mjs": false,
