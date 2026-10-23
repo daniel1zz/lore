@@ -872,6 +872,22 @@ describe("milestone review gates close: stale refresh and suite environment", ()
     expect(r.adhocCalls[0]?.opts.allowNewCommands).toBe(true);
   });
 
+  it("milestone review gates close: the runner's environment matches a clean run", async () => {
+    const { suiteChildEnv } = await import("../../src/adapters/cli/assess-suite-runner.js");
+    const env = suiteChildEnv({
+      PATH: "/usr/bin",
+      HOME: "/home/x",
+      TMPDIR: "/tmp",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "s",
+      CLAUDE_CODE_MESSAGING_TOKEN: "t",
+      LORE_ACTOR: "agent:x",
+      LORE_GATE_BYPASS: "1",
+    });
+    expect(Object.keys(env).sort()).toEqual(["HOME", "PATH", "TMPDIR"]);
+    expect(suiteChildEnv({})).toEqual({});
+  });
+
   it("milestone review gates close: an unscoped AC with no corpus wiring fails loud and runs nothing", async () => {
     const r = await refresher({}, false);
     const out = await r.refresh.runAcs("plan-x", ["AC-9"]);
