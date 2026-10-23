@@ -86,6 +86,8 @@ interface ProducerRow {
   readonly label: string;
   /** Drives the producer to an escalate verdict; returns the exact values the detail must carry. */
   readonly drive: (corpus: Corpus) => Expected | Promise<Expected>;
+  /** The verdict the driven decision is recorded with; absent = `escalate`. */
+  readonly verdict?: "escalate" | "milestone";
   /** The words the summary must contain (the subject). */
   readonly summaryWords: (expected: Expected) => readonly string[];
   /** Class-specific assertions over `change`. */
@@ -141,6 +143,12 @@ function specWithAc(corpus: Corpus, extraAcs = 0): { spec: string; specId: strin
 function expectRefusedWithPendingDecision(r: { exitCode: number; stderr: string }): void {
   expect(r.exitCode, r.stderr).toBe(4);
   expect(r.stderr).toMatch(/Pending decision \d+ created/);
+}
+
+/** BR-1370: a milestone-class override applies at once and opens NO pending decision (its `milestone` row is the record). */
+function expectAppliedWithoutPendingDecision(r: { exitCode: number; stderr: string }): void {
+  expect(r.exitCode, r.stderr).toBe(0);
+  expect(r.stderr).not.toMatch(/Pending decision/);
 }
 
 const ENDED_RUN_ID = "cc:hr2-ended-run";
@@ -363,6 +371,7 @@ const PRODUCERS: readonly ProducerRow[] = [
   },
   {
     cls: "override-judgment",
+    verdict: "milestone",
     label: "lore approve --override-judgment <id>",
     drive: (corpus) => {
       const { spec, specId, version } = specWithAc(corpus);
@@ -378,7 +387,7 @@ const PRODUCERS: readonly ProducerRow[] = [
       } finally {
         db.close();
       }
-      expectRefusedWithPendingDecision(lore(corpus, ["approve", spec, "--override-judgment", judgmentId]));
+      expectAppliedWithoutPendingDecision(lore(corpus, ["approve", spec, "--override-judgment", judgmentId]));
       return { document: spec, judgmentId };
     },
     summaryWords: (e) => [e["document"] as string],
@@ -389,12 +398,13 @@ const PRODUCERS: readonly ProducerRow[] = [
   },
   {
     cls: "override-attestation",
+    verdict: "milestone",
     label: "lore done --override-attestation",
     drive: (corpus) => {
       mustOk(corpus, ["create", "prd", "--title", "Root PRD", "--content", "x", "--json"]);
       const task = (JSON.parse(mustOk(corpus, ["create", "task", "--title", "Manual Task", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"])) as { data: { slug: string } }).data.slug;
       mustOk(corpus, ["evidence", task, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"]);
-      expectRefusedWithPendingDecision(lore(corpus, ["done", task, "--override-attestation", "verified by hand in staging", "--declare-no-new-tests", "this task adds no test"]));
+      expectAppliedWithoutPendingDecision(lore(corpus, ["done", task, "--override-attestation", "verified by hand in staging", "--declare-no-new-tests", "this task adds no test"]));
       return { document: task };
     },
     summaryWords: (e) => [e["document"] as string],
@@ -406,10 +416,11 @@ const PRODUCERS: readonly ProducerRow[] = [
   },
   {
     cls: "ac-exempt",
+    verdict: "milestone",
     label: "lore ac exempt",
     drive: (corpus) => {
       const { spec } = specWithAc(corpus, 9);
-      expectRefusedWithPendingDecision(lore(corpus, ["ac", "exempt", spec, "AC-2", "--reason", "no rule exists for this yet", "--expires", "2099-01-01T00:00:00Z"]));
+      expectAppliedWithoutPendingDecision(lore(corpus, ["ac", "exempt", spec, "AC-2", "--reason", "no rule exists for this yet", "--expires", "2099-01-01T00:00:00Z"]));
       return { document: spec };
     },
     summaryWords: (e) => [e["document"] as string],
@@ -449,13 +460,13 @@ const PRODUCERS: readonly ProducerRow[] = [
 ];
 
 describe("decision detail producers", () => {
-  it.each(PRODUCERS.map((p) => [`${p.cls}: ${p.label}`, p] as const))("AC-HR-1: %s escalates with a complete, readable detail", async (_label, producer) => {
+  it.each(PRODUCERS.map((p) => [`${p.cls}: ${p.label}`, p] as const))("AC-HR-1: %s records a complete, readable detail", async (_label, producer) => {
     const corpus = newCorpus();
     const expected = await producer.drive(corpus);
     const dbDir = expected["dbDir"];
     const readFrom: Corpus = typeof dbDir === "string" ? { dir: dbDir, dbPath: join(dbDir, ".lore", "lore.db") } : corpus;
     const { raw, detail, verdict } = latestDetail(readFrom, producer.cls);
-    expect(verdict, `class ${producer.cls} must have escalated`).toBe("escalate");
+    expect(verdict, `class ${producer.cls} must have been recorded as ${producer.verdict ?? "escalate"}`).toBe(producer.verdict ?? "escalate");
     expect(raw, `class ${producer.cls} wrote no detail`).not.toBeNull();
     if (detail === null) return;
     for (const field of ["summary", "requested_by", "on_accept", "on_reject"] as const) {

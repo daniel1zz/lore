@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decide, OPERATION_CLASS_REGISTRY, ok, seedGovernedThresholds, type AutonomyFacts } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { verifyDecisionChain } from "../../src/store/decision-log.js";
 import { DecisionService } from "../../src/service/decision-service.js";
 import { createOverrideDecisionPort, OVERRIDE_MEASURED_FACTS } from "../../src/service/override-decision.js";
 import { StashPruneService, type GitRunner } from "../../src/service/stash-prune-service.js";
@@ -141,6 +142,41 @@ describe("AC-LG-8 three human classes: worktree-remove and stash-drop decide wit
     expect(git("rev-parse", "--verify", `refs/lore/archive/stash/${sha}^{commit}`)).toBe(sha); // archived first, recoverable
     expect(await pendingClasses()).toEqual([]);
     expect(await chainIsValid()).toBe(true);
+  });
+});
+
+describe("AC-LG-8 three human classes: migration 032 widens the verdict CHECK without touching the chain", () => {
+  const row = (verdict: "auto" | "escalate" | "milestone", subject: string) => ({
+    ts: "2026-10-01T00:00:00.000Z", class: "override-judgment", subject_id: subject, subject_version: "1", facts: "{}", factors: "{}",
+    score: 0, threshold: null, verdict, reasons: "[]", executor_run: null, channel: "machine" as const, detail: '{"summary":"s"}',
+  });
+
+  it("a schema-31 store REFUSES 'milestone'; after the upgrade the old rows (detail included) verify unchanged and 'milestone' is accepted", async () => {
+    const path = join(dir, "old.db");
+    const old = actedStore(new SQLiteStore(path, { schemaCeiling: 31 }));
+    expect((await old.appendDecisionRecord(row("auto", "a"))).ok).toBe(true);
+    expect((await old.appendDecisionRecord(row("escalate", "b"))).ok).toBe(true);
+    const refused = await old.appendDecisionRecord(row("milestone", "c"));
+    expect(refused.ok).toBe(false); // NEGATIVE: the CHECK of schema 31 does not know the verdict
+    const before = await old.listDecisionLog();
+    old.close();
+
+    const upgraded = actedStore(new SQLiteStore(path, { migrate: true }));
+    try {
+      const after = await upgraded.listDecisionLog();
+      expect(after.ok && before.ok && after.value).toEqual(before.ok ? before.value : []);
+      expect(after.ok && after.value.length).toBe(2);
+      expect(after.ok && after.value.every((r) => r.detail === '{"summary":"s"}')).toBe(true);
+      expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 2 });
+      const appended = await upgraded.appendDecisionRecord(row("milestone", "c"));
+      expect(appended.ok && appended.value.id).toBe(3);
+      const final = await upgraded.listDecisionLog();
+      expect(final.ok && verifyDecisionChain(final.value)).toEqual({ clean: true, checked: 3 });
+      expect(() => upgraded.getDatabase().run("UPDATE decision_log SET score = 1")).toThrow(); // append-only trigger re-armed
+      expect(upgraded.getDatabase().query("PRAGMA user_version").get()).toEqual({ user_version: 32 });
+    } finally {
+      upgraded.close();
+    }
   });
 });
 
