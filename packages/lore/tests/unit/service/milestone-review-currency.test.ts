@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
+ * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, BR-1372)
  *
  * The plan-state fingerprint, the currency check plan close runs, the milestone decisions a review lists, and the
  * review prompt. Pure modules, so vitest.
