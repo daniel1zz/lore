@@ -102,6 +102,7 @@ import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
+import { RetiredAcService } from "./service/retired-ac-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import type { StateBindingOccupancyPort } from "./service/verify-runner-service.js";
@@ -520,6 +521,11 @@ export interface App {
    * DI services so bare test stubs stay valid; always wired in production.
    */
   milestoneReviewService?: MilestoneReviewService;
+  /**
+   * RetiredAcService — lists the ACs retired during a plan and settles the owner's one confirmation (`lore assess`,
+   * plan close). Optional like the other DI services; always wired in production.
+   */
+  retiredAcService?: RetiredAcService;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -961,6 +967,8 @@ function buildAppFromSqlite(
   // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
+  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService);
+  wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
@@ -1091,7 +1099,9 @@ function buildAppFromSqlite(
     planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
+    retiredAcService,
     milestoneReviewService: new MilestoneReviewService({
+      listRetiredAcs: (bundle) => retiredAcService.collect(bundle),
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
       getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
       listDecisionLog: () => store.listDecisionLog(),
@@ -1392,6 +1402,8 @@ function buildAppFromTurso(
   // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
+  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService);
+  wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
@@ -1517,7 +1529,9 @@ function buildAppFromTurso(
     planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
+    retiredAcService,
     milestoneReviewService: new MilestoneReviewService({
+      listRetiredAcs: (bundle) => retiredAcService.collect(bundle),
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
       getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
       listDecisionLog: () => store.listDecisionLog(),
@@ -2140,6 +2154,37 @@ function buildRunReapService(
  */
 function buildOverrideDecisionPort(store: ConstructorParameters<typeof DecisionService>[0]["store"]): OverrideDecisionPort {
   return createOverrideDecisionPort(new DecisionService({ store, executorRun: null }));
+}
+
+/**
+ * Builds the retired-AC confirmation service (adr-an-acceptance-criterion-retires-with-the-feature-it) over `store`.
+ * reason: its restores go through a bare-gate `AcService` (the restore reinstates a state the citation gate already
+ * admitted, so it carries no gate config); its decisions go through a `DecisionService` on the same decision log.
+ */
+function buildRetiredAcService(
+  store: StoreInterface & ConstructorParameters<typeof DecisionService>[0]["store"],
+  recordLockService: RecordLockService,
+  corpusService: CorpusService,
+): RetiredAcService {
+  const acs = new AcService(store, recordLockService, undefined, corpusService);
+  return new RetiredAcService({
+    store,
+    decisions: new DecisionService({ store, executorRun: null }),
+    listDecisionLog: () => store.listDecisionLog(),
+    restoreCriterion: (spec, ac, at, reason) => acs.restoreRetiredCriterion(spec, ac, at, reason),
+    restoreSpecStatus: (spec, status, reason) => acs.restoreDeprecatedSpec(spec, status, reason),
+  });
+}
+
+/** Hands plan close the settle step of the retired-AC confirmation (see {@link buildRetiredAcService}). */
+function wirePlanCloseRetirements(corpusService: CorpusService, retiredAcService: RetiredAcService): void {
+  corpusService.setPlanCloseRetirementPort({
+    settle: async (planId) => {
+      const bundle = await corpusService.getPlanBundle(planId);
+      if (!bundle.ok) return bundle;
+      return retiredAcService.settle(bundle.value);
+    },
+  });
 }
 
 /**

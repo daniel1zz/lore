@@ -15,7 +15,16 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { failedDimensions, milestoneReviewSchema, type DocRecord, type MilestoneDimension, type MilestoneReview } from "@lore/core";
+import {
+  failedDimensions,
+  milestoneReviewSchema,
+  type DocRecord,
+  type LoreError,
+  type MilestoneDimension,
+  type MilestoneReview,
+  type Result,
+  type RetiredAcRef,
+} from "@lore/core";
 import { readTaskLanding } from "./task-commit-range.js";
 
 /** `extra.sub_type` of the knowledge doc that stores a review. */
@@ -109,6 +118,41 @@ export function assessMilestoneCurrency(
     return { state: "failed", failed, reviewSlug: latest.doc.slug };
   }
   return { state: "pass", reviewSlug: latest.doc.slug };
+}
+
+/** Where a plan stands on the ACs retired during it (settled by `RetiredAcService`; adr-an-acceptance-criterion-retires-with-the-feature-it). */
+export type PlanRetirementState =
+  | { readonly state: "none" }
+  | { readonly state: "confirmed"; readonly retired: readonly RetiredAcRef[] }
+  | { readonly state: "pending"; readonly retired: readonly RetiredAcRef[]; readonly pendingId: number }
+  | { readonly state: "rejected"; readonly restored: readonly RetiredAcRef[] };
+
+/** The port plan close holds for the retired-AC confirmation: carries out an answered rejection, reports the state. */
+export interface PlanCloseRetirementPort {
+  settle(planId: string): Promise<Result<PlanRetirementState, LoreError>>;
+}
+
+/**
+ * The refusal text of a plan close that must wait for, or was refused by, the owner's retired-AC answer.
+ *
+ * @returns `undefined` when the close may proceed (nothing retired, or the owner confirmed)
+ */
+export function describeRetirementRefusal(planSlug: string, state: PlanRetirementState): string | undefined {
+  switch (state.state) {
+    case "none":
+    case "confirmed":
+      return undefined;
+    case "pending":
+      return (
+        `Plan "${planSlug}" retired ${String(state.retired.length)} acceptance criteria that the owner has not confirmed ` +
+        `(pending decision ${String(state.pendingId)}). Ask the owner in the session: \`lore pending --ask\`, then close again.`
+      );
+    case "rejected":
+      return (
+        `The owner rejected the acceptance criteria retired during plan "${planSlug}"; ${String(state.restored.length)} were restored. ` +
+        "The plan cannot close until it is re-planned (a plan or task change) and reviewed again."
+      );
+  }
 }
 
 /** One rule cited by the plan's spec, with the state `RuleStateService.full()` reported (read by the snapshot-accuracy dimension). */
