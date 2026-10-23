@@ -25,7 +25,7 @@
  * `assembleHandoffInput`, `parseHandoffJsonFile`) live in `../handoff-input.js`,
  * NOT this file — this file transitively imports `loader.ts` (`bun:sqlite`), which
  * vitest cannot resolve, so `session-roundtrip.test.ts` (AC-SL-7) imports them from
- * that sibling module instead (mirrors `assess-render.ts`'s split for
+ * that sibling module instead (mirrors `status-stamp-verdict.ts`'s split for
  * `commands/assess.ts`, `packages/lore/src/adapters/cli/CLAUDE.md`).
  *
  * There is deliberately no `--content`/`--content-file` flag, ever — a

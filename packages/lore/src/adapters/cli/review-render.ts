@@ -4,7 +4,7 @@
  * `commands/review.ts` into its own module so it can be unit-tested directly under
  * vitest — `commands/review.ts` transitively imports `loader.ts` (`bun:sqlite`), which
  * vitest cannot resolve, but this module imports only `@lore/core` + `./utils.js` +
- * `../../flows/staleness-flow.js` (all vitest-safe). Mirrors `assess-render.ts`'s split
+ * `../../flows/staleness-flow.js` (all vitest-safe). Mirrors `status-stamp-verdict.ts`'s split
  * for the identical reason.
  *
  * Public surface:

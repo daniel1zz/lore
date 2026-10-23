@@ -105,9 +105,6 @@ function makeReviewService(provider: InMemoryAIProvider) {
   };
   const providers = new Map([[provider.name, provider]]) as unknown as ReadonlyMap<string, AIProvider>;
   return new AIProviderService(providers, provider.name, {}, telemetry, false, 8000, {
-    max_plan_chars: 8000,
-    max_spec_chars: 12000,
-    max_task_chars: 4000,
     max_diff_chars: 24000,
   });
 }

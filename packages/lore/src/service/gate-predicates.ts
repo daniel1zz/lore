@@ -960,8 +960,7 @@ export function requiresUatDeclared(
  * added by spec-plan-closure-must-be-loud-terminality-divergence-silent
  * §Design Decisions DD-4(b)) — `null` when reachable. A discriminated
  * companion to `ReachabilityResult.reachable` rather than a bare boolean:
- * callers (the `plan-promote` advisory, `plan-close`'s `feedAttestationFloor`
- * branch) render DIFFERENT prose per reason, so collapsing this to `boolean`
+ * callers (the `plan-promote` advisory) render DIFFERENT prose per reason, so collapsing this to `boolean`
  * would force them to re-derive it themselves — the exact "two parallel
  * reachability computations" shape §Design Decisions D2 forbids.
  *
@@ -990,11 +989,9 @@ export interface ReachabilityResult {
  * `spec === undefined` ⇒ `"plan has no parent spec — nothing to verify"`; zero
  * script-mode criteria ⇒ nothing for the runner to execute), reflected here as
  * a pure, store-free PREDICTION of that outcome rather than a duplicate
- * enforcement path. Two independent callers consume this ONE derivation
- * (spec-verify-reachability-plan-promote-early-warning §Design Decisions D2):
- * `plan-promote`'s early-warning advisory (`checkpoint-registry.ts`'s
- * `planPromoteReachabilityAdvisory`) and `plan-close`'s `feedAttestationFloor`
- * branch — they can never disagree about whether a given plan is reachable.
+ * enforcement path. It is the ONE derivation behind `plan-promote`'s early-warning advisory
+ * (`checkpoint-registry.ts`'s `planPromoteReachabilityAdvisory`; spec-verify-reachability-plan-promote-early-warning
+ * §Design Decisions D2).
  *
  * @param planParentType - The plan's resolved ancestor-spec doc type. THREE
  *   distinct inputs, not two (DD-4(b)): `"spec"` when `hasSpecParent` is

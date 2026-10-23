@@ -1,7 +1,7 @@
 /**
  * Pure flag-validation + path-resolution helpers for `lore setup`
  * (SPEC-046 §Design, task AC-046-E). Split out of `commands/setup.ts` for
- * vitest-testability, mirroring `assess-render.ts` / `review-render.ts` /
+ * vitest-testability, mirroring `status-stamp-verdict.ts` / `review-render.ts` /
  * `handoff-input.ts` — `commands/setup.ts` transitively imports
  * `../../flows/init-corpus.ts` → `../../app.js` (`bun:sqlite`), which vitest
  * cannot resolve, but this module imports only `node:path` and plain object

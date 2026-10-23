@@ -229,7 +229,7 @@ import { computeIssueCheck, type IssueCheckPayload } from "../status-issue-check
 import { loadConfig } from "@lore/core/node";
 import { resolveCiteGateRaw, classifyCaptureSource, type DocRecord } from "@lore/core";
 import type { StampVerdictDistribution } from "../../../service/gate-predicates.js";
-import { formatStampVerdictLine } from "../assess-render.js";
+import { formatStampVerdictLine } from "../status-stamp-verdict.js";
 import type { EvidenceEntry } from "@lore/core";
 import {
   findUnresolvedStateBindingSkips,

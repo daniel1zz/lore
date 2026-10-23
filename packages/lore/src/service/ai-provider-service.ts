@@ -137,14 +137,11 @@ import {
 } from "../ai/staleness-template.js";
 
 /**
- * The size budgets of the AI judge's input (`config.ai.assess.*`). Only `max_diff_chars` is read today (by the milestone
- * review's diff cut, `assessMaxDiffChars`); the other three belonged to the retired plan-outcome prompt and stay on the
- * config schema until it is next revised.
+ * The size budgets of the AI judge's input (`config.ai.assess.*`). Only `max_diff_chars` exists: the milestone
+ * review's diff cut reads it as `assessMaxDiffChars`. The plan/spec/task budgets belonged to the retired
+ * plan-outcome prompt and are removed (`lore migrate config-keys` strips them from config files).
  */
 export interface AssessBudgets {
-  readonly max_plan_chars: number;
-  readonly max_spec_chars: number;
-  readonly max_task_chars: number;
   readonly max_diff_chars: number;
 }
 

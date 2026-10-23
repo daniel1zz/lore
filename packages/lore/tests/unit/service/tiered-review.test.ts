@@ -407,7 +407,7 @@ describe("AC-TIER-3 pending filter — task + ledger sub_types hidden by default
 // ─── AC-TIER-6: I1 provenance collision + provenance-less pass ────────────────
 
 describe("AC-TIER-6 provenance write half (AIProviderService.generate)", () => {
-  const budgets = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
+  const budgets = { max_diff_chars: 24000 };
 
   // task-t3-hardening-reachable-override-escape-real-ai-provenance — the honesty-gap fix:
   // when the active provider exposes a REAL modelId, it is used verbatim (never the provider

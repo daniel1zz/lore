@@ -5,7 +5,7 @@
  * `loader.ts` (`bun:sqlite`), which vitest cannot resolve, but this module imports
  * only `../../service/seat-service.js`'s type (vitest-safe: `seat-service.ts` itself
  * has zero bun:sqlite dependency, proven by `seat-service.test.ts` running under
- * `bunx vitest`), mirroring `assess-render.ts`/`review-render.ts`'s identical split.
+ * `bunx vitest`), mirroring `status-stamp-verdict.ts`/`review-render.ts`'s identical split.
  *
  * Public surface:
  *   - buildSeatListJsonPayload(entries) — the exact envelope `lore seat list --json`

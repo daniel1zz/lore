@@ -337,8 +337,7 @@ export interface GateContext {
    * `parentSpec` (spec-verify-reachability-plan-promote-early-warning §Scope
    * M1/M2) — the SAME field `verifyReachability` consumes for BOTH
    * `plan-promote`'s early-warning advisory (`planPromoteReachabilityAdvisory`
-   * below) and `plan-close`'s `feedAttestationFloor` branch (§Design Decisions
-   * D2: one shared derivation, never two). `undefined` when `hasSpecParent` is
+   * below; §Design Decisions D2: one shared derivation). `undefined` when `hasSpecParent` is
    * not `true`, or the caller never resolved it — `verifyReachability` treats
    * that identically to `0` (module invariant on that function, gate-
    * predicates.ts).
@@ -840,9 +839,7 @@ export const REACHABILITY_NO_SPEC_ANCESTOR = "this plan has no spec-tier ancesto
  * the ONE place this prose is written (spec-verify-reachability-plan-promote-
  * early-warning §Design Decisions D2; `"unknown"` branch added by spec-plan-
  * closure-must-be-loud-terminality-divergence-silent §Design Decisions
- * DD-4(b)), consumed by BOTH `planPromoteReachabilityAdvisory` and
- * `feedAttestationFloor`'s unreachable branch so the two surfaces never drift
- * apart on wording.
+ * DD-4(b)), consumed by `planPromoteReachabilityAdvisory`.
  *
  * ⛔ The `"unknown"` branch MUST NOT assert a definite corpus fact — DD-4(b)'s
  * whole point is that "the caller never told me" and "I checked and there is
@@ -878,13 +875,11 @@ function describeReachabilityWhy(why: Exclude<ReachabilityResult["why"], null>):
  * plan can be perfectly promotable (approved ancestor spec, >=1 declared AC)
  * and STILL be `lore verify`-unreachable (its ancestor spec has zero
  * script-mode ACs) — exactly the late-failure gap this spec closes: the
- * incompatibility used to surface only hours later, at plan-close
- * (`ATTESTATION_FLOOR_NOT_MET`), with no earlier signal at all.
+ * incompatibility used to surface only hours later, when the milestone review
+ * of the plan had no `lore verify` evidence to cite, with no earlier signal.
  *
- * Consumes the SAME `verifyReachability` derivation `feedAttestationFloor`
- * uses at plan-close (§Design Decisions D2 — one shared computation, never
- * two) — `ctx.hasSpecParent`/`ctx.parentSpecScriptAcCount`, the identical
- * fields a plan-close caller populates for its own branch.
+ * Consumes the `verifyReachability` derivation (§Design Decisions D2) over
+ * `ctx.hasSpecParent`/`ctx.parentSpecScriptAcCount`.
  *
  * @returns `null` when `verifyReachability` reports `reachable: true`
  *   (nothing to warn about — the common case, every pre-existing
@@ -921,12 +916,10 @@ export function planPromoteReachabilityAdvisory(ctx: GateContext): string | null
   return (
     `ADVISORY (${PLAN_PROMOTE_ADVISORY_NON_BLOCKING}): \`lore verify\` will be structurally ` +
     `unreachable for ${plan} — ${describeReachabilityWhy(reachability.why as Exclude<ReachabilityResult["why"], null>)}. ` +
-    `At plan-close, the attestation floor (SPEC-069) will have no \`lore verify\` path ` +
-    `to satisfy it. Two real options before that happens: (1) parent this plan under a ` +
-    `spec that declares >= 1 script-mode acceptance criterion (\`lore ac add <spec> <id> ` +
-    `--mode script ...\`), or (2) plan on declaring a typed exemption at close time ` +
-    `(\`extra.attestation_exempt: true\` + \`extra.attestation_exempt_reason\` + ` +
-    `\`extra.attestation_exempt_kind: "pipeline-unreachable"\`).`
+    `The milestone review (\`lore assess\`, BR-1372) that gates closing this plan will then have no ` +
+    `\`lore verify\` evidence to cite for correctness against the acceptance criteria. To give it some, ` +
+    `parent this plan under a spec that declares >= 1 script-mode acceptance criterion ` +
+    `(\`lore ac add <spec> <id> --mode script ...\`).`
   );
 }
 

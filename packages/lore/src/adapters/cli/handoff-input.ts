@@ -4,7 +4,7 @@
  * can be unit-tested directly under vitest (`session-roundtrip.test.ts`, AC-SL-7) —
  * `commands/handoff.ts` transitively imports `loader.ts` (`bun:sqlite`), which
  * vitest cannot resolve, but this module imports only `@lore/core` (vitest-safe).
- * Mirrors `assess-render.ts`'s split for the identical reason.
+ * Mirrors `status-stamp-verdict.ts`'s split for the identical reason.
  *
  * Public surface:
  *   - parseDecisionFlag(raw) — "<judgment>[@<confidence>]" → HandoffKeyDecision

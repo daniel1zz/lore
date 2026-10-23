@@ -45,7 +45,7 @@
  * is the sole executable venue for it): the "--raw NEVER carries the banner"
  * REGRESSION check is exercised HERE (compiled-binary spawn) rather than in AC-MH-7's
  * vitest suite, because `get.ts` transitively imports `loader.ts` → `bun:sqlite`,
- * which vitest cannot resolve (same constraint documented on `assess-render.ts`/
+ * which vitest cannot resolve (same constraint documented on `status-stamp-verdict.ts`/
  * `handoff-input.ts`). AC-MH-7's vitest suite covers the banner FORMAT pinned cases
  * (no-reason, deleted-successor, no-banner-on-valid) via the shared
  * `renderDocMarkdown`/`ExportDocsService` functions `get.ts` itself delegates to.

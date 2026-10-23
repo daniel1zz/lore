@@ -66,9 +66,6 @@ function makeApp(opts: { resolveAiDefault?: (explicit?: boolean) => { ai: boolea
   aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeAnswer() });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<string, import("@lore/core").AIProvider>;
   const aiProviderService = new AIProviderService(providers, "in-memory", {}, new NoOpTelemetry(), false, 8000, {
-    max_plan_chars: 8000,
-    max_spec_chars: 12000,
-    max_task_chars: 4000,
     max_diff_chars: 24000,
   });
   return {

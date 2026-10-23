@@ -5,7 +5,7 @@
  * exercises the pure unit `commands/pending.ts` calls verbatim:
  *   - `PENDING_TABLE_HEADERS` / `buildPendingTableRows`
  *     (`packages/lore/src/adapters/cli/pending-render.ts`) — same split pattern
- *     as `assess-render.ts`/`review-render.ts`/`seat-render.ts`.
+ *     as `status-stamp-verdict.ts`/`review-render.ts`/`seat-render.ts`.
  *   - `formatTable` (`packages/lore/src/adapters/cli/utils.ts`) — the SAME
  *     rendering `commands/pending.ts` pipes the built rows through, so this
  *     suite proves the actual printed table string, not just the row array.

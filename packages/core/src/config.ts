@@ -467,35 +467,19 @@ const WorkflowConfigSchema = z
       .strict()
       .default({}),
     /**
-     * `plan-close`'s OPT-IN execution-time attestation-ratio sub-predicate config
-     * (spec-plan-close-predicates-measure-invariants-an-applicability §D4,
-     * superseding SPEC-069 §Design Decisions D1's always-on `0.5` default) — the
-     * minimum plan-wide fraction of a closing plan's `verification_evidence`
-     * entries (aggregated across every task) that must be runner-issued
-     * (`attestation` present) before the plan may transition to `archived`.
-     * Nested under `workflow` (not `gates.<checkpoint>`) because it is a NUMBER,
-     * not an `enabled` toggle — `GateCheckpointConfigSchema`'s existing
-     * sub-predicate shape only carries boolean switches; whether the WHOLE
-     * checkpoint runs at all is still `workflow.gates."plan-close".enabled`
-     * (unchanged).
+     * DISPLAY-ONLY attestation-ratio floor. `plan-close` no longer reads it (plan close is gated by the milestone
+     * review alone, BR-1372); the dashboard's plan attestation panel (`AttestationSummary.min_ratio`,
+     * `deriveAttestationSummary`) still shows the configured floor next to the measured ratio. Nothing refuses
+     * anything on it.
      *
-     * `min_ratio` deliberately carries NO Zod `.default(...)` — the field is
-     * `undefined` when absent, never a silently-resurrected `0.5`. A Zod default
-     * would make "absent" and "explicitly 0.5" indistinguishable at every read
-     * site, which is the exact migration hazard §D4 closes: this predicate's
-     * per-claimed-AC attested-coverage conjunct (the new default teeth) already
-     * runs unconditionally, so the ratio is now an opt-in ADDITIONAL conjunct, on
-     * only when a team explicitly writes this value. Absence of the whole
-     * `workflow` section, or of `attestation` within it, both resolve to
-     * `undefined` here too (`resolveAttestationMinRatio` is the sole seam that
-     * turns that into the caller-visible `null`).
+     * `min_ratio` carries NO Zod `.default(...)`: absent stays `undefined` (never a silently-resurrected `0.5`);
+     * `resolveAttestationMinRatio` is the sole seam that turns that into the caller-visible `null`.
      */
     attestation: z
       .object({
         /**
-         * Minimum plan-wide attested-evidence ratio required to close. No default
-         * — absent means the ratio conjunct does not run at all (see this field's
-         * parent JSDoc).
+         * Plan-wide attested-evidence ratio shown by the dashboard panel as the floor. Display-only: it
+         * gates nothing. No default — absent means the panel shows no floor (see this field's parent JSDoc).
          */
         min_ratio: z.number().min(0).max(1).optional(),
       })

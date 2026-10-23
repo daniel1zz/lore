@@ -15,7 +15,7 @@
  * `formatStructuredExtraNotice`) plus a source-text WIRING assertion against
  * `commands/get.ts` — that command file transitively imports `loader.ts` → `bun:sqlite`,
  * which vitest cannot resolve, so it can never be imported here (same constraint
- * documented on `assess-render.ts` / `handoff-input.ts`). The end-to-end proof that the
+ * documented on `status-stamp-verdict.ts` / `handoff-input.ts`). The end-to-end proof that the
  * notice reaches real stdout, and that `--json` gained no bytes, lives in
  * `cli-get-structured-extra.bun.test.ts`, which spawns the compiled binary. A pure-unit
  * suite alone would pass against a render function that is never called — the
