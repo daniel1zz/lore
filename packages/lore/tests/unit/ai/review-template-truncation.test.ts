@@ -1,5 +1,5 @@
 /**
- * D9 (BR-268, spec-defect-clusters-round-2-part-b-review-pending-queue-corpus): the active prompt version (v6)
+ * D9 (BR-268, spec-defect-clusters-round-2-part-b-review-pending-queue-corpus): the active prompt version (v7)
  * never cuts the document under review and `AIProviderService.judgeDoc` then never stamps a judgment `truncated`;
  * the frozen v1-v5 keep the SPEC-040 D8 doc-body cut and notice (AC-ADF-8) so stored judgments stay reproducible.
  *
@@ -44,9 +44,9 @@ function makeDoc(overrides: Partial<DocRecord>): DocRecord {
 
 // ─── Pure template-level tests ────────────────────────────────────────────────
 
-describe("the document under review is never cut by the active version, v6 (BR-268, D9)", () => {
-  it("the active version is v6 and it renders a 36000-char doc body whole: last line present, no notice, no 'doc' cut", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v6");
+describe("the document under review is never cut by the active version, v7 (BR-268, D9)", () => {
+  it("the active version is v7 and it renders a 36000-char doc body whole: last line present, no notice, no 'doc' cut", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v7");
     const content = "x".repeat(36000) + "\nLAST-LINE-MARKER";
     const bundle: ReviewBundle = { doc: makeDoc({ content }), links: [] };
     const result = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!(bundle, [], BUDGETS);
@@ -69,7 +69,7 @@ describe("the document under review is never cut by the active version, v6 (BR-2
 });
 
 describe("frozen v1-v5 keep cutting the document body at max_doc_chars (SPEC-040 D8, AC-ADF-8)", () => {
-  for (const version of ["v1", "v2", "v3", "v4", "v5"]) {
+  for (const version of ["v1", "v3", "v4", "v5"]) {
     it(`${version}: a doc body over max_doc_chars sets docTruncated=true, adds the Truncation Notice and truncated includes 'doc'`, () => {
       const bundle: ReviewBundle = { doc: makeDoc({ content: "x".repeat(36000) + "\nLAST-LINE-MARKER" }), links: [] };
       const result = REVIEW_TEMPLATES[version]!(bundle, [], BUDGETS);

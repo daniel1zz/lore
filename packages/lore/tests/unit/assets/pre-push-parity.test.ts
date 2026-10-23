@@ -117,11 +117,11 @@ describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 
   // and flips GREEN once that task appends the check-claude-md step to both
   // copies (mirroring the audit --verify case immediately above, which pins the
   // SAME invariant for the SPEC-080/081 G5 step).
-  it("HAPPY: both hook copies invoke `lore status --check-claude-md` (AC-CMC-4)", () => {
-    const repoHook = readFileSync(REPO_HOOK_PATH, "utf8");
-    const assetHook = readFileSync(ASSET_HOOK_PATH, "utf8");
-    expect(repoHook).toContain("--check-claude-md");
-    expect(assetHook).toContain("--check-claude-md");
+  it("NEGATIVE: neither hook copy invokes `--check-claude-md` or the prose-pin checker (AC-LG-7 supersedes the AC-CMC-4 pin; memory-file budgets are check:memory-files)", () => {
+    for (const hook of [readFileSync(REPO_HOOK_PATH, "utf8"), readFileSync(ASSET_HOOK_PATH, "utf8")]) {
+      expect(hook).not.toContain("--check-claude-md");
+      expect(hook).not.toContain("check-prose-pins");
+    }
   });
 
   // AC-BFI-9 (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor):

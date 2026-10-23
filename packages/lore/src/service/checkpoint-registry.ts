@@ -2015,35 +2015,6 @@ export const JUDGMENT_REJECTED_REASON = "JUDGMENT_REJECTED";
 /** `checkReviewJudgment`'s failure when the WORST independent current-version judgment is `"escalate"`. */
 export const JUDGMENT_ESCALATED_REASON = "JUDGMENT_ESCALATED";
 
-/**
- * `true` exactly when `error` is a `review-judgment` gate denial whose propagating
- * reason is {@link JUDGMENT_ESCALATED_REASON} — the ONE verdict that gates EVERY doc
- * type, not only the ones in `workflow.review.judgment_required_types`
- * (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1).
- *
- * Lives here, beside the reason constant it looks for, so
- * `ReviewService.enforceJudgmentRequiredGate` never string-matches a gate reason
- * itself — the same "a LoreError-shape predicate belongs with the wiring that owns
- * the shape" placement {@link isNonPlanParentError} already uses in this module.
- * Keyed on `GateEnforcer.enforce`'s STRUCTURED `value: reasons` field (its own
- * documented denial shape), never on the human-readable `message` prose. That coupling
- * is pinned by an external oracle rather than by convention: an `enforce` that stopped
- * populating `value` would make this answer `false` for a real escalate — turning the
- * universal gate silently off for ungated types — and
- * `tests/unit/service/review-judgment-escalate-scope.test.ts`'s AC-ESC-1 cases go RED
- * the moment that happens.
- *
- * @param error - The `LoreError` a failed `enforce("review-judgment", ctx)` returned.
- * @returns `false` for every non-`VALIDATION_ERROR` code, for a denial carrying no
- *   reasons array, and for a `reject`/`NO_JUDGMENT`/provenance-collision denial —
- *   those three stay scoped to the configured types (D1).
- */
-export function isJudgmentEscalatedDenial(error: LoreError): boolean {
-  if (error.code !== "VALIDATION_ERROR") return false;
-  const reasons = error.value;
-  return Array.isArray(reasons) && reasons.includes(JUDGMENT_ESCALATED_REASON);
-}
-
 /** The `PredicateResult.field` value every `review-judgment` failure carries. */
 export const REVIEW_JUDGMENT_FIELD = "judgment-required";
 

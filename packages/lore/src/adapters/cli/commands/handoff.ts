@@ -40,7 +40,7 @@
  * line + `RESUME_COVERAGE_FLOOR`) and the disposition-line grammar a consumer
  * writes back (`RESUME_DISPOSITION_MARKER <id>: <accepted disposition>`) — D9: the
  * grammar lives in exactly ONE place, this verb, never duplicated into the Stop
- * hook that calls it (`assets/hooks/stop-handoff-coverage.mjs`, T5, NOT edited by
+ * hook that calls it (the former Stop hook `stop-handoff-coverage.mjs`, removed by AC-LG-7; it was NOT edited by
  * either spec — it is a blind pipe that relays this verb's stdout, stderr and
  * exit status verbatim, which is exactly why moving the verdict onto stdout
  * needed no asset edit and no assets-manifest regeneration:
@@ -216,8 +216,8 @@ const COMMAND_WORD_EDGE_PUNCTUATION = /^[`'"([{;&|]+|[`'")\]};&|,]+$/g;
 /**
  * Shape this verb reads from ITS OWN stdin
  * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D8, D9). The
- * Stop hook that calls this verb (`assets/hooks/stop-handoff-coverage.mjs`,
- * T5, NOT edited here) is a blind pipe: it parses the Stop payload's JSON
+ * Stop hook that called this verb (`stop-handoff-coverage.mjs`, removed by
+ * AC-LG-7) was a blind pipe: it parses the Stop payload's JSON
  * only far enough to forward these two fields, then relays this verb's exit
  * code and stderr verbatim. Read via stdin rather than CLI flags for two
  * reasons: it mirrors the shape a Stop hook itself receives on ITS OWN

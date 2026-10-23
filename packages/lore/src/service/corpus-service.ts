@@ -309,6 +309,11 @@ export interface WriteActorOpts {
 export interface SetOptions extends WriteActorOpts {
   readonly expectedVersion?: number;
   readonly correction?: { readonly reason: string };
+  /**
+   * Free-text justification of this write (`lore bulk --reason`, BR-1366): written verbatim to the update audit row as
+   * `details.reason`. A note only — it relaxes no gate. Unlike `correction.reason` it needs no locked record.
+   */
+  readonly reason?: string;
 }
 
 /**
@@ -3859,6 +3864,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           new_version: newVersion,
           version: newVersion,
           ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
+          ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
         },
       },
       abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,

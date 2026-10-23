@@ -25,6 +25,7 @@
     "check:hook-top-level-symbols": "bun scripts/sync-hook-top-level-symbols.ts --check",
     "check:static":"bun scripts/run-chain.ts --static",
     "check:floor": "bun scripts/run-chain.ts --floor",
+    "check:plan-close": "bun scripts/run-chain.ts --plan-close",
     "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs",
     "check:baseline-coverage": "bun scripts/check-baseline-coverage.ts",
     "test:file": "bun scripts/test-file.ts",
@@ -56,7 +57,8 @@
       "test": "Take the checkout's oracle lock, then run each check script and test:vitest in a fixed order; every step runs and a per-step exit table prints.",
       "test:changed": "Select and run the tests a change can affect, printing a reason per file; --list previews, an optional ref sets the diff base.",
       "test:file": "Run the named test files, each on the runner that collects it (Bun, or Node for files in vitest.node-files.ts); -t <name> and other flags pass through.",
-      "check:floor": "Build, typecheck and run every check: script except the corpus-dependent ones (the integrate floor).",
+      "check:floor": "Install, build and typecheck (the integrate floor); --list prints the step names.",
+      "check:plan-close": "Run every check: script the integrate floor does not (the plan-close chain); --list prints the names.",
       "check:memory-files": "Run `lore context refresh --check`: exit 1 when CLAUDE.md or a lore rules file differs from a fresh refresh, or the root file is over its ceiling."
     }
   },

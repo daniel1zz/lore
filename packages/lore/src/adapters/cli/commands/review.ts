@@ -81,7 +81,6 @@ import { REVIEW_PROMPT_VERSION } from "../../../ai/review-template.js";
 import {
   formatJudgmentSummary,
   renderSupersededCandidateNudgeBlock,
-  renderAdvisoryBlock,
   renderTruncationBlock,
   renderBatchFailureCounts,
   summarizeBatchFailures,
@@ -578,7 +577,7 @@ export default defineLoreCommand({
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
-      printLine(inv.io.stdout, formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
+      printLine(inv.io.stdout, formatJudgmentSummary(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
     } finally {
       app.close();
     }

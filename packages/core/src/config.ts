@@ -647,27 +647,19 @@ const WorkflowConfigSchema = z
      *   _createImpl`/`set` never fast-track a ledger knowledge doc (assessment/retro/
      *   handoff/uat) — it lands (and stays) `draft` exactly like every other type,
      *   pre-SPEC-103 byte-identical.
-     * @invariant `judgment_required_types: []` disables M2 entirely — for every doc
-     *   type AND every review decision, `escalate` included: `ReviewService.approve`
-     *   requires no `review_judgments` row and honours none it finds, pre-SPEC-103
-     *   byte-identical. This is the operator's total off-switch and is checked BEFORE
-     *   the escalate path below.
-     * @invariant A NON-EMPTY `judgment_required_types` is the SET of `DocType` values
-     *   whose approval M2 gates on a `reject`, on a missing judgment, and on a
-     *   self-review provenance collision — that scoping is deliberate: an AI judge
-     *   disagreeing with a record of what happened (a retro, an assessment) must not
-     *   hold event capture hostage. It does NOT scope `escalate`
-     *   (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1): an escalate
-     *   asserts an outstanding HUMAN decision and carries the questions in
-     *   `blocking_questions`, so once this list is non-empty an escalate blocks
-     *   approval for EVERY doc type, listed or not, and the denial renders those
-     *   questions. Typed as `string[]` (not `DocType[]`) for the SAME
+     * @invariant `judgment_required_types` is the SET of `DocType` values whose approval
+     *   consults `review_judgments` (default `["spec","adr"]`, BR-1369): a `reject`, a
+     *   missing judgment, an `escalate` and a self-review provenance collision all block
+     *   approval of a listed type. A type OUTSIDE the list (plan, task, knowledge,
+     *   baseline node) NEVER consults `review_judgments`, an `escalate` included — the
+     *   milestone review (`lore assess`) is where those are judged. `[]` disables the
+     *   gate for every type. Typed as `string[]` (not `DocType[]`) for the SAME
      *   leaf-of-dependency-graph reason `resolveGateEnabled`'s `checkpoint` param is a
      *   plain string — this module must not import `DocType`'s consumer-side
      *   gate-checkpoint machinery.
      * @invariant Absence of the whole `workflow` section, or of `review` within it,
      *   or of an individual field, ALL fall back to that field's own schema default
-     *   (`true` / `["spec","adr","plan"]`) — same "absence = default" shape as `staleness`/
+     *   (`true` / `["spec","adr"]`) — same "absence = default" shape as `staleness`/
      *   `drift`/`attestation` above (SPEC-103's OWN stated default row, AC-TIER-7's
      *   kill-switch test proves the EXPLICIT-override path, not this default path).
      */
@@ -676,11 +668,11 @@ const WorkflowConfigSchema = z
         /** `false` disables M1 ledger fast-track entirely. Default: true. */
         ledger_auto_approve: z.boolean().default(true),
         /**
-         * `DocType` values M2 gates on a `reject` / missing judgment / provenance
-         * collision. An `escalate` gates every type regardless (see the second
-         * `@invariant` above); `[]` disables M2 entirely. Default: ["spec","adr","plan"].
+         * `DocType` values whose approval needs an independent review judgment (reject,
+         * escalate, missing and provenance collision all block); other types never consult
+         * judgments (BR-1369). `[]` disables the gate entirely. Default: ["spec","adr"].
          */
-        judgment_required_types: z.array(z.string()).default(["spec", "adr", "plan"]),
+        judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
       })
       .strict()
       .default({}),
@@ -1507,14 +1499,14 @@ export function resolveLedgerAutoApprove(config: LoreConfig | undefined): boolea
  * §Mechanisms M2). Mirrors {@link resolveLedgerAutoApprove}'s fully-optional-chained
  * shape (see that function's JSDoc for why the shallower {@link resolveClaimTtlMinutes}
  * shape is unsafe for a NESTED optional-with-default sub-section) — the schema default is
- * `["spec","adr","plan"]` (BR-281), and `[]` is the documented kill-switch (AC-TIER-7).
+ * `["spec","adr"]` (BR-1369), and `[]` is the documented kill-switch (AC-TIER-7).
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
  * @returns Effective `judgment_required_types` array (never mutated in place by callers)
  * @example
- *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr", "plan"]
+ *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr"]
  *   resolveJudgmentRequiredTypes({ ..., workflow: { review: { judgment_required_types: [] } } }) // => []
- *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr","plan"] (no throw)
+ *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr"] (no throw)
  */
 export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): string[] {
   return (

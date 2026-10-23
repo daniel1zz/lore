@@ -89,5 +89,74 @@ export async function renderUsageDoubleDash(io: CliIo, cmd: CommandDef<any>, par
   // citty's own built-in `showUsage`'s `consola.log(text + "\n")` call
   // exactly (see this file's header); it is not a debug/log statement, it
   // IS the `--help` output.
-  printLine(io.stdout, fixSingleDashAliasRendering(text) + "\n");
+  printLine(io.stdout, fitUsageToWidth(fixSingleDashAliasRendering(text), resolveUsageWidth()) + "\n");
+}
+
+/** Width help is fitted to when stdout is not a terminal and `COLUMNS` is unset (BR-1371). */
+const DEFAULT_USAGE_WIDTH = 100;
+
+/**
+ * The column count usage text must fit: the terminal's width on a TTY, else `COLUMNS`, else 100.
+ *
+ * @returns a width of at least 40 columns
+ */
+export function resolveUsageWidth(): number {
+  const fromTerminal = process.stdout.isTTY === true ? process.stdout.columns : undefined;
+  const fromEnv = Number.parseInt(process.env["COLUMNS"] ?? "", 10);
+  const width = fromTerminal ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_USAGE_WIDTH);
+  return Math.max(40, width);
+}
+
+/**
+ * Make usage text fit `width` columns with no trailing padding. citty pads every row to the widest description in
+ * the table, so one long `meta.description` once made every `lore --help` line 1,172 characters (74 KB of spaces).
+ * Trailing spaces are dropped; a line still wider than `width` is wrapped at word boundaries, its continuation lines
+ * indented to the column where the line's description began.
+ *
+ * @param text - citty's rendered usage
+ * @param width - the column limit
+ * @returns the text with every line at most `width` characters and no trailing whitespace
+ * @example
+ *   fitUsageToWidth("  name    a long description ...", 30) // wrapped under "a long description"
+ */
+export function fitUsageToWidth(text: string, width: number): string {
+  const out: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    if (line.length <= width) {
+      out.push(line);
+      continue;
+    }
+    const lead = /^\s*/.exec(line)?.[0].length ?? 0;
+    const gap = /\S( {2,})\S/.exec(line.slice(lead));
+    let indent = gap?.index === undefined ? lead + 2 : lead + gap.index + 1 + (gap[1]?.length ?? 0);
+    // reason: a name column wider than half the width would leave no room for text; fall back to a small indent.
+    if (indent > width / 2) indent = lead + 2;
+    let rest = line;
+    let prefix = "";
+    while (rest.length + prefix.length > width) {
+      const room = width - prefix.length;
+      let cut = rest.lastIndexOf(" ", room);
+      if (cut <= 0) cut = room;
+      out.push((prefix + rest.slice(0, cut)).trimEnd());
+      rest = rest.slice(cut).trimStart();
+      prefix = " ".repeat(indent);
+    }
+    out.push(prefix + rest);
+  }
+  return out.join("\n");
+}
+
+/**
+ * The short refusal for an unknown subcommand: that command's usage line and a pointer to `--help`, never the full
+ * help (BR-1371: it was 84 KB).
+ *
+ * @param commandPath - the command words that resolved before the unknown one (`["phase"]` for `lore phase bogus`)
+ * @param message - citty's own message (`Unknown command bogus`)
+ * @returns at most 600 bytes of text
+ */
+export function formatUnknownCommandUsage(commandPath: readonly string[], message: string): string {
+  const base = ["lore", ...commandPath].join(" ");
+  const usage = `Usage: ${base} <command> [options]\nRun \`${base} --help\` for the commands and options.`;
+  return `${message.slice(0, 300)}\n${usage}`;
 }

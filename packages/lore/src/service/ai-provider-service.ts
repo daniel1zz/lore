@@ -2191,10 +2191,6 @@ export class AIProviderService {
       // reason: SPEC-044 D11 byproduct — a review judge MAY emit this nomination
       // alongside its normal verdict; passed through verbatim, never re-derived here.
       ...(parsed.superseded_candidate !== undefined ? { superseded_candidate: parsed.superseded_candidate } : {}),
-      // reason: SPEC-053 — the v2 judge MAY emit non-blocking AC-quantifiability advisory
-      // findings; passed through verbatim (never re-derived, never allowed to alter the
-      // decision here — the prompt already forbids the judge from rejecting on them).
-      ...(parsed.advisory !== undefined ? { advisory: parsed.advisory } : {}),
       judge: {
         provider: this.active,
         // reason: the AIProvider interface (packages/core/src/ai.ts) exposes no resolved
