@@ -173,7 +173,8 @@ describe("AC-ASK-1 harness records the answer", () => {
     expect(hook.exitCode, hook.stderr).toBe(0);
     expect(hook.stdout).toContain(`decision ${id} rejected`);
 
-    expect(loosenAgain(corpus, "stash-drop").exitCode).toBe(4);
+    const again = loosenAgain(corpus, "stash-drop");
+    expect(again.exitCode, again.stderr).not.toBe(0); // the same refusal as before the answer (autonomy-tier-retire pins the code family)
     expect(thresholdOf(corpus, "stash-drop")).toBe(0.8);
     const human = (await readLog(corpus)).filter((r) => r.channel === "human-tty");
     expect(human).toHaveLength(1);
