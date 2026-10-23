@@ -71,7 +71,7 @@ function questionFor(pending: PendingDecision, nonce: string, recommendation: As
     const label = side === "accept" ? t.acceptLabel : t.rejectLabel;
     const description = side === "accept" ? t.acceptDescription : t.rejectDescription;
     if (recommendation === undefined || recommendation.answer !== side) return { label, description };
-    return { label: `${label} ${t.recommendedMarker}`, description: `${recommendation.reason} ${description}` };
+    return { label: `${label}${t.recommendedMarker}`, description: `${recommendation.reason} ${description}` };
   };
   const options = recommendation?.answer === "reject" ? [option("reject"), option("accept")] : [option("accept"), option("reject")];
   return { question: text, header: `Decision ${pending.id}`.slice(0, 12), options, multiSelect: false };

@@ -5,7 +5,7 @@
  * Public surface: ASK_LANGUAGES, AskLanguage, parseAskLanguage, ASK_TEXT, AskText.
  * Invariants:
  *   - Every language carries the same keys (the table is typed `Record<AskLanguage, AskText>`).
- *   - The recommendation marker is the last part of an option label; harness-ask.ts strips it when reading the answer.
+ *   - The recommendation marker (leading space included where the language uses one) is the last part of an option label; harness-ask.ts strips it when reading the answer.
  * Side-effect class: pure.
  */
 import type { LoreError, Result } from "@lore/core";
@@ -41,7 +41,7 @@ export const ASK_TEXT: Record<AskLanguage, AskText> = {
   en: {
     acceptLabel: "Accept",
     rejectLabel: "Reject",
-    recommendedMarker: "(Recommended)",
+    recommendedMarker: " (Recommended)",
     acceptDescription: "Accept: the operation may proceed when it is re-run.",
     rejectDescription: "Reject: the operation stays refused.",
     question: "do you accept it?",
