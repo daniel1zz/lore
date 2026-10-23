@@ -265,7 +265,10 @@ async function runRender(args: Record<string, unknown>, cwd: string, inv: Invoca
   if (args["explain"] === true) {
     for (const row of result.value.explain) inv.io.stderr.write(`explain: ${row.id} layer=${row.layer} chars=${row.chars}\n`);
   }
-  emitHookJson(inv.io, outlet, result.value.additionalContext);
+  // `--with-pointers`: one hook process gets fragments + project pointers from ONE lore call (AC-LG-7).
+  const pointers = args["with-pointers"] === true ? (await collectPointerText(cwd, inv)).trim() : "";
+  const context = [result.value.additionalContext, pointers].filter((part) => part !== "").join("\n\n");
+  emitHookJson(inv.io, outlet, context);
   return 0;
 }
 
@@ -297,7 +300,8 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   return 0;
 }
 
-async function runPointers(cwd: string, inv: Invocation): Promise<number> {
+/** Builds the project pointer lines (one `lore bootstrap --json` spawn); a skip reason other than no-corpus goes to stderr. */
+async function collectPointerText(cwd: string, inv: Invocation): Promise<string> {
   const projectRoot = resolveProjectRoot(cwd);
   // reason: from source the re-run is `bun <source entry>`; the Invocation carries no entry-script path, and the
   // entry (`packages/lore/src/index.ts`, the `bin` of packages/lore) is fixed relative to this module.
@@ -317,7 +321,12 @@ async function runPointers(cwd: string, inv: Invocation): Promise<number> {
   if (result.skipped !== undefined && result.skipped !== "no-corpus") {
     inv.io.stderr.write(`lore fragments pointers: no pointers emitted (${result.skipped})\n`);
   }
-  if (result.text.length > 0) inv.io.stdout.write(result.text);
+  return result.text;
+}
+
+async function runPointers(cwd: string, inv: Invocation): Promise<number> {
+  const text = await collectPointerText(cwd, inv);
+  if (text.length > 0) inv.io.stdout.write(text);
   return 0;
 }
 
@@ -335,6 +344,7 @@ export default defineLoreCommand({
     outlet: { type: "string", description: "render: hook:subagent-start" },
     "agent-type": { type: "string", description: "render: subagent type for hook:subagent-start" },
     cwd: { type: "string", description: "Project directory (default: current directory)" },
+    "with-pointers": { type: "boolean", description: "render: append the project pointer lines to the hook context", default: false },
     explain: { type: "boolean", description: "render: print per-fragment id/layer/chars to stderr", default: false },
     json: { type: "boolean", description: "check: print the report as JSON", default: false },
   },

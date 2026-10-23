@@ -19,14 +19,10 @@
  *       source edits total <= SOURCE_EDIT_ALLOWANCE changed lines (per file: max(added, deleted),
  *       summed). AUTHORITATIVE reading per the spec's #198 note — the reserved rule text is
  *       imprecise.
- *   (b) anchor drift — a file deleted (rm / mv / git mv / Edit-less shell) between the
- *       snapshot and now that a live spec declares as a code anchor. An anchor already missing at
- *       the snapshot is pre-existing drift, not a finding. ONE `lore status --check-drift`
- *       spawn, made only when something was deleted and `.lore/` exists.
- *   (c) a CLAUDE.md changed this turn that is over its ceiling per `lore status --check-claude-md`
- *       (config-only check; spawned only when a CLAUDE.md changed).
+ *   (b) shared-checkout changes (BR-1349) — see below. (The anchor-drift and CLAUDE.md-budget findings
+ *       were removed: own-diff BR-1355 and check:memory-files already cover them; AC-LG-7.)
  *
- *   (d) shared-checkout changes (BR-1349) — ONE `git status --porcelain` on the shared checkout (the main working
+ *       ONE `git status --porcelain` on the shared checkout (the main working
  *       tree: the parent of `git rev-parse --git-common-dir`). Every changed or untracked, not-ignored path is a
  *       finding in the single block, except a path finding (a) already lists. A clean checkout adds nothing. The
  *       cost is one git call however many helpers ran; helper work is judged at `lore integrate`, not here (the
@@ -34,10 +30,10 @@
  *
  * Flow: stop_hook_active=true -> exit 0 silent (loop prevention) | turn state unreadable ->
  * exit 0 + ONE stderr line "turn state not measured: ..." (lore issue #156, same policy as
- * the retired stop-doc-sync hook) | measure (a)(b)(c)(d) | no finding -> exit 0 silent | else one block.
+ * the retired stop-doc-sync hook) | measure (a)(b) | no finding -> exit 0 silent | else one block.
  *
  * Side-effect class: IO — reads the turn dir and `.lore/config.yaml`, spawns git (temporary
- * index under os.tmpdir(), removed afterwards) and, conditionally, `lore`. Writes only to
+ * index under os.tmpdir(), removed afterwards). Writes only to
  * stdout/stderr. The setting is read with a small indentation scan because a standalone hook
  * has no YAML parser (same constraint session-start-resume.mjs documents).
  *
@@ -73,8 +69,6 @@ const SOURCE_EXTENSIONS = new Set([
 const EXEMPT_SEGMENTS = new Set(['hooks', '.claude', '.github', '.vscode', '.lore']);
 /** Config-by-name source files (`vitest.config.ts`, `.eslintrc.js`, ...). */
 const CONFIG_FILE_NAME = /(?:\.config\.[cm]?[jt]s|rc\.[cm]?js|\.setup\.[cm]?[jt]s)$/;
-
-const DEAD_SPEC_STATUSES = new Set(['deprecated', 'archived']);
 
 /** Reasons a measurement could not be made; flushed as ONE stderr line at the end. */
 const notMeasuredReasons = [];
@@ -201,60 +195,8 @@ function findSourceEdits(turnChanges, mainRun, changedLines, realRoot) {
   return { counted: total > SOURCE_EDIT_ALLOWANCE ? counted : null, total, notCounted };
 }
 
-/** (b) Live-spec code anchors deleted since the snapshot; one `lore status --check-drift` spawn. */
-function findAnchorDrift(realRoot, deletedPaths) {
-  if (deletedPaths.length === 0 || !existsSync(join(realRoot, '.lore'))) return [];
-  const run = runProcess('lore', ['status', '--check-drift', '--json'], realRoot);
-  let drift;
-  try { drift = JSON.parse(run.stdout)?.data?.code_drift; } catch { drift = undefined; }
-  if (!drift) {
-    notMeasuredReasons.push(`anchor drift (lore status --check-drift gave no readable report: ${run.error?.message ?? run.stderr.trim() ?? `exit ${run.status}`})`);
-    return [];
-  }
-  if (drift.enabled === false || !Array.isArray(drift.drifts)) return [];
-  const findings = [];
-  for (const row of drift.drifts) {
-    if (row.kind !== 'file_missing' || DEAD_SPEC_STATUSES.has(row.doc_status)) continue;
-    const anchorPath = String(row.anchor).split('#')[0].replace(/\/+$/, '');
-    const removed = deletedPaths.find((p) => p === anchorPath || p.startsWith(`${anchorPath}/`));
-    if (removed) findings.push({ spec: row.doc_slug, anchor: anchorPath });
-  }
-  return findings;
-}
-
 /**
- * (c) Report lines for the changed CLAUDE.md files that are over a ceiling, from the JSON of
- * `lore status --check-claude-md`; null when all are within budget.
- * reason: the exit code is NOT the verdict here — negative headroom is the ceiling fact itself, read per
- * changed file (the exit code only says that SOME memory file has a finding).
- */
-function findClaudeMdBreach(realRoot, changedPaths) {
-  const run = runProcess('lore', ['status', '--check-claude-md', '--json'], realRoot);
-  let report;
-  try { report = JSON.parse(run.stdout)?.data?.claude_md; } catch { report = undefined; }
-  if (!report || !Array.isArray(report.headroom)) {
-    notMeasuredReasons.push(`CLAUDE.md budget (lore status --check-claude-md gave no readable report: ${run.error?.message ?? (run.stderr.trim() || `exit ${run.status}`)})`);
-    return null;
-  }
-  const lines = [];
-  for (const row of report.headroom) {
-    if (!changedPaths.has(row.path)) continue;
-    const overLines = row.lines?.remaining < 0;
-    const overBytes = row.bytes?.remaining < 0;
-    if (!overLines && !overBytes) continue;
-    lines.push(`${row.path} (${row.role}): lines ${row.lines.used}/${row.lines.ceiling} (${row.lines.remaining} remaining), bytes ${row.bytes.used}/${row.bytes.ceiling} (${row.bytes.remaining} remaining)`);
-  }
-  const ceilingKinds = new Set(['max_lines', 'max_bytes']);
-  for (const finding of [...(report.findings ?? []), ...(report.advisory ?? [])]) {
-    const kind = finding.kind === 'downgraded' ? finding.downgraded_kind : finding.kind;
-    if (changedPaths.has(finding.path) && ceilingKinds.has(kind)) lines.push(finding.message);
-  }
-  return lines.length > 0 ? lines : null;
-}
-
-
-/**
- * (d) Changed or untracked, not-ignored paths of the shared checkout (BR-1349): one `git status --porcelain`.
+ * (b) Changed or untracked, not-ignored paths of the shared checkout (BR-1349): one `git status --porcelain`.
  * The shared checkout is the main working tree, i.e. the parent of `git rev-parse --git-common-dir`; from a
  * linked worktree that is NOT the worktree the hook runs in.
  * Returns `{root, paths}`; `paths` is null when the checkout could not be read (a not-measured reason is recorded,
@@ -339,7 +281,7 @@ let diffFailure = null;
 const noteUnmeasured = (reason) => { notMeasuredReasons.push(reason); diffFailure ??= reason; };
 const top = runProcess('git', ['rev-parse', '--show-toplevel'], cwd);
 if (!top.ok) {
-  noteUnmeasured('not a git work tree; source edits and anchor drift need the turn-start snapshot');
+  noteUnmeasured('not a git work tree; source edits need the turn-start snapshot');
 } else {
   realRoot = realpathSync(top.stdout.trim());
   try {
@@ -397,33 +339,6 @@ if (!quiet) {
     infoLines.push(`Source-edit finding: listed, not counted (a non-isolated helper shared the working copy this turn):\n${notCounted.join('\n')}`);
   }
 }
-if (diff && !quiet) {
-  const deleted = diff.entries.filter((e) => e.status === 'D').map((e) => e.path);
-  const drifted = findAnchorDrift(realRoot, deleted);
-  if (drifted.length > 0) {
-    findings.push([
-      'Anchor drift (a live spec anchors a file this turn deleted or renamed):',
-      ...drifted.map((d) => `   - ${d.spec}: ${d.anchor}`),
-      '   Restore the file, or update the spec anchor (lore anchor rm / lore anchor add) to the new path.',
-    ].join('\n'));
-  }
-}
-
-// reason: with a measured diff the changed set is what the working tree really shows (Bash edits
-// included, an edit reverted within the turn excluded); without one the edit records are all we have.
-const changedClaudeMd = new Set(
-  diff
-    ? diff.entries.filter((e) => e.status !== 'D' && basename(e.path) === 'CLAUDE.md').map((e) => e.path)
-    : records.filter((r) => basename(r.file) === 'CLAUDE.md')
-        .map((r) => (realRoot ? toRepoRelative(realRoot, r.file, cwd) : r.file)).filter(Boolean),
-);
-if (changedClaudeMd.size > 0 && !quiet) {
-  const report = findClaudeMdBreach(realRoot ?? cwd, changedClaudeMd);
-  if (report) {
-    findings.push(['A CLAUDE.md edited this turn is over its ceiling (lore status --check-claude-md):', ...report.map((l) => `   - ${l}`), '   Evict detail into the corpus (or split into a module CLAUDE.md) before finishing.'].join('\n'));
-  }
-}
-
 // ── 4b. shared checkout: one `git status --porcelain` (BR-1349) ──
 if (!quiet) {
   const shared = findSharedCheckoutChanges(realRoot ?? cwd);

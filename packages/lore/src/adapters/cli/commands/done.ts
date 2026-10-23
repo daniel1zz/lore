@@ -69,13 +69,10 @@
  * this citation can never launder a self-report into something that reads as
  * attested.
  *
- * MCP: NOT plumbed. `lore_done` does not exist on the MCP tool surface at all
- * (verified 2026-08-01: `grep -c "lore_done" packages/lore/src/adapters/mcp/
- * tools.ts` → 0; `grep -rln "\.done(" packages/lore/src/adapters` → this file
- * only) — there is no MCP call site to plumb the escape hatch onto. Should a
- * future `lore_done` MCP tool ever be added, it inherits the attestation floor
- * automatically (service-layer predicate) and would need its OWN explicit
- * `overrideReason` tool argument, same audited-and-mandatory shape as here.
+ * MCP: `lore_done` (mcp/tools.ts) calls the same `TaskWorkflowService.done`, so every floor applies to it
+ * identically; it carries its own `override_attestation` / `declare_no_new_tests` arguments (the same audited,
+ * mandatory-reason shape as the two flags here; it has no citation form). `lore bulk done` reaches the same service
+ * method for many tasks.
  *
  * `--declare-no-new-tests "<reason>"` is the SAME audited-escape shape for a
  * DIFFERENT, INDEPENDENT floor (task-a-non-empty-output-tail-can-be-hand-

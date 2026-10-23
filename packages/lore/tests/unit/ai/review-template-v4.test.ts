@@ -2,7 +2,7 @@
 /**
  * Review judge prompt v4 (design necessity): v4 is the current version, its assembled prompt for a
  * spec, a plan and an ADR carries the design_necessity rule (four item classes + end-state test), and
- * the v1/v2/v3 builders still produce the bytes recorded in `review-prompt-v1-v3-frozen.json`
+ * the v1/v3 builders still produce the bytes recorded in `review-prompt-v1-v3-frozen.json`
  * (snapshotted from the builders BEFORE v4 existed).
  *
  * Side-effect class: reads one fixture file; no IO otherwise.
@@ -44,7 +44,7 @@ describe("review prompt v4", () => {
   });
 
   it("ERROR: an unknown version key is not registered", () => {
-    expect(REVIEW_TEMPLATES["v7"]).toBeUndefined();
+    expect(REVIEW_TEMPLATES["v8"]).toBeUndefined();
   });
 
   it.each(KINDS)("HAPPY: the v4 prompt for a %s carries the design_necessity rule", (kind) => {
@@ -59,7 +59,7 @@ describe("review prompt v4", () => {
     expect(prompt).toContain("is not a finding");
   });
 
-  it.each(["v1", "v2", "v3"])("NEGATIVE: the %s prompt does not mention design_necessity", (version) => {
+  it.each(["v1", "v3"])("NEGATIVE: the %s prompt does not mention design_necessity", (version) => {
     for (const kind of KINDS) expect(render(version, kind)).not.toContain("design_necessity");
   });
 
@@ -73,7 +73,7 @@ describe("review prompt v4", () => {
     expect(v4.slice(0, start)).toBe(v3);
   });
 
-  it.each(["v1", "v2", "v3"])("REGRESSION: %s output is byte-identical to the frozen snapshot", (version) => {
+  it.each(["v1", "v3"])("REGRESSION: %s output is byte-identical to the frozen snapshot", (version) => {
     for (const kind of KINDS) {
       expect(render(version, kind)).toBe(FROZEN[`${version}:${kind}`]);
     }

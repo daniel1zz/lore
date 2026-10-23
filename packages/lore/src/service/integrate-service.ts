@@ -92,7 +92,7 @@ import { err, ok, type LoreError, type Result } from "@lore/core";
 import { z } from "zod";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
-import type { OwnDiffRename, OwnDiffVerdict } from "./own-diff-judgment.js";
+import type { BoundProseRow, OwnDiffRename, OwnDiffVerdict } from "./own-diff-judgment.js";
 import type { LandingFact, LandingRequest } from "./task-commit-range.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
 import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
@@ -212,6 +212,14 @@ export interface OwnDiffJudge {
 interface JudgedChange {
   readonly footprint: Pick<LandingFact, "outside_anchors">;
   readonly renames: readonly OwnDiffRename[];
+}
+
+/** One output line per changed file with bound prose: `integrate: prose bound to <path>: <document[:line]> (<reference>), ...`. */
+function renderBoundProseLines(rows: readonly BoundProseRow[]): string[] {
+  return rows.map((row) => {
+    const bindings = row.bindings.map((b) => `${b.line === undefined ? b.document : `${b.document}:${b.line}`} (${b.reference})`);
+    return `integrate: prose bound to ${row.path}: ${bindings.join(", ")}`;
+  });
 }
 
 export interface IntegrateDeps {
@@ -587,6 +595,7 @@ export class IntegrateService {
     if (onMain.status !== 1) return err(gitFailure(`is ${short(tip)} on ${TARGET_NAME}`, onMain));
     const verdict = await judgment.judge(branch, tip);
     if (!verdict.ok) return verdict;
+    for (const line of renderBoundProseLines(verdict.value.bound_prose)) this.deps.log(line);
     return ok({ footprint: { outside_anchors: [...verdict.value.outside_anchors] }, renames: verdict.value.renames });
   }
 

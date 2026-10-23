@@ -1,4 +1,3 @@
-// @spawns assets/hooks/stop-handoff-coverage.mjs
 // @spawns packages/lore/src/index.ts
 // @reads packages/lore/src/adapters/cli/commands/handoff.ts
 /**
@@ -108,8 +107,6 @@ import type { ResumeHandoffRecord, ResumeResult } from "../../src/service/sessio
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
-/** The SHIPPED Stop hook asset, run unmodified from its own path (AC-RCH-3 / H1: this spec edits no asset). */
-const HOOK_PATH = join(REPO_ROOT, "assets", "hooks", "stop-handoff-coverage.mjs");
 /** The verb's own source, read only to prove it types no grammar literal (AC-RCH-2). */
 const VERB_SOURCE_PATH = join(PACKAGE_ROOT, "src", "adapters", "cli", "commands", "handoff.ts");
 
@@ -168,40 +165,6 @@ function runHandoffWrite(extraArgs: string[]): RunResult {
     stderr: result.stderr ?? "",
     exitCode: result.status ?? 1,
   };
-}
-
-/**
- * Runs the UNMODIFIED hook asset with `stubDir` prepended to `PATH`, so the
- * hook's own `spawnSync('lore', …)` resolves the stub instead of a real
- * binary — the same `PATH` substitution SPEC-112 AC-RC-10 uses. stdout is
- * captured as a RAW Buffer (no `encoding`), because AC-RCH-3's property is
- * byte-for-byte reproduction, which a decode/re-encode round could mask.
- */
-function runHookWithStub(stubDir: string, payload: unknown): { stdout: Buffer; stderr: string; exitCode: number } {
-  const result = spawnSync("node", [HOOK_PATH], {
-    input: JSON.stringify(payload),
-    env: { ...process.env, PATH: `${stubDir}:${process.env.PATH ?? ""}` },
-  });
-  return {
-    stdout: result.stdout ?? Buffer.alloc(0),
-    stderr: (result.stderr ?? Buffer.alloc(0)).toString("utf8"),
-    exitCode: result.status ?? 1,
-  };
-}
-
-/**
- * Writes an executable `lore` shim into a fresh directory and returns that
- * directory. The shim drains its stdin (the hook writes the forwarded payload
- * there and a non-reading child would risk an EPIPE that masks the relay),
- * then writes `stdout` with NO added newline and exits 0.
- */
-function writeLoreStub(dir: string, stdout: string): string {
-  const stubDir = join(dir, "stub-bin");
-  mkdirSync(stubDir, { recursive: true });
-  const stubPath = join(stubDir, "lore");
-  writeFileSync(stubPath, `#!/bin/sh\ncat > /dev/null\nprintf '%s' '${stdout}'\nexit 0\n`);
-  chmodSync(stubPath, 0o755);
-  return stubDir;
 }
 
 // ─── Transcript construction (MEASURED entry shapes) ────────────────────────
@@ -633,56 +596,6 @@ describe("AC-RCH-2 — the reason template is composed of exported constants and
     // mistyped needle would make the zero-hit assertion pass vacuously.
     expect(countOccurrences(reason, RESUME_DISPOSITION_MARKER)).toBeGreaterThan(0);
     expect(countOccurrences(verbSource, RESUME_DISPOSITION_MARKER)).toBe(0);
-  });
-});
-
-// ─── AC-RCH-3 ───────────────────────────────────────────────────────────────
-
-describe("AC-RCH-3 — the unmodified hook relays block payloads verbatim and still holds zero grammar", () => {
-  /** A payload only the stub can have produced — the real verb never emits this reason. */
-  const STUB_STDOUT = JSON.stringify({
-    decision: BLOCK_DECISION,
-    reason: "stub sentinel 7f3a9c relayed unchanged",
-  });
-
-  it("HAPPY: with a stub `lore` earlier on PATH, the shipped hook reproduces the stub's stdout byte-for-byte and exits 0", () => {
-    const stubDir = writeLoreStub(tmpDir, STUB_STDOUT);
-    const transcriptPath = writeNoTicketTranscript(tmpDir);
-
-    const result = runHookWithStub(stubDir, {
-      transcript_path: transcriptPath,
-      last_assistant_message: "anything at all",
-    });
-
-    // Byte comparison, not a decoded string compare: "byte-for-byte" is the
-    // property, and the sentinel proves the stub (not a real binary) answered.
-    expect(result.stdout.equals(Buffer.from(STUB_STDOUT, "utf8"))).toBe(true);
-    expect(result.exitCode).toBe(0);
-    // A fault of the hook's own is never silent — its absence proves the relay
-    // path ran rather than the stub failing to resolve.
-    expect(result.stderr).not.toContain("stop-handoff-coverage: ");
-  });
-
-  it("REGRESSION control: the hook asset yields zero hits for every exported id prefix and disposition token — it gained no grammar (D9)", () => {
-    const hookSource = readFileSync(HOOK_PATH, "utf8");
-    const needles: ReadonlyArray<readonly [string, string]> = [
-      ["RESUME_ITEM_ID_PREFIX_KEY_DECISION", RESUME_ITEM_ID_PREFIX_KEY_DECISION],
-      ["RESUME_ITEM_ID_PREFIX_NEXT_STEP", RESUME_ITEM_ID_PREFIX_NEXT_STEP],
-      ["RESUME_DISPOSITION_MARKER", RESUME_DISPOSITION_MARKER],
-      ["RESUME_DISPOSITION_DONE", RESUME_DISPOSITION_DONE],
-      ["RESUME_DISPOSITION_DEFERRED_PREFIX", RESUME_DISPOSITION_DEFERRED_PREFIX],
-      ["RESUME_COVERAGE_FLOOR", RESUME_COVERAGE_FLOOR],
-    ];
-    // Positive control haystack, built from the exports themselves: every
-    // needle IS findable by this searcher, so each zero below is a measured
-    // absence rather than a broken search or an empty needle.
-    const control = needles.map(([, value]) => value).join("\n");
-
-    for (const [name, value] of needles) {
-      expect(value.length, `${name} must be a non-empty export`).toBeGreaterThan(0);
-      expect(countOccurrences(control, value), `${name} must be findable by this searcher`).toBeGreaterThan(0);
-      expect(countOccurrences(hookSource, value), `the hook must not carry ${name}`).toBe(0);
-    }
   });
 });
 
