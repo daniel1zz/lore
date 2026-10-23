@@ -207,7 +207,7 @@ import { assertRegisteredToolsMatchNames, type LoreMcpToolName } from "./tool-na
 import { McpCallScope, requireCallIdentity } from "./call-scope.js";
 import type { Invocation, LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
-import { renderAssessmentContent, CAPTURE_TAIL_CHARS } from "@lore/core";
+import { failedDimensions, CAPTURE_TAIL_CHARS } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import type { SetRulePatch } from "../../service/rule-service.js";
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
@@ -271,9 +271,9 @@ import {
 import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from "../../flows/drift-flow.js";
 import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildFileAnchorProbeContext, buildRealFsProbe } from "../real-fs-probe.js";
-import { collectFileAnchorResolution } from "../../service/anchor-resolution.js";import { buildAssessSummaryText } from "./assess-render.js";
+import { collectFileAnchorResolution } from "../../service/anchor-resolution.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
-import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
+import { deriveCommitSetForPlan, describeCommitCount, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
 import { collectRecordedRanges } from "../../service/task-commit-range.js";
 import {
   findMissingOracleFilesForEvidence,
@@ -844,20 +844,14 @@ export const LoreAnchorSetSchema = z.object({
 });
 
 /**
- * Input schema for lore_assess (SPEC-026).
- * `diff_text` — optional pre-acquired diff content, an explicit override (mirrors the
- * CLI's `--diff`/`--diff-file`). When OMITTED, `lore_assess` now auto-derives the plan's
- * own commit set from git history itself (`../cli/assess-commit-derivation.js`, same
- * mechanism the CLI uses via its own `process.cwd()`) instead of requiring the caller to
- * assemble a diff — task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be.
- * `ai` — explicit AI opt-in/out. Unlike lore_create's `ai` (default false — MCP callers are
- * always agents), assess has no non-AI mode (SPEC-026 §3 D5: the tool name IS the AI intent).
- * Passing `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
+ * Input schema for lore_assess (BR-1372): the milestone review of one plan.
+ * The plan's landed diff is derived from the commit range its tasks recorded (`../cli/assess-commit-derivation.js`),
+ * never supplied by the caller. `ai` — explicit AI opt-in/out: assess has no non-AI mode (SPEC-026 §3 D5), so
+ * `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
  */
 export const LoreAssessSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   plan_id_or_slug: z.string(),
-  diff_text: z.string().optional(),
   ai: z.boolean().optional(),
 });
 
@@ -2714,137 +2708,65 @@ export function registerTools(
     },
   );
 
-  // ── SPEC-026: AI plan-outcome assessment ──────────────────────────────────
+  // ── BR-1372: milestone review ─────────────────────────────────────────────
 
   // lore_assess
   registerToolWithArgs(
     server,
     "lore_assess",
-    "AI plan-outcome assessment (LLM-as-judge) — judges a plan's completion against its spec's ACs and its tasks' evidence trails, persisting an auditable knowledge doc linked to the plan",
+    "Milestone review of a plan: judges its landed diff, documents and attested evidence on seven dimensions (correctness_vs_acs, spec_conformance, regression, design_necessity, snapshot_accuracy, concurrency_safety, security), stores the review linked to the plan; plan close requires a passing review of the plan's current state",
     LoreAssessSchema,
     async (args) => {
-      const bundleResult = await corpusService.getPlanBundle(args.plan_id_or_slug);
-      if (!bundleResult.ok) return errorContent(bundleResult.error);
-      const bundle = bundleResult.value;
-
-      // AC-ASSESS-8: zero child tasks → VALIDATION_ERROR before any AI call.
-      if (bundle.tasks.length === 0) {
-        return errorContent({
-          code: "VALIDATION_ERROR",
-          field: "tasks",
-          message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
-        });
-      }
-
-      // reason: args.ai === false is a contradiction — assess has no non-AI mode
-      // (SPEC-026 §3 D5), mirroring the CLI's `--no-ai` → exit 2.
+      // reason: args.ai === false is a contradiction — assess has no non-AI mode (SPEC-026 §3 D5), mirroring the
+      // CLI's `--no-ai` → exit 2.
       if (args.ai === false) {
         return errorContent({
           code: "AI_PROVIDER_ERROR",
           message: "lore_assess requires AI; ai: false is a contradiction. Omit the field or pass ai: true.",
         });
       }
-
-      // SPEC-026 §3 D5: only an EXPLICIT config override braked (not the mcp surface's
-      // built-in AI-off default) requires the caller to pass ai: true.
+      // SPEC-026 §3 D5: only an EXPLICIT config override braked (not the mcp surface's built-in AI-off default)
+      // requires the caller to pass ai: true.
       const explicitAi = args.ai === true ? true : undefined;
-      const resolved = app.resolveAiDefault(explicitAi);
-      if (explicitAi === undefined && isAssessAiBraked(resolved)) {
+      if (explicitAi === undefined && isAssessAiBraked(app.resolveAiDefault(explicitAi))) {
         return errorContent({
           code: "AI_PROVIDER_ERROR",
           message: "AI is disabled for the mcp surface by config.ai.default_per_surface.mcp. Pass ai: true to override.",
         });
       }
-
-      // ─── Diff acquisition: explicit diff_text override, else auto-derive ──────
-      // reason: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be —
-      // mirrors the CLI's assess.ts: an explicit `diff_text` always wins (this MCP
-      // surface has no subprocess/file-read seam of its own, so an override still
-      // comes in as pre-acquired text); when omitted, derive the plan's own commit
-      // set from git history via the SAME shared mechanism the CLI uses, instead of
-      // requiring the caller to assemble a diff themselves.
-      let diffText: string | undefined = args.diff_text;
-      let diffSource: DiffSourceRecord;
-      // reason: the MCP server has no Invocation; its cwd is the one `assessPlan` verifies finding paths
-      // against (formerly `assessPlan`'s own `opts.repoRoot ?? process.cwd()` default). Read once here,
-      // reused by the derivation below, so this handler's cwd read count does not rise (AS-26 ratchet).
-      const assessRepoRoot = inv.cwd;
-      // reason: task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan —
-      // mirrors `commands/assess.ts`'s own `commitDerivationUnverifiable` local exactly:
-      // set ONLY by the auto-derived branch below when the derivation reports
-      // `"unverifiable_convention_mismatch"`; forwarded to `assessPlan` so the SERVICE
-      // layer (never this adapter) forbids `scope_fidelity` from publishing an
-      // absence-based score in that state. `false` on every OTHER path (explicit
-      // `diff_text` override, or a genuinely commit-less plan) is a deliberate value,
-      // never an omission — `assessPlan`'s `opts.commitDerivationUnverifiable` is a
-      // REQUIRED field precisely so this adapter cannot silently skip computing it the
-      // way it previously did.
-      let commitDerivationUnverifiable = false;
-      if (args.diff_text !== undefined) {
-        diffSource = { mode: "explicit_diff_text" };
-      } else {
-        // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task — every task
-        // already `archived` means merged work exists BY DEFINITION (VALID_TRANSITIONS,
-        // @lore/core); a zero-match derivation in that state is a commit-message
-        // CONVENTION MISMATCH, not genuine absence, so it must be told apart from a plan
-        // that plausibly has no merged work yet. Mirrors `commands/assess.ts` exactly —
-        // `deriveCommitSetForPlan`'s `allTasksArchived` parameter is REQUIRED (no default),
-        // so this computation cannot be omitted and still compile.
-        const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
-        const derivation = deriveCommitSetForPlan(
-          assessRepoRoot,
-          bundle.tasks.map((t) => t.slug),
-          allTasksArchived,
-          collectRecordedRanges(bundle.tasks),
-        );
-        diffSource = { mode: "auto_derived", ...derivation };
-        if (derivation.status === "derived") {
-          diffText = derivation.diff_text;
-        } else if (derivation.status === "unverifiable_convention_mismatch") {
-          commitDerivationUnverifiable = true;
-        }
+      const reviewService = app.milestoneReviewService;
+      if (reviewService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "milestoneReviewService is not wired on this App instance" });
       }
+      const bundleResult = await corpusService.getPlanBundle(args.plan_id_or_slug);
+      if (!bundleResult.ok) return errorContent(bundleResult.error);
+      const bundle = bundleResult.value;
 
-      // reason: D6 (spec-judgment-surfaces-must-verify-before-they-certify-machine,
-      // task-thread-diff-source-through-the-cli-and-mcp-assess-adapters) — `diffSource`
-      // (this handler's own already-computed `DiffSourceRecord` local, assigned on every
-      // branch above) is now threaded into `opts.diffSource` so `resolveAssessedCommit`/
-      // `verifyFindingPaths` (AC-JV-1, D2, D3) have a referent to check finding paths
-      // against — mirrors the CLI's `commands/assess.ts` fix exactly; the two adapters
-      // drift independently, so wiring one alone proves nothing about the other (AC-JV-5).
-      const assessResult = await app.aiProviderService.assessPlan(bundle, {
-        ...(diffText !== undefined ? { diffText } : {}),
-        source: app.callerSurface,
-        commitDerivationUnverifiable,
-        diffSource,
-        repoRoot: assessRepoRoot,
+      // reason: the MCP server has no Invocation; its cwd is the one the commit derivation runs git in. Read once.
+      const repoRoot = inv.cwd;
+      const derivation = deriveCommitSetForPlan(
+        repoRoot,
+        bundle.tasks.map((t) => t.slug),
+        bundle.tasks.length > 0 && bundle.tasks.every((t) => t.status === "archived"),
+        collectRecordedRanges(bundle.tasks),
+      );
+      const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
+      const reviewed = await reviewService.review(args.plan_id_or_slug, {
+        ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
+        diffSource:
+          derivation.status === "derived"
+            ? `derived from ${describeCommitCount(derivation.commits.length, derivation.excluded_merged_commit_count)} across the plan's tasks`
+            : `unavailable (${derivation.status})`,
+        maxDiffChars: app.aiProviderService.assessMaxDiffChars,
       });
-      if (!assessResult.ok) return errorContent(assessResult.error);
-
-      const createResult = await corpusService.create({
-        type: "knowledge",
-        title: `Assessment: ${bundle.plan.title} (${new Date().toISOString().slice(0, 10)})`,
-        parent_id: bundle.plan.id,
-        // reason: `diff_source` is additive on the passthrough `extra` object (never a
-        // core `assessmentResultSchema` change) — records HOW this run's diff (if any)
-        // was obtained, so `diff_available` alone is never the only auditable signal
-        // (AC #3, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be).
-        extra: { sub_type: "assessment", assessment: assessResult.value, diff_source: diffSource },
-        content: renderAssessmentContent(assessResult.value),
-      });
-      if (!createResult.ok) return errorContent(createResult.error);
-
-      const linkResult = await corpusService.link(createResult.value.id, bundle.plan.id, "informs");
-      if (!linkResult.ok) return errorContent(linkResult.error);
-
-      // reason: SPEC-040 §T3 D3 — `summary` is additive to the pre-existing
-      // `assessment`/`result` envelope fields (which already carry the full typed
-      // AssessmentResult verbatim); it gives an agent reading MCP text content a
-      // scannable digest without re-deriving one from the nested JSON.
+      if (!reviewed.ok) return errorContent(reviewed.error);
+      const { doc, review } = reviewed.value;
       return textContent({
-        assessment: createResult.value,
-        result: assessResult.value,
-        summary: buildAssessSummaryText(assessResult.value),
+        review: doc,
+        overall: review.overall,
+        failed_dimensions: failedDimensions(review.dimensions),
+        dimensions: review.dimensions,
+        decisions: review.decisions,
         diff_source: diffSource,
       });
     },

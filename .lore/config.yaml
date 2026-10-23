@@ -60,13 +60,7 @@ workflow:
     # acCountMeetsFloor). No required_oracles: no oracle-coverage floor either.
     domain-overview:
       min_acs: 0
-  # plan-close cited-rule check (BR-984) ARMED. Armed 2026-07-26 as the prd-outline sync switch
-  # (SPEC-080 Phase 3); that predicate is retired and the switch was renamed for what it now
-  # switches, `cited_rule_check` (BL-D3, was `prd_sync`).
   gates:
-    plan-close:
-      cited_rule_check:
-        enabled: true
     # Citation gate (SPEC-157 C4) ARMED 2026-10-09 on all 12 baseline branches after the fast-mode
     # exit passed (knowledge-fast-mode-re-assessment-after-remediation-ac-bls2-13). A NEW or REVISED
     # criterion must cite a live rule; untouched legacy criteria are never refused. Roll back: mode report.

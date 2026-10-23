@@ -55,13 +55,8 @@ import {
   type RadiusDiffPort,
 } from "../../../src/service/stamp-binding-reader.js";
 import { SpawnGitPort } from "../../../src/service/rule-state-git-port.js";
-import {
-  ATTESTATION_FLOOR_FIELD,
-  ATTESTATION_FLOOR_REASON,
-  attestationFloor,
-  computeStampVerdictDistribution,
-  readStampVerdict,
-} from "../../../src/service/gate-predicates.js";
+import { computeStampVerdictDistribution, readStampVerdict } from "../../../src/service/gate-predicates.js";
+import { ATTESTATION_FLOOR_FIELD, ATTESTATION_FLOOR_REASON, attestationFloor } from "../../helpers/attestation-floor-stand-in.js";
 import {
   computeCaptureSourceDistribution,
   formatStampVerdictLine,

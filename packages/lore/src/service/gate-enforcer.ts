@@ -107,7 +107,6 @@ import {
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
-  resolveCitedRuleCheckGateEnabled,
   resolveVerificationProfile,
   SCOPE_UNDECLARED_REASON,
   type AuditEntry,

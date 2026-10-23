@@ -58,7 +58,7 @@
 
 import { dirname, join } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, isRetiredAdoptionError, isRetiredVerifySinceError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, isRetiredAdoptionError, isRetiredVerifySinceError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -374,7 +374,6 @@ export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig
     // per-call re-read never aborts a live server mid-request (the start-up `loadLoreApp` already refused a file
     // broken at boot), so it names the defect on stderr on every call and degrades to `undefined`.
     if (
-      isPrdSyncRenameError(configResult.error) ||
       isRetiredAdoptionError(configResult.error) ||
       isRetiredVerifySinceError(configResult.error)
     ) {
@@ -467,7 +466,6 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     rawConfig = configResult.value;
   } else if (
     isAiConfigValidationError(configResult.error) ||
-    isPrdSyncRenameError(configResult.error) ||
     isRetiredAdoptionError(configResult.error) ||
     isRetiredVerifySinceError(configResult.error)
   ) {

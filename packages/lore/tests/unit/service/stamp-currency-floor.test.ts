@@ -53,12 +53,8 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import { StateBindingService } from "../../../src/service/state-binding-service.js";
 import { loadStampBindingContext } from "../../../src/service/stamp-binding-reader.js";
-import {
-  ATTESTATION_FLOOR_FIELD,
-  ATTESTATION_FLOOR_REASON,
-  attestationFloor,
-  stampCurrency,
-} from "../../../src/service/gate-predicates.js";
+import { stampCurrency } from "../../../src/service/gate-predicates.js";
+import { ATTESTATION_FLOOR_FIELD, ATTESTATION_FLOOR_REASON, attestationFloor } from "../../helpers/attestation-floor-stand-in.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { actedStore } from "../../live-invocation.js";
 

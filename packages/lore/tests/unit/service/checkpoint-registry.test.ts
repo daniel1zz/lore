@@ -662,29 +662,4 @@ describe("reachability unknown vs known-false (verifyReachability / describeReac
   it("BOUNDARY: verifyReachability('spec', 0) still reports no-script-acs unchanged", () => {
     expect(verifyReachability("spec", 0)).toEqual({ reachable: false, why: "no-script-acs" });
   });
-
-  // STATE — the live incident shape: a plan-close ctx that never populated
-  // `hasSpecParent`/`parentSpecScriptAcCount` at all (exactly what
-  // `CorpusService.set`'s real plan-close call site does today, pre-fix) must
-  // render NEITHER definite reachability claim in the feeding pack.
-  it("STATE: plan-close feed for an unknown-reachability ctx renders neither definite reachability claim", () => {
-    const planClose = checkpointRegistry["plan-close"];
-    if (planClose === undefined) {
-      throw new Error("plan-close checkpoint not registered — test fixture assumption broken");
-    }
-    const ctx: GateContext = {
-      targetIdOrSlug: "plan-example",
-      attestationMinRatio: 0.5,
-      planTasksAttestation: [{ slug: "task-1", title: "Task One", evidenceCount: 3, attestedCount: 0 }],
-      // hasSpecParent / parentSpecScriptAcCount deliberately OMITTED — mirrors
-      // the live bug: plan-close's real caller never populates these today.
-    };
-    // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
-    // `checkPlanClose`'s check() can now also return a `PredicateNotApplicable`
-    // member; `selectFailures` (already imported above) narrows those out.
-    const failures = selectFailures(planClose.check(ctx));
-    const text = planClose.feed(ctx, failures);
-    expect(text).not.toContain("no spec-tier ancestor");
-    expect(text).not.toContain("zero script-mode");
-  });
 });
