@@ -22,6 +22,7 @@ import { join } from "node:path";
 import * as core from "@lore/core";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { retirementAssessFields } from "../../src/service/retired-ac-service.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -75,7 +76,7 @@ let prdSlug: string;
 let counter = 0;
 
 function slugOf(stdout: string): string {
-  const slug = stdout.match(/Slug:\s+(\S+)/)?.[1];
+  const slug = stdout.match(/Slug:\s+(\S+)/)?.[1] ?? stdout.match(/Created baseline \w+ (\S+) \(/)?.[1];
   if (slug === undefined) throw new Error(`no slug in create output: ${stdout}`);
   return slug;
 }
@@ -819,6 +820,53 @@ describe("milestone review gates close", () => {
     expect(refused.stderr).toContain("BR-1372");
     expect(refused.stderr).toContain("--file-issues");
     expect(statusOf(plan)).toBe("approved");
+  });
+
+  /** Runs lore in the throwaway corpus and requires exit 0. */
+  const must = (args: string[]): string => {
+    const r = runLore(args, tmpDir);
+    expect(r.exitCode, `lore ${args.join(" ")}: ${r.stderr}${r.stdout}`).toBe(0);
+    return r.stdout;
+  };
+  const ruleState = (id: string): string => (JSON.parse(must(["rule", "show", id, "--json"])) as { data: { state: string } }).data.state;
+
+  it("milestone review gates close: rejecting a deprecation restores the spec AND proposes its abandoned rule again (#337)", { timeout: 300_000 }, () => {
+    const root = slugOf(must(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Rule Root"]));
+    const branch = slugOf(must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Rule Branch"]));
+    const leaf = slugOf(must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Rule Leaf"]));
+    const { plan } = makePlan("Retire with rule");
+    const spec = createSpec("Doomed spec with a rule");
+    must(["ac", "add", spec, "AC-RULE-1", "--statement", "doomed", "--mode", "human"]);
+    const proposed = must(["rule", "propose", spec, "add", "--leaf", leaf, "--statement", "A rule the spec introduces", "--example", "when X then Y", "--enforced-by", "both"]);
+    const ruleId = proposed.match(/\bBR-\d+\b/)?.[0] ?? "";
+    expect(ruleId).not.toBe("");
+    expect(ruleState(ruleId)).toBe("proposed");
+
+    must(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"]);
+    expect(ruleState(ruleId)).toBe("retired"); // abandoned with the deprecation (BR-1307)
+    assessRows([plan]);
+    answerPending("Reject");
+    expect(close(plan).exitCode).toBe(4);
+    expect(statusOf(spec)).toBe("draft");
+    expect(ruleState(ruleId)).toBe("proposed"); // revived in the same write as the status restore
+    assessRows([plan]); // a second settle changes nothing
+    expect(ruleState(ruleId)).toBe("proposed");
+    expect(statusOf(spec)).toBe("draft");
+  });
+
+  it("milestone review gates close: the shared serializer yields the CLI row's retired_acs and pending_decision exactly", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("Serializer shape");
+    const spec = createSpec("Doomed spec");
+    must(["ac", "add", spec, "AC-DOOM-1", "--statement", "doomed", "--mode", "human"]);
+    must(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"]);
+    const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: never[]; pending_decision?: number };
+    expect(row.retired_acs).toBeDefined();
+    expect(row.pending_decision).toBeTypeOf("number");
+    const fields = retirementAssessFields({ state: "pending", retired: row.retired_acs ?? [], pendingId: row.pending_decision ?? -1 });
+    expect({ retired_acs: fields.retired_acs, pending_decision: fields.pending_decision }).toEqual({
+      retired_acs: row.retired_acs,
+      pending_decision: row.pending_decision,
+    });
   });
 });
 
