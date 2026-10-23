@@ -132,7 +132,9 @@ describe("migrateFragments", () => {
   });
 });
 
-describe("AC-IT-5 concurrent change", () => {
+// reason: the ownership checker treats only the FIRST file of the AC command as owner (the compiled e2e), so this second
+// file references the AC spec-qualified; the `-t 'AC-IT-5'` filter in the declared command still matches this name.
+describe("spec-fragment-injection-timing-one-inject-enum-a-per-turn#AC-IT-5 concurrent change", () => {
   it("a file changed between the flow's read and its write (injected beforeWrite) is a conflict with exit 5 and keeps the concurrent writer's bytes; other files still migrate", async () => {
     const fs = memoryFs({ "/d/a.md": old(["audience: [main]"]), "/d/b.md": old(["audience: [main]"]) });
     const theirs = "---\nid: x\ntitle: T\ninject: [launch]\n---\nconcurrent\n";
