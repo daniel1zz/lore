@@ -1,5 +1,5 @@
 /**
- * AC-HR-3 — the decision read routes are authenticated and PURE (no audit-item route exists any more, AC-LG-14).
+ * AC-HR-3 — the decision read routes are authenticated and PURE (no audit-item route exists any more).
  *
  * Throwaway in-memory corpus + a real in-process Bun.Server (same harness as feedback-loop-routes.bun.test.ts).
  * Dimensions: HAPPY (cookie + agent key 200, detail/label/factors/commands), NEGATIVE (401, 404, 422),
@@ -232,7 +232,7 @@ describe("AC-HR-3 decision read routes", () => {
     expect(data.detail).toBeNull();
   });
 
-  it("AC-LG-14 NEGATIVE: the 10th auto decision of a class is not served, there is no audit-items route, and the open list holds only open decisions", async () => {
+  it("AC-HR-3 NEGATIVE: the 10th auto decision of a class is not served, there is no audit-items route, and the open list holds only open decisions", async () => {
     const auth = { headers: { Authorization: `Bearer ${ctx.rawKey}` } };
     expect((await fetch(`${ctx.baseUrl}/api/decisions/${ctx.autoId}`, auth)).status).toBe(404);
     expect((await fetch(`${ctx.baseUrl}/api/audit-items`, auth)).status).toBe(404);
