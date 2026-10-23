@@ -1,4 +1,6 @@
+// @spawns assets/hooks/post-ask-decide.mjs
 // @spawns packages/lore/src/index.ts
+// @reads assets/**
 /**
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D; AC-LG-12; BR-1372)
  *
@@ -184,6 +186,99 @@ function readJudgeFile(name: string): string {
   return existsSync(join(judgeDir, name)) ? readFileSync(join(judgeDir, name), "utf8") : "";
 }
 
+interface AskedQuestion {
+  question: string;
+  header: string;
+  options: { label: string; description: string }[];
+  multiSelect: boolean;
+}
+
+const HOOK_SHIM_DIRS: string[] = [];
+const ASK_HOOK = join(PROJECT_ROOT, "..", "..", "assets", "hooks", "post-ask-decide.mjs");
+
+/** A directory holding a `lore` script that runs the source entry; first on PATH for the shipped ask hook. */
+function loreShimDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "lore-ask-shim-"));
+  HOOK_SHIM_DIRS.push(dir);
+  const shim = join(dir, "lore");
+  writeFileSync(shim, `#!/bin/sh\nexec bun run "${INDEX_TS}" "$@"\n`);
+  chmodSync(shim, 0o755);
+  return dir;
+}
+
+/** Ids of the open pending decisions (`lore pending --json`). */
+function pendingIds(): number[] {
+  const r = runLore(["pending", "--json"], tmpDir);
+  expect(r.exitCode, r.stderr).toBe(0);
+  const parsed = JSON.parse(r.stdout) as { data?: { pending?: { id: number }[]; decisions?: { id: number }[] } };
+  return (parsed.data?.pending ?? parsed.data?.decisions ?? []).map((p) => p.id);
+}
+
+/** The in-session answer: `lore pending --ask` writes the question, the shipped PostToolUse hook records the answer. */
+function answerPending(label: "Accept" | "Reject"): void {
+  const asked = runLore(["pending", "--ask"], tmpDir);
+  expect(asked.exitCode, asked.stderr).toBe(0);
+  const questions = (JSON.parse(asked.stdout) as { data: { questions: AskedQuestion[] } }).data.questions;
+  expect(questions).toHaveLength(1);
+  const question = questions[0] as AskedQuestion;
+  expect(question.question).toContain("acceptance criteria retired");
+  const shim = loreShimDir();
+  const payload = {
+    session_id: "sess-retire-test",
+    cwd: tmpDir,
+    permission_mode: "default",
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions },
+    tool_response: { questions, answers: { [question.question]: label }, annotations: {} },
+    tool_use_id: "toolu_retire_test",
+  };
+  const hook = spawnSync("node", [ASK_HOOK], {
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+    env: { PATH: `${shim}:${process.env["PATH"] ?? ""}`, HOME: tmpDir, CLAUDE_STATE_BASE_OVERRIDE: join(judgeDir, "state") },
+    timeout: 120_000,
+  });
+  expect(hook.status, hook.stderr).toBe(0);
+  expect(hook.stdout).toContain(label === "Accept" ? "accepted" : "rejected");
+}
+
+function createSpec(title: string): string {
+  const r = runLore(["create", "spec", "--title", title, "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx\n", "--no-ai"], tmpDir);
+  expect(r.exitCode, `${r.stderr}${r.stdout}`).toBe(0);
+  return slugOf(r.stdout);
+}
+
+/** Two specs; `old` has two ACs, both superseded by `fresh`'s AC (the feature they described was removed). */
+function retireTwoAcs(env: Record<string, string> = {}): { old: string; fresh: string } {
+  const prev = extraEnv;
+  extraEnv = { ...extraEnv, ...env };
+  try {
+    const old = createSpec("Old feature");
+    const fresh = createSpec("New feature");
+    for (const [spec, id] of [[old, "AC-OLD-1"], [old, "AC-OLD-2"], [fresh, "AC-NEW-1"]] as const) {
+      const added = runLore(["ac", "add", spec, id, "--statement", `${id} holds`, "--mode", "human"], tmpDir);
+      expect(added.exitCode, added.stderr).toBe(0);
+    }
+    for (const id of ["AC-OLD-1", "AC-OLD-2"]) {
+      const sup = runLore(["ac", "supersede", old, id, "--by", `${fresh}:AC-NEW-1`, "--reason", "feature removed"], tmpDir);
+      expect(sup.exitCode, sup.stderr).toBe(0);
+    }
+    return { old, fresh };
+  } finally {
+    extraEnv = prev;
+  }
+}
+
+function acSuperseded(spec: string, acId: string): boolean {
+  const r = runLore(["get", spec, "--json"], tmpDir);
+  expect(r.exitCode, r.stderr).toBe(0);
+  const doc = (JSON.parse(r.stdout) as { data: { doc: { extra: { acceptance_criteria: { id: string; superseded_by?: unknown }[] } } } }).data.doc;
+  const criterion = doc.extra.acceptance_criteria.find((c) => c.id === acId);
+  expect(criterion, `${acId} exists on ${spec}`).toBeDefined();
+  return criterion?.superseded_by !== undefined;
+}
+
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-milestone-review-test-"));
   judgeDir = mkdtempSync(join(tmpdir(), "lore-milestone-judge-"));
@@ -199,6 +294,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const dir of HOOK_SHIM_DIRS.splice(0)) rmSync(dir, { recursive: true, force: true });
   rmSync(tmpDir, { recursive: true, force: true });
   rmSync(judgeDir, { recursive: true, force: true });
 });
@@ -636,6 +732,83 @@ describe("milestone review gates close", () => {
     expect(refused.stderr).toContain("feedback.upstream");
     expect(readJudgeFile("prompts.txt")).toBe("");
     expect(readJudgeFile("suite-runs.txt")).toBe("");
+  });
+
+  it("milestone review gates close: a plan with 2 retired ACs raises ONE pending decision; accept lets the plan close (adr: an AC retires with its feature)", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("Retire accept");
+    const specs = retireTwoAcs();
+    const review = assessRows([plan]);
+    expect(review.exitCode, review.stderr).toBe(0);
+    const row = review.rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string; superseded_by?: string; reason: string }[]; pending_decision?: number };
+    expect(row.retired_acs?.map((r) => `${r.spec}:${r.ac}`).sort()).toEqual([`${specs.old}:AC-OLD-1`, `${specs.old}:AC-OLD-2`]);
+    expect(row.retired_acs?.every((r) => r.superseded_by === `${specs.fresh}:AC-NEW-1` && r.reason === "feature removed")).toBe(true);
+    expect(typeof row.pending_decision).toBe("number");
+    expect(assessRows([plan]).rows[0]).toMatchObject({ pending_decision: row.pending_decision }); // a second run raises nothing new
+    expect(pendingIds()).toHaveLength(1);
+
+    const waiting = close(plan);
+    expect(waiting.exitCode).toBe(4);
+    expect(waiting.stderr).toContain("lore pending --ask");
+    expect(statusOf(plan)).toBe("approved");
+
+    answerPending("Accept");
+    const closed = close(plan);
+    expect(closed.exitCode, closed.stderr).toBe(0);
+    expect(statusOf(plan)).toBe("archived");
+    expect(acSuperseded(specs.old, "AC-OLD-1")).toBe(true); // accept keeps the retirement
+  });
+
+  it("milestone review gates close: reject restores both ACs and keeps the close refused until the plan is re-planned", { timeout: 300_000 }, () => {
+    const { plan, task } = makePlan("Retire reject");
+    const specs = retireTwoAcs();
+    expect(assessRows([plan]).exitCode).toBe(0);
+    answerPending("Reject");
+
+    const refused = close(plan);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain("rejected");
+    expect(statusOf(plan)).toBe("approved");
+    expect(acSuperseded(specs.old, "AC-OLD-1")).toBe(false);
+    expect(acSuperseded(specs.old, "AC-OLD-2")).toBe(false);
+    expect(close(plan).exitCode).toBe(4); // still refused on a second try: restoring is not re-planning
+
+    // re-planning: a task change gives the plan a new state, the refusal lifts and the review is stale until re-run
+    expect(runLore(["set", task, "--content", "re-planned after the rejected retirement"], tmpDir).exitCode).toBe(0);
+    addPass(task);
+    expect(assessRows([plan]).exitCode).toBe(0);
+    const closed = close(plan);
+    expect(closed.exitCode, closed.stderr).toBe(0);
+  });
+
+  it("milestone review gates close: a spec deprecated during the plan lists its ACs; reject puts it back to its previous status", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("Retire deprecated");
+    const spec = createSpec("Doomed spec");
+    expect(runLore(["ac", "add", spec, "AC-DOOM-1", "--statement", "doomed", "--mode", "human"], tmpDir).exitCode).toBe(0);
+    const deprecated = runLore(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"], tmpDir);
+    expect(deprecated.exitCode, deprecated.stderr).toBe(0);
+    const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string }[] };
+    expect(row.retired_acs).toMatchObject([{ spec, ac: "AC-DOOM-1" }]);
+    answerPending("Reject");
+    expect(close(plan).exitCode).toBe(4);
+    expect(statusOf(spec)).toBe("draft");
+  });
+
+  it("milestone review gates close: a plan with no retired ACs raises no decision", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("No retirement");
+    const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: unknown; pending_decision?: unknown };
+    expect(row.retired_acs).toBeUndefined();
+    expect(row.pending_decision).toBeUndefined();
+    expect(pendingIds()).toHaveLength(0);
+    expect(close(plan).exitCode).toBe(0);
+  });
+
+  it("milestone review gates close: a retirement made BEFORE the plan existed is not attributed to it", { timeout: 300_000 }, () => {
+    retireTwoAcs();
+    const { plan } = makePlan("Later plan");
+    const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: unknown };
+    expect(row.retired_acs).toBeUndefined();
+    expect(pendingIds()).toHaveLength(0);
+    expect(close(plan).exitCode).toBe(0);
   });
 
   it("milestone review gates close: a failing review with no linked open issue still refuses the close (exit 4, BR-1372)", { timeout: 300_000 }, () => {

@@ -60,7 +60,7 @@ function legacyDb(path: string): void {
   // reason: this fixture models only the decision_log tables; migration-025 indexes `versions` and migration-026
   // rebuilds it, so the upgrade chain needs that table with every column 026 copies, plus the `docs` table its
   // doc_id references.
-  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT, version INTEGER)"); // 027 reads the baseline columns (no row here)
+  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT, version INTEGER, parent_id TEXT, deleted_at TEXT)"); // 027 reads the baseline columns (no row here)
   // reason: migration-030 adds `runs.message_address`, so the table it alters must exist (one column is enough).
   db.exec("CREATE TABLE runs (id TEXT PRIMARY KEY)");
   // reason: migration-031 deletes the per-read `get` trace rows, so `trace_events` (with its `kind`) must exist.

@@ -59,6 +59,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -143,11 +144,8 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     const approveResult = runLore(["set", planSlug, "--status", "approved"], tmpDir);
     expect(approveResult.exitCode).toBe(0);
 
-    const archivePlanResult = runLore(["set", planSlug, "--status", "archived"], tmpDir);
-    expect(archivePlanResult.exitCode).toBe(0);
-
-    // Task created AFTER the plan already archived — a genuine R4 straggler, never
-    // touched by the R1 cascade (which only ever sees children present AT close time).
+    // A genuine R4 straggler: an open task under an archived plan, never touched by the R1 cascade. BR-1379 no longer
+    // lets the write path create one (archived is terminal), so the plan is archived directly after the task exists.
     const taskResult = runLore(
       [
         "create",
@@ -178,6 +176,7 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
       tmpDir,
     );
     expect(evidenceResult.exitCode).toBe(0);
+    archivePlanWithoutCascade(tmpDir, planSlug);
 
     const sweepResult = runLore(["archive", "--sweep", "--json"], tmpDir);
     expect(sweepResult.exitCode).toBe(3);
@@ -221,7 +220,6 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
       ).stdout,
     );
     expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
-    expect(runLore(["set", planSlug, "--status", "archived"], tmpDir).exitCode).toBe(0);
 
     // Straggler with NO evidence: `lore done` would refuse it with floor `attested-pass`.
     const taskSlug = parseSlug(
@@ -245,6 +243,7 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
     } finally {
       db.close();
     }
+    archivePlanWithoutCascade(tmpDir, planSlug); // BR-1379: legacy straggler shape, see the helper
 
     const applyResult = runLore(["archive", "--apply", "--json"], tmpDir);
     expect(applyResult.exitCode).toBe(0);

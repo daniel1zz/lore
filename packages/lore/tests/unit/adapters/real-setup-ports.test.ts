@@ -391,6 +391,7 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/stop-turn-review.mjs",
   // stop-turn-review turn-state producers (issue #156)
   "hooks/user-prompt-turn-start.mjs",
+  "hooks/user-prompt-fragments.mjs",
   "hooks/post-edit-mark.mjs",
   "hooks/post-ask-decide.mjs",
   "hooks/subagent-context.mjs",

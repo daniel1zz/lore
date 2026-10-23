@@ -34,6 +34,7 @@ import {
   type MilestoneReview,
   type PlanBundle,
   type Result,
+  type RetiredAcRef,
 } from "@lore/core";
 import {
   buildMilestoneReviewPrompt,
@@ -62,6 +63,8 @@ export interface MilestoneReviewDeps {
   readonly listDecisionLog: () => Promise<Result<DecisionLogRow[], LoreError>>;
   /** Sends `prompt` to the configured judge and returns its raw text. */
   readonly judge: (prompt: string, title: string) => Promise<Result<string, LoreError>>;
+  /** The ACs retired during the plan (adr-an-acceptance-criterion-retires-with-the-feature-it), listed in the review. */
+  readonly listRetiredAcs?: (bundle: PlanBundle) => Promise<Result<RetiredAcRef[], LoreError>>;
   readonly createReviewDoc: (input: CreateDocInput) => Promise<Result<DocRecord, LoreError>>;
   readonly link: (fromId: string, toId: string, type: LinkType) => Promise<Result<unknown, LoreError>>;
 }
@@ -227,8 +230,12 @@ export class MilestoneReviewService {
       ),
       citedRulesResult.value,
     );
+    // reason: optional port so hand-built services (unit tests, MCP stubs) stay valid; `app.ts` always wires it.
+    const retiredResult = this.deps.listRetiredAcs !== undefined ? await this.deps.listRetiredAcs(bundle) : ok<RetiredAcRef[]>([]);
+    if (!retiredResult.ok) return retiredResult;
     const review: MilestoneReview = {
       plan_id: bundle.plan.id,
+      ...(retiredResult.value.length > 0 ? { retired_acs: retiredResult.value } : {}),
       fingerprint: planStateFingerprint(bundle.plan, bundle.tasks),
       overall: overallMilestoneVerdict(dimensions),
       dimensions,
