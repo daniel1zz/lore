@@ -28,7 +28,7 @@
  * resolution failure (empirically confirmed this task — see that module's header).
  *
  * Exemption ledger (`adr-a-newly-armed-structural-oracle-enforces-from-a-baseline`,
- * modeled on `scripts/check-test-budgets.ts`'s established shape): a dangling ref
+ * a baseline-ledger shape): a dangling ref
  * whose `(spec, id)` is listed in `scripts/ac-ref-exemption-ledger.json` is reported
  * for audit visibility but never fails the run — D7 option 2, for a criterion that
  * was genuinely retired/merged rather than accidentally orphaned. A ledger entry that
@@ -49,7 +49,7 @@
  * (IO — the scan + ledger check over an already-constructed `App`, injectable for
  * tests that build their own fixture `App`), `main` (IO — resolves the corpus + ledger
  * paths, runs the check, prints a report, returns the process exit code; never calls
- * `process.exit` itself, so it stays testable — mirrors `check-test-budgets.ts::main`).
+ * `process.exit` itself, so it stays testable).
  *
  * Exit codes:
  *   0 — zero dangling refs after ledger exemptions, and the ledger itself is clean
