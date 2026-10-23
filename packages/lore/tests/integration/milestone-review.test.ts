@@ -251,10 +251,14 @@ function createSpec(title: string): string {
 }
 
 /** Two specs; `old` has two ACs, both superseded by `fresh`'s AC (the feature they described was removed). */
-function retireTwoAcs(env: Record<string, string> = {}): { old: string; fresh: string } {
+function retireTwoAcs(claimedTask?: string, session: string | null = "sess-retire"): { old: string; fresh: string } {
   const prev = extraEnv;
-  extraEnv = { ...extraEnv, ...env };
+  extraEnv = session === null ? { ...extraEnv } : { ...extraEnv, CLAUDE_CODE_SESSION_ID: session };
   try {
+    if (claimedTask !== undefined) {
+      const claimed = runLore(["claim", claimedTask, "--worktree", tmpDir], tmpDir);
+      expect(claimed.exitCode, claimed.stderr).toBe(0);
+    }
     const old = createSpec("Old feature");
     const fresh = createSpec("New feature");
     for (const [spec, id] of [[old, "AC-OLD-1"], [old, "AC-OLD-2"], [fresh, "AC-NEW-1"]] as const) {
@@ -265,7 +269,26 @@ function retireTwoAcs(env: Record<string, string> = {}): { old: string; fresh: s
       const sup = runLore(["ac", "supersede", old, id, "--by", `${fresh}:AC-NEW-1`, "--reason", "feature removed"], tmpDir);
       expect(sup.exitCode, sup.stderr).toBe(0);
     }
+    // the retirements carry their plan; releasing the claim lets the test edit the task afterwards
+    if (claimedTask !== undefined) {
+      const released = runLore(["release", claimedTask], tmpDir);
+      expect(released.exitCode, released.stderr).toBe(0);
+    }
     return { old, fresh };
+  } finally {
+    extraEnv = prev;
+  }
+}
+
+/** Deprecates `spec` as a run (session) that claims `claimedTask` (none when undefined). */
+function deprecateAs(spec: string, claimedTask?: string, session: string | null = "sess-deprecate"): void {
+  const prev = extraEnv;
+  extraEnv = session === null ? { ...extraEnv } : { ...extraEnv, CLAUDE_CODE_SESSION_ID: session };
+  try {
+    if (claimedTask !== undefined) expect(runLore(["claim", claimedTask, "--worktree", tmpDir], tmpDir).exitCode).toBe(0);
+    const r = runLore(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"], tmpDir);
+    expect(r.exitCode, r.stderr).toBe(0);
+    if (claimedTask !== undefined) expect(runLore(["release", claimedTask], tmpDir).exitCode).toBe(0);
   } finally {
     extraEnv = prev;
   }
@@ -739,8 +762,8 @@ describe("milestone review gates close", () => {
   });
 
   it("milestone review gates close: a plan with 2 retired ACs raises ONE pending decision; accept lets the plan close (adr: an AC retires with its feature)", { timeout: 300_000 }, () => {
-    const { plan } = makePlan("Retire accept");
-    const specs = retireTwoAcs();
+    const { plan, task } = makePlan("Retire accept");
+    const specs = retireTwoAcs(task);
     const review = assessRows([plan]);
     expect(review.exitCode, review.stderr).toBe(0);
     const row = review.rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string; superseded_by?: string; reason: string }[]; pending_decision?: number };
@@ -764,7 +787,7 @@ describe("milestone review gates close", () => {
 
   it("milestone review gates close: reject restores both ACs and keeps the close refused until the plan is re-planned", { timeout: 300_000 }, () => {
     const { plan, task } = makePlan("Retire reject");
-    const specs = retireTwoAcs();
+    const specs = retireTwoAcs(task);
     expect(assessRows([plan]).exitCode).toBe(0);
     answerPending("Reject");
 
@@ -785,11 +808,10 @@ describe("milestone review gates close", () => {
   });
 
   it("milestone review gates close: a spec deprecated during the plan lists its ACs; reject puts it back to its previous status", { timeout: 300_000 }, () => {
-    const { plan } = makePlan("Retire deprecated");
+    const { plan, task } = makePlan("Retire deprecated");
     const spec = createSpec("Doomed spec");
     expect(runLore(["ac", "add", spec, "AC-DOOM-1", "--statement", "doomed", "--mode", "human"], tmpDir).exitCode).toBe(0);
-    const deprecated = runLore(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"], tmpDir);
-    expect(deprecated.exitCode, deprecated.stderr).toBe(0);
+    deprecateAs(spec, task);
     const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string }[] };
     expect(row.retired_acs).toMatchObject([{ spec, ac: "AC-DOOM-1" }]);
     answerPending("Reject");
@@ -811,6 +833,52 @@ describe("milestone review gates close", () => {
     const { plan } = makePlan("Later plan");
     const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: unknown };
     expect(row.retired_acs).toBeUndefined();
+    expect(pendingIds()).toHaveLength(0);
+    expect(close(plan).exitCode).toBe(0);
+  });
+
+  it("milestone review gates close: retirements made by runs claiming tasks of plan A only are attributed to plan A only", { timeout: 300_000 }, () => {
+    const a = makePlan("Plan A");
+    // plan B's task is authored by the SAME session actor that later retires for plan A: actor never attributes
+    const prev = extraEnv;
+    extraEnv = { ...extraEnv, CLAUDE_CODE_SESSION_ID: "sess-retire" };
+    const b = makePlan("Plan B");
+    extraEnv = prev;
+    const specs = retireTwoAcs(a.task);
+    const reviewA = assessRows([a.plan]).rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string }[]; pending_decision?: number };
+    expect(reviewA.retired_acs?.map((r) => `${r.spec}:${r.ac}`).sort()).toEqual([`${specs.old}:AC-OLD-1`, `${specs.old}:AC-OLD-2`]);
+    const reviewB = assessRows([b.plan]).rows[0] as AssessRow & { retired_acs?: unknown; pending_decision?: unknown };
+    expect(reviewB.retired_acs).toBeUndefined();
+    expect(reviewB.pending_decision).toBeUndefined();
+    expect(pendingIds()).toEqual([reviewA.pending_decision]);
+    expect(close(b.plan).exitCode).toBe(0);
+  });
+
+  it("milestone review gates close: a retirement by a run with no claimed task is attributed to no plan", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("Plan unclaimed");
+    // the writing run is the plan's own author actor, claiming no task: actor never attributes
+    retireTwoAcs(undefined, null);
+    const spec = createSpec("Unclaimed doomed spec");
+    must(["ac", "add", spec, "AC-NOCLAIM-1", "--statement", "doomed", "--mode", "human"]);
+    deprecateAs(spec, undefined, null);
+    const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: unknown; pending_decision?: unknown };
+    expect(row.retired_acs).toBeUndefined();
+    expect(row.pending_decision).toBeUndefined();
+    expect(pendingIds()).toHaveLength(0);
+    expect(close(plan).exitCode).toBe(0);
+  });
+
+  it("milestone review gates close: a pending decision whose list changed to empty is withdrawn and the plan no longer awaits the owner", { timeout: 300_000 }, () => {
+    const { plan, task } = makePlan("Plan withdrawn");
+    const specs = retireTwoAcs(task);
+    const first = assessRows([plan]).rows[0] as AssessRow & { pending_decision?: number };
+    expect(typeof first.pending_decision).toBe("number");
+    expect(pendingIds()).toHaveLength(1);
+    // the retired list changes to empty: the retiring spec goes away
+    must(["delete", specs.old, "--confirm"]);
+    const after = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: unknown; pending_decision?: unknown };
+    expect(after.retired_acs).toBeUndefined();
+    expect(after.pending_decision).toBeUndefined();
     expect(pendingIds()).toHaveLength(0);
     expect(close(plan).exitCode).toBe(0);
   });
@@ -837,7 +905,7 @@ describe("milestone review gates close", () => {
     const root = slugOf(must(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Rule Root"]));
     const branch = slugOf(must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Rule Branch"]));
     const leaf = slugOf(must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Rule Leaf"]));
-    const { plan } = makePlan("Retire with rule");
+    const { plan, task } = makePlan("Retire with rule");
     const spec = createSpec("Doomed spec with a rule");
     must(["ac", "add", spec, "AC-RULE-1", "--statement", "doomed", "--mode", "human"]);
     const proposed = must(["rule", "propose", spec, "add", "--leaf", leaf, "--statement", "A rule the spec introduces", "--example", "when X then Y", "--enforced-by", "both"]);
@@ -845,7 +913,7 @@ describe("milestone review gates close", () => {
     expect(ruleId).not.toBe("");
     expect(ruleState(ruleId)).toBe("proposed");
 
-    must(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"]);
+    deprecateAs(spec, task);
     expect(ruleState(ruleId)).toBe("retired"); // abandoned with the deprecation (BR-1307)
     assessRows([plan]);
     answerPending("Reject");
@@ -858,10 +926,10 @@ describe("milestone review gates close", () => {
   });
 
   it("milestone review gates close: the shared serializer yields the CLI row's retired_acs and pending_decision exactly", { timeout: 300_000 }, () => {
-    const { plan } = makePlan("Serializer shape");
+    const { plan, task } = makePlan("Serializer shape");
     const spec = createSpec("Doomed spec");
     must(["ac", "add", spec, "AC-DOOM-1", "--statement", "doomed", "--mode", "human"]);
-    must(["bulk", "deprecate", spec, "--apply", "--reason", "feature removed"]);
+    deprecateAs(spec, task);
     const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: never[]; pending_decision?: number };
     expect(row.retired_acs).toBeDefined();
     expect(row.pending_decision).toBeTypeOf("number");
