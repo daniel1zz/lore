@@ -4,11 +4,12 @@
  *
  * Purpose: give every plan's regression dimension the same measured run, without ever running the suite in the shared
  *   checkout and without writing the repo's `.lore`.
- * Public surface: createGitSuiteRunner, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, resolveDirectImports.
+ * Public surface: createGitSuiteRunner, suiteChildEnv, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, resolveDirectImports.
  * Invariants:
  *   - The commands are the project's own package.json scripts (`check:plan-close`, `test`) run with `bun run`; a script
  *     the project does not define is reported as skipped with that reason, never invented.
  *   - The run happens in `git worktree add --detach <tmp> main`; the worktree is removed afterwards, success or not.
+ *   - The suite commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -52,6 +53,21 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
   // reason: a spawn that never started (ENOENT) or was killed has status null; it is a failure with its own message.
   if (result.status === null) return { status: 1, output: `${output}\n${result.error?.message ?? "terminated by signal"}` };
   return { status: result.status, output };
+}
+
+/** Variables of the agent harness / lore session that a clean checkout's `bun run test` never carries. */
+const HARNESS_ENV_PATTERN = /^(?:CLAUDE|LORE_|ANTHROPIC_|MCP_)/;
+
+/**
+ * The environment the suite commands run with: the caller's, minus the agent-harness and lore-session variables, so the
+ * run in the throwaway worktree is the run a clean shell (CI, a fresh terminal) would make. Identity, claim and
+ * messaging variables of the process that launched `lore assess` must not leak into tests that spawn `dist/lore`.
+ *
+ * @param ambient - the invoking process's environment
+ * @returns a copy without any `CLAUDE*`, `LORE_*`, `ANTHROPIC_*` or `MCP_*` variable
+ */
+export function suiteChildEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(ambient).filter(([name]) => !HARNESS_ENV_PATTERN.test(name)));
 }
 
 function notMeasured(reason: string): Result<SuiteRun, LoreError> {
@@ -119,7 +135,7 @@ export function createGitSuiteRunner(
       try {
         const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repoRoot, env);
         if (added.status !== 0) return notMeasured(`could not create the throwaway worktree: ${added.output.trim()}`);
-        const measured = measure(scratch, commit, env);
+        const measured = measure(scratch, commit, suiteChildEnv(env));
         if (inWorktree !== undefined) await inWorktree(scratch, commit);
         return ok(measured);
       } catch (cause) {
