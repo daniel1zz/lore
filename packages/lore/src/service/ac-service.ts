@@ -131,6 +131,7 @@ import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
+import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { ownProposedRules } from "./rule-changes.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, pipeAdvisories, resolveCiteGateFor } from "./ac-write-chokepoint.js";
@@ -1064,9 +1065,14 @@ export class AcService {
     }
 
     const actor = resolveWriteActorFor(this.store, opts.by);
+    // reason: the retirement belongs to the plan whose work made it (the plan of the task this run holds a claim on),
+    // recorded in this same write; none when the run claims no (single) plan task.
+    const retiredInPlan = await findPlanClaimedByWriter(this.store);
+    if (!retiredInPlan.ok) return retiredInPlan;
     const marked: AcceptanceCriterion = {
       ...target,
       superseded_by: {
+        ...(retiredInPlan.value !== undefined ? { retired_in_plan: retiredInPlan.value } : {}),
         spec: superseding.value.id as string,
         ac: by.ac,
         reason: trimmedReason,

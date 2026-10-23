@@ -203,6 +203,12 @@ export const supersededByRefSchema = z.object({
   reason: z.string().min(1).max(1000),
   by: z.string().min(1),
   at: z.string().min(1),
+  /**
+   * Id of the plan whose work made this retirement: the plan of the task the writing run held a claim on, recorded
+   * in the same write. Absent = the writing run claimed no (single) plan task, or the retirement predates the field;
+   * an absent value is never attributed to any plan (adr-an-acceptance-criterion-retires-with-the-feature-it).
+   */
+  retired_in_plan: z.string().min(1).optional(),
 });
 
 /** Derived type of {@link supersededByRefSchema}. */

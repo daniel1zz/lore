@@ -126,6 +126,7 @@ import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-arc
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
+import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
 // the STORE-FREE pure read-surface projection helpers that module also exports, and they
@@ -3728,6 +3729,14 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // or neither does: a plan that cannot be made, or a leaf that moved since it was read, refuses the deprecation
     // with nothing written. reason: do not split this back into a second write - that is the half-done state
     // (deprecated spec, ids still reserved, "re-run lore rule apply" to finish) this replaced.
+    // retired-AC attribution (adr-an-acceptance-criterion-retires-with-the-feature-it): a deprecation records the plan
+    // whose work made it on its own audit row, in the same write.
+    let retiredInPlan: string | undefined;
+    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated") {
+      const claimedPlan = await findPlanClaimedByWriter(this.store);
+      if (!claimedPlan.ok) return claimedPlan;
+      retiredInPlan = claimedPlan.value;
+    }
     let abandonmentWrites: CompanionDocWrite[] = [];
     if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated" && this.ruleChangeLanding !== undefined) {
       const abandonment = await this.ruleChangeLanding.planAbandonment(existing.slug, { by: resolvedActor });
@@ -3765,6 +3774,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           version: newVersion,
           ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
           ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
+          ...(retiredInPlan !== undefined ? { retired_in_plan: retiredInPlan } : {}),
         },
       },
       abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,
