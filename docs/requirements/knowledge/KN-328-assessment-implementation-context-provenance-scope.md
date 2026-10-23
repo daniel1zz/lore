@@ -3,10 +3,10 @@ id: KN-328
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — context provenance (scope-declaring injection + scope-closing resume ticket) (2026-07-30)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-10-23
 tags: []
 parent: PLAN-101
 links:

@@ -3,10 +3,10 @@ id: KN-489
 type: knowledge
 role: knowledge
 title: "Assessment: Fix the flat command tokenizer at its root: one segmentation seam for all three path-parsing call sites (2026-08-21)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-23
 tags: []
 parent: PLAN-134
 links:

@@ -9,7 +9,7 @@ created: 2026-07-28
 updated: 2026-10-17
 tags: [dashboard, packaging, f5a]
 links:
-  - {id: SPEC-204, type: implements}
+  - {id: SPEC-244, type: implements}
 ---
 # Spec: Dashboard production packaging — one-command `lore dashboard` (F5a)
 

@@ -3,7 +3,7 @@ id: TASK-1595
 type: task
 role: plan
 title: "[Skill:fix] TG-45 a script criterion whose command the shell cannot parse is refused at write time (AC-AU-8 declared with an unbalanced quote, verify failed exit 2 without running)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 3b: one runner"
 created: 2026-10-18

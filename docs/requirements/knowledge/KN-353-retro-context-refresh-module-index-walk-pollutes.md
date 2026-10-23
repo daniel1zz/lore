@@ -3,10 +3,10 @@ id: KN-353
 type: knowledge
 role: knowledge
 title: "Retro: context refresh module-index walk pollutes CLAUDE.md and breaches its own ceiling"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-29
+updated: 2026-10-23
 tags: [dogfood, context-verb, defect]
 parent: PLAN-088
 links:

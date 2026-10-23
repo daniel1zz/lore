@@ -3,10 +3,10 @@ id: KN-103
 type: knowledge
 role: knowledge
 title: "Assessment: Slugify CJK fix + set --slug: single-implementer execution (2026-07-23)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-23
-updated: 2026-07-26
+updated: 2026-10-23
 tags: []
 parent: PLAN-049
 links:

@@ -3,10 +3,10 @@ id: TASK-1583
 type: task
 role: plan
 title: "Web-API approve and reject record no reviewer, and web reject takes no reason"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-196
 plan: PLAN-196

@@ -6,10 +6,10 @@ title: "Plan closure must be loud — terminality divergence, silent demotion, a
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [governance, plan-close, gates]
 links:
-  - {id: SPEC-208, type: implements}
+  - {id: SPEC-238, type: implements}
 ---
 # Spec: Plan closure must be loud — terminality divergence, silent demotion, and absence-as-assertion
 
@@ -99,6 +99,6 @@ Two-part, both required:
 - [⊘] [script] AC-CLOSURE-5: verifyReachability distinguishes unknown (caller supplied no parent type) from known-false (parent type supplied and is not a spec); describeReachabilityWhy never renders the definite claim 'no spec-tier ancestor' for the unknown case
   script: test — bunx vitest run packages/lore/tests/unit/service/checkpoint-registry.test.ts -t "reachability unknown"
   other_command=1
-- [·] [script] AC-CLOSURE-6: REGRESSION (live 2026-07-28 case): a plan whose parent IS an approved tech spec declaring >=1 script-mode AC, closed via lore set --status archived, NEVER produces remediation text containing 'no spec-tier ancestor' — plan-close threads hasSpecParent and parentSpecScriptAcCount from the already-resolved plan bundle
+- [⊖] [script] AC-CLOSURE-6: REGRESSION (live 2026-07-28 case): a plan whose parent IS an approved tech spec declaring >=1 script-mode AC, closed via lore set --status archived, NEVER produces remediation text containing 'no spec-tier ancestor' — plan-close threads hasSpecParent and parentSpecScriptAcCount from the already-resolved plan bundle
   script: test — bunx --bun vitest run packages/lore/tests/integration/plan-close-reachability.bun.test.ts
   other_command=11

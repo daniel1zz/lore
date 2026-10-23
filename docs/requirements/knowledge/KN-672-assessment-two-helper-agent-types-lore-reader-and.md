@@ -3,10 +3,10 @@ id: KN-672
 type: knowledge
 role: knowledge
 title: "Assessment: Two helper agent types: lore-reader and lore-implementer (2026-10-15)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-23
 tags: []
 parent: PLAN-183
 links:

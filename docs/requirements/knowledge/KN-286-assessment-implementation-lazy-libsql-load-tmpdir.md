@@ -3,10 +3,10 @@ id: KN-286
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — lazy libsql load + TMPDIR diagnostic (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-094
 links:

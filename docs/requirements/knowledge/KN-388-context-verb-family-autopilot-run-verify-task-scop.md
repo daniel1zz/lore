@@ -3,10 +3,10 @@ id: KN-388
 type: knowledge
 role: knowledge
 title: "Context verb family autopilot run — verify task-scoping semantics, legacy-shape upgrade paths, TDD-paired worktree dispatch"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: [retro, autopilot, worktree, verify]
 parent: PRD-001
 links:

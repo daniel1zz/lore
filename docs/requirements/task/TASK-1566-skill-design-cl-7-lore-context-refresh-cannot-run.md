@@ -3,7 +3,7 @@ id: TASK-1566
 type: task
 role: plan
 title: "[Skill:design] CL-7 lore context refresh cannot run on this repo: it would splice a 251-line managed zone into the hand-curated root CLAUDE.md (329 > 220 ceiling)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1: cleanup without a human"
 created: 2026-10-18

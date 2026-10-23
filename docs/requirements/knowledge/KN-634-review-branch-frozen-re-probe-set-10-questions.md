@@ -3,10 +3,10 @@ id: KN-634
 type: knowledge
 role: knowledge
 title: "Review-branch frozen re-probe set: 10 questions written from code only before the remediation revision"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-177
 ---

@@ -3,10 +3,10 @@ id: KN-631
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline review-branch migration — the first branch eligible to arm the citation gate (2026-10-09)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-177
 links:

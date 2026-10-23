@@ -3,10 +3,10 @@ id: KN-652
 type: knowledge
 role: knowledge
 title: "Pilot v2 pre-registration addendum: probe scope error and in-branch secondary measure"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-173
 ---

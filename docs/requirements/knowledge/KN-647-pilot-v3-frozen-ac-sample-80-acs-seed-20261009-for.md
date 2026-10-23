@@ -3,10 +3,10 @@ id: KN-647
 type: knowledge
 role: knowledge
 title: "Pilot v3 frozen AC sample (80 ACs, seed 20261009) for the two-branch placement measurement"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-174
 ---

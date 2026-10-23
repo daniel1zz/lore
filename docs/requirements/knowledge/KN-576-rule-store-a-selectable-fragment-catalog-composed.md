@@ -3,10 +3,10 @@ id: KN-576
 type: knowledge
 role: knowledge
 title: "Rule store: a selectable fragment catalog composed per project and per role (measurements, overlap census, options)"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-23
 tags: [fragments, rules, composition, roles, config]
 links:
   - {id: KN-580, type: relates-to}

@@ -3,10 +3,10 @@ id: KN-629
 type: knowledge
 role: knowledge
 title: "Fast-mode migration assessment: 12 branches populated, not armable"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-176
 ---

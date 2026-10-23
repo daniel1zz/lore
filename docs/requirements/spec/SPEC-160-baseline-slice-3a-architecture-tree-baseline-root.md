@@ -6,7 +6,7 @@ title: "Baseline slice 3a: architecture tree, baseline-root navigation, requirem
 status: approved
 priority: medium
 created: 2026-10-10
-updated: 2026-10-17
+updated: 2026-10-19
 tags: []
 ---
 # Baseline slice 3a: architecture tree, baseline-root navigation, requirements to rules, outline retirement, distribution
@@ -58,9 +58,9 @@ Spec parent contract and the 169-spec parent migration; PRD budget re-scoped to 
 - [⚑] [script] AC-BLS3-5: Plan close (describe 'plan-close rule state (BL-16)'): with prd_sync enabled, a plan whose spec criteria cite a contradicted rule is refused exit 4 naming the rule; a stale cited rule with no attested pass from the plan's tasks since it went stale is refused; all cited rules verified -> closes with no domain-document edit; the old PRD_OUTLINE_NOT_SYNCED reason is never produced
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-rule-state.test.ts && echo 'AC-BLS3-5 PASS: plan-close checks cited rule state, never outline sync'
   other_command=3
-- [⚑] [script] AC-BLS3-6: Outline retired (describe 'outline writes retired (BL-16)'): lore outline set/rm/exempt exit 4 naming lore baseline add and write nothing; lore outline list still lists the stored entries; the dead bootstrap outline renderer no longer exists
-  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/outline-retired.bun.test.ts && echo 'AC-BLS3-6 PASS: outline writes refused, list kept'
-  other_command=5
+- [·] [script] AC-BLS3-6: RETIRED BEHAVIOUR, re-homed 2026-10-19 by task-remove-the-retired-outline-write-verbs-instead-of-keeping (BR-985 retired): the lore outline command family is removed, so lore outline <anything> is the CLI's ordinary unknown-command refusal (no refusal text naming lore baseline add), no outline write/remove/exempt/list code path remains, and the stored outline is archived by lore migrate outline-sections (BR-1314) instead of being listed. Original statement: lore outline set/rm/exempt exit 4 naming lore baseline add and write nothing; lore outline list still lists the stored entries; the dead bootstrap outline renderer no longer exists.
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/outline-sections-retire-migration.test.ts packages/lore/tests/integration/cli/outline-family-removed.bun.test.ts && echo 'AC-BLS3-6 PASS: lore outline is an unknown command, no outline code path remains, stored outlines archived by the migration'
+  other_command=6
 - [⚑] [script] AC-BLS3-7: Setup (describe 'setup seeds baseline adoption (BL-8)'): lore setup --project in a temp git repo with lore init writes workflow.gates.ac-cite.mode report when absent and never changes an existing mode; the baseline authoring skill and node templates are installed and listed in the setup ledger; assets manifest parity holds
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli/setup-baseline-adoption.bun.test.ts && echo 'AC-BLS3-7 PASS: setup seeds report mode only when absent; skill and templates installed'
   other_command=4
@@ -77,8 +77,9 @@ Spec parent contract and the 169-spec parent migration; PRD budget re-scoped to 
 - [⚑] [script] AC-BLS3-12: RETIRED BEHAVIOUR, re-baselined 2026-10-10 by slice 3b (owner decision D7; BR-424 retired): outline detail links are no longer checked — an outline entry with no rel=detail link, or a link to a missing document, is not a size-check finding (lore status --check-prd-budget exits 0 for it), because the outline is read-only history (BR-694) and size budgets moved to baseline nodes (BR-1010). Original statement: every stored outline entry declares >= 1 rel=detail link resolving to an existing non-deleted document, else exit 3.
   script: test — bunx --bun vitest run packages/lore/tests/integration/prd-budget-check.bun.test.ts -t detail-link && echo 'AC-BLS3-12 PASS: detail links are no longer a finding'
   other_command=1
-- [⚑] [script] AC-BLS3-13: Re-homed from deprecated SPEC-080 AC-080-2's surviving half (BL-16): a direct lore set patching extra.outline is refused with VALIDATION_ERROR (exit 4) naming the retirement and lore baseline add; lore outline list returns stored entries unchanged (describe 'outline writes retired' guard cases)
-  script: test — bunx vitest run packages/lore/tests/unit/service/outline-writer-guard.test.ts && echo 'AC-BLS3-13 PASS: direct outline edits refused, list read-only'
+- [·] [script] AC-BLS3-13: RETIRED BEHAVIOUR, re-homed 2026-10-19 by task-remove-the-retired-outline-write-verbs-instead-of-keeping (BR-695 retired): the extra.outline refusal in lore set is removed together with the outline (an outline key is now ordinary extra), lore outline list no longer exists, and existing outline content is preserved by lore migrate outline-sections (BR-1314): the previous document version and the audit row hold it verbatim. Original statement: a direct lore set patching extra.outline is refused with VALIDATION_ERROR (exit 4) naming the retirement and lore baseline add; lore outline list returns stored entries unchanged.
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/outline-sections-retire-migration.test.ts && echo 'AC-BLS3-13 PASS: outline refusal and reader removed, outline content preserved by the migration'
+  other_command=1
 
 ## Code anchors
 

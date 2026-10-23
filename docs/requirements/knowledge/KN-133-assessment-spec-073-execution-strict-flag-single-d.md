@@ -3,10 +3,10 @@ id: KN-133
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-073 execution: strict-flag single-dash hardening (2026-07-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-046
 links:

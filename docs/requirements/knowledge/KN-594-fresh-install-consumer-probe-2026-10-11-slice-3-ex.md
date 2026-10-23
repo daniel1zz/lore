@@ -3,10 +3,10 @@ id: KN-594
 type: knowledge
 role: knowledge
 title: "Fresh-install consumer probe 2026-10-11 slice 3 exit criterion"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: SPEC-164
 ---

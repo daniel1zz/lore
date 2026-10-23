@@ -3,10 +3,10 @@ id: KN-660
 type: knowledge
 role: knowledge
 title: "Pilot D4 raw: blind reader answers and independent grading"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: [baseline, pilot]
 parent: KN-655
 links:

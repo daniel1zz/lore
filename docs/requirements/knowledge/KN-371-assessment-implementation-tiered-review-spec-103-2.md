@@ -3,10 +3,10 @@ id: KN-371
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — tiered review (SPEC-103) (2026-07-28)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PLAN-109
 links:

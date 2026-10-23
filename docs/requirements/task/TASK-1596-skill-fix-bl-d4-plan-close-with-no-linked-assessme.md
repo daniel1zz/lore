@@ -3,11 +3,11 @@ id: TASK-1596
 type: task
 role: plan
 title: "[Skill:fix] BL-D4 plan close with no linked assessment no longer passes the freshness condition silently (BR-225 vacuous pass)"
-status: draft
+status: archived
 priority: medium
 phase: "P3-stale-and-draft"
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 tags: []
 parent: PLAN-206
 plan: PLAN-206

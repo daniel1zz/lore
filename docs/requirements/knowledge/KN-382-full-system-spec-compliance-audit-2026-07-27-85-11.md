@@ -3,10 +3,10 @@ id: KN-382
 type: knowledge
 role: knowledge
 title: "Full-system spec compliance audit 2026-07-27 — 85/11/1 verdicts, remediation dispatch, open decisions"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PRD-001
 links:

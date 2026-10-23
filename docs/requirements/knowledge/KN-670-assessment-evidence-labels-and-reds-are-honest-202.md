@@ -3,10 +3,10 @@ id: KN-670
 type: knowledge
 role: knowledge
 title: "Assessment: Evidence labels and reds are honest (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-153
 links:

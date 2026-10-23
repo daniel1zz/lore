@@ -6,7 +6,7 @@ title: "plan-close predicates measure invariants: an applicability verdict in th
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 links:
   - {id: ADR-017, type: implements}
@@ -145,30 +145,30 @@ Structured criteria are authored via `lore ac add` (below); the prose here is a 
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-PCI-1: prdOutlineSynced given an absent domain doc returns a PredicateNotApplicable value: notApplicable === true, reason === 'referent-absent', a non-empty referent, and NO 'ok' property (asserted via "ok" in result === false).
+- [⊖] [script] AC-PCI-1: prdOutlineSynced given an absent domain doc returns a PredicateNotApplicable value: notApplicable === true, reason === 'referent-absent', a non-empty referent, and NO 'ok' property (asserted via "ok" in result === false).
   script: test — bunx vitest run packages/lore/tests/unit/service/predicate-applicability.test.ts -t 'notApplicable shape'
-- [⚑] [script] AC-PCI-2: checkPlanClose given a plan-close ctx whose domain doc is absent returns a results array containing NO entry with field 'prd-outline-synced' and no ok:false entry attributable to prd_sync; the not-applicable verdict is returned on its own channel.
+- [⊖] [script] AC-PCI-2: checkPlanClose given a plan-close ctx whose domain doc is absent returns a results array containing NO entry with field 'prd-outline-synced' and no ok:false entry attributable to prd_sync; the not-applicable verdict is returned on its own channel.
   script: test — bunx vitest run packages/lore/tests/unit/service/predicate-applicability.test.ts -t 'never a fail'
-- [⚑] [script] AC-PCI-3: GateEnforcer.enforce('plan-close', ctx) with an absent domain doc returns ok (never a deny) AND records one best-effort audit row naming the absent referent; a throwing audit writer leaves the enforce result unchanged.
+- [⊖] [script] AC-PCI-3: GateEnforcer.enforce('plan-close', ctx) with an absent domain doc returns ok (never a deny) AND records one best-effort audit row naming the absent referent; a throwing audit writer leaves the enforce result unchanged.
   script: test — bunx vitest run packages/lore/tests/unit/service/predicate-applicability.test.ts -t 'enforce advisory'
-- [⚑] [script] AC-PCI-4: ReviewService.approve on a plan-promote whose ancestor spec resolves no domain doc while prd_sync is enabled returns a prd_sync advisory naming that spec's slug and the lore link wiring command, on a key distinct from reachability_advisories; a resolvable domain doc yields no such advisory.
+- [⊖] [script] AC-PCI-4: ReviewService.approve on a plan-promote whose ancestor spec resolves no domain doc while prd_sync is enabled returns a prd_sync advisory naming that spec's slug and the lore link wiring command, on a key distinct from reachability_advisories; a resolvable domain doc yields no such advisory.
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-promote-prd-sync-advisory.test.ts -t 'promote advisory'
 - [⚑] [script] AC-PCI-5: deriveClaimedAcCoverage returns claimed_acs containing exactly the script-mode declared criteria carrying at least one evidence ref: an ai-mode and a human-mode criterion with refs are excluded, and an evidence ac_ref naming an undeclared id never appears in claimed_acs or unattested_acs.
   script: test — bunx vitest run packages/core/src/evidence-panel.test.ts -t 'claimed set'
 - [⚑] [script] AC-PCI-6: deriveAttestationSummary returns meets_floor false for a fixture where every evidence-bearing task has at least one attested entry AND the ratio meets an explicit min_ratio, but one claimed script-mode AC has zero attested refs; unattested_acs names exactly that AC id.
   script: test — bunx vitest run packages/core/src/evidence-panel.test.ts -t 'coverage conjunct'
-- [⚑] [script] AC-PCI-7: resolveAttestationMinRatio returns null for a config declaring no workflow.attestation.min_ratio, and a plan whose attested ratio is 0.36 with every claimed AC attested transitions to archived through the real plan-close gate with no exemption field set.
+- [⊖] [script] AC-PCI-7: resolveAttestationMinRatio returns null for a config declaring no workflow.attestation.min_ratio, and a plan whose attested ratio is 0.36 with every claimed AC attested transitions to archived through the real plan-close gate with no exemption field set.
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t 'ratio disabled'
-- [⚑] [script] AC-PCI-8: A config explicitly setting workflow.attestation.min_ratio to 0.5 still denies the same 0.36-ratio plan (ratio conjunct AND-ed with per-AC coverage), and an explicit 0 permits it; both paths exercise CorpusService.set's real gate rather than the predicate in isolation.
+- [⊖] [script] AC-PCI-8: A config explicitly setting workflow.attestation.min_ratio to 0.5 still denies the same 0.36-ratio plan (ratio conjunct AND-ed with per-AC coverage), and an explicit 0 permits it; both paths exercise CorpusService.set's real gate rather than the predicate in isolation.
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t 'explicit ratio'
-- [⚑] [script] AC-PCI-10: An in-window domain-doc content diff whose submitted content names neither the closing plan nor its governing spec, with no relates-to or informs edge to either, denies plan-close; the same edit passes once the plan slug appears in the content, and passes via a relates-to edge to the plan; a parent_id or implements structural relation alone never satisfies attribution.
+- [⊖] [script] AC-PCI-10: An in-window domain-doc content diff whose submitted content names neither the closing plan nor its governing spec, with no relates-to or informs edge to either, denies plan-close; the same edit passes once the plan slug appears in the content, and passes via a relates-to edge to the plan; a parent_id or implements structural relation alone never satisfies attribution.
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-prd-sync.test.ts -t 'attribution'
 - [⚑] [script] AC-PCI-11: PREDICATE_CONTRACTS declares an entry for every field checkPlanClose can emit (asserted by comparing the table's key set against the emitted-field constants), and lore gate --explain plan-close prints each predicate's invariant, measured proxy, and known_false_pass/known_false_block entries.
   script: test — bunx vitest run packages/lore/tests/unit/service/predicate-contracts.test.ts -t 'contract table'
 - [⚑] [script] AC-PCI-12: From a throwaway corpus driven by the compiled dist/lore binary: a plan whose single claimed AC carries attested evidence, whose ancestor spec has no domain doc, and whose config sets no min_ratio, archives at exit 0 with the not-applicable advisory printed; a sibling plan with an unattested claimed AC exits 4 with that AC id in the output.
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'compiled close'
   other_command=9
-- [⚑] [script] AC-PCI-9: The attestation-floor feeding pack names every unattested claimed AC id; it contains the literal substring 'attested ratio' when min_ratio is explicitly configured and does NOT contain that substring when min_ratio is unconfigured; feed-attestation-reachability.test.ts's byte-pinned Recovery tail still passes unchanged.
+- [⊖] [script] AC-PCI-9: The attestation-floor feeding pack names every unattested claimed AC id; it contains the literal substring 'attested ratio' when min_ratio is explicitly configured and does NOT contain that substring when min_ratio is unconfigured; feed-attestation-reachability.test.ts's byte-pinned Recovery tail still passes unchanged.
   script: test — bunx vitest run packages/lore/tests/unit/service/feed-attestation-ac-diagnostics.test.ts packages/lore/tests/unit/service/feed-attestation-reachability.test.ts -t 'unattested naming'
 - [⚑] [script] AC-PCI-13: VerificationProjectionService's plan panel passes a null min_ratio through verbatim (never coerced to 0 or a numeric default) and its claimed-AC coverage field equals deriveClaimedAcCoverage over computeAcCoverage's own output for the same fixture, so the panel and the gate cannot disagree.
   script: test — bunx vitest run packages/lore/tests/unit/service/verification-projection-service.test.ts -t 'ratio disabled render'
@@ -180,13 +180,13 @@ Structured criteria are authored via `lore ac add` (below); the prose here is a 
   other_command=1
 - [⚑] [script] AC-PCI-16: lore approve prints every prd_sync_advisories entry to stderr (never stdout) with an unchanged exit code 0, keeps that rendering distinct from the reachability_advisories loop, and prints nothing when both fields are absent.
   script: test — bunx vitest run packages/lore/tests/unit/cli/approve-advisory-render.test.ts -t 'advisory render'
-- [·] [script] AC-PCI-17: checkPlanClose emits a BLOCKING failure (not an advisory) for a plan-close ctx whose declared-scope coverage conjunct is notApplicable('scope-undeclared') while at least one of the plan's tasks carries verification evidence — the exact input shape that archived four plans at exit 0 on 2026-07-31
+- [⊖] [script] AC-PCI-17: checkPlanClose emits a BLOCKING failure (not an advisory) for a plan-close ctx whose declared-scope coverage conjunct is notApplicable('scope-undeclared') while at least one of the plan's tasks carries verification evidence — the exact input shape that archived four plans at exit 0 on 2026-07-31
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-vacuity-guard.test.ts -t 'PCI-17'
-- [·] [script] AC-PCI-18: CONTROL: the same plan with extra.ac_scope declared on its evidence-bearing tasks and attested coverage still passes checkPlanClose with zero blocking failures — AC-PCI-17's deny is conditional on the UNDECLARED scope, not on the presence of evidence
+- [⊖] [script] AC-PCI-18: CONTROL: the same plan with extra.ac_scope declared on its evidence-bearing tasks and attested coverage still passes checkPlanClose with zero blocking failures — AC-PCI-17's deny is conditional on the UNDECLARED scope, not on the presence of evidence
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-vacuity-guard.test.ts -t 'PCI-18'
-- [·] [script] AC-PCI-19: CONTROL: a plan whose tasks carry ZERO evidence still closes — attestationFloor's notApplicable('no-evidence') stays advisory, proving AC-PCI-17 did not break the pure-planning close path
+- [⊖] [script] AC-PCI-19: CONTROL: a plan whose tasks carry ZERO evidence still closes — attestationFloor's notApplicable('no-evidence') stays advisory, proving AC-PCI-17 did not break the pure-planning close path
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-vacuity-guard.test.ts -t 'PCI-19'
-- [·] [script] AC-PCI-20: A plan-close run in which EVERY blocking conjunct returned notApplicable reports that vacuity as a literal string on the gate's own output surface, asserted by string equality and never inferred from an empty failure list; a run with at least one applicable conjunct does NOT carry that string
+- [⊖] [script] AC-PCI-20: A plan-close run in which EVERY blocking conjunct returned notApplicable reports that vacuity as a literal string on the gate's own output surface, asserted by string equality and never inferred from an empty failure list; a run with at least one applicable conjunct does NOT carry that string
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-vacuity-guard.test.ts -t 'PCI-20'
 - [·] [script] AC-PCI-21: From a throwaway corpus driven by the compiled dist/lore binary: archiving a plan whose tasks carry evidence and declare no ac_scope exits NONZERO and names the missing declaration, while the same corpus's zero-evidence plan still archives at exit 0
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'PCI-21'

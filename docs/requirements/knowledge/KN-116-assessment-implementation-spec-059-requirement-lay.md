@@ -3,10 +3,10 @@ id: KN-116
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-059 requirement-layer quantifiability lint (2026-07-20)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-20
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-067
 links:

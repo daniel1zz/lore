@@ -3,10 +3,10 @@ id: KN-683
 type: knowledge
 role: knowledge
 title: "Assessment: An active spec counts as approved for claims and plan approval (2026-10-15)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-23
 tags: []
 parent: PLAN-180
 links:

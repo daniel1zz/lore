@@ -3,10 +3,10 @@ id: KN-563
 type: knowledge
 role: knowledge
 title: "Assessment: CLAUDE.md root section-structure check and adoption mode (2026-10-07)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: []
 parent: PLAN-149
 links:

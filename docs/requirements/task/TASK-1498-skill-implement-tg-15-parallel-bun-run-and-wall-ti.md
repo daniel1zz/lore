@@ -3,11 +3,11 @@ id: TASK-1498
 type: task
 role: plan
 title: "[Skill:implement] TG-15 parallel bun run and wall-time measure"
-status: draft
+status: deprecated
 priority: high
 phase: "Phase 5: cadence"
 created: 2026-10-16
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 parent: PLAN-201
 plan: PLAN-201

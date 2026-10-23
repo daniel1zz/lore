@@ -6,10 +6,12 @@ title: "A tracker is replaceable, a corpus is not — GitHub is the defect chann
 status: approved
 priority: critical
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-19
 tags: [defect-channel, transport, github, ssot, adr]
 parent: PRD-001
 ---
+> ⚠ INVALIDATED 2026-10-19T07:39:05.665Z — superseded by adr-github-owns-issue-report-state-the-corpus-owns-only-the
+
 # A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT
 
 **Date**: 2026-08-23

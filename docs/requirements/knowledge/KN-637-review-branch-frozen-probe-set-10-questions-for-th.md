@@ -3,10 +3,10 @@ id: KN-637
 type: knowledge
 role: knowledge
 title: "Review-branch frozen probe set: 10 questions for the review branch migration"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-177
 ---

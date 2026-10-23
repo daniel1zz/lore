@@ -3,10 +3,10 @@ id: KN-580
 type: knowledge
 role: knowledge
 title: "Score-gated autonomy: AI assesses decision factors, the program scores and compares against configured thresholds"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-23
 tags: [autonomy, config, decision-log]
 links:
   - {id: KN-041, type: relates-to}

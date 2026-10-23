@@ -3,10 +3,10 @@ id: KN-084
 type: knowledge
 role: knowledge
 title: "Assessment: Plan — SPEC-074 dashboard Issues triage (2026-07-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-24
-updated: 2026-07-26
+updated: 2026-10-23
 tags: []
 parent: PLAN-043
 links:

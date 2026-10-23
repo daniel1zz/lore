@@ -3,10 +3,10 @@ id: KN-184
 type: knowledge
 role: knowledge
 title: "Assessment: Land fail_superseded and not_measured as one widening of the coverage derivation, absorbing the consumer ripple exactly once (2026-08-07)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-10-23
 tags: []
 parent: PLAN-080
 links:

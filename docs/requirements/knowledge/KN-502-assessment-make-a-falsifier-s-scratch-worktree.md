@@ -3,10 +3,10 @@ id: KN-502
 type: knowledge
 role: knowledge
 title: "Assessment: Make a falsifier's scratch worktree runnable and observable: hybrid dependency materialization, wired and falsified end to end (2026-08-23)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-23
 tags: []
 parent: PLAN-135
 links:

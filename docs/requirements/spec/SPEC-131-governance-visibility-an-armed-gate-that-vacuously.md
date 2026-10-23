@@ -6,7 +6,7 @@ title: "Governance visibility: an armed gate that vacuously passes lends its aut
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 # Overview
@@ -96,7 +96,7 @@ Declared structurally via `lore ac add` (AC-GV-1..5). Each carries a named way t
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-GV-1: DATA LAYER: checkPlanClose emits, for every plan-close predicate, a distinct machine-readable discriminator separating a vacuous pass (no applicable data) from a satisfied one — asserted on the returned verdict objects. RED: make a vacuous predicate return a bare {ok:true} and this fails. ⛔ Re-baselined 2026-08-10 after lore assess rated the prior single-AC version a MAJOR outcome gap: it spanned BOTH this data layer and the render surface, while its oracle (plan-close-predicate-provenance.test.ts -t vacuous-vs-satisfied, attested pass, exit 0, 7/7) only ever asserted checkPlanClose's returned objects and JSON.stringify of those same objects — so the render half passed by assumption. Scope narrowed to what the oracle actually measures; the render half moved to AC-GV-6, which is purely additive. Nothing was removed.
+- [⊖] [script] AC-GV-1: DATA LAYER: checkPlanClose emits, for every plan-close predicate, a distinct machine-readable discriminator separating a vacuous pass (no applicable data) from a satisfied one — asserted on the returned verdict objects. RED: make a vacuous predicate return a bare {ok:true} and this fails. ⛔ Re-baselined 2026-08-10 after lore assess rated the prior single-AC version a MAJOR outcome gap: it spanned BOTH this data layer and the render surface, while its oracle (plan-close-predicate-provenance.test.ts -t vacuous-vs-satisfied, attested pass, exit 0, 7/7) only ever asserted checkPlanClose's returned objects and JSON.stringify of those same objects — so the render half passed by assumption. Scope narrowed to what the oracle actually measures; the render half moved to AC-GV-6, which is purely additive. Nothing was removed.
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-predicate-provenance.test.ts -t vacuous-vs-satisfied
 - [⚑] [script] AC-GV-2: tree-check-service no longer emits the sentence claiming the plan-close gate never evaluated a doc, and the command it suggests is one whose gate behaviour matches the surrounding justification. RED: restore the old wording and the assertion on the emitted message fails.
   script: test — bunx vitest run packages/lore/tests/unit/service/tree-check-service.test.ts -t plan-close-hint-wording
@@ -106,5 +106,5 @@ Declared structurally via `lore ac add` (AC-GV-1..5). Each carries a named way t
   script: test — bunx vitest run packages/lore/tests/unit/adapters/ac-demotion-notice.test.ts -t demotion-blast-radius
 - [⚑] [script] AC-GV-5: A spec-create denial in a FRESH mkdtemp + lore init corpus carries a non-empty rule slice with a named source (never [source: unknown]), AND the same denial in this repo's populated corpus — used as a live control in the same test run — is also non-empty. ⛔ Both ends are required: a single-ended probe passes vacuously. The test MUST NOT write to this repo's own .lore/.
   script: test — bunx vitest run packages/lore/tests/unit/service/gate-feeding-fresh-install.test.ts -t both-ends
-- [⚑] [script] AC-GV-6: SURFACE LAYER: the plan-close gate's USER-FACING output distinguishes a vacuous pass from a satisfied one in BOTH the human render and the --json payload — asserted by driving the actual CLI/render path, never by re-serialising the predicate objects the data layer already returns. RED: make the renderer print both cases identically (or drop the discriminator from the --json payload) and this must fail. ⛔ This AC exists because the prior AC-GV-1 covered this layer only by assumption — see its own re-baseline note. ⛔ Asserting on JSON.stringify of checkPlanClose's return value does NOT satisfy this criterion; the oracle MUST exercise the surface a human or a --json consumer actually reads.
+- [⊖] [script] AC-GV-6: SURFACE LAYER: the plan-close gate's USER-FACING output distinguishes a vacuous pass from a satisfied one in BOTH the human render and the --json payload — asserted by driving the actual CLI/render path, never by re-serialising the predicate objects the data layer already returns. RED: make the renderer print both cases identically (or drop the discriminator from the --json payload) and this must fail. ⛔ This AC exists because the prior AC-GV-1 covered this layer only by assumption — see its own re-baseline note. ⛔ Asserting on JSON.stringify of checkPlanClose's return value does NOT satisfy this criterion; the oracle MUST exercise the surface a human or a --json consumer actually reads.
   script: test — bunx vitest run packages/lore/tests/unit/adapters/plan-close-render-provenance.test.ts -t surface-discriminator

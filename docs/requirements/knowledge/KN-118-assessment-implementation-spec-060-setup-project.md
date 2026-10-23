@@ -3,10 +3,10 @@ id: KN-118
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-060 setup --project scaffold + repo ledger (2026-07-21)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-21
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-066
 links:

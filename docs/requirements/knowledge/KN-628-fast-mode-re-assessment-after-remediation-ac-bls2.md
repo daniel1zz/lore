@@ -3,10 +3,10 @@ id: KN-628
 type: knowledge
 role: knowledge
 title: "Fast-mode re-assessment after remediation: AC-BLS2-13/17/18 pass"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-23
 tags: []
 parent: PLAN-176
 ---

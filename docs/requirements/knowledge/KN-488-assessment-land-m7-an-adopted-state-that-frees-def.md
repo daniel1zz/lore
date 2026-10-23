@@ -3,10 +3,10 @@ id: KN-488
 type: knowledge
 role: knowledge
 title: "Assessment: Land M7: an adopted state that frees defect-channel quota without retiring the claim, with abandonment counted (2026-08-21)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-23
 tags: []
 parent: PLAN-132
 links:

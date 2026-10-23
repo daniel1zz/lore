@@ -3,10 +3,10 @@ id: KN-644
 type: knowledge
 role: knowledge
 title: "Pilot v3 placement: 11.2% full-granularity disagreement, 22 in-tree, 20/20 same rule"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-174
 ---

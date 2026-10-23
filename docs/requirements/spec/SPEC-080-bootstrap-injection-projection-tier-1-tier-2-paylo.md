@@ -6,7 +6,7 @@ title: "Bootstrap injection projection: tier-1/tier-2 payload split"
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-10-17
+updated: 2026-10-19
 tags: []
 links:
   - {id: SPEC-041, type: relates-to}
@@ -121,7 +121,7 @@ Design produced via lore-design module mode: 4-perspective parallel review (coup
 - [⊘] [script] AC-080-5: Monorepo typecheck passes with the new BootstrapInjection types and config schema extension: tsc --noEmit exits 0 across all packages and scripts
   script: tsc — bun run typecheck
   other_command=2
-- [⚑] [script] AC-080-3: Compiled-binary e2e: dist/lore bootstrap --json on a seeded throwaway corpus has exactly the literal 10-key BootstrapReport set pinned in the test (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, corpus, active_sessions, archive_candidates) with no omitted ledger; --injectoin (typo) exits 2 naming the unknown option; --injection --json combined is byte-identical to --injection alone (CORRECTED 2026-10-17, TG-31: the original criterion pinned the tier-1 injection key order and omitted ledger, which seat-only injection (4b515543) retired; the seat-only payload is asserted by AC-SI-2)
+- [⚑] [script] AC-080-3: Compiled-binary e2e: dist/lore bootstrap --json on a seeded throwaway corpus has exactly the literal 11-key BootstrapReport set pinned in the test (root, architecture, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, corpus, active_sessions, archive_candidates) with no omitted ledger; --injectoin (typo) exits 2 naming the unknown option; --injection --json combined is byte-identical to --injection alone (CORRECTED 2026-10-17, TG-31: the original criterion pinned the tier-1 injection key order and omitted ledger, which seat-only injection (4b515543) retired; the seat-only payload is asserted by AC-SI-2) (CORRECTED 2026-10-19: the plain --json key set grows from 10 to 11 — `architecture` ({tree,id,slug,title} or an explicit null) inserted after root, SPEC-205 BL-6 architecture root reachable from session start, task-lore-bootstrap-names-only-the-business-baseline-root-the-2. Original command: bunx --bun vitest run packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts; exact failure: 'REGRESSION: plain --json ... literal 10-key BootstrapReport set' — expected [ 'root', 'architecture', …(9) ] to have a length of 10 but got 11. Corrects, not weakens: still an exact ordered literal list plus exact length; architecture is pull-only (BOOTSTRAP_CORPUS_GLOBAL_KEYS), injection payload unchanged.)
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts
   other_command=9
 - [⚑] [script] AC-080-6: Config knobs are never decorative end-to-end (CORRECTED 2026-10-17, TG-31): the compiled-binary e2e seeds a throwaway corpus whose .lore/config.yaml sets the retired workflow.bootstrap_injection count knobs (max_active_plans, max_handoffs, max_pending_slugs) and asserts bootstrap --injection exits 0 and warns exactly once per set retired key as deprecated, with a config setting none emitting no deprecation line; and char_budget=50 with a seat claim yields budget_exceeded true with a payload that still parses as JSON and keeps its seat claim (never sliced). The original count-cap halves (1 plan + omitted count, 1 handoff, 1 pending slug) were retired by seat-only injection (4b515543)

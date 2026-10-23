@@ -3,10 +3,10 @@ id: SPEC-040
 type: spec
 role: spec
 title: "Assessment dimension framework v2: facts/judgment split + typed findings"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: [assess, judge, rubric, calibration, spec-040, instrument]
 ---
 # SPEC-040 — Assessment dimension framework v2: deterministic-facts / judgment split + typed findings
@@ -196,5 +196,4 @@ are vitest on InMemoryStore/InMemoryAIProvider — no bun:sqlite dependency; rev
 
 ## Code anchors
 
-- packages/lore/src/ai/assess-golden-aggregation.ts
 - packages/core/src/assessment.ts#computeScopeMismatchWarning

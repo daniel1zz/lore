@@ -3,10 +3,10 @@ id: SPEC-114
 type: spec
 role: spec
 title: "A test case's timeout budget must be declared when its spawn count makes the default unsafe: a structural oracle instead of a bigger number"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-31
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 ---
 ## Overview
@@ -92,7 +92,3 @@ Out of scope, each deliberately:
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts -t 'unparseable file is loud'
 - [·] [script] AC-TB-6: The baseline ledger fails loud in every direction, never silently re-exempting: a violation with no matching ledger row is reported as NEW debt (exit 2); a ledger row whose violation was fixed, or whose (path,line) matches but spawnCount drifted, is ORPHANED rather than re-exempted (exit 5); a ledger row naming a nonexistent path is reported by name (exit 5); and every row carries path/line/spawnCount/reason. Deliberately run as the WHOLE file with no -t filter: a -t name filter that matches nothing exits 0 with zero tests executed (measured 2026-08-01), which is indistinguishable from passing, so name-filtered ACs silently rot the moment a test is renamed.
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts
-
-## Code anchors
-
-- scripts/check-test-budgets.ts

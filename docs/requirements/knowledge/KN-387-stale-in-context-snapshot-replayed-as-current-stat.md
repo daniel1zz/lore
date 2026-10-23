@@ -3,10 +3,10 @@ id: KN-387
 type: knowledge
 role: knowledge
 title: "Stale in-context snapshot replayed as current state in a cross-plan report — timeless-context bias, mechanized at reporter layer"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: [retro, process, multi-session, reporting]
 parent: PRD-001
 links:

@@ -1,0 +1,1375 @@
+---
+id: KN-790
+type: knowledge
+role: knowledge
+title: "Baseline site-map mappings as of 2026-10-20: labelling hints for RQ, never labels"
+status: draft
+priority: medium
+created: 2026-10-20
+updated: 2026-10-20
+tags: []
+---
+## Purpose
+
+Every (leaf, site, rule) mapping that baseline leaves held in `extra.site_map` on 2026-10-20, exported before the keys were removed (D1, `plan-d1-refusal-sites-declare-their-rule-in-code`). Under `adr-a-refusal-carries-its-rule-as-a-required-field-type`, these are HINTS for labelling refusals in plan `plan-rq-every-refusal-carries-its-rule-required-type-checked`, never labels: a site key names the census site of that day (file#function#code~ordinal), and a rule here is what a leaf once mapped, not a verified decision.
+
+D1-1 placed 644 of them at the constructing line; the rest (522 on shared sites, 140 stale, 6 on non-live rules, others in deleted or held code) remain to label from the predicate that decides each refusal.
+
+## Rows (leaf | site | rule)
+
+- packages/core/src/acceptance.ts#resolveGoverningSpecByAcScope#VALIDATION_ERROR#ac_scope~0 | BR-183 | baseline-run-verification
+- packages/core/src/acceptance.ts#resolveGoverningSpecByAcScope#VALIDATION_ERROR#ac_scope~1 | BR-183 | baseline-run-verification
+- packages/core/src/ai.ts#AIProvider#generate | BR-588 | baseline-check-a-gate-before-writing
+- packages/core/src/ai.ts#AIProvider#generate | BR-708 | baseline-create-a-document
+- packages/core/src/ai.ts#AIProvider#generate | BR-733 | baseline-revise-a-document
+- packages/core/src/ai.ts#AIProvider#generate | BR-762 | baseline-link-two-documents
+- packages/core/src/ai.ts#AIProvider#generate | BR-875 | baseline-create-the-project-memory-file
+- packages/core/src/assessment.ts#extractAssessmentJson#VALIDATION_ERROR#assessment_json~0 | BR-264 | baseline-judge-a-document
+- packages/core/src/assessment.ts#extractAssessmentJson#VALIDATION_ERROR#assessment_json~0 | BR-544 | baseline-assess-a-plan-s-outcome
+- packages/core/src/assessment.ts#extractAssessmentJson#VALIDATION_ERROR#assessment_json~0 | BR-588 | baseline-check-a-gate-before-writing
+- packages/core/src/assessment.ts#extractAssessmentJson#VALIDATION_ERROR#assessment_json~1 | BR-264 | baseline-judge-a-document
+- packages/core/src/assessment.ts#extractAssessmentJson#VALIDATION_ERROR#assessment_json~1 | BR-544 | baseline-assess-a-plan-s-outcome
+- packages/core/src/assessment.ts#extractAssessmentJson#VALIDATION_ERROR#assessment_json~1 | BR-588 | baseline-check-a-gate-before-writing
+- packages/core/src/code-anchors.ts#parseCodeAnchor#VALIDATION_ERROR#code_anchors | BR-11 | baseline-create-a-spec
+- packages/core/src/code-anchors.ts#parseCodeAnchor#VALIDATION_ERROR#code_anchors | BR-1331 | baseline-detect-code-anchor-drift
+- packages/core/src/code-anchors.ts#parseCodeAnchor#VALIDATION_ERROR#code_anchors | BR-251 | baseline-declare-a-code-anchor
+- packages/core/src/code-anchors.ts#parseCodeAnchor#VALIDATION_ERROR#code_anchors | BR-63 | baseline-declare-a-code-anchor
+- packages/core/src/code-anchors.ts#parseCodeAnchor#VALIDATION_ERROR#code_anchors | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/config-node.ts#migrateConfigKeys#STORE_ERROR | BR-1306 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config-node.ts#migrateMemoryLimits#STORE_ERROR | BR-1323 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config-node.ts#saveConfig#STORE_ERROR | BR-807 | baseline-initialise-a-project-corpus
+- packages/core/src/config-node.ts#saveConfig#STORE_ERROR | BR-810 | baseline-initialise-a-project-corpus
+- packages/core/src/config-node.ts#saveConfig#STORE_ERROR | BR-830 | baseline-scaffold-a-project-workflow
+- packages/core/src/config-node.ts#saveConfig#STORE_ERROR | BR-922 | baseline-connect-a-project-to-a-remote-corpus
+- packages/core/src/config.ts#detectPrdSyncConfigKey#VALIDATION_ERROR#0 | BR-1304 | baseline-close-a-plan
+- packages/core/src/config.ts#detectPrdSyncConfigKey#VALIDATION_ERROR#0 | BR-1306 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config.ts#detectRetiredAdoptionSetting#VALIDATION_ERROR#context.memory_files.adoption | BR-1321 | baseline-check-project-memory-files
+- packages/core/src/config.ts#detectRetiredVerifySinceSetting#VALIDATION_ERROR#audit.verify_since | BR-1335 | baseline-verify-the-audit-trail
+- packages/core/src/config.ts#removeRetiredAdoptionSetting#VALIDATION_ERROR#context.memory_files.adoption | BR-1323 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config.ts#removeRetiredAdoptionSetting#VALIDATION_ERROR#yaml | BR-1323 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config.ts#renamePrdSyncConfigKey#VALIDATION_ERROR#0 | BR-1306 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config.ts#renamePrdSyncConfigKey#VALIDATION_ERROR#1 | BR-1306 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/config.ts#renamePrdSyncConfigKey#VALIDATION_ERROR#yaml | BR-1306 | baseline-upgrade-the-corpus-in-place
+- packages/core/src/context-variables.ts#refuse#VALIDATION_ERROR#0 | BR-1095 | baseline-choose-which-fragments-apply
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~0 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~0 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~1 | BR-11 | baseline-create-a-spec
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~1 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~1 | BR-251 | baseline-declare-a-code-anchor
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~1 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~2 | BR-11 | baseline-create-a-spec
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~2 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~2 | BR-63 | baseline-declare-a-code-anchor
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~2 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~3 | BR-11 | baseline-create-a-spec
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~3 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~3 | BR-63 | baseline-declare-a-code-anchor
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~3 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~4 | BR-11 | baseline-create-a-spec
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~4 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~4 | BR-63 | baseline-declare-a-code-anchor
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~4 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~5 | BR-11 | baseline-create-a-spec
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~5 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~5 | BR-63 | baseline-declare-a-code-anchor
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~5 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~6 | BR-11 | baseline-create-a-spec
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~6 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~6 | BR-251 | baseline-declare-a-code-anchor
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~6 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~7 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~7 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~8 | BR-122 | baseline-create-a-task
+- packages/core/src/file-anchors.ts#normalizeFileAnchors#VALIDATION_ERROR#file_anchors~8 | BR-672 | baseline-compute-a-rule-s-state
+- packages/core/src/fs-ports.ts#outsideRootsError#VALIDATION_ERROR#path | BR-1177 | baseline-install-the-lore-rules-files
+- packages/core/src/issue-report.ts#buildUnconfiguredUpstreamRemedy#VALIDATION_ERROR#feedback.upstream | BR-489 | baseline-file-a-defect-report
+- packages/core/src/issue-report.ts#buildUnconfiguredUpstreamRemedy#VALIDATION_ERROR#feedback.upstream | BR-521 | baseline-adopt-a-github-issue
+- packages/core/src/merge-settings.ts#mergeSettings#VALIDATION_ERROR#0 | BR-820 | baseline-install-the-agent-integration
+- packages/core/src/merge-settings.ts#mergeSettings#VALIDATION_ERROR#1 | BR-820 | baseline-install-the-agent-integration
+- packages/core/src/merge-settings.ts#mergeSettings#VALIDATION_ERROR#2 | BR-820 | baseline-install-the-agent-integration
+- packages/core/src/merge-settings.ts#mergeSettings#VALIDATION_ERROR#existingRaw~0 | BR-820 | baseline-install-the-agent-integration
+- packages/core/src/merge-settings.ts#mergeSettings#VALIDATION_ERROR#existingRaw~1 | BR-820 | baseline-install-the-agent-integration
+- packages/core/src/merge-settings.ts#mergeSettings#VALIDATION_ERROR#hooks | BR-820 | baseline-install-the-agent-integration
+- packages/core/src/phase.ts#assertScopeFreeze#VALIDATION_ERROR#ac_scope | BR-120 | baseline-create-a-task
+- packages/core/src/phase.ts#computeAcScopeEdit#VALIDATION_ERROR#ac_scope~0 | BR-255 | baseline-create-a-task
+- packages/core/src/phase.ts#computeAcScopeEdit#VALIDATION_ERROR#ac_scope~1 | BR-121 | baseline-create-a-task
+- packages/core/src/phase.ts#computeAcScopeEdit#VALIDATION_ERROR#ac_scope~2 | BR-121 | baseline-create-a-task
+- packages/core/src/plan-update.ts#UpdateProbe#listManagedPaths | BR-846 | baseline-check-installation-freshness
+- packages/core/src/plan-update.ts#UpdateProbe#resolve | BR-846 | baseline-check-installation-freshness
+- packages/core/src/plan-update.ts#planUpdate#STORE_ERROR#~0 | BR-846 | baseline-check-installation-freshness
+- packages/core/src/plan-update.ts#planUpdate#STORE_ERROR#~1 | BR-846 | baseline-check-installation-freshness
+- packages/core/src/plan-update.ts#planUpdate#STORE_ERROR#~2 | BR-846 | baseline-check-installation-freshness
+- packages/core/src/seat.ts#assertSeatEntryReady#VALIDATION_ERROR#gate:seat-entry:anchor-conflict | BR-369 | baseline-enter-a-seat
+- packages/core/src/task-workflow.ts#rejectSelfLabelledRunnerUnattested#VALIDATION_ERROR#capture_source | BR-1180 | baseline-record-evidence
+- packages/core/src/task-workflow.ts#resolveTargetTask#VALIDATION_ERROR#task~0 | BR-162 | baseline-run-verification
+- packages/core/src/task-workflow.ts#resolveTargetTask#VALIDATION_ERROR#task~1 | BR-162 | baseline-run-verification
+- packages/core/src/tree-blueprint.ts#parseTreeBlueprint#VALIDATION_ERROR#lore.tree.yaml~0 | BR-273 | baseline-judge-a-document
+- packages/core/src/tree-blueprint.ts#parseTreeBlueprint#VALIDATION_ERROR#lore.tree.yaml~0 | BR-402 | baseline-check-the-document-tree
+- packages/core/src/tree-blueprint.ts#parseTreeBlueprint#VALIDATION_ERROR#lore.tree.yaml~1 | BR-273 | baseline-judge-a-document
+- packages/core/src/tree-blueprint.ts#parseTreeBlueprint#VALIDATION_ERROR#lore.tree.yaml~1 | BR-402 | baseline-check-the-document-tree
+- packages/lore/src/adapters/ac-cite-config-file.ts#storedOf#VALIDATION_ERROR#workflow.gates.ac-cite.armed_branches | BR-987 | baseline-cite-a-baseline-rule
+- packages/lore/src/adapters/ac-cite-config-file.ts#storedOf#VALIDATION_ERROR#workflow.gates.ac-cite.mode | BR-987 | baseline-cite-a-baseline-rule
+- packages/lore/src/adapters/claude-settings-port.ts#ClaudeSettingsFs#read | BR-827 | baseline-install-the-agent-integration
+- packages/lore/src/adapters/claude-settings-port.ts#ClaudeSettingsFs#write | BR-827 | baseline-install-the-agent-integration
+- packages/lore/src/adapters/claude-settings-port.ts#ClaudeSettingsPort.mergeLanguage#VALIDATION_ERROR#settings~0 | BR-827 | baseline-install-the-agent-integration
+- packages/lore/src/adapters/claude-settings-port.ts#ClaudeSettingsPort.mergeLanguage#VALIDATION_ERROR#settings~1 | BR-827 | baseline-install-the-agent-integration
+- packages/lore/src/adapters/claude-settings-port.ts#resolveLanguageName#VALIDATION_ERROR#context.language | BR-828 | baseline-install-the-agent-integration
+- packages/lore/src/adapters/cli/absent-declarations.ts#buildBaselineDeclarationPort.absentDeclarations#VALIDATION_ERROR#0 | BR-1309 | baseline-approve-a-document
+- packages/lore/src/adapters/cli/absent-declarations.ts#buildMainTreePort#VALIDATION_ERROR#0 | BR-1317 | baseline-account-for-a-refusal-site
+- packages/lore/src/adapters/cli/absent-declarations.ts#buildMainTreePort#dynamic:measure | BR-1317 | baseline-account-for-a-refusal-site
+- packages/lore/src/adapters/cli/absent-declarations.ts#checkBaselineApprovable#VALIDATION_ERROR#0 | BR-1309 | baseline-approve-a-document
+- packages/lore/src/adapters/cli/absent-declarations.ts#checkBaselineApprovable#VALIDATION_ERROR#baseline-commands | BR-1308 | baseline-approve-a-document
+- packages/lore/src/adapters/cli/autonomy-heads.ts#ledgerError#STORE_ERROR | BR-1264 | baseline-prove-the-decision-record-was-not-rewritten-before-a
+- packages/lore/src/adapters/cli/autonomy-heads.ts#readPushedHeads#dynamic:err(ledgerError(`pushed-heads ledger ${path} has an unexpected shape: ${parsed.error...) | BR-1264 | baseline-prove-the-decision-record-was-not-rewritten-before-a
+- packages/lore/src/adapters/cli/autonomy-heads.ts#readPushedHeads#dynamic:err(ledgerError(`pushed-heads ledger ${path} is unreadable: ${String(cause)}`)) | BR-1264 | baseline-prove-the-decision-record-was-not-rewritten-before-a
+- packages/lore/src/adapters/cli/commands/anchor.ts#unsupportedTargetTypeError#VALIDATION_ERROR#type | BR-62 | baseline-declare-a-code-anchor
+- packages/lore/src/adapters/cli/commands/autonomy.ts#propose#dynamic:build | BR-1260 | baseline-govern-autonomy-thresholds
+- packages/lore/src/adapters/cli/commands/autonomy.ts#propose#dynamic:build | BR-1261 | baseline-govern-autonomy-thresholds
+- packages/lore/src/adapters/cli/commands/baseline-adopt.ts#usageError#VALIDATION_ERROR#0 | BR-987 | baseline-cite-a-baseline-rule
+- packages/lore/src/adapters/cli/commands/baseline.ts#default.subCommands.add.run#VALIDATION_ERROR#content-file | BR-614 | baseline-add-a-baseline-node
+- packages/lore/src/adapters/cli/commands/baseline.ts#default.subCommands.add.run#VALIDATION_ERROR#tree | BR-979 | baseline-add-a-baseline-node
+- packages/lore/src/adapters/cli/commands/baseline.ts#default.subCommands.map.run#VALIDATION_ERROR#sites-file | BR-1288 | baseline-account-for-a-refusal-site
+- packages/lore/src/adapters/cli/commands/baseline.ts#default.subCommands.map.run#VALIDATION_ERROR#site~0 | BR-655 | baseline-account-for-a-refusal-site
+- packages/lore/src/adapters/cli/commands/baseline.ts#default.subCommands.map.run#VALIDATION_ERROR#site~1 | BR-655 | baseline-account-for-a-refusal-site
+- packages/lore/src/adapters/cli/commands/baseline.ts#default.subCommands.sites.run#VALIDATION_ERROR#command | BR-664 | baseline-measure-completeness
+- packages/lore/src/adapters/cli/commands/baseline.ts#parseSitesFile#VALIDATION_ERROR#sites-file | BR-1288 | baseline-account-for-a-refusal-site
+- packages/lore/src/adapters/cli/commands/baseline.ts#reportCensusFailure#VALIDATION_ERROR#0 | BR-663 | baseline-measure-completeness
+- packages/lore/src/adapters/cli/commands/baseline.ts#reportCensusFailure#VALIDATION_ERROR#0 | BR-664 | baseline-measure-completeness
+- packages/lore/src/adapters/cli/commands/baseline.ts#runCoverage#VALIDATION_ERROR#target | BR-662 | baseline-measure-completeness
+- packages/lore/src/adapters/cli/commands/baseline.ts#runFidelityCommand#VALIDATION_ERROR#0 | BR-963 | baseline-sample-citation-fidelity
+- packages/lore/src/adapters/cli/commands/context.ts#default.run#VALIDATION_ERROR#options | BR-889 | baseline-refresh-the-managed-part
+- packages/lore/src/adapters/cli/commands/context.ts#makeRealContextFsPort#dynamic:err(outsideRootsError(path, roots)) | BR-1177 | baseline-install-the-lore-rules-files
+- packages/lore/src/adapters/cli/commands/dashboard.ts#withLiveServerRemoval#dynamic:teardown | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/commands/done.ts#resolveEvidenceCitation#VALIDATION_ERROR#override-attestation-cite~0 | BR-204 | baseline-archive-a-task
+- packages/lore/src/adapters/cli/commands/done.ts#resolveEvidenceCitation#VALIDATION_ERROR#override-attestation-cite~1 | BR-204 | baseline-archive-a-task
+- packages/lore/src/adapters/cli/commands/done.ts#resolveEvidenceCitation#VALIDATION_ERROR#override-attestation-cite~2 | BR-204 | baseline-archive-a-task
+- packages/lore/src/adapters/cli/commands/done.ts#resolveEvidenceCitation#VALIDATION_ERROR#override-attestation-cite~3 | BR-204 | baseline-archive-a-task
+- packages/lore/src/adapters/cli/commands/evidence.ts#default.run#VALIDATION_ERROR#command | BR-253 | baseline-record-evidence
+- packages/lore/src/adapters/cli/commands/gate.ts#runPhaseClaimGate#VALIDATION_ERROR#type | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/adapters/cli/commands/gate.ts#runTaskClaimGate#VALIDATION_ERROR#type | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/adapters/cli/commands/governance.ts#readGovernanceAsset#VALIDATION_ERROR#assetsRoot | BR-857 | baseline-print-a-governance-topic
+- packages/lore/src/adapters/cli/commands/issue.ts#fixedNotSettableError#VALIDATION_ERROR#state | BR-527 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#invalidIssueNumberError#VALIDATION_ERROR#number | BR-520 | baseline-adopt-a-github-issue
+- packages/lore/src/adapters/cli/commands/issue.ts#invalidStateError#VALIDATION_ERROR#state | BR-527 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#issueNotListedError#VALIDATION_ERROR#number | BR-522 | baseline-adopt-a-github-issue
+- packages/lore/src/adapters/cli/commands/issue.ts#missingPointerError#VALIDATION_ERROR#0 | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#missingReasonError#VALIDATION_ERROR#reason | BR-528 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#noRootPrdError#VALIDATION_ERROR#rootPrdId | BR-524 | baseline-adopt-a-github-issue
+- packages/lore/src/adapters/cli/commands/issue.ts#notAnIssueError#VALIDATION_ERROR#issue | BR-531 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#pointerForWrongStateError#VALIDATION_ERROR#0 | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#selfPointerError#VALIDATION_ERROR#0 | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#unresolvablePointerError#VALIDATION_ERROR#0 | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issue.ts#wrongPointerTypeError#VALIDATION_ERROR#0 | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/adapters/cli/commands/issues.ts#fetchGithubLabelResolutions#VALIDATION_ERROR#gh_issues_verify_response | BR-516 | baseline-check-resolution-labels
+- packages/lore/src/adapters/cli/commands/report-issue.ts#validateTriageLabels#VALIDATION_ERROR#category~0 | BR-492 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/commands/report-issue.ts#validateTriageLabels#VALIDATION_ERROR#category~1 | BR-492 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/commands/report-issue.ts#validateTriageLabels#VALIDATION_ERROR#severity | BR-492 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/commands/scope.ts#unsupportedTargetTypeError#VALIDATION_ERROR#type | BR-256 | baseline-create-a-task
+- packages/lore/src/adapters/cli/commands/setup.ts#classifyProjectSettingsEntries#VALIDATION_ERROR#settings~0 | BR-1181 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/commands/setup.ts#classifyProjectSettingsEntries#VALIDATION_ERROR#settings~1 | BR-1181 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/commands/setup.ts#makeRealProjectAssetSource.readAsset#VALIDATION_ERROR#name | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/adapters/cli/commands/setup.ts#makeRealProjectSkillSource.listSkillAssets#VALIDATION_ERROR#skills~0 | BR-986 | baseline-scaffold-a-project-workflow
+- packages/lore/src/adapters/cli/commands/setup.ts#makeRealProjectSkillSource.listSkillAssets#VALIDATION_ERROR#skills~1 | BR-986 | baseline-scaffold-a-project-workflow
+- packages/lore/src/adapters/cli/commands/status.ts#collectCodeAnchorSpecMembers#STORE_ERROR | BR-444 | baseline-report-corpus-health
+- packages/lore/src/adapters/cli/commands/status.ts#default.run#VALIDATION_ERROR#enumerate | BR-443 | baseline-report-corpus-health
+- packages/lore/src/adapters/cli/commands/sync.ts#performPull#dynamic:err(tmpdirError) | BR-939 | baseline-pull-remote-changes
+- packages/lore/src/adapters/cli/commands/sync.ts#performPush#dynamic:err(tmpdirError) | BR-931 | baseline-push-local-changes-to-the-remote
+- packages/lore/src/adapters/cli/commands/trace.ts#default.subCommands.stats.run#VALIDATION_ERROR#enumerate | BR-485 | baseline-measure-corpus-usage
+- packages/lore/src/adapters/cli/create-resolves.ts#refusal#VALIDATION_ERROR#resolves | BR-1083 | baseline-create-a-document
+- packages/lore/src/adapters/cli/create-resolves.ts#resolveResolvesTargets#dynamic:err(refusal( `--resolves ${token} is ambiguous (${candidates.map((doc) => doc.slug)....) | BR-1083 | baseline-create-a-document
+- packages/lore/src/adapters/cli/create-resolves.ts#resolveResolvesTargets#dynamic:err(refusal( `--resolves ${token}: no filed defect report carries GitHub issue ~${to...) | BR-1083 | baseline-create-a-document
+- packages/lore/src/adapters/cli/create-resolves.ts#resolveResolvesTargets#dynamic:err(refusal( existing === undefined ? `--resolves ${token}: does not name a filed de...) | BR-1083 | baseline-create-a-document
+- packages/lore/src/adapters/cli/create-resolves.ts#resolveResolvesTargets#dynamic:err(refusal("--resolves received an empty value", rawToken)) | BR-1083 | baseline-create-a-document
+- packages/lore/src/adapters/cli/dashboard-lifecycle.ts#ClosableApp#close | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/dashboard-lifecycle.ts#ClosableDb#close | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/dashboard-lifecycle.ts#ClosableMountRegistry#closeAll | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/dashboard-lifecycle.ts#KillableChild#kill | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/dashboard-lifecycle.ts#StoppableServer#stop | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/dashboard-lifecycle.ts#registerDashboardShutdownSignals#dynamic:teardown | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findCaptureFlagConflict#VALIDATION_ERROR#capture~0 | BR-152 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findCaptureFlagConflict#VALIDATION_ERROR#capture~1 | BR-152 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findCapturedFailDiscoveryRefusal#VALIDATION_ERROR#command | BR-155 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findCapturedRedProofGap#VALIDATION_ERROR#command~0 | BR-1077 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findCapturedRedProofGap#VALIDATION_ERROR#command~1 | BR-1077 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findFilteredPassRefusal#VALIDATION_ERROR#0 | BR-153 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findMixedRunnerRefusal#VALIDATION_ERROR#command | BR-252 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findPipeRefusal#VALIDATION_ERROR#command | BR-154 | baseline-record-evidence
+- packages/lore/src/adapters/cli/evidence-precheck.ts#findUnderMatchedPassRefusal#VALIDATION_ERROR#output_tail | BR-252 | baseline-record-evidence
+- packages/lore/src/adapters/cli/filter-values.ts#refuse#VALIDATION_ERROR#0 | BR-1289 | baseline-list-documents
+- packages/lore/src/adapters/cli/local-key.ts#LocalApiKeyCreator#create | BR-867 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#buildPartialSuccessStoreError#STORE_ERROR | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#buildRetiredFeedbackUpstreamError#VALIDATION_ERROR#feedback.upstream | BR-490 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#buildRetiredFeedbackUpstreamError#VALIDATION_ERROR#feedback.upstream | BR-505 | baseline-list-defect-reports
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#buildRetiredFeedbackUpstreamError#VALIDATION_ERROR#feedback.upstream | BR-521 | baseline-adopt-a-github-issue
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#fileGithubIssue#VALIDATION_ERROR#reporter_root_prd | BR-493 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#mintIssueTask#dynamic:err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(createRes...) | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#mintIssueTask#dynamic:err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(taskInput...) | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/adapters/cli/setup-check.ts#readInstalledManifest#STORE_ERROR | BR-848 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/setup-check.ts#readInstalledManifest#VALIDATION_ERROR#manifest~0 | BR-847 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/setup-check.ts#readInstalledManifest#VALIDATION_ERROR#manifest~1 | BR-847 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/setup-github-health.ts#GhHealthProbeRunner#run | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/setup-hook-double-registration.ts#readRegistrations#VALIDATION_ERROR#settings~0 | BR-1182 | baseline-check-installation-freshness
+- packages/lore/src/adapters/cli/setup-hook-double-registration.ts#readRegistrations#VALIDATION_ERROR#settings~1 | BR-1182 | baseline-check-installation-freshness
+- packages/lore/src/adapters/evidence-capture.ts#captureOracleCommand#VALIDATION_ERROR#capture~0 | BR-152 | baseline-record-evidence
+- packages/lore/src/adapters/evidence-capture.ts#captureOracleCommand#VALIDATION_ERROR#capture~1 | BR-254 | baseline-record-evidence
+- packages/lore/src/adapters/evidence-capture.ts#captureOracleCommand#VALIDATION_ERROR#capture~2 | BR-254 | baseline-record-evidence
+- packages/lore/src/adapters/evidence-capture.ts#captureOracleCommand#VALIDATION_ERROR#result | BR-152 | baseline-record-evidence
+- packages/lore/src/adapters/http/auth.ts#ApiKeyStore.create#VALIDATION_ERROR#name~0 | BR-952 | baseline-issue-an-agent-key
+- packages/lore/src/adapters/http/auth.ts#ApiKeyStore.create#VALIDATION_ERROR#name~1 | BR-952 | baseline-issue-an-agent-key
+- packages/lore/src/adapters/http/auth.ts#ApiKeyStore.revoke#DOC_NOT_FOUND | BR-956 | baseline-revoke-an-agent-key
+- packages/lore/src/adapters/http/auth.ts#ApiKeyStore.validate#VALIDATION_ERROR#token~0 | BR-945 | baseline-serve-the-corpus-over-http
+- packages/lore/src/adapters/http/auth.ts#ApiKeyStore.validate#VALIDATION_ERROR#token~1 | BR-945 | baseline-serve-the-corpus-over-http
+- packages/lore/src/adapters/http/auth.ts#ApiKeyStore.validate#VALIDATION_ERROR#token~2 | BR-945 | baseline-serve-the-corpus-over-http
+- packages/lore/src/adapters/http/auth.ts#authenticateRequest#VALIDATION_ERROR#Authorization | BR-943 | baseline-serve-the-corpus-over-http
+- packages/lore/src/adapters/http/auth.ts#authenticateRequest#VALIDATION_ERROR#Cookie~0 | BR-944 | baseline-serve-the-corpus-over-http
+- packages/lore/src/adapters/http/auth.ts#authenticateRequest#VALIDATION_ERROR#Cookie~1 | BR-944 | baseline-serve-the-corpus-over-http
+- packages/lore/src/adapters/http/static-serving.ts#DashboardHandler#handle | BR-858 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/http/static-serving.ts#NonceStore#mint | BR-862 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/http/static-serving.ts#NonceStoreWithConsume#consume | BR-862 | baseline-launch-the-dashboard
+- packages/lore/src/adapters/http/sync-push.ts#syncPush#STORE_ERROR#~1 | BR-937 | baseline-push-local-changes-to-the-remote
+- packages/lore/src/adapters/real-git-port.ts#RealGitPort.branchDelete#dynamic:err(gitFailure(args, result)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/adapters/real-git-port.ts#RealGitPort.worktreeList#dynamic:err(gitFailure(args, result)) | BR-399 | baseline-see-who-owns-each-branch
+- packages/lore/src/adapters/real-git-port.ts#countUnmergedCommitsSync#STORE_ERROR | BR-394 | baseline-see-who-owns-each-branch
+- packages/lore/src/adapters/real-git-port.ts#gitFailure#STORE_ERROR | BR-399 | baseline-see-who-owns-each-branch
+- packages/lore/src/adapters/real-git-port.ts#parseUnmergedCount#STORE_ERROR | BR-394 | baseline-see-who-owns-each-branch
+- packages/lore/src/adapters/real-process-scan-port.ts#ProcessScanPort#processesInside | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/ai/assess-template.ts#getAssessTemplate#dynamic:err(unregisteredAssessTemplateVersionError(version)) | BR-552 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/ai/assess-template.ts#getAssessTemplateReproducibility#dynamic:err(unregisteredAssessTemplateVersionError(version)) | BR-552 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/ai/assess-template.ts#unregisteredAssessTemplateVersionError#AI_PROVIDER_ERROR | BR-552 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/app.ts#App#resolveAiDefault | BR-539 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/flows/calibration-hook.ts#warnCalibrationFailure#dynamic:deps.warn | BR-288 | baseline-approve-a-document
+- packages/lore/src/flows/config-template.ts#parseConfigTemplateOverlay#VALIDATION_ERROR#configTemplateYaml~0 | BR-829 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/config-template.ts#parseConfigTemplateOverlay#VALIDATION_ERROR#configTemplateYaml~1 | BR-829 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#checkInitAllowed#VALIDATION_ERROR#path | BR-876 | baseline-create-the-project-memory-file
+- packages/lore/src/flows/context-flow.ts#planRulesFiles#VALIDATION_ERROR#deps.fs | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#planRulesFiles#VALIDATION_ERROR#path | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#planRulesFiles#VALIDATION_ERROR#path | BR-896 | baseline-install-the-lore-rules-files
+- packages/lore/src/flows/context-flow.ts#planSkillDirs#VALIDATION_ERROR#fragment.id | BR-1064 | baseline-install-the-lore-rules-files
+- packages/lore/src/flows/context-flow.ts#resolveFragmentDeps#VALIDATION_ERROR#deps | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#runContextInit#VALIDATION_ERROR#path | BR-876 | baseline-create-the-project-memory-file
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#CONFLICT | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#CONFLICT | BR-888 | baseline-refresh-the-managed-part
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#VALIDATION_ERROR#path~0 | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#VALIDATION_ERROR#path~0 | BR-885 | baseline-refresh-the-managed-part
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#VALIDATION_ERROR#path~1 | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#VALIDATION_ERROR#path~1 | BR-887 | baseline-refresh-the-managed-part
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#VALIDATION_ERROR#rulesOnly | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#runContextRefresh#VALIDATION_ERROR#scope | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/context-flow.ts#selectScopeFragments#VALIDATION_ERROR#fragments | BR-839 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/init-corpus.ts#initCorpusAt#STORE_ERROR#~0 | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/init-corpus.ts#initCorpusAt#STORE_ERROR#~1 | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/phase-status-flow.ts#buildPhaseStatusPayload#VALIDATION_ERROR#parent_id | BR-1190 | baseline-keep-a-phase-checklist
+- packages/lore/src/flows/phase-status-flow.ts#buildPhaseStatusPayload#VALIDATION_ERROR#type | BR-1190 | baseline-keep-a-phase-checklist
+- packages/lore/src/flows/selection-flow.ts#discoverUnmerged#dynamic:err(validationError("fragments", found.error.message)) | BR-900 | baseline-choose-which-fragments-apply
+- packages/lore/src/flows/selection-flow.ts#readSelection#dynamic:err(parsed.error) | BR-1062 | baseline-choose-which-fragments-apply
+- packages/lore/src/flows/selection-flow.ts#runSelectionChange#CONFLICT | BR-1063 | baseline-choose-which-fragments-apply
+- packages/lore/src/flows/selection-flow.ts#runSelectionChange#dynamic:err(next.error) | BR-1063 | baseline-choose-which-fragments-apply
+- packages/lore/src/flows/selection-flow.ts#runSelectionChange#dynamic:err(refusal.code === "VALIDATION_ERROR" ? refusal : validationError("path", `write o...) | BR-1177 | baseline-install-the-lore-rules-files
+- packages/lore/src/flows/selection-flow.ts#runSelectionList#dynamic:err(validationError("fragments", discovered.error.message)) | BR-900 | baseline-choose-which-fragments-apply
+- packages/lore/src/flows/selection-flow.ts#validationError#VALIDATION_ERROR#0 | BR-900 | baseline-choose-which-fragments-apply
+- packages/lore/src/flows/setup-project-flow.ts#ExecPort#run | BR-837 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectAssetSource#readAsset | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectFsPort#backup | BR-836 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectFsPort#exists | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectFsPort#mkdir | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectFsPort#readFile | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectFsPort#remove | BR-843 | baseline-uninstall-an-integration
+- packages/lore/src/flows/setup-project-flow.ts#ProjectFsPort#writeFile | BR-830 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#ProjectSkillAssetSource#listSkillAssets | BR-986 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#checkGitSupportsMainRefHook#VALIDATION_ERROR#git~0 | BR-1281 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#checkGitSupportsMainRefHook#VALIDATION_ERROR#git~1 | BR-1281 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#recordInProjectLedger#VALIDATION_ERROR#manifest~0 | BR-834 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#recordInProjectLedger#VALIDATION_ERROR#manifest~1 | BR-834 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#recordInProjectLedger#VALIDATION_ERROR#manifest~2 | BR-834 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#recordInProjectLedger#VALIDATION_ERROR#manifest~3 | BR-834 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-flow.ts#scaffoldProject#dynamic:err(gitVersionRefusal) | BR-1281 | baseline-scaffold-a-project-workflow
+- packages/lore/src/flows/setup-project-uninstall.ts#uninstallProject#STORE_ERROR#~0 | BR-842 | baseline-uninstall-an-integration
+- packages/lore/src/flows/setup-project-uninstall.ts#uninstallProject#STORE_ERROR#~1 | BR-842 | baseline-uninstall-an-integration
+- packages/lore/src/flows/setup-project-uninstall.ts#uninstallProject#VALIDATION_ERROR#manifest~0 | BR-841 | baseline-uninstall-an-integration
+- packages/lore/src/flows/setup-project-uninstall.ts#uninstallProject#VALIDATION_ERROR#manifest~1 | BR-841 | baseline-uninstall-an-integration
+- packages/lore/src/flows/setup-project-uninstall.ts#uninstallProject#VALIDATION_ERROR#manifest~2 | BR-841 | baseline-uninstall-an-integration
+- packages/lore/src/flows/supersede-flow.ts#createWithSupersedes#VALIDATION_ERROR#supersedes | BR-710 | baseline-supersede-a-document
+- packages/lore/src/mount/mount-registry.ts#createMountRegistry#dynamic:(entry.app as { close: () => void }).close | BR-869 | baseline-launch-the-dashboard
+- packages/lore/src/mount/types.ts#MountRegistry#init | BR-868 | baseline-launch-the-dashboard
+- packages/lore/src/mount/types.ts#MountRegistry#listEntries | BR-868 | baseline-launch-the-dashboard
+- packages/lore/src/mount/types.ts#MountRegistry#markError | BR-868 | baseline-launch-the-dashboard
+- packages/lore/src/mount/types.ts#MountRegistry#resolve | BR-868 | baseline-launch-the-dashboard
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("ac_id", `Spec ${spec.value.slug} declares no criterion "${input...) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("by", "An exemption needs a named grantor (--by).")) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("expires_at", "An exemption needs an expiry (--expires <ISO date...) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("expires_at", `Expiry "${input.expiresAt}" is not a parseable IS...) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("expires_at", `Expiry "${input.expiresAt}" is not in the future....) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("reason", "An exemption needs a non-blank --reason.")) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#AcExemptionService.grant#dynamic:err(validationError("type", `Expected a spec document; got type '${spec.value.type}'...) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-exemption-service.ts#validationError#VALIDATION_ERROR#0 | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#0 | BR-16 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#0 | BR-17 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#0 | BR-20 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#0 | BR-52 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#0 | BR-53 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#0 | BR-61 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#1 | BR-18 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.addCriterion#VALIDATION_ERROR#1 | BR-96 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.citeCriterion#VALIDATION_ERROR#0 | BR-85 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-service.ts#AcService.citeCriterion#VALIDATION_ERROR#acceptance_criteria[].id | BR-91 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-service.ts#AcService.citeCriterion#VALIDATION_ERROR#cites | BR-242 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-service.ts#AcService.removeCriterion#VALIDATION_ERROR#acceptance_criteria[].id~0 | BR-45 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.removeCriterion#VALIDATION_ERROR#acceptance_criteria[].id~1 | BR-46 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.resolveSpec#VALIDATION_ERROR#type | BR-15 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.resolveSpec#VALIDATION_ERROR#type | BR-239 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.resolveSpec#VALIDATION_ERROR#type | BR-240 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.resolveSpec#VALIDATION_ERROR#type | BR-241 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-service.ts#AcService.resolveSpec#VALIDATION_ERROR#type | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#0 | BR-33 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#0 | BR-52 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#0 | BR-53 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#0 | BR-61 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#acceptance_criteria[].id | BR-30 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#correction.reason | BR-1069 | baseline-keep-a-record-unchanged
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#VALIDATION_ERROR#patch | BR-29 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--command", mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--falsifier-*", mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--falsifier-*", mode)) | BR-51 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--note", mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--oracle", mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--rubric", mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, "--timeout-ms", mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, foreign, mode)) | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(modeMismatchError(acId, foreign, mode)) | BR-51 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#AcService.setCriterion#dynamic:err(supersededSet) | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.supersedeCriterion#VALIDATION_ERROR#0 | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.supersedeCriterion#VALIDATION_ERROR#by~0 | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.supersedeCriterion#VALIDATION_ERROR#by~1 | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.supersedeCriterion#VALIDATION_ERROR#reason | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.supersedeCriterion#dynamic:err(already) | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#AcService.supersedeCriterion#dynamic:err(unknownCriterionError(existing, acId)) | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#checkDeclaredPathExistence#VALIDATION_ERROR#verify.command | BR-21 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#checkDeclaredPathExistence#VALIDATION_ERROR#verify.command | BR-36 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#modeMismatchError#VALIDATION_ERROR#verify | BR-32 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#modeMismatchError#VALIDATION_ERROR#verify | BR-51 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-service.ts#supersededRefusal#VALIDATION_ERROR#acceptance_criteria[].superseded_by | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-service.ts#unknownCriterionError#VALIDATION_ERROR#acceptance_criteria[].id | BR-1330 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/service/ac-write-chokepoint.ts#admitAcWrite#dynamic:err(await buildRefusal(store, input.target, input.existing, input.next, decision.mes...) | BR-257 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#AC_CITE_REQUIRED | BR-980 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#AC_WRITE_NOT_VIA_AC_VERB | BR-247 | baseline-approve-a-spec
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#VALIDATION_ERROR#0 | BR-232 | baseline-create-a-spec
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#VALIDATION_ERROR#0 | BR-572 | baseline-run-an-evaluation-scenario
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#VALIDATION_ERROR#0 | BR-774 | baseline-restore-an-earlier-version
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#VALIDATION_ERROR#0 | BR-797 | baseline-import-a-version-1-corpus
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#dynamic:err(pipeBlocked) | BR-1078 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#dynamic:err(rangeRefusal) | BR-1076 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-write-chokepoint.ts#applyAcChange#dynamic:err(unparseable) | BR-1282 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-write-chokepoint.ts#buildRefusal#dynamic:error-literal({ ...base, feeding_pack: buildCiteFeedingPack({ specId: target.id, specSlug: tar...) | BR-257 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-write-chokepoint.ts#falsifierRangeRefusal#VALIDATION_ERROR#falsifier.expected_exit_code | BR-1076 | baseline-declare-a-falsifier
+- packages/lore/src/service/ac-write-chokepoint.ts#pipeRefusal#VALIDATION_ERROR#command | BR-1078 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ac-write-chokepoint.ts#resolveCiteGateFor#VALIDATION_ERROR#0 | BR-259 | baseline-cite-a-baseline-rule
+- packages/lore/src/service/ac-write-chokepoint.ts#unparseableCommandRefusal#VALIDATION_ERROR#command | BR-1282 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/service/ai-provider-service.ts#AIProviderService.assessPlan#AI_PROVIDER_ERROR | BR-544 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/ai-provider-service.ts#AIProviderService.inferLinkType#AI_PROVIDER_ERROR | BR-762 | baseline-link-two-documents
+- packages/lore/src/service/ai-provider-service.ts#AIProviderService.judgeDoc#AI_PROVIDER_ERROR | BR-264 | baseline-judge-a-document
+- packages/lore/src/service/ai-provider-service.ts#AIProviderService.judgeDoc#AI_PROVIDER_ERROR | BR-588 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/ai-provider-service.ts#AIProviderService.probeStaleness#AI_PROVIDER_ERROR#~0 | BR-471 | baseline-probe-documents-for-staleness
+- packages/lore/src/service/ai-provider-service.ts#AIProviderService.probeStaleness#AI_PROVIDER_ERROR#~1 | BR-471 | baseline-probe-documents-for-staleness
+- packages/lore/src/service/ai-provider-service.ts#validateAcIdContainment#VALIDATION_ERROR#ac_scores[].ac_id | BR-545 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/ai-provider-service.ts#verifyFindingPaths#VALIDATION_ERROR#diff_source | BR-549 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/audit-service.ts#AuditService.getChainHead#VALIDATION_ERROR#audit_chain~0 | BR-479 | baseline-verify-the-audit-trail
+- packages/lore/src/service/audit-service.ts#AuditService.getChainHead#VALIDATION_ERROR#audit_chain~1 | BR-479 | baseline-verify-the-audit-trail
+- packages/lore/src/service/audit-verify-runner.ts#readAuditAnchorFile#VALIDATION_ERROR#.lore/audit-anchor.json | BR-1293 | baseline-verify-the-audit-trail
+- packages/lore/src/service/autonomy-calibration-service.ts#AutonomyCalibrationService.recordAudit#dynamic:err(validationError("id", `decision ${decisionId} is not awaiting audit`)) | BR-1252 | baseline-decide-a-pending-operation
+- packages/lore/src/service/autonomy-calibration-service.ts#AutonomyCalibrationService.recordAudit#dynamic:err(validationError("proof", "an audit answer needs a proof minted by the human chan...) | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/autonomy-calibration-service.ts#ReversalProbe#check | BR-1271 | baseline-prune-stashes
+- packages/lore/src/service/autonomy-calibration-service.ts#validationError#VALIDATION_ERROR#0 | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/autonomy-calibration-service.ts#validationError#VALIDATION_ERROR#0 | BR-1252 | baseline-decide-a-pending-operation
+- packages/lore/src/service/autonomy-threshold-service.ts#AutonomyThresholdService.propose#VALIDATION_ERROR#record | BR-1260 | baseline-govern-autonomy-thresholds
+- packages/lore/src/service/binary-provenance.ts#GitProvenanceProbe#hasCommit | BR-434 | baseline-check-the-binary-is-current
+- packages/lore/src/service/binary-provenance.ts#GitProvenanceProbe#readHeadCommit | BR-434 | baseline-check-the-binary-is-current
+- packages/lore/src/service/code-reference-index.ts#loadFragmentDocuments#VALIDATION_ERROR#0 | BR-1296 | baseline-refresh-the-managed-part
+- packages/lore/src/service/code-reference-index.ts#normalizeQueryPath#VALIDATION_ERROR#path | BR-1295 | baseline-detect-code-anchor-drift
+- packages/lore/src/service/context-facts.ts#readCommands#VALIDATION_ERROR#0 | BR-883 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-facts.ts#readCommands#VALIDATION_ERROR#1 | BR-883 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-facts.ts#readCommands#VALIDATION_ERROR#package.json lore.documentedScripts | BR-883 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-facts.ts#readCommands#VALIDATION_ERROR#package.json lore.documentedScripts~0 | BR-1294 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-facts.ts#readCommands#VALIDATION_ERROR#package.json lore.documentedScripts~1 | BR-883 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-fragments/discover.ts#fail#VALIDATION_ERROR#0 | BR-1066 | baseline-check-the-context-setup
+- packages/lore/src/service/context-fragments/discover.ts#fail#VALIDATION_ERROR#0 | BR-898 | baseline-install-the-lore-rules-files
+- packages/lore/src/service/context-fragments/discover.ts#fail#VALIDATION_ERROR#0 | BR-900 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/discover.ts#fail#VALIDATION_ERROR#0 | BR-908 | baseline-inject-context-at-start
+- packages/lore/src/service/context-fragments/render.ts#renderOutlet#BUDGET_EXCEEDED | BR-1066 | baseline-check-the-context-setup
+- packages/lore/src/service/context-fragments/render.ts#renderOutlet#BUDGET_EXCEEDED | BR-907 | baseline-inject-context-at-start
+- packages/lore/src/service/context-fragments/render.ts#renderOutlet#BUDGET_EXCEEDED | BR-914 | baseline-check-the-context-setup
+- packages/lore/src/service/context-fragments/section.ts#renderRulesFile#VALIDATION_ERROR#fragment.id | BR-1066 | baseline-check-the-context-setup
+- packages/lore/src/service/context-fragments/section.ts#renderRulesFile#VALIDATION_ERROR#fragment.id | BR-897 | baseline-install-the-lore-rules-files
+- packages/lore/src/service/context-fragments/section.ts#renderRulesFile#VALIDATION_ERROR#fragment.id | BR-908 | baseline-inject-context-at-start
+- packages/lore/src/service/context-fragments/section.ts#renderSkillFile#VALIDATION_ERROR#fragment.id | BR-897 | baseline-install-the-lore-rules-files
+- packages/lore/src/service/context-fragments/select.ts#checkOverrides#VALIDATION_ERROR#context.fragments | BR-1066 | baseline-check-the-context-setup
+- packages/lore/src/service/context-fragments/select.ts#checkOverrides#VALIDATION_ERROR#context.fragments | BR-898 | baseline-install-the-lore-rules-files
+- packages/lore/src/service/context-fragments/select.ts#checkOverrides#VALIDATION_ERROR#context.fragments | BR-905 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#addToDisable#dynamic:err(selectionError("id", `${verdict.error.message} (scope: ${scope})`, id)) | BR-1063 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#addToDisable#dynamic:err(selectionError("id", `${verdict.error.message} (scope: ${scope})`, id)) | BR-905 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#addToDisable#dynamic:err(unknown) | BR-1063 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#parseSelection#dynamic:err(selectionError("selection", `${source}: invalid YAML: ${cause instanceof Error ?...) | BR-1062 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#parseSelection#dynamic:err(selectionError("selection", `${source}: invalid selection file (${detail})`, raw...) | BR-1062 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#removeFromDisable#dynamic:err(unknown) | BR-1063 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#selectionError#VALIDATION_ERROR#0 | BR-1062 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#selectionError#VALIDATION_ERROR#0 | BR-1063 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-fragments/selection.ts#selectionToLayer#dynamic:err(selectionError( "context.fragments.disable", `context.fragments.disable in a set...) | BR-1062 | baseline-choose-which-fragments-apply
+- packages/lore/src/service/context-projection.ts#buildRebuiltZone#VALIDATION_ERROR#content | BR-881 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-projection.ts#locateZone#VALIDATION_ERROR#content | BR-836 | baseline-scaffold-a-project-workflow
+- packages/lore/src/service/context-projection.ts#locateZone#VALIDATION_ERROR#content | BR-886 | baseline-refresh-the-managed-part
+- packages/lore/src/service/context-projection.ts#parseManagedSections#VALIDATION_ERROR#content | BR-836 | baseline-scaffold-a-project-workflow
+- packages/lore/src/service/context-projection.ts#parseManagedSections#VALIDATION_ERROR#content | BR-886 | baseline-refresh-the-managed-part
+- packages/lore/src/service/corpus-service.ts#ApprovalPort#approve | BR-77 | baseline-approve-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService#full | BR-984 | baseline-close-a-plan
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#DOC_NOT_FOUND | BR-235 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#DOC_NOT_FOUND | BR-236 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#DOC_NOT_FOUND | BR-701 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#INVALID_PARENT_TYPE | BR-2 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#INVALID_PARENT_TYPE | BR-235 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#INVALID_PARENT_TYPE | BR-701 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#INVALID_PARENT_TYPE | BR-97 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#PARENT_REQUIRED | BR-1 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#PARENT_REQUIRED | BR-114 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#PARENT_REQUIRED | BR-701 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#PARENT_REQUIRED | BR-97 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-113 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-114 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-121 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-230 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-231 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-3 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-700 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-98 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#0 | BR-99 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#extra.ac_scope~0 | BR-98 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#extra.ac_scope~1 | BR-98 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#extra.code_anchors | BR-11 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#extra.file_anchors | BR-122 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#extra.sub_type~0 | BR-704 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#extra.sub_type~1 | BR-705 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#parent_id~0 | BR-2 | baseline-create-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#parent_id~0 | BR-701 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#parent_id~1 | BR-113 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#parent_id~1 | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/service/corpus-service.ts#CorpusService._createImpl#VALIDATION_ERROR#parent_id~1 | BR-524 | baseline-adopt-a-github-issue
+- packages/lore/src/service/corpus-service.ts#CorpusService._getImpl#DOC_NOT_FOUND | BR-526 | baseline-adopt-a-github-issue
+- packages/lore/src/service/corpus-service.ts#CorpusService._getImpl#DOC_NOT_FOUND | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/service/corpus-service.ts#CorpusService._getImpl#DOC_NOT_FOUND | BR-531 | baseline-resolve-a-defect-report
+- packages/lore/src/service/corpus-service.ts#CorpusService._getImpl#DOC_NOT_FOUND | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService._getImpl#DOC_NOT_FOUND | BR-594 | baseline-pull-the-rules-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService._getImpl#DOC_NOT_FOUND | BR-716 | baseline-read-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#DOC_NOT_FOUND#~0 | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#DOC_NOT_FOUND#~1 | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#DOC_NOT_FOUND#~1 | BR-758 | baseline-link-two-documents
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#DOC_NOT_FOUND#~2 | BR-1083 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#DOC_NOT_FOUND#~2 | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#INVALID_PARENT_TYPE#~0 | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#INVALID_PARENT_TYPE#~0 | BR-758 | baseline-link-two-documents
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#INVALID_PARENT_TYPE#~1 | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#INVALID_PARENT_TYPE#~1 | BR-758 | baseline-link-two-documents
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#VALIDATION_ERROR#to | BR-1083 | baseline-create-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#VALIDATION_ERROR#to | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#VALIDATION_ERROR#type | BR-1025 | baseline-link-two-documents
+- packages/lore/src/service/corpus-service.ts#CorpusService._linkImpl#VALIDATION_ERROR#type | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService._resolvePlanForAcLookup#DOC_NOT_FOUND | BR-1328 | baseline-record-evidence
+- packages/lore/src/service/corpus-service.ts#CorpusService._resolvePlanForAcLookup#VALIDATION_ERROR#type | BR-1329 | baseline-record-evidence
+- packages/lore/src/service/corpus-service.ts#CorpusService._validateTaskPhase#VALIDATION_ERROR#extra.phase~0 | BR-116 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._validateTaskPhase#VALIDATION_ERROR#extra.phase~1 | BR-116 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._validateTaskPhase#VALIDATION_ERROR#extra.phase~2 | BR-116 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService._validateTaskPhase#VALIDATION_ERROR#extra.phase~3 | BR-116 | baseline-create-a-task
+- packages/lore/src/service/corpus-service.ts#CorpusService.archiveSweepCandidate#INVALID_TRANSITION | BR-456 | baseline-sweep-finished-work-into-the-archive
+- packages/lore/src/service/corpus-service.ts#CorpusService.delete#DELETE_REQUIRES_CONFIRM | BR-739 | baseline-delete-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.getPlanBundle#DOC_NOT_FOUND | BR-538 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService.getPlanBundle#DOC_NOT_FOUND | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.getPlanBundle#VALIDATION_ERROR#type | BR-233 | baseline-plan-the-work
+- packages/lore/src/service/corpus-service.ts#CorpusService.getPlanBundle#VALIDATION_ERROR#type | BR-538 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/service/corpus-service.ts#CorpusService.getPlanBundle#VALIDATION_ERROR#type | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.getReviewBundle#DOC_NOT_FOUND | BR-272 | baseline-judge-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.getReviewBundle#DOC_NOT_FOUND | BR-588 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.refuseIfForeignCorpusWrite#dynamic:err(decided.error) | BR-802 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/corpus-service.ts#CorpusService.refuseIfForeignCorpusWrite#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-802 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/corpus-service.ts#CorpusService.refuseIfForeignCorpusWrite#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-803 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolve#dynamic:err({ ...result.error, suggestions }) | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolve#dynamic:err({ ...result.error, suggestions }) | BR-596 | baseline-pull-the-rules-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolve#dynamic:err({ ...result.error, suggestions }) | BR-716 | baseline-read-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolve#dynamic:error-literal({ ...result.error, suggestions }) | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolve#dynamic:error-literal({ ...result.error, suggestions }) | BR-596 | baseline-pull-the-rules-before-writing
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolve#dynamic:error-literal({ ...result.error, suggestions }) | BR-716 | baseline-read-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolveCitedRuleViolations#VALIDATION_ERROR#extra.acceptance_criteria | BR-984 | baseline-close-a-plan
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolveCitedRuleViolations#VALIDATION_ERROR#gate:plan-close:cited-rule-measurement | BR-984 | baseline-close-a-plan
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolveDeclaredAcCriteriaForAdhocTask#VALIDATION_ERROR#ac_scope~0 | BR-1327 | baseline-record-evidence
+- packages/lore/src/service/corpus-service.ts#CorpusService.resolveDeclaredAcCriteriaForAdhocTask#VALIDATION_ERROR#ac_scope~1 | BR-1327 | baseline-record-evidence
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#DOC_NOT_FOUND | BR-531 | baseline-resolve-a-defect-report
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#INVALID_TRANSITION | BR-213 | baseline-close-a-plan
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#INVALID_TRANSITION | BR-307 | baseline-submit-a-document-for-review
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#0 | BR-727 | baseline-revise-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#1 | BR-728 | baseline-revise-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#3 | BR-246 | baseline-approve-a-spec
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#4 | BR-729 | baseline-revise-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#correction | BR-1178 | baseline-keep-a-record-unchanged
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#correction.reason | BR-1049 | baseline-keep-a-record-unchanged
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#extra.prd_sync_exempt | BR-250 | baseline-close-a-plan
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#extra.validity | BR-730 | baseline-revise-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.set#VALIDATION_ERROR#slug | BR-725 | baseline-revise-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.tree#DOC_NOT_FOUND#~0 | BR-753 | baseline-browse-the-document-tree
+- packages/lore/src/service/corpus-service.ts#CorpusService.tree#DOC_NOT_FOUND#~1 | BR-753 | baseline-browse-the-document-tree
+- packages/lore/src/service/corpus-service.ts#CorpusService.undelete#VALIDATION_ERROR#deleted_at | BR-741 | baseline-delete-a-document
+- packages/lore/src/service/corpus-service.ts#CorpusService.undelete#VALIDATION_ERROR#recoverable_until | BR-741 | baseline-delete-a-document
+- packages/lore/src/service/corpus-service.ts#DoneFloorPort#checkDoneFloors | BR-1072 | baseline-close-a-plan
+- packages/lore/src/service/decision-service.ts#DecisionService.resolvePending#dynamic:err(validationError("id", `decision ${pendingId} is not pending`)) | BR-1252 | baseline-decide-a-pending-operation
+- packages/lore/src/service/decision-service.ts#DecisionService.resolvePending#dynamic:err(validationError("proof", "a human-tty record needs a proof minted by the human c...) | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/decision-subject-probes.ts#SubjectProbePorts#listWorktreePaths | BR-1283 | baseline-list-documents-awaiting-review
+- packages/lore/src/service/decision-subject-probes.ts#SubjectProbePorts#realPath | BR-1283 | baseline-list-documents-awaiting-review
+- packages/lore/src/service/decision-subject-probes.ts#SubjectProbePorts#runEnded | BR-1283 | baseline-list-documents-awaiting-review
+- packages/lore/src/service/drift-check-service.ts#DriftCheckService.resolveAnchorableDoc#VALIDATION_ERROR#type | BR-62 | baseline-declare-a-code-anchor
+- packages/lore/src/service/drift-check-service.ts#FsProbe#listDir | BR-412 | baseline-detect-code-anchor-drift
+- packages/lore/src/service/drift-check-service.ts#FsProbe#readFile | BR-412 | baseline-detect-code-anchor-drift
+- packages/lore/src/service/drift-check-service.ts#FsProbe#stat | BR-412 | baseline-detect-code-anchor-drift
+- packages/lore/src/service/export-docs-service.ts#ExportDocsService.exportDocs#VALIDATION_ERROR#parent_id | BR-785 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#ExportDocsService.exportDocs#dynamic:this.warn | BR-784 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#buildOrExtendIndex#VALIDATION_ERROR#ordinal | BR-1332 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#buildOrExtendIndex#dynamic:warn | BR-1284 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#reconcileOrdinalMappings#dynamic:warn | BR-783 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#repairCollisions#dynamic:warn | BR-783 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#repairDuplicateHumanIds#dynamic:warn | BR-783 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#retireDeletedDocMappings#dynamic:warn | BR-787 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#writeFileExclusive#STORE_ERROR#~0 | BR-785 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#writeFileExclusive#STORE_ERROR#~1 | BR-785 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#writeFileExclusive#STORE_ERROR#~2 | BR-785 | baseline-export-documents-to-files
+- packages/lore/src/service/export-docs-service.ts#writeFileExclusive#STORE_ERROR#~3 | BR-785 | baseline-export-documents-to-files
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveSingleWorkspaceScope#VALIDATION_ERROR#workspaceMembers~0 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveSingleWorkspaceScope#VALIDATION_ERROR#workspaceMembers~1 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveWorkspaceMembers#VALIDATION_ERROR#package.json~workspaces~0 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveWorkspaceMembers#VALIDATION_ERROR#package.json~workspaces~1 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveWorkspaceMembers#VALIDATION_ERROR#package.json~workspaces~2 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveWorkspaceMembers#VALIDATION_ERROR#workspaceMember.package.json~name~0 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#deriveWorkspaceMembers#VALIDATION_ERROR#workspaceMember.package.json~name~1 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#STORE_ERROR#~0 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#STORE_ERROR#~1 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#STORE_ERROR#~2 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#STORE_ERROR#~3 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#STORE_ERROR#~4 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#STORE_ERROR#~5 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#VALIDATION_ERROR#mainRepoRoot | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#VALIDATION_ERROR#scratchWorktreeDir~0 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#VALIDATION_ERROR#scratchWorktreeDir~1 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#materializeFalsifierDependencies#VALIDATION_ERROR#scratchWorktreeDir~2 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#parseWildcardGlobBaseDir#VALIDATION_ERROR#package.json~workspaces | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#readJsonFile#VALIDATION_ERROR#0 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/falsifier-dep-materialization.ts#readJsonFile#VALIDATION_ERROR#1 | BR-188 | baseline-prove-a-red
+- packages/lore/src/service/fidelity-sample.ts#aiError#AI_PROVIDER_ERROR | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#askJudge#dynamic:err(aiError(ai.name, `${role} reply does not match [{n, verdict, reason}]: ${reply.e...) | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#askJudge#dynamic:err(aiError(ai.name, `${role} reply gives item ${entry.n} twice`)) | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#askJudge#dynamic:err(aiError(ai.name, `${role} reply has no verdict for item(s) ${missing.join(", ")}...) | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#askJudge#dynamic:err(aiError(ai.name, `${role} reply is not JSON: ${String(cause)}`)) | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#askJudge#dynamic:err(aiError(ai.name, `${role} reply names item ${entry.n}, which is not in the reque...) | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#drawFidelitySample#dynamic:err(validationError("size", `--size ${size} exceeds the pool of ${pairs.length}; the...) | BR-963 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#drawFidelitySample#dynamic:err(validationError("size", `--size must be a positive integer, got ${String(size)}`...) | BR-963 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#runFidelity#dynamic:err(validationError("nonce", "the sampled text contains the closing fence; pass anot...) | BR-964 | baseline-sample-citation-fidelity
+- packages/lore/src/service/fidelity-sample.ts#validationError#VALIDATION_ERROR#0 | BR-963 | baseline-sample-citation-fidelity
+- packages/lore/src/service/foreign-corpus-write-guard.ts#CorpusWriteAuthority.authorize#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-630 | baseline-write-a-business-rule
+- packages/lore/src/service/foreign-corpus-write-guard.ts#CorpusWriteAuthority.authorize#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-657 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/foreign-corpus-write-guard.ts#CorpusWriteAuthority.decide#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-802 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/foreign-corpus-write-guard.ts#foreignCorpusWriteRefusalError#VALIDATION_ERROR#gate:corpus-write:foreign-provenance | BR-341 | baseline-hand-off-a-session
+- packages/lore/src/service/foreign-corpus-write-guard.ts#foreignCorpusWriteRefusalError#VALIDATION_ERROR#gate:corpus-write:foreign-provenance | BR-618 | baseline-add-a-baseline-node
+- packages/lore/src/service/foreign-corpus-write-guard.ts#foreignCorpusWriteRefusalError#VALIDATION_ERROR#gate:corpus-write:foreign-provenance | BR-630 | baseline-write-a-business-rule
+- packages/lore/src/service/foreign-corpus-write-guard.ts#foreignCorpusWriteRefusalError#VALIDATION_ERROR#gate:corpus-write:foreign-provenance | BR-657 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/foreign-corpus-write-guard.ts#foreignCorpusWriteRefusalError#VALIDATION_ERROR#gate:corpus-write:foreign-provenance | BR-802 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/foreign-corpus-write-guard.ts#foreignCorpusWriteRefusalError#VALIDATION_ERROR#gate:corpus-write:foreign-provenance | BR-803 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/foreign-corpus-write-guard.ts#guardTaskLifecycleWrites#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-341 | baseline-hand-off-a-session
+- packages/lore/src/service/foreign-corpus-write-guard.ts#guardTaskLifecycleWrites#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-618 | baseline-add-a-baseline-node
+- packages/lore/src/service/foreign-corpus-write-guard.ts#guardTaskLifecycleWrites#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-630 | baseline-write-a-business-rule
+- packages/lore/src/service/foreign-corpus-write-guard.ts#guardTaskLifecycleWrites#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-657 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/foreign-corpus-write-guard.ts#guardTaskLifecycleWrites#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-802 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/foreign-corpus-write-guard.ts#guardTaskLifecycleWrites#dynamic:err(foreignCorpusWriteRefusalError(verdict)) | BR-803 | baseline-keep-writes-in-this-checkout-s-corpus
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-103 | baseline-plan-the-work
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-104 | baseline-plan-the-work
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-1048 | baseline-keep-a-record-unchanged
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-105 | baseline-plan-the-work
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-106 | baseline-plan-the-work
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-117 | baseline-create-a-task
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-129 | baseline-claim-a-task
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-130 | baseline-claim-a-task
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-131 | baseline-claim-a-task
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-134 | baseline-claim-a-task
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-2 | baseline-create-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-217 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-218 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-219 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-220 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-221 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-222 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-224 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-225 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-226 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-228 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-277 | baseline-approve-a-document
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-278 | baseline-approve-a-document
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-279 | baseline-approve-a-document
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-280 | baseline-approve-a-document
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-286 | baseline-approve-a-document
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-3 | baseline-create-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-4 | baseline-create-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-5 | baseline-create-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-6 | baseline-create-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-72 | baseline-approve-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-73 | baseline-approve-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-74 | baseline-approve-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-75 | baseline-approve-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-76 | baseline-approve-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#VALIDATION_ERROR#0 | BR-78 | baseline-approve-a-spec
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.enforce#dynamic:this.warnSink | BR-1303 | baseline-close-a-plan
+- packages/lore/src/service/gate-enforcer.ts#GateEnforcer.warnVacuousCheckpoint#dynamic:this.warnSink | BR-227 | baseline-close-a-plan
+- packages/lore/src/service/gh-runner.ts#GhRunner.run#dynamic:err(classifyGhFailure(cause)) | BR-503 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#GhRunner.run#dynamic:err(classifyGhFailure(cause)) | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#GhRunner.run#dynamic:err(classifyGhFailure(cause)) | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#AUTH_REQUIRED#~0 | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#AUTH_REQUIRED#~0 | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#AUTH_REQUIRED#~1 | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#AUTH_REQUIRED#~1 | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#RATE_LIMITED | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#RATE_LIMITED | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#TRANSPORT_UNAVAILABLE | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#TRANSPORT_UNAVAILABLE | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#VALIDATION_ERROR#gh | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/gh-runner.ts#classifyGhFailure#VALIDATION_ERROR#gh | BR-850 | baseline-check-installation-freshness
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.fileIssue#STORE_ERROR | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.fileIssue#VALIDATION_ERROR#gh_issue_create_response | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.listIssues#VALIDATION_ERROR#gh_issues_list_response | BR-501 | baseline-file-a-defect-report
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.listIssues#VALIDATION_ERROR#gh_issues_list_response | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.listIssues#VALIDATION_ERROR#gh_issues_list_response | BR-505 | baseline-list-defect-reports
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.listIssues#VALIDATION_ERROR#gh_issues_list_response | BR-514 | baseline-list-defect-reports
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.listIssues#VALIDATION_ERROR#gh_issues_list_response | BR-522 | baseline-adopt-a-github-issue
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.verifyTarget#VALIDATION_ERROR#gh_repo_response | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/github-intake-port.ts#GitHubIntakePort.verifyTarget#VALIDATION_ERROR#gh_user_response | BR-504 | baseline-file-a-defect-report
+- packages/lore/src/service/helper-scope-review.ts#coChangeRequiredFiles#dynamic:coChange.matches | BR-1285 | baseline-check-a-turn-at-its-end
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#argv | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#env | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#newNonce | BR-1250 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#openTerminal | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#readProcessTable | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#selfPid | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#stdinIsTty | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanChannelPorts#stdoutIsTty | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanTerminal#readLine | BR-1250 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#HumanTerminal#write | BR-1250 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#refusal#dynamic:err({ rule, message: `${rule}: ${detail}` }) | BR-1249 | baseline-decide-a-pending-operation
+- packages/lore/src/service/human-channel.ts#refusal#dynamic:err({ rule, message: `${rule}: ${detail}` }) | BR-1250 | baseline-decide-a-pending-operation
+- packages/lore/src/service/impact-service.ts#ImpactService.impact#DOC_NOT_FOUND | BR-681 | baseline-assess-a-rule-s-impact
+- packages/lore/src/service/integrate-service.ts#IntegrateService.afterFailedMerge#dynamic:this.deps.git | BR-1246 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.describeMoves#dynamic:this.deps.git | BR-1245 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.ensureWorktree#STORE_ERROR | BR-1278 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.fetchRemoteTracking#dynamic:this.deps.git | BR-1277 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.integrate#VALIDATION_ERROR#session | BR-1272 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.integrate#VALIDATION_ERROR#workflow.integrate.floor_command | BR-1272 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.integrate#dynamic:granted.value.release | BR-1312 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.integrate#dynamic:this.deps.runFloor | BR-1275 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.landOn#dynamic:this.deps.runFloor | BR-1275 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.operationInProgress#dynamic:this.deps.git | BR-1273 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.prepareSharedCheckout#VALIDATION_ERROR#worktree~0 | BR-1273 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.prepareSharedCheckout#VALIDATION_ERROR#worktree~1 | BR-1273 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.prepareSharedCheckout#VALIDATION_ERROR#worktree~2 | BR-1247 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.prepareSharedCheckout#VALIDATION_ERROR#worktree~2 | BR-1273 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.remoteOf#dynamic:err(gitFailure("git remote", remotes)) | BR-1290 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.remoteOf#dynamic:this.deps.git | BR-1277 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.resolveCommit#VALIDATION_ERROR#branch | BR-1272 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/integrate-service.ts#IntegrateService.resolveCommit#dynamic:this.deps.git | BR-1272 | baseline-integrate-a-branch-into-main
+- packages/lore/src/service/issue-closer-port.ts#GhIssueCloser.closeIssue#dynamic:err(closed.error) | BR-1082 | baseline-resolve-a-defect-report
+- packages/lore/src/service/issue-closer-port.ts#GhIssueCloser.closeIssue#dynamic:err(snapshot.error) | BR-1082 | baseline-resolve-a-defect-report
+- packages/lore/src/service/issue-closer-port.ts#GhIssueCloser.commentIssue#dynamic:err(posted.error) | BR-1082 | baseline-resolve-a-defect-report
+- packages/lore/src/service/issue-closer-port.ts#GhIssueCloser.readIssue#VALIDATION_ERROR#gh_issue_response | BR-1082 | baseline-resolve-a-defect-report
+- packages/lore/src/service/issue-closer-port.ts#GhIssueCloser.readIssue#dynamic:err(response.error) | BR-1082 | baseline-resolve-a-defect-report
+- packages/lore/src/service/issue-task-shaping.ts#toIssueTaskInput#VALIDATION_ERROR#issue.body~0 | BR-523 | baseline-adopt-a-github-issue
+- packages/lore/src/service/issue-task-shaping.ts#toIssueTaskInput#VALIDATION_ERROR#issue.body~1 | BR-523 | baseline-adopt-a-github-issue
+- packages/lore/src/service/issue-task-shaping.ts#toIssueTaskInput#VALIDATION_ERROR#rootPrdId | BR-524 | baseline-adopt-a-github-issue
+- packages/lore/src/service/judgment-service.ts#JudgmentService._recordCalibrationImpl#VALIDATION_ERROR#0 | BR-288 | baseline-approve-a-document
+- packages/lore/src/service/judgment-service.ts#JudgmentService._recordCalibrationImpl#VALIDATION_ERROR#0 | BR-296 | baseline-reject-a-document
+- packages/lore/src/service/judgment-service.ts#JudgmentService._recordImpl#VALIDATION_ERROR#0 | BR-263 | baseline-judge-a-document
+- packages/lore/src/service/main-tree-guard.ts#MainTreePort#presentCommands | BR-1316 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/main-tree-guard.ts#MainTreePort#reachedSites | BR-1315 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/main-tree-guard.ts#MainTreePort#reachedSites | BR-1318 | baseline-retire-a-business-rule
+- packages/lore/src/service/main-tree-guard.ts#MainTreePort#reachedSites | BR-1319 | baseline-move-a-business-rule
+- packages/lore/src/service/main-tree-guard.ts#refusal#VALIDATION_ERROR#0 | BR-1315 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/main-tree-guard.ts#refusal#VALIDATION_ERROR#0 | BR-1318 | baseline-retire-a-business-rule
+- packages/lore/src/service/main-tree-guard.ts#refusal#VALIDATION_ERROR#0 | BR-1319 | baseline-move-a-business-rule
+- packages/lore/src/service/main-tree-guard.ts#refuseLiveCommandRemoval#dynamic:err(refusal( "commands", `cannot remove command declaration(s) of ${leaf.slug}, noth...) | BR-1316 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/main-tree-guard.ts#refuseReachedSiteRemoval#dynamic:err(refusal( "site_map", `cannot remove ${reached.value.length} site mapping(s) of $...) | BR-1315 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/main-tree-guard.ts#refuseRuleWithdrawal#dynamic:err(refusal( "ruleId", `cannot ${verb} ${input.ruleId}, nothing written: site mappin...) | BR-1318 | baseline-retire-a-business-rule
+- packages/lore/src/service/main-tree-guard.ts#refuseRuleWithdrawal#dynamic:err(refusal( "ruleId", `cannot ${verb} ${input.ruleId}, nothing written: site mappin...) | BR-1319 | baseline-move-a-business-rule
+- packages/lore/src/service/migration-service.ts#MigrationService.execute#VALIDATION_ERROR#sourcePath | BR-795 | baseline-import-a-version-1-corpus
+- packages/lore/src/service/migration-service.ts#collectMdFiles#STORE_ERROR#~0 | BR-797 | baseline-import-a-version-1-corpus
+- packages/lore/src/service/migration-service.ts#collectMdFiles#STORE_ERROR#~0 | BR-958 | baseline-run-an-evaluation-scenario
+- packages/lore/src/service/migration-service.ts#collectMdFiles#STORE_ERROR#~1 | BR-797 | baseline-import-a-version-1-corpus
+- packages/lore/src/service/migration-service.ts#collectMdFiles#STORE_ERROR#~1 | BR-958 | baseline-run-an-evaluation-scenario
+- packages/lore/src/service/migration-service.ts#collectMdFiles#dynamic:err(storeErr) | BR-797 | baseline-import-a-version-1-corpus
+- packages/lore/src/service/migration-service.ts#collectMdFiles#dynamic:err(storeErr) | BR-958 | baseline-run-an-evaluation-scenario
+- packages/lore/src/service/ordinal-migration-service.ts#OrdinalMigrationService.migrateOrdinals#dynamic:err(fetchResult.error) | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#OrdinalMigrationService.migrateOrdinals#dynamic:err(fetchResult.error) | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#OrdinalMigrationService.migrateOrdinals#dynamic:err(indexResult.error) | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#OrdinalMigrationService.migrateOrdinals#dynamic:err(indexResult.error) | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#OrdinalMigrationService.migrateOrdinals#dynamic:err(saveResult.error) | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#OrdinalMigrationService.migrateOrdinals#dynamic:err(saveResult.error) | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#loadExportIndexOrFail#STORE_ERROR | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#loadExportIndexOrFail#VALIDATION_ERROR#export-index.json~0 | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#loadExportIndexOrFail#VALIDATION_ERROR#export-index.json~1 | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/ordinal-migration-service.ts#saveExportIndexAtomic#STORE_ERROR | BR-800 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/service/override-decision.ts#OverrideDecisionPort#requireAuto | BR-1286 | baseline-approve-a-document
+- packages/lore/src/service/override-decision.ts#createOverrideDecisionPort.requireAuto#dynamic:err(refused( request.summary, `Class ${request.classId} is refused for this subject ...) | BR-1286 | baseline-approve-a-document
+- packages/lore/src/service/override-decision.ts#createOverrideDecisionPort.requireAuto#dynamic:err(refused( request.summary, `Class ${request.classId} scored ${decision.score} aga...) | BR-1286 | baseline-approve-a-document
+- packages/lore/src/service/override-decision.ts#refused#VALIDATION_ERROR#autonomy | BR-1286 | baseline-approve-a-document
+- packages/lore/src/service/phase-checklist-service.ts#PhaseChecklistService.checkChecklistItem#VALIDATION_ERROR#checklist[].checked | BR-1191 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#PhaseChecklistService.checkChecklistItem#VALIDATION_ERROR#checklist[].id~0 | BR-1221 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#PhaseChecklistService.dropChecklistItem#VALIDATION_ERROR#checklist[].id~0 | BR-1193 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#PhaseChecklistService.dropChecklistItem#VALIDATION_ERROR#reason | BR-1193 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#PhaseChecklistService.editChecklistStatement#VALIDATION_ERROR#checklist[].id~0 | BR-1221 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#PhaseChecklistService.resolvePhase#VALIDATION_ERROR#type | BR-1195 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#validationErrorFromZodIssue#VALIDATION_ERROR#0 | BR-1192 | baseline-keep-a-phase-checklist
+- packages/lore/src/service/phase-checklist-service.ts#validationErrorFromZodIssue#VALIDATION_ERROR#0 | BR-1197 | baseline-note-a-phase-s-progress
+- packages/lore/src/service/phase-service.ts#PhaseService.addPhase#VALIDATION_ERROR#name | BR-99 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.addPhase#VALIDATION_ERROR#phases[].name | BR-99 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.addPhase#VALIDATION_ERROR#type | BR-233 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.listPhases#VALIDATION_ERROR#type | BR-233 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.removePhase#VALIDATION_ERROR#extra.phase | BR-101 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.removePhase#VALIDATION_ERROR#phases[].name | BR-234 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.removePhase#VALIDATION_ERROR#type | BR-233 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.renamePhase#VALIDATION_ERROR#name~0 | BR-99 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.renamePhase#VALIDATION_ERROR#name~1 | BR-99 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.renamePhase#VALIDATION_ERROR#phases[].name~0 | BR-234 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.renamePhase#VALIDATION_ERROR#phases[].name~1 | BR-99 | baseline-plan-the-work
+- packages/lore/src/service/phase-service.ts#PhaseService.renamePhase#VALIDATION_ERROR#type | BR-233 | baseline-plan-the-work
+- packages/lore/src/service/phase-workflow-service.ts#PhaseWorkflowService._claimImpl#dynamic:err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso)) | BR-1040 | baseline-claim-a-task
+- packages/lore/src/service/phase-workflow-service.ts#PhaseWorkflowService._releaseImpl#dynamic:err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso)) | BR-1043 | baseline-claim-a-task
+- packages/lore/src/service/phase-workflow-service.ts#PhaseWorkflowService._releaseImpl#dynamic:err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso)) | BR-142 | baseline-claim-a-task
+- packages/lore/src/service/plan-exemption-service.ts#PlanExemptionService.exemptAttestation#VALIDATION_ERROR#attestation_exempt_kind | BR-1198 | baseline-close-a-plan
+- packages/lore/src/service/plan-exemption-service.ts#PlanExemptionService.mergeExemptionIntoExtra#VALIDATION_ERROR#type | BR-1198 | baseline-close-a-plan
+- packages/lore/src/service/plan-exemption-service.ts#PlanExemptionService.mergeExemptionIntoExtra#VALIDATION_ERROR#type | BR-1200 | baseline-close-a-plan
+- packages/lore/src/service/plan-exemption-service.ts#PlanExemptionService.setIntegrationBranch#VALIDATION_ERROR#integration_branch | BR-1313 | baseline-plan-the-work
+- packages/lore/src/service/plan-exemption-service.ts#validateReason#VALIDATION_ERROR#reason | BR-1198 | baseline-close-a-plan
+- packages/lore/src/service/plan-exemption-service.ts#validateReason#VALIDATION_ERROR#reason | BR-1200 | baseline-close-a-plan
+- packages/lore/src/service/project-setup-service.ts#checkProjectLedger#VALIDATION_ERROR#manifest~0 | BR-1181 | baseline-check-installation-freshness
+- packages/lore/src/service/project-setup-service.ts#checkProjectLedger#VALIDATION_ERROR#manifest~1 | BR-847 | baseline-check-installation-freshness
+- packages/lore/src/service/project-setup-service.ts#checkProjectLedger#VALIDATION_ERROR#manifest~2 | BR-847 | baseline-check-installation-freshness
+- packages/lore/src/service/receipt-log-v2.ts#ReceiptLogV2.appendLine#STORE_ERROR | BR-497 | baseline-file-a-defect-report
+- packages/lore/src/service/receipt-log-v2.ts#ReceiptLogV2.read#STORE_ERROR | BR-500 | baseline-file-a-defect-report
+- packages/lore/src/service/requirement-service.ts#RequirementService.addRequirement#VALIDATION_ERROR#0 | BR-683 | baseline-declare-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.addRequirement#VALIDATION_ERROR#1 | BR-684 | baseline-declare-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.migrateRequirement#VALIDATION_ERROR#0 | BR-1001 | baseline-declare-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.migrateRequirement#VALIDATION_ERROR#requirements[].id | BR-1001 | baseline-declare-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.removeRequirement#VALIDATION_ERROR#requirements[].id~0 | BR-690 | baseline-withdraw-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.removeRequirement#VALIDATION_ERROR#requirements[].id~1 | BR-691 | baseline-withdraw-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.removeRequirement#VALIDATION_ERROR#requirements[].id~1 | BR-692 | baseline-withdraw-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.requireLiveRule#VALIDATION_ERROR#migrated_to~0 | BR-1001 | baseline-declare-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.requireLiveRule#VALIDATION_ERROR#migrated_to~1 | BR-1001 | baseline-declare-a-product-requirement
+- packages/lore/src/service/requirement-service.ts#RequirementService.resolvePrd#VALIDATION_ERROR#type | BR-686 | baseline-declare-a-product-requirement
+- packages/lore/src/service/resolution-label-port.ts#GhResolutionLabelPort.setLabel#VALIDATION_ERROR#gh_labels_response | BR-534 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-label-port.ts#GhResolutionLabelPort.setLabel#dynamic:err(addResult.error) | BR-534 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-label-port.ts#GhResolutionLabelPort.setLabel#dynamic:err(deleteResult.error) | BR-534 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-label-port.ts#GhResolutionLabelPort.setLabel#dynamic:err(listResult.error) | BR-534 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-projector.ts#ResolutionLabelPort#setLabel | BR-533 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-projector.ts#ResolutionLabelPort#setLabel | BR-534 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-projector.ts#ResolutionProjector.project#dynamic:err(setResult.error) | BR-533 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolution-projector.ts#ResolutionProjector.project#dynamic:err(setResult.error) | BR-534 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-338 | baseline-hand-off-a-session
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-347 | baseline-resume-a-session
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-373 | baseline-enter-a-seat
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-531 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-596 | baseline-pull-the-rules-before-writing
+- packages/lore/src/service/resolve.ts#lookupDoc#DOC_NOT_FOUND | BR-716 | baseline-read-a-document
+- packages/lore/src/service/resolve.ts#lookupDoc#VALIDATION_ERROR#id | BR-338 | baseline-hand-off-a-session
+- packages/lore/src/service/resolve.ts#lookupDoc#VALIDATION_ERROR#id | BR-347 | baseline-resume-a-session
+- packages/lore/src/service/resolve.ts#lookupDoc#VALIDATION_ERROR#id | BR-715 | baseline-read-a-document
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-338 | baseline-hand-off-a-session
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-347 | baseline-resume-a-session
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-373 | baseline-enter-a-seat
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-529 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-531 | baseline-resolve-a-defect-report
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-577 | baseline-check-a-gate-before-writing
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-596 | baseline-pull-the-rules-before-writing
+- packages/lore/src/service/resolve.ts#resolveDoc#DOC_NOT_FOUND | BR-716 | baseline-read-a-document
+- packages/lore/src/service/resolve.ts#resolveDoc#VALIDATION_ERROR#id | BR-338 | baseline-hand-off-a-session
+- packages/lore/src/service/resolve.ts#resolveDoc#VALIDATION_ERROR#id | BR-347 | baseline-resume-a-session
+- packages/lore/src/service/resolve.ts#resolveDoc#VALIDATION_ERROR#id | BR-715 | baseline-read-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.approve#INVALID_TRANSITION | BR-275 | baseline-approve-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.approve#STALE_VERSION | BR-1015 | baseline-launch-the-dashboard
+- packages/lore/src/service/review-service.ts#ReviewService.approve#VALIDATION_ERROR#gate:plan-promote | BR-287 | baseline-approve-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.approve#VALIDATION_ERROR#override-judgment~0 | BR-284 | baseline-approve-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.approve#VALIDATION_ERROR#override-judgment~2 | BR-284 | baseline-approve-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.approve#VALIDATION_ERROR#override-no-judgment~1 | BR-285 | baseline-approve-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.enforceApprovalGate#VALIDATION_ERROR#baseline-commands | BR-1308 | baseline-approve-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.reject#INVALID_TRANSITION | BR-292 | baseline-reject-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.rejectWithOutcome#INVALID_TRANSITION | BR-292 | baseline-reject-a-document
+- packages/lore/src/service/review-service.ts#ReviewService.reopen#INVALID_TRANSITION | BR-1186 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopen#VALIDATION_ERROR#reason | BR-1185 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopen#VALIDATION_ERROR#status | BR-1187 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopen#VALIDATION_ERROR#type | BR-1184 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopen#dynamic:err(this.reopenRefusal(doc, after.value, true)) | BR-1054 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopen#dynamic:err(this.reopenRefusal(doc, before.value, false)) | BR-1050 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopenRefusal#VALIDATION_ERROR#gate:reopen | BR-1050 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/review-service.ts#ReviewService.reopenRefusal#VALIDATION_ERROR#gate:reopen | BR-1054 | baseline-reopen-an-approved-spec
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.authorizeTarget#dynamic:err(validationError("leaf", `an add lands on a business leaf; '${change.leaf}' is no...) | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.checkAmendable#dynamic:err(validationError( "id", `${change.id} is already ${other.change.op === "retire" ?...) | BR-1207 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.checkAmendable#dynamic:err(validationError("id", `${change.id} already landed from ${spec.slug}; a landed e...) | BR-1208 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.checkAmendable#dynamic:err(validationError("id", `a ${change.op} names a LIVE rule: ${why}`, change.id)) | BR-1207 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.findOwnProposedAdd#dynamic:err(validationError("id", `an amend rewrites a proposed entry of ${spec.slug}: ${rul...) | BR-1287 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.ownerOf#dynamic:err(validationError("id", `${ruleId} is not a rule of the baseline`, ruleId)) | BR-1232 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.proposeAmendOfProposal#dynamic:err(validationError("change", `an amend must change something: ${entry.value.id} alr...) | BR-1287 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.proposeWithdrawal#dynamic:err(validationError("id", `a withdraw removes an entry of ${spec.slug}'s change set:...) | BR-1311 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.requireLandingEvidence#dynamic:err(validationError( "rule_changes", `cannot land the rule changes of ${spec.slug}: ...) | BR-1210 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.resolveLeaf#dynamic:err(validationError("leaf", `a rule lands on a business leaf; '${leafRef}' is not on...) | BR-1232 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.resolveLockExit#dynamic:err(validationError( "correction.reason", 'a correction needs a non-empty reason (--...) | BR-1208 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.resolveSpec#dynamic:err(validationError("spec", `a rule change set belongs to a spec; '${specRef}' is a ...) | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.resolveSpec#dynamic:err(validationError("spec", `a rule change set belongs to a spec; '${specRef}' is a ...) | BR-1209 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#RuleChangeService.resolveSpec#dynamic:err(validationError("spec", `a rule change set belongs to a spec; '${specRef}' is a ...) | BR-1233 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#planLeaf#dynamic:err(validationError("id", `${change.id} is ${current.lifecycle} in ${leaf.slug}; a s...) | BR-1232 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#planLeaf#dynamic:err(validationError("id", `${change.id} is ${current.lifecycle}; a modify names a li...) | BR-1232 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#planLeaf#dynamic:err(validationError("id", `${change.id} is not a proposed rule id (registry state: $...) | BR-1232 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#planLeaf#dynamic:err(validationError("id", `${change.id} is not on ${leaf.slug}; it moved or was remo...) | BR-1232 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#readChangeSet#dynamic:err(validationError( `extra.rule_changes${issue !== undefined && issue.path.length >...) | BR-1209 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#shapeAmend#dynamic:err(validationError( issue !== undefined && issue.path.length > 0 ? String(issue.pat...) | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#shapeAmend#dynamic:err(validationError("change", "an amend must change at least one of statement, examp...) | BR-1287 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#shapeInput#dynamic:err(validationError( issue !== undefined && issue.path.length > 0 ? String(issue.pat...) | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#shapeInput#dynamic:err(validationError("change", "a modify must change at least one of statement, examp...) | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#shapeInput#dynamic:err(validationError("note", "a retire needs a non-blank note naming why the rule is ...) | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#0 | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#0 | BR-1207 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#0 | BR-1208 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#0 | BR-1210 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#1 | BR-1206 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#1 | BR-1207 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#1 | BR-1208 | baseline-propose-a-rule-change
+- packages/lore/src/service/rule-change-service.ts#validationError#VALIDATION_ERROR#1 | BR-1210 | baseline-land-a-spec-s-rule-changes
+- packages/lore/src/service/rule-index-queries.ts#cyclicComponents#dynamic:(edges.get(n) ?? new Set<string>())[Symbol.iterator] | BR-681 | baseline-assess-a-rule-s-impact
+- packages/lore/src/service/rule-landing-port.ts#RuleChangeLandingPort#apply | BR-1234 | baseline-close-a-plan
+- packages/lore/src/service/rule-read-service.ts#RuleReadService.show#DOC_NOT_FOUND | BR-676 | baseline-find-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:err(validationError("label", "label must not be empty")) | BR-613 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:err(validationError("node", `node must be one of ${baselineNodeSchema.options.join("...) | BR-979 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:err(validationError("node", `node must be root|branch|leaf (got '${String(input.node...) | BR-613 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:err(validationError("node", `node=${node.data} does not belong to tree=${input.tree ...) | BR-979 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:err(validationError("parent", verdict.reason, parent)) | BR-612 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:err(validationError("tree", `tree must be one of ${baselineTreeSchema.options.join("...) | BR-613 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addNode#dynamic:this.createDoc | BR-618 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.addRule#dynamic:err(lastStale ?? staleExhausted(leafId)) | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.addRule#dynamic:err(validationError( "node", `rules live only on a business leaf, an architecture st...) | BR-1002 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.addRule#dynamic:err(validationError( issue ? `rule.${issue.path.join(".")}` : "rule", issue ? issue....) | BR-623 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.addRule#dynamic:err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue...) | BR-632 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.checkCurrentExceptions#dynamic:err(validationError( "current_exceptions", `${id} is not a live AD-<n> debt entry (a...) | BR-1002 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.glossaryAdd#dynamic:err(validationError("glossary.term", `term '${parsed.data.term}' already defined`, p...) | BR-620 | baseline-define-a-glossary-term
+- packages/lore/src/service/rule-service.ts#RuleService.glossaryAdd#dynamic:err(validationError(issue ? `glossary.${issue.path.join(".")}` : "glossary", issue ?...) | BR-621 | baseline-define-a-glossary-term
+- packages/lore/src/service/rule-service.ts#RuleService.glossaryRemove#dynamic:err(validationError("glossary.term", `term '${term}' is not defined on this node`, t...) | BR-622 | baseline-define-a-glossary-term
+- packages/lore/src/service/rule-service.ts#RuleService.locateRule#DOC_NOT_FOUND#~0 | BR-637 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.locateRule#DOC_NOT_FOUND#~1 | BR-637 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.locateRule#STORE_ERROR | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError( "node", need === "leaf" ? `rules and depends_on live only on a ...) | BR-619 | baseline-define-a-glossary-term
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError( "node", need === "leaf" ? `rules and depends_on live only on a ...) | BR-624 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError( "node", need === "leaf" ? `rules and depends_on live only on a ...) | BR-646 | baseline-move-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError( "node", need === "leaf" ? `rules and depends_on live only on a ...) | BR-651 | baseline-declare-a-leaf-dependency
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError( "node", need === "leaf" ? `rules and depends_on live only on a ...) | BR-656 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-616 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-619 | baseline-define-a-glossary-term
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-624 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-646 | baseline-move-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-651 | baseline-declare-a-leaf-dependency
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-656 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.resolveBaselineDoc#dynamic:err(validationError("type", `expected a baseline doc; '${idOrSlug}' is a ${doc.type}...) | BR-674 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-service.ts#RuleService.setDependsOn#dynamic:err(validationError("depends_on", "nothing to change: pass at least one add or remov...) | BR-651 | baseline-declare-a-leaf-dependency
+- packages/lore/src/service/rule-service.ts#RuleService.setDependsOn#dynamic:err(validationError("depends_on", `'${id}' is not a rule id (BR-<n>)`, id)) | BR-651 | baseline-declare-a-leaf-dependency
+- packages/lore/src/service/rule-service.ts#RuleService.setDependsOn#dynamic:err(validationError("depends_on", `cannot remove, not present: ${absent.join(", ")}`...) | BR-651 | baseline-declare-a-leaf-dependency
+- packages/lore/src/service/rule-service.ts#RuleService.setDependsOn#dynamic:err(validationError("depends_on", `rule id(s) that exist nowhere in the baseline tre...) | BR-650 | baseline-declare-a-leaf-dependency
+- packages/lore/src/service/rule-service.ts#RuleService.setLabel#dynamic:err(validationError("label", "label must not be empty")) | BR-616 | baseline-add-a-baseline-node
+- packages/lore/src/service/rule-service.ts#RuleService.setRule#dynamic:err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.mov...) | BR-646 | baseline-move-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.setRule#dynamic:err(validationError("ruleId", `rule id must match BR-<n> (got '${ruleId}')`, ruleId)) | BR-637 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("commands", "a command name must not be blank")) | BR-656 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("commands", `cannot remove, not present: ${absentCommands.join("...) | BR-656 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", `${problems.length} site rows refused, nothing writt...) | BR-1288 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", `'${entry}' for site '${site}' is neither a rule of ...) | BR-654 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", `cannot remove, not mapped: ${absentSites.join(", ")...) | BR-656 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", `owned-by entry for site '${site}': ${judged.problem...) | BR-654 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", `owned-by entry for site '${site}': ${owned.problem}...) | BR-654 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", `site '${site}' needs a non-empty key and at least o...) | BR-654 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#RuleService.setSiteMap#dynamic:err(validationError("site_map", problems[0]!.message, problems[0]!.value)) | BR-654 | baseline-account-for-a-refusal-site
+- packages/lore/src/service/rule-service.ts#applyRulePatch#dynamic:err(validationError( "lifecycle", `rule ${current.id} cannot move ${current.lifecycl...) | BR-641 | baseline-retire-a-business-rule
+- packages/lore/src/service/rule-service.ts#applyRulePatch#dynamic:err(validationError(issue ? `rule.${issue.path.join(".")}` : "rule", issue ? issue.m...) | BR-638 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-service.ts#replaceRule#STORE_ERROR | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-service.ts#staleExhausted#STORE_ERROR | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/service/rule-service.ts#validateSetRulePatch#dynamic:err(validationError( "lifecycle", "no rule enters the 'deprecated' lifecycle: a rule...) | BR-641 | baseline-retire-a-business-rule
+- packages/lore/src/service/rule-service.ts#validateSetRulePatch#dynamic:err(validationError("note", "lifecycle=retired requires --note (stored as retired_no...) | BR-642 | baseline-retire-a-business-rule
+- packages/lore/src/service/rule-service.ts#validateSetRulePatch#dynamic:err(validationError("note", "note is the retirement note and is valid only with life...) | BR-642 | baseline-retire-a-business-rule
+- packages/lore/src/service/rule-service.ts#validateSetRulePatch#dynamic:err(validationError("patch", "nothing to change: pass at least one of statement, con...) | BR-637 | baseline-revise-a-business-rule
+- packages/lore/src/service/rule-state-git-port.ts#SpawnGitPort.changedSince#dynamic:err(gitUnavailable(`diff since ${sha}`, this.describe(run))) | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-git-port.ts#SpawnGitPort.headSha#dynamic:err(gitUnavailable("HEAD", `unexpected output '${sha}'`)) | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-git-port.ts#SpawnGitPort.headSha#dynamic:err(gitUnavailable("HEAD", this.describe(run))) | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-git-port.ts#SpawnGitPort.isAncestor#dynamic:err(gitUnavailable(`ancestry of ${sha}`, this.describe(run))) | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-service.ts#GitPort#changedSince | BR-665 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-service.ts#GitPort#changedSince | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-service.ts#GitPort#headSha | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-service.ts#GitPort#isAncestor | BR-666 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/rule-state-service.ts#RuleStateService.full#VALIDATION_ERROR#rule | BR-673 | baseline-compute-a-rule-s-state
+- packages/lore/src/service/run-identity-verify.ts#verifyInvocationIdentity#dynamic:warn | BR-1035 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.end#dynamic:err(validationError("reason", "--reason is required", reason)) | BR-1215 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.occupancy#dynamic:err(validationError("worktree", "a worktree path is required", input.worktree)) | BR-1216 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.register#dynamic:err(validationError("agent-type", "--agent-type requires --agent-id", input.agentTyp...) | BR-1217 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.register#dynamic:err(validationError("agent-type", "a subagent run requires --agent-type", input.agen...) | BR-1217 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.register#dynamic:err(validationError("harness", message, input.harness)) | BR-1217 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.show#DOC_NOT_FOUND | BR-1038 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#RunService.tasks#dynamic:err(validationError("run-id", `run ${runId} is not registered`, runId)) | BR-1150 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#validationError#VALIDATION_ERROR#0 | BR-1150 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#validationError#VALIDATION_ERROR#0 | BR-1215 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#validationError#VALIDATION_ERROR#0 | BR-1216 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/run-service.ts#validationError#VALIDATION_ERROR#0 | BR-1217 | baseline-attribute-work-to-a-run
+- packages/lore/src/service/seat-service.ts#GitPort#isDirty | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#isMerged | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#isMerged | BR-381 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#rebaseFromMain | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#worktreeAdd | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#worktreeList | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#worktreeList | BR-372 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#worktreeList | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#worktreeList | BR-381 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#GitPort#worktreeRemove | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#VALIDATION_ERROR#gate:seat-entry:dirty-main | BR-367 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#VALIDATION_ERROR#gate:seat-entry:not-a-plan | BR-370 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#dynamic:err(wrapStepError("entry", "isDirty", dirtyResult.error)) | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#dynamic:err(wrapStepError("entry", "rebaseFromMain", rebaseResult.error)) | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#dynamic:err(wrapStepError("entry", "worktreeAdd", addResult.error)) | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#dynamic:err(wrapStepError("isDirty", dirtyResult.error)) | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#dynamic:err(wrapStepError("rebaseFromMain", rebaseResult.error)) | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.enter#dynamic:err(wrapStepError("worktreeAdd", addResult.error)) | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#VALIDATION_ERROR#gate:seat-remove:not-found | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#VALIDATION_ERROR#gate:seat-remove:unmerged | BR-374 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("isMerged", mergedResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("remove", "branchDelete", deleteResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("remove", "isMerged", mergedResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("remove", "worktreeList", listResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("remove", "worktreeRemove", removeResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("worktreeList", listResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.remove#dynamic:err(wrapStepError("worktreeRemove", removeResult.error)) | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#SeatService.resume#VALIDATION_ERROR#gate:seat-resume:not-found | BR-372 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#mainCheckoutBranch#VALIDATION_ERROR#gate:seat-remove:no-base-branch | BR-379 | baseline-remove-a-seat
+- packages/lore/src/service/seat-service.ts#wrapStepError#STORE_ERROR | BR-371 | baseline-enter-a-seat
+- packages/lore/src/service/seat-service.ts#wrapStepError#STORE_ERROR | BR-378 | baseline-remove-a-seat
+- packages/lore/src/service/session-service.ts#SessionService.deriveSessionLiveness#dynamic:this.probeProcessStartTimePort | BR-383 | baseline-see-who-is-working
+- packages/lore/src/service/session-service.ts#SessionService.withTrailChangedFiles#dynamic:this.readTrailPort | BR-1149 | baseline-hand-off-a-session
+- packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#0 | BR-335 | baseline-hand-off-a-session
+- packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#0 | BR-337 | baseline-hand-off-a-session
+- packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#plan_ref~0 | BR-338 | baseline-hand-off-a-session
+- packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#plan_ref~1 | BR-338 | baseline-hand-off-a-session
+- packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#plan_ref~2 | BR-339 | baseline-hand-off-a-session
+- packages/lore/src/service/setup-service.ts#AssetSource#load | BR-825 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#McpRegistrar#add | BR-826 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#McpRegistrar#remove | BR-844 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#backup | BR-824 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#mkdir | BR-824 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#remove | BR-842 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#remove | BR-843 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#removeDirIfEmpty | BR-842 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#removeDirIfEmpty | BR-843 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupFsWriter#write | BR-824 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#SetupService.install#STORE_ERROR | BR-824 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#SetupService.install#dynamic:err(describeWriterFailure("install", cause, { committedBackups, committedWrites, com...) | BR-824 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#SetupService.uninstall#STORE_ERROR | BR-842 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupService.uninstall#VALIDATION_ERROR#manifest | BR-841 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#SetupService.uninstall#dynamic:err(describeWriterFailure("uninstall", cause, { restoredPaths, removedPaths })) | BR-842 | baseline-uninstall-an-integration
+- packages/lore/src/service/setup-service.ts#describeWriterFailure#STORE_ERROR | BR-824 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#parseManifestRaw#VALIDATION_ERROR#manifest~0 | BR-821 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#parseManifestRaw#VALIDATION_ERROR#manifest~1 | BR-821 | baseline-install-the-agent-integration
+- packages/lore/src/service/setup-service.ts#resolvePayload#VALIDATION_ERROR#0 | BR-825 | baseline-install-the-agent-integration
+- packages/lore/src/service/spec-approval-citation.ts#requireSpecCitesLiveRule#VALIDATION_ERROR#acceptance_criteria | BR-1007 | baseline-approve-a-spec
+- packages/lore/src/service/spec-approval-citation.ts#requireSpecCitesLiveRule#VALIDATION_ERROR#acceptance_criteria | BR-1026 | baseline-submit-a-document-for-review
+- packages/lore/src/service/spec-approval-citation.ts#requireSpecCitesLiveRule#VALIDATION_ERROR#acceptance_criteria | BR-286 | baseline-approve-a-document
+- packages/lore/src/service/staleness-probe-service.ts#StalenessProbeService.probeOne#VALIDATION_ERROR#extra.validity | BR-467 | baseline-probe-documents-for-staleness
+- packages/lore/src/service/staleness-probe-service.ts#StalenessProbeService.probeOne#VALIDATION_ERROR#type | BR-468 | baseline-probe-documents-for-staleness
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.allInMain#dynamic:this.deps.git | BR-1265 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.archive#dynamic:err(storeError(`archive ref ${ref} does not resolve to stash commit ${sha}; nothing ...) | BR-1266 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.archive#dynamic:err(storeError(`archive write failed for stash ${sha} (${ref}): ${written.stderr.tri...) | BR-1266 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.archive#dynamic:this.deps.git | BR-1266 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.checkoutOfBranch#dynamic:this.deps.git | BR-1268 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.dropBySha#dynamic:err(storeError(`stash stack changed while dropping ${sha}; nothing dropped, re-run l...) | BR-1269 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.dropBySha#dynamic:this.deps.git | BR-1269 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.list#dynamic:this.deps.git | BR-1265 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.resolveMainRef#dynamic:this.deps.git | BR-1265 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.stashCreatedAtMs#dynamic:this.deps.git | BR-1268 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.trackedEntries#dynamic:this.deps.git | BR-1265 | baseline-prune-stashes
+- packages/lore/src/service/stash-prune-service.ts#StashPruneService.untrackedEntries#dynamic:this.deps.git | BR-1265 | baseline-prune-stashes
+- packages/lore/src/service/sync-docs-service.ts#parseSpecFile#VALIDATION_ERROR#file | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#parseSpecFile#VALIDATION_ERROR#frontmatter~0 | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#parseSpecFile#VALIDATION_ERROR#frontmatter~1 | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#parseSpecFile#VALIDATION_ERROR#frontmatter~2 | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#parseSpecFile#VALIDATION_ERROR#title | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#parseSpecFile#VALIDATION_ERROR#type | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#resolveParentId#VALIDATION_ERROR#parent_id~0 | BR-789 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#resolveParentId#VALIDATION_ERROR#parent_id~0 | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#resolveParentId#VALIDATION_ERROR#parent_id~1 | BR-789 | baseline-import-spec-files
+- packages/lore/src/service/sync-docs-service.ts#resolveParentId#VALIDATION_ERROR#parent_id~1 | BR-791 | baseline-import-spec-files
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._addEvidenceImpl#VALIDATION_ERROR#attestation | BR-148 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._addEvidenceImpl#VALIDATION_ERROR#result | BR-147 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._addEvidenceImpl#dynamic:err(gitStampRefusal) | BR-148 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._addEvidenceImpl#dynamic:err(worktreeError) | BR-159 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._claimImpl#CLAIM_CONFLICT | BR-1040 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._claimImpl#VALIDATION_ERROR#gate:task-claim:anchor-overlap | BR-139 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._claimImpl#VALIDATION_ERROR#status | BR-140 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._claimImpl#dynamic:err(buildClaimConflictError(task.id, existingClaim, holder, nowIso)) | BR-1040 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._claimImpl#dynamic:this.detectBranch | BR-137 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._claimImpl#dynamic:this.installClaimTrailerBinding | BR-1162 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#extra.claim | BR-208 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#extra.verification_evidence~0 | BR-199 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#extra.verification_evidence~1 | BR-205 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#extra.verification_evidence~2 | BR-206 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#extra.verification_evidence~3 | BR-207 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#noNewTestsReason | BR-206 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#overrideReason | BR-203 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#VALIDATION_ERROR#status | BR-197 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(asyncFloor.value.error) | BR-1179 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(asyncFloor.value.error) | BR-1291 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(evaluated.value.refusal.error) | BR-199 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(evaluated.value.refusal.error) | BR-205 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(evaluated.value.refusal.error) | BR-206 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(evaluated.value.refusal.error) | BR-207 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(evaluated.value.refusal.error) | BR-209 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._doneImpl#dynamic:err(missingOracle.value.error) | BR-1179 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._releaseImpl#CLAIM_CONFLICT | BR-142 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._releaseImpl#VALIDATION_ERROR#extra.claim | BR-142 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._releaseImpl#dynamic:err(buildClaimConflictError(task.id, existingClaim, holder, nowIso)) | BR-1043 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._releaseImpl#dynamic:err(buildClaimConflictError(task.id, existingClaim, holder, nowIso)) | BR-142 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._releaseImpl#dynamic:err(worktreeError) | BR-144 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService._releaseImpl#dynamic:this.releaseClaimTrailerBinding | BR-1162 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#0 | BR-145 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#ac_oracle_generation | BR-238 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#ac_ref~0 | BR-156 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#ac_ref~1 | BR-156 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#ac_ref~2 | BR-156 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#extra.verification_evidence | BR-158 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#VALIDATION_ERROR#recorded_corpus_rev | BR-1180 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#dynamic:this.resolveAdhocGoverningAcIds | BR-156 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.appendEvidenceEntry#dynamic:this.resolveDeclaredAcIds | BR-156 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#extra.verification_evidence~0 | BR-199 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#extra.verification_evidence~1 | BR-205 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#extra.verification_evidence~2 | BR-206 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#extra.verification_evidence~3 | BR-207 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#extra.verification_evidence~4 | BR-207 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#noNewTestsReason | BR-206 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.evaluateDoneFloors#VALIDATION_ERROR#overrideReason | BR-203 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.findMissingOracleFileFloor#VALIDATION_ERROR#extra.ac_scope | BR-1179 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.findMissingOracleFileFloor#dynamic:error-literal({ ...error, details: { floor: "missing-oracle-file" } }) | BR-1179 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.findUnlandedWorkFloor#VALIDATION_ERROR#extra.claim | BR-1291 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.findUnlandedWorkFloor#dynamic:error-literal({ ...error, details: { floor: "unmerged-branch" } }) | BR-1291 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.ready#VALIDATION_ERROR#type | BR-233 | baseline-plan-the-work
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.ready#VALIDATION_ERROR#type | BR-370 | baseline-enter-a-seat
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.resolveAcOracleGeneration#dynamic:this.resolveAdhocGoverningAcCriteria | BR-238 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.resolveAcOracleGeneration#dynamic:this.resolveDeclaredAcCriteria | BR-238 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.resolveCorpusScope#VALIDATION_ERROR#corpus_scope~0 | BR-237 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#TaskWorkflowService.resolveCorpusScope#VALIDATION_ERROR#corpus_scope~1 | BR-237 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#buildClaimConflictError#CLAIM_CONFLICT | BR-1040 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#buildClaimConflictError#CLAIM_CONFLICT | BR-1043 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#buildNoWorktreeMismatchRefusal#VALIDATION_ERROR#extra.claim.worktree | BR-144 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#buildNoWorktreeMismatchRefusal#VALIDATION_ERROR#extra.claim.worktree | BR-159 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#buildUncommittedWorktreeRefusal#VALIDATION_ERROR#extra.claim.worktree | BR-144 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#buildUncommittedWorktreeRefusal#VALIDATION_ERROR#extra.claim.worktree | BR-159 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#doneFloorRefusal#dynamic:error-literal({ ...error, details: { floor } }) | BR-199 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#doneFloorRefusal#dynamic:error-literal({ ...error, details: { floor } }) | BR-205 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#doneFloorRefusal#dynamic:error-literal({ ...error, details: { floor } }) | BR-206 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#doneFloorRefusal#dynamic:error-literal({ ...error, details: { floor } }) | BR-207 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#doneFloorRefusal#dynamic:error-literal({ ...error, message: `${error.message} [floor: ${floor}]`, details: { floor } }) | BR-1292 | baseline-archive-a-task
+- packages/lore/src/service/task-workflow-service.ts#rejectBlankClaimWorktree#VALIDATION_ERROR#worktree | BR-136 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#rejectCallerGitStamp#VALIDATION_ERROR#0 | BR-148 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#rejectMissingNonPassOutputTail#VALIDATION_ERROR#output_tail | BR-149 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#rejectMissingPassOutputTail#VALIDATION_ERROR#output_tail | BR-150 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#rejectPlaceholderEvidenceCommand#VALIDATION_ERROR#command | BR-161 | baseline-record-evidence
+- packages/lore/src/service/task-workflow-service.ts#resolveClaimSessionId#VALIDATION_ERROR#claim.session_id | BR-138 | baseline-claim-a-task
+- packages/lore/src/service/task-workflow-service.ts#resolveClaimSessionId#VALIDATION_ERROR#claim.session_id | BR-385 | baseline-see-who-is-working
+- packages/lore/src/service/task-workflow-service.ts#resolveClaimSessionId#VALIDATION_ERROR#claim.session_id | BR-393 | baseline-see-who-owns-each-branch
+- packages/lore/src/service/uat-service.ts#UatService.record#VALIDATION_ERROR#0 | BR-560 | baseline-record-an-acceptance-verdict
+- packages/lore/src/service/uat-service.ts#UatService.record#VALIDATION_ERROR#informs_link | BR-564 | baseline-record-an-acceptance-verdict
+- packages/lore/src/service/uat-service.ts#UatService.record#VALIDATION_ERROR#plan | BR-561 | baseline-record-an-acceptance-verdict
+- packages/lore/src/service/uat-service.ts#UatService.record#dynamic:this.deps.addLink | BR-564 | baseline-record-an-acceptance-verdict
+- packages/lore/src/service/uat-service.ts#UatService.record#dynamic:this.deps.resolveTarget | BR-561 | baseline-record-an-acceptance-verdict
+- packages/lore/src/service/validity-service.ts#ValidityService._invalidateImpl#VALIDATION_ERROR#type | BR-776 | baseline-invalidate-a-document
+- packages/lore/src/service/validity-service.ts#ValidityService.applyInvalidate#VALIDATION_ERROR#0 | BR-777 | baseline-invalidate-a-document
+- packages/lore/src/service/validity-service.ts#ValidityService.applyInvalidate#VALIDATION_ERROR#invalid_at | BR-778 | baseline-invalidate-a-document
+- packages/lore/src/service/validity-service.ts#ValidityService.applyUndo#VALIDATION_ERROR#extra.validity | BR-780 | baseline-invalidate-a-document
+- packages/lore/src/service/verification-projection-service.ts#resolvePlanTasks#VALIDATION_ERROR#plan_id | BR-1223 | baseline-see-a-document-s-verification-evidence
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._runFalsifier#STORE_ERROR | BR-193 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._runFalsifier#VALIDATION_ERROR#falsifier.expected_exit_code | BR-191 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._runVerification#NEEDS_APPROVAL | BR-171 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._runVerification#STORE_ERROR | BR-175 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._selectDeclaredScopeCriteria#VALIDATION_ERROR#acIds | BR-167 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._selectDeclaredScopeCriteria#VALIDATION_ERROR#ac_scope~0 | BR-164 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._selectDeclaredScopeCriteria#VALIDATION_ERROR#ac_scope~1 | BR-165 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService._selectDeclaredScopeCriteria#VALIDATION_ERROR#ac_scope~2 | BR-166 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#acIds | BR-167 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#ac_scope~0 | BR-164 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#ac_scope~0 | BR-183 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#ac_scope~1 | BR-165 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#ac_scope~1 | BR-183 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#adhoc | BR-183 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyAdhocTask#VALIDATION_ERROR#type | BR-183 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyFalsifier#VALIDATION_ERROR#acId | BR-185 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyFalsifier#VALIDATION_ERROR#acceptance_criteria | BR-185 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyFalsifier#VALIDATION_ERROR#spec | BR-185 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyFalsifier#VALIDATION_ERROR#verify.falsifier | BR-248 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyFalsifier#VALIDATION_ERROR#verify.falsifier.expected_exit_code | BR-1074 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyFalsifier#VALIDATION_ERROR#verify.mode | BR-185 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyPlan#VALIDATION_ERROR#acIds | BR-167 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyPlan#VALIDATION_ERROR#acceptance_criteria | BR-168 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#VerifyRunnerService.verifyPlan#VALIDATION_ERROR#spec | BR-168 | baseline-run-verification
+- packages/lore/src/service/verify-runner-service.ts#applyFalsifierMutation#STORE_ERROR | BR-249 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#applyFalsifierMutation#VALIDATION_ERROR#falsifier.find | BR-190 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#applyFalsifierMutation#VALIDATION_ERROR#falsifier.path | BR-190 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#createFalsifierScratchWorktree#STORE_ERROR#~0 | BR-249 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#createFalsifierScratchWorktree#STORE_ERROR#~1 | BR-249 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#createFalsifierScratchWorktree#STORE_ERROR#~2 | BR-249 | baseline-prove-a-red
+- packages/lore/src/service/verify-runner-service.ts#createFalsifierScratchWorktree#STORE_ERROR#~3 | BR-249 | baseline-prove-a-red
+- packages/lore/src/service/version-service.ts#VersionService.diff#DOC_NOT_FOUND#~0 | BR-769 | baseline-read-a-document-s-history
+- packages/lore/src/service/version-service.ts#VersionService.diff#DOC_NOT_FOUND#~1 | BR-769 | baseline-read-a-document-s-history
+- packages/lore/src/service/version-service.ts#VersionService.diff#DOC_NOT_FOUND#~2 | BR-769 | baseline-read-a-document-s-history
+- packages/lore/src/service/version-service.ts#VersionService.diff#DOC_NOT_FOUND#~3 | BR-769 | baseline-read-a-document-s-history
+- packages/lore/src/service/version-service.ts#VersionService.restore#DOC_NOT_FOUND#~0 | BR-775 | baseline-restore-an-earlier-version
+- packages/lore/src/service/version-service.ts#VersionService.restore#DOC_NOT_FOUND#~1 | BR-775 | baseline-restore-an-earlier-version
+- packages/lore/src/service/version-service.ts#VersionService.restore#DOC_NOT_FOUND#~2 | BR-775 | baseline-restore-an-earlier-version
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#countCommits | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#countCommits | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#currentWorkingDirectory | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#currentWorkingDirectory | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#deleteBranch | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#deleteBranch | BR-1220 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#ignoredPathIdenticalToMain | BR-1235 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#ignoredPaths | BR-1235 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#integrationBranch | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#isDirty | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#isDirty | BR-961 | baseline-archive-a-task
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#isPidAlive | BR-1236 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#listWorktrees | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#listWorktrees | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#listWorktrees | BR-1220 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#newestReflogEpochSeconds | BR-961 | baseline-archive-a-task
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#pathExists | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#pathExists | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#realPath | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#realPath | BR-1219 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#removeScratchWorktree | BR-1236 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#removeWorktree | BR-1079 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#removeWorktree | BR-1220 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#WorktreeGitProbe#scratchOwner | BR-1236 | baseline-remove-a-finished-worktree
+- packages/lore/src/service/worktree-cleanup.ts#parseQuietMinutes#VALIDATION_ERROR#LORE_WORKTREE_QUIET_MINUTES | BR-961 | baseline-archive-a-task
+- packages/lore/src/service/worktree-removal-service.ts#WorktreeRemovalService.sweep#VALIDATION_ERROR#cwd | BR-1220 | baseline-remove-a-finished-worktree
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.addLink#DUPLICATE_LINK | BR-756 | baseline-link-two-documents
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.addLink#DUPLICATE_LINK | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#DOC_NOT_FOUND | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#STALE_VERSION#~0 | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#STALE_VERSION#~0 | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#STALE_VERSION#~0 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#STALE_VERSION#~1 | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#STALE_VERSION#~1 | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.allocateOrdinalForExisting#STALE_VERSION#~1 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.applyRuleLeafPatchSync#DOC_NOT_FOUND | BR-633 | baseline-write-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.applyRuleLeafPatchSync#DOC_NOT_FOUND | BR-637 | baseline-revise-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.applyRuleLeafPatchSync#STALE_VERSION | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.applyRuleLeafPatchSync#STALE_VERSION | BR-647 | baseline-move-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertAcExemptionCapped#dynamic:err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id)) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertAcExemptionCapped#dynamic:err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive)) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertAcExemptionCapped#dynamic:err(buildAcExemptionCapError(count.n, cap.liveCriteria, cap.maxActive)) | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG | BR-498 | baseline-file-a-defect-report
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG | BR-526 | baseline-adopt-a-github-issue
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG | BR-707 | baseline-create-a-document
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG | BR-791 | baseline-import-spec-files
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG | BR-978 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertLinkSync#DUPLICATE_LINK | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertLinkSync#DUPLICATE_LINK | BR-756 | baseline-link-two-documents
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.moveRule#DOC_NOT_FOUND | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.moveRule#VALIDATION_ERROR#fromLeaf.id | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.softDeleteDocSync#DOC_NOT_FOUND | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#DOC_NOT_FOUND#~0 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#DOC_NOT_FOUND#~1 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-210 | baseline-archive-a-task
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-243 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-244 | baseline-declare-a-falsifier
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-245 | baseline-declare-a-code-anchor
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-27 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-289 | baseline-approve-a-document
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-298 | baseline-reject-a-document
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-44 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-456 | baseline-sweep-finished-work-into-the-archive
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-49 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-647 | baseline-move-a-business-rule
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-688 | baseline-declare-a-product-requirement
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-693 | baseline-withdraw-a-product-requirement
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateDocSync#STALE_VERSION | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/sqlite-store.ts#SQLiteStore.updateWithProvenance#dynamic:err(refusal) | BR-260 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLink | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLink | BR-574 | baseline-run-an-evaluation-scenario
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLink | BR-756 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLink | BR-758 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLink | BR-779 | baseline-invalidate-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLink | BR-794 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLinkWithProvenance | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLinkWithProvenance | BR-756 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLinkWithProvenance | BR-757 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#addLinkWithProvenance | BR-758 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#allocateRuleAndUpdateLeaf | BR-625 | baseline-write-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#allocateRuleAndUpdateLeaf | BR-633 | baseline-write-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-405 | baseline-check-the-document-tree
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-463 | baseline-probe-documents-for-staleness
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-495 | baseline-file-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-525 | baseline-adopt-a-github-issue
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-757 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-763 | baseline-unlink-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-773 | baseline-restore-an-earlier-version
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-777 | baseline-invalidate-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#appendAuditEntry | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/store/store-interface.ts#StoreInterface#assignOrdinalForRepair | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/store/store-interface.ts#StoreInterface#endRun | BR-1215 | baseline-attribute-work-to-a-run
+- packages/lore/src/store/store-interface.ts#StoreInterface#findJudgments | BR-277 | baseline-approve-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insert | BR-574 | baseline-run-an-evaluation-scenario
+- packages/lore/src/store/store-interface.ts#StoreInterface#insert | BR-794 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/store-interface.ts#StoreInterface#insert | BR-796 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertCalibrationRecord | BR-288 | baseline-approve-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertCalibrationRecord | BR-296 | baseline-reject-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertJudgment | BR-266 | baseline-judge-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertJudgment | BR-463 | baseline-probe-documents-for-staleness
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertRun | BR-1029 | baseline-attribute-work-to-a-run
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-276 | baseline-approve-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-574 | baseline-run-an-evaluation-scenario
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-688 | baseline-declare-a-product-requirement
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-693 | baseline-withdraw-a-product-requirement
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-770 | baseline-restore-an-earlier-version
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-777 | baseline-invalidate-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-796 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertVersion | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-10 | baseline-create-a-spec
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-495 | baseline-file-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-525 | baseline-adopt-a-github-issue
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-526 | baseline-adopt-a-github-issue
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-702 | baseline-create-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-707 | baseline-create-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithAllocatedOrdinalAndProvenance | BR-9 | baseline-create-a-spec
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-495 | baseline-file-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-496 | baseline-file-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-525 | baseline-adopt-a-github-issue
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-526 | baseline-adopt-a-github-issue
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-702 | baseline-create-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#insertWithProvenance | BR-707 | baseline-create-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#latestJudgment | BR-288 | baseline-approve-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#latestJudgment | BR-296 | baseline-reject-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#latestJudgment | BR-304 | baseline-list-documents-awaiting-review
+- packages/lore/src/store/store-interface.ts#StoreInterface#listAcCites | BR-676 | baseline-find-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#listAcCites | BR-681 | baseline-assess-a-rule-s-impact
+- packages/lore/src/store/store-interface.ts#StoreInterface#listRuleDepends | BR-681 | baseline-assess-a-rule-s-impact
+- packages/lore/src/store/store-interface.ts#StoreInterface#listRuleDepends | BR-682 | baseline-assess-a-rule-s-impact
+- packages/lore/src/store/store-interface.ts#StoreInterface#listRuleRegistry | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#listRuleRegistry | BR-650 | baseline-declare-a-leaf-dependency
+- packages/lore/src/store/store-interface.ts#StoreInterface#maxDocVersion | BR-669 | baseline-compute-a-rule-s-state
+- packages/lore/src/store/store-interface.ts#StoreInterface#moveRule | BR-647 | baseline-move-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#queryCalibrationWindow | BR-556 | baseline-read-calibration-statistics
+- packages/lore/src/store/store-interface.ts#StoreInterface#removeLink | BR-763 | baseline-unlink-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#reopenRun | BR-1029 | baseline-attribute-work-to-a-run
+- packages/lore/src/store/store-interface.ts#StoreInterface#search | BR-749 | baseline-search-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#setDocParentWithProvenance | BR-1009 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/store/store-interface.ts#StoreInterface#softDeleteWithProvenance | BR-740 | baseline-delete-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#softDeleteWithProvenance | BR-742 | baseline-delete-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-210 | baseline-archive-a-task
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-243 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-244 | baseline-declare-a-falsifier
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-245 | baseline-declare-a-code-anchor
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-27 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-289 | baseline-approve-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-298 | baseline-reject-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-404 | baseline-check-the-document-tree
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-44 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-49 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-574 | baseline-run-an-evaluation-scenario
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-688 | baseline-declare-a-product-requirement
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-693 | baseline-withdraw-a-product-requirement
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-758 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-760 | baseline-link-two-documents
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-770 | baseline-restore-an-earlier-version
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-772 | baseline-restore-an-earlier-version
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-777 | baseline-invalidate-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-794 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/store-interface.ts#StoreInterface#update | BR-799 | baseline-upgrade-the-corpus-in-place
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-260 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-455 | baseline-sweep-finished-work-into-the-archive
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-532 | baseline-resolve-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-609 | baseline-fast-track-ledger-records
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-616 | baseline-add-a-baseline-node
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-627 | baseline-write-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-636 | baseline-revise-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-643 | baseline-retire-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-649 | baseline-move-a-business-rule
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-653 | baseline-declare-a-leaf-dependency
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-658 | baseline-account-for-a-refusal-site
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-721 | baseline-revise-a-document
+- packages/lore/src/store/store-interface.ts#StoreInterface#updateWithProvenance | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/store-shared.ts#buildAcExemptionAlreadyActiveError#VALIDATION_ERROR#ac_id | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/store-shared.ts#buildAcExemptionCapError#VALIDATION_ERROR#exemptions | BR-971 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/store-shared.ts#toStoreError#STORE_ERROR#~0 | BR-941 | baseline-pull-remote-changes
+- packages/lore/src/store/store-shared.ts#toStoreError#STORE_ERROR#~1 | BR-941 | baseline-pull-remote-changes
+- packages/lore/src/store/store-shared.ts#wrapStoreError#dynamic:err(toStoreError(e)) | BR-941 | baseline-pull-remote-changes
+- packages/lore/src/store/turso-store.ts#TursoStore.addLink#DUPLICATE_LINK | BR-756 | baseline-link-two-documents
+- packages/lore/src/store/turso-store.ts#TursoStore.addLink#DUPLICATE_LINK | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.addLinkWithProvenance#DOC_NOT_FOUND | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/turso-store.ts#TursoStore.addLinkWithProvenance#DUPLICATE_LINK | BR-550 | baseline-assess-a-plan-s-outcome
+- packages/lore/src/store/turso-store.ts#TursoStore.addLinkWithProvenance#DUPLICATE_LINK | BR-756 | baseline-link-two-documents
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#DOC_NOT_FOUND | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#STALE_VERSION#~0 | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#STALE_VERSION#~0 | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#STALE_VERSION#~0 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#STALE_VERSION#~1 | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#STALE_VERSION#~1 | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.allocateOrdinalForExisting#STALE_VERSION#~1 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.applyRuleLeafPatchTx#DOC_NOT_FOUND | BR-633 | baseline-write-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.applyRuleLeafPatchTx#DOC_NOT_FOUND | BR-637 | baseline-revise-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.applyRuleLeafPatchTx#STALE_VERSION | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.applyRuleLeafPatchTx#STALE_VERSION | BR-647 | baseline-move-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.getDuplicateSlugErrorFor#DUPLICATE_SLUG | BR-498 | baseline-file-a-defect-report
+- packages/lore/src/store/turso-store.ts#TursoStore.getDuplicateSlugErrorFor#DUPLICATE_SLUG | BR-526 | baseline-adopt-a-github-issue
+- packages/lore/src/store/turso-store.ts#TursoStore.getDuplicateSlugErrorFor#DUPLICATE_SLUG | BR-707 | baseline-create-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.getDuplicateSlugErrorFor#DUPLICATE_SLUG | BR-791 | baseline-import-spec-files
+- packages/lore/src/store/turso-store.ts#TursoStore.getDuplicateSlugErrorFor#DUPLICATE_SLUG | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.getDuplicateSlugErrorFor#DUPLICATE_SLUG | BR-978 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/turso-store.ts#TursoStore.insert#dynamic:err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e)) | BR-978 | baseline-import-a-version-1-corpus
+- packages/lore/src/store/turso-store.ts#TursoStore.insertWithProvenance#dynamic:err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e)) | BR-498 | baseline-file-a-defect-report
+- packages/lore/src/store/turso-store.ts#TursoStore.insertWithProvenance#dynamic:err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e)) | BR-526 | baseline-adopt-a-github-issue
+- packages/lore/src/store/turso-store.ts#TursoStore.insertWithProvenance#dynamic:err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e)) | BR-707 | baseline-create-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.insertWithProvenance#dynamic:err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e)) | BR-791 | baseline-import-spec-files
+- packages/lore/src/store/turso-store.ts#TursoStore.insertWithProvenance#dynamic:err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e)) | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.moveRuleSerialized#DOC_NOT_FOUND | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.moveRuleSerialized#VALIDATION_ERROR#fromLeaf.id | BR-640 | baseline-revise-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.softDeleteWithProvenance#DOC_NOT_FOUND | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.update#DOC_NOT_FOUND#~0 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.update#DOC_NOT_FOUND#~1 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-210 | baseline-archive-a-task
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-245 | baseline-declare-a-code-anchor
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-289 | baseline-approve-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-298 | baseline-reject-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-44 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-49 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-647 | baseline-move-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-688 | baseline-declare-a-product-requirement
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-693 | baseline-withdraw-a-product-requirement
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.update#STALE_VERSION | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#DOC_NOT_FOUND#~0 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#DOC_NOT_FOUND#~1 | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-243 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-244 | baseline-declare-a-falsifier
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-27 | baseline-declare-an-acceptance-criterion
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-44 | baseline-revise-an-acceptance-criterion
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-456 | baseline-sweep-finished-work-into-the-archive
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-49 | baseline-withdraw-an-acceptance-criterion
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-536 | baseline-resolve-a-defect-report
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-631 | baseline-write-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-647 | baseline-move-a-business-rule
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-732 | baseline-revise-a-document
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#STALE_VERSION | BR-949 | baseline-serve-the-corpus-over-http
+- packages/lore/src/store/turso-store.ts#TursoStore.updateWithProvenance#dynamic:err(refusal) | BR-260 | baseline-cite-a-baseline-rule
+- packages/lore/src/store/turso-store.ts#probeTmpdirUsability#STORE_ERROR | BR-931 | baseline-push-local-changes-to-the-remote
+- packages/lore/src/store/turso-store.ts#probeTmpdirUsability#STORE_ERROR | BR-939 | baseline-pull-remote-changes

@@ -3,10 +3,10 @@ id: KN-669
 type: knowledge
 role: knowledge
 title: "Assessment: Archiving the work that resolves a defect report closes its GitHub issue (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-155
 links:

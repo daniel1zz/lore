@@ -3,10 +3,10 @@ id: TASK-1585
 type: task
 role: plan
 title: "lore seat accepts any document as target; it must refuse a non-plan with exit 4"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-194
 plan: PLAN-194

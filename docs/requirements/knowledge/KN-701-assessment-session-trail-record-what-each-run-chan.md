@@ -3,10 +3,10 @@ id: KN-701
 type: knowledge
 role: knowledge
 title: "Assessment: Session trail: record what each run changed, judge it at turn end, carry it in the handoff (2026-10-16)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-188
 links:

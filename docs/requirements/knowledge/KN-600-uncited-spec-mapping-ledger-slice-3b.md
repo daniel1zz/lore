@@ -3,10 +3,10 @@ id: KN-600
 type: knowledge
 role: knowledge
 title: "Uncited spec mapping ledger slice 3b"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: SPEC-163
 ---

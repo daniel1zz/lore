@@ -3,10 +3,10 @@ id: KN-537
 type: knowledge
 role: knowledge
 title: "Assessment: Make lore issues refuse a retired-shape upstream as loudly as report-issue already does (2026-08-24)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-140
 links:

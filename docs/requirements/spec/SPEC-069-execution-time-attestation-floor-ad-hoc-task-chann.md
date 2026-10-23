@@ -6,7 +6,7 @@ title: "Execution-time attestation floor + ad-hoc task channel"
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 links:
   - {id: SPEC-039, type: relates-to}
@@ -95,13 +95,13 @@ single-pass create-task validation (missing/conflicting flags reported together)
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-069-1: Closing a plan whose tasks carry evidence but zero attested entries is DENIED at plan-close; the denial names an offending task and contains the string lore verify
+- [⊖] [script] AC-069-1: Closing a plan whose tasks carry evidence but zero attested entries is DENIED at plan-close; the denial names an offending task and contains the string lore verify
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-1"
-- [⚑] [script] AC-069-2: After attested evidence meets the floor the same plan-close transition succeeds
+- [⊖] [script] AC-069-2: After attested evidence meets the floor the same plan-close transition succeeds
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-2"
-- [⚑] [script] AC-069-3: workflow.attestation.min_ratio is honored: ratio 0.4 fails the default 0.5 floor and passes when the knob is set to 0.3
+- [⊖] [script] AC-069-3: workflow.attestation.min_ratio is honored: ratio 0.4 fails the default 0.5 floor and passes when the knob is set to 0.3
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-3"
-- [⚑] [script] AC-069-4: A plan with extra.attestation_exempt true plus reason closes without attested evidence and assess facts surface the exemption
+- [⊖] [script] AC-069-4: A plan with extra.attestation_exempt true plus reason closes without attested evidence and assess facts surface the exemption
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-4"
 - [⚑] [script] AC-069-5: create task --adhoc succeeds with no plan-id or parent, sets extra.adhoc true, parents to the root PRD; combining --adhoc with --plan-id exits 2
   script: test — bunx vitest run packages/lore/tests/unit/service/adhoc-task.test.ts -t "AC-069-5"
@@ -109,19 +109,19 @@ single-pass create-task validation (missing/conflicting flags reported together)
   script: test — bunx vitest run packages/lore/tests/unit/service/adhoc-task.test.ts -t "AC-069-6"
 - [⚑] [script] AC-069-7: lore ready plan output is regression-unchanged for plan tasks and lore ready --adhoc --json lists open ad-hoc tasks
   script: test — bunx vitest run packages/lore/tests/unit/service/adhoc-task.test.ts -t "AC-069-7"
-- [⚑] [script] AC-069-8: lore plan exempt-attestation <plan> --reason <text> --kind <k> authors all three fields by READ-MERGE-WRITE onto extra (attestation_exempt true, attestation_exempt_reason, attestation_exempt_kind), leaving every unrelated extra key byte-identical — never the wholesale extra replacement lore set performs
+- [⊖] [script] AC-069-8: lore plan exempt-attestation <plan> --reason <text> --kind <k> authors all three fields by READ-MERGE-WRITE onto extra (attestation_exempt true, attestation_exempt_reason, attestation_exempt_kind), leaving every unrelated extra key byte-identical — never the wholesale extra replacement lore set performs
   script: test — bun run test:file packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-8'
-- [⚑] [script] AC-069-9: Refusals: a missing or whitespace-only --reason exits 2, and a --kind outside attestationExemptKindSchema's four values (red-tdd|no-oracle|pipeline-unreachable|other) exits 2 naming the permitted set — an exemption with no justification is never authorable
+- [⊖] [script] AC-069-9: Refusals: a missing or whitespace-only --reason exits 2, and a --kind outside attestationExemptKindSchema's four values (red-tdd|no-oracle|pipeline-unreachable|other) exits 2 naming the permitted set — an exemption with no justification is never authorable
   script: test — bun run test:file packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-9'
-- [⚑] [script] AC-069-10: The exemption is AUDITED: the write emits an audit entry carrying actor and reason, resolved by the same --by > LORE_ACTOR > OS-username precedence every other writer uses
+- [⊖] [script] AC-069-10: The exemption is AUDITED: the write emits an audit entry carrying actor and reason, resolved by the same --by > LORE_ACTOR > OS-username precedence every other writer uses
   script: test — bun run test:file packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-10'
-- [⚑] [script] AC-069-11: NO BACK DOOR: lore set --attestation-exempt exits 2 as an unknown flag, matching the dedicated-writer discipline lore outline exempt already establishes for prd_sync_exempt
+- [⊖] [script] AC-069-11: NO BACK DOOR: lore set --attestation-exempt exits 2 as an unknown flag, matching the dedicated-writer discipline lore outline exempt already establishes for prd_sync_exempt
   script: test — bun run test:file packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-11'
-- [⚑] [script] AC-069-12: WRITER-EXISTS CLASS AUDIT: a source scan enumerates every plan-level extra.* field the plan-close checkpoint reads and asserts each has an authoring surface in packages/lore/src/adapters — the class this task's finding is one instance of, mechanized so the next gate-read field without a writer fails a test instead of an incident
+- [⊖] [script] AC-069-12: WRITER-EXISTS CLASS AUDIT: a source scan enumerates every plan-level extra.* field the plan-close checkpoint reads and asserts each has an authoring surface in packages/lore/src/adapters — the class this task's finding is one instance of, mechanized so the next gate-read field without a writer fails a test instead of an incident
   script: test — bun run test:file packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-12'
-- [·] [script] AC-069-13: From a throwaway corpus driven by compiled dist/lore, THE PAIR: a plan denied by the attestation floor closes WITH the exemption and the close output NAMES the exemption and its reason; the identical plan WITHOUT it is still denied — so the exemption is provably what changed the verdict, and an exemption that allowed a close is never invisible
+- [⊖] [script] AC-069-13: From a throwaway corpus driven by compiled dist/lore, THE PAIR: a plan denied by the attestation floor closes WITH the exemption and the close output NAMES the exemption and its reason; the identical plan WITHOUT it is still denied — so the exemption is provably what changed the verdict, and an exemption that allowed a close is never invisible
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-exempt-attestation-compiled.bun.test.ts
-- [⚑] [script] AC-069-14: NO ORPHAN CASES: the whole plan-exempt-attestation suite passes as a single unfiltered file run, so the three formatAttestationExemptionNotice renderer cases that no tagged AC selects (HAPPY/NEGATIVE/BOUNDARY on the notice's activeness rule) are still exercised by a declared AC — 8+11+5+4+12 tagged = 40 of 43
+- [⊖] [script] AC-069-14: NO ORPHAN CASES: the whole plan-exempt-attestation suite passes as a single unfiltered file run, so the three formatAttestationExemptionNotice renderer cases that no tagged AC selects (HAPPY/NEGATIVE/BOUNDARY on the notice's activeness rule) are still exercised by a declared AC — 8+11+5+4+12 tagged = 40 of 43
   script: test — bun run test:file packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts
 - [·] [script] AC-069-15: verifyAdhocTask records ac_ref on its runner-attested evidence: the entry written for each executed script criterion carries ac_ref equal to that criterion id, cross-validated through the ad-hoc governing-AC port (resolveAdhocGoverningAcIds) rather than the plan-only parent_id walk
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-runner-service.test.ts -t "AC-069-15"

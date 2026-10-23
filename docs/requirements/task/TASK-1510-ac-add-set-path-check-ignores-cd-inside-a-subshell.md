@@ -3,10 +3,10 @@ id: TASK-1510
 type: task
 role: plan
 title: "ac add/set path check ignores cd inside a subshell group"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-197
 plan: PLAN-197

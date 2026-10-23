@@ -11,6 +11,9 @@ updated: 2026-10-10
 tags: []
 parent: PLAN-165
 plan: PLAN-165
+links:
+  - {id: TASK-1085, type: resolves}
+  - {id: TASK-1084, type: resolves}
 ---
 Estimate: S
 Source: spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-2

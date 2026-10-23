@@ -6,7 +6,7 @@ title: "Session trail: a session-local record of what each run changed, judged a
 status: approved
 priority: high
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-19
 tags: [session, turn-end, handoff, run-identity, hooks]
 ---
 ## Overview/Goal
@@ -199,7 +199,7 @@ Performance is recorded at landing, not asserted as an AC (timing on a shared ma
 - [⚑] [script] AC-ST-8: In a throwaway corpus: lore run tasks <helper-run> --json lists a task the run claimed then released, and a task it claimed that is now archived, each with its anchors; an unregistered run id exits 4 naming it; trail-review reports a helper file outside its task anchors (names helper, task, file); none when directory anchor src/ covers src/a/b.ts; a finding when the helper wrote by absolute path into the main checkout; a finding for changed files with no claimed task; none for a helper that changed nothing; none when the project has no .lore directory.
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/cli/session-trail-review-helper-scope.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 9 ] && echo 'AC-ST-8 PASS: run tasks finds released claims; helper files outside anchors, outside its working copy, or without a claim are findings'
   other_command=1
-- [⚑] [script] AC-ST-9: A helper whose SubagentStop lands after turn 4 review and before turn 5 opens is judged by turn 5 review and not by turn 6 review; two helpers ending in turn 2 are both judged by turn 2 review; a review with no finding still records judged_end_count equal to the end_count it read at its start; a review whose trail-review exits non-zero leaves judged_end_count unchanged, names the helper in its not-measured line, and the next review judges it; a helper judged at end 1 that ends again is judged once for end 2 and end 1 is not re-reported; a SubagentStop that lands while a review is running (end_count raised after the review read it) is not marked judged by that review and is judged by the next one.
+- [⊖] [script] AC-ST-9: A helper whose SubagentStop lands after turn 4 review and before turn 5 opens is judged by turn 5 review and not by turn 6 review; two helpers ending in turn 2 are both judged by turn 2 review; a review with no finding still records judged_end_count equal to the end_count it read at its start; a review whose trail-review exits non-zero leaves judged_end_count unchanged, names the helper in its not-measured line, and the next review judges it; a helper judged at end 1 that ends again is judged once for end 2 and end 1 is not re-reported; a SubagentStop that lands while a review is running (end_count raised after the review read it) is not marked judged by that review and is judged by the next one.
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/hooks/stop-turn-review-cursor.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 6 ] && echo 'AC-ST-9 PASS: each helper end is judged by exactly one completed review, including ends between turns, repeated ends and failed reviews'
   other_command=1
 - [⚑] [script] AC-ST-10: With a PATH stub that counts lore invocations: a turn with no unjudged helper end and no co_change key in .lore/config.yaml spawns trail-review zero times; adding the co_change key makes it spawn exactly once; an unjudged helper end makes it spawn exactly once.
@@ -223,7 +223,6 @@ Performance is recorded at landing, not asserted as an AC (timing on a shared ma
 - assets/hooks/user-prompt-turn-start.mjs
 - packages/lore/src/adapters/cli/commands/session.ts
 - packages/lore/src/adapters/cli/session-trail-render.ts
-- packages/lore/src/service/helper-scope-review.ts
 - packages/lore/src/service/co-change-review.ts
 - packages/lore/src/service/run-service.ts
 - packages/core/src/session.ts

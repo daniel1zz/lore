@@ -3,10 +3,10 @@ id: KN-593
 type: knowledge
 role: knowledge
 title: "Assessment: Fresh-install probe fixes (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-163
 links:

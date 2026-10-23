@@ -3,10 +3,10 @@ id: KN-605
 type: knowledge
 role: knowledge
 title: "AC-BLS2-14 re-measurement after the baseline review: 93.6% of 110 pairs (seed 20261015), PASS"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 AC-BLS2-14 re-measurement after the 2026-10-10 baseline review (122 nodes approved, ~40 rule statements rewritten). Same protocol as knowledge-ac-bls2-14-re-measurement-after-105-fidelity-93-6-of: two independent judges reading the named test files, fixed two-part rule, rule text as data, judges barred from earlier verdicts. Seed 20261015, 110 of 386 live citations (311 citing criteria), all 12 branches.

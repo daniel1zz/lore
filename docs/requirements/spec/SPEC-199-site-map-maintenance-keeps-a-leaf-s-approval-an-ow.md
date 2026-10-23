@@ -6,7 +6,7 @@ title: "Site-map maintenance keeps a leaf's approval; an owned-by exclusion is a
 status: approved
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 tags: []
 ---
 # Spec: Site-map maintenance keeps a leaf's approval; an owned-by exclusion is a checked reference
@@ -41,9 +41,9 @@ Declared as structured criteria with `lore ac add` (AC-SMM-1..3), each citing th
 
 - [⊘] [script] AC-SMM-1: On an approved baseline leaf, a baseline map call that only sets or removes site mappings leaves the status approved, adds exactly 1 version and 1 audit row with operation baseline-map; the same call shape that also adds a declared command (and one that only removes a command) demotes the leaf to draft
   script: test — bunx vitest run packages/lore/tests/unit/service/site-map-approval.test.ts && echo 'AC-SMM-1 PASS: site-only map keeps approval, command change demotes'
-- [⚑] [script] AC-SMM-2: baseline map refuses a non-business:owned-by exclusion with VALIDATION_ERROR (exit 4) and writes no version when the named node is unknown, is a branch rather than a leaf, is the leaf being mapped, no BR id is named, a named id is retired, a named id is a live rule of a different leaf, the spaced em-dash separator is missing, or the reason after it is blank; an owned-by naming a live rule of the named leaf (by id and by slug) with a reason is accepted, and a non-business reason not starting with owned-by is unaffected
+- [⊖] [script] AC-SMM-2: baseline map refuses a non-business:owned-by exclusion with VALIDATION_ERROR (exit 4) and writes no version when the named node is unknown, is a branch rather than a leaf, is the leaf being mapped, no BR id is named, a named id is retired, a named id is a live rule of a different leaf, the spaced em-dash separator is missing, or the reason after it is blank; an owned-by naming a live rule of the named leaf (by id and by slug) with a reason is accepted, and a non-business reason not starting with owned-by is unaffected
   script: test — bunx vitest run packages/lore/tests/unit/service/site-map-owned-by-write.test.ts && echo 'AC-SMM-2 PASS: owned-by exclusions are checked at map time'
-- [⚑] [script] AC-SMM-3: baseline coverage reports a site as a gap when its only mapping is an owned-by exclusion whose named rule has since been retired, moved to another leaf, or whose owner leaf was deleted; the same exclusion is not a gap while the rule is live on the named leaf
+- [⊖] [script] AC-SMM-3: baseline coverage reports a site as a gap when its only mapping is an owned-by exclusion whose named rule has since been retired, moved to another leaf, or whose owner leaf was deleted; the same exclusion is not a gap while the rule is live on the named leaf
   script: test — bunx vitest run packages/lore/tests/unit/service/leaf-coverage-owned-by.test.ts && echo 'AC-SMM-3 PASS: stale owned-by exclusions are coverage gaps'
 
 ## Code anchors

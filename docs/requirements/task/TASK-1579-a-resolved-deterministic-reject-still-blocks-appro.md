@@ -3,10 +3,10 @@ id: TASK-1579
 type: task
 role: plan
 title: "A resolved deterministic reject still blocks approve after a re-review approves the same version"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-196
 plan: PLAN-196

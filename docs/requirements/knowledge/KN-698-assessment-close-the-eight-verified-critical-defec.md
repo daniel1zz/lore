@@ -3,10 +3,10 @@ id: KN-698
 type: knowledge
 role: knowledge
 title: "Assessment: Close the eight verified critical defects (2026-10-16)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-189
 links:

@@ -6,7 +6,7 @@ title: "Run-only write identity and run-end claim release"
 status: approved
 priority: medium
 created: 2026-10-11
-updated: 2026-10-17
+updated: 2026-10-20
 tags: [run-identity, claims]
 ---
 ## Overview/Goal
@@ -112,7 +112,6 @@ Structured criteria live in `extra.acceptance_criteria` (`lore ac list <this spe
 
 ## Code anchors
 
-- packages/core/src/actor-resolution-node.ts#resolveActorWithSource
 - packages/core/src/run-identity.ts#hasClaimConflict
 - packages/core/src/task-workflow.ts#isClaimStaleForRun
 - packages/lore/src/store/migrations/migration-017.ts
@@ -125,7 +124,6 @@ Structured criteria live in `extra.acceptance_criteria` (`lore ac list <this spe
 - assets/hooks/run-end.mjs
 - packages/core/src/distribution-hooks.ts#HOOK_REGISTRATIONS
 - packages/lore/tests/unit/cli/write-commands-take-no-by.test.ts
-- packages/lore/tests/unit/core/actor-resolution-ignores-lore-actor.test.ts
 - packages/lore/tests/integration/run-owned-done-and-overlap.bun.test.ts
 - packages/lore/tests/integration/run-end-releases-claims.bun.test.ts
 - packages/lore/tests/integration/run-end-staleness.bun.test.ts

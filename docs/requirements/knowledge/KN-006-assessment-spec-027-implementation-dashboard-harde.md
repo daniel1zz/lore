@@ -3,10 +3,10 @@ id: KN-006
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-027 Implementation — Dashboard Hardening (2026-07-03)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-03
-updated: 2026-07-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-006
 links:

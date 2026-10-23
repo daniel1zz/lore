@@ -3,10 +3,10 @@ id: KN-334
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — issue closure loop (resolves edge, computed resolution, agent-reachable surfaces) (2026-07-29)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-10-23
 tags: []
 parent: PLAN-103
 links:

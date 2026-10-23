@@ -3,10 +3,10 @@ id: KN-656
 type: knowledge
 role: knowledge
 title: "Pilot v2 frozen probe set (10 questions) for the specification-branch blind reader"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-173
 ---

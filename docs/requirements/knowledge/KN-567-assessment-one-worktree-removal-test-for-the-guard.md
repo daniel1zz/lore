@@ -3,10 +3,10 @@ id: KN-567
 type: knowledge
 role: knowledge
 title: "Assessment: One worktree-removal test for the guard, lore done and a sweep (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-152
 links:

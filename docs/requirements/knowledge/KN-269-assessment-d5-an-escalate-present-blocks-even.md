@@ -3,10 +3,10 @@ id: KN-269
 type: knowledge
 role: knowledge
 title: "Assessment: D5: an escalate present blocks even alongside a reject (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-091
 links:

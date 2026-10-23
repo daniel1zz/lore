@@ -6,7 +6,7 @@ title: "Close the eight verified critical defects: no judge, listing, mirror, wo
 status: approved
 priority: medium
 created: 2026-10-16
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 links:
   - {id: SPEC-040, type: relates-to}
@@ -113,7 +113,6 @@ Extends (not edits) the governing specs in the Scope table; each fix task links 
 
 - packages/lore/src/ai/review-template.ts
 - packages/lore/src/service/ai-provider-service.ts
-- packages/lore/src/ai/assess-template.ts
 - packages/core/src/assessment.ts
 - packages/core/src/review-judgment.ts
 - scripts/export-spec-mirror.ts

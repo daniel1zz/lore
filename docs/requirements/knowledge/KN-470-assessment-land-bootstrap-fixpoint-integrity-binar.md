@@ -3,10 +3,10 @@ id: KN-470
 type: knowledge
 role: knowledge
 title: "Assessment: Land bootstrap fixpoint integrity: binary provenance, the anchor-coverage ratchet, and mirror content drift (2026-08-17)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-10-23
 tags: []
 parent: PLAN-121
 links:

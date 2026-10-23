@@ -3,10 +3,10 @@ id: KN-662
 type: knowledge
 role: knowledge
 title: "Pilot: specification branch build log (draft rule to BR id mapping)"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: [baseline, pilot]
 parent: PLAN-172
 links:

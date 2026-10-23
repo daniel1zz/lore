@@ -3,10 +3,10 @@ id: KN-174
 type: knowledge
 role: knowledge
 title: "Assessment: Land oracle executability: the discovery-refusal primitive, both call sites, and the audited escape for not-yet-written tests (2026-08-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-079
 links:

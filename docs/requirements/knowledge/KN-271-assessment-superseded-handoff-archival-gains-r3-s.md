@@ -3,10 +3,10 @@ id: KN-271
 type: knowledge
 role: knowledge
 title: "Assessment: Superseded-handoff archival gains R3's recency guard (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-093
 links:

@@ -3,10 +3,10 @@ id: KN-621
 type: knowledge
 role: knowledge
 title: "Assessment: Fix #105: the citation gate honours an active exemption on an uncited criterion (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-175
 links:

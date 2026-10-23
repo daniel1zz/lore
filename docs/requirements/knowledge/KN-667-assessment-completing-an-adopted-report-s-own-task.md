@@ -3,10 +3,10 @@ id: KN-667
 type: knowledge
 role: knowledge
 title: "Assessment: Completing an adopted report's own task closes its GitHub issue (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-179
 links:
