@@ -123,6 +123,8 @@ export interface GithubListedIssue {
   readonly state: string;
   readonly body: string;
   readonly labels?: readonly string[];
+  /** ISO 8601 creation time from GitHub's `created_at`; absent only for a record `listIssues` never produced. */
+  readonly createdAt?: string;
 }
 
 /**
@@ -182,6 +184,7 @@ const GithubIssueListEntrySchema = z
     state: z.string(),
     body: z.string().nullable().optional(),
     labels: z.array(GithubIssueListLabelSchema),
+    created_at: z.string().optional(),
   })
   .passthrough();
 
@@ -421,6 +424,7 @@ export class GitHubIntakePort {
         state: entry.state,
         body: entry.body ?? "",
         labels: entry.labels.map((label) => label.name),
+        ...(entry.created_at !== undefined ? { createdAt: entry.created_at } : {}),
       })),
     );
   }

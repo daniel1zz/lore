@@ -41,6 +41,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:run-register');
 
 /** Resolved from `PATH`: the hook runs in the user's environment, and this is what lets tests substitute a stub. */
 const VERB_BINARY = 'lore';
@@ -71,7 +73,7 @@ function reportAndExit(eventName, reason) {
 
 let payload;
 try {
-  payload = JSON.parse(readFileSync(0, 'utf8'));
+  payload = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
 } catch (cause) {
   reportAndExit(DEFAULT_EVENT_NAME, `malformed hook payload on stdin (${String(cause)})`);
 }

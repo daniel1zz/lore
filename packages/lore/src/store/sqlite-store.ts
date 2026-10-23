@@ -88,6 +88,8 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  CheckOutcomeInput,
+  CheckOutcomeStat,
   ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
@@ -160,6 +162,7 @@ import { applyMigration029 } from "./migrations/migration-029.js";
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
+import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -886,6 +889,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-031 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 33 && 33 <= ceiling) {
+      // reason: migration-033 creates check_outcomes (one row per gate/hook run, BR-1373) in ONE BEGIN/COMMIT;
+      // a failure rolls back and leaves schema 32.
+      try {
+        this.db.exec(MIGRATION_033_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-032 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3394,6 +3412,57 @@ export class SQLiteStore implements StoreInterface {
         .query("SELECT day, count FROM trace_read_counts WHERE day >= ? ORDER BY day ASC")
         .all(sinceDay) as { day: string; count: number | bigint }[];
       return ok(rows.map((row) => ({ day: row.day, count: Number(row.count) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
+    if (rows.length === 0) return ok(undefined);
+    try {
+      // reason: one transaction so a batch (a hook-outcome ingest) lands whole or not at all.
+      this.db.transaction(() => {
+        for (const row of rows) {
+          this.db.run("INSERT INTO check_outcomes (check_id, outcome, ts) VALUES (?, ?, ?)", [row.check_id, row.outcome, row.ts]);
+        }
+      })();
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {
+    try {
+      const rows = this.db
+        .query(
+          `SELECT check_id, COUNT(*) AS runs,
+                  SUM(CASE WHEN outcome = 'deny' THEN 1 ELSE 0 END) AS denials,
+                  SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+                  MIN(ts) AS first_run, MAX(ts) AS last_run,
+                  MAX(CASE WHEN outcome = 'deny' THEN ts END) AS last_denial
+             FROM check_outcomes GROUP BY check_id ORDER BY check_id ASC`,
+        )
+        .all() as {
+        check_id: string;
+        runs: number | bigint;
+        denials: number | bigint;
+        errors: number | bigint;
+        first_run: string;
+        last_run: string;
+        last_denial: string | null;
+      }[];
+      return ok(
+        rows.map((r) => ({
+          check_id: r.check_id,
+          runs: Number(r.runs),
+          denials: Number(r.denials),
+          errors: Number(r.errors),
+          first_run: r.first_run,
+          last_run: r.last_run,
+          last_denial: r.last_denial,
+        })),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

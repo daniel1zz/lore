@@ -7,11 +7,11 @@
  * anything but GET. `lib/review-queue` is mocked (it has its own tests).
  *
  * Test plan (six-dimension coverage):
- *   HAPPY — three sections with exact counts; detail shows summary, before/after, on_accept, on_reject,
+ *   HAPPY — two sections with exact counts; detail shows summary, before/after, on_accept, on_reject,
  *     every factor, recommendation, the two `lore decide` commands and the terminal sentence.
  *   NEGATIVE — a button click and every link-free control issues no non-GET request.
- *   BOUNDARY — empty section stays visible with count 0 and the exact empty text; audit item (null
- *     recommendation) shows no recommendation; detail without before/after shows neither.
+ *   BOUNDARY — empty section stays visible with count 0 and the exact empty text; a decision with no
+ *     detail shows the label and no before/after.
  *   ERROR — one failing list shows an error line without a fake 0; 404 and 422 detail messages differ.
  *   STATE — Refresh refetches (GET only).
  *   REGRESSION — project-scoped mirror routes render the same components and scope their requests.
@@ -48,7 +48,6 @@ const NO_DETAIL = "no detail recorded (decided before detail existed)";
 
 function decision(over: Partial<DecisionReadView> = {}): DecisionReadView {
   return {
-    kind: "decision",
     id: 7,
     class: "governance-loosen",
     subject_id: "rule:max-retries",
@@ -68,24 +67,20 @@ function decision(over: Partial<DecisionReadView> = {}): DecisionReadView {
     },
     recommendation: { answer: "reject", reason: "Loosening a limit is hard to undo." },
     answer_commands: { accept: "lore decide 7 --accept", reject: "lore decide 7 --reject" },
-    audit_sequence: null,
     ...over,
   };
 }
 
-const AUDIT: DecisionReadView = decision({
-  kind: "audit",
+const BARE: DecisionReadView = decision({
   id: 12,
   summary: NO_DETAIL,
   detail: null,
   recommendation: null,
-  audit_sequence: 2,
   answer_commands: { accept: "lore decide 12 --accept", reject: "lore decide 12 --reject" },
 });
 
 interface Routes {
   decisions?: DecisionReadView[] | "fail";
-  audit?: DecisionReadView[] | "fail";
   one?: DecisionReadView | 404 | 422;
 }
 
@@ -100,11 +95,6 @@ function stubFetch(routes: Routes): void {
       return routes.decisions === "fail"
         ? json(500, { ok: false, error: { code: "X", message: "boom" } })
         : json(200, { ok: true, data: routes.decisions ?? [] });
-    }
-    if (url.endsWith("/audit-items")) {
-      return routes.audit === "fail"
-        ? json(500, { ok: false, error: { code: "X", message: "boom" } })
-        : json(200, { ok: true, data: routes.audit ?? [] });
     }
     if (/\/decisions\/[^/]+$/.test(url)) {
       if (routes.one === 404) return json(404, { ok: false, error: { code: "NOT_FOUND", message: "no" } });
@@ -141,15 +131,15 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("NeedsYou page", () => {
-  it("HAPPY: three sections, each headed by its exact count, with rows linking to details", async () => {
-    stubFetch({ decisions: [decision()], audit: [AUDIT, decision({ id: 13, kind: "audit", summary: "Spot check of an automatic approval" })] });
+  it("HAPPY: two sections, each headed by its exact count, with rows linking to details; no audit section exists", async () => {
+    stubFetch({ decisions: [decision()] });
     vi.mocked(fetchReviewQueueRows).mockResolvedValue([
       { id: "doc-1", type: "spec", title: "A draft spec", status: "draft", created_by: "me", updated_at: "x", version: 1 },
     ]);
     render(withClient(<NeedsYou />));
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Open decisions (1)" })).toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "Audit items (2)" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Audit items/ })).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Documents awaiting review (1)" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Allow agents to retry/ })).toHaveAttribute(
       "href",
@@ -159,19 +149,19 @@ describe("NeedsYou page", () => {
   });
 
   it("BOUNDARY: an empty section stays visible with count 0 and the exact empty text", async () => {
-    stubFetch({ decisions: [decision()], audit: [] });
+    stubFetch({ decisions: [] });
     render(withClient(<NeedsYou />));
 
-    const audit = await screen.findByRole("region", { name: /Audit items/ });
-    await waitFor(() => expect(within(audit).getByRole("heading", { name: "Audit items (0)" })).toBeInTheDocument());
-    expect(within(audit).getByText("Nothing waiting for you here.")).toBeInTheDocument();
+    const open = await screen.findByRole("region", { name: /Open decisions/ });
+    await waitFor(() => expect(within(open).getByRole("heading", { name: "Open decisions (0)" })).toBeInTheDocument());
+    expect(within(open).getByText("Nothing waiting for you here.")).toBeInTheDocument();
     await waitFor(() =>
       expect(within(section(/Documents awaiting review/)).getByText("Nothing waiting for you here.")).toBeInTheDocument(),
     );
   });
 
   it("ERROR: a failing list shows an error line, never a fake zero", async () => {
-    stubFetch({ decisions: "fail", audit: [] });
+    stubFetch({ decisions: "fail" });
     render(withClient(<NeedsYou />));
 
     const decisions = section(/Open decisions/);
@@ -181,9 +171,9 @@ describe("NeedsYou page", () => {
   });
 
   it("NEGATIVE/STATE: clicking every button (Refresh) refetches with GET only", async () => {
-    stubFetch({ decisions: [decision()], audit: [AUDIT] });
+    stubFetch({ decisions: [decision()] });
     render(withClient(<NeedsYou />));
-    await screen.findByRole("heading", { name: "Audit items (1)" });
+    await screen.findByRole("heading", { name: "Open decisions (1)" });
     const before = fetchSpy.mock.calls.length;
 
     for (const button of screen.getAllByRole("button")) await userEvent.click(button);
@@ -194,7 +184,7 @@ describe("NeedsYou page", () => {
   });
 
   it("REGRESSION: the project-scoped mirror renders the same page and scopes its reads", async () => {
-    stubFetch({ decisions: [decision()], audit: [] });
+    stubFetch({ decisions: [decision()] });
     mockParams.value = { name: "acme" };
     const Page = (ProjectNeedsYouRoute as unknown as RouteWithComponent).component;
     render(withClient(<Page />));
@@ -229,12 +219,12 @@ describe("Decision detail page", () => {
     expect(screen.getByText(/Answering happens in your own terminal/)).toBeInTheDocument();
   });
 
-  it("BOUNDARY: an audit item with no detail shows the label, no recommendation and no before/after", async () => {
-    stubFetch({ one: AUDIT });
+  it("BOUNDARY: a decision with no detail shows the label, no recommendation and no before/after", async () => {
+    stubFetch({ one: BARE });
     render(withClient(<DecisionDetailPage id="12" />));
 
     expect(await screen.findByText(NO_DETAIL)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Audit item #12" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Decision #12" })).toBeInTheDocument();
     expect(screen.queryByText("Recommendation")).not.toBeInTheDocument();
     expect(screen.queryByText("Before")).not.toBeInTheDocument();
     expect(screen.getByText("lore decide 12 --accept")).toBeInTheDocument();
@@ -244,7 +234,7 @@ describe("Decision detail page", () => {
   it("ERROR: 404 and 422 give different plain messages", async () => {
     stubFetch({ one: 404 });
     const first = render(withClient(<DecisionDetailPage id="999" />));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No decision or audit item with that number exists.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("No decision with that number exists.");
     first.unmount();
 
     stubFetch({ one: 422 });

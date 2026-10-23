@@ -12,7 +12,7 @@
  * Side-effect class: IO in `main` (spawns each step with inherited stdio); `runChain`/`renderTable` are pure.
  *
  * Usage: bun scripts/run-chain.ts [shell-command ...]   (no arguments = DEFAULT_STEPS)
- *        bun scripts/run-chain.ts --floor [--list] [package.json]       (install + build + typecheck = `bun run check:floor`; --list prints the step names)
+ *        bun scripts/run-chain.ts --floor [--list] [package.json]       (install + build + typecheck + the two :changed checks = `bun run check:floor`; --list prints the step names)
  *        bun scripts/run-chain.ts --plan-close [--list] [package.json]  (every other ^check: script = `bun run check:plan-close`)
  *        bun scripts/run-chain.ts --static [package.json]   (build + typecheck + every ^check: script = `bun run check:static`)
  */
@@ -165,14 +165,18 @@ export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnS
 }
 
 /**
- * The ONE declaration of the lean integrate floor (BR-1368): install, build, typecheck. Every other `check:*` script runs
+ * The ONE declaration of the lean integrate floor (BR-1368): install, build, typecheck, plus the two checks that caught real
+ * defects, scoped to the branch's own diff (`:changed`). Every other `check:*` script runs
  * at plan close (PLAN_CLOSE_STEPS). `--floor`, `--plan-close` and `--list` all read these two lists.
  */
-export const FLOOR_STEPS = ["install", "build", "typecheck"] as const;
+export const FLOOR_STEPS = ["install", "build", "typecheck", "baseline-coverage:changed", "ac-oracle-ownership:changed"] as const;
 const FLOOR_COMMANDS: Readonly<Record<(typeof FLOOR_STEPS)[number], string>> = {
   install: "bun install --frozen-lockfile",
   build: "bun run build",
   typecheck: "bun run typecheck",
+  // reason: the two checks that caught real defects return to landing scoped to the branch's own diff against main (--changed)
+  "baseline-coverage:changed": "bun run check:baseline-coverage:changed",
+  "ac-oracle-ownership:changed": "bun run check:ac-oracle-ownership:changed",
 };
 
 /** Every `check:*` script that is not an aggregate, in package.json order; a new check must be added here (the test fails otherwise). */
@@ -181,7 +185,6 @@ export const PLAN_CLOSE_STEPS: readonly string[] = [
   "check:hook-top-level-symbols",
   "check:ordinal-sites",
   "check:baseline-coverage",
-  "check:test-budgets",
   "check:no-timer-retry",
   "check:ac-ref-integrity",
   "check:memory-files",
@@ -202,7 +205,7 @@ export const PLAN_CLOSE_STEPS: readonly string[] = [
 
 /** The `check:*` scripts in `scripts` that are in neither the floor nor PLAN_CLOSE_STEPS (aggregates excluded). */
 export function unlistedChecks(scripts: Readonly<Record<string, string>>): string[] {
-  return Object.keys(scripts).filter((n) => /^check:/.test(n) && !AGGREGATE_SCRIPTS.has(n) && !PLAN_CLOSE_STEPS.includes(n) && !(FLOOR_STEPS as readonly string[]).includes(n));
+  return Object.keys(scripts).filter((n) => /^check:/.test(n) && !AGGREGATE_SCRIPTS.has(n) && !PLAN_CLOSE_STEPS.includes(n) && !(FLOOR_STEPS as readonly string[]).includes(n.replace(/^check:/, "")));
 }
 
 /**
@@ -212,6 +215,9 @@ export function unlistedChecks(scripts: Readonly<Record<string, string>>): strin
 export function deriveFloorSteps(scripts: Readonly<Record<string, string>>): string[] {
   for (const base of ["build", "typecheck"]) {
     if (!(base in scripts)) throw new Error(`check:floor: package.json has no "${base}" script`);
+  }
+  for (const name of FLOOR_STEPS.filter((n) => n.endsWith(":changed"))) {
+    if (!(`check:${name}` in scripts)) throw new Error(`check:floor: package.json has no "check:${name}" script`);
   }
   return FLOOR_STEPS.map((name) => FLOOR_COMMANDS[name]);
 }

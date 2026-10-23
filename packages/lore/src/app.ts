@@ -19,6 +19,7 @@
 import { warnSinkOf, type WarnSink } from "./service/warn-sink.js";
 import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
+import { homedir } from "node:os";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
 import { TursoStore, probeTmpdirUsability, type TursoConfig } from "./store/turso-store.js";
@@ -110,6 +111,7 @@ import { GateEnforcer } from "./service/gate-enforcer.js";
 import { RecordLockService } from "./service/record-lock-service.js";
 import { TraceRecorder } from "./service/trace-recorder.js";
 import { TraceStatsService } from "./service/trace-stats-service.js";
+import { CheckStatsService, hookOutcomesFilePath } from "./service/check-stats-service.js";
 import { pruneTraceEventsOpportunistically } from "./service/trace-retention.js";
 import { VerificationProjectionService } from "./service/verification-projection-service.js";
 import { SessionService } from "./service/session-service.js";
@@ -276,7 +278,7 @@ export interface App {
    */
   judgmentService: JudgmentService;
   /**
-   * Read-only decision-log view for the dashboard's GET /api/decisions, /api/decisions/:id, /api/audit-items
+   * Read-only decision-log view for the dashboard's GET /api/decisions, /api/decisions/:id
    * (HR-T3). Only its pure `read*` methods may be called from HTTP: `listPending` appends stale-close markers.
    * Optional so test App literals stay valid; the routes answer 503 when absent.
    */
@@ -593,6 +595,11 @@ export interface App {
    * Source: SPEC-102 §Acceptance Criteria AC-TRACE-4.
    */
   traceStatsService?: TraceStatsService;
+  /**
+   * BR-1373 — per-check runs/denials, removal candidates and per-plan escaped defects (`lore checks stats`).
+   * Optional for the same "hand-built App test stubs stay valid" reason as `traceStatsService`; always wired in production.
+   */
+  checkStatsService?: CheckStatsService;
   /**
    * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
    * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
@@ -1160,6 +1167,12 @@ function buildAppFromSqlite(
     // shape as AuditService/DriftCheckService — always constructed regardless
     // of trace.enabled (a disabled corpus just reports all-zero counts).
     traceStatsService: new TraceStatsService(store),
+    checkStatsService: new CheckStatsService({
+      store,
+      now: () => new Date().toISOString(),
+      hookOutcomesPath: hookOutcomesFilePath(ambient.env, homedir()),
+      projectRoot: repoRoot,
+    }),
     // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
     // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
     // hook-layer deny trace directly (see this field's App JSDoc).
@@ -1567,6 +1580,12 @@ function buildAppFromTurso(
     // just as valid over the replica's local view, and this keeps ONE
     // TraceStatsService construction shape across both branches.
     traceStatsService: new TraceStatsService(store),
+    checkStatsService: new CheckStatsService({
+      store,
+      now: () => new Date().toISOString(),
+      hookOutcomesPath: hookOutcomesFilePath(ambient.env, homedir()),
+      projectRoot: repoRoot,
+    }),
     // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
     // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
     // hook-layer deny trace directly (see this field's App JSDoc).
@@ -1912,6 +1931,7 @@ function createAppUnscoped(
       () => resolveWriteActorFor(sqliteStore),
       ambient.env,
       warnSinkOf(ambient.io.stderr),
+      (row) => sqliteStore.appendCheckOutcomes([row]),
     );
     const sqliteApp = buildAppFromSqlite(
       sqliteStore,
@@ -2021,7 +2041,7 @@ function createAppUnscoped(
     // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
     // 3rd arg wires SPEC-102's OPTIONAL TraceRecorder — see the SQLite branch's
     // identical comment.
-    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store), ambient.env, warnSinkOf(ambient.io.stderr));
+    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store), ambient.env, warnSinkOf(ambient.io.stderr), (row) => store.appendCheckOutcomes([row]));
     const tursoApp = buildAppFromTurso(
         store,
         dbPath,

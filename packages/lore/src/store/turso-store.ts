@@ -85,6 +85,7 @@ import {
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
+import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -133,6 +134,8 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  CheckOutcomeInput,
+  CheckOutcomeStat,
   ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
@@ -1002,6 +1005,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 32) {
         // reason: migration-032 rebuilds decision_log with the verdict CHECK widened to 'milestone' (BR-1370, AC-LG-8).
         await this.client.executeMultiple(MIGRATION_032_SQL);
+      }
+
+      if (currentVersion < 33) {
+        // reason: migration-033 creates check_outcomes (one row per gate/hook run, BR-1373).
+        await this.client.executeMultiple(MIGRATION_033_SQL);
       }
     })();
 
@@ -3752,6 +3760,48 @@ export class TursoStore implements StoreInterface {
         args: [sinceDay],
       });
       return ok(rs.rows.map((row) => ({ day: rowStr(row, "day"), count: Number(row["count"]) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
+    if (rows.length === 0) return ok(undefined);
+    try {
+      await this.ensureReady();
+      // reason: one batch (implicit transaction) so an ingest lands whole or not at all.
+      await this.client.batch(
+        rows.map((row) => ({ sql: "INSERT INTO check_outcomes (check_id, outcome, ts) VALUES (?, ?, ?)", args: [row.check_id, row.outcome, row.ts] })),
+        "write",
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        `SELECT check_id, COUNT(*) AS runs,
+                SUM(CASE WHEN outcome = 'deny' THEN 1 ELSE 0 END) AS denials,
+                SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+                MIN(ts) AS first_run, MAX(ts) AS last_run,
+                MAX(CASE WHEN outcome = 'deny' THEN ts END) AS last_denial
+           FROM check_outcomes GROUP BY check_id ORDER BY check_id ASC`,
+      );
+      return ok(
+        rs.rows.map((row) => ({
+          check_id: rowStr(row, "check_id"),
+          runs: Number(row["runs"]),
+          denials: Number(row["denials"]),
+          errors: Number(row["errors"]),
+          first_run: rowStr(row, "first_run"),
+          last_run: rowStr(row, "last_run"),
+          last_denial: row["last_denial"] === null || row["last_denial"] === undefined ? null : rowStr(row, "last_denial"),
+        })),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

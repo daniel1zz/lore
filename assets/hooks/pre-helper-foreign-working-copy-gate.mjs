@@ -49,6 +49,8 @@ import { execFileSync } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve, sep, basename } from 'node:path';
 
 import { getStateBase, resolveSessionId } from './lib/turn-state.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-helper-foreign-working-copy-gate');
 
 /** Tools whose target path this hook checks, with the payload field that carries it. */
 const PATH_FIELD_BY_TOOL = {
@@ -63,7 +65,7 @@ const GIT_TIMEOUT_MS = 3000;
 
 function readPayload() {
   try {
-    const parsed = JSON.parse(readFileSync(0, 'utf8'));
+    const parsed = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;

@@ -72,7 +72,7 @@
  *   - `main(dbPathOverride?, repoRootOverride?)` — IO: resolves corpus + ledger,
  *     prints the report, RETURNS the exit code. Never calls `process.exit` itself
  *     (the `import.meta.main` block below is the only place that does), mirroring
- *     `check-ac-ref-integrity.ts::main` / `check-test-budgets.ts::main`.
+ *     `check-ac-ref-integrity.ts::main`.
  *
  * ## Exit codes
  *

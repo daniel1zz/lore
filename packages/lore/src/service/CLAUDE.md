@@ -72,6 +72,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `SetupService` | planInstall/install/uninstall — global-machine installer over a resolved `targetDir`, manifest-authoritative |
 | `ProjectSetupService` | Thin wrapper over `scaffoldProject` — per-repo `lore setup --project` scaffold |
 | `GateEnforcer` | `enforce(checkpoint, ctx)` — service-layer runner for the seven `lore gate` checkpoints |
+| `CheckStatsService` | `lore checks stats`: per-check runs/denials/last denial from `check_outcomes`, removal candidates (deny-capable checks only, >=30 days AND >=50 runs AND 0 denials), `quality(listIssues)` escaped defects per closed plan, `ingestHookOutcomes` (hooks append to a local JSONL carrying their cwd; ingest claims it by rename, takes only lines whose cwd is inside this corpus's project root and leaves other projects' lines in the file). `GateEnforcer` appends `gate:<checkpoint>` pass/deny rows through its optional `recordCheckOutcome` port. The 1-in-10 human sampling audit no longer exists |
 | `RequirementService` | add/list/removeRequirement on `prd.extra.requirements`; mirrors `AcService` one tier up |
 | `Rule*` / `ImpactService` / `AcExemptionService` | baseline rules, rule state, read/impact, exemptions; every AC write goes through `ac-write-chokepoint`. Contracts: `SPEC-156`, `SPEC-157` (`lore get` resolves both) |
 | `UatService` | `record` — sole UAT-verdict write orchestrator; refuses a non-plan target BEFORE doc creation (no orphan, no `--force`) |

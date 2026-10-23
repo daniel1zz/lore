@@ -100,6 +100,8 @@ import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { readHookPayload, resolveSessionId } from './lib/turn-state.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:session-start-resume');
 
 // No longer read for a roster (removed 2026-07-17 — harness lists agents
 // natively); retained because Phase D derives <claude-dir> as its dirname,

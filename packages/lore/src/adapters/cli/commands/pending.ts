@@ -36,7 +36,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { parseDocTypeFilter, parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
-import { collectAuditItems, collectPendingDecisions, renderAuditItems, renderPendingDecisions } from "../pending-decisions-render.js";
+import { collectPendingDecisions, renderPendingDecisions } from "../pending-decisions-render.js";
 import { withValidityStatus } from "../../../service/validity-service.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
@@ -122,15 +122,8 @@ export default defineLoreCommand({
         return exitCode(decisionsResult.error);
       }
       const decisions = decisionsResult.value;
-      // AC-AU-10: the sampling floor's audit queue is listed SEPARATELY from the blocking escalations.
-      const auditResult = await collectAuditItems(dbPath);
-      if (!auditResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, auditResult.error) + "\n");
-        return exitCode(auditResult.error);
-      }
-      const audit = auditResult.value;
       const detailBase = resolveDetailBase(inv);
-      const decisionsBlock = renderPendingDecisions(decisions, detailBase) + renderAuditItems(audit, detailBase);
+      const decisionsBlock = renderPendingDecisions(decisions, detailBase);
 
       const filters: Record<string, unknown> = {};
       if (args.author !== undefined) filters["author"] = args.author;
@@ -155,7 +148,7 @@ export default defineLoreCommand({
       // post-filter empty check below).
       if (docs.length === 0) {
         if (args.json) {
-          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions, audit } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions } }, null, 2));
         } else {
           printLine(inv.io.stdout, "No pending documents.");
           if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
@@ -192,7 +185,6 @@ export default defineLoreCommand({
                 docs: withValidity.map((d) => ({ ...d, judgment: judgments.get(d.id) ?? null })),
                 total: withValidity.length,
                 decisions,
-                audit,
               },
             },
             null,

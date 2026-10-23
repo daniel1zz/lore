@@ -70,8 +70,7 @@
  * break `git push` in every consumer repo that installs that hook (the
  * referenced files do not exist there). Instead this module is armed the
  * same way every sibling structural checker in `scripts/` already is
- * (`check-ordinal-write-sites.mjs`, `check-test-budgets.ts`,
- * `check-no-nul-bytes.ts`): the paired `.test.ts`'s REGRESSION suite calls
+ * (`check-ordinal-write-sites.mjs`, `check-no-nul-bytes.ts`): the paired `.test.ts`'s REGRESSION suite calls
  * `main()` with no injected `repoRoot` and asserts exit 0 against the real
  * checkout, and that file is picked up automatically by `bun run test`'s
  * `test:vitest` step (the `scripts/tests` test-file include glob declared in

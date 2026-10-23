@@ -133,6 +133,7 @@ import {
   type PredicateNotApplicable,
 } from "./gate-predicates.js";
 import type { TraceRecorder } from "./trace-recorder.js";
+import type { CheckOutcomeInput } from "../store/store-interface.js";
 
 /**
  * Which escape hatch produced a `gate_skipped` audit entry (SPEC-080 G4 D2) —
@@ -159,6 +160,9 @@ export type GateSkipMechanism = "config_disabled" | "env_bypass";
  * identically-narrow shape one field up.
  */
 export type RecordGateSkip = (entry: AuditEntry) => Promise<Result<void, LoreError>>;
+
+/** Narrow port appending one `check_outcomes` row — bound to `store.appendCheckOutcomes([row])` in `app.ts` (BR-1373). */
+export type RecordCheckOutcome = (row: CheckOutcomeInput) => Promise<Result<void, LoreError>>;
 
 /**
  * Fixed `session_id` sentinel for every `gate_skipped` audit row — a gate skip has
@@ -567,7 +571,32 @@ export class GateEnforcer {
     private readonly env: Readonly<Record<string, string | undefined>> = {},
     /** Where the enforcer's advisories (a failed audit write, a vacuous checkpoint) go; absent (bare tests) -> not printed. */
     private readonly warnSink: WarnSink = discardWarnings,
+    /**
+     * OPTIONAL BR-1373 port: every evaluated (not config-disabled) run appends one `pass|deny` outcome row, so
+     * `lore checks stats` can show a gate never caught anything. Absent (bare tests) -> nothing is recorded.
+     */
+    private readonly recordCheckOutcome?: RecordCheckOutcome,
   ) {}
+
+  /**
+   * Fire-and-forget one outcome row for `checkpoint` (id `gate:<checkpoint>`). Never awaited and never able to
+   * change what `enforce()` returns (D1, observability never changes gate outcomes); a failure is one stderr line.
+   */
+  private recordOutcome(checkpoint: GateCheckpoint, outcome: "pass" | "deny"): void {
+    const port = this.recordCheckOutcome;
+    if (port === undefined) return;
+    const row: CheckOutcomeInput = { check_id: `gate:${checkpoint}`, outcome, ts: new Date().toISOString() };
+    const onFailure = (reason: string): void => this.warnAuditWriteFailure(checkpoint, "check-outcome", reason);
+    try {
+      Promise.resolve(port(row))
+        .then((result) => {
+          if (!result.ok) onFailure(describeLoreError(result.error));
+        })
+        .catch((error: unknown) => onFailure(describeThrown(error)));
+    } catch (error) {
+      onFailure(describeThrown(error));
+    }
+  }
 
   /**
    * The actor of a gate row: the wired port's name (the invocation's known party). ⛔ A gate row's actor is never
@@ -653,9 +682,11 @@ export class GateEnforcer {
       // which is exactly how `plan-close` became the only checkpoint with
       // ANY observability before this task.
       this.recordPass(checkpoint, ctx);
+      this.recordOutcome(checkpoint, "pass");
       return ok(undefined);
     }
 
+    this.recordOutcome(checkpoint, "deny");
     const failures = selectFailures(results);
     const reasons = failures.map((f) => f.reason);
     // reason: SPEC-042 §Design Decisions D5 (review U4) — a failure carrying an
@@ -906,7 +937,7 @@ export class GateEnforcer {
    */
   private warnAuditWriteFailure(
     checkpoint: GateCheckpoint,
-    auditKind: "gate-skip" | "gate-not-applicable" | "gate-pass",
+    auditKind: "gate-skip" | "gate-not-applicable" | "gate-pass" | "check-outcome",
     reason: string,
   ): void {
     this.warnSink(`${auditKind} audit not recorded for checkpoint "${checkpoint}": ${reason}`);

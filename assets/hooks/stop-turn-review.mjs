@@ -49,6 +49,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { spawnSync } from 'node:child_process';
 import { getTurnDir, readHookPayload } from './lib/turn-state.mjs';
 import { diffTrees, recordTurnChanges, snapshotWorkingTree } from './lib/session-trail.mjs';
+import { trackOutcome, markDeny } from './lib/check-outcome.mjs';
+trackOutcome('hook:stop-turn-review');
 
 /** Setting path inside `.lore/config.yaml`; values: off (default) | block. */
 const SETTING_KEYS = ['workflow', 'turn_end', 'main_session_source_edits'];
@@ -363,6 +365,7 @@ if (notMeasuredReasons.length > 0) {
   process.stderr.write(`[stop-turn-review] turn state not measured: ${notMeasuredReasons.join("; ").replace(/\s*\n\s*/g, " ")}\n`);
 }
 if (findings.length > 0) {
+  markDeny();
   process.stdout.write(JSON.stringify({ decision: 'block', reason: renderBlock(findings, notMeasuredReasons) }));
 } else {
   // D13: with no block the user (not the model) is told, through systemMessage with no decision
