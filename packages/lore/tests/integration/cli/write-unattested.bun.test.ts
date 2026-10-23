@@ -155,14 +155,14 @@ function newTask(dir: string, title: string): string {
   return JSON.parse(mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" }).stdout).data.slug as string;
 }
 
-// ─── Unknown run id: the write is refused and writes nothing (AC-HID-1 superseded AC-RID-8's "stored unattested") ───
+// ─── Unknown run id: the write is refused and writes nothing (superseded "stored unattested", BR-1351) ───
 
 /** Rows and versions written since `since`, whoever wrote them: a refused write must leave both empty. */
 async function writtenSince(dir: string, since: string): Promise<{ audit: AuditEntry[]; versions: VersionRecord[] }> {
   return { audit: await auditSince(dir, since), versions: await versionsSince(dir, since) };
 }
 
-describe("AC-RID-8 (superseded by AC-HID-1): --harness-run naming an unregistered run id is refused", () => {
+describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-1): --harness-run naming an unregistered run id is refused", () => {
   let dir = "";
   let task = "";
 
@@ -351,7 +351,7 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
 
 // ─── Regression: an unregistered run decides a claim as UNATTESTED, one answer for the whole operation ───
 
-describe("AC-RID-8 regression (AC-HID-1): a claim by an unregistered --harness-run is refused, then the same session claims on its own run", () => {
+describe("AC-RID-8 regression (spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-1): a claim by an unregistered --harness-run is refused, then the same session claims on its own run", () => {
   let dir = "";
 
   beforeAll(() => {
