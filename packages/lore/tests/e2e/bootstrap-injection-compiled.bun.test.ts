@@ -79,6 +79,7 @@
  * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
+import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -344,10 +345,11 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     planSlug = parseSlug(planResult.stdout);
 
     expect((await runLore(["set", planSlug, "--status", "approved"], dir)).exitCode).toBe(0);
-    expect((await runLore(["set", planSlug, "--status", "archived"], dir)).exitCode).toBe(0);
 
-    // Created AFTER the plan archived — a genuine R4 done_plan_straggler
-    // candidate, never touched by the R1 cascade.
+    // BR-1379: archived is terminal — creating a task under an archived plan exits 4, and
+    // `set --status archived` cascades the plan's tasks. A genuine R4 done_plan_straggler
+    // (open task, archived plan) is therefore built in the only order the write path
+    // allows: the task first, then the plan archived WITHOUT the cascade (legacy-shape helper).
     const taskResult = await runLore(
       [
         "create",
@@ -365,6 +367,7 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
       dir,
     );
     expect(taskResult.exitCode).toBe(0);
+    archivePlanWithoutCascade(dir, planSlug);
     // reason: the created slug is only used implicitly (it's what makes
     // archive_candidates positive) — no per-doc identity assertion needed
     // for this suite, which is scoped to the INJECTION SHAPE, not R4's own
