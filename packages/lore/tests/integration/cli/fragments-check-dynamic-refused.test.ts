@@ -12,7 +12,7 @@
  *   HAPPY:      control - the same project without the fragment -> exit 0
  *   BOUNDARY:   a helper-only inject fragment is NOT refused; a launch fragment is NOT refused
  *
- * @spec_ref AC-IT-1
+ * @spec_ref spec-fragment-injection-timing-one-inject-enum-a-per-turn (Frontmatter, retired keys)
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
