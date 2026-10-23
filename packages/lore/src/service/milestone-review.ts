@@ -6,8 +6,9 @@
  * Public surface: planStateFingerprint, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
  *   MilestoneReviewCurrency, MILESTONE_REVIEW_SUB_TYPE.
  * Invariants:
- *   - Fingerprint = plan id@version, every task id@version (sorted by id), and the main commit that last landed one of
- *     the tasks (the `extra.landing.landing_commit` with the newest `recorded_at`; `none` when no task has a landing).
+ *   - Fingerprint = SHA-256 of plan id@version, every task id@version (sorted by id), the main commit that last landed one of
+ *     the tasks (the `extra.landing.landing_commit` with the newest `recorded_at`; `none` when no task has a landing) and
+ *     the governing spec's live AC ids with content hashes (BR-1379).
  *     Any plan edit, task edit, evidence write, or a newer landing therefore makes the stored review not current.
  *   - A review whose `extra.milestone_review` does not parse is not a review (never read as pass).
  * Side-effect class: pure (no store, no IO, no clock).
@@ -15,9 +16,11 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
+import { createHash } from "node:crypto";
 import {
   failedDimensions,
   milestoneReviewSchema,
+  specAcceptanceCriteriaSchema,
   type DocRecord,
   type LoreError,
   type MilestoneDimension,
@@ -41,23 +44,38 @@ export function latestLandingCommit(tasks: readonly Pick<DocRecord, "extra">[]):
   return newest?.commit ?? "none";
 }
 
+/** The governing spec's live (not superseded) AC ids with content hashes, sorted. */
+function liveAcHashes(spec: Pick<DocRecord, "extra"> | undefined): string[] {
+  if (spec === undefined) return [];
+  const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+  if (!parsed.success) return [];
+  return parsed.data
+    .filter((c) => c.superseded_by === undefined)
+    .map((c) => `${c.id}:${createHash("sha256").update(JSON.stringify({ statement: c.statement, verify: c.verify })).digest("hex")}`)
+    .sort();
+}
+
 /**
- * The plan's current state as one comparable string.
+ * The plan's current state as one comparable value: the SHA-256 (hex) of its four inputs (BR-1379): the plan's id and
+ * version; the sorted task/phase ids with versions; the main commit that last landed one of the tasks; and the sorted
+ * live (not superseded) AC ids of the governing spec with their content hashes. Restoring or retiring an AC therefore
+ * changes it.
  *
  * @param plan - the plan (id, version)
  * @param tasks - every member task (id, version, extra for the landing)
- * @example
- * planStateFingerprint({ id: "P", version: 3 }, [{ id: "T1", version: 2, extra: {} }]); // => "plan:P@3|tasks:T1@2|landed:none"
+ * @param spec - the plan's governing spec; absent = the plan has none (no AC input)
  */
 export function planStateFingerprint(
   plan: Pick<DocRecord, "id" | "version">,
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
+  spec?: Pick<DocRecord, "extra">,
 ): string {
   const taskPart = [...tasks]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((t) => `${t.id}@${String(t.version)}`)
     .join(",");
-  return `plan:${plan.id}@${String(plan.version)}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}`;
+  const canonical = `plan:${plan.id}@${String(plan.version)}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}|acs:${liveAcHashes(spec).join(",")}`;
+  return createHash("sha256").update(canonical).digest("hex");
 }
 
 /** The newest parsable review among `docs` (knowledge docs informs-linked to the plan), by `created_at`. */
@@ -103,13 +121,14 @@ export function assessMilestoneCurrency(
   plan: Pick<DocRecord, "id" | "version">,
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
   reviewDocs: readonly DocRecord[],
+  spec?: Pick<DocRecord, "extra">,
 ): MilestoneReviewCurrency {
   // reason: a plan with no member task landed no work; `lore assess` refuses to review it, so requiring a review would
   // make an empty plan unclosable. The close reports this as not-applicable (audited), never as a pass.
   if (tasks.length === 0) return { state: "no-tasks" };
   const latest = selectLatestMilestoneReview(reviewDocs);
   if (latest === undefined) return { state: "absent" };
-  const current = planStateFingerprint(plan, tasks);
+  const current = planStateFingerprint(plan, tasks, spec);
   if (latest.review.fingerprint !== current) {
     return { state: "stale", reviewed: latest.review.fingerprint, current, reviewSlug: latest.doc.slug };
   }

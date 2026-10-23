@@ -82,6 +82,18 @@ export const retiredAcRefSchema = z.object({
 });
 export type RetiredAcRef = z.infer<typeof retiredAcRefSchema>;
 
+/**
+ * The measured causes of a review's failed findings, stored so a later batch can file them by root cause without
+ * re-reviewing (BR-1379: issues are grouped by fingerprint, and a filing error retries only the filing).
+ */
+export const reviewCausesSchema = z.object({
+  /** Failing suite test files attributed to the plan (the regression finding's root cause), sorted. */
+  regression_files: z.array(z.string().min(1)).optional(),
+  /** Cited rule ids whose state is contradicted (the snapshot-accuracy finding's root cause), sorted. */
+  contradicted_rules: z.array(z.string().min(1)).optional(),
+});
+export type ReviewCauses = z.infer<typeof reviewCausesSchema>;
+
 /** The stored review (`extra.milestone_review` of a knowledge doc with sub_type `milestone-review`). */
 export const milestoneReviewSchema = z.object({
   plan_id: z.string().min(1),
@@ -92,6 +104,8 @@ export const milestoneReviewSchema = z.object({
   decisions: z.array(milestoneDecisionRefSchema),
   /** ACs retired during the plan; absent on a review stored before the list existed (never read as "none retired"). */
   retired_acs: z.array(retiredAcRefSchema).optional(),
+  /** Measured root causes of the failed findings (absent on a review stored before BR-1379 grouping). */
+  causes: reviewCausesSchema.optional(),
   prompt_version: z.string().min(1),
   /** How the diff was obtained, e.g. `auto_derived:derived` or `none`. */
   diff_source: z.string().min(1),
