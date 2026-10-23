@@ -860,6 +860,44 @@ describe("milestone review gates close", () => {
     expect(close(b.plan).exitCode).toBe(0);
   });
 
+  it("milestone review gates close: a run claiming tasks in two plans is refused naming both; --plan resolves it and attributes to that plan only", { timeout: 300_000 }, () => {
+    const a = makePlan("Plan two-A");
+    const b = makePlan("Plan two-B");
+    const old = createSpec("Two-plan old");
+    const fresh = createSpec("Two-plan new");
+    for (const [spec, id] of [[old, "AC-TWO-1"], [fresh, "AC-TWO-NEW"]] as const) must(["ac", "add", spec, id, "--statement", `${id} holds`, "--mode", "human"]);
+    const prev = extraEnv;
+    extraEnv = { ...extraEnv, CLAUDE_CODE_SESSION_ID: "sess-two-plans" };
+    try {
+      must(["claim", a.task, "--worktree", tmpDir]);
+      // one working copy carries one unlanded task, so the second claim names another (throwaway) working copy
+      const secondCopy = join(mkdtempSync(join(tmpdir(), "lore-milestone-second-copy-")), "wt");
+      const added = spawnSync("git", ["worktree", "add", "-b", "second-copy", secondCopy], { cwd: tmpDir, encoding: "utf8" });
+      expect(added.status, added.stderr).toBe(0);
+      must(["claim", b.task, "--worktree", secondCopy]);
+      const supersede = (extra: string[]): RunResult =>
+        runLore(["ac", "supersede", old, "AC-TWO-1", "--by", `${fresh}:AC-TWO-NEW`, "--reason", "feature removed", ...extra], tmpDir);
+      const refused = supersede([]);
+      expect(refused.exitCode).toBe(4);
+      expect(refused.stderr).toContain(a.plan);
+      expect(refused.stderr).toContain(b.plan);
+      expect(refused.stderr).toContain("--plan");
+      expect(acSuperseded(old, "AC-TWO-1")).toBe(false); // nothing was written
+      const notClaimed = supersede(["--plan", prdSlug]);
+      expect(notClaimed.exitCode).toBe(4); // a plan the run does not claim a task in
+      expect(acSuperseded(old, "AC-TWO-1")).toBe(false);
+      const resolved = supersede(["--plan", a.plan]);
+      expect(resolved.exitCode, resolved.stderr).toBe(0);
+    } finally {
+      extraEnv = prev;
+    }
+    expect(acSuperseded(old, "AC-TWO-1")).toBe(true);
+    const rowA = assessRows([a.plan]).rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string }[] };
+    expect(rowA.retired_acs?.map((r) => `${r.spec}:${r.ac}`)).toEqual([`${old}:AC-TWO-1`]);
+    const rowB = assessRows([b.plan]).rows[0] as AssessRow & { retired_acs?: unknown };
+    expect(rowB.retired_acs).toBeUndefined();
+  });
+
   it("milestone review gates close: a retirement by a run with no claimed task is attributed to no plan", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Plan unclaimed");
     // the writing run is the plan's own author actor, claiming no task: actor never attributes

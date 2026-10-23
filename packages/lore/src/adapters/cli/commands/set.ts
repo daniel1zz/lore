@@ -199,6 +199,12 @@ export default defineLoreCommand({
         "task, a closed plan). Bypasses the record-edit gate, writes exactly one version and keeps the " +
         "status; the reason is stored in the version and the audit trail. Must be non-empty.",
     },
+    plan: {
+      type: "string",
+      description:
+        "Deprecating a spec: the plan slug that owns the retirement when this run claims tasks in several plans " +
+        "(must be a plan the run claims a task in).",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -663,6 +669,7 @@ export default defineLoreCommand({
       const result = await app.corpusService.set(args.id, patch, {
         by: resolvedActor,
         ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
+        ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
       });
 
       if (!result.ok) {

@@ -635,6 +635,8 @@ export const LoreAcSupersedeSchema = z.object({
   by_spec: z.string(),
   by_ac: z.string(),
   reason: z.string(),
+  /** Plan slug that owns the retirement when the run claims tasks in several plans. */
+  plan: z.string().optional(),
 });
 
 /** Input schema for lore_context_bundle. */
@@ -2183,7 +2185,7 @@ export function registerTools(
     async (args) => {
       const result = await scope
         .service("acService")
-        .supersedeCriterion(args.spec, args.ac_id, { spec: args.by_spec, ac: args.by_ac }, args.reason, { by: args.by });
+        .supersedeCriterion(args.spec, args.ac_id, { spec: args.by_spec, ac: args.by_ac }, args.reason, { by: args.by, ...(args.plan !== undefined ? { plan: args.plan } : {}) });
       if (!result.ok) return errorContent(result.error);
       return textContent({ criteria: result.value });
     },

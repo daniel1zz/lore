@@ -317,6 +317,11 @@ export interface SetOptions extends WriteActorOpts {
    * `details.reason`. A note only — it relaxes no gate. Unlike `correction.reason` it needs no locked record.
    */
   readonly reason?: string;
+  /**
+   * Plan slug (or id) a spec DEPRECATION is made for (`--plan`): names which of several claimed plans owns the
+   * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
+   */
+  readonly plan?: string;
 }
 
 /**
@@ -3733,7 +3738,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // whose work made it on its own audit row, in the same write.
     let retiredInPlan: string | undefined;
     if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated") {
-      const claimedPlan = await findPlanClaimedByWriter(this.store);
+      const claimedPlan = await findPlanClaimedByWriter(this.store, opts?.plan);
       if (!claimedPlan.ok) return claimedPlan;
       retiredInPlan = claimedPlan.value;
     }

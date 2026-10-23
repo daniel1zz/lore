@@ -630,6 +630,10 @@ export default defineLoreCommand({
           description: "REQUIRED: the superseding criterion as <spec>:<AC-ID> (spec id or slug)",
         },
         reason: { type: "string", description: "REQUIRED: why the criterion is superseded (non-empty)" },
+        plan: {
+          type: "string",
+          description: "The plan slug that owns this retirement when the run claims tasks in several plans (must be one it claims a task in)",
+        },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
@@ -654,7 +658,7 @@ export default defineLoreCommand({
             args.id as string,
             { spec: byRaw.slice(0, sep), ac: byRaw.slice(sep + 1) },
             reason,
-            { by: resolveActor(inv) },
+            { by: resolveActor(inv), ...(typeof args.plan === "string" ? { plan: args.plan } : {}) },
           );
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");

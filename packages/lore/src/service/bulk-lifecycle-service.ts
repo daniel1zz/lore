@@ -100,7 +100,7 @@ export interface BulkCorpusPort {
   set(
     idOrSlug: string,
     patch: { status: DocStatus },
-    opts: { by: string; expectedVersion: number; reason?: string },
+    opts: { by: string; expectedVersion: number; reason?: string; plan?: string },
   ): Promise<Result<DocRecord, LoreError>>;
 }
 
@@ -117,6 +117,8 @@ export interface BulkApplyOptions {
   readonly by: string;
   readonly reason?: string;
   readonly source?: string;
+  /** Plan slug a deprecation is made for (`--plan`); see `SetOptions.plan`. */
+  readonly plan?: string;
 }
 
 function usage(field: string, message: string, value: unknown): LoreError {
@@ -315,6 +317,7 @@ export class BulkLifecycleService {
             by: opts.by,
             expectedVersion: expected,
             ...(reason !== undefined ? { reason } : {}),
+            ...(opts.plan !== undefined ? { plan: opts.plan } : {}),
           });
     if (!written.ok) return failed(doc.id, doc.slug, doc.type, doc.status, written.error);
     const after = verb === "done" ? (written.value as { task: DocRecord }).task : (written.value as DocRecord);

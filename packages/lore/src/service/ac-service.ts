@@ -1018,7 +1018,7 @@ export class AcService {
     acId: string,
     by: { spec: string; ac: string },
     reason: string,
-    opts: { by?: string } = {},
+    opts: { by?: string; plan?: string } = {},
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const trimmedReason = reason.trim();
     if (trimmedReason.length === 0) {
@@ -1067,7 +1067,7 @@ export class AcService {
     const actor = resolveWriteActorFor(this.store, opts.by);
     // reason: the retirement belongs to the plan whose work made it (the plan of the task this run holds a claim on),
     // recorded in this same write; none when the run claims no (single) plan task.
-    const retiredInPlan = await findPlanClaimedByWriter(this.store);
+    const retiredInPlan = await findPlanClaimedByWriter(this.store, opts.plan);
     if (!retiredInPlan.ok) return retiredInPlan;
     const marked: AcceptanceCriterion = {
       ...target,

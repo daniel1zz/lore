@@ -51,6 +51,7 @@ export default defineLoreCommand({
     },
     apply: { type: "boolean", description: "Write the rows (default: preview only, exit 3 when there are candidates)" },
     reason: { type: "string", description: "Why (required with --apply for archive/deprecate/close); written to every row's audit entry" },
+    plan: { type: "string", description: "deprecate only: the plan slug that owns the retirement when this run claims tasks in several plans" },
     json: { type: "boolean", description: "Output as JSON" },
   },
   async run(context): Promise<number> {
@@ -103,6 +104,7 @@ export default defineLoreCommand({
       const result = await service.apply(selector.value, verb, {
         by: resolveActor(inv),
         ...(reason !== undefined ? { reason } : {}),
+        ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
         source: app.callerSurface,
       });
       if (!result.ok) {
