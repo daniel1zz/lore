@@ -1093,6 +1093,83 @@ export class AcService {
     return ok(parsed.data);
   }
 
+  // ── restoreRetiredCriterion / restoreDeprecatedSpec ───────────────────────
+
+  /**
+   * Undoes ONE supersession the owner rejected at the plan's milestone review (adr-an-acceptance-criterion-retires-
+   * with-the-feature-it): clears the criterion's `superseded_by` marker and records the restore. The ONLY writer
+   * that removes a D15 marker. It acts on the marker whose `at` is `expectedAt` and nothing else, so a criterion
+   * superseded again later (a different `at`) is never touched by an older rejection.
+   *
+   * @param specIdOrSlug - the spec that declares the criterion
+   * @param acId - the superseded criterion
+   * @param expectedAt - `superseded_by.at` of the retirement the owner rejected
+   * @param reason - why (written to the audit row)
+   * @returns `ok(true)` restored, `ok(false)` nothing to do (marker absent or a different retirement instance)
+   */
+  async restoreRetiredCriterion(
+    specIdOrSlug: string,
+    acId: string,
+    expectedAt: string,
+    reason: string,
+    opts: { by?: string } = {},
+  ): Promise<Result<boolean, LoreError>> {
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const existing = extractCriteria(spec);
+    const target = existing.find((c) => c.id === acId);
+    if (target === undefined || target.superseded_by === undefined || target.superseded_by.at !== expectedAt) return ok(false);
+    const { superseded_by: _cleared, ...restored } = target;
+    const parsed = specAcceptanceCriteriaSchema.safeParse(existing.map((c) => (c.id === acId ? restored : c)));
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acceptance_criteria",
+        message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
+        value: acId,
+        rule: "BR-1330",
+      });
+    }
+    const written = await this.writeCriteria(spec, parsed.data, "restore", {
+      by: resolveWriteActorFor(this.store, opts.by),
+      acId,
+      auditDetails: { restored_retirement: { ac: acId, superseded_at: expectedAt, reason } },
+    });
+    return written.ok ? ok(true) : written;
+  }
+
+  /**
+   * Puts a spec whose deprecation the owner rejected at the milestone review back to its previous status.
+   * `deprecated` is terminal in the lifecycle graph, so this is a dedicated audited restore (version action
+   * `restore`), never a `lore set`. It acts only while the spec is still `deprecated`.
+   *
+   * @returns `ok(true)` restored, `ok(false)` the spec is no longer deprecated
+   */
+  async restoreDeprecatedSpec(
+    specIdOrSlug: string,
+    previousStatus: DocRecord["status"],
+    reason: string,
+    opts: { by?: string } = {},
+  ): Promise<Result<boolean, LoreError>> {
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    if (spec.status !== "deprecated" || previousStatus === "deprecated") return ok(false);
+    const written = await this.writer.writeDoc({
+      doc: spec,
+      patch: { status: previousStatus },
+      action: "restore",
+      changeSummary: `Deprecation rejected at the milestone review; restored to ${previousStatus}`,
+      auditAction: "update",
+      auditDetails: { operation: "retirement-restore", restored_status: previousStatus, reason },
+      lock: "none",
+      by: resolveWriteActorFor(this.store, opts.by),
+    });
+    return written.ok ? ok(true) : written;
+  }
+
   // ── countUnredeemedAllowMissingPath ───────────────────────────────────────
 
   /**
@@ -1212,7 +1289,7 @@ export class AcService {
   private async writeCriteria(
     spec: DocRecord,
     criteria: AcceptanceCriterion[],
-    operation: "add" | "remove" | "set" | "cite" | "supersede",
+    operation: "add" | "remove" | "set" | "cite" | "supersede" | "restore",
     opts: {
       status?: DocRecord["status"];
       acId?: string;
@@ -1251,7 +1328,7 @@ export class AcService {
     const target = { id: spec.id as string, slug: spec.slug, anchors: codeAnchorsOf(spec) };
     let requireLiveRules: string[] = [];
     let wouldRefuseAudit: AuditEntry[] = [];
-    if (this.citeGate !== undefined && operation !== "remove" && operation !== "supersede") {
+    if (this.citeGate !== undefined && operation !== "remove" && operation !== "supersede" && operation !== "restore") {
       const admission = await admitAcWrite(this.store, {
         rawGateConfig: this.citeGate.raw,
         target,
@@ -1281,6 +1358,8 @@ export class AcService {
           ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
           : operation === "supersede"
             ? `Acceptance criterion ${opts.acId ?? ""} superseded — ${criteria.length} entries`
+          : operation === "restore"
+            ? `Acceptance criterion ${opts.acId ?? ""} restored (retirement rejected at the milestone review) — ${criteria.length} entries`
           : operation === "cite"
             ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
             : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,

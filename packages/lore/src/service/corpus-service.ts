@@ -109,6 +109,7 @@ import {
   type MilestoneReviewCurrency,
 } from "./milestone-review.js";
 import { coverFailedDimensions, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
 import { readGithubIssueRef } from "./resolution-projector.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
@@ -1201,6 +1202,18 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
   /** Present iff {@link setPlanCloseIssuePort} was called. */
   private planCloseIssuePort: PlanCloseIssuePort | undefined;
+
+  /**
+   * Hands plan close the settle step of the retired-AC confirmation (adr-an-acceptance-criterion-retires-with-the-
+   * feature-it). Called once by `app.ts`; absent ⇒ plan close does not consult retired ACs (bare test constructions).
+   *
+   * @param port - carries out an answered rejection and reports where the plan stands
+   */
+  setPlanCloseRetirementPort(port: PlanCloseRetirementPort): void {
+    this.planCloseRetirementPort = port;
+  }
+
+  private planCloseRetirementPort: PlanCloseRetirementPort | undefined;
 
   /**
    * Upgrades a `failed` review currency to `accepted` when every failed dimension has an OPEN GitHub issue linked to
@@ -3586,6 +3599,17 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
       if (!gateResult.ok) return gateResult;
+      // reason: plan close waits for the owner's one confirmation of the ACs retired during the plan
+      // (adr-an-acceptance-criterion-retires-with-the-feature-it); a rejection was carried out by `settle` and keeps
+      // the close refused until the plan is re-planned.
+      if (this.planCloseRetirementPort !== undefined) {
+        const retirement = await this.planCloseRetirementPort.settle(existing.id);
+        if (!retirement.ok) return retirement;
+        const refusal = describeRetirementRefusal(existing.slug, retirement.value);
+        if (refusal !== undefined) {
+          return err({ code: "VALIDATION_ERROR", field: "gate:plan-close", message: refusal, rule: "BR-1372" });
+        }
+      }
       if (milestoneReview.state === "accepted") {
         const issueList = milestoneReview.issues.map((n) => `#${String(n)}`).join(", ");
         const recorded = await this.appendAudit({

@@ -47,7 +47,7 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
-import { failedDimensions, type MilestoneReview } from "@lore/core";
+import { failedDimensions, type MilestoneReview, type RetiredAcRef } from "@lore/core";
 import type { LoreError } from "@lore/core";
 
 /** One plan's row of the batch result. */
@@ -58,6 +58,10 @@ interface AssessRow {
   readonly failed: readonly string[];
   readonly diff_source: string | null;
   readonly reason: string;
+  /** ACs retired during the plan (adr-an-acceptance-criterion-retires-with-the-feature-it); absent when none. */
+  readonly retired_acs?: readonly RetiredAcRef[];
+  /** The one pending owner decision that confirms them (`lore pending --ask`); absent when none is open. */
+  readonly pending_decision?: number;
 }
 
 /** One-line account of how a plan's diff was obtained (stored on the review as `diff_source`). */
@@ -224,6 +228,14 @@ export default defineLoreCommand({
           rows.push(errorRow(ref, bundle.error));
           continue;
         }
+        // reason: the owner's answer to an earlier retired-AC question is carried out, and the one pending decision for
+        // this plan is raised, BEFORE the review so the review lists what is still retired.
+        const retirement = app.retiredAcService !== undefined ? await app.retiredAcService.settle(bundle.value) : undefined;
+        if (retirement !== undefined && !retirement.ok) {
+          rows.push(errorRow(ref, retirement.error));
+          continue;
+        }
+        const retirementState = retirement?.value;
         const tasks = bundle.value.tasks;
         const derivation = deriveCommitSetForPlan(
           inv.cwd,
@@ -238,7 +250,30 @@ export default defineLoreCommand({
           maxDiffChars: app.aiProviderService.assessMaxDiffChars,
           ...(suite !== undefined ? { suite } : {}),
         });
-        rows.push(reviewed.ok ? passFailRow(ref, reviewed.value.doc.slug, reviewed.value.review) : errorRow(ref, reviewed.error));
+        const baseRow = reviewed.ok ? passFailRow(ref, reviewed.value.doc.slug, reviewed.value.review) : errorRow(ref, reviewed.error);
+        const retiredList =
+          retirementState?.state === "pending" || retirementState?.state === "confirmed"
+            ? retirementState.retired
+            : retirementState?.state === "rejected"
+              ? retirementState.restored
+              : [];
+        rows.push(
+          retiredList.length === 0
+            ? baseRow
+            : {
+                ...baseRow,
+                retired_acs: retiredList,
+                ...(retirementState?.state === "pending" ? { pending_decision: retirementState.pendingId } : {}),
+                reason:
+                  `${baseRow.reason}; ${String(retiredList.length)} retired AC(s) ${
+                    retirementState?.state === "pending"
+                      ? `await the owner (decision #${String(retirementState.pendingId)}, lore pending --ask)`
+                      : retirementState?.state === "rejected"
+                        ? "rejected by the owner and restored"
+                        : "confirmed by the owner"
+                  }`,
+              },
+        );
         if (reviewed.ok) {
           for (const dimension of failedDimensions(reviewed.value.review.dimensions)) {
             const judgment = reviewed.value.review.dimensions[dimension];
