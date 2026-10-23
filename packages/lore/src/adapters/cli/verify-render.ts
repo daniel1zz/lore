@@ -2,7 +2,7 @@
  * Pure render helpers for `lore verify`'s terminal output. Split out of
  * `commands/verify.ts` for testability — that file transitively imports
  * `loader.ts` (`bun:sqlite`), unresolvable by vitest — mirroring
- * `assess-render.ts`/`review-render.ts`/`setup-render.ts`/`seat-render.ts`'s
+ * `status-stamp-verdict.ts`/`review-render.ts`/`setup-render.ts`/`seat-render.ts`'s
  * identical split. `formatAcResultLine` moved here VERBATIM (byte-identical,
  * REGRESSION) from `commands/verify.ts`, which now imports it rather than
  * defining it inline.

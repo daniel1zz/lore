@@ -56,10 +56,7 @@ import {
 import { SpawnGitPort } from "../../../src/service/rule-state-git-port.js";
 import { computeStampVerdictDistribution, readStampVerdict } from "../../../src/service/gate-predicates.js";
 import { ATTESTATION_FLOOR_FIELD, ATTESTATION_FLOOR_REASON, attestationFloor } from "../../helpers/attestation-floor-stand-in.js";
-import {
-  computeCaptureSourceDistribution,
-  formatStampVerdictLine,
-} from "../../../src/adapters/cli/assess-render.js";
+import { formatStampVerdictLine } from "../../../src/adapters/cli/status-stamp-verdict.js";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
@@ -438,22 +435,6 @@ describe("AC-CT-9 (d): the stamp-verdict distribution", () => {
     const direct = computeStampVerdictDistribution(docs, await bindingFor(c, docs, port));
 
     expect(viaService).toEqual({ ok: true, value: direct });
-  });
-
-  it("(d) never merged: the capture_source distribution buckets the SAME rows on another axis and sums to ITS OWN total, not twice the row count", async () => {
-    const { c, docs, port } = await fiveReadingsCorpus();
-    const stamp = computeStampVerdictDistribution(docs, await bindingFor(c, docs, port));
-    const captureSource = computeCaptureSourceDistribution({ tasks: docs } as never);
-
-    const evidenceRows = 7; // six attested rows + the one self-report
-    expect(captureSource.runnerCount + captureSource.selfReportCount + captureSource.runnerUnattestedCount).toBe(evidenceRows);
-    expect(stamp.total).toBe(6); // attested rows only: a self-report has no stamp reading
-    expect(stamp.total + 1).toBe(evidenceRows);
-    // Disjoint vocabularies: no bucket of one axis is a bucket of the other.
-    const stampKeys = Object.keys(stamp);
-    for (const key of ["runnerCount", "selfReportCount", "runnerUnattestedCount"]) {
-      expect(stampKeys).not.toContain(key);
-    }
   });
 
   it("(d) the rendered line names all five readings, radius-unmeasured on its own", async () => {

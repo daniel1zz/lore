@@ -111,9 +111,10 @@ describe("planPromoteReachabilityAdvisory", () => {
     };
     const advisory = planPromoteReachabilityAdvisory(ctx);
     expect(advisory).not.toBeNull();
-    // names both real options
+    // names the milestone review and the one real option
     expect(advisory).toContain("script-mode acceptance criterion");
-    expect(advisory).toContain("typed exemption");
+    expect(advisory).toContain("milestone review");
+    expect(advisory).not.toContain("exempt");
   });
 
   // HAPPY (absence) — reachable plan gets NO advisory.

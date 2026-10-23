@@ -7,7 +7,7 @@
  * `commands/done.ts` transitively imports `loader.ts` (`bun:sqlite`), which vitest
  * cannot resolve, so this suite exercises the pure unit extracted for testability:
  *   - `formatDoneMessage` (`packages/lore/src/adapters/cli/done-render.ts`) — same
- *     split pattern as `pending-render.ts`/`assess-render.ts`/`review-render.ts`.
+ *     split pattern as `pending-render.ts`/`status-stamp-verdict.ts`/`review-render.ts`.
  *
  * The substantive service-layer behavior (evidence/claim validation, the actual
  * VALID_TRANSITIONS walk, blocks-link readiness flip, idempotency) is covered by

@@ -33,7 +33,7 @@ Foundational types, Result/LoreError, Zod schemas, lifecycle rules, config, and 
 
 `milestone-review.ts` (BR-1372) is the home of the seven review dimensions (`MILESTONE_DIMENSIONS`), the judge's output shape (`llmMilestoneOutputSchema`), the stored review (`milestoneReviewSchema`, `knowledgeExtraSchema.extra.milestone_review` whenever `sub_type === "milestone-review"`) and the deterministic rules the judge cannot waive (`applyDeterministicDimensionRules`: a `design_necessity` pass with no reference is a fail; `overallMilestoneVerdict`: pass iff no dimension fails). Pure, browser-safe. ⛔ Only `lore assess`/`lore_assess` write that sub_type (`CorpusService.createMilestoneReviewDoc`). The plan-state fingerprint and the currency check live in `packages/lore/src/service/milestone-review.ts` because they read task landings.
 
-`assessment.ts` is pure/browser-safe (no IO, no wall-clock reads) and survives only to READ the plan-outcome `assessment` docs written before the milestone review (`assessmentResultSchema`, validated by `knowledgeExtraSchema.extra.assessment` when `sub_type === "assessment"`) and for the shared `PlanBundle`/`extractAssessmentJson`/`truncateSection` helpers. Nothing writes a new `assessment` doc. Detail: SPEC-026, SPEC-040.
+`assessment.ts` is pure/browser-safe (no IO, no wall-clock reads) and holds only the shared `PlanBundle`/`extractAssessmentJson`/`truncateSection`/`clipTextToBudget` helpers. The legacy plan-outcome assessment schema, facts and renderer are gone: archived `assessment` docs are read as plain documents (`extra.assessment` rides the `knowledgeExtraSchema` passthrough raw, nothing parses it) and `CorpusService` refuses to create a new one.
 
 ### Plan Phases Schema Invariants
 

@@ -40,15 +40,13 @@ export const CORPUS_SCHEMA_INFO = {
       ] as const,
     },
     knowledge: {
-      // reason: "assessment" (SPEC-026) is written exclusively by `lore assess` — it
-      // additionally requires a Zod-valid extra.assessment (not expressible in this
-      // static string list; see knowledgeExtraSchema in @lore/core for the full contract).
+      // reason: "assessment" (the retired plan-outcome assessment) is deliberately absent — it can no longer be
+      // created; archived docs of that sub_type stay readable. See knowledgeExtraSchema in @lore/core.
       sub_type: [
         "ideation",
         "retro",
         "research",
         "reference",
-        "assessment",
       ] as const,
     },
     task: {

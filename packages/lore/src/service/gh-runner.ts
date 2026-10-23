@@ -43,7 +43,7 @@
  *   - `run()` returns raw `stdout` untouched — callers are responsible for
  *     invoking this ONLY with `gh api ...` (JSON output), never `gh issue`/
  *     `gh repo`'s human-formatted presentation output, which has already
- *     burned this codebase once via `assess-render.ts`'s ENOBUFS precedent
+ *     burned this codebase once via an ENOBUFS incident in an earlier diff reader
  *     (unbounded presentation-format text overflowing a fixed buffer).
  *   - `GH_REPO` / `GH_HOST` / `GH_CONFIG_DIR` / `GH_ENTERPRISE_TOKEN` are
  *     DELETED as OWN PROPERTY KEYS from the child's env on every call
@@ -98,7 +98,7 @@ const SCRUBBED_ENV_VAR_NAMES = ["GH_REPO", "GH_HOST", "GH_CONFIG_DIR", "GH_ENTER
  * listing/search payloads are small compared to e.g. a git diff, but this
  * module deliberately states an EXPLICIT bound rather than relying on
  * Node's own default (the Scope entry's "explicit maxBuffer" requirement,
- * and the ENOBUFS precedent at `assess-render.ts:152` this module's own
+ * and the earlier ENOBUFS incident this module's own
  * doc comment cites).
  */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;

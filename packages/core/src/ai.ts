@@ -329,12 +329,6 @@ export const AiConfigSchema = z
      */
     assess: z
       .object({
-        /** Max chars of the plan document's content included in the prompt. Default: 8000. */
-        max_plan_chars: z.number().int().positive().default(8000),
-        /** Max chars of the linked spec's content included in the prompt. Default: 12000. */
-        max_spec_chars: z.number().int().positive().default(12000),
-        /** Max chars of each task's content included in the prompt (per task). Default: 4000. */
-        max_task_chars: z.number().int().positive().default(4000),
         /** Max chars of the optional git diff included in the prompt. Default: 80000. */
         max_diff_chars: z.number().int().positive().default(80_000),
       })

@@ -2007,6 +2007,20 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       });
     }
 
+    // Knowledge sub_type "assessment" is the retired plan-outcome assessment (BR-1372): its docs are archived and read
+    // as plain documents, and nothing may write a new one. Refused on every path (no writer is allowed).
+    if (data.type === "knowledge" && (data.extra?.["sub_type"] as unknown) === "assessment") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.sub_type",
+        message:
+          'knowledge sub_type "assessment" is retired — the milestone review (`lore assess`) replaced it; ' +
+          "existing assessment docs are archived and stay readable, but no new one can be created",
+        value: "assessment",
+        rule: "BR-1372",
+      });
+    }
+
     // Write-path exclusivity for knowledge sub_type "milestone-review" (BR-1372) — same writer-identity guard as
     // "uat": the review gates plan close, and extra.milestone_review is user-supplied data a Zod shape check cannot
     // make unforgeable. `opts.allowMilestoneReview` is set ONLY by `createMilestoneReviewDoc`.

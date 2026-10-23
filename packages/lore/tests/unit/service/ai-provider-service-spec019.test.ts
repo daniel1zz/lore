@@ -88,7 +88,7 @@ function makeService({
     telemetry,
     aiTelemetryEnabled,
     refineMaxInputChars,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 }, // assessBudgets — SPEC-026 default
+    { max_diff_chars: 24000 }, // assessBudgets — SPEC-026 default
   );
   return { service, provider, telemetry, emitCalls };
 }

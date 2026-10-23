@@ -1,7 +1,7 @@
 /**
  * `LORE_GATE_BYPASS=1` escape-hatch observability (SPEC-080 G4) — the decision
  * logic behind `commands/gate.ts`'s env-bypass audit trace, split into this
- * sibling module for the SAME reason `assess-render.ts`/`review-render.ts` are
+ * sibling module for the SAME reason `status-stamp-verdict.ts`/`review-render.ts` are
  * split out (`../../CLAUDE.md`'s testability-split pattern): `commands/gate.ts`
  * transitively imports `loader.ts` (`bun:sqlite` via `app.ts`), which vitest
  * cannot resolve, but this file imports only `@lore/core`/`@lore/core/node` +

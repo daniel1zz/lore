@@ -97,6 +97,30 @@ export function removeRetiredPlanCloseKey(
   return removeRetiredConfigKey(yamlText, ["workflow", "gates", "plan-close"], key, retiredPlanCloseField(key));
 }
 
+/** The retired prompt-size budgets of `ai.assess` that `lore migrate config-keys` removes (the plan-outcome prompt they sized is gone). */
+export const RETIRED_ASSESS_BUDGET_KEYS = ["max_plan_chars", "max_spec_chars", "max_task_chars"] as const;
+
+/** The `LoreError.field` / notice label of one retired `ai.assess` budget key. */
+export function retiredAssessBudgetField(key: (typeof RETIRED_ASSESS_BUDGET_KEYS)[number]): string {
+  return `ai.assess.${key}`;
+}
+
+/**
+ * PURE removal of one retired `ai.assess` budget key from a config text (same line-wise cut as
+ * {@link removeRetiredActorIdentityGate}). `ai.assess.max_diff_chars` is still read and is never touched.
+ *
+ * @param yamlText - the raw config file text
+ * @param key - which retired key to cut
+ * @returns `ok(undefined)` when absent; `ok({text, value})` when present; `err(VALIDATION_ERROR)` for malformed YAML or
+ *   a flow-style placement
+ */
+export function removeRetiredAssessBudgetKey(
+  yamlText: string,
+  key: (typeof RETIRED_ASSESS_BUDGET_KEYS)[number],
+): Result<RetiredActorIdentityRemoval | undefined, LoreError> {
+  return removeRetiredConfigKey(yamlText, ["ai", "assess"], key, retiredAssessBudgetField(key));
+}
+
 function removeRetiredConfigKey(
   yamlText: string,
   chain: readonly string[],

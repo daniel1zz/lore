@@ -51,6 +51,9 @@ import {
   retiredPlanCloseField,
   RETIRED_ACTOR_IDENTITY_FIELD,
   RETIRED_PLAN_CLOSE_KEYS,
+  RETIRED_ASSESS_BUDGET_KEYS,
+  removeRetiredAssessBudgetKey,
+  retiredAssessBudgetField,
 } from "./retired-actor-identity-migration.js";
 
 /** The invocation environment the global-config path resolvers read (`Invocation.env`). */
@@ -100,7 +103,7 @@ export interface ConfigKeysMigration {
 /**
  * The explicit, one-time removal of retired config keys in `<dir>/.lore/config.yaml` (`lore migrate config-keys`):
  * `workflow.gates."plan-close".cited_rule_check` and `.prd_sync` (plan close is gated by the milestone review only,
- * BR-1372), and the retired claim-time identity setting of the `task-claim` gate (claims compare runs only). Only those
+ * BR-1372), and the retired claim-time identity setting of the `task-claim` gate (claims compare runs only), plus the unread `ai.assess.max_plan_chars`/`max_spec_chars`/`max_task_chars` budgets. Only those
  * keys change; every other byte of the file is identical. The write is atomic (temp file in the same directory, then
  * rename). A second run finds no old key and changes nothing.
  *
@@ -123,6 +126,13 @@ export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKey
       if (cut.value === undefined) continue;
       text = cut.value.text;
       notices.push(`${file}: ${retiredPlanCloseField(key)} removed (plan close is gated by the milestone review only; the setting no longer exists)`);
+    }
+    for (const key of RETIRED_ASSESS_BUDGET_KEYS) {
+      const cut = removeRetiredAssessBudgetKey(text, key);
+      if (!cut.ok) return cut;
+      if (cut.value === undefined) continue;
+      text = cut.value.text;
+      notices.push(`${file}: ${retiredAssessBudgetField(key)} removed (the plan-outcome prompt it sized no longer exists)`);
     }
     const removed = removeRetiredActorIdentityGate(text);
     if (!removed.ok) return removed;

@@ -10,8 +10,7 @@
  *   - AC-069-5: `--adhoc` succeeds with no `--plan-id`/`--parent`, sets
  *     `extra.adhoc === true`, parents to the root PRD; `--adhoc` + `--plan-id`
  *     is a single-pass mutual-exclusion conflict (CLI-layer, exit-2 shape).
- *   - AC-069-6: `--linkage` stores `extra.linkage` verbatim; `lore assess`
- *     scope-fidelity facts (`computeAssessmentFacts`) include it.
+ *   - AC-069-6: `--linkage` stores `extra.linkage` verbatim.
  *   - AC-069-7: `lore ready <plan>` output is regression-unchanged for plan
  *     tasks; a new `readyAdhoc()` corpus-wide listing surfaces OPEN ad-hoc
  *     tasks (and excludes closed ones / plan-scoped ones).
@@ -21,7 +20,7 @@
  * `commands/create.ts` transitively imports `loader.ts` (`bun:sqlite`), which
  * vitest cannot resolve (same split rationale as SPEC-065's own
  * `create-task-validation.test.ts`). Service-layer behavior (schema relaxation,
- * root-PRD auto-parenting, assess facts) is tested against InMemoryStore.
+ * root-PRD auto-parenting) is tested against InMemoryStore.
  *
  * Coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION
  *
@@ -42,7 +41,6 @@ import {
   isAdhocAcScopeDeclarationMissing,
   resolveAcScopeForCreate,
 } from "../../../src/adapters/cli/create-task-validation.js";
-import { computeAssessmentFacts } from "@lore/core";
 import type { CreateDocInput, PlanBundle } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
@@ -385,9 +383,9 @@ describe("AC-069-5: CorpusService.create — extra.adhoc service-layer behavior"
   });
 });
 
-// ─── AC-069-6: --linkage verbatim storage + assess facts ───────────────────
+// ─── AC-069-6: --linkage verbatim storage ───────────────────
 
-describe("AC-069-6: --linkage stores extra.linkage verbatim + assess facts include it", () => {
+describe("AC-069-6: --linkage stores extra.linkage verbatim", () => {
   // ── HAPPY ──────────────────────────────────────────────────────────────
 
   it("AC-069-6: extra.linkage is stored VERBATIM on a --plan-id task", async () => {
@@ -405,108 +403,6 @@ describe("AC-069-6: --linkage stores extra.linkage verbatim + assess facts inclu
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.extra["linkage"]).toBe(linkageText);
-  });
-
-  it("AC-069-6: computeAssessmentFacts.task_linkage includes the linked task's id + verbatim text", async () => {
-    const { corpusService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const linkageText = "found while testing X";
-    const taskId = await createTask(corpusService, planId, "Linked task", { linkage: linkageText });
-
-    const bundleResult = await corpusService.getPlanBundle(planId);
-    expect(bundleResult.ok).toBe(true);
-    if (!bundleResult.ok) return;
-
-    const facts = computeAssessmentFacts(bundleResult.value, []);
-    expect(facts.task_linkage).toEqual([{ task_id: taskId, linkage: linkageText }]);
-  });
-
-  // ── NEGATIVE ───────────────────────────────────────────────────────────
-
-  it("a task with NO extra.linkage does not appear in task_linkage", async () => {
-    const { corpusService } = makeServices();
-    const planId = await createPlan(corpusService);
-    await createTask(corpusService, planId, "Unlinked task");
-
-    const bundleResult = await corpusService.getPlanBundle(planId);
-    expect(bundleResult.ok).toBe(true);
-    if (!bundleResult.ok) return;
-
-    const facts = computeAssessmentFacts(bundleResult.value, []);
-    expect(facts.task_linkage).toEqual([]);
-  });
-
-  // ── BOUNDARY ───────────────────────────────────────────────────────────
-
-  it("BOUNDARY: an empty-string extra.linkage is treated as absent (no falsy/empty entries)", async () => {
-    const { corpusService, store } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Blank linkage");
-    // reason: bypass CorpusService.set (extra is untyped storage — set() would work too,
-    // but a direct store write keeps this test's intent narrow: prove the FACTS accessor
-    // treats "" as absent, independent of how it got written).
-    const found = await store.find(taskId);
-    if (found.ok && found.value) {
-      await store.update(
-        taskId,
-        { extra: { ...found.value.extra, linkage: "" } },
-        { expected_version: found.value.version },
-      );
-    }
-
-    const bundleResult = await corpusService.getPlanBundle(planId);
-    expect(bundleResult.ok).toBe(true);
-    if (!bundleResult.ok) return;
-
-    const facts = computeAssessmentFacts(bundleResult.value, []);
-    expect(facts.task_linkage).toEqual([]);
-  });
-
-  // ── STATE ──────────────────────────────────────────────────────────────
-
-  it("STATE: attestation_exemption defaults to {exempt: false} when the plan declares no exemption", async () => {
-    const { corpusService } = makeServices();
-    const planId = await createPlan(corpusService);
-
-    const bundleResult = await corpusService.getPlanBundle(planId);
-    expect(bundleResult.ok).toBe(true);
-    if (!bundleResult.ok) return;
-
-    const facts = computeAssessmentFacts(bundleResult.value, []);
-    expect(facts.attestation_exemption).toEqual({ exempt: false });
-  });
-
-  it("AC-069-6 (D1 complement): attestation_exemption surfaces extra.attestation_exempt + reason when set", async () => {
-    const { corpusService } = makeServices();
-    const planId = await createPlan(corpusService);
-    await corpusService.set(planId, {
-      extra: { attestation_exempt: true, attestation_exempt_reason: "prototype spike, no test harness yet" },
-    });
-
-    const bundleResult = await corpusService.getPlanBundle(planId);
-    expect(bundleResult.ok).toBe(true);
-    if (!bundleResult.ok) return;
-
-    const facts = computeAssessmentFacts(bundleResult.value, []);
-    expect(facts.attestation_exemption).toEqual({
-      exempt: true,
-      reason: "prototype spike, no test harness yet",
-    });
-  });
-
-  // ── REGRESSION ─────────────────────────────────────────────────────────
-
-  it("REGRESSION: a plan bundle with zero tasks still produces a well-formed (empty) task_linkage array", async () => {
-    const { corpusService } = makeServices();
-    const planId = await createPlan(corpusService);
-
-    const bundleResult = await corpusService.getPlanBundle(planId);
-    expect(bundleResult.ok).toBe(true);
-    if (!bundleResult.ok) return;
-
-    const facts = computeAssessmentFacts(bundleResult.value, []);
-    expect(facts.task_linkage).toEqual([]);
-    expect(facts.ac_coverage).toEqual([]); // pre-existing SPEC-040 fact, unaffected
   });
 });
 

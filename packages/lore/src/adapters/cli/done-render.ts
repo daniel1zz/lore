@@ -4,7 +4,7 @@
  * Extracted from `commands/done.ts` for testability — that command transitively
  * imports `loader.ts` (`bun:sqlite`), unresolvable by vitest; this module imports
  * only the service's own `DoneResult` type (vitest-safe). Mirrors
- * `pending-render.ts`/`assess-render.ts`'s identical split, same reason
+ * `pending-render.ts`/`status-stamp-verdict.ts`'s identical split, same reason
  * (`adapters/cli/CLAUDE.md`'s "Vitest-unsafe commands get a sibling *-render.ts
  * split" invariant).
  *
