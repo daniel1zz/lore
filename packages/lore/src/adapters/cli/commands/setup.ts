@@ -192,6 +192,7 @@ import {
   type SetupPathContext,
 } from "../setup-args.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
+import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 import { computeSetupCheckReport, finishProjectSetupCheck, runSetupCheck } from "../setup-check.js";
 import type { SetupCheckFiles } from "../setup-check.js";
 import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
@@ -773,6 +774,25 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: I
   });
 }
 
+/**
+ * Automatic fragment migration (spec-fragment-injection-timing-one-inject-enum-a-per-turn, D9): apply for the user layer and,
+ * when `projectRoot` is a lore project, the project layer. Prints the per-file lines (stderr when stdout carries JSON).
+ * Returns the migrate exit code (5 conflict, 4 refused, 0 clean); the caller never stops the rest of setup for it.
+ */
+async function migrateFragmentsForSetup(inv: Invocation, json: boolean, projectRoot: string | null): Promise<number> {
+  return runFragmentsMigration(inv, {
+    scopes: projectRoot !== null ? ["user", "project"] : ["user"],
+    projectRoot,
+    apply: true,
+    sink: json ? inv.io.stderr : inv.io.stdout,
+  });
+}
+
+/** A failure of setup itself wins; otherwise a refused/conflicting fragment surfaces as setup's exit code (never silent). */
+function combineSetupExit(setupExit: ExitReport, migrateExit: number): ExitReport {
+  return setupExit === 0 ? migrateExit : setupExit;
+}
+
 async function runProjectScaffold(opts: {
   json: boolean;
   yes: boolean;
@@ -780,6 +800,29 @@ async function runProjectScaffold(opts: {
   binPath: string;
   claudeDir: string;
   inv: Invocation;
+}): Promise<ExitReport> {
+  const resolvedRoot = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
+  if (!resolvedRoot.ok) return failWith(opts.inv, resolvedRoot.error);
+  let migrateExit = 0;
+  const setupExit = await runProjectScaffoldConfirmed({
+    ...opts,
+    // reason: after the confirmation, before the scaffold — it reads the project's fragments (reference context) and
+    // the new schema refuses the old format; the rules files are refreshed later in this run.
+    onConfirmed: async () => {
+      migrateExit = await migrateFragmentsForSetup(opts.inv, opts.json, resolvedRoot.value);
+    },
+  });
+  return combineSetupExit(setupExit, migrateExit);
+}
+
+async function runProjectScaffoldConfirmed(opts: {
+  json: boolean;
+  yes: boolean;
+  assetsRoot: string;
+  binPath: string;
+  claudeDir: string;
+  inv: Invocation;
+  onConfirmed: () => Promise<void>;
 }): Promise<ExitReport> {
   const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
@@ -794,8 +837,9 @@ async function runProjectScaffold(opts: {
       `(.lore/ init, hooks/, lore.tree.yaml, .gitignore, CLAUDE.md, git core.hooksPath).`,
   });
   if (!confirmation.proceed) return confirmation.code;
+  await opts.onConfirmed();
 
-  const projectAssets = makeRealProjectAssetSource(join(opts.assetsRoot, "project"));
+  const projectAssets =makeRealProjectAssetSource(join(opts.assetsRoot, "project"));
 
   const service = new ProjectSetupService({
     fs: makeRealProjectFs(),
@@ -969,6 +1013,10 @@ async function runInstall(inv: Invocation,
   });
   if (!confirmation.proceed) return confirmation.code;
 
+  // reason: old-format fragments are refused by the schema (D9), so every setup run migrates them first; a refused or
+  // conflicting file never stops the install but becomes the exit code at the end.
+  const migrateExit = await migrateFragmentsForSetup(opts.inv, opts.json, findLoreProjectRoot(opts.inv.cwd));
+
   // reason: the global-layer language lands in `<targetDir>/settings.json`, the very file the install
   // merges hooks into. Handing it to `install` makes the manifest sha the sha of the FINAL bytes (report
   // #233); the post-install projection below then finds the value already equal and writes nothing.
@@ -1000,7 +1048,7 @@ async function runInstall(inv: Invocation,
 
   const projected = applyLanguageProjections(languagePlan.value);
   if (!projected.ok) return failWith(opts.inv, projected.error);
-  return mcpExit;
+  return combineSetupExit(mcpExit, migrateExit);
 }
 
 async function runUninstall(inv: Invocation, 

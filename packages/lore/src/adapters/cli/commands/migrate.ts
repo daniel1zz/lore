@@ -43,6 +43,13 @@
  *                      entry marked reconstructed (naming the version, the reason and this run), then remove the
  *                      setting from .lore/config.yaml. Preview is the DEFAULT; a second `--apply` writes nothing.
  *                      Never loads the config through the app (it repairs that file).
+ *   fragments --scope user|project [--apply] Rewrite old-format context-fragment frontmatter (audience / mode /
+ *                      delivery) to `inject` (+ `agents`). `--scope` is required (exit 2 without it); `user` needs no
+ *                      corpus, `project` needs a lore project root. Preview is the DEFAULT and prints one line per file
+ *                      (`<path>: <old> -> <new>`, `unchanged`, `refused: <reason>`); `--apply` rewrites only frontmatter
+ *                      lines with a per-file hash precondition. Exit 5 if any file changed concurrently, else 4 if any
+ *                      was refused, else 0. Bypasses `loadLoreApp` (no corpus DB). Logic in
+ *                      `../../../flows/migrate-fragments-flow.ts`. (spec-fragment-injection-timing, BR-1376)
  *   plan-outline-exempt [--apply] Remove the legacy outline-sync exemption (`extra.prd_sync_exempt`) from
  *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
@@ -67,6 +74,7 @@ import { requirePhaseMigrationService } from "../phase-wiring.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { runMigrateSchema } from "../migrate-schema.js";
+import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 
 export default defineLoreCommand({
   meta: {
@@ -77,7 +85,8 @@ export default defineLoreCommand({
     version: {
       type: "positional",
       description:
-        "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill" + "\n" +
+        "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill | fragments" + "\n" +
+        "Fragments: `fragments --scope user|project [--apply]` (rewrite old audience/mode/delivery fragment frontmatter to `inject`; preview by default, `--apply` writes; exit 5 concurrent change, 4 refused file). " +
         "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes), or `audit-backfill` (record pre-writer versions as reconstructed audit entries and remove the retired audit cut-off; preview by default, `--apply` writes)",
       required: true,
     },
@@ -91,7 +100,11 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits, audit-backfill] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits, audit-backfill, fragments] Execute the migration (default is dry-run/preview-only)",
+    },
+    scope: {
+      type: "string",
+      description: "[fragments only] Layer to migrate: user | project (required)",
     },
     revert: {
       type: "boolean",
@@ -117,6 +130,20 @@ export default defineLoreCommand({
     if (args.version === "schema") {
       // reason: the ONE command that upgrades a corpus schema; it bypasses `loadLoreApp` (which refuses the older corpus).
       return runMigrateSchema(inv, { dryRun: args["dry-run"] === true, json: args.json === true });
+    }
+    if (args.version === "fragments") {
+      // reason: bypasses `loadLoreApp` — fragments are plain files; the user layer needs no corpus at all.
+      const scope = args.scope;
+      if (scope !== "user" && scope !== "project") {
+        inv.io.stderr.write("Error: `migrate fragments` requires --scope user|project.\n");
+        return 2;
+      }
+      const projectRoot = findLoreProjectRoot(inv.cwd);
+      if (scope === "project" && projectRoot === null) {
+        inv.io.stderr.write("Error: `migrate fragments --scope project` needs a lore project root (no .lore/ found above the current directory).\n");
+        return 4;
+      }
+      return runFragmentsMigration(inv, { scopes: [scope], projectRoot, apply: args.apply === true });
     }
     if (
       args.version !== "v1" &&
