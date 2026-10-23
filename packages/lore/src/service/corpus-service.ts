@@ -38,14 +38,11 @@ import {
   prdRequirementsSchema,
   computeRequirementCoverage,
   SPEC_KINDS,
-  buildTaskAttestationInfos,
-  deriveDeclaredScopeCoverage,
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
   SELF_DECLARED_ORDINAL_TITLE_REFUSAL,
   computePlanCloseCascadeTargets,
   isLedgerKnowledgeSubType,
-  computeAcCoverage,
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
   resolveStatusAfterContractEdit,
@@ -102,7 +99,6 @@ import type { GateContext } from "./checkpoint-registry.js";
 import {
   computeArmedGates,
   buildUpstreamSpecContext,
-  checkpointRegistry,
   countScriptModeAcceptanceCriteria,
   isNonPlanParentError,
 } from "./checkpoint-registry.js";

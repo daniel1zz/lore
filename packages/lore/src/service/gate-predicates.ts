@@ -56,8 +56,6 @@ import {
   fileAnchorPath,
   lintAcQuantifiability,
   checkOracleCoverage,
-  declaredScopeCoverageVerdict,
-  deriveAttestationSummary,
   extractTestFileTokens,
   classifyStampAxis,
   classifyEvidenceRadii,
@@ -76,13 +74,8 @@ import {
   type UnboundReason,
   type LoreError,
   type Result,
-  attestationExemptKindSchema,
   SCOPE_UNDECLARED_REASON,
-  type AcCoverageFact,
   type AcceptanceCriterion,
-  type DeclaredScopeCoverage,
-  type DocType,
-  type TaskAttestationInfo,
   type VerificationProfile,
 } from "@lore/core";
 

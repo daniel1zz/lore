@@ -57,6 +57,7 @@ import type { VerifiedEvidenceInput } from "../../src/service/task-workflow-serv
 import type { PlanCloseCascadeResult } from "../../src/service/corpus-service.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
+import { passMilestoneReview } from "../helpers/plan-review-fixture.js";
 
 let tmpDir: string;
 
@@ -170,6 +171,8 @@ describe("plan-close cascade (R1) — HAPPY", () => {
       if (!handoffResult.ok) throw new Error(`handoff seed failed: ${JSON.stringify(handoffResult.error)}`);
       const handoff = handoffResult.value;
 
+      await passMilestoneReview(app.corpusService, plan.id);
+
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -215,6 +218,8 @@ describe("plan-close cascade (R1) — NEGATIVE", () => {
       const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
       expect(claimResult.ok).toBe(true);
 
+      await passMilestoneReview(app.corpusService, plan.id);
+
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -247,6 +252,8 @@ describe("plan-close cascade (R1) — BOUNDARY", () => {
       const preArchived = await app.corpusService.set(task.id, { status: "archived" });
       expect(preArchived.ok).toBe(true);
 
+      await passMilestoneReview(app.corpusService, plan.id);
+
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -267,6 +274,7 @@ describe("plan-close cascade (R1) — STATE (never rolls back the plan's own wri
     const app = openApp();
     try {
       const plan = await makeApprovedPlan(app);
+      await passMilestoneReview(app.corpusService, plan.id);
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -289,6 +297,8 @@ describe("plan-close cascade (R1) — REGRESSION (audit chain integrity)", () =>
       const plan = await makeApprovedPlan(app);
       const straggler = await makeTask(app, plan, "Straggler for chain check");
       await giveAttestedPass(app, straggler); // re-baselined (#47): a floor-clearing task, so the cascade really writes
+
+      await passMilestoneReview(app.corpusService, plan.id);
 
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
@@ -363,6 +373,7 @@ function floorOf(cascade: PlanCloseCascadeResult, docId: string): string | undef
 /** Runs the plan close on a fresh fixture and asserts AC-AP-4 (a)-(d). */
 async function assertFloorOutcome(app: App): Promise<FloorFixture> {
   const f = await seedFloorFixture(app);
+  await passMilestoneReview(app.corpusService, f.plan.id);
   const archiveResult = await app.corpusService.set(f.plan.id, { status: "archived" }, { by: "agent:closer" });
   expect(archiveResult.ok).toBe(true);
   if (!archiveResult.ok) throw new Error("plan close refused");
@@ -414,6 +425,7 @@ describe("plan-close cascade floors (AC-AP-4, BR-1072)", () => {
     const app = openApp();
     try {
       const f = await seedFloorFixture(app);
+      await passMilestoneReview(app.corpusService, f.plan.id);
       const r = await app.corpusService.set(f.plan.id, { status: "archived" }, { by: "agent:closer" });
       if (!r.ok) throw new Error("plan close refused");
       const cascade = cascadeOf(r.value)!;

@@ -92,7 +92,7 @@ Approve/reject implicitly capture a calibration record against the doc's latest 
 ## Feedback loop (SPEC-026 / SPEC-035)
 
 ```bash
-lore assess <plan> [--diff HEAD~3..HEAD | --diff-file <path>]   # LLM-as-judge: plan vs spec ACs + task evidence → knowledge doc (sub_type=assessment) linked informs→plan
+lore assess <plan>... | --where "<filters>"   # milestone review (7 dimensions, one row per plan, exit 0 all pass / 1 any fail) → knowledge doc (sub_type=milestone-review) linked informs→plan; plan close needs a passing review of the plan's current state
 lore audit [<doc>] [--actor <a>] [--action <act>] [--since <ISO>] [--limit N]   # decision trail (create|update|approve|reject|claim|release|evidence|judge|…)
 lore audit --verify                   # completeness oracle: versions ⋈ audit reconcile
 lore calibration --stats [--doc-type spec] [--prompt-version v1]   # human-vs-AI agreement per doc_type × prompt_version, Wilson lower bound

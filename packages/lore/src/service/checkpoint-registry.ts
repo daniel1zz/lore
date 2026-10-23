@@ -87,21 +87,10 @@ import {
   isClaimStale,
   lintAcQuantifiability,
   checkOracleCoverage,
-  deriveClaimedAcCoverage,
-  isUnboundOnlyTask,
-  isStaleOnlyTask,
-  isStampRefusedOnlyTask,
-  UNRESOLVED_DECLARED_SCOPE,
   type AcceptanceCriterion,
   type AcCiteFeedingPack,
-  type AcCoverageFact,
-  type DeclaredScopeCoverage,
   type DocRecord,
   type LoreError,
-  // reason: SPEC-075 D6 — TaskAttestationInfo's home MOVED to @lore/core
-  // (evidence-panel.ts), read from there directly rather than re-exported
-  // through gate-predicates.ts (see that file's own JSDoc for the type).
-  type TaskAttestationInfo,
   type VerificationProfile,
   type ReviewDecision,
   specAcceptanceCriteriaSchema,
@@ -145,7 +134,6 @@ import {
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 import type { MilestoneReviewCurrency } from "./milestone-review.js";
-import { PREDICATE_CONTRACTS } from "./predicate-contracts.js";
 import { uncitedSpecMessage } from "./spec-approval-citation.js";
 
 /**
