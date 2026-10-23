@@ -102,7 +102,14 @@ import {
   countScriptModeAcceptanceCriteria,
   isNonPlanParentError,
 } from "./checkpoint-registry.js";
-import { assessMilestoneCurrency, MILESTONE_REVIEW_SUB_TYPE, type CitedRuleStateRow } from "./milestone-review.js";
+import {
+  assessMilestoneCurrency,
+  MILESTONE_REVIEW_SUB_TYPE,
+  type CitedRuleStateRow,
+  type MilestoneReviewCurrency,
+} from "./milestone-review.js";
+import { coverFailedDimensions, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { readGithubIssueRef } from "./resolution-projector.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
 import { computeRecoverableUntil } from "./soft-delete-window.js";
@@ -1180,6 +1187,48 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    */
   setArchiveIssueClosePort(port: ArchiveIssueClosePort): void {
     this.archiveIssueClosePort = port;
+  }
+
+  /**
+   * Hands plan close the reader of the live OPEN GitHub issues (Part D, "accepted with known defects"). Called once by
+   * `app.ts` when `feedback.upstream` is a GitHub repository; absent ⇒ a failing review always refuses the close.
+   *
+   * @param port - anything that lists the open issues of the configured repository
+   */
+  setPlanCloseIssuePort(port: PlanCloseIssuePort): void {
+    this.planCloseIssuePort = port;
+  }
+
+  /** Present iff {@link setPlanCloseIssuePort} was called. */
+  private planCloseIssuePort: PlanCloseIssuePort | undefined;
+
+  /**
+   * Upgrades a `failed` review currency to `accepted` when every failed dimension has an OPEN GitHub issue linked to
+   * the plan (BR-1372). Anything else (no port, no links, an unreachable GitHub) leaves it `failed`: the close is
+   * refused, never waved through on a read that did not happen.
+   */
+  private async acceptKnownDefects(
+    planId: string,
+    currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
+  ): Promise<MilestoneReviewCurrency> {
+    const port = this.planCloseIssuePort;
+    if (port === undefined) return currency;
+    const links = await this.store.findLinks(planId, "out");
+    if (!links.ok) return currency;
+    const linked: { number: number; repoId?: number }[] = [];
+    for (const link of links.value) {
+      if (link.link_type !== "resolves" || link.from_id !== planId) continue;
+      const target = await this.store.find(link.to_id);
+      if (!target.ok || target.value === null || target.value.deleted_at !== null) continue;
+      const ref = readGithubIssueRef(target.value.extra);
+      if (ref !== undefined) linked.push({ number: ref.issueNumber, ...(ref.repo_id !== undefined ? { repoId: ref.repo_id } : {}) });
+    }
+    if (linked.length === 0) return currency;
+    const listing = await port.listOpenIssues();
+    if (!listing.ok) return currency;
+    const coverage = coverFailedDimensions(currency.failed, linked, listing.value);
+    if (!coverage.accepted) return currency;
+    return { state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.issues };
   }
 
   /** Present iff {@link setArchiveIssueClosePort} was called. */
@@ -3530,13 +3579,30 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (!bundleResult.ok) return bundleResult;
       const reviewDocsResult = await this.listMilestoneReviewDocs(existing.id);
       if (!reviewDocsResult.ok) return reviewDocsResult;
-      planCloseCtx = {
-        ...planCloseCtx,
-        milestoneReview: assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value),
-      };
+      const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value);
+      const milestoneReview =
+        measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview) : measuredReview;
+      planCloseCtx = { ...planCloseCtx, milestoneReview };
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
       if (!gateResult.ok) return gateResult;
+      if (milestoneReview.state === "accepted") {
+        const issueList = milestoneReview.issues.map((n) => `#${String(n)}`).join(", ");
+        const recorded = await this.appendAudit({
+          action: "plan-close-accepted-with-known-defects",
+          sessionId: existing.id,
+          docId: existing.id,
+          details: {
+            message: `accepted with known defects: ${issueList}`,
+            review: milestoneReview.reviewSlug,
+            failed_dimensions: [...milestoneReview.failed],
+            issues: [...milestoneReview.issues],
+            rule: "BR-1372",
+          },
+          ...(opts?.by !== undefined ? { by: opts.by } : {}),
+        });
+        if (!recorded.ok) return recorded;
+      }
     }
 
     // Landing of the plan's spec's rule change set (D3 of spec-a-spec-carries-its-rule-changes-the-baseline-

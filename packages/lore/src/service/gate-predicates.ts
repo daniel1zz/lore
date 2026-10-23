@@ -1076,6 +1076,7 @@ export const MILESTONE_REVIEW_FIELD = "milestone-review";
 export function milestoneReviewCurrent(currency: Exclude<MilestoneReviewCurrency, { state: "no-tasks" }>): PredicateResult {
   switch (currency.state) {
     case "pass":
+    case "accepted":
       return { ok: true };
     case "absent":
       return { ok: false, reason: MILESTONE_REVIEW_MISSING_REASON, field: MILESTONE_REVIEW_FIELD, rule: MILESTONE_REVIEW_RULE };

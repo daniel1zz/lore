@@ -22,12 +22,22 @@
  * AI default (SPEC-026 §3 D5): assess has no non-AI mode. It runs with AI on every surface by default; only an
  * EXPLICIT `ai.default_per_surface.<surface> = false` config override requires `--ai`. `--no-ai` is always exit 2.
  *
+ * Inputs measured once per batch (Part D): before the first review `assess` runs `bun run check:plan-close` and
+ * `bun run test` ONCE on main's HEAD in a throwaway worktree (`assess-suite-runner.ts`) and hands that one result to
+ * every plan's regression dimension. `--file-issues` then files one GitHub issue per failed dimension (title
+ * `<plan>: <dimension>`) through the report-issue path and links each to its plan (`assess-file-issues.ts`); plan close
+ * accepts a failing review when every failed dimension has such an OPEN linked issue ("accepted with known defects").
+ *
  * The logic lives in `MilestoneReviewService`; this file resolves flags, derives each plan's diff, renders rows.
  */
 
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatErrorFor, formatTable } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable, resolveActor } from "../utils.js";
+import { classifyFeedbackUpstream, resolveConsumerCorpusRoot, type GithubUpstreamCfg } from "../report-issue-wiring.js";
+import { fileDimensionIssues, type FailedDimensionFinding } from "../assess-file-issues.js";
+import { createGitSuiteRunner } from "../assess-suite-runner.js";
+import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { deriveCommitSetForPlan, describeCommitCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
@@ -107,6 +117,11 @@ export default defineLoreCommand({
       type: "string",
       description: 'Select plans by filters instead of ids: "status=approved,tag=...,older-than=30d,open-tasks=0" (plans only)',
     },
+    "file-issues": {
+      type: "boolean",
+      description:
+        "File one GitHub issue per failed dimension (title: plan + dimension, body: the finding) through the report-issue path and link each to its plan",
+    },
     json: { type: "boolean", description: "Output the rows as JSON" },
     ai: {
       type: "boolean",
@@ -136,8 +151,23 @@ export default defineLoreCommand({
       return 2;
     }
 
-    const { app } = loadLoreApp({ inv });
+    const { app, config } = loadLoreApp({ inv });
     try {
+      const fileIssues = args["file-issues"] === true;
+      let issueUpstream: GithubUpstreamCfg | undefined;
+      if (fileIssues) {
+        // reason: refused BEFORE any judge call — a batch that cannot file its issues must not spend the reviews first.
+        const classification = classifyFeedbackUpstream(config);
+        if (classification.kind === "retired") {
+          inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+          return exitCode(classification.error);
+        }
+        if (classification.kind === "unconfigured") {
+          inv.io.stderr.write("Error: --file-issues needs a GitHub `feedback.upstream.repo` in .lore/config.yaml; none is configured.\n");
+          return 4;
+        }
+        issueUpstream = classification.cfg;
+      }
       if (!hasExplicitAi && isAssessAiBraked(app.resolveAiDefault(undefined))) {
         inv.io.stderr.write(
           "Error: AI is required for `lore assess` but is disabled for this surface by " +
@@ -154,7 +184,16 @@ export default defineLoreCommand({
         return refs.error.code === "VALIDATION_ERROR" ? 2 : exitCode(refs.error);
       }
 
+      // reason: Part D — the plan-close chain and the full suite run ONCE for the whole batch on main's HEAD (in a
+      // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
+      let suite: SuiteRun | undefined;
+      if (refs.value.length > 0) {
+        const measured = await createGitSuiteRunner(inv.cwd, inv.env).run();
+        suite = measured.ok ? measured.value : { status: "not_measured", reason: formatErrorFor(inv, measured.error) };
+      }
+
       const rows: AssessRow[] = [];
+      const findings: FailedDimensionFinding[] = [];
       for (const ref of refs.value) {
         const bundle = await app.corpusService.getPlanBundle(ref);
         if (!bundle.ok) {
@@ -173,12 +212,43 @@ export default defineLoreCommand({
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
           diffSource: describeDiffSource(diffSource),
           maxDiffChars: app.aiProviderService.assessMaxDiffChars,
+          ...(suite !== undefined ? { suite } : {}),
         });
         rows.push(reviewed.ok ? passFailRow(ref, reviewed.value.doc.slug, reviewed.value.review) : errorRow(ref, reviewed.error));
+        if (reviewed.ok) {
+          for (const dimension of failedDimensions(reviewed.value.review.dimensions)) {
+            const judgment = reviewed.value.review.dimensions[dimension];
+            findings.push({ plan: ref, dimension, reason: judgment.reason, reference: judgment.reference, reviewSlug: reviewed.value.doc.slug });
+          }
+        }
       }
 
+      let fileError: LoreError | undefined;
+      const filedByPlan = new Map<string, number[]>();
+      if (issueUpstream !== undefined && findings.length > 0) {
+        const filed = await fileDimensionIssues(
+          findings,
+          issueUpstream,
+          {
+            consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
+            corpusService: app.corpusService,
+            actor: resolveActor(inv),
+            home: inv.paths.home,
+            env: inv.env,
+          },
+          app.corpusService,
+          resolveActor(inv),
+        );
+        if (filed.ok) {
+          for (const issue of filed.value) filedByPlan.set(issue.plan, [...(filedByPlan.get(issue.plan) ?? []), issue.number]);
+        } else {
+          fileError = filed.error;
+        }
+      }
+      const outRows = rows.map((r) => (filedByPlan.has(r.plan) ? { ...r, filed_issues: filedByPlan.get(r.plan) } : r));
+
       if (args.json === true) {
-        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows: outRows } }, null, 2));
       } else if (rows.length === 0) {
         printLine(inv.io.stdout, "No plans selected.");
       } else {
@@ -186,9 +256,18 @@ export default defineLoreCommand({
           inv.io.stdout,
           formatTable(
             ["RESULT", "PLAN", "REVIEW", "REASON"],
-            rows.map((r) => [r.outcome, r.plan, r.review ?? "-", r.reason]),
+            outRows.map((r) => [
+              r.outcome,
+              r.plan,
+              r.review ?? "-",
+              "filed_issues" in r && r.filed_issues !== undefined ? `${r.reason}; issues ${r.filed_issues.map((n) => `#${String(n)}`).join(", ")}` : r.reason,
+            ]),
           ),
         );
+      }
+      if (fileError !== undefined) {
+        inv.io.stderr.write(formatErrorFor(inv, fileError) + "\n");
+        return 1;
       }
       return rows.some((r) => r.outcome !== "PASS") ? 1 : 0;
     } finally {

@@ -18,7 +18,7 @@
 
 import { warnSinkOf, type WarnSink } from "./service/warn-sink.js";
 import { Database } from "bun:sqlite";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
@@ -142,6 +142,7 @@ import { ResolutionProjector } from "./service/resolution-projector.js";
 // this is no longer "optional here, absent in production").
 import { GhResolutionLabelPort } from "./service/resolution-label-port.js";
 import { GhRunner, createNodeGhExecFile } from "./service/gh-runner.js";
+import { GitHubIntakePort } from "./service/github-intake-port.js";
 import { GhIssueCloser } from "./service/issue-closer-port.js";
 import { IssueCloseOnArchive } from "./service/issue-close-on-archive.js";
 import { BulkLifecycleService } from "./service/bulk-lifecycle-service.js";
@@ -1667,6 +1668,30 @@ function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreCo
 }
 
 /**
+ * Hands plan close the live OPEN-issue reader (Part D, accepted with known defects), only for a GitHub-repo
+ * `feedback.upstream` (never the vendor-consent intake repository).
+ */
+function wirePlanCloseIssues(app: App, config: LoreConfig | undefined, ambient: AppAmbient, dbPath: string): void {
+  const upstream = resolveFeedbackUpstreamCfg(config);
+  if (upstream === undefined || !isGithubUpstreamCfg(upstream)) return;
+  const repo = upstream.repo;
+  app.corpusService.setPlanCloseIssuePort({
+    listOpenIssues: async () => {
+      const runner = new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env });
+      const port = new GitHubIntakePort({ runner, repo, receiptsPath: join(dirname(dbPath), "issue-receipts-v2.jsonl") });
+      const verified = await port.verifyTarget();
+      if (!verified.ok) return verified;
+      const listed = await port.listIssues();
+      if (!listed.ok) return listed;
+      return ok({
+        repoId: verified.value.id,
+        open: listed.value.filter((issue) => issue.state === "open").map((issue) => ({ number: issue.number, title: issue.title })),
+      });
+    },
+  });
+}
+
+/**
  * Opens the embedded replica for a sync-enabled corpus. The one production implementation is
  * {@link openTursoReplicaStore}; a test installs a double through {@link installReplicaStoreFactory}.
  * Throws when the replica cannot open (remote unreachable, bad credentials): `createApp` turns the throw into a
@@ -1959,6 +1984,7 @@ function createAppUnscoped(
       buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
+    wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
   }
 
@@ -2071,6 +2097,7 @@ function createAppUnscoped(
         buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
+    wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };
   } catch (e) {
     telemetry.close();

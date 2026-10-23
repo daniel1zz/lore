@@ -21,7 +21,7 @@ import { truncateDiffByFile } from "./diff-truncation.js";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
 
 /** Stamped on every stored review (`prompt_version`). */
-export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-1";
+export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-2";
 
 /** One task's evidence row as the judge sees it. */
 export interface MilestoneEvidenceLine {
@@ -54,6 +54,8 @@ export interface MilestoneReviewPromptInput {
   /** Human-readable account of how the diff was obtained (or why it is absent). */
   readonly diffSource: string;
   readonly maxDiffChars: number;
+  /** The batch's full-suite run as it concerns this plan (`renderSuiteSection`); absent = a bare prompt build. */
+  readonly suiteSection?: string;
 }
 
 const DIMENSION_GUIDE: Readonly<Record<(typeof MILESTONE_DIMENSIONS)[number], string>> = {
@@ -62,14 +64,17 @@ const DIMENSION_GUIDE: Readonly<Record<(typeof MILESTONE_DIMENSIONS)[number], st
     "that no trusted runner produced is a self-report. List any milestone decisions below here: each is an override " +
     "that was applied and is waiting for this review.",
   spec_conformance: "Does the landed work do what the spec and plan say, no less and no more?",
-  regression: "Did the change break behaviour that existed before it? Name the behaviour at risk and what covers it.",
+  regression: "Did the change break behaviour that existed before it? Name the behaviour at risk and what covers it. Read the " +
+    "full-suite section below: it is one run on main for the whole batch; a failing file counts against this plan only " +
+    "when the section attributes it to this plan.",
   design_necessity:
     "Is each technical choice needed? For EVERY technical choice name the external product or practice it follows in " +
     "`reference` (for example: Kayenta canary analysis, Postgres MVCC, the Google code review guide). A choice with no " +
     "external reference you can name is a fail.",
   snapshot_accuracy:
-    "Do the documents describe what the code now does? Read the cited-rule state below: a contradicted or stale rule " +
-    "means a document and the code disagree.",
+    "Do the documents describe what the code now does? Read the cited-rule state below: fail ONLY for a rule whose " +
+    "state is stale (the document and the code disagree). An unknown rule (no code anchor, dirty tree, no recorded " +
+    "commit) is na, never a fail.",
   concurrency_safety: "Can two sessions, writers or processes doing this at once corrupt state or lose a write?",
   security: "Does the change open a path for untrusted input, leaked credentials or an unchecked privilege?",
 };
@@ -144,6 +149,9 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
     "# Cited rule state",
     rules,
+    "",
+    "# Full-suite run on main (regression input)",
+    input.suiteSection ?? "No full-suite run was supplied for this review.",
     "",
     "# Milestone decisions awaiting this review",
     decisions,
