@@ -38,8 +38,8 @@ import type { IssueFilingService } from "./issue-filing-service.js";
 import { fingerprintTag, rootCauseOf, type FailedFinding } from "./root-cause-fingerprint.js";
 import { leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
 
-/** The audit action of an errored batch attempt: not a review, never counted toward once-per-fingerprint. */
-export const BATCH_ERROR_AUDIT_ACTION = "milestone-batch-error";
+// reason: the constant lives in the pure acceptance view (bootstrap and checks stats read the same rows); re-exported so existing importers keep one name.
+export { BATCH_ERROR_AUDIT_ACTION } from "./plan-acceptance-view.js";
 
 /** What a complete plan needs next. */
 export type PlanReviewNeed =
@@ -101,6 +101,15 @@ export interface ReviewTriggerDeps {
 export interface TriggerEntry {
   readonly plan: string;
   readonly need: Exclude<PlanReviewNeed, "none" | "awaiting-owner">;
+}
+
+/** A complete, unarchived plan and what it needs next. */
+export interface CompletePlanEntry {
+  readonly plan: string;
+  readonly planId: string;
+  readonly need: Exclude<PlanReviewNeed, "none">;
+  /** The stored `progress.at` of the write that made the plan complete. */
+  readonly completeAt: string;
 }
 
 /** What the landing's start did. */
@@ -167,11 +176,27 @@ export class ReviewTriggerService {
    * @returns entries in plan order; awaiting-owner plans (decision still pending) are excluded
    */
   async computeTriggerSet(): Promise<Result<TriggerEntry[], LoreError>> {
+    const complete = await this.listCompletePlans();
+    if (!complete.ok) return complete;
+    const set: TriggerEntry[] = [];
+    for (const entry of complete.value) {
+      if (entry.need !== "awaiting-owner") set.push({ plan: entry.plan, need: entry.need });
+    }
+    return ok(set);
+  }
+
+  /**
+   * Every complete, unarchived plan with what it needs next (awaiting-owner included) and when it became complete.
+   * The ONE classification the trigger set, bootstrap's complete line and `lore checks stats` all read.
+   *
+   * @returns entries in plan order
+   */
+  async listCompletePlans(): Promise<Result<CompletePlanEntry[], LoreError>> {
     const plans = await this.deps.listPlans();
     if (!plans.ok) return plans;
     const pending = await this.deps.pendingDecisionSubjects();
     if (!pending.ok) return pending;
-    const set: TriggerEntry[] = [];
+    const set: CompletePlanEntry[] = [];
     for (const plan of plans.value) {
       const progress = readStoredPlanProgress(plan.extra);
       if (progress === null || progress.state !== "complete" || plan.status === "archived" || plan.status === "deprecated") continue;
@@ -180,7 +205,7 @@ export class ReviewTriggerService {
       const facts = await planFactsOf(this.deps, bundle.value, progress.state, pending.value);
       if (!facts.ok) return facts;
       const need = classifyPlan(facts.value);
-      if (need !== "none" && need !== "awaiting-owner") set.push({ plan: plan.slug, need });
+      if (need !== "none") set.push({ plan: plan.slug, planId: plan.id, need, completeAt: progress.at });
     }
     return ok(set);
   }

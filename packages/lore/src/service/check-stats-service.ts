@@ -26,7 +26,9 @@
  *   adr-ai-decision-standard-four-checks-references-from-excellent (observation window).
  */
 import { appendFileSync, existsSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
-import { err, isDenyCapableHookCheck, ok, storeError, validationError, type DocRecord, type LoreError, type Result } from "@lore/core";
+import { err, isDenyCapableHookCheck, ok, storeError, validationError, type DocId, type DocRecord, type LoreError, type Result } from "@lore/core";
+import { readStoredPlanProgress } from "../store/plan-progress.js";
+import { BATCH_ERROR_AUDIT_ACTION, findAnomalies, parseBatchError, type BatchErrorView, type CompletePlanView } from "./plan-acceptance-view.js";
 import { join, sep } from "node:path";
 import { z } from "zod";
 import type { CheckOutcomeInput, CheckOutcomeStat, StoreInterface } from "../store/store-interface.js";
@@ -85,6 +87,30 @@ export interface PlanQualityLine {
 
 export interface QualityReport {
   readonly plans: readonly PlanQualityLine[];
+}
+
+/** Reads the complete, unarchived plans (id, slug, complete time, awaiting-owner flag); bound by the adapter to the review trigger service. */
+export type ListCompletePlans = () => Promise<Result<readonly Omit<CompletePlanView, "lastError">[], LoreError>>;
+
+/** One accepted plan's line in `lore checks stats`. */
+export interface AcceptedPlanLine {
+  readonly plan_slug: string;
+  readonly complete_at: string;
+  readonly accepted_at: string;
+  readonly complete_to_accepted_ms: number;
+}
+
+/** A plan that stayed complete and unaccepted for over 24 h, not waiting on an unresolved owner decision. */
+export interface AcceptanceAnomaly {
+  readonly plan_slug: string;
+  readonly complete_at: string;
+  readonly complete_for_ms: number;
+  readonly last_error?: BatchErrorView;
+}
+
+export interface AcceptanceReport {
+  readonly accepted: readonly AcceptedPlanLine[];
+  readonly anomalies: readonly AcceptanceAnomaly[];
 }
 
 /** What one ingest of the hook outcomes file did. */
@@ -218,6 +244,64 @@ export class CheckStatsService {
       lines.push(line.value);
     }
     return ok({ plans: lines.sort((a, b) => a.plan_slug.localeCompare(b.plan_slug)) });
+  }
+
+  /**
+   * The complete, unarchived plans with each one's last review-batch error. Bootstrap's complete line and the
+   * anomaly list both read this one view.
+   *
+   * @param listComplete - the review trigger service's classification, bound by the adapter (a failure is returned as is)
+   */
+  async completePlanViews(listComplete: ListCompletePlans): Promise<Result<CompletePlanView[], LoreError>> {
+    const complete = await listComplete();
+    if (!complete.ok) return complete;
+    const views: CompletePlanView[] = [];
+    for (const entry of complete.value) {
+      const audit = await this.deps.store.queryAudit({ doc_id: entry.planId as DocId, action: BATCH_ERROR_AUDIT_ACTION });
+      if (!audit.ok) return audit;
+      const lastError = audit.value
+        .map(parseBatchError)
+        .filter((e): e is BatchErrorView => e !== undefined)
+        .sort((a, b) => b.at.localeCompare(a.at))[0];
+      views.push({ ...entry, ...(lastError !== undefined ? { lastError } : {}) });
+    }
+    return ok(views);
+  }
+
+  /**
+   * Plan acceptance (BR-1379 "Self-measurement"): per accepted (archived, once complete) plan the time from complete to
+   * accepted, and the anomalies (complete, not accepted, not awaiting an unresolved owner decision, over 24 h).
+   * Accepted time is the plan's archive write (the batch's close); complete time is the plan's stored `progress.at`.
+   *
+   * @param listComplete - see {@link completePlanViews}
+   */
+  async acceptance(listComplete: ListCompletePlans): Promise<Result<AcceptanceReport, LoreError>> {
+    const nowMs = Date.parse(this.deps.now());
+    const views = await this.completePlanViews(listComplete);
+    if (!views.ok) return views;
+    const archived = await this.deps.store.findMany({ type: "plan", status: "archived" });
+    if (!archived.ok) return archived;
+    const accepted: AcceptedPlanLine[] = [];
+    for (const plan of archived.value) {
+      const progress = readStoredPlanProgress(plan.extra);
+      if (progress === null || progress.state !== "complete") continue;
+      const closed = await this.closeTimeOf(plan);
+      if (!closed.ok) return closed;
+      accepted.push({
+        plan_slug: plan.slug,
+        complete_at: progress.at,
+        accepted_at: closed.value.at,
+        complete_to_accepted_ms: Date.parse(closed.value.at) - Date.parse(progress.at),
+      });
+    }
+    accepted.sort((a, b) => a.plan_slug.localeCompare(b.plan_slug));
+    const anomalies = findAnomalies(views.value, nowMs).map((p) => ({
+      plan_slug: p.plan,
+      complete_at: p.completeAt,
+      complete_for_ms: nowMs - Date.parse(p.completeAt),
+      ...(p.lastError !== undefined ? { last_error: p.lastError } : {}),
+    }));
+    return ok({ accepted, anomalies });
   }
 
   private async closeTimeOf(plan: DocRecord): Promise<Result<{ at: string; source: "audit" | "updated_at" }, LoreError>> {

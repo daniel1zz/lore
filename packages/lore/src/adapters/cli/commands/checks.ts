@@ -10,6 +10,9 @@
  * `--quality` reads the project's issue tracker through `feedback.upstream`; an unconfigured or retired upstream is
  * a refusal, never "0 escaped defects".
  *
+ * The plain run also prints the plan acceptance section (BR-1379): each accepted plan's time from complete to accepted,
+ * and the anomalies (complete, not accepted, not awaiting an unresolved owner decision, over 24 h) with their last error.
+ *
  * Exit codes: 0 success; non-zero via `exitCode()` on a store/validation error.
  */
 import { defineLoreCommand } from "../cli-exit.js";
@@ -19,6 +22,8 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { formatAge } from "../../../service/plan-acceptance-view.js";
+import { buildCompletePlanLister, buildReviewTriggerService, refuseSpawnForRead } from "../review-batch-wiring.js";
 import { classifyFeedbackUpstream, resolveGithubIssueListing } from "../report-issue-wiring.js";
 
 export default defineLoreCommand({
@@ -86,8 +91,16 @@ export default defineLoreCommand({
 
           const stats = await service.stats();
           if (!stats.ok) return fail(stats.error);
+          // BR-1379 self-measurement: time from complete to accepted per plan, and the over-24h anomalies.
+          const trigger = buildReviewTriggerService(app, `checks:stats:${String(process.pid)}`, refuseSpawnForRead);
+          if (trigger === undefined) {
+            inv.io.stderr.write("Error: this composition cannot classify complete plans (no lease store or decision reader wired).\n");
+            return 1;
+          }
+          const acceptance = await service.acceptance(buildCompletePlanLister(trigger));
+          if (!acceptance.ok) return fail(acceptance.error);
           if (args.json === true) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: stats.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ...stats.value, acceptance: acceptance.value } }, null, 2));
             return 0;
           }
           // reason: an informational check cannot deny, so its denial columns would read as "never caught" when the truth is "cannot catch".
@@ -102,6 +115,14 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, rows.length > 0 ? formatTable(["Check", "Runs", "Denials", "Errors", "Last denial"], rows) : "  (no outcomes recorded yet)");
           printLine(inv.io.stdout, "\nRemoval candidates (checks that can deny: >= 30 days observed, >= 50 runs, 0 denials):");
           printLine(inv.io.stdout, stats.value.removal_candidates.length > 0 ? stats.value.removal_candidates.map((id) => `  - ${id}`).join("\n") : "  (none)");
+          printLine(inv.io.stdout, "\nPlan acceptance (time from complete to accepted):");
+          const accepted = acceptance.value.accepted.map((a) => [a.plan_slug, a.complete_at, a.accepted_at, formatAge(a.complete_to_accepted_ms)]);
+          printLine(inv.io.stdout, accepted.length > 0 ? formatTable(["Plan", "Complete", "Accepted", "Took"], accepted) : "  (no accepted plans)");
+          printLine(inv.io.stdout, "\nAnomalies (complete, not accepted, not awaiting owner, over 24 h):");
+          const anomalyLines = acceptance.value.anomalies.map(
+            (a) => `  - ${a.plan_slug}: complete for ${formatAge(a.complete_for_ms)}; last error: ${a.last_error === undefined ? "none recorded" : `${a.last_error.stage}: ${a.last_error.message}`}`,
+          );
+          printLine(inv.io.stdout, anomalyLines.length > 0 ? anomalyLines.join("\n") : "  (none)");
           return 0;
         } finally {
           app.close();

@@ -51,6 +51,8 @@ import { warnSinkOf } from "../../../service/warn-sink.js";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, relativeTime } from "../utils.js";
+import { formatCompleteLines, summarizeComplete, type CompleteSummary } from "../../../service/plan-acceptance-view.js";
+import { buildCompletePlanLister, buildReviewTriggerService, refuseSpawnForRead } from "../review-batch-wiring.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
@@ -72,6 +74,8 @@ const NO_KNOWN_PARTY_FILTER = "(no known party)";
  */
 type BootstrapReportWithStaleness = BootstrapReport & {
   corpus: BootstrapReport["corpus"] & { open_stale_candidates: number; code_anchor_specs: number };
+  /** BR-1379: the complete-plans summary (counted once by `run()`), and the slugs kept out of the named plan list. */
+  plan_acceptance: { summary: CompleteSummary; complete_slugs: string[] };
 };
 
 /**
@@ -103,9 +107,12 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
 
   // reason: BR-1371 — the report is bounded (BOOTSTRAP_MAX_BYTES). Idle plans (nothing ready, nothing claimed) print
   // as a count and only the first BOOTSTRAP_MAX_PLANS busy plans are named; the rest are one pointer line.
-  const busyPlans = report.active_plans.filter((p) => p.task_counts.ready > 0 || p.task_counts.claimed > 0);
-  const idleCount = report.active_plans.length - busyPlans.length;
-  lines.push(`Active plans (${report.active_plans.length}; ${idleCount} idle):`);
+  // reason: BR-1379 — only in-progress plans are listed; a complete plan is summarised by the one `complete N (...)` line below.
+  const completeSlugs = new Set(report.plan_acceptance.complete_slugs);
+  const inProgressPlans = report.active_plans.filter((p) => !completeSlugs.has(p.slug));
+  const busyPlans = inProgressPlans.filter((p) => p.task_counts.ready > 0 || p.task_counts.claimed > 0);
+  const idleCount = inProgressPlans.length - busyPlans.length;
+  lines.push(`Active plans (${inProgressPlans.length}; ${idleCount} idle):`);
   if (busyPlans.length > 0) {
     for (const plan of busyPlans.slice(0, BOOTSTRAP_MAX_PLANS)) {
       lines.push(
@@ -119,6 +126,7 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   } else {
     lines.push("  (none busy)");
   }
+  for (const line of formatCompleteLines(report.plan_acceptance.summary)) lines.push(line);
   lines.push("");
 
   lines.push(`Pending reviews: ${report.pending_reviews.count} (lore pending)`);
@@ -351,8 +359,21 @@ export default defineLoreCommand({
       // `config` loadLoreApp() already parsed. Absent (not null) when nothing to report.
       const memoryFileHealth = computeMemoryFileHealth(inv.cwd, config);
 
+      // BR-1379 — the complete-plans summary, from the SAME classification the landing's trigger set uses.
+      const trigger = buildReviewTriggerService(app, `${by}:bootstrap:${String(process.pid)}`, refuseSpawnForRead);
+      if (trigger === undefined || app.checkStatsService === undefined) {
+        inv.io.stderr.write("Error: this composition cannot summarise complete plans (no lease store, decision reader or check stats service wired).\n");
+        return 1;
+      }
+      const completeViews = await app.checkStatsService.completePlanViews(buildCompletePlanLister(trigger));
+      if (!completeViews.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, completeViews.error) + "\n");
+        return exitCode(completeViews.error);
+      }
+
       const reportWithStaleness: BootstrapReportWithStaleness = {
         ...result.value,
+        plan_acceptance: { summary: summarizeComplete(completeViews.value, Date.now()), complete_slugs: completeViews.value.map((p) => p.plan) },
         ...(memoryFileHealth === undefined ? {} : { memory_file_health: memoryFileHealth }),
         corpus: {
           ...result.value.corpus,

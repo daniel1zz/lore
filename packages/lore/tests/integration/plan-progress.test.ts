@@ -36,6 +36,11 @@ import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
 import { ReviewBatchLease, REVIEW_BATCH_LEASE_NAME, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts, type ReviewTriggerDeps } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
+import { CheckStatsService } from "../../src/service/check-stats-service.js";
+import { BATCH_ERROR_AUDIT_ACTION, formatCompleteLines, summarizeComplete } from "../../src/service/plan-acceptance-view.js";
+import { retirementSubjectId } from "../../src/service/retired-ac-service.js";
+import { buildCompletePlanLister } from "../../src/adapters/cli/review-batch-wiring.js";
+import { BOOTSTRAP_MAX_BYTES, formatBootstrapReport } from "../../src/adapters/cli/commands/bootstrap.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
@@ -1082,5 +1087,110 @@ describe.each(KINDS)("lease and retry — the store lease verbs, %s store", (kin
     expect(await fx.store.readLease(name)).toMatchObject({ ok: true, value: { holder: "b" } });
     expect(await fx.store.releaseLease(name, "b")).toEqual({ ok: true, value: undefined });
     expect(await fx.store.readLease(name)).toEqual({ ok: true, value: null });
+  });
+});
+
+describe("visible and measured — bootstrap complete line, checks stats time-to-accepted and anomalies (AC-PCR-6)", () => {
+  const nowIso = (offsetMs = 0): string => new Date(T0 + offsetMs).toISOString();
+  const HOUR = 3_600_000;
+
+  function planAt(world: World, slug: string, completeAtMs: number, state: "complete" | "in-progress" = "complete"): WorldPlan {
+    const plan = world.add(makeWorldPlan(slug, { progress: state }));
+    (plan.bundle.plan.extra as Record<string, unknown>)["progress"] = { state, open: state === "complete" ? 0 : 1, total: 1, at: nowIso(completeAtMs) };
+    return plan;
+  }
+
+  it("HAPPY: the bootstrap line counts complete plans, awaiting review and awaiting owner, and the oldest age; in-progress plans are not in it", async () => {
+    const world = new World();
+    planAt(world, "p-review-old", -50 * HOUR);
+    planAt(world, "p-review-new", -2 * HOUR);
+    const owner = planAt(world, "p-owner", -5 * HOUR);
+    planAt(world, "p-working", -1 * HOUR, "in-progress");
+    owner.retired = true;
+    // a current review listing retired ACs plus a pending decision makes the plan awaiting-owner
+    await world.judge("p-owner");
+    const lister = buildCompletePlanLister(new ReviewTriggerService(world.triggerDeps({ pending: new Set([retirementSubjectId("p-owner")]), leaseLive: false })));
+    const service = new CheckStatsService({ store: world.store, now: () => nowIso() });
+    const views = await service.completePlanViews(lister);
+    if (!views.ok) throw new Error(JSON.stringify(views.error));
+    const summary = summarizeComplete(views.value, T0);
+    expect(summary).toMatchObject({ complete: 3, awaitingReview: 2, awaitingOwner: 1, oldestAgeMs: 50 * HOUR });
+    expect(formatCompleteLines(summary)).toEqual(["complete 3 (awaiting review 2, awaiting owner 1, oldest 2d)"]);
+    expect(views.value.map((v) => v.plan)).not.toContain("p-working");
+  });
+
+  it("HAPPY: formatBootstrapReport names in-progress plans only and prints exactly one complete line within 3 KB", () => {
+    const entry = (slug: string, ready: number) => ({ slug, title: slug, task_counts: { ready, claimed: 0, done: 1 }, last_activity_at: nowIso() });
+    const summary = summarizeComplete([{ plan: "p-done", planId: "i", completeAt: nowIso(-3 * HOUR), awaitingOwner: false }], T0);
+    const text = formatBootstrapReport(
+      { root: null, architecture: null, active_plans: [entry("p-working", 2), entry("p-done", 0)], pending_reviews: { count: 0, slugs: [] }, my_claims: [], armed_gates: [], latest_handoffs: [], resume_hint: null, corpus: { total_docs: 1, last_updated: "x", open_stale_candidates: 0, code_anchor_specs: 0 }, plan_acceptance: { summary, complete_slugs: ["p-done"] } } as never,
+      "agent:x",
+    );
+    expect(text).toContain("p-working");
+    expect(text).not.toContain("- p-done");
+    expect(text.split("\n").filter((l) => l.startsWith("complete "))).toEqual(["complete 1 (awaiting review 1, awaiting owner 0, oldest 3h)"]);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(BOOTSTRAP_MAX_BYTES);
+  });
+
+  it("BOUNDARY: no complete plan prints `complete 0 (..., oldest -)`", () => {
+    expect(formatCompleteLines(summarizeComplete([], T0))).toEqual(["complete 0 (awaiting review 0, awaiting owner 0, oldest -)"]);
+  });
+
+  it("ERROR: a batch error shows in the bootstrap summary as a separate line and is the plan's last error", async () => {
+    const store = new InMemoryStore();
+    const service = new CheckStatsService({ store, now: () => nowIso() });
+    const stored = await seed(store, rawDoc("plan", "Errored", { progress: { state: "complete", open: 0, total: 1, at: nowIso(-3 * HOUR) } }, "active"));
+    for (const [at, message] of [[-2 * HOUR, "first failure"], [-1 * HOUR, "second failure"]] as const) {
+      await store.appendAuditEntry({ timestamp: nowIso(at), actor: "t", session_id: stored.id, action: BATCH_ERROR_AUDIT_ACTION, doc_id: stored.id, details: { plan: stored.slug, fingerprint: "f", stage: "review", message, at: nowIso(at) } });
+    }
+    const views = await service.completePlanViews(async () => ok([{ plan: stored.slug, planId: stored.id, completeAt: nowIso(-3 * HOUR), awaitingOwner: false }]));
+    if (!views.ok) throw new Error(JSON.stringify(views.error));
+    expect(views.value[0]?.lastError?.message).toBe("second failure");
+    const lines = formatCompleteLines(summarizeComplete(views.value, T0));
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("review: second failure");
+  });
+
+  it("HAPPY: checks stats lists time from complete to accepted for an archived plan", async () => {
+    const store = new InMemoryStore();
+    const service = new CheckStatsService({ store, now: () => nowIso() });
+    const plan = await seed(store, rawDoc("plan", "Accepted", { progress: { state: "complete", open: 0, total: 1, at: nowIso(-10 * HOUR) } }, "active"));
+    const archivedAt = nowIso(-4 * HOUR);
+    const moved = await store.updateWithProvenance(
+      plan.id,
+      { status: "archived", version: 2, updated_at: archivedAt },
+      { expected_version: 1 },
+      { doc_id: plan.id, version: 2, content: "", extra: plan.extra, status: "archived", title: plan.title, action: "update", created_at: archivedAt, created_by: "t", slug: plan.slug },
+      { timestamp: archivedAt, actor: "t", session_id: plan.id, action: "update", doc_id: plan.id, details: { version: 2, patch: { status: "archived" } } },
+    );
+    expect(moved.ok).toBe(true);
+    const report = await service.acceptance(async () => ok([]));
+    if (!report.ok) throw new Error(JSON.stringify(report.error));
+    expect(report.value.accepted).toEqual([{ plan_slug: plan.slug, complete_at: nowIso(-10 * HOUR), accepted_at: archivedAt, complete_to_accepted_ms: 6 * HOUR }]);
+    expect(report.value.anomalies).toEqual([]);
+  });
+
+  it("STATE: complete over 24 h is an anomaly with its last error; under or exactly 24 h and awaiting-owner are not", async () => {
+    const store = new InMemoryStore();
+    const service = new CheckStatsService({ store, now: () => nowIso() });
+    const stale = await seed(store, rawDoc("plan", "Stale", {}, "active"));
+    await store.appendAuditEntry({ timestamp: nowIso(-HOUR), actor: "t", session_id: stale.id, action: BATCH_ERROR_AUDIT_ACTION, doc_id: stale.id, details: { plan: stale.slug, fingerprint: "f", stage: "filing", message: "no tracker", at: nowIso(-HOUR) } });
+    const entries = [
+      { plan: stale.slug, planId: stale.id, completeAt: nowIso(-25 * HOUR), awaitingOwner: false },
+      { plan: "fresh", planId: "id-fresh", completeAt: nowIso(-23 * HOUR), awaitingOwner: false },
+      { plan: "waiting-owner", planId: "id-wo", completeAt: nowIso(-90 * HOUR), awaitingOwner: true },
+      { plan: "exactly-24h", planId: "id-24", completeAt: nowIso(-24 * HOUR), awaitingOwner: false },
+    ];
+    const report = await service.acceptance(async () => ok(entries));
+    if (!report.ok) throw new Error(JSON.stringify(report.error));
+    expect(report.value.anomalies).toEqual([
+      { plan_slug: stale.slug, complete_at: nowIso(-25 * HOUR), complete_for_ms: 25 * HOUR, last_error: { plan: stale.slug, stage: "filing", message: "no tracker", at: nowIso(-HOUR) } },
+    ]);
+  });
+
+  it("NEGATIVE: a failing complete-plan reader is returned, never read as no anomalies", async () => {
+    const service = new CheckStatsService({ store: new InMemoryStore(), now: () => nowIso() });
+    const report = await service.acceptance(async () => err<LoreError>({ code: "STORE_ERROR", message: "reader down" }));
+    expect(report.ok).toBe(false);
   });
 });

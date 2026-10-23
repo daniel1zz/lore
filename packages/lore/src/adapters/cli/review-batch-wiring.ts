@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { App } from "../../app.js";
 import { ReviewBatchLease } from "../../service/review-batch-lease.js";
+import type { ListCompletePlans } from "../../service/check-stats-service.js";
 import { ReviewTriggerService } from "../../service/review-batch-service.js";
 
 /** The batch command line (after the program): the spec's `lore assess --where needs-review --file-issues --close`. */
@@ -73,6 +74,25 @@ export function spawnDetachedReviewBatch(opts: {
   } finally {
     closeSync(log);
   }
+}
+
+/**
+ * The complete-plan reader `CheckStatsService` takes (bootstrap's complete line, `lore checks stats`): the trigger
+ * service's one classification, narrowed to the acceptance view's shape.
+ *
+ * @param trigger - from {@link buildReviewTriggerService}
+ */
+export function buildCompletePlanLister(trigger: ReviewTriggerService): ListCompletePlans {
+  return async () => {
+    const complete = await trigger.listCompletePlans();
+    if (!complete.ok) return complete;
+    return ok(complete.value.map((e) => ({ plan: e.plan, planId: e.planId, completeAt: e.completeAt, awaitingOwner: e.need === "awaiting-owner" })));
+  };
+}
+
+/** The spawn a read-only caller binds: a read never starts a batch. */
+export function refuseSpawnForRead(): Result<{ readonly pid: number | undefined }, LoreError> {
+  return err({ code: "VALIDATION_ERROR", field: "spawn", message: "a read never spawns a review batch", rule: "BR-1379" });
 }
 
 /**
