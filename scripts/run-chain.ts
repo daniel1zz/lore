@@ -12,7 +12,8 @@
  * Side-effect class: IO in `main` (spawns each step with inherited stdio); `runChain`/`renderTable` are pure.
  *
  * Usage: bun scripts/run-chain.ts [shell-command ...]   (no arguments = DEFAULT_STEPS)
- *        bun scripts/run-chain.ts --floor [package.json]    (build + typecheck + every ^check: script except the corpus-dependent set = `bun run check:floor`)
+ *        bun scripts/run-chain.ts --floor [--list] [package.json]       (install + build + typecheck = `bun run check:floor`; --list prints the step names)
+ *        bun scripts/run-chain.ts --plan-close [--list] [package.json]  (every other ^check: script = `bun run check:plan-close`)
  *        bun scripts/run-chain.ts --static [package.json]   (build + typecheck + every ^check: script = `bun run check:static`)
  */
 import { spawnSync } from "node:child_process";
@@ -133,7 +134,7 @@ export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set([
 export const CORPUS_DEPENDENT_LABEL = "corpus-dependent: needs a fresh mirror export / live corpus state";
 
 /** Aggregate scripts excluded from every derived list: they ARE the chains, naming them would recurse. */
-const AGGREGATE_SCRIPTS: ReadonlySet<string> = new Set(["check:static", "check:floor"]);
+const AGGREGATE_SCRIPTS: ReadonlySet<string> = new Set(["check:static", "check:floor", "check:plan-close"]);
 
 /**
  * Derive the `check:static` step list from a package.json `scripts` map: build, typecheck, then EVERY
@@ -164,24 +165,87 @@ export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnS
 }
 
 /**
- * Derive the `check:floor` step list (the integrate floor): build, typecheck, then every `^check:` script
- * except the aggregates and CORPUS_DEPENDENT_CHECKS (the one source of what judges corpus state, not code).
- * @throws Error when the map has no `build` or `typecheck` script.
+ * The ONE declaration of the lean integrate floor (BR-1368): install, build, typecheck. Every other `check:*` script runs
+ * at plan close (PLAN_CLOSE_STEPS). `--floor`, `--plan-close` and `--list` all read these two lists.
+ */
+export const FLOOR_STEPS = ["install", "build", "typecheck"] as const;
+const FLOOR_COMMANDS: Readonly<Record<(typeof FLOOR_STEPS)[number], string>> = {
+  install: "bun install --frozen-lockfile",
+  build: "bun run build",
+  typecheck: "bun run typecheck",
+};
+
+/** Every `check:*` script that is not an aggregate, in package.json order; a new check must be added here (the test fails otherwise). */
+export const PLAN_CLOSE_STEPS: readonly string[] = [
+  "check:hook-shell-cwd",
+  "check:hook-top-level-symbols",
+  "check:ordinal-sites",
+  "check:baseline-coverage",
+  "check:test-budgets",
+  "check:no-timer-retry",
+  "check:ac-ref-integrity",
+  "check:memory-files",
+  "check:no-nul-bytes",
+  "check:no-bunx-of-declared-deps",
+  "check:agent-hygiene",
+  "check:plan-member-sites",
+  "check:ac-state-renderers",
+  "check:prose-pins",
+  "check:shipped-defaults",
+  "check:ac-oracle-ownership",
+  "check:evidence-identity-drop-set",
+  "check:capture-source-buckets",
+  "check:spec-mirror",
+  "check:corpus-fail-census",
+  "check:live-repo-state",
+];
+
+/** The `check:*` scripts in `scripts` that are in neither the floor nor PLAN_CLOSE_STEPS (aggregates excluded). */
+export function unlistedChecks(scripts: Readonly<Record<string, string>>): string[] {
+  return Object.keys(scripts).filter((n) => /^check:/.test(n) && !AGGREGATE_SCRIPTS.has(n) && !PLAN_CLOSE_STEPS.includes(n) && !(FLOOR_STEPS as readonly string[]).includes(n));
+}
+
+/**
+ * The `check:floor` step commands (the integrate floor): install, build, typecheck.
+ * @throws Error when the map has no `build` or `typecheck` script (a floor missing its base steps is not a floor).
  */
 export function deriveFloorSteps(scripts: Readonly<Record<string, string>>): string[] {
   for (const base of ["build", "typecheck"]) {
     if (!(base in scripts)) throw new Error(`check:floor: package.json has no "${base}" script`);
   }
-  const checks = Object.keys(scripts).filter((name) => /^check:/.test(name) && !AGGREGATE_SCRIPTS.has(name) && !CORPUS_DEPENDENT_CHECKS.has(name));
-  return ["build", "typecheck", ...checks].map((name) => `bun run ${name}`);
+  return FLOOR_STEPS.map((name) => FLOOR_COMMANDS[name]);
 }
 
-/** Run the derived integrate floor over `packageJsonPath` and print the table; returns the exit code. */
-export function runFloor(packageJsonPath: string, run: StepRunner = spawnStep): number {
+/**
+ * The `check:plan-close` step commands: every PLAN_CLOSE_STEPS script.
+ * @throws Error when a declared check is missing from `scripts`, or a `check:*` script is in neither list.
+ */
+export function derivePlanCloseSteps(scripts: Readonly<Record<string, string>>): string[] {
+  const missing = PLAN_CLOSE_STEPS.filter((n) => !(n in scripts));
+  if (missing.length > 0) throw new Error(`check:plan-close: package.json has no script for ${missing.join(", ")}`);
+  const unlisted = unlistedChecks(scripts);
+  if (unlisted.length > 0) throw new Error(`check:plan-close: ${unlisted.join(", ")} is in neither FLOOR_STEPS nor PLAN_CLOSE_STEPS (scripts/run-chain.ts)`);
+  return PLAN_CLOSE_STEPS.map((name) => `bun run ${name}`);
+}
+
+function readScripts(packageJsonPath: string, label: string): Record<string, string> {
   const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
   const scripts = (parsed as { scripts?: Record<string, string> }).scripts;
-  if (scripts === undefined) throw new Error(`check:floor: ${packageJsonPath} has no scripts`);
-  const results = runChain(deriveFloorSteps(scripts), run);
+  if (scripts === undefined) throw new Error(`${label}: ${packageJsonPath} has no scripts`);
+  return scripts;
+}
+
+/** Run the integrate floor over `packageJsonPath` and print the table; returns the exit code. */
+export function runFloor(packageJsonPath: string, run: StepRunner = spawnStep): number {
+  const results = runChain(deriveFloorSteps(readScripts(packageJsonPath, "check:floor")), run);
+  report(results);
+  emitTimings(results);
+  return results.every((r) => r.exit === 0) ? 0 : 1;
+}
+
+/** Run the plan-close checks over `packageJsonPath` and print the table; returns the exit code. */
+export function runPlanClose(packageJsonPath: string, run: StepRunner = spawnStep): number {
+  const results = runChain(derivePlanCloseSteps(readScripts(packageJsonPath, "check:plan-close")), run);
   report(results);
   emitTimings(results);
   return results.every((r) => r.exit === 0) ? 0 : 1;
@@ -214,10 +278,18 @@ export function main(argv: readonly string[], run: StepRunner = spawnStep): numb
 if (import.meta.main) {
   try {
     const argv = process.argv.slice(2);
+    // `--floor [--list] [package.json]`: the integrate floor (install + build + typecheck)
+    // `--plan-close [--list] [package.json]`: every other check:* script, run at plan close
     // `--static [package.json]`: the post-merge floor (build + typecheck + every check:*)
-    // `--floor [package.json]`: the integrate floor (the static floor minus the corpus-dependent checks)
-    const pkg = argv[1] ?? join(ROOT, "package.json");
-    process.exit(argv[0] === "--static" ? runStaticFloor(pkg) : argv[0] === "--floor" ? runFloor(pkg) : main(argv));
+    const listOnly = argv.includes("--list");
+    const rest = argv.filter((a) => a !== "--list");
+    const pkg = rest[1] ?? join(ROOT, "package.json");
+    if (listOnly && (rest[0] === "--floor" || rest[0] === "--plan-close")) {
+      if (rest[0] === "--plan-close") derivePlanCloseSteps(readScripts(pkg, "check:plan-close")); // fail loud on a drifted declaration
+      console.log((rest[0] === "--floor" ? [...FLOOR_STEPS] : PLAN_CLOSE_STEPS).join("\n"));
+      process.exit(0);
+    }
+    process.exit(rest[0] === "--static" ? runStaticFloor(pkg) : rest[0] === "--floor" ? runFloor(pkg) : rest[0] === "--plan-close" ? runPlanClose(pkg) : main(argv));
   } catch (e) {
     console.error(`run-chain: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(2);

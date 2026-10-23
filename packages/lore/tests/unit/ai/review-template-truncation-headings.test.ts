@@ -242,15 +242,15 @@ describe("buildOmittedSectionsNotice — STATE", () => {
     expect(short2).toEqual(short1);
   });
 
-  it("v1 and v2 apply the identical heading-omission mechanism for a non-AC document", () => {
-    // `makeDoc`'s default extra={} declares no acceptance_criteria, so v2 collapses to the
+  it("v1 and v3 apply the identical heading-omission mechanism for a non-AC document", () => {
+    // `makeDoc`'s default extra={} declares no acceptance_criteria, so v3 collapses to the
     // same NO_ADVISORY assembly as v1 (see extractSpecAcceptanceCriteria) — both should
     // therefore produce a BYTE-IDENTICAL prompt, heading list included.
     const v1Result = REVIEW_TEMPLATES["v1"]!(bundleFor(longContent), [], BUDGETS);
-    const v2Result = REVIEW_TEMPLATES["v2"]!(bundleFor(longContent), [], BUDGETS);
+    const v3Result = REVIEW_TEMPLATES["v3"]!(bundleFor(longContent), [], BUDGETS);
 
-    expect(v2Result.prompt).toBe(v1Result.prompt);
-    expect(v2Result.prompt).toContain("Sections not shown");
+    expect(v3Result.prompt).toBe(v1Result.prompt);
+    expect(v3Result.prompt).toContain("Sections not shown");
   });
 });
 

@@ -54,7 +54,10 @@ import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
-import { isTerminalStatus, ok, type DocStatus } from "@lore/core";
+import { GOVERNING_PACKAGE_JSON, err, isTerminalStatus, ok, resolveMemoryFileBudgets, scanPackageScripts, type DocStatus } from "@lore/core";
+import { buildRealFsProbe } from "../../real-fs-probe.js";
+import { discoverFragmentDocuments, discoverMemoryFiles } from "../../real-memory-file-probe.js";
+import { buildReferenceIndex, findBindings } from "../../../service/code-reference-index.js";
 import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-snapshot.js";
 import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
@@ -318,6 +321,30 @@ export default defineLoreCommand({
                   .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
                   .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
               );
+            },
+          },
+          // AC-LG-7: the prose bound to each changed file (what `lore refs <path>` lists), replacing the post-edit hook
+          boundProse: {
+            read: async (paths) => {
+              const declared = await drift.listDeclaredAnchors();
+              if (!declared.ok) return declared;
+              const probe = buildRealFsProbe(projectRoot);
+              let knownScripts: ReadonlySet<string> = new Set();
+              if (probe.stat(GOVERNING_PACKAGE_JSON) === "file") {
+                const scripts = scanPackageScripts(probe.readFile(GOVERNING_PACKAGE_JSON) ?? "");
+                if (scripts === undefined) {
+                  return err({ code: "VALIDATION_ERROR", field: GOVERNING_PACKAGE_JSON, message: `${GOVERNING_PACKAGE_JSON} has no usable scripts object` });
+                }
+                knownScripts = scripts;
+              }
+              const index = buildReferenceIndex({
+                declaredAnchors: declared.value,
+                memoryFiles: discoverMemoryFiles(projectRoot, resolveMemoryFileBudgets(config).filenames),
+                fragments: discoverFragmentDocuments(projectRoot),
+                knownScripts,
+                probe,
+              });
+              return ok(paths.map((path) => ({ path, bindings: findBindings(index, path) })));
             },
           },
           loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),

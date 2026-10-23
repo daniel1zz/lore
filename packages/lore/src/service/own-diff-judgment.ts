@@ -15,6 +15,9 @@
  *   - BR-1355 the own change deletes a path some live spec or knowledge doc anchors (`code_anchors`): refused, naming
  *     each doc and anchor. A RENAME is not a deletion: the verdict carries it as `renames`, and the landing rewrites the
  *     docs' anchors after main moved ({@link OwnDiffRename}).
+ * Bound prose (AC-LG-7, replaces the removed post-edit-bindings hook): per changed file, the prose bound to it (what
+ * `lore refs <path>` lists: spec and knowledge anchors, memory-file and fragment lines) is returned as `bound_prose`
+ * and printed by the integrate service. Informational, never a refusal; not reported when no reader is wired.
  * Each BR-1346 line names the holding task, the claim's holder and the claim's age in minutes (BR-1354).
  * A change outside the branch's own tasks' anchors that no other live claim holds is NOT refused: it is returned as
  * `outside_anchors` and recorded on the landing, so what landed is always visible.
@@ -52,6 +55,7 @@ import {
 } from "@lore/core";
 import { detectWorktreeBranch, type BranchMeasurement } from "../adapters/real-git-port.js";
 import type { StoreInterface } from "../store/store-interface.js";
+import type { ReferenceBinding } from "./code-reference-index.js";
 import { reviewCoChange, type CoChangeRulesLoad, type GlobMatchFn } from "./co-change-review.js";
 import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 
@@ -192,6 +196,17 @@ export interface UnlandedOverlap {
   readonly paths: readonly string[];
 }
 
+/** Prose bound to one changed file: the bindings `lore refs <path>` lists for it. */
+export interface BoundProseRow {
+  readonly path: string;
+  readonly bindings: readonly ReferenceBinding[];
+}
+
+/** Reads the bindings of every given path from the ONE reverse index (`code-reference-index.ts`). */
+export interface BoundProseReader {
+  readonly read: (paths: readonly string[]) => Promise<Result<readonly BoundProseRow[], LoreError>>;
+}
+
 /** What a passed judgment hands back to the landing. */
 export interface OwnDiffVerdict extends LandedFootprint {
   /** Tasks the change was judged against. */
@@ -200,6 +215,8 @@ export interface OwnDiffVerdict extends LandedFootprint {
   readonly renames: readonly OwnDiffRename[];
   /** Released, unlanded tasks whose anchors overlapped the own change (informational, never a refusal). */
   readonly unlanded_overlaps: readonly UnlandedOverlap[];
+  /** Prose bound to the changed files (only files with at least one binding); empty when no reader is wired. */
+  readonly bound_prose: readonly BoundProseRow[];
 }
 
 /** Dependencies of {@link OwnDiffJudgment}. */
@@ -210,6 +227,8 @@ export interface OwnDiffJudgmentDeps {
   readonly ownership: Pick<BranchOwnershipReader, "read">;
   /** The declared code anchors of live spec and knowledge docs (BR-1355). Absent in a bare construction: not judged. */
   readonly codeAnchors?: DeclaredCodeAnchorReader;
+  /** Prose bound to the changed files (AC-LG-7). Absent in a bare construction: no bound prose is reported. */
+  readonly boundProse?: BoundProseReader;
   /** Wall clock in epoch milliseconds for the age of a held claim (default `Date.now`). */
   readonly clock?: () => number;
   /** Co-change rules of the project (`workflow.turn_end.co_change`), or the reason they could not be read. */
@@ -329,7 +348,20 @@ export class OwnDiffJudgment {
       }))
       .filter((overlap) => overlap.paths.length > 0)
       .sort((a, b) => a.task.localeCompare(b.task));
-    return ok({ outside_anchors: outside, tasks: ownership.value.own.map((task) => task.slug), renames, unlanded_overlaps: unlanded });
+    const bound = await this.boundProseOf(changed);
+    if (!bound.ok) return bound;
+    return ok({ outside_anchors: outside, tasks: ownership.value.own.map((task) => task.slug), renames, unlanded_overlaps: unlanded, bound_prose: bound.value });
+  }
+
+  /** The prose bound to each changed path that still exists after the change (a deleted path is judged by BR-1355). */
+  private async boundProseOf(changed: readonly ChangedFile[]): Promise<Result<readonly BoundProseRow[], LoreError>> {
+    const reader = this.deps.boundProse;
+    if (reader === undefined) return ok([]);
+    const paths = [...new Set(changed.filter((file) => file.kind !== "D").map((file) => file.path))].sort();
+    if (paths.length === 0) return ok([]);
+    const rows = await reader.read(paths);
+    if (!rows.ok) return rows;
+    return ok(rows.value.filter((row) => row.bindings.length > 0));
   }
 
   /**

@@ -37,31 +37,14 @@
  * end-review, Scope 4-5) is the ONE turn-end review of the main session. It
  * replaced three retired hook families: `stop-doc-sync.mjs` (turn-end doc
  * reminder), `claude-md-guard.sh` (per-edit CLAUDE.md ceiling check, now
- * finding (c) of the turn-end review) and the four per-call checkpoint gate
+ * a turn-end finding until AC-LG-7 removed it) and the four per-call checkpoint gate
  * hooks (the service-layer write refuses instead: `GateEnforcer.enforce`). BR-1092: no registered
  * per-tool-call hook refuses anything except irreversible git operations
  * (`pre-bash-git-safety-gate.mjs`). Converge (BR-823 / BR-975) removes the
  * retired files and settings entries from older installs.
  *
- * `stop-handoff-coverage.mjs` (added 2026-07-31, owner classification decision
- * of spec-resume-ticket-coverage-a-shipped-upper-bound-left-the) joins the
- * governance set beside `stop-turn-review.mjs`, its nearest sibling: both are
- * turn-end accounting gates, differing only in WHAT must be accounted for
- * (findings in the turn's own work vs. resume-ticket items the turn left
- * undispositioned). It constrains "the consumer accounts for every ticket
- * item" — a governance invariant any team consuming resume tickets needs, not
- * a statement about how this team routes subagents, which is what keeps it on
- * the auto-registered side of the line the excluded orchestration-policy pair
- * sits on. Registering it is what makes the spec's own Delivery constraint
- * satisfiable: a fresh `lore init` + `lore setup` project must be unable to
- * reach the original defect, and an INSTALLED-but-unregistered hook leaves
- * that project in exactly the defect state (the hook file lands under
- * `<claude-dir>/hooks/` and never fires) — the silent-inertness class the
- * spec's D6 exists to forbid. Like every hook in this set, it is fail-open by
- * construction (see the hook's own module header) and is a blind pipe to
- * `lore handoff coverage-check`, holding no grammar of its own, so a
- * mis-registration cannot wedge a session and a grammar change cannot
- * strand it.
+ * `stop-handoff-coverage.mjs` and `post-edit-bindings.mjs` were removed (AC-LG-7): they served neither the
+ * correctness nor the context goal. The `lore handoff coverage-check` verb stays; only the Stop hook is gone.
  *
  * `session-start-marker.mjs` (added 2026-08-01,
  * task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) joins the
@@ -142,7 +125,7 @@ const RUN_END_HOOK_TIMEOUT_SECONDS = 10;
 /**
  * The full declared "core governance + security" hook set (owner decision,
  * 2026-07-20; `subagent-stop-commit-guard.mjs` added 2026-07-21;
- * `stop-handoff-coverage.mjs` added 2026-07-31; `session-start-marker.mjs`
+ * `session-start-marker.mjs`
  * added 2026-08-01; `stop-turn-review.mjs` replaced `stop-doc-sync.mjs` and
  * `claude-md-guard.sh`) — already matcher-expanded, one entry per distinct
  * `(event, matcher)` pair.
@@ -166,11 +149,8 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // post-edit-mark.mjs — producer of edited.flag / edited-files.jsonl on every editing tool; stop-turn-review.mjs reads them.
   { file: "post-edit-mark.mjs", runner: "node", event: "PostToolUse", matcher: "Edit|Write|MultiEdit|NotebookEdit" },
 
-  // stop-turn-review.mjs — the one turn-end review of the main session: opt-in source edits, anchor drift, CLAUDE.md ceiling; one block listing every finding, silent otherwise.
+  // stop-turn-review.mjs — the one turn-end review of the main session: opt-in source edits and shared-checkout changes; one block listing every finding, silent otherwise.
   { file: "stop-turn-review.mjs", runner: "node", event: "Stop" },
-
-  // stop-handoff-coverage.mjs — resume-ticket coverage floor on turn end: blind pipe to `lore handoff coverage-check` (no matcher; Stop does not scope by one).
-  { file: "stop-handoff-coverage.mjs", runner: "node", event: "Stop" },
 
   // subagent-context.mjs — per-agent-type directive + lore project context injection.
   { file: "subagent-context.mjs", runner: "node", event: "SubagentStart" },
@@ -202,8 +182,6 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
 
   // pre-edit-anchor-gate.mjs — a helper's Write/Edit/MultiEdit/NotebookEdit outside the anchors of its claimed task is declared through `lore anchor declare` (the task-claim gate's overlap predicate; free path -> added to the task's anchors) or denied before it happens (path or top-level symbol held by another live claim, no claim, anything undecidable). An anchor is a file, a `path#Symbol`, or a directory that holds only the files its holder touched. A Bash command whose write targets are readable from its text (`sed -i`, `>`, `tee`, python `open(.., 'w')`) is judged the same way but refused ONLY when another live claim holds the target (BR-1092); a free file is auto-declared. Git-ignored paths pass. Never applies to the main session; unreadable shell targets stay with the turn-end helper-scope review.
   { file: "pre-edit-anchor-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash" },
-  // post-edit-bindings.mjs — after a write, lists the prose bound to the edited file (spec/knowledge anchors, memory-file and fragment lines) from `lore refs --json`; script bindings only when that script's command text changed. Additional context only, never a block (spec-prose-about-code-is-bound-to-what-it-describes-one D3).
-  { file: "post-edit-bindings.mjs", runner: "node", event: "PostToolUse", matcher: "Edit|Write|MultiEdit|NotebookEdit" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */

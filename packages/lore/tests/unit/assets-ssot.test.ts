@@ -405,8 +405,6 @@ const DECLARED_FILES = [
   // stop-turn-review turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
-  // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
-  "hooks/stop-handoff-coverage.mjs",
   // stop-turn-review (turn-end review of the main session, spec-interception-moves-off-every-tool-call-one-turn-end-review;
   // in HOOK_REGISTRATIONS on Stop; replaced stop-doc-sync.mjs and claude-md-guard.sh)
   "hooks/stop-turn-review.mjs",
@@ -435,8 +433,6 @@ const DECLARED_FILES = [
   // the anchor gate's two libraries: the top-level-symbol scan of an Edit, and the files a Bash command writes
   "hooks/lib/top-level-symbols.mjs",
   "hooks/lib/shell-writes.mjs",
-  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
-  "hooks/post-edit-bindings.mjs",
   "hooks/lib/turn-state.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library
   "hooks/session-trail-start.mjs",
