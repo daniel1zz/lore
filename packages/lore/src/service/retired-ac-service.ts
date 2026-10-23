@@ -7,9 +7,12 @@
  * Public surface: `RetiredAcService.collect(bundle)`, `RetiredAcService.settle(bundle)`, `RetiredAcDeps`,
  *   `PlanRetirementState`, `retirementSubjectId`.
  * Invariants:
- *   - A retirement belongs to a plan when it happened after the plan was created AND (its spec is the plan's governing
- *     spec, or it was superseded BY a criterion of that spec, or the writing actor is one of the plan's task/plan
- *     authors or claim holders). An actor with no relation to the plan never attributes anything to it.
+ *   - A retirement belongs to a plan ONLY when the retiring write recorded `retired_in_plan` = that plan's id (the plan
+ *     of the task the writing run held a claim on: `lore ac supersede` marker / the deprecation's audit row). No
+ *     timestamp, spec or actor heuristic attributes anything; a retirement without the field (history, or a run with
+ *     no claimed task) belongs to no plan.
+ *   - A pending decision of this subject whose retired list no longer matches the plan's current list is withdrawn in
+ *     `settle` (closing marker in the decision log), so it leaves `lore pending`.
  *   - The decision uses class `governance-loosen` (human-always: weakening the quality floor is the owner's call, check 1
  *     of adr-ai-decision-standard-four-checks-references-from-excellent). Its subject id is `ac-retire-confirm:<plan>`
  *     (never the threshold subject, so threshold calibration ignores it) and its version hashes the plan fingerprint
@@ -47,7 +50,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 /** The ports this service needs. */
 export interface RetiredAcDeps {
   readonly store: Pick<StoreInterface, "findMany" | "queryAudit" | "findVersions">;
-  readonly decisions: Pick<DecisionService, "decide" | "listPending">;
+  readonly decisions: Pick<DecisionService, "decide" | "listPending" | "withdrawPending">;
   readonly listDecisionLog: () => Promise<Result<DecisionLogRow[], LoreError>>;
   /** Clears one supersession (matched by its `at`); `ok(false)` when nothing matched. */
   readonly restoreCriterion: (spec: string, ac: string, at: string, reason: string) => Promise<Result<boolean, LoreError>>;
@@ -56,9 +59,8 @@ export interface RetiredAcDeps {
 }
 
 interface RetirementInstance extends RetiredAcRef {
-  readonly by: string;
-  readonly specId: string;
-  readonly bySpecId?: string;
+  /** Id of the plan whose work made the retirement; absent = attributed to no plan. */
+  readonly retiredInPlan?: string;
 }
 
 /** Decision subject id of one plan's retirement confirmation. */
@@ -90,17 +92,10 @@ export class RetiredAcService {
 
   /** The retired ACs attributed to the plan in `bundle`, oldest first. */
   async collect(bundle: PlanBundle): Promise<Result<RetiredAcRef[], LoreError>> {
+    // reason: `plan.created_at` only bounds the scan (work done for a plan cannot predate it); it attributes nothing.
     const scanned = await this.scan(bundle.plan.created_at);
     if (!scanned.ok) return scanned;
-    const actors = new Set<string>([bundle.plan.created_by, ...bundle.tasks.map((t) => t.created_by)]);
-    for (const task of bundle.tasks) {
-      const claimBy = (task.extra["claim"] as { by?: unknown } | undefined)?.by;
-      if (typeof claimBy === "string") actors.add(claimBy);
-    }
-    const planSpecId = bundle.spec?.id;
-    const mine = scanned.value.filter(
-      (i) => i.at >= bundle.plan.created_at && ((planSpecId !== undefined && (i.specId === planSpecId || i.bySpecId === planSpecId)) || actors.has(i.by)),
-    );
+    const mine = scanned.value.filter((i) => i.retiredInPlan === (bundle.plan.id as string));
     return ok(mine.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).map(toRef));
   }
 
@@ -135,9 +130,15 @@ export class RetiredAcService {
     const collected = await this.collect(bundle);
     if (!collected.ok) return collected;
     const retired = collected.value;
-    if (retired.length === 0) return ok({ state: "none" });
-
     const version = createHash("sha256").update(`${fingerprint}|${retired.map(instanceKey).sort().join(",")}`).digest("hex");
+    const withdrawn = await this.deps.decisions.withdrawPending(
+      GOVERNANCE_LOOSEN_CLASS,
+      subjectId,
+      retired.length === 0 ? null : version,
+      `the plan's retired-AC list changed (now ${String(retired.length)} listed); this question no longer matches it`,
+    );
+    if (!withdrawn.ok) return withdrawn;
+    if (retired.length === 0) return ok({ state: "none" });
     const effective = effectiveDecisionVerdict(rows, { class: GOVERNANCE_LOOSEN_CLASS, subject_id: subjectId, subject_version: version });
     if (effective !== null && effective.channel === "human-tty" && effective.verdict === "auto") return ok({ state: "confirmed", retired });
 
@@ -233,12 +234,10 @@ export class RetiredAcService {
         found.push({
           kind: "superseded",
           spec: spec.slug,
-          specId: spec.id as string,
           ac: c.id,
           reason: marker.reason,
           at: marker.at,
-          by: marker.by,
-          bySpecId: marker.spec,
+          ...(marker.retired_in_plan !== undefined ? { retiredInPlan: marker.retired_in_plan } : {}),
           superseded_by: `${slugOfId.get(marker.spec) ?? marker.spec}:${marker.ac}`,
         });
       }
@@ -261,16 +260,16 @@ export class RetiredAcService {
       const criteria = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
       if (!criteria.success) continue;
       const reasonText = entry.details?.["reason"];
+      const retiredInPlan = entry.details?.["retired_in_plan"];
       for (const c of criteria.data) {
         if (c.superseded_by !== undefined) continue;
         found.push({
           kind: "deprecated-spec",
           spec: spec.slug,
-          specId: spec.id as string,
           ac: c.id,
           reason: typeof reasonText === "string" && reasonText.length > 0 ? reasonText : "spec deprecated",
           at: entry.timestamp,
-          by: entry.actor,
+          ...(typeof retiredInPlan === "string" && retiredInPlan !== "" ? { retiredInPlan } : {}),
           previous_status: previous.value,
         });
       }

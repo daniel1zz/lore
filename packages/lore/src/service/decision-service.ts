@@ -415,6 +415,28 @@ export class DecisionService {
     return ok(open.value.find((v) => v.id === id) ?? null);
   }
 
+  /**
+   * Withdraws the open escalations of one subject whose version is not `keepVersion` (`null` keeps none): each gets
+   * one closing marker (cause `withdrawn`, machine channel, an audit row in the decision log). Used when the question
+   * itself changed (e.g. a retired-AC list that is now empty), so `lore pending` no longer shows it.
+   *
+   * @returns how many escalations were withdrawn
+   */
+  async withdrawPending(classId: string, subjectId: string, keepVersion: string | null, detail: string): Promise<Result<number, LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    const open = deriveOpenEscalations(rows.value);
+    if (!open.ok) return open;
+    let withdrawn = 0;
+    for (const candidate of open.value) {
+      if (candidate.class !== classId || candidate.subject_id !== subjectId || candidate.subject_version === keepVersion) continue;
+      const written = await this.appendSupersedeMarker(candidate, "withdrawn", detail);
+      if (!written.ok) return written;
+      if (written.value) withdrawn += 1;
+    }
+    return ok(withdrawn);
+  }
+
   /** Appends a closing marker for every open escalation that is stale; returns how many markers were appended. */
   private async closeStalePending(): Promise<Result<number, LoreError>> {
     const rows = await this.deps.store.listDecisionLog();
