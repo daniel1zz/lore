@@ -697,7 +697,7 @@ describe("assets-ssot — BOUNDARY", () => {
   // retired single-file wrapper. The fragments carry NO wrapper tags by design (the renderer owns
   // framing), so the corrected claims are: schema-valid frontmatter, unique prefixed ids, tag-free
   // bodies, and verbatim bodies (sha256 pins measured equal to the deleted file's sections).
-  it("every corpus-workflow fragment parses with FragmentFrontmatterSchema (audience [main], mode static, id corpus-workflow-*)", () => {
+  it("every corpus-workflow fragment parses with FragmentFrontmatterSchema (inject [launch], id corpus-workflow-*)", () => {
     const ids: string[] = [];
     for (const rel of CORPUS_WORKFLOW_FRAGMENT_RELS) {
       const split = splitFrontmatter(readRequiredFile(join(ASSETS_ROOT, rel)), "strict");
@@ -706,8 +706,7 @@ describe("assets-ssot — BOUNDARY", () => {
       const parsed = FragmentFrontmatterSchema.safeParse(parseYaml(split.frontmatter));
       expect(parsed.success, rel).toBe(true);
       if (!parsed.success) continue;
-      expect(parsed.data.audience).toEqual(["main"]);
-      expect(parsed.data.mode).toBe("static");
+      expect(parsed.data.inject).toEqual(["launch"]);
       expect(parsed.data.id.startsWith("corpus-workflow-")).toBe(true);
       ids.push(parsed.data.id);
     }

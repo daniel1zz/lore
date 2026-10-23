@@ -21,9 +21,7 @@ function frag(id: string, layer: Layer, delivery: "rules" | "skill", body = `bod
     frontmatter: {
       id,
       title: id,
-      audience: ["main"],
-      mode: "static",
-      delivery,
+      inject: [delivery === "skill" ? "on-demand" : "launch"],
       ...(delivery === "skill" ? { description: `d ${id}` } : {}),
     },
     body,

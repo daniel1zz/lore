@@ -1,8 +1,8 @@
 ---
 id: project-test-runner-split
 title: "Test runner: one vitest runner"
-audience: ["subagent:lore-implementer", "subagent:lore-reader"]
-mode: static
+inject: [subagent-start]
+agents: [lore-implementer, lore-reader]
 ---
 ## Test runner (this repo)
 

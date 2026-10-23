@@ -1,8 +1,7 @@
 ---
 id: dispatch-bundle
 title: "Subagent dispatch bundle and context watermarks"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## Subagent dispatch
 

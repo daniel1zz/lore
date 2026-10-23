@@ -46,11 +46,11 @@ async function makeSandbox(): Promise<Sandbox> {
   writeFileSync(join(corpus, ".claude", "agents", "res.md"), "# res\n");
   writeFileSync(
     join(userContext, "ghost-note.md"),
-    '---\nid: ghost-note\ntitle: "Ghost note"\naudience: ["subagent:ghost"]\nmode: static\n---\nGhost helpers read this.\n',
+    '---\nid: ghost-note\ntitle: "Ghost note"\ninject: [subagent-start]\nagents: [ghost]\n---\nGhost helpers read this.\n',
   );
   writeFileSync(
     join(userContext, "user-note.md"),
-    '---\nid: user-note\ntitle: "User note"\naudience: ["main"]\nmode: static\n---\nUser-scope main rule.\n',
+    '---\nid: user-note\ntitle: "User note"\ninject: [launch]\n---\nUser-scope main rule.\n',
   );
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;

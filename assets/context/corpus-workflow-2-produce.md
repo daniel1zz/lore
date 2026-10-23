@@ -1,8 +1,7 @@
 ---
 id: corpus-workflow-produce
 title: "PRODUCE — output follows the corpus type chain"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## PRODUCE — output follows the corpus type chain
 

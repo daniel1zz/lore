@@ -4,7 +4,7 @@
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7, AC-RS-10, BR-1061;
  * task task-rs-t10-context-list-add-remove-verbs-and-skill-refresh-via).
  *
- * Contract: a user fragment with `delivery: skill` and a nonce makes `lore context refresh --scope user`
+ * Contract: a user fragment with `inject: [on-demand]` and a nonce makes `lore context refresh --scope user`
  * write `$HOME/.claude/skills/lore-<id>/SKILL.md` and NO `$HOME/.claude/rules/lore-<id>.md`; the nonce is
  * absent from the `hook:subagent-start` render for lore-implementer (the `hook:session-start` render is retired; it exits 2).
  * Pruning the fragment removes the SKILL.md and its now-empty `lore-<id>/` directory.
@@ -81,9 +81,7 @@ function writeSkillFragment(sb: Sandbox): string {
     "---",
     `id: ${FRAGMENT_ID}`,
     "title: skill probe",
-    'audience: ["main"]',
-    "mode: static",
-    "delivery: skill",
+    "inject: [on-demand]",
     "description: Use when probing skill delivery in the e2e fixture",
     "---",
     "",
@@ -114,7 +112,7 @@ describe("AC-RS-10 skill-delivered fragment", () => {
     const controlNonce = "CONTROL-NONCE-5d2e";
     writeFileSync(
       join(sb.userContextDir, "rs-render-control.md"),
-      `---\nid: rs-render-control\ntitle: control\naudience: ["subagent:lore-implementer"]\nmode: dynamic\n---\nControl line ${controlNonce}.\n`,
+      `---\nid: rs-render-control\ntitle: control\ninject: [subagent-start]\nagents: [lore-implementer]\n---\nControl line ${controlNonce}.\n`,
       "utf8",
     );
     expect((await lore(sb, "context", "refresh", "--scope", "user")).code).toBe(0);

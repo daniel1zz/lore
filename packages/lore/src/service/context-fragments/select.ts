@@ -6,16 +6,18 @@
  * Invariants:
  *   - Pure (no IO, no clock); never mutates inputs; output is id-ascending (deterministic).
  *   - Pipeline order: outlet layer routing -> id override (project > user > shipped)
- *     -> disable -> audience/mode routing -> `when` matchers.
+ *     -> disable -> `inject` routing -> `when` matchers.
  *   - rules:project / skills:project see ONLY shipped+project layers; rules:user / skills:user
  *     see ONLY the user layer. This keeps each project-scoped render independent of user scope.
- *   - delivery: skill fragments route to exactly one skills outlet and to no rules:* / hook:* outlet
- *     (BR-1061, BR-1060).
+ *   - Routing is a lookup on `inject`: launch -> rules:*, on-demand -> skills:*, user-prompt -> hook:user-prompt,
+ *     subagent-start -> hook:subagent-start (filtered by `agents`). A timing reaches no other outlet (BR-1061, BR-1060).
+ *   - hook:user-prompt applies each disable list only to the fragments it may legally disable (D8, BR-905).
  *   - A `when` key missing from WHEN_MATCHERS fails loud (throws) - never silently matches.
  * Side-effect class: pure.
  */
 import {
   WHEN_MATCHERS,
+  hasMainSessionTiming,
   err,
   ok,
   type Fragment,
@@ -38,12 +40,13 @@ const OUTLET_LAYERS: Readonly<Record<OutletId, ReadonlySet<FragmentLayer>>> = {
   "skills:project": new Set<FragmentLayer>(["shipped", "project"]),
   "skills:user": new Set<FragmentLayer>(["user"]),
   "hook:subagent-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
+  "hook:user-prompt": new Set<FragmentLayer>(["shipped", "user", "project"]),
 };
 
 /** Options for {@link selectFragments}. `config` = `resolveContextConfig(global, project, outlet)`. */
 export interface SelectOptions {
   readonly outlet: OutletId;
-  /** Subagent type at hook:subagent-start; absent means only `subagent:*` audiences match. */
+  /** Subagent type at hook:subagent-start; absent means only fragments without an `agents` filter match. */
   readonly agentType?: string;
   readonly config: ResolvedContextConfig;
 }
@@ -75,27 +78,35 @@ function resolveOverrides(candidates: readonly Fragment[]): Fragment[] {
   return [...winners.values()];
 }
 
-function isStaticMain(fragment: Fragment): boolean {
-  return fragment.frontmatter.mode === "static" && fragment.frontmatter.audience.includes("main");
-}
-
 function matchesOutletRouting(fragment: Fragment, outlet: OutletId, agentType: string | undefined): boolean {
-  const { audience, mode, delivery } = fragment.frontmatter;
-  const isSkill = delivery === "skill";
+  const { inject, agents } = fragment.frontmatter;
   switch (outlet) {
     case "rules:project":
     case "rules:user":
-      return !isSkill && mode === "static" && audience.includes("main");
+      return inject.includes("launch");
     case "skills:project":
     case "skills:user":
-      return isSkill && mode === "static" && audience.includes("main");
+      return inject.includes("on-demand");
+    case "hook:user-prompt":
+      return inject.includes("user-prompt");
     case "hook:subagent-start":
-      return !isSkill && audience.some((a) => a === "subagent:*" || (agentType !== undefined && a === `subagent:${agentType}`));
+      return inject.includes("subagent-start") && (agents === undefined || (agentType !== undefined && agents.includes(agentType)));
     default: {
       const unreachable: never = outlet;
       throw new Error(`selectFragments: unknown outlet ${String(unreachable)}`);
     }
   }
+}
+
+/**
+ * Whether the outlet's disable config removes `fragment`. At hook:user-prompt the lists are NOT unioned (D8):
+ * the block reaches the main session, where a shipped fragment is disabled by the project list, a user fragment
+ * by the user (global) list and a project fragment by the project list (BR-905).
+ */
+function isDisabled(fragment: Fragment, outlet: OutletId, config: ResolvedContextConfig): boolean {
+  const id = fragment.frontmatter.id;
+  if (outlet !== "hook:user-prompt") return config.disabled.has(id);
+  return fragment.layer === "user" ? config.disabledByGlobal.has(id) : config.disabledByProject.has(id);
 }
 
 function matchesWhen(fragment: Fragment, language: string | null): boolean {
@@ -125,17 +136,17 @@ export function selectFragments(all: readonly Fragment[], options: SelectOptions
   const allowedLayers = OUTLET_LAYERS[outlet];
   const eligible = all.filter((f) => allowedLayers.has(f.layer));
   return resolveOverrides(eligible)
-    .filter((f) => !config.disabled.has(f.frontmatter.id))
+    .filter((f) => !isDisabled(f, outlet, config))
     .filter((f) => matchesOutletRouting(f, outlet, agentType))
     .filter((f) => matchesWhen(f, config.language))
     .sort(compareById);
 }
 
 /**
- * Refuse cross-file targeting of a STATIC MAIN fragment that the targeting file does not own.
- * A static main fragment lands in a lore rules file (D15), so only the scope that owns the next layer
- * up may override/disable it: shipped is overridable/disable-able by project only; user-layer
- * ones by nobody outside the user file. Dynamic and subagent-only fragments are unrestricted.
+ * Refuse cross-file targeting of a MAIN-SESSION fragment (inject names launch, on-demand or user-prompt)
+ * that the targeting file does not own. Such a fragment lands in a lore rules/skill file (D15) or the per-turn block,
+ * so only the scope that owns the next layer up may override/disable it: shipped is overridable/disable-able by
+ * project only; user-layer ones by nobody outside the user file. Subagent-start-only fragments are unrestricted.
  *
  * @param all Fragments of ALL layers, un-merged.
  * @param configs Raw global + project config layers.
@@ -153,7 +164,7 @@ export function checkOverrides(all: readonly Fragment[], configs: OverrideConfig
 
   for (const [id, versions] of byId) {
     for (const lower of versions) {
-      if (!isStaticMain(lower)) continue;
+      if (!hasMainSessionTiming(lower.frontmatter)) continue;
       for (const higher of versions) {
         if (LAYER_RANK[higher.layer] <= LAYER_RANK[lower.layer]) continue;
         const legal = lower.layer === "shipped" && higher.layer === "project";
@@ -165,7 +176,7 @@ export function checkOverrides(all: readonly Fragment[], configs: OverrideConfig
   const globalDisable = new Set(configs.global.context?.fragments?.disable ?? []);
   const projectDisable = new Set(configs.project.context?.fragments?.disable ?? []);
   for (const fragment of all) {
-    if (!isStaticMain(fragment)) continue;
+    if (!hasMainSessionTiming(fragment.frontmatter)) continue;
     const id = fragment.frontmatter.id;
     // Global config owns only the user layer; project config owns shipped (and its own) layer.
     if (fragment.layer === "shipped" && globalDisable.has(id)) offending.add(id);
@@ -177,7 +188,7 @@ export function checkOverrides(all: readonly Fragment[], configs: OverrideConfig
   return err({
     code: "VALIDATION_ERROR",
     field: "context.fragments",
-    message: `cross-file override/disable of static main fragment refused: ${list.join(", ")}`,
+    message: `cross-file override/disable of main-session fragment refused: ${list.join(", ")}`,
     value: list,
   });
 }

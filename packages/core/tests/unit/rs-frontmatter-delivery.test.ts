@@ -1,12 +1,14 @@
 /**
- * AC-RS-1 — fragment frontmatter `delivery` / `description` bounds.
- * Spec: spec-rule-store-git-tracked-fragment-selection-on-demand-skill (BR-1061).
+ * AC-RS-1 — fragment frontmatter on-demand delivery / `description` bounds, re-keyed to `inject`.
+ * Spec: spec-rule-store-git-tracked-fragment-selection-on-demand-skill (BR-1061); the delivery / audience / mode
+ * fields are superseded by `inject` (spec-fragment-injection-timing-one-inject-enum-a-per-turn, AC-IT-1 owns the
+ * full refusal matrix). The kept property: a skill fragment needs a bounded description, and skills outlets exist.
  */
 import { describe, expect, it } from "vitest";
 import { FragmentFrontmatterSchema, OUTLET_IDS, resolveContextConfig } from "../../src/context-fragments.js";
 
-const base = { id: "x", title: "X", audience: ["main"], mode: "static" } as const;
-const skill = { ...base, delivery: "skill", description: "When to load this skill" };
+const base = { id: "x", title: "X", inject: ["launch"] } as const;
+const skill = { id: "x", title: "X", inject: ["on-demand"], description: "When to load this skill" };
 
 describe("fragment id must not carry the lore- prefix (task-rs-t13 mechanism)", () => {
   it("accepts `x` and refuses `lore-x` naming why", () => {
@@ -17,18 +19,12 @@ describe("fragment id must not carry the lore- prefix (task-rs-t13 mechanism)", 
   });
 });
 
-describe("AC-RS-1 fragment frontmatter delivery", () => {
-  it("AC-RS-1 absent delivery parses as rules", () => {
-    const r = FragmentFrontmatterSchema.safeParse(base);
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.delivery).toBe("rules");
-  });
-
-  it("AC-RS-1 delivery skill with description passes", () => {
+describe("AC-RS-1 fragment frontmatter on-demand delivery", () => {
+  it("AC-RS-1 on-demand with description passes", () => {
     expect(FragmentFrontmatterSchema.safeParse(skill).success).toBe(true);
   });
 
-  it("AC-RS-1 delivery skill without description is a schema error", () => {
+  it("AC-RS-1 on-demand without description is a schema error", () => {
     const { description: _d, ...noDesc } = skill;
     expect(FragmentFrontmatterSchema.safeParse(noDesc).success).toBe(false);
   });
@@ -38,21 +34,12 @@ describe("AC-RS-1 fragment frontmatter delivery", () => {
     expect(FragmentFrontmatterSchema.safeParse({ ...skill, description: "a".repeat(1537) }).success).toBe(false);
   });
 
-  it("AC-RS-1 delivery skill with mode dynamic is a schema error", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...skill, mode: "dynamic" }).success).toBe(false);
+  it("AC-RS-1 on-demand beside any other timing is a schema error", () => {
+    expect(FragmentFrontmatterSchema.safeParse({ ...skill, inject: ["on-demand", "subagent-start"] }).success).toBe(false);
   });
 
-  it("AC-RS-1 delivery skill with a non-[main] audience is a schema error", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...skill, audience: ["subagent:*"] }).success).toBe(false);
-    expect(FragmentFrontmatterSchema.safeParse({ ...skill, audience: ["main", "subagent:*"] }).success).toBe(false);
-  });
-
-  it("AC-RS-1 unknown delivery value is a schema error", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...base, delivery: "hook" }).success).toBe(false);
-  });
-
-  it("AC-RS-1 rules delivery keeps dynamic mode and subagent audience valid (regression)", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...base, mode: "dynamic", audience: ["subagent:*"] }).success).toBe(true);
+  it("AC-RS-1 a helper-only fragment stays valid (regression)", () => {
+    expect(FragmentFrontmatterSchema.safeParse({ ...base, inject: ["subagent-start"] }).success).toBe(true);
   });
 
   it("AC-RS-1 skills outlets exist and resolve like rules outlets", () => {

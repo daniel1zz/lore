@@ -110,7 +110,7 @@ describe("AC-BIND-2: bun run <script> in a memory file", () => {
 
 describe("AC-BIND-2: bun run <script> in a context fragment", () => {
   const fragment = (body: string): string =>
-    ["---", "id: project-fragment-under-test", "title: Fragment under test", 'audience: ["subagent:*"]', "mode: static", "---", body, ""].join("\n");
+    ["---", "id: project-fragment-under-test", "title: Fragment under test", "inject: [subagent-start]", "---", body, ""].join("\n");
 
   it("HAPPY: a fragment naming a missing script is a script_missing finding at its FILE line, exit exactly 3", () => {
     writeFileSync(join(dir, ".lore", "context", "frag.md"), fragment("Run `bun run no-such-script` first."));
@@ -119,7 +119,7 @@ describe("AC-BIND-2: bun run <script> in a context fragment", () => {
 
     expect(exitCode).toBe(3);
     expect(unresolved(findings)).toEqual([
-      expect.objectContaining({ drift_kind: "script_missing", path: ".lore/context/frag.md", line: 7 }),
+      expect.objectContaining({ drift_kind: "script_missing", path: ".lore/context/frag.md", line: 6 }),
     ]);
   });
 
@@ -135,11 +135,11 @@ describe("AC-BIND-2: bun run <script> in a context fragment", () => {
 
 describe("AC-BIND-2: generated rules files are checked at their fragment, not at the copy", () => {
   const fragmentSource = (): string =>
-    ["---", "id: gen-frag", "title: Generated", 'audience: [main]', "mode: static", "---", "Run `bun run no-such-script`.", ""].join("\n");
+    ["---", "id: gen-frag", "title: Generated", "inject: [launch]", "---", "Run `bun run no-such-script`.", ""].join("\n");
 
   it("NEGATIVE: a lore-managed rules file naming a missing script is not a finding; the same text hand-written is", () => {
     const rendered = renderRulesFile({
-      frontmatter: { id: "gen-frag", title: "Generated", audience: ["main"], mode: "static", delivery: "rules" },
+      frontmatter: { id: "gen-frag", title: "Generated", inject: ["launch"] },
       body: "Run `bun run no-such-script`.\n",
       layer: "project",
       path: ".lore/context/gen-frag.md",
@@ -163,7 +163,7 @@ describe("AC-BIND-2: generated rules files are checked at their fragment, not at
     const { exitCode, findings } = runCheck(dir);
 
     expect(exitCode).toBe(3);
-    expect(unresolved(findings)).toEqual([expect.objectContaining({ path: ".lore/context/gen-frag.md", line: 7 })]);
+    expect(unresolved(findings)).toEqual([expect.objectContaining({ path: ".lore/context/gen-frag.md", line: 6 })]);
   });
 });
 

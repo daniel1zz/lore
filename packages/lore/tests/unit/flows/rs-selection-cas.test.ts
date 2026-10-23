@@ -10,14 +10,14 @@ import { runSelectionChange, runSelectionList, type SelectionFlowDeps } from "..
 const PROJECT_SEL = "/p/.lore/context/selection.yaml";
 const USER_SEL = "/u/context/selection.yaml";
 
-function fragment(id: string, extra = ""): string {
-  return `---\nid: ${id}\ntitle: T ${id}\naudience: [main]\nmode: static\n${extra}---\nbody of ${id}\n`;
+function fragment(id: string, extra = "", inject = "launch"): string {
+  return `---\nid: ${id}\ntitle: T ${id}\ninject: [${inject}]\n${extra}---\nbody of ${id}\n`;
 }
 
 function seed(files: Record<string, string>): InMemoryFsPort {
   return new InMemoryFsPort({
     "/s/context/shipped-a.md": fragment("shipped-a"),
-    "/s/context/skill-b.md": fragment("skill-b", "delivery: skill\ndescription: d\n"),
+    "/s/context/skill-b.md": fragment("skill-b", "description: d\n", "on-demand"),
     "/u/context/user-c.md": fragment("user-c"),
     ...files,
   });
@@ -131,7 +131,7 @@ describe("runSelectionChange", () => {
 });
 
 describe("runSelectionList", () => {
-  it("lists id, layer, delivery, size, selected, reflecting both scopes' selections", async () => {
+  it("lists id, layer, inject, size, selected, reflecting both scopes' selections", async () => {
     const mem = seed({
       [PROJECT_SEL]: "schemaVersion: 1\ndisable:\n  - shipped-a\n",
       [USER_SEL]: "schemaVersion: 1\ndisable:\n  - user-c\n",
@@ -140,9 +140,9 @@ describe("runSelectionList", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toEqual([
-      { id: "shipped-a", layer: "shipped", delivery: "rules", size: "body of shipped-a\n".length, selected: false },
-      { id: "skill-b", layer: "shipped", delivery: "skill", size: "body of skill-b\n".length, selected: true },
-      { id: "user-c", layer: "user", delivery: "rules", size: "body of user-c\n".length, selected: false },
+      { id: "shipped-a", layer: "shipped", inject: ["launch"], size: "body of shipped-a\n".length, selected: false },
+      { id: "skill-b", layer: "shipped", inject: ["on-demand"], size: "body of skill-b\n".length, selected: true },
+      { id: "user-c", layer: "user", inject: ["launch"], size: "body of user-c\n".length, selected: false },
     ]);
   });
 

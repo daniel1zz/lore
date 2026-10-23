@@ -63,7 +63,7 @@ function tmp(prefix: string): string {
 
 function fragment(id: string, body: string, extra: Record<string, unknown> = {}): Fragment {
   return {
-    frontmatter: { id, title: `T ${id}`, audience: ["main"], mode: "static", ...extra },
+    frontmatter: { id, title: `T ${id}`, inject: ["launch"], ...extra },
     body,
     layer: "project",
     path: `.lore/context/${id}.md`,
@@ -87,8 +87,8 @@ const ROOT_CLAUDE_MD =
     .map((heading) => `## ${heading}\n\nshort\n`)
     .join("\n");
 
-function fragmentFile(id: string, audience: string, mode: string, body: string): string {
-  return `---\nid: ${id}\ntitle: T ${id}\naudience: [${audience}]\nmode: ${mode}\n---\n${body}`;
+function fragmentFile(id: string, inject: string, body: string): string {
+  return `---\nid: ${id}\ntitle: T ${id}\ninject: [${inject}]\n---\n${body}`;
 }
 
 interface Sandbox {
@@ -149,7 +149,7 @@ describe("AC-CV-2 fragment outlets expand {{lore:<name>}} before fingerprinting"
 
   it("HAPPY skills outlet: the SKILL.md holds String(CAPTURE_TAIL_CHARS), no '{{lore:', fingerprint covers frontmatter + expanded body", () => {
     const source = fragment("tailskill", "Tail window: {{lore:capture_tail_chars}}.\n", {
-      delivery: "skill",
+      inject: ["on-demand"],
       description: "How the evidence tail works",
     });
     const [expanded] = mustExpand([source], "skills:project");
@@ -164,8 +164,7 @@ describe("AC-CV-2 fragment outlets expand {{lore:<name>}} before fingerprinting"
 
   it("HAPPY hook:subagent-start: the rendered block holds String(CAPTURE_TAIL_CHARS) and no '{{lore:'", () => {
     const source = fragment("helper-tail", "Helpers: tail is {{lore:capture_tail_chars}} chars.\n", {
-      audience: ["subagent:*"],
-      mode: "dynamic",
+      inject: ["subagent-start"],
     });
     const expanded = mustExpand([source], "hook:subagent-start");
     const block = renderOutlet(expanded, "hook:subagent-start");
@@ -176,7 +175,7 @@ describe("AC-CV-2 fragment outlets expand {{lore:<name>}} before fingerprinting"
   });
 
   it("BOUNDARY hook block size: chars are counted on the EXPANDED text (the 27-char token counts as its value's length)", () => {
-    const source = fragment("cap-probe", "{{lore:capture_tail_chars}}\n", { audience: ["subagent:*"], mode: "dynamic" });
+    const source = fragment("cap-probe", "{{lore:capture_tail_chars}}\n", { inject: ["subagent-start"] });
     const expanded = mustExpand([source], "hook:subagent-start");
     const block = renderOutlet(expanded, "hook:subagent-start");
     expect(block.ok).toBe(true);
@@ -234,7 +233,7 @@ describe("AC-CV-2 fragments without '{{lore:' render byte-identical to the pre-c
     const goldens = readdirSync(GOLDEN_DIR).filter((name) => name.endsWith(".md"));
     expect(goldens.length).toBeGreaterThanOrEqual(9); // liveness: the fixture set is non-empty
     const staticMain = discovered.value.filter(
-      (f) => f.frontmatter.mode === "static" && f.frontmatter.audience.includes("main") && f.frontmatter.delivery !== "skill",
+      (f) => f.frontmatter.inject.includes("launch"),
     );
     expect(staticMain.map((f) => `${f.frontmatter.id}.md`).sort()).toEqual([...goldens].sort());
 
@@ -257,10 +256,10 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     () => {
       const sb = makeSandbox();
       // body starts on file line 7 (after the 6-line frontmatter block); the variable sits on line 8
-      writeProjectFragment(sb, "badvar.md", fragmentFile("badvar", "main", "static", "first body line\nuses {{lore:nope}} here\n"));
+      writeProjectFragment(sb, "badvar.md", fragmentFile("badvar", "launch", "first body line\nuses {{lore:nope}} here\n"));
       const refresh = lore(sb, "context", "refresh");
       expect(refresh.status).toBe(4);
-      expect(refresh.stderr).toMatch(/\.lore\/context\/badvar\.md:8\b/);
+      expect(refresh.stderr).toMatch(/\.lore\/context\/badvar\.md:7\b/);
       expect(refresh.stderr).toContain("nope");
       expect(loreRulesFiles(sb.repo)).toEqual([]);
 
@@ -277,7 +276,7 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     "refresh expands a registered variable into the project rules file and fingerprints the expanded body",
     () => {
       const sb = makeSandbox();
-      writeProjectFragment(sb, "tailrule.md", fragmentFile("tailrule", "main", "static", "Tail is {{lore:capture_tail_chars}} chars.\n"));
+      writeProjectFragment(sb, "tailrule.md", fragmentFile("tailrule", "launch", "Tail is {{lore:capture_tail_chars}} chars.\n"));
       const refresh = lore(sb, "context", "refresh");
       expect(refresh.status, refresh.stderr).toBe(0);
       const content = readFileSync(join(sb.repo, ".claude", "rules", "lore-tailrule.md"), "utf8");
@@ -297,7 +296,7 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     "fragments render (hook:subagent-start) prints the expanded value from the binary, never the token",
     () => {
       const sb = makeSandbox();
-      writeProjectFragment(sb, "helpertail.md", fragmentFile("helpertail", '"subagent:*"', "dynamic", "Helper tail is {{lore:capture_tail_chars}} chars.\n"));
+      writeProjectFragment(sb, "helpertail.md", fragmentFile("helpertail", "subagent-start", "Helper tail is {{lore:capture_tail_chars}} chars.\n"));
       const render = lore(sb, "fragments", "render", "--outlet", "hook:subagent-start", "--agent-type", "lore-reader");
       expect(render.status, render.stderr).toBe(0);
       const payload = JSON.parse(render.stdout) as { hookSpecificOutput: { additionalContext: string } };
@@ -311,8 +310,8 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     "fragments check --json: two fragments whose lines are equal only AFTER expansion report a duplicate_line naming both ids (exit 4, see header note on 'exits 1')",
     () => {
       const sb = makeSandbox();
-      writeProjectFragment(sb, "dup-a.md", fragmentFile("dup-a", "main", "static", "Evidence tail keeps {{lore:capture_tail_chars}} chars.\n"));
-      writeProjectFragment(sb, "dup-b.md", fragmentFile("dup-b", "main", "static", `Evidence tail keeps ${String(CAPTURE_TAIL_CHARS)} chars.\n`));
+      writeProjectFragment(sb, "dup-a.md", fragmentFile("dup-a", "launch", "Evidence tail keeps {{lore:capture_tail_chars}} chars.\n"));
+      writeProjectFragment(sb, "dup-b.md", fragmentFile("dup-b", "launch", `Evidence tail keeps ${String(CAPTURE_TAIL_CHARS)} chars.\n`));
       const refresh = lore(sb, "context", "refresh"); // check also measures rules-file drift, so write the files first
       expect(refresh.status, refresh.stderr).toBe(0);
       const check = lore(sb, "fragments", "check", "--json");
@@ -332,8 +331,8 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     "fragments check --json NEGATIVE control: lines that stay different after expansion produce no duplicate_line and exit 0",
     () => {
       const sb = makeSandbox();
-      writeProjectFragment(sb, "dup-a.md", fragmentFile("dup-a", "main", "static", "Evidence tail keeps {{lore:capture_tail_chars}} chars.\n"));
-      writeProjectFragment(sb, "dup-b.md", fragmentFile("dup-b", "main", "static", `Evidence tail keeps ${String(CAPTURE_TAIL_CHARS + 1)} chars.\n`));
+      writeProjectFragment(sb, "dup-a.md", fragmentFile("dup-a", "launch", "Evidence tail keeps {{lore:capture_tail_chars}} chars.\n"));
+      writeProjectFragment(sb, "dup-b.md", fragmentFile("dup-b", "launch", `Evidence tail keeps ${String(CAPTURE_TAIL_CHARS + 1)} chars.\n`));
       const refresh = lore(sb, "context", "refresh");
       expect(refresh.status, refresh.stderr).toBe(0);
       const check = lore(sb, "fragments", "check", "--json");
@@ -348,11 +347,11 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     "fragments check over an unregistered variable fails with the same file:line + name (check and refresh cannot disagree, D10)",
     () => {
       const sb = makeSandbox();
-      writeProjectFragment(sb, "badvar.md", fragmentFile("badvar", "main", "static", "first body line\nuses {{lore:nope}} here\n"));
+      writeProjectFragment(sb, "badvar.md", fragmentFile("badvar", "launch", "first body line\nuses {{lore:nope}} here\n"));
       const check = lore(sb, "fragments", "check", "--json");
       expect(check.status).toBe(4);
       const combined = `${check.stdout}\n${check.stderr}`;
-      expect(combined).toMatch(/\.lore\/context\/badvar\.md:8\b/);
+      expect(combined).toMatch(/\.lore\/context\/badvar\.md:7\b/);
       expect(combined).toContain("nope");
     },
     SPAWN_TIMEOUT_MS,
@@ -368,11 +367,11 @@ describe("AC-CV-2 error line is counted in the FILE even for flow-style frontmat
       "---", // 1
       "id: flowy", // 2
       "title: Flowy", // 3
-      "audience: [main]", // 4
+      "inject: [launch]", // 4
       "", // 5
       "# a comment inside the frontmatter", // 6
       "when: {language: [zh]}", // 7
-      "mode: static", // 8
+      "# a second comment", // 8
       "---", // 9
       "first body line", // 10
       "bad {{lore:nope}} here", // 11

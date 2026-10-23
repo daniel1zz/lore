@@ -1,5 +1,5 @@
 /**
- * Lore-owned rules-file shape for static `main` fragments (D15): the ONLY owner of the
+ * Lore-owned rules-file shape for `launch` fragments (D15): the ONLY owner of the
  * `lore-<id>.md` file name, its fingerprint first line, and the intact/diverged test.
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D15, D4, D8).
  *
@@ -72,7 +72,7 @@ export function isLoreRulesFileName(name: string): boolean {
 }
 
 /**
- * Render one static main fragment as a lore rules file.
+ * Render one `launch` fragment as a lore rules file.
  *
  * @returns ok(file) or VALIDATION_ERROR when the fragment id cannot be a file-name stem.
  */
@@ -107,7 +107,7 @@ export function parseRulesFile(content: string): ParsedRulesFile | null {
 }
 
 // ---------------------------------------------------------------------------
-// Skill files (BR-1064): `lore-<id>/SKILL.md` for `delivery: skill` fragments.
+// Skill files (BR-1064): `lore-<id>/SKILL.md` for `inject: [on-demand]` fragments.
 // File = YAML frontmatter (`name: lore-<id>`, `description`) + fingerprint line + body.
 // The fingerprint hash covers the frontmatter block AND the body, so a hand-edited
 // description counts as divergence (a rules file has no frontmatter to protect).
@@ -148,7 +148,7 @@ export function skillDirName(id: string): string {
 }
 
 /**
- * Render one `delivery: skill` fragment as a lore SKILL.md.
+ * Render one `on-demand` fragment as a lore SKILL.md.
  *
  * @returns ok(file) or VALIDATION_ERROR when the id is not a safe stem or the description is missing.
  */

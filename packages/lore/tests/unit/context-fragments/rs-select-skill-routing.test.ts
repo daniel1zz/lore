@@ -1,7 +1,7 @@
 /**
  * @spec_ref AC-RS-2
  * Spec: spec-rule-store (Scope 3; BR-1061, BR-1060)
- * A `delivery: skill` fragment leaves rules:* and hook:* and lands in exactly one skills outlet.
+ * An `inject: [on-demand]` fragment leaves rules:* and hook:* and lands in exactly one skills outlet.
  */
 import { describe, it, expect } from "vitest";
 import { resolveContextConfig, type Fragment, type OutletId, type ContextConfigLayer } from "@lore/core";
@@ -14,9 +14,7 @@ function frag(id: string, layer: Layer, delivery: "rules" | "skill" = "skill"): 
     frontmatter: {
       id,
       title: `title ${id}`,
-      audience: ["main"],
-      mode: "static",
-      delivery,
+      inject: [delivery === "skill" ? "on-demand" : "launch"],
       ...(delivery === "skill" ? { description: `when to use ${id}` } : {}),
     },
     body: `body of ${id} from ${layer}`,
@@ -31,6 +29,7 @@ const OUTLETS: OutletId[] = [
   "skills:project",
   "skills:user",
   "hook:subagent-start",
+  "hook:user-prompt",
 ];
 
 const empty: ContextConfigLayer = {};

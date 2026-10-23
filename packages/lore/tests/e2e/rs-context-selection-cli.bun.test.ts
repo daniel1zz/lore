@@ -4,7 +4,7 @@
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7, AC-RS-7, BR-1063;
  * task task-rs-t10-context-list-add-remove-verbs-and-skill-refresh-via).
  *
- * Contract: `list --json` lists every fragment with layer/delivery/selected; `remove <id>` records the id
+ * Contract: `list --json` lists every fragment with layer/inject/selected; `remove <id>` records the id
  * in `.lore/context/selection.yaml` and deletes the project rules file; a repeat exits 0 and leaves the
  * selection file byte-equal; `add` restores the rules file; an unknown id exits 4.
  *
@@ -92,19 +92,20 @@ describe("AC-RS-7 lore context list | add | remove", () => {
     expect(existsSync(selectionFile(sb))).toBe(false);
   });
 
-  it("list --json lists every fragment with layer, delivery and selected", async () => {
+  it("list --json lists every fragment with layer, inject and selected", async () => {
     const sb = await makeSandbox();
     const run = await lore(sb, "context", "list", "--json");
     expect(run.code).toBe(0);
     const report = JSON.parse(run.stdout) as {
       ok: boolean;
-      data: { id: string; layer: string; delivery: string; selected: boolean }[];
+      data: { id: string; layer: string; inject: string[]; selected: boolean }[];
     };
     expect(report.ok).toBe(true);
     expect(report.data.length).toBeGreaterThan(5);
     for (const row of report.data) {
       expect(["shipped", "user", "project"]).toContain(row.layer);
-      expect(["rules", "skill"]).toContain(row.delivery);
+      expect(Array.isArray(row.inject) && row.inject.length > 0).toBe(true);
+      expect(row).not.toHaveProperty("delivery");
       expect(typeof row.selected).toBe("boolean");
     }
     const close = report.data.find((row) => row.id === FRAGMENT_ID);

@@ -98,7 +98,7 @@ function refuseUnknown(id: string, fragments: readonly Fragment[]): SelectionErr
  * @param id Fragment id.
  * @param scope Scope owning `selection`.
  * @param fragments ALL discovered fragments, un-merged (the flow supplies them): defines the known ids and
- *   lets a static main fragment the scope does not own be refused (reuses `checkOverrides`).
+ *   lets a main-session fragment the scope does not own be refused (reuses `checkOverrides`).
  * @returns ok(new Selection), or VALIDATION_ERROR (unknown id / not owned).
  */
 export function addToDisable(

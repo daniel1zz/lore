@@ -4,7 +4,7 @@
  * Spec: spec-rule-store-git-tracked-fragment-selection-on-demand-skill (Scope 2 + 6, BR-1063, AC-RS-6).
  *
  * Public surface:
- *   - runSelectionList(deps) — every fragment with id, layer, delivery, size, selected.
+ *   - runSelectionList(deps) — every fragment with id, layer, inject timings, size, selected.
  *   - runSelectionChange(deps, input) — `add` (re-enable) / `remove` (disable) one fragment id in one scope.
  *   - SelectionFlowDeps, SelectionListEntry, SelectionChangeInput, SelectionChangeOutcome, SelectionFlowError.
  *
@@ -22,7 +22,7 @@
  * Side-effect class: IO through the injected FsWritePort (at most one selection-file write per change).
  */
 import { createHash } from "node:crypto";
-import { err, ok, validationError, type Fragment, type FragmentDelivery, type FsWritePort, type LoreError, type Result } from "@lore/core";
+import { err, ok, validationError, type Fragment, type InjectTiming, type FsWritePort, type LoreError, type Result } from "@lore/core";
 import { discoverFragments, type FragmentRoots } from "../service/context-fragments/discover.js";
 import {
   addToDisable,
@@ -50,7 +50,7 @@ export interface SelectionFlowDeps {
 export interface SelectionListEntry {
   readonly id: string;
   readonly layer: Fragment["layer"];
-  readonly delivery: FragmentDelivery;
+  readonly inject: readonly InjectTiming[];
   /** Body length in characters. */
   readonly size: number;
   /** false when either scope's selection disables the id. */
@@ -127,7 +127,7 @@ export async function runSelectionList(deps: SelectionFlowDeps): Promise<Result<
     (fragment): SelectionListEntry => ({
       id: fragment.frontmatter.id,
       layer: fragment.layer,
-      delivery: fragment.frontmatter.delivery,
+      inject: fragment.frontmatter.inject,
       size: fragment.body.length,
       selected: !disabled.has(fragment.frontmatter.id),
     }),

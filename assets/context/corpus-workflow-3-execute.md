@@ -1,8 +1,7 @@
 ---
 id: corpus-workflow-execute
 title: "EXECUTE — claim before you work, evidence over assertion"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## EXECUTE — claim before you work, evidence over assertion
 

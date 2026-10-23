@@ -35,7 +35,7 @@ import type { FsWritePort, LoreError, Result } from "@lore/core";
 import { runContextInit, runContextRefresh } from "../../../src/flows/context-flow.js";
 
 const FRAGMENT_MD =
-  "---\nid: cas-probe-rule\ntitle: CAS probe rule\naudience: [main]\nmode: static\n---\n" +
+  "---\nid: cas-probe-rule\ntitle: CAS probe rule\ninject: [launch]\n---\n" +
   "Sentinel body CAS-PROBE-7731.\n";
 
 const RULES_FILE = ".claude/rules/lore-cas-probe-rule.md";

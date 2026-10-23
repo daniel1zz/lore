@@ -87,7 +87,7 @@ writeFileSync(
 );
 writeFileSync(
   join(dir, ".lore", "context", "widget-rules.md"),
-  ["---", "id: project-widget-rules", "title: Widget rules", 'audience: ["subagent:*"]', "mode: static", "---", "Never edit `src/widget.ts#renderWidget` by hand.", ""].join("\n"),
+  ["---", "id: project-widget-rules", "title: Widget rules", "inject: [subagent-start]", "---", "Never edit `src/widget.ts#renderWidget` by hand.", ""].join("\n"),
 );
 
 const specSlug = slugOf(
@@ -115,7 +115,7 @@ describe("AC-BIND-3: lore refs <path>", () => {
         document_kind: "fragment",
         reference: "src/widget.ts#renderWidget",
         path: "src/widget.ts",
-        line: 7,
+        line: 6,
         symbol: "renderWidget",
       },
     ]);
@@ -160,7 +160,7 @@ describe("AC-BIND-3: lore refs <path>", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("CLAUDE.md:3");
-    expect(result.stdout).toContain(".lore/context/widget-rules.md:7");
+    expect(result.stdout).toContain(".lore/context/widget-rules.md:6");
     expect(result.stdout).toContain(specSlug);
   });
 
