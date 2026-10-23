@@ -136,4 +136,41 @@ describe("autonomy set --tier milestone / --retire: loosenings wait for a human"
     expect(retired.exitCode, retired.stderr).toBe(0);
     expect(Object.keys(shownClasses(corpus))).not.toContain("old-normal");
   }, 120_000);
+
+  // AC-ASK-1: an approval binds to the changed class entry, not the whole record version.
+  for (const order of [["override-judgment", "report-issue"], ["report-issue", "override-judgment"]] as const) {
+    it(`AC-ASK-1: two approved loosenings of different classes both apply, order ${order.join(" then ")}`, async () => {
+      const corpus = await newStaleCorpus("lore-batch-");
+      const argsOf = (id: string): string[] => (id === "report-issue" ? ["autonomy", "set", id, "--retire"] : ["autonomy", "set", id, "--tier", "milestone"]);
+      const pending = order.map((id) => {
+        const first = lore(corpus, argsOf(id));
+        expect(first.exitCode, first.stderr).toBe(4);
+        return pendingIdOf(first.stderr);
+      });
+      for (const id of pending) expect((await runDecide(corpus, id, "accept")).code).toBe(0);
+      for (const id of order) {
+        const applied = lore(corpus, argsOf(id));
+        expect(applied.exitCode, `${id}: ${applied.stderr}`).toBe(0);
+        expect(applied.stdout).toContain("approved by human decision record");
+      }
+      const classes = shownClasses(corpus);
+      expect(classes["override-judgment"]?.tier).toBe("milestone");
+      expect(Object.keys(classes)).not.toContain("report-issue");
+      const audit = lore(corpus, ["audit", "--verify"]);
+      expect(audit.exitCode, audit.stderr + audit.stdout).toBe(0);
+    }, 300_000);
+  }
+
+  it("AC-ASK-1: a loosening whose SAME class entry changed after approval is refused as stale (new pending decision)", async () => {
+    const corpus = await newStaleCorpus("lore-batch-stale-");
+    const first = lore(corpus, ["autonomy", "set", "override-judgment", "--tier", "milestone"]);
+    expect((await runDecide(corpus, pendingIdOf(first.stderr), "accept")).code).toBe(0);
+    // the same class entry changes (a tightening applies at once) before the approved command is re-run
+    const tighten = lore(corpus, ["autonomy", "set", "override-judgment", "--threshold", "0.95"]);
+    expect(tighten.exitCode, tighten.stderr).toBe(0);
+    const rerun = lore(corpus, ["autonomy", "set", "override-judgment", "--tier", "milestone"]);
+    expect(rerun.exitCode, rerun.stdout + rerun.stderr).toBe(4);
+    expect(pendingIdOf(rerun.stderr)).toBeGreaterThan(0);
+    expect(shownClasses(corpus)["override-judgment"]?.tier).toBe("normal");
+  }, 240_000);
 });
