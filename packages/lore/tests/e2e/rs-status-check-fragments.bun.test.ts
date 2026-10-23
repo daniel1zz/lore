@@ -83,7 +83,7 @@ async function makeSandbox(): Promise<Sandbox> {
 
 function writeDynamicHelperFragment(dir: string, id: string, body: string): void {
   mkdirSync(dir, { recursive: true });
-  const front = ["---", `id: ${id}`, `title: fixture ${id}`, 'audience: ["subagent:*"]', "mode: dynamic", "---", ""].join("\n");
+  const front = ["---", `id: ${id}`, `title: fixture ${id}`, "inject: [subagent-start]", "---", ""].join("\n");
   writeFileSync(join(dir, `${id}.md`), `${front}${body}\n`, "utf8");
 }
 

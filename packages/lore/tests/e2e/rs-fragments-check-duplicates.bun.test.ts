@@ -64,8 +64,8 @@ async function makeSandbox(): Promise<Sandbox> {
 function writeHelperFragment(dir: string, id: string, body: string): string {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${id}.md`);
-  // reason: helper-audience dynamic fixture — a dynamic MAIN fragment is itself a `dynamic_main` check finding (BR-1066), so it cannot be a clean control.
-  writeFileSync(path, `---\nid: ${id}\ntitle: fixture ${id}\naudience: ["subagent:*"]\nmode: dynamic\n---\n${body}\n`, "utf8");
+  // reason: helper-only fixture — it needs no rules file, so it is a clean control.
+  writeFileSync(path, `---\nid: ${id}\ntitle: fixture ${id}\ninject: [subagent-start]\n---\n${body}\n`, "utf8");
   return path;
 }
 
@@ -118,7 +118,7 @@ describe("AC-RS-8 lore fragments check duplicate and selection findings", () => 
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, "ai-native-coding.md"),
-      `---\nid: ai-native-coding\ntitle: collides\naudience: ["main"]\nmode: static\ndelivery: skill\ndescription: collides with a shipped skill\n---\nCollision body line.\n`,
+      `---\nid: ai-native-coding\ntitle: collides\ninject: [on-demand]\ndescription: collides with a shipped skill\n---\nCollision body line.\n`,
       "utf8",
     );
     const res = await lore(sb, "fragments", "check");

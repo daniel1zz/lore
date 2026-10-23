@@ -58,7 +58,7 @@ function writeProbe(chars: number): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, `${FRAGMENT_ID}.md`),
-    `---\nid: ${FRAGMENT_ID}\ntitle: ur3 boundary probe\naudience: ["subagent:${AGENT_TYPE}"]\nmode: static\n---\n${"x".repeat(chars)}`,
+    `---\nid: ${FRAGMENT_ID}\ntitle: ur3 boundary probe\ninject: [subagent-start]\nagents: [${AGENT_TYPE}]\n---\n${"x".repeat(chars)}`,
     "utf8",
   );
 }

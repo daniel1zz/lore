@@ -14,7 +14,7 @@ import { isLoreSkillDir, isLoreSkillFileBytes, parseSkillFile, renderSkillFile }
 
 function skillFragment(id: string, body: string, description = "Use when editing rules: handles \"quotes\", colons: and more."): Fragment {
   return {
-    frontmatter: { id, title: `title ${id}`, audience: ["main"], mode: "static", delivery: "skill", description },
+    frontmatter: { id, title: `title ${id}`, inject: ["on-demand"], description },
     body,
     layer: "shipped",
     path: `/fixture/${id}.md`,

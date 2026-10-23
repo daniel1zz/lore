@@ -87,7 +87,7 @@ writeFileSync(
 );
 writeFileSync(
   join(dir, ".lore", "context", "widget-rules.md"),
-  ["---", "id: project-widget-rules", "title: Widget rules", 'audience: ["subagent:*"]', "mode: static", "---", "Never edit `src/widget.ts#renderWidget` by hand.", ""].join("\n"),
+  ["---", "id: project-widget-rules", "title: Widget rules", "inject: [subagent-start]", "---", "Never edit `src/widget.ts#renderWidget` by hand.", ""].join("\n"),
 );
 
 const specSlug = slugOf(

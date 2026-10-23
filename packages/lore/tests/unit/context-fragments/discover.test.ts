@@ -12,7 +12,7 @@ import { discoverFragments } from "../../../src/service/context-fragments/discov
 const ROOTS = { shipped: "assets/context", user: "home/.config/lore/context", project: ".lore/context" };
 
 function frag(id: string, body = "A factual statement."): string {
-  return `---\nid: ${id}\ntitle: Title of ${id}\naudience: [main]\nmode: static\n---\n${body}\n`;
+  return `---\nid: ${id}\ntitle: Title of ${id}\ninject: [launch]\n---\n${body}\n`;
 }
 
 describe("AC-CF-1 discoverFragments layer override", () => {
@@ -123,7 +123,7 @@ describe("AC-CF-1 discoverFragments layer override", () => {
 
   it("frontmatter that fails the schema returns err naming the file (fail loud)", async () => {
     const fs = new InMemoryFsPort({
-      ".lore/context/bad.md": "---\nid: bad\ntitle: T\naudience: [nobody]\nmode: static\n---\nbody\n",
+      ".lore/context/bad.md": "---\nid: bad\ntitle: T\ninject: [sometimes]\n---\nbody\n",
     });
     const r = await discoverFragments(fs, ROOTS);
     expect(r.ok).toBe(false);
@@ -143,8 +143,8 @@ describe("AC-CF-1 discoverFragments layer override", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value[0]?.body).toContain("BODY-MARKER");
-    expect(r.value[0]?.body).not.toContain("audience:");
-    expect(r.value[0]?.frontmatter.mode).toBe("static");
+    expect(r.value[0]?.body).not.toContain("inject:");
+    expect(r.value[0]?.frontmatter.inject).toEqual(["launch"]);
   });
 });
 

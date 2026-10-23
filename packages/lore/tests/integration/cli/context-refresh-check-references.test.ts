@@ -88,7 +88,7 @@ describe("context refresh --check resolves code references", () => {
     put(
       dir,
       ".lore/context/frag.md",
-      ["---", "id: project-frag", "title: Frag", 'audience: ["subagent:*"]', "mode: static", "---", "Run `bun run no-such-script`.", ""].join("\n"),
+      ["---", "id: project-frag", "title: Frag", "inject: [subagent-start]", "---", "Run `bun run no-such-script`.", ""].join("\n"),
     );
 
     const { exitCode, output } = refreshCheck(dir);

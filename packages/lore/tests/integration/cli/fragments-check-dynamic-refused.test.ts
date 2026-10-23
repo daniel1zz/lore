@@ -1,18 +1,18 @@
 // @spawns packages/lore/src/index.ts
 /**
- * Integration tests for `lore fragments check` refusing a dynamic main-session fragment
- * (spec-one-upgrade-reminder-at-session-start-covers-the-global, AC-UR-4; BR-1066 modified).
- * With the `hook:session-start` outlet retired, a `mode: dynamic` + `audience: main` fragment reaches
- * no outlet; `check` must say so (exit 4, fragment id on stderr and in the JSON report) rather than
- * let it fail silently. Real CLI via subprocess in a throwaway `mkdtemp` project.
+ * Integration tests for `lore fragments check` and old-format (audience / mode / delivery) fragments.
+ * Superseded: AC-UR-4 (a dynamic main-session fragment is refused with finding `dynamic_main`) - the `mode` field
+ * no longer exists (spec-fragment-injection-timing-one-inject-enum-a-per-turn). The kept property: `check`
+ * refuses a fragment that cannot reach a session, exit 4 with the fragment named on stderr and in the JSON
+ * report, instead of letting it fail silently. Now that is an old-format file, refused naming the migration command.
+ * Real CLI via subprocess in a throwaway `mkdtemp` project.
  *
  * Coverage:
- *   NEGATIVE:   dynamic + main fragment -> exit 4, id on stderr and in the JSON findings
- *   HAPPY:      control — the same project without the fragment -> exit 0
- *   BOUNDARY:   a dynamic fragment whose audience is a helper (subagent:*) is NOT refused
- *   BOUNDARY:   a static main fragment is NOT refused
+ *   NEGATIVE:   old-format (audience/mode) fragment -> exit 4, path and `lore migrate fragments` on stderr and in the JSON findings
+ *   HAPPY:      control - the same project without the fragment -> exit 0
+ *   BOUNDARY:   a helper-only inject fragment is NOT refused; a launch fragment is NOT refused
  *
- * @spec_ref AC-UR-4
+ * @spec_ref AC-IT-1
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -25,7 +25,7 @@ const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const BUN_BIN = execSync("command -v bun", { encoding: "utf8" }).trim();
 
-const FRAGMENT_ID = "ur4-dynamic-main";
+const FRAGMENT_ID = "ur4-old-format";
 
 interface RunResult {
   readonly stdout: string;
@@ -55,14 +55,14 @@ function runCheck(project: string, extra: string[] = []): RunResult {
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
-function makeProject(fragment?: { mode: "static" | "dynamic"; audience: string }): string {
+function makeProject(fragmentFrontmatter?: string): string {
   const project = mkdtempSync(join(sandbox, "project-"));
   const dir = join(project, ".lore", "context");
   mkdirSync(dir, { recursive: true });
-  if (fragment !== undefined) {
+  if (fragmentFrontmatter !== undefined) {
     writeFileSync(
       join(dir, `${FRAGMENT_ID}.md`),
-      `---\nid: ${FRAGMENT_ID}\ntitle: ur4 probe\naudience: ["${fragment.audience}"]\nmode: ${fragment.mode}\n---\nProbe body.\n`,
+      `---\nid: ${FRAGMENT_ID}\ntitle: ur4 probe\n${fragmentFrontmatter}\n---\nProbe body.\n`,
       "utf8",
     );
   }
@@ -78,41 +78,43 @@ afterAll(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
-describe("fragments check refuses a dynamic main-session fragment (AC-UR-4)", () => {
-  it("AC-UR-4.N1: a project fragment with mode: dynamic and audience: main exits 4 naming the id on stderr and in the JSON report", () => {
-    const project = makeProject({ mode: "dynamic", audience: "main" });
+describe("fragments check refuses an old-format fragment naming the migration command", () => {
+  it("N1: a project fragment with audience and mode exits 4 naming the file and `lore migrate fragments` on stderr and in the JSON report", () => {
+    const project = makeProject("audience: [main]\nmode: dynamic");
 
     const human = runCheck(project);
     expect(human.exitCode).toBe(4);
-    expect(human.stderr).toContain(FRAGMENT_ID);
+    expect(human.stderr).toContain(`${FRAGMENT_ID}.md`);
+    expect(human.stderr).toContain("lore migrate fragments");
 
     const json = runCheck(project, ["--json"]);
     expect(json.exitCode).toBe(4);
     const report = JSON.parse(json.stdout) as CheckReport;
     expect(report.ok).toBe(false);
-    const hits = report.data.findings.filter((f) => f.message.includes(FRAGMENT_ID));
+    const hits = report.data.findings.filter((f) => f.message.includes(`${FRAGMENT_ID}.md`));
     expect(hits.length).toBeGreaterThanOrEqual(1);
     expect(hits[0]?.code).toBe("VALIDATION_ERROR");
-    expect(hits[0]?.kind).toBe("dynamic_main");
+    expect(hits[0]?.kind).toBe("discovery");
+    expect(hits[0]?.message).toContain("lore migrate fragments");
   });
 
-  it("AC-UR-4.H1: control — the same project without the fragment exits 0", () => {
+  it("H1: control — the same project without the fragment exits 0", () => {
     const project = makeProject();
     const run = runCheck(project);
     expect(run.exitCode).toBe(0);
     expect(run.stderr).not.toContain(FRAGMENT_ID);
   });
 
-  it("AC-UR-4.B1: a dynamic fragment for a helper audience is not refused", () => {
-    const project = makeProject({ mode: "dynamic", audience: "subagent:*" });
+  it("B1: a helper-only inject fragment is not refused", () => {
+    const project = makeProject("inject: [subagent-start]");
     const run = runCheck(project);
     expect(run.exitCode).toBe(0);
   });
 
-  it("AC-UR-4.B2: a static main fragment is not refused (it lands in a rules file)", () => {
-    const project = makeProject({ mode: "static", audience: "main" });
+  it("B2: a launch fragment is not a retired-field finding (it lands in a rules file)", () => {
+    const project = makeProject("inject: [launch]");
     const run = runCheck(project, ["--json"]);
     const report = JSON.parse(run.stdout) as CheckReport;
-    expect(report.data.findings.filter((f) => f.kind === "dynamic_main")).toEqual([]);
+    expect(report.data.findings.filter((f) => f.kind === "discovery")).toEqual([]);
   });
 });

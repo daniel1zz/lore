@@ -16,7 +16,7 @@ const PROJECT_RULES = ".claude/rules";
 const HEADER = /^<!-- lore:managed fragment=(\S+) hash=[0-9a-f]{8} -->\n/;
 
 function fragmentMd(id: string, body: string): string {
-  return `---\nid: ${id}\ntitle: ${id} rule\naudience: [main]\nmode: static\n---\n${body}\n`;
+  return `---\nid: ${id}\ntitle: ${id} rule\ninject: [launch]\n---\n${body}\n`;
 }
 
 function depsFor(fs: InMemoryFsPort) {

@@ -7,7 +7,7 @@
  * Interface assumptions (spec "Module Boundary" + dispatch bundle):
  *   selectFragments(all, { outlet, agentType?, config }): Fragment[]
  *     - `all` holds fragments of ALL layers un-merged (duplicate ids across layers allowed);
- *       selection resolves id-override (project > user > shipped), disable, audience, when,
+ *       selection resolves id-override (project > user > shipped), disable, inject, when,
  *       outlet layer routing; output order = id ascending.
  *   checkOverrides(all, configs): Result<..., LoreError>
  *     - configs = { global: ContextConfigLayer, project: ContextConfigLayer } (RAW layers,
@@ -16,12 +16,12 @@
  *   "user" layer, so fixtures cast it.
  *
  * Six-dimension coverage:
- *   HAPPY: audience/when selection, outlet routing.  NEGATIVE: excluded audience/when/disabled,
+ *   HAPPY: inject/when selection, outlet routing.  NEGATIVE: excluded inject/when/disabled,
  *   cross-file override refusal.  BOUNDARY: subagent:<type> vs subagent:*, agentType absent.
  *   ERROR: err names the id.  STATE: inputs not mutated.  REGRESSION: determinism (id order).
  */
 import { describe, it, expect } from "vitest";
-import { OUTLET_IDS, resolveContextConfig, type Fragment, type OutletId, type ContextConfigLayer } from "@lore/core";
+import { OUTLET_IDS, resolveContextConfig, type Fragment, type InjectTiming, type OutletId, type ContextConfigLayer } from "@lore/core";
 import { selectFragments, checkOverrides } from "../../../src/service/context-fragments/select.js";
 
 type Layer = "shipped" | "user" | "project";
@@ -29,8 +29,8 @@ type Layer = "shipped" | "user" | "project";
 function frag(
   id: string,
   opts: {
-    audience?: string[];
-    mode?: "static" | "dynamic";
+    inject?: InjectTiming[];
+    agents?: string[];
     layer?: Layer;
     when?: { language: string[] };
     body?: string;
@@ -41,8 +41,8 @@ function frag(
     frontmatter: {
       id,
       title: `title ${id}`,
-      audience: opts.audience ?? ["main"],
-      mode: opts.mode ?? "static",
+      inject: opts.inject ?? ["launch"],
+      ...(opts.agents ? { agents: opts.agents } : {}),
       ...(opts.when ? { when: opts.when } : {}),
     },
     body: opts.body ?? `body of ${id} from ${layer}`,
@@ -76,20 +76,20 @@ function select(
   });
 }
 
-describe("AC-CF-2 selectFragments hook:subagent-start audience, when and disable", () => {
+describe("AC-CF-2 selectFragments hook:subagent-start inject, agents, when and disable", () => {
   const all = [
-    frag("a-star", { audience: ["subagent:*"], mode: "dynamic" }),
-    frag("b-tester", { audience: ["subagent:tester"], mode: "static" }),
-    frag("c-reviewer-only", { audience: ["subagent:lore-reviewer-only"] }),
-    frag("d-en-only", { audience: ["subagent:*"], when: { language: ["en"] } }),
-    frag("e-disabled", { audience: ["subagent:*"] }),
-    frag("f-zh", { audience: ["subagent:*"], when: { language: ["zh"] } }),
-    frag("g-main-only", { audience: ["main"], mode: "dynamic" }),
+    frag("a-star", { inject: ["subagent-start"] }),
+    frag("b-tester", { inject: ["subagent-start"], agents: ["tester"] }),
+    frag("c-reviewer-only", { inject: ["subagent-start"], agents: ["lore-reviewer-only"] }),
+    frag("d-en-only", { inject: ["subagent-start"], when: { language: ["en"] } }),
+    frag("e-disabled", { inject: ["subagent-start"] }),
+    frag("f-zh", { inject: ["subagent-start"], when: { language: ["zh"] } }),
+    frag("g-main-only", { inject: ["launch"] }),
   ];
   const run = (agentType: string | undefined, language = "zh") =>
     select(all, "hook:subagent-start", cfg(), cfg(language, ["e-disabled"]), agentType);
 
-  it("includes subagent:* and subagent:<type> fragments (static and dynamic) in id order", () => {
+  it("includes subagent:* and subagent:<type> fragments in id order", () => {
     expect(ids(run("tester"))).toEqual(["a-star", "b-tester", "f-zh"]);
   });
 
@@ -105,7 +105,7 @@ describe("AC-CF-2 selectFragments hook:subagent-start audience, when and disable
     expect(ids(run("tester"))).not.toContain("e-disabled");
   });
 
-  it("excludes audience-main-only fragments", () => {
+  it("excludes launch-only fragments", () => {
     expect(ids(run("tester"))).not.toContain("g-main-only");
   });
 
@@ -167,8 +167,8 @@ describe("AC-CF-19 each static main fragment reaches exactly one CLAUDE.md outle
     frag("m-shipped", { layer: "shipped" }),
     frag("m-user", { layer: "user" }),
     frag("m-project", { layer: "project" }),
-    frag("n-dynamic", { layer: "shipped", mode: "dynamic" }),
-    frag("n-sub", { layer: "project", audience: ["subagent:*"] }),
+    frag("n-per-turn", { layer: "shipped", inject: ["user-prompt"] }),
+    frag("n-sub", { layer: "project", inject: ["subagent-start"] }),
   ];
   const proj = () => select(all, "rules:project", cfg(), cfg());
   const usr = () => select(all, "rules:user", cfg(), cfg());
@@ -244,41 +244,41 @@ describe("AC-CF-20 cross-file override of a static main fragment is refused", ()
     expect(r.ok).toBe(true);
   });
 
-  it("accepts the same cross-file targeting when the shipped fragment is dynamic", () => {
-    const dyn = frag("dyn", { layer: "shipped", mode: "dynamic" });
-    const r = checkOverrides([dyn, frag("dyn", { layer: "user", mode: "dynamic" })], { global: cfg(undefined, ["dyn"]), project: cfg() });
+  it("accepts the same cross-file targeting when the shipped fragment is helper-only with an agents filter", () => {
+    const dyn = frag("dyn", { layer: "shipped", inject: ["subagent-start"], agents: ["lore-reader"] });
+    const r = checkOverrides([dyn, frag("dyn", { layer: "user", inject: ["subagent-start"], agents: ["lore-reader"] })], { global: cfg(undefined, ["dyn"]), project: cfg() });
     expect(r.ok).toBe(true);
   });
 
   it("accepts the same cross-file targeting when the shipped fragment is subagent-only", () => {
-    const sub = frag("sub", { layer: "shipped", audience: ["subagent:*"] });
-    const r = checkOverrides([sub, frag("sub", { layer: "user", audience: ["subagent:*"] })], { global: cfg(undefined, ["sub"]), project: cfg() });
+    const sub = frag("sub", { layer: "shipped", inject: ["subagent-start"] });
+    const r = checkOverrides([sub, frag("sub", { layer: "user", inject: ["subagent-start"] })], { global: cfg(undefined, ["sub"]), project: cfg() });
     expect(r.ok).toBe(true);
   });
 
   it("accepts project targeting a user dynamic helper fragment and applies it at the helper hook outlet", () => {
-    const ud = frag("udyn", { layer: "user", mode: "dynamic", audience: ["subagent:*"] });
-    const over = frag("udyn", { layer: "project", mode: "dynamic", audience: ["subagent:*"], body: "PROJECT-OVERRIDE" });
+    const ud = frag("udyn", { layer: "user", inject: ["subagent-start"] });
+    const over = frag("udyn", { layer: "project", inject: ["subagent-start"], body: "PROJECT-OVERRIDE" });
     expect(checkOverrides([ud, over], { global: cfg(), project: cfg() }).ok).toBe(true);
     const r = select([ud, over], "hook:subagent-start", cfg(), cfg());
     expect(r.map((f) => f.body)).toEqual(["PROJECT-OVERRIDE"]);
   });
 
   it("applies a project disable of a user dynamic helper fragment at hook:subagent-start", () => {
-    const ud = frag("udyn", { layer: "user", mode: "dynamic", audience: ["subagent:*"] });
+    const ud = frag("udyn", { layer: "user", inject: ["subagent-start"] });
     const r = select([ud], "hook:subagent-start", cfg(), cfg(undefined, ["udyn"]));
     expect(ids(r)).toEqual([]);
   });
 
   it("applies a global disable of a shipped dynamic helper fragment at hook:subagent-start", () => {
-    const dyn = frag("dyn", { layer: "shipped", mode: "dynamic", audience: ["subagent:*"] });
+    const dyn = frag("dyn", { layer: "shipped", inject: ["subagent-start"] });
     const r = select([dyn], "hook:subagent-start", cfg(undefined, ["dyn"]), cfg());
     expect(ids(r)).toEqual([]);
   });
 
-  it("a dynamic main fragment reaches no outlet now that hook:session-start is retired (BR-912)", () => {
-    const dyn = frag("dynmain", { layer: "shipped", mode: "dynamic", audience: ["main"] });
-    for (const outlet of OUTLET_IDS) expect(ids(select([dyn], outlet, cfg(), cfg())), outlet).toEqual([]);
+  it("a launch fragment reaches no hook outlet now that hook:session-start is retired (BR-912)", () => {
+    const dyn = frag("dynmain", { layer: "shipped", inject: ["launch"] });
+    for (const outlet of OUTLET_IDS.filter((id) => id.startsWith("hook:"))) expect(ids(select([dyn], outlet, cfg(), cfg())), outlet).toEqual([]);
   });
 });
 
@@ -289,7 +289,7 @@ describe("AC-CF-21 rules:project render is independent of user layer and global 
     frag("s-zh", { layer: "shipped", when: { language: ["zh"] } }),
   ];
   const userA = [frag("u-a", { layer: "user" })];
-  const userB = [frag("u-b", { layer: "user" }), frag("u-c", { layer: "user", mode: "dynamic" })];
+  const userB = [frag("u-b", { layer: "user" }), frag("u-c", { layer: "user" })];
   const project = cfg("zh");
 
   it("is byte-equal across differing user-layer fragment sets", () => {

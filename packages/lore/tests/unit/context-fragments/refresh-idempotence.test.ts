@@ -80,7 +80,7 @@ describe("AC-CTX-3 init/refresh idempotence with D15 lore rules files", () => {
     const result = await runContextRefresh(deps, "", { scope: "project" });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     const names = (await fs.listDir(RULES_DIR)).sort();
-    // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules): the four promoted main-audience static fragments ship too.
+    // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules): the four promoted launch fragments ship too.
     expect(names).toEqual([
       "lore-ac-design.md",
       "lore-ask-then-execute.md",

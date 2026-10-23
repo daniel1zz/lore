@@ -17,8 +17,8 @@ import { InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
 import type { FsWritePort, LoreError, Result } from "@lore/core";
 import { runContextRefresh } from "../../../src/flows/context-flow.js";
 
-const FRAGMENT_A = "---\nid: d16-a\ntitle: D16 A\naudience: [main]\nmode: static\n---\nSentinel body D16-A-1.\n";
-const FRAGMENT_B = "---\nid: d16-b\ntitle: D16 B\naudience: [main]\nmode: static\n---\nSentinel body D16-B-1.\n";
+const FRAGMENT_A = "---\nid: d16-a\ntitle: D16 A\ninject: [launch]\n---\nSentinel body D16-A-1.\n";
+const FRAGMENT_B = "---\nid: d16-b\ntitle: D16 B\ninject: [launch]\n---\nSentinel body D16-B-1.\n";
 const RULES_A = ".claude/rules/lore-d16-a.md";
 const RULES_B = ".claude/rules/lore-d16-b.md";
 

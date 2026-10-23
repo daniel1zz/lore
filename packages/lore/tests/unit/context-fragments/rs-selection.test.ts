@@ -21,9 +21,9 @@ import {
 } from "../../../src/service/context-fragments/selection.js";
 import { resolveUserConfigDir } from "../../../src/service/context-fragments/user-config-dir.js";
 
-function frag(id: string, layer: "shipped" | "user" | "project", mode: "static" | "dynamic" = "static"): Fragment {
+function frag(id: string, layer: "shipped" | "user" | "project", helperOnly = false): Fragment {
   return {
-    frontmatter: { id, audience: ["main"], mode, delivery: "rules" },
+    frontmatter: { id, inject: helperOnly ? ["subagent-start"] : ["launch"] },
     body: "x",
     layer,
     path: `/${layer}/${id}.md`,
@@ -31,7 +31,7 @@ function frag(id: string, layer: "shipped" | "user" | "project", mode: "static" 
   } as unknown as Fragment;
 }
 
-const ALL = [frag("alpha", "shipped"), frag("beta", "project"), frag("mine", "user"), frag("dyn", "user", "dynamic")];
+const ALL = [frag("alpha", "shipped"), frag("beta", "project"), frag("mine", "user"), frag("dyn", "user", true)];
 
 function mustOk<T, E>(r: { ok: boolean; value?: T; error?: E }): T {
   if (!r.ok) throw new Error(`expected ok: ${JSON.stringify(r.error)}`);
@@ -75,7 +75,7 @@ describe("AC-RS-3 selection model", () => {
     const result = addToDisable(emptySelection(), "mine", "project", ALL);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain("mine");
-    // the owning scope may disable it; a dynamic user fragment is unrestricted
+    // the owning scope may disable it; a helper-only user fragment is unrestricted
     expect(addToDisable(emptySelection(), "mine", "user", ALL).ok).toBe(true);
     expect(addToDisable(emptySelection(), "dyn", "project", ALL).ok).toBe(true);
     // user scope cannot disable a shipped static main fragment
