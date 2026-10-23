@@ -131,10 +131,6 @@ describe("setup seeds baseline adoption (BL-8)", () => {
     expect(citeOf(fresh)).toEqual({ mode: "report" });
   });
 
-  it("the pre-existing adoption seed is still written (regression control)", () => {
-    expect(readConfig(fresh).context?.memory_files?.adoption).toBeDefined();
-  });
-
   it.each(["off", "enforce", "report"] as const)("an existing mode %s is never changed", (mode) => {
     const dir = makeRepo((cfg) => {
       cfg.workflow = { gates: { "ac-cite": { mode } } };

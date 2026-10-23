@@ -92,7 +92,12 @@ async function collectMcpToolShapes(): Promise<Map<string, readonly string[]>> {
   return out;
 }
 
-const CLI_ALLOWED = READ_SIDE_BY_FILTERS.filter((f) => f.surface === "cli").map((f) => f.verb).sort();
+// reason: `ac supersede --by <spec>:<AC>` names the AC that REPLACES the superseded one; it is a criterion reference, not a
+// writer's name, so it neither attributes the write nor belongs in the read-side actor filters. Pinned by name so a second
+// non-actor `by` cannot slip in unnoticed.
+const NON_ACTOR_BY_LEAVES: readonly string[] = ["ac supersede"];
+
+const CLI_ALLOWED = [...READ_SIDE_BY_FILTERS.filter((f) => f.surface === "cli").map((f) => f.verb), ...NON_ACTOR_BY_LEAVES].sort();
 const MCP_ALLOWED = READ_SIDE_BY_FILTERS.filter((f) => f.surface === "mcp").map((f) => f.verb).sort();
 
 describe("AC-ROI-1 write commands take no `by`", () => {
