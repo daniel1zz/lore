@@ -94,7 +94,7 @@ describe("context refresh --check resolves code references", () => {
     const { exitCode, output } = refreshCheck(dir);
 
     expect(exitCode).not.toBe(0);
-    expect(output).toContain(".lore/context/frag.md:7");
+    expect(output).toContain(".lore/context/frag.md:6");
     expect(output).toContain("script_missing");
   });
 

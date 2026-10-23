@@ -259,7 +259,7 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
       writeProjectFragment(sb, "badvar.md", fragmentFile("badvar", "launch", "first body line\nuses {{lore:nope}} here\n"));
       const refresh = lore(sb, "context", "refresh");
       expect(refresh.status).toBe(4);
-      expect(refresh.stderr).toMatch(/\.lore\/context\/badvar\.md:8\b/);
+      expect(refresh.stderr).toMatch(/\.lore\/context\/badvar\.md:7\b/);
       expect(refresh.stderr).toContain("nope");
       expect(loreRulesFiles(sb.repo)).toEqual([]);
 
@@ -351,7 +351,7 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
       const check = lore(sb, "fragments", "check", "--json");
       expect(check.status).toBe(4);
       const combined = `${check.stdout}\n${check.stderr}`;
-      expect(combined).toMatch(/\.lore\/context\/badvar\.md:8\b/);
+      expect(combined).toMatch(/\.lore\/context\/badvar\.md:7\b/);
       expect(combined).toContain("nope");
     },
     SPAWN_TIMEOUT_MS,

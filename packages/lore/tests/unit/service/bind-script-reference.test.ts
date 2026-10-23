@@ -119,7 +119,7 @@ describe("AC-BIND-2: bun run <script> in a context fragment", () => {
 
     expect(exitCode).toBe(3);
     expect(unresolved(findings)).toEqual([
-      expect.objectContaining({ drift_kind: "script_missing", path: ".lore/context/frag.md", line: 7 }),
+      expect.objectContaining({ drift_kind: "script_missing", path: ".lore/context/frag.md", line: 6 }),
     ]);
   });
 
@@ -163,7 +163,7 @@ describe("AC-BIND-2: generated rules files are checked at their fragment, not at
     const { exitCode, findings } = runCheck(dir);
 
     expect(exitCode).toBe(3);
-    expect(unresolved(findings)).toEqual([expect.objectContaining({ path: ".lore/context/gen-frag.md", line: 7 })]);
+    expect(unresolved(findings)).toEqual([expect.objectContaining({ path: ".lore/context/gen-frag.md", line: 6 })]);
   });
 });
 
