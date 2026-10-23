@@ -159,6 +159,7 @@ import { applyMigration028 } from "./migrations/migration-028.js";
 import { applyMigration029 } from "./migrations/migration-029.js";
 import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
+import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -870,6 +871,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-030 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 32 && 32 <= ceiling) {
+      // reason: migration-032 rebuilds decision_log with the verdict CHECK widened to 'milestone' in ONE BEGIN/COMMIT
+      // (BR-1370); a failure rolls back and leaves schema 31.
+      try {
+        this.db.exec(MIGRATION_032_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-031 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }

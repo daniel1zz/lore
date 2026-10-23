@@ -28,7 +28,6 @@ import {
   projectAcCoverageGlyph,
 } from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { actedStore, liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { approvePending } from "../helpers/approve-baseline.js";
@@ -105,7 +104,6 @@ async function createTask(title: string, scope: readonly string[]): Promise<stri
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-ac-superseded-readers-"));
   await must(["init"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
   patchLoreConfig(
     dir,
     [

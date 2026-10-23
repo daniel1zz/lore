@@ -31,6 +31,7 @@ type RecoverabilityKey = keyof typeof RECOVERABILITY_SCORE;
 const recoverabilitySchema = z.enum(Object.keys(RECOVERABILITY_SCORE) as [RecoverabilityKey, ...RecoverabilityKey[]]);
 
 const humanAlwaysClassSchema = z.object({ tier: z.literal("human-always"), usesJudge: z.boolean() }).strict();
+const milestoneClassSchema = z.object({ tier: z.literal("milestone"), usesJudge: z.boolean() }).strict();
 const normalClassSchema = z
   .object({
     tier: z.literal("normal"),
@@ -45,7 +46,7 @@ const normalClassSchema = z
 export const governedThresholdsSchema = z
   .object({
     version: z.literal(1),
-    classes: z.record(z.string().min(1), z.discriminatedUnion("tier", [humanAlwaysClassSchema, normalClassSchema])),
+    classes: z.record(z.string().min(1), z.discriminatedUnion("tier", [humanAlwaysClassSchema, milestoneClassSchema, normalClassSchema])),
     worktreeRemoveRegenerable: z.array(z.string().min(1)),
   })
   .strict();
@@ -62,6 +63,9 @@ export function seedGovernedThresholds(): GovernedThresholds {
 export function registryOf(record: GovernedThresholds): OperationClassRegistry {
   return record.classes;
 }
+
+/** How hard a tier binds: a move to a higher value is a tightening, to a lower one a loosening. */
+const TIER_STRICTNESS: Readonly<Record<OperationClass["tier"], number>> = { normal: 0, milestone: 1, "human-always": 2 };
 
 export interface ThresholdChange {
   /** Human-readable lines, one per loosening edit. Non-empty -> the whole change is a loosening. */
@@ -86,7 +90,7 @@ export function diffGovernedThresholds(before: GovernedThresholds, after: Govern
       continue;
     }
     if (was === undefined || now === undefined) continue;
-    if (was.tier !== now.tier) (now.tier === "human-always" ? tightened : loosened).push(`${id}.tier: ${was.tier} -> ${now.tier}`);
+    if (was.tier !== now.tier) (TIER_STRICTNESS[now.tier] > TIER_STRICTNESS[was.tier] ? tightened : loosened).push(`${id}.tier: ${was.tier} -> ${now.tier}`);
     if (was.usesJudge !== now.usesJudge) (now.usesJudge ? tightened : loosened).push(`${id}.usesJudge: ${was.usesJudge} -> ${now.usesJudge}`);
     if (was.tier !== "normal" || now.tier !== "normal") continue;
     if (now.threshold !== was.threshold) (now.threshold > was.threshold ? tightened : loosened).push(`${id}.threshold: ${was.threshold} -> ${now.threshold}`);
@@ -139,7 +143,7 @@ export function applyClassEdit(
     const priorConfidence = edit.priorConfidence ?? base?.priorConfidence;
     const declaredRecoverability = edit.declaredRecoverability ?? base?.declaredRecoverability;
     if (threshold === undefined || priorConfidence === undefined || declaredRecoverability === undefined) {
-      return { ok: false, message: `class "${classId}" is human-always; turning it normal needs threshold, prior and recoverability all given` };
+      return { ok: false, message: `class "${classId}" is ${current.tier}; turning it normal needs threshold, prior and recoverability all given` };
     }
     next = { tier: "normal", threshold, priorConfidence, declaredRecoverability, usesJudge };
   }

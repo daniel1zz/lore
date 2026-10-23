@@ -19,7 +19,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 
 const ID = "spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-15";
 
@@ -98,7 +97,6 @@ async function addScriptAc(spec: string, acId: string): Promise<void> {
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-dc2-15-"));
   await must(["init"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
   patchLoreConfig(
     dir,
     [

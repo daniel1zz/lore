@@ -26,7 +26,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
 import { actedStore } from "../../live-invocation.js";
 
@@ -101,7 +100,6 @@ beforeAll(async () => {
   mustLore(["create", "prd", "--title", "Deprecation Root", "--content", "root", "--no-ai"], dir, SETUP);
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(dir, ["override-attestation"]);
 });
 
 afterAll(() => {

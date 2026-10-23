@@ -13,7 +13,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -118,7 +117,6 @@ beforeAll(async () => {
   // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
   // suite's subject is the citation gate, so the profiles are removed (an absent profile is a vacuous pass).
   dropLoreConfigKey(dir, ["workflow", "verification_profiles"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
   const prd = slugOf(mustRun(["create", "prd", "--title", "DC2-13 PRD", "--content", "root", "--no-ai"]).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-13 Root"]).stdout);
   branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "DC2-13 Branch"]).stdout);

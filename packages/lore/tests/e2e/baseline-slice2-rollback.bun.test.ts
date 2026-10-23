@@ -44,7 +44,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loosenOverrideClasses } from "../integration/fixtures/autonomy-override-helpers.js";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
@@ -410,7 +409,6 @@ async function claimAndResume(c: Corpus, specCitesRule = false): Promise<RunResu
   // live rule, so it goes through the real verb.
   // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(c.dir, ["override-judgment"]);
   if (specCitesRule) {
     mustRun(["approve", c.specSlug, "--override-no-judgment"], c.dir);
   } else {
