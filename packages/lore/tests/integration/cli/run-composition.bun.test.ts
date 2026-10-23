@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/context/agent-rules.md
+// @reads assets/context/ask-then-execute.md
 // @reads assets/context/evidence-attestation.md
 /**
  * @spec_ref AC-RID-2

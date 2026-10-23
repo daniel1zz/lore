@@ -73,14 +73,15 @@ describe("StatusPill", () => {
       expect(screen.getByRole("button", { name: /^Status: draft/ })).toBeInTheDocument();
     });
 
-    it("lists exactly the draft transitions (Submit for review, Approve) in the dropdown", async () => {
+    it("lists exactly the draft transitions (Submit for review, Approve, Deprecate) in the dropdown", async () => {
       const user = userEvent.setup();
       render(<StatusPill status="draft" onTransition={vi.fn()} />);
       const menu = await openMenu(user, "draft");
 
       expect(within(menu).getByText("Submit for review")).toBeInTheDocument();
       expect(within(menu).getByText("Approve")).toBeInTheDocument();
-      expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
+      expect(within(menu).getByText("Deprecate")).toBeInTheDocument();
+      expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
     });
   });
 

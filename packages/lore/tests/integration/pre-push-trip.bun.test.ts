@@ -70,7 +70,7 @@
  *               ratchet failure AND the offending slug AND the finding class.
  *   BOUNDARY:   consumer shape — no `scripts/check-anchor-coverage.ts` at the
  *               repo root → the step is SKIPPED and the hook still exits 0,
- *               with the five `lore` steps demonstrably run.
+ *               with the four `lore` steps demonstrably run.
  *   ERROR:      a scan failure (exit 2, unparseable ledger) gets advice that is
  *               textually DISTINCT from the exit-1 violation advice.
  *   STATE:      the reverse ratchet direction — a ledger row whose spec now
@@ -277,17 +277,16 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-3
  */
 const SHIM_LOG_ENV = "LORE_TRIP_SHIM_LOG";
 
-/** The five `lore` invocations the hook must make, in order, BEFORE the ratchet. */
+/** The four `lore` invocations the hook must make, in order, BEFORE the ratchet. */
 const EXPECTED_LORE_STEPS: readonly string[] = [
   "status --check-binary-provenance",
   "status --check-tree --check-drift",
   "audit --verify",
   "status --check-prd-budget",
-  "status --check-claude-md",
 ];
 
 /**
- * The `lore` invocations the hook makes AFTER the ratchet and the prose-pin guard (AU-T9, AC-AU-9). A run the ratchet
+ * The `lore` invocations the hook makes AFTER the ratchet (AU-T9, AC-AU-9). A run the ratchet
  * blocks exits before them, so only a run that reaches the end of the hook shows all of ALL_LORE_STEPS.
  */
 const POST_RATCHET_LORE_STEPS: readonly string[] = [
@@ -298,13 +297,12 @@ const POST_RATCHET_LORE_STEPS: readonly string[] = [
 /** Every `lore` call of a hook run that is not stopped by the ratchet, in order. */
 const ALL_LORE_STEPS: readonly string[] = [...EXPECTED_LORE_STEPS, ...POST_RATCHET_LORE_STEPS];
 
-/** Every `pre-push:` failure line the five earlier steps can emit — none may appear. */
+/** Every `pre-push:` failure line the four earlier steps can emit — none may appear. */
 const EARLIER_STEP_FAILURE_LINES: readonly string[] = [
   "pre-push: binary provenance check failed",
   "pre-push: lore corpus check failed",
   "pre-push: audit chain verification failed",
   "pre-push: PRD outline budget check failed",
-  "pre-push: CLAUDE.md budget check failed",
 ];
 
 interface RatchetRun extends RunResult {
@@ -327,7 +325,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
   //
   // ⛔ The repo's OWN `.lore/` is never read: `check-anchor-coverage.ts`
   // resolves its corpus from the spawned process's cwd, which is this fixture.
-  // ⛔ The five `lore` steps run against a SHIM that exits 0 and logs its argv.
+  // ⛔ The four `lore` steps run against a SHIM that exits 0 and logs its argv.
   // That is deliberate and is not what is under test here — the point is the
   // SIXTH step, and an all-pass shim is the only way to reach it deterministically
   // (the real binary reports dev-stale against a synthetic fixture repo and
@@ -410,13 +408,6 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     mkdirSync(corpusRepo, { recursive: true });
     execFileSync("git", ["init", "-q", "."], { cwd: corpusRepo, encoding: "utf8" });
     symlinkSync(join(REPO_ROOT, "scripts"), join(corpusRepo, "scripts"));
-    // reason: the hook's prose-pin step (scripts/check-prose-pins.ts, AC-TG-4) runs with cwd = this
-    // fixture and reads the shipped ledger through the `scripts` symlink; every ledger row names a
-    // consumer under packages/ and the prose it pins under assets/ + docs/. Without these links the
-    // fixture looks like a dev repo that lost those files, so every row reads as a stale entry and
-    // the hook exits 1 — turning the "dispositioned ratchet is green" control red for an unrelated
-    // reason (measured on main after TG-6). Linking them models what the hook assumes: a dev checkout.
-    for (const dir of ["packages", "assets", "docs"]) symlinkSync(join(REPO_ROOT, dir), join(corpusRepo, dir));
     execFileSync(join(realBinDir, "lore"), ["init", "--name", "bfi9-ratchet-fixture"], {
       cwd: corpusRepo,
       encoding: "utf8",
@@ -494,12 +485,12 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     expect(result.combined).not.toContain("could not complete its scan");
   }, 120_000);
 
-  it("NEGATIVE (attribution): the five earlier steps all RAN, in order, and none of them contributed the exit code", () => {
+  it("NEGATIVE (attribution): the four earlier steps all RAN, in order, and none of them contributed the exit code", () => {
     const emptyLedger = writeLedgerRoot("empty-attribution", JSON.stringify({ entries: [] }));
 
     const result = runRatchetHook(corpusRepo, emptyLedger);
 
-    // Positive trace: the shim recorded all five `lore` steps, in hook order.
+    // Positive trace: the shim recorded all four `lore` steps, in hook order.
     // ⛔ Asserting only the ABSENCE of their failure lines would pass equally on
     // a hook that skipped them entirely.
     expect(result.loreCalls).toEqual([...EXPECTED_LORE_STEPS]);
@@ -556,7 +547,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     // Skipped, not run: no checker output at all, and no ratchet failure line.
     expect(result.combined).not.toContain("check-anchor-coverage:");
     expect(result.combined).not.toContain("pre-push: anchor-coverage ratchet");
-    // ⛔ and skipping it did NOT short-circuit the hook: the five real steps ran.
+    // ⛔ and skipping it did NOT short-circuit the hook: the four real steps ran.
     expect(result.loreCalls).toEqual([...ALL_LORE_STEPS]);
   }, 120_000);
 
