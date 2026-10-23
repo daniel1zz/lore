@@ -526,6 +526,8 @@ export interface App {
    * plan close). Optional like the other DI services; always wired in production.
    */
   retiredAcService?: RetiredAcService;
+  /** The store's lease verbs, for the post-landing review batch lease (BR-1379); optional like the other late additions. */
+  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "renewLease" | "releaseLease" | "readLease">;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -1100,6 +1102,7 @@ function buildAppFromSqlite(
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
     retiredAcService,
+    reviewLeaseStore: store,
     milestoneReviewService: new MilestoneReviewService({
       listRetiredAcs: (bundle) => retiredAcService.collect(bundle),
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
@@ -1530,6 +1533,7 @@ function buildAppFromTurso(
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
     retiredAcService,
+    reviewLeaseStore: store,
     milestoneReviewService: new MilestoneReviewService({
       listRetiredAcs: (bundle) => retiredAcService.collect(bundle),
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),

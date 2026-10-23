@@ -203,6 +203,15 @@ export interface LandingCompleter {
   readonly complete: (tasks: readonly string[]) => Promise<readonly TaskCompletion[]>;
 }
 
+/**
+ * Starts the post-landing review batch (BR-1379, AC-PCR-3). Wired by the CLI to `ReviewTriggerService.start`: it computes
+ * the trigger set from stored plan progress and, when non-empty and no review batch holds the lease, spawns ONE detached
+ * batch and returns at once. A failure is a WARNING line, never a failed landing; the landing carries no review time.
+ */
+export interface ReviewBatchStarter {
+  readonly start: () => Promise<Result<{ readonly state: "empty" | "lease-live" | "started"; readonly triggered?: number; readonly pid?: number | undefined }, LoreError>>;
+}
+
 /** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348, BR-1355); `OwnDiffJudgment` implements it. Reads, never writes. */
 export interface OwnDiffJudge {
   readonly judge: (branch: string, tip: string) => Promise<Result<OwnDiffVerdict, LoreError>>;
@@ -234,6 +243,8 @@ export interface IntegrateDeps {
   readonly anchors?: AnchorFollower;
   /** The done walk after the landing (BR-1356). Absent in a bare construction: no task is archived by the landing. */
   readonly completion?: LandingCompleter;
+  /** Starts the detached review batch after a landing (BR-1379). Absent in a bare construction: no batch is started. */
+  readonly reviewBatch?: ReviewBatchStarter;
   /** The own-diff judgment run before the floor. Absent in a bare construction: the branch is not judged. */
   readonly ownDiff?: OwnDiffJudge;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
@@ -556,7 +567,11 @@ export class IntegrateService {
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
         const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
+        const schema = this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun);
+        // reason: BR-1379 — last step, after the rebuild and the schema migration, so the detached batch runs main's binary
+        // against the migrated corpus. It only reads progress and spawns; the landing never waits for a review.
+        await this.startReviewBatch();
+        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema });
       }
 
       const now = this.resolveCommit(TARGET_REF);
@@ -644,6 +659,24 @@ export class IntegrateService {
       }
       log(`integrate: ${done.task} stays unarchived${done.floor !== undefined ? ` [floor: ${done.floor}]` : ""}; main stays landed. ${done.message}`);
     }
+  }
+
+  /**
+   * After a landing: computes the review trigger set and starts one detached batch when it is non-empty and no lease is
+   * live (BR-1379). Never fails the integration and never waits: the outcome is one line.
+   */
+  private async startReviewBatch(): Promise<void> {
+    const starter = this.deps.reviewBatch;
+    if (starter === undefined) return;
+    const started = await starter.start();
+    if (!started.ok) {
+      this.deps.log(`integrate: WARNING: the review batch was not started: ${started.error.code}${"message" in started.error ? ` ${started.error.message}` : ""}`);
+      return;
+    }
+    const outcome = started.value;
+    if (outcome.state === "empty") this.deps.log("integrate: review batch: no plan needs review");
+    else if (outcome.state === "lease-live") this.deps.log(`integrate: review batch: ${String(outcome.triggered)} plan(s) need review; a batch already holds the lease`);
+    else this.deps.log(`integrate: review batch started for ${String(outcome.triggered)} plan(s)${outcome.pid !== undefined ? ` (pid ${String(outcome.pid)})` : ""}; the landing does not wait for it`);
   }
 
   /**

@@ -35,7 +35,14 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, resolveActor } from "../utils.js";
 import { classifyFeedbackUpstream, resolveConsumerCorpusRoot, type GithubUpstreamCfg } from "../report-issue-wiring.js";
-import { fileDimensionIssues, type FailedDimensionFinding } from "../assess-file-issues.js";
+import { createGithubIssuePort } from "../assess-file-issues.js";
+import { IssueFilingService } from "../../../service/issue-filing-service.js";
+import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
+import { retirementAssessFields } from "../../../service/retired-ac-service.js";
+import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow } from "../../../service/review-batch-service.js";
+import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { err, ok, type DocId } from "@lore/core";
+import type { App } from "../../../app.js";
 import { createGitSuiteRunner } from "../assess-suite-runner.js";
 import { createVerifyStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
@@ -120,12 +127,18 @@ export default defineLoreCommand({
     },
     where: {
       type: "string",
-      description: 'Select plans by filters instead of ids: "status=approved,tag=...,older-than=30d,open-tasks=0" (plans only)',
+      description:
+        'Select plans by filters instead of ids: "status=approved,tag=...,older-than=30d,open-tasks=0" (plans only); or "needs-review": the complete plans the post-landing batch would process',
     },
     "file-issues": {
       type: "boolean",
       description:
-        "File one GitHub issue per failed dimension (title: plan + dimension, body: the finding) through the report-issue path and link each to its plan",
+        "File the failed findings by root cause: ONE issue per fingerprint (searched among open issues first, never duplicated), linked to every plan that shares it",
+    },
+    close: {
+      type: "boolean",
+      description:
+        "Run as the review batch under the store lease: judge a plan only when no valid review matches its current fingerprint, file by root cause, then archive it (accepted, or accepted with known defects)",
     },
     json: { type: "boolean", description: "Output the rows as JSON" },
     ai: {
@@ -150,7 +163,13 @@ export default defineLoreCommand({
     }
 
     const positionals = ((args._ as string[] | undefined) ?? (args.plan !== undefined ? [String(args.plan)] : [])).map(String);
-    const selector = resolveBulkSelector(positionals, typeof args.where === "string" ? args.where : undefined);
+    // reason: `needs-review` is not a key=value filter; it names the batch's trigger set (BR-1379), resolved below.
+    const needsReview = args.where === "needs-review";
+    if (needsReview && positionals.length > 0) {
+      inv.io.stderr.write("Error: --where needs-review cannot be combined with plan ids.\n");
+      return 2;
+    }
+    const selector = needsReview ? { ok: true as const, value: { kind: "ids" as const, ids: [] } } : resolveBulkSelector(positionals, typeof args.where === "string" ? args.where : undefined);
     if (!selector.ok) {
       inv.io.stderr.write(formatErrorFor(inv, selector.error) + "\n");
       return 2;
@@ -183,16 +202,36 @@ export default defineLoreCommand({
       const reviewService = app.milestoneReviewService;
       if (reviewService === undefined) throw new Error("milestoneReviewService is not wired on this App instance");
 
-      const refs = await resolvePlanRefs(selector.value, requireBulkLifecycleService(app));
-      if (!refs.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, refs.error) + "\n");
-        return refs.error.code === "VALIDATION_ERROR" ? 2 : exitCode(refs.error);
+      const actor = resolveActor(inv);
+      const holder = `${actor}:assess:${String(process.pid)}`;
+      let planRefs: string[];
+      if (needsReview) {
+        // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
+        const trigger = buildReviewTriggerService(app, holder, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+        if (trigger === undefined) {
+          inv.io.stderr.write("Error: this composition cannot compute the needs-review set (no lease store or decision reader wired).\n");
+          return 1;
+        }
+        const set = await trigger.computeTriggerSet();
+        if (!set.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, set.error) + "\n");
+          return exitCode(set.error);
+        }
+        planRefs = set.value.map((entry) => entry.plan);
+      } else {
+        const refs = await resolvePlanRefs(selector.value, requireBulkLifecycleService(app));
+        if (!refs.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, refs.error) + "\n");
+          return refs.error.code === "VALIDATION_ERROR" ? 2 : exitCode(refs.error);
+        }
+        planRefs = refs.value;
       }
+      const refs = { ok: true as const, value: planRefs };
 
       // reason: Part D — the plan-close chain and the full suite run ONCE for the whole batch on main's HEAD (in a
       // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
-      let suite: SuiteRun | undefined;
-      if (refs.value.length > 0) {
+      const measureSuite = async (suiteRefs: readonly string[]): Promise<SuiteRun | undefined> => {
+        if (suiteRefs.length === 0) return undefined;
         // reason: stale cited evidence is re-verified in this SAME throwaway main worktree, once per batch, before any
         // plan is judged (Part D); a failed refresh leaves its rules stale, which the snapshot rule reads as n/a.
         const verifyRunner = app.verifyRunnerService;
@@ -204,10 +243,10 @@ export default defineLoreCommand({
                   verify: verifyRunner,
                   getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
                   executionRoot: root,
-                  by: resolveActor(inv),
+                  by: actor,
                   nowIso: () => new Date().toISOString(),
                 });
-                const refreshed = await reviewService.refreshStaleCitedRules(refs.value, refresher);
+                const refreshed = await reviewService.refreshStaleCitedRules(suiteRefs, refresher);
                 if (!refreshed.ok) {
                   inv.io.stderr.write(`Warning: stale cited-rule refresh failed: ${formatErrorFor(inv, refreshed.error)}\n`);
                   return;
@@ -217,11 +256,49 @@ export default defineLoreCommand({
                 }
               };
         const measured = await createGitSuiteRunner(inv.cwd, inv.env, refreshStale).run();
-        suite = measured.ok ? measured.value : { status: "not_measured", reason: formatErrorFor(inv, measured.error) };
+        return measured.ok ? measured.value : { status: "not_measured", reason: formatErrorFor(inv, measured.error) };
+      };
+
+      const filingCtx = {
+        consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
+        corpusService: app.corpusService,
+        actor,
+        home: inv.paths.home,
+        env: inv.env,
+      };
+      const filing =
+        issueUpstream === undefined
+          ? undefined
+          : new IssueFilingService(createGithubIssuePort(issueUpstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()));
+
+      /** Judges one plan from its landed diff: the one review step both the hand run and the batch use. */
+      const reviewOne = async (ref: string, suiteForPlan: SuiteRun | undefined) => {
+        const bundle = await app.corpusService.getPlanBundle(ref);
+        if (!bundle.ok) return bundle;
+        const tasks = bundle.value.tasks;
+        const derivation = deriveCommitSetForPlan(
+          inv.cwd,
+          tasks.map((t) => t.slug),
+          tasks.length > 0 && tasks.every((t) => t.status === "archived"),
+          collectRecordedRanges(tasks),
+        );
+        const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
+        return reviewService.review(ref, {
+          ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
+          diffSource: describeDiffSource(diffSource),
+          maxDiffChars: app.aiProviderService.assessMaxDiffChars,
+          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
+        });
+      };
+
+      if (args.close === true) {
+        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, filing, json: args.json === true });
       }
 
+      const suite = await measureSuite(refs.value);
+
       const rows: AssessRow[] = [];
-      const findings: FailedDimensionFinding[] = [];
+      const findings: FailedFinding[] = [];
       for (const ref of refs.value) {
         const bundle = await app.corpusService.getPlanBundle(ref);
         if (!bundle.ok) {
@@ -235,71 +312,36 @@ export default defineLoreCommand({
           rows.push(errorRow(ref, retirement.error));
           continue;
         }
-        const retirementState = retirement?.value;
-        const tasks = bundle.value.tasks;
-        const derivation = deriveCommitSetForPlan(
-          inv.cwd,
-          tasks.map((t) => t.slug),
-          tasks.length > 0 && tasks.every((t) => t.status === "archived"),
-          collectRecordedRanges(tasks),
-        );
-        const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
-        const reviewed = await reviewService.review(ref, {
-          ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
-          diffSource: describeDiffSource(diffSource),
-          maxDiffChars: app.aiProviderService.assessMaxDiffChars,
-          ...(suite !== undefined ? { suite } : {}),
-        });
+        const reviewed = await reviewOne(ref, suite);
         const baseRow = reviewed.ok ? passFailRow(ref, reviewed.value.doc.slug, reviewed.value.review) : errorRow(ref, reviewed.error);
-        const retiredList =
-          retirementState?.state === "pending" || retirementState?.state === "confirmed"
-            ? retirementState.retired
-            : retirementState?.state === "rejected"
-              ? retirementState.restored
-              : [];
-        rows.push(
-          retiredList.length === 0
-            ? baseRow
-            : {
-                ...baseRow,
-                retired_acs: retiredList,
-                ...(retirementState?.state === "pending" ? { pending_decision: retirementState.pendingId } : {}),
-                reason:
-                  `${baseRow.reason}; ${String(retiredList.length)} retired AC(s) ${
-                    retirementState?.state === "pending"
-                      ? `await the owner (decision #${String(retirementState.pendingId)}, lore pending --ask)`
-                      : retirementState?.state === "rejected"
-                        ? "rejected by the owner and restored"
-                        : "confirmed by the owner"
-                  }`,
-              },
-        );
+        // reason: one serializer for CLI and MCP (retirementAssessFields), so the row shape cannot drift between them.
+        const { summary, ...retiredFields } = retirementAssessFields(retirement?.value);
+        rows.push(summary === undefined ? baseRow : { ...baseRow, ...retiredFields, reason: `${baseRow.reason}; ${summary}` });
         if (reviewed.ok) {
           for (const dimension of failedDimensions(reviewed.value.review.dimensions)) {
             const judgment = reviewed.value.review.dimensions[dimension];
-            findings.push({ plan: ref, dimension, reason: judgment.reason, reference: judgment.reference, reviewSlug: reviewed.value.doc.slug });
+            findings.push({
+              plan: ref,
+              dimension,
+              reason: judgment.reason,
+              reference: judgment.reference,
+              reviewSlug: reviewed.value.doc.slug,
+              causes: reviewed.value.review.causes,
+            });
           }
         }
       }
 
       let fileError: LoreError | undefined;
       const filedByPlan = new Map<string, number[]>();
-      if (issueUpstream !== undefined && findings.length > 0) {
-        const filed = await fileDimensionIssues(
-          findings,
-          issueUpstream,
-          {
-            consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
-            corpusService: app.corpusService,
-            actor: resolveActor(inv),
-            home: inv.paths.home,
-            env: inv.env,
-          },
-          app.corpusService,
-          resolveActor(inv),
-        );
+      if (filing !== undefined && findings.length > 0) {
+        const filed = await filing.fileFindings(findings);
         if (filed.ok) {
-          for (const issue of filed.value) filedByPlan.set(issue.plan, [...(filedByPlan.get(issue.plan) ?? []), issue.number]);
+          for (const group of filed.value) {
+            if (group.error !== undefined) fileError ??= group.error;
+            if (group.issue === undefined) continue;
+            for (const plan of group.linked) filedByPlan.set(plan, [...(filedByPlan.get(plan) ?? []), group.issue.number]);
+          }
         } else {
           fileError = filed.error;
         }
@@ -334,6 +376,82 @@ export default defineLoreCommand({
     }
   },
 });
+
+/** The inputs of the `--close` batch, built by `run`. */
+interface BatchCloseInput {
+  readonly app: App;
+  readonly inv: ReturnType<typeof invocationOf>;
+  readonly actor: string;
+  readonly holder: string;
+  readonly planRefs: readonly string[];
+  readonly measureSuite: (refs: readonly string[]) => Promise<SuiteRun | undefined>;
+  readonly reviewOne: (ref: string, suite: SuiteRun | undefined) => ReturnType<NonNullable<App["milestoneReviewService"]>["review"]>;
+  readonly filing: IssueFilingService | undefined;
+  readonly json: boolean;
+}
+
+/**
+ * `lore assess ... --close`: the review batch (BR-1379). Takes the store lease (a live lease of another batch makes this
+ * a no-op, exit 0), then runs `ReviewBatchRunner.runBatch` and prints one row per plan.
+ */
+async function runBatchClose(input: BatchCloseInput): Promise<number> {
+  const { app, inv, actor } = input;
+  const lease = buildReviewLease(app, input.holder);
+  if (lease === undefined) {
+    inv.io.stderr.write("Error: this composition has no lease store, so the review batch cannot run.\n");
+    return 1;
+  }
+  const service = new ReviewBatchRunner({
+    getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
+    listReviewDocs: (planId) => app.corpusService.listMilestoneReviewDocs(planId),
+  });
+  const run = await service.runBatch(input.planRefs, {
+    acquireLease: () => lease.acquire(),
+    settleRetirement: async (bundle) => {
+      if (app.retiredAcService === undefined) return ok(undefined);
+      return app.retiredAcService.settle(bundle);
+    },
+    measureSuite: input.measureSuite,
+    reviewPlan: input.reviewOne,
+    closePlan: async (ref) => {
+      const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor });
+      return closed.ok ? ok(undefined) : closed;
+    },
+    recordError: (error) =>
+      app.corpusService.appendAudit({
+        action: BATCH_ERROR_AUDIT_ACTION,
+        sessionId: error.planId,
+        docId: error.planId as DocId,
+        details: { plan: error.planSlug, fingerprint: error.fingerprint, stage: error.stage, message: error.message, at: error.at, rule: "BR-1379" },
+        by: actor,
+      }),
+    filing: input.filing,
+    now: () => new Date().toISOString(),
+  });
+  if (!run.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");
+    return exitCode(run.error);
+  }
+  if (run.value.state === "busy") {
+    printLine(inv.io.stdout, `Another review batch holds the lease (${run.value.holder}, until ${run.value.expires_at}); nothing ran.`);
+    return 0;
+  }
+  const rows: readonly BatchPlanRow[] = run.value.rows;
+  if (input.json) {
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns, took_over: run.value.tookOver } }, null, 2));
+  } else if (rows.length === 0) {
+    printLine(inv.io.stdout, "No plans selected.");
+  } else {
+    printLine(
+      inv.io.stdout,
+      formatTable(
+        ["RESULT", "PLAN", "REVIEW", "REASON"],
+        rows.map((r) => [r.outcome.toUpperCase(), r.plan, r.review ?? "-", r.issues.length > 0 ? `${r.detail}; issues ${r.issues.map((n) => `#${String(n)}`).join(", ")}` : r.detail]),
+      ),
+    );
+  }
+  return rows.some((r) => r.outcome === "error") ? 1 : 0;
+}
 
 /** Plans to review: the given ids as they are, or the plans the `--where` selection yields (never a non-plan). */
 async function resolvePlanRefs(
