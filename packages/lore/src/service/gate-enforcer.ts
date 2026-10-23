@@ -109,7 +109,6 @@ import {
   resolveRequiresUatGateEnabled,
   resolveCitedRuleCheckGateEnabled,
   resolveVerificationProfile,
-  resolveAttestationMinRatio,
   SCOPE_UNDECLARED_REASON,
   type AuditEntry,
   type LoreConfig,
@@ -122,8 +121,6 @@ import type { PlanBundle } from "@lore/core";
 import { WriteActorUnresolvedError } from "../store/write-context-store.js";
 import {
   checkpointRegistry,
-  describeAssessmentFreshnessNotApplicable,
-  describeCitedRuleUnknowns,
   describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
@@ -645,14 +642,6 @@ export class GateEnforcer {
     // `lore set --status archived` shows it without altering stdout or the exit
     // code — an observation, never an outcome, exactly like `recordSkip`.
     this.warnVacuousCheckpoint(checkpoint, results);
-    // reason: BL-D4 / BR-225 — the per-conjunct complement of the all-inapplicable notice above:
-    // an unassessed plan whose other conditions measured would otherwise close with no mention
-    // that assessment freshness was never checked. Never blocks (same channel, same contract).
-    const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
-    /** @lore-site BR-1303 */
-    if (freshnessLine !== null) this.warnSink(freshnessLine);
-    // reason: BR-984 - a cited rule whose state was unknown (reportable reason) closes with a line, never silently.
-    for (const unknownLine of describeCitedRuleUnknowns(checkpoint, ctx)) this.warnSink(unknownLine);
     if (!isCheckpointBlocked(results)) {
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — the ONE thing that, before this task, left NO trace
@@ -692,6 +681,8 @@ export class GateEnforcer {
     // the identical `ctx` render byte-identical pack text, by construction, not
     // by convention. A trailing newline (spec-promote's `feed` ends with one) is
     // trimmed so the `\n\n`-separated pack block never grows a blank third line.
+    // reason: a predicate that names its business rule (milestone review, BR-1372) puts it on the refusal.
+    const rule = failures.map((f) => f.rule).find((r) => r !== undefined);
     const feedText = checkpointDef.feed(ctx, failures).replace(/\n+$/, "");
     // reason: task-lore-gate-bypass-honored-by-lore-gate-subcommands-but, Design
     // Decision Option B (this module's header) — the boundary note is appended ONLY
@@ -715,6 +706,7 @@ export class GateEnforcer {
       field,
       message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}${bypassBoundaryNote}`,
       value: reasons,
+      ...(rule !== undefined ? { rule } : {}),
     });
   }
 
@@ -1040,27 +1032,6 @@ export class GateEnforcer {
   }
 
   /**
-   * Whether `plan-close`'s `citedRuleStateClean` (BR-984) sub-predicate specifically is
-   * enabled (`workflow.gates."plan-close".cited_rule_check.enabled`, SPEC-080 §C4) —
-   * NARROWER than `isEnabled("plan-close")`, which governs the WHOLE
-   * checkpoint. A caller building `GateContext.citedRuleCheckEnabled`
-   * (`CorpusService.set`) consults this, not `isEnabled`.
-   *
-   * DELIBERATELY THE OPPOSITE DEFAULT of `isTaskClaimAnchorOverlapEnabled` /
-   * `isAcQuantifiableEnabled` / `isOracleCoverageEnabled` / `isRequiresUatEnabled`
-   * above — those all default ENABLED (an explicit `false` turns them off);
-   * this one defaults DISABLED (an explicit `true` turns it on), per
-   * `resolveCitedRuleCheckGateEnabled`'s own JSDoc.
-   *
-   * @returns `true` iff the sub-key is explicitly enabled; `false` otherwise.
-   * @example
-   * enforcer.isCitedRuleCheckEnabled(); // => false unless config explicitly enables it
-   */
-  isCitedRuleCheckEnabled(): boolean {
-    return resolveCitedRuleCheckGateEnabled(this.config);
-  }
-
-  /**
    * Resolves `specKind`'s configured verification profile (SPEC-058) against
    * this enforcer's own `LoreConfig` — the single config-reading seam a caller
    * building `GateContext.verificationProfile` (`CorpusService.set`,
@@ -1079,23 +1050,5 @@ export class GateEnforcer {
    */
   resolveVerificationProfile(specKind: SpecKind): VerificationProfile | null {
     return resolveVerificationProfile(this.config, specKind);
-  }
-
-  /**
-   * Resolves `plan-close`'s OPT-IN execution-time attestation-ratio conjunct
-   * (`workflow.attestation.min_ratio`, spec-plan-close-predicates-measure-
-   * invariants-an-applicability §D4, superseding SPEC-069 §Design Decisions D1's
-   * always-on default) against this enforcer's own `LoreConfig` — the single
-   * config-reading seam a caller building `GateContext.attestationMinRatio`
-   * (`CorpusService.set`) consults, mirroring `resolveVerificationProfile`'s
-   * "GateEnforcer owns the one config reference" shape.
-   *
-   * @returns The explicitly configured floor, or `null` when unconfigured — the
-   *   ratio conjunct does not run at all in that case.
-   * @example
-   * enforcer.resolveAttestationMinRatio(); // => null by default, 0.3 when configured
-   */
-  resolveAttestationMinRatio(): number | null {
-    return resolveAttestationMinRatio(this.config);
   }
 }

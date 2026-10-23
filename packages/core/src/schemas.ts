@@ -14,6 +14,7 @@ import { VALID_TRANSITIONS } from "./lifecycle.js";
 export { isValidTransition, getAllowedTransitions, isTerminalStatus } from "./lifecycle.js";
 import { assessmentResultSchema } from "./assessment.js";
 import { uatVerdictSchema } from "./uat.js";
+import { milestoneReviewSchema } from "./milestone-review.js";
 import { prdRequirementsSchema } from "./requirement.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
@@ -173,6 +174,8 @@ export const knowledgeExtraSchema = z
     sub_type: knowledgeSubTypeSchema,
     /** Present iff sub_type === "assessment" — the Zod-typed SSOT judge result. */
     assessment: assessmentResultSchema.optional(),
+    /** Present iff sub_type === "milestone-review" — the stored seven-dimension review (BR-1372). */
+    milestone_review: milestoneReviewSchema.optional(),
     /** Present only for sub_type === "prompt"; optional even then (see schema JSDoc). */
     prompt: promptExtraSchema.optional(),
     /** Present only for sub_type === "skill"; optional even then (see schema JSDoc). */
@@ -206,6 +209,13 @@ export const knowledgeExtraSchema = z
         code: z.ZodIssueCode.custom,
         message: "knowledge sub_type 'assessment' requires a Zod-valid extra.assessment",
         path: ["assessment"],
+      });
+    }
+    if (data.sub_type === "milestone-review" && data.milestone_review === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "knowledge sub_type 'milestone-review' requires a Zod-valid extra.milestone_review",
+        path: ["milestone_review"],
       });
     }
     // reason: same cross-field pattern as "assessment" above — sub_type "handoff"
@@ -716,7 +726,7 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
             code: z.ZodIssueCode.custom,
             message:
               issue.path[0] === "sub_type"
-                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|prompt|skill|handoff)"
+                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|milestone-review|prompt|skill|handoff)"
                 : issue.message,
             path: ["extra", ...issue.path],
           });

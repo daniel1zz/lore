@@ -1,185 +1,63 @@
 /**
- * lore plan — plan-level writers for the two OPT-OUT plan-close predicates'
- * audited exemptions (SPEC-069 §Design Decisions D1; SPEC-106 §D4).
+ * lore plan — plan-level writers.
  *
  * Subcommands:
- *   exempt-attestation <plan> --reason <text> --kind <k>
- *       Record an audited, typed exemption from the plan-close ATTESTATION
- *       FLOOR (`extra.attestation_exempt` + `_reason` + `_kind`).
- *       `--kind` ∈ red-tdd | no-oracle | pipeline-unreachable | other.
- *   exempt-assessment-freshness <plan> --reason <text>
- *       Record an audited exemption from the plan-close ASSESSMENT-FRESHNESS
- *       predicate (`extra.assessment_freshness_exempt` + `_reason`).
- *
  *   integration-branch <plan> <branch>
  *       Declare the feature branch the plan lands through (`extra.integration_branch`): a `blocks` edge is
  *       READY-met when the blocker landed there, while `lore done` still requires main.
  *
- * All accept `--json`. Thin pipe over `PlanExemptionService` — zero business
- * logic here (read-merge-write, taxonomy validation, audit shape all live in
- * the service; see its module header), the same split `commands/ac.ts` uses
- * over `AcService`.
+ * Accepts `--json`. Thin pipe over `PlanIntegrationBranchService` — zero business logic here (read-merge-write,
+ * validation and audit shape live in the service), the same split `commands/ac.ts` uses over `AcService`.
  *
- * Actor identity: the invoking run, via the SHARED
- * `utils.ts::resolveActor` (no `--by` flag). This command deliberately reads no env var of its
- * own — a second precedence chain would silently diverge from every other
- * writer's (AC-069-10).
+ * The plan-close exemptions (`exempt-attestation`, `exempt-assessment-freshness`) no longer exist: plan close
+ * requires only a passing current milestone review (`lore assess`, BR-1372).
  *
- * Exit codes per SPEC-003 §5 (via utils.ts::exitCode):
- *   0 = success
- *   2 = CLI usage error (blank/missing --reason, missing/off-taxonomy --kind;
- *       unknown flag via the SPEC-051 strict-flag seam)
- *   3 = DOC_NOT_FOUND
- *   4 = VALIDATION_ERROR (target is not a plan; a blank reason that somehow
- *       reached the service)
- *   5 = STALE_VERSION
+ * Actor identity: the invoking run, via the SHARED `utils.ts::resolveActor` (no `--by` flag).
  *
- * ⛔ There is deliberately NO `lore set --attestation-exempt` (AC-069-11).
- * `set` replaces `extra` WHOLESALE, so a flag there would silently delete every
- * other service's owned state on the plan — the same reason `file_anchors`,
- * `ac_scope`, `claim`, `verification_evidence`, `validity`, and
- * `prd_sync_exempt` each have a dedicated writer. The existing strict
- * unknown-flag seam (`strict-flags.ts`) is what refuses it, exit 2; no bespoke
- * check is needed in `commands/set.ts`.
+ * Exit codes per SPEC-003 §5 (via utils.ts::exitCode): 0 success; 3 DOC_NOT_FOUND; 4 VALIDATION_ERROR (target is
+ * not a plan, odd branch name); 5 STALE_VERSION.
  *
- * @invariant The `loadLoreApp` import is DYNAMIC and performed INSIDE each
- *   `run()`, AFTER argument validation — unlike every sibling command module,
- *   which imports it statically at module scope. This is load-bearing, not
- *   stylistic: `loader.ts` pulls `bun:sqlite`, which vitest cannot resolve, so
- *   a static import would make AC-069-9's refusal cases untestable except by
- *   source-scanning for the literal `2` (which proves a digit appears near a
- *   refusal, not that the command exits 2). With the import deferred, the
- *   vitest suite invokes the REAL citty handler and observes the REAL
- *   `process.exitCode`. Do NOT "harmonize" this back to a static import — the
- *   refusal path must stay reachable without a store. (The failure would be
- *   loud, not silent: the vitest suite would fail to resolve `bun:sqlite` at
- *   collection time.)
- *
- * Source: SPEC-069 §Design Decisions D1, §Mechanism required 1–3
- *         (AC-069-8 … AC-069-11); spec-verify-reachability-plan-promote-
- *         early-warning §Scope M3; SPEC-106 §Design Decisions D4
+ * @invariant The `loadLoreApp` import is DYNAMIC and performed INSIDE `run()`: `loader.ts` pulls `bun:sqlite`, which
+ *   vitest cannot resolve, so a static import would make this command untestable under vitest. Do NOT "harmonize"
+ *   it back to a static import.
  */
 
 import { defineLoreCommand } from "../cli-exit.js";
 
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
-import {
-  ATTESTATION_EXEMPT_KIND_VALUES,
-  PLAN_EXEMPT_USAGE_EXIT_CODE,
-  checkExemptAssessmentFreshnessArgs,
-  checkExemptAttestationArgs,
-} from "../plan-exempt-validation.js";
-import type { PlanExemptionService } from "../../../service/plan-exemption-service.js";
+import type { PlanIntegrationBranchService } from "../../../service/plan-integration-branch-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
-import type { CliIo } from "../output.js";
-import type { ExitReport } from "../cli-exit.js";
 
 /**
- * `App.planExemptionService` is typed optional only to keep pre-existing
- * hand-built App test stubs compiling — the identical guard `commands/ac.ts`
- * uses. `loadLoreApp()` (this adapter's only App
- * source) always returns a fully-wired App from `createApp`, so this assertion
- * never fires in the CLI.
+ * `App.planIntegrationBranchService` is typed optional only to keep pre-existing hand-built App test stubs
+ * compiling — the identical guard `commands/ac.ts` uses. `loadLoreApp()` always returns a fully-wired App.
  */
-function requirePlanExemptionService(app: { planExemptionService?: PlanExemptionService }): PlanExemptionService {
-  const service = app.planExemptionService;
+function requirePlanIntegrationBranchService(app: {
+  planIntegrationBranchService?: PlanIntegrationBranchService;
+}): PlanIntegrationBranchService {
+  const service = app.planIntegrationBranchService;
   if (service === undefined) {
-    throw new Error("planExemptionService is not wired on this App instance");
+    throw new Error("planIntegrationBranchService is not wired on this App instance");
   }
   return service;
 }
 
-/** Writes a usage refusal to stderr and sets the SPEC-003 §5 usage exit code. */
-function refuse(io: CliIo, message: string): ExitReport {
-  io.stderr.write(message + "\n");
-  return PLAN_EXEMPT_USAGE_EXIT_CODE;
-}
-
-const sharedArgs = {
-  plan: {
-    type: "positional" as const,
-    description: "Plan document ID or slug",
-    required: true,
-  },
-  reason: {
-    type: "string" as const,
-    description: "Required justification for the exemption (recorded in the audit trail)",
-  },
-  json: {
-    type: "boolean" as const,
-    description: "Output result as JSON",
-  },
-};
-
 export default defineLoreCommand({
   meta: {
     name: "plan",
-    description: "Plan-level writers (audited plan-close exemptions)",
+    description: "Plan-level writers (integration branch)",
   },
   subCommands: {
-    "exempt-attestation": defineLoreCommand({
-      meta: {
-        name: "exempt-attestation",
-        description: "Record an audited, typed exemption from the plan-close attestation floor",
-      },
-      args: {
-        ...sharedArgs,
-        kind: {
-          type: "string" as const,
-          description: `Required exemption type: ${ATTESTATION_EXEMPT_KIND_VALUES.join(" | ")}`,
-        },
-      },
-      async run(context): Promise<number> {
-        const { args } = context;
-        const inv = invocationOf(context);
-        const checked = checkExemptAttestationArgs({ reason: args.reason, kind: args.kind });
-        if (!checked.ok) {
-          return refuse(inv.io, checked.message);
-        }
-
-        // Deferred on purpose — see this module's @invariant.
-        const { loadLoreApp } = await import("../loader.js");
-        const { app } = loadLoreApp({ inv });
-        try {
-          const by = resolveActor(inv);
-          const result = await requirePlanExemptionService(app).exemptAttestation(
-            args.plan as string,
-            { reason: checked.reason, kind: checked.kind, by },
-          );
-
-          if (!result.ok) {
-            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            return exitCode(result.error);
-          }
-
-          if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return 0;
-          }
-
-          printLine(inv.io.stdout, 
-            `Recorded plan-close ATTESTATION EXEMPTION [${result.value.kind}] for ` +
-              `${args.plan as string}: ${result.value.reason}`,
-          );
-          printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
-        } finally {
-          app.close();
-        }
-        return 0;
-      },
-    }),
-
     "integration-branch": defineLoreCommand({
       meta: {
         name: "integration-branch",
         description: "Declare the integration branch a plan lands through (blocks edges are ready-met on it)",
       },
       args: {
-        plan: sharedArgs.plan,
+        plan: { type: "positional" as const, description: "Plan document ID or slug", required: true },
         branch: { type: "positional" as const, description: "Integration branch name", required: true },
-        json: sharedArgs.json,
+        json: { type: "boolean" as const, description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
         const { args } = context;
@@ -188,7 +66,7 @@ export default defineLoreCommand({
         const { app } = loadLoreApp({ inv });
         try {
           const by = resolveActor(inv);
-          const result = await requirePlanExemptionService(app).setIntegrationBranch(args.plan as string, {
+          const result = await requirePlanIntegrationBranchService(app).setIntegrationBranch(args.plan as string, {
             branch: args.branch as string,
             by,
           });
@@ -202,52 +80,6 @@ export default defineLoreCommand({
             return 0;
           }
           printLine(inv.io.stdout, `Plan ${args.plan as string} integration branch: ${result.value.branch}`);
-          printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
-        } finally {
-          app.close();
-        }
-        return 0;
-      },
-    }),
-
-    "exempt-assessment-freshness": defineLoreCommand({
-      meta: {
-        name: "exempt-assessment-freshness",
-        description: "Record an audited exemption from the plan-close assessment-freshness predicate",
-      },
-      args: { ...sharedArgs },
-      async run(context): Promise<number> {
-        const { args } = context;
-        const inv = invocationOf(context);
-        const checked = checkExemptAssessmentFreshnessArgs({ reason: args.reason });
-        if (!checked.ok) {
-          return refuse(inv.io, checked.message);
-        }
-
-        const { loadLoreApp } = await import("../loader.js");
-        const { app } = loadLoreApp({ inv });
-        try {
-          const by = resolveActor(inv);
-          const result = await requirePlanExemptionService(app).exemptAssessmentFreshness(
-            args.plan as string,
-            { reason: checked.reason, by },
-          );
-
-          if (!result.ok) {
-            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            return exitCode(result.error);
-          }
-
-          if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return 0;
-          }
-
-          printLine(inv.io.stdout, 
-            `Recorded plan-close ASSESSMENT-FRESHNESS EXEMPTION for ` +
-              `${args.plan as string}: ${result.value.reason}`,
-          );
           printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
         } finally {
           app.close();

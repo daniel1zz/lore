@@ -872,6 +872,20 @@ export class AIProviderService {
     return this.assessBudgets.max_diff_chars;
   }
 
+  /**
+   * Sends one milestone-review prompt (BR-1372) to the active provider and returns its raw text. The prompt, the
+   * parse and the retry belong to `MilestoneReviewService`; this is only the provider call, so the review judge runs
+   * through the same provider registry and hermetic spawn as every other judge.
+   *
+   * @param prompt - the rendered review prompt
+   * @param title - the plan's title (the provider input's required `title`)
+   * @returns `ok(text)` or the provider's own `AI_PROVIDER_ERROR`; never throws
+   */
+  async judgeMilestone(prompt: string, title: string): Promise<Result<string, LoreError>> {
+    const { result } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
+    return result.ok ? ok(result.value.content) : result;
+  }
+
   // ─── SPEC-017: create path ──────────────────────────────────────────────────
 
   /**

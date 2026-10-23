@@ -230,6 +230,7 @@ export const KNOWLEDGE_SUB_TYPES = [
   "research",
   "reference",
   "assessment",
+  "milestone-review",
   "prompt",
   "skill",
   "handoff",
@@ -260,7 +261,7 @@ export type KnowledgeSubType = (typeof KNOWLEDGE_SUB_TYPES)[number];
  *   approved-at-create task would silently corrupt. This constant is scoped to
  *   `KnowledgeSubType` only; there is no analogous "ledger task" concept.
  */
-export const LEDGER_KNOWLEDGE_SUB_TYPES = ["assessment", "retro", "handoff", "uat"] as const;
+export const LEDGER_KNOWLEDGE_SUB_TYPES = ["assessment", "milestone-review", "retro", "handoff", "uat"] as const;
 
 /** Derived TypeScript union for a ledger-eligible knowledge `extra.sub_type` value. */
 export type LedgerKnowledgeSubType = (typeof LEDGER_KNOWLEDGE_SUB_TYPES)[number];
