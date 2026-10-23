@@ -61,6 +61,22 @@ function makeTaskDoc(overrides: Partial<DocRecord> = {}): DocRecord {
   };
 }
 
+/**
+ * BR-1379: a task transition writes its plan's `extra.progress` in the same transaction, so `done` leaves the plan's
+ * status alone and changes nothing on the plan except that one `extra` key (state/open/total pinned exactly).
+ */
+function expectOnlyProgressChanged(
+  before: { status: string; extra: Record<string, unknown> },
+  after: { status: string; extra: Record<string, unknown> },
+  expected: { state: string; open: number; total: number },
+): void {
+  expect(after.status).toBe(before.status);
+  const { progress: afterProgress, ...afterRest } = after.extra;
+  const { progress: _beforeProgress, ...beforeRest } = before.extra;
+  expect(afterRest).toEqual(beforeRest);
+  expect(afterProgress).toMatchObject(expected);
+}
+
 describe("lore done — success message rendering (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree#AC-WH-3)", () => {
   // ── HAPPY ──────────────────────────────────────────────────────────────
 
@@ -367,7 +383,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
 
   // ── STATE ──────────────────────────────────────────────────────────────
 
-  it("STATE: in BOTH the advisory and no-advisory cases, the plan doc's status and version are unchanged before and after — done never writes the plan", async () => {
+  it("STATE: in BOTH the advisory and no-advisory cases, the plan's status is unchanged and the only plan change is extra.progress matching the task rows", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
 
     // Case 1: last task archived (advisory case).
@@ -390,8 +406,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     const advisoryPlanAfter = await corpusService.get(advisoryPlan.id);
     expect(advisoryPlanAfter.ok).toBe(true);
     if (!advisoryPlanAfter.ok) return;
-    expect(advisoryPlanAfter.value.doc.status).toBe(advisoryPlanBefore.value.doc.status);
-    expect(advisoryPlanAfter.value.doc.version).toBe(advisoryPlanBefore.value.doc.version);
+    expectOnlyProgressChanged(advisoryPlanBefore.value.doc, advisoryPlanAfter.value.doc, { state: "complete", open: 0, total: 2 });
 
     // Case 2: non-last task archived (no-advisory case).
     const noAdvisoryPlan = await createPlan(corpusService, "State No-Advisory Plan");
@@ -410,8 +425,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     const noAdvisoryPlanAfter = await corpusService.get(noAdvisoryPlan.id);
     expect(noAdvisoryPlanAfter.ok).toBe(true);
     if (!noAdvisoryPlanAfter.ok) return;
-    expect(noAdvisoryPlanAfter.value.doc.status).toBe(noAdvisoryPlanBefore.value.doc.status);
-    expect(noAdvisoryPlanAfter.value.doc.version).toBe(noAdvisoryPlanBefore.value.doc.version);
+    expectOnlyProgressChanged(noAdvisoryPlanBefore.value.doc, noAdvisoryPlanAfter.value.doc, { state: "in-progress", open: 1, total: 2 });
   });
 
   // ── BOUNDARY ───────────────────────────────────────────────────────────
