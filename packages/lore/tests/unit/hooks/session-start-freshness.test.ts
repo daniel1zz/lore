@@ -24,19 +24,8 @@
  *               LORE_SETUP_NO_CHECK=1 suppresses the advisory (and the
  *               background refresh) regardless of cache state, including
  *               when the cache is entirely absent
- *   BOUNDARY:   missing cache → hook exits WITHOUT WAITING for its REAL
- *               detached child process (R2 oracle — a genuine OS subprocess
- *               spawn, not a mocked call): the hook has already exited while
- *               the cache does not yet exist / still holds its pre-refresh
- *               content, and only later does the child's refresh land on
- *               disk. This is an ORDERING invariant, asserted via the stub's
- *               injected `REFRESH_DELAY_MS` sleep + polling, never an
- *               absolute wall-clock budget (see `knowledge-mechanized...`
- *               task history: a `<100ms` budget on the hook's own elapsed
- *               time false-reds under full-suite CPU contention — the hook's
- *               honest non-blocking exit legitimately took 116-133ms there).
- *               An on-disk-but-EXPIRED (>24h) cache is treated identically
- *               to a missing one.
+ *   BOUNDARY:   a missing or expired (>24h) cache yields no advisory and spawns no `lore setup --check`
+ *               (the detached refresh was removed, AC-LG-7); the on-disk cache is left untouched.
  *   ERROR:      corrupted cache JSON → silence (no advisory), no crash,
  *               exit 0
  *   STATE:      a stale cache with NO `stale_counts` field still renders a
@@ -83,21 +72,6 @@ if (!existsSync(HOOK_PATH)) {
 
 /** Must stay byte-identical to the hook's own `SETUP_CHECK_CACHE_FILENAME` literal (SPEC-076 §C6). */
 const CACHE_FILENAME = ".lore-setup-check.json";
-
-/**
- * Artificial delay injected into the `lore` stub's `setup --check` branch,
- * used ONLY by the two BOUNDARY ordering cases below. The task history's
- * worst observed full-suite-contention number for the HOOK'S OWN elapsed
- * exit time was ~133ms (`task-session-start-freshness-boundary-cases...`);
- * this constant is ~4x that, so the hook's own exit — which the stub delay
- * does not touch at all, since the hook never waits on its detached child —
- * is guaranteed to be observed (via a plain `existsSync`/content check, not
- * a timer) strictly BEFORE the child's delayed write, on any machine load
- * this suite is expected to run under. This turns the assertion into an
- * ordering check immune to load, rather than a wall-clock budget subject to
- * it.
- */
-const REFRESH_DELAY_MS = 500;
 
 const cleanupDirs: string[] = [];
 
@@ -201,61 +175,9 @@ function writeCache(cachePath: string, cache: Record<string, unknown>): void {
   writeFileSync(cachePath, JSON.stringify(cache));
 }
 
-/** Synchronous sleep (main-thread `Atomics.wait` is permitted in Node, unlike browsers) — used ONLY to poll for a real detached child's on-disk output, bounded by each caller's own deadline. */
+/** Synchronous sleep (main-thread `Atomics.wait` is permitted in Node, unlike browsers) — used ONLY to give a would-be detached child time to write its log line before asserting it never ran. */
 function sleepSyncMs(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/**
- * Polls `cachePath` until it exists AND parses as JSON, returning the parsed
- * value. A bare `existsSync` check races with the REAL detached child's
- * write (the stub's `cat > file <<HEREDOC` truncates the file before its
- * content lands) — this waits for a genuinely complete write instead of
- * treating file-creation as file-completion. Bounded by `timeoutMs`; a
- * timeout is a real test failure (thrown), never a silently-passed check.
- */
-function pollForValidCacheJson(cachePath: string, timeoutMs = 5000): unknown {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (existsSync(cachePath)) {
-      try {
-        return JSON.parse(readFileSync(cachePath, "utf8"));
-      } catch {
-        // Still mid-write — keep polling rather than failing on a partial read.
-      }
-    }
-    sleepSyncMs(25);
-  }
-  throw new Error(`pollForValidCacheJson: timed out waiting for valid JSON at ${cachePath}`);
-}
-
-/**
- * Polls until the on-disk cache parses as JSON AND satisfies `predicate`, or
- * throws on timeout. Needed where a valid cache is ALREADY on disk before
- * the hook runs (the "expired cache" BOUNDARY case) — plain
- * `pollForValidCacheJson` would trivially return that pre-existing content
- * on its very first check, proving nothing about the detached child's
- * refresh actually landing. This instead waits for the specific replacement
- * the refresh is expected to produce.
- */
-function pollUntilCacheMatches(
-  cachePath: string,
-  predicate: (cache: Record<string, unknown>) => boolean,
-  timeoutMs = 5000,
-): Record<string, unknown> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (existsSync(cachePath)) {
-      try {
-        const parsed = JSON.parse(readFileSync(cachePath, "utf8")) as Record<string, unknown>;
-        if (predicate(parsed)) return parsed;
-      } catch {
-        // Still mid-write — keep polling rather than failing on a partial read.
-      }
-    }
-    sleepSyncMs(25);
-  }
-  throw new Error(`pollUntilCacheMatches: timed out waiting for a matching cache at ${cachePath}`);
 }
 
 /**
@@ -407,11 +329,11 @@ describe("session-start-freshness — reminder_enabled (SPEC-076 T8b)", () => {
   });
 });
 
-// ─── BOUNDARY — non-blocking exit + real detached refresh (R2 oracle) ─────────
+// ─── BOUNDARY — a missing or expired cache says nothing and spawns nothing (AC-LG-7) ─────────────────────────
 
-describe("session-start-freshness — BOUNDARY (R2 real-subprocess oracle)", () => {
-  it("missing cache: hook exits before its REAL detached child's refresh completes, and the cache subsequently appears written by that child", () => {
-    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture({ refreshDelayMs: REFRESH_DELAY_MS });
+describe("session-start-freshness — BOUNDARY (no refresh spawn)", () => {
+  it("missing cache: no advisory, exit 0, and no `lore setup --check` is spawned (the detached refresh was removed)", () => {
+    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture();
     expect(existsSync(cachePath)).toBe(false);
 
     const { result } = runHook({
@@ -421,33 +343,17 @@ describe("session-start-freshness — BOUNDARY (R2 real-subprocess oracle)", () 
 
     expect(result.status).toBe(0);
     expect(parseAdditionalContext(result.stdout as string)).toBe("");
-
-    // ORDERING invariant (not a wall-clock budget): `runHook` above only
-    // returns once the hook's own node process has EXITED. At that instant
-    // the cache still does not exist — the hook never waited for its
-    // detached child, whose refresh is deliberately slowed by
-    // REFRESH_DELAY_MS in the stub. This is immune to machine load: it only
-    // requires the injected delay to outlast the hook's own (unrelated,
-    // un-delayed) exit, never a specific millisecond figure.
+    sleepSyncMs(300); // a would-be detached child is not awaited: give it time to write its log line
+    expect(readLogLines(logPath).filter((l) => l.startsWith("setup"))).toEqual([]);
     expect(existsSync(cachePath)).toBe(false);
-
-    // Poll for the REAL detached child's on-disk output (genuine OS process,
-    // not awaited by the hook) — bounded, never an unbounded wait.
-    const written = pollForValidCacheJson(cachePath) as Record<string, unknown>;
-    expect(written.status).toBe("sync");
-    expect(typeof written.binary_version).toBe("string");
-    expect(typeof written.checked_at).toBe("string");
-
-    const calls = readLogLines(logPath);
-    expect(calls.some((l) => l.startsWith("setup --check"))).toBe(true);
   });
 
-  it("on-disk cache older than 24h is treated identically to a missing cache: hook exits before the refresh overwrites it, refresh lands later", () => {
-    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture({ refreshDelayMs: REFRESH_DELAY_MS });
+  it("on-disk cache older than 24h is treated like a missing cache: no advisory, nothing spawned, the stale file is left as it was", () => {
+    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture();
     writeCache(cachePath, {
       checked_at: isoMinusMs(25 * 60 * 60 * 1000), // 25h old — past the 24h TTL
       binary_version: "1.2.3",
-      status: "sync",
+      status: "stale",
     });
 
     const { result } = runHook({
@@ -457,24 +363,9 @@ describe("session-start-freshness — BOUNDARY (R2 real-subprocess oracle)", () 
 
     expect(result.status).toBe(0);
     expect(parseAdditionalContext(result.stdout as string)).toBe("");
-
-    // ORDERING invariant, mirrors the missing-cache case above: the hook has
-    // already exited (`runHook` returned) while the on-disk cache is STILL
-    // the stale 25h-old content written above — the (deliberately slowed)
-    // refresh has not yet overwritten it. Immune to machine load for the
-    // same reason: only requires the stub's injected delay to outlast the
-    // hook's own exit.
-    const stillStale = JSON.parse(readFileSync(cachePath, "utf8")) as Record<string, unknown>;
-    expect(stillStale.binary_version).toBe("1.2.3");
-
-    // Poll until the detached child's refresh actually replaces it — a bare
-    // "exists and parses" check would trivially pass on the pre-existing
-    // stale content, so this waits for the specific stub-written payload.
-    const refreshed = pollUntilCacheMatches(cachePath, (c) => c.binary_version === "9.9.9-stub");
-    expect(refreshed.status).toBe("sync");
-
-    const calls = readLogLines(logPath);
-    expect(calls.some((l) => l.startsWith("setup --check"))).toBe(true);
+    sleepSyncMs(300);
+    expect(readLogLines(logPath).filter((l) => l.startsWith("setup"))).toEqual([]);
+    expect((JSON.parse(readFileSync(cachePath, "utf8")) as Record<string, unknown>).binary_version).toBe("1.2.3");
   });
 });
 
@@ -527,33 +418,6 @@ describe("session-start-freshness — STATE", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("binary 4.5.6");
     expect(readLogLines(logPath)).toHaveLength(0);
-  });
-
-  it("a missing cache, once refreshed by the detached child, is OBSERVABLE by a second hook invocation as fresh+sync", () => {
-    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture();
-
-    const first = runHook({
-      cwd,
-      extraEnv: { PATH: `${stubDir}:${process.env.PATH}`, CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents") },
-    });
-    expect(first.result.status).toBe(0);
-    expect(parseAdditionalContext(first.result.stdout as string)).toBe("");
-
-    pollForValidCacheJson(cachePath);
-
-    const second = runHook({
-      cwd,
-      extraEnv: { PATH: `${stubDir}:${process.env.PATH}`, CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents") },
-    });
-    expect(second.result.status).toBe(0);
-    // The cache the first run's background refresh wrote is now fresh+sync —
-    // the second invocation reads REAL state that did not exist at the start
-    // of the first, proving the state genuinely changed on disk.
-    expect(parseAdditionalContext(second.result.stdout as string)).toBe("");
-
-    // Exactly one refresh was fired (the second run found a fresh cache and
-    // did not re-trigger).
-    expect(readLogLines(logPath).filter((l) => l.startsWith("setup --check"))).toHaveLength(1);
   });
 });
 
