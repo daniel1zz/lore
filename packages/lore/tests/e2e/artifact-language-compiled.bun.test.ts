@@ -1,4 +1,5 @@
 // @spawns dist/lore
+// @layer compiled-binary AC-IT-6 (compiled half; the AC's declared command names the unit file first, which owns it)
 /**
  * AC-IT-6 (compiled half): with a temp HOME whose global config sets `context.artifact_language: en` and a user
  * launch fragment naming `{{lore:artifact_language}}`, `lore context refresh --scope user` writes a rules file
