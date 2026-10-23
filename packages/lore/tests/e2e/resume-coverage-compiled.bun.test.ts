@@ -637,7 +637,7 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     // fragment's text (minus frontmatter) must appear in the project .claude/rules/lore-corpus-workflow-feed.md (D15).
     expect(existsSync(join(targetDir, "governance", "corpus-workflow.md"))).toBe(false);
 
-    const governanceVerb = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
+    const governanceVerb = Bun.spawnSync([LORE_BIN, "governance"], { cwd: scratch });
     expect(governanceVerb.exitCode).not.toBe(0);
     expect(governanceVerb.stderr.toString()).toContain("retired");
 

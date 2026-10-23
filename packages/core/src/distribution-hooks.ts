@@ -44,7 +44,7 @@
  * retired files and settings entries from older installs.
  *
  * `stop-handoff-coverage.mjs` and `post-edit-bindings.mjs` were removed (AC-LG-7): they served neither the
- * correctness nor the context goal. The `lore handoff coverage-check` verb stays; only the Stop hook is gone.
+ * correctness nor the context goal. The `lore handoff coverage-check` verb went with the hook.
  *
  * `session-start-marker.mjs` (added 2026-08-01,
  * task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) joins the

@@ -90,15 +90,13 @@
  *     sections, a second implementation of the same SSOT).
  *     `packages/lore/src/flows/feed-flow.ts` appends `RESUME_COVERAGE_FLOOR`
  *     alongside `RESUME_SCOPE_CLOSURE` on the single-record resume-ticket
- *     path only (D10 — never on the `multi_actor` branch). Parsing a
- *     disposition line back into a verdict is sibling T3's job (the
- *     `lore handoff` coverage-check verb, the SOLE parser of that grammar —
- *     D9).
+ *     path only (D10 — never on the `multi_actor` branch). No verb parses a
+ *     disposition line any more (the `lore handoff coverage-check` verb was removed).
  *   - hasDeferralDestination(reason) / RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX
  *     — spec-resume-coverage-floor-the-satisfaction-boundaries-a S4 (Overview
  *     Hole 3): a deferral REASON (S1) is not itself a DESTINATION — the
  *     predicate recognizes an issue reference or a corpus slug inside the
- *     reason text, and the prefix is the coverage-check verb's distinct
+ *     reason text, and the prefix was the removed coverage-check verb's distinct
  *     stderr refusal for a reason that names neither. MANDATORY exports per
  *     that spec's Scope section (SPEC-112 D7/D9: the verb composes from
  *     exports, never inline literals) — see the constants' own doc comments,
@@ -191,8 +189,7 @@
  * `renderHandoffContent` — this module — never re-derived or parsed by a
  * consumer), D3 (the lower-bound constant is separate from the upper-bound
  * one), D5 (the obligation is to account, not to complete), D8 (zero
- * cross-process state), D9 (the coverage-check verb is the sole grammar
- * parser; this module only names the disposition tokens), D10 (the floor
+ * cross-process state), D9 (this module only names the disposition tokens; the coverage-check verb that parsed them was removed), D10 (the floor
  * binds on the single-record resume-ticket path only — `feed-flow.ts`'s
  * job, not this module's);
  * task-verifying-a-handoff-you-just-authored-arms-the-coverage §Candidate
@@ -1122,8 +1119,7 @@ export const RESUME_SCOPE_CLOSURE =
 // function's parameter carries only a pre-rendered `content: string`, never
 // the structured arrays). `feed-flow.ts` appends RESUME_COVERAGE_FLOOR
 // alongside RESUME_SCOPE_CLOSURE on the single-record path only (D10).
-// Parsing a disposition line back into a verdict belongs to sibling T3 (the
-// `lore handoff` coverage-check verb, the SOLE parser of this grammar, D9).
+// No verb parses a disposition line any more (the `lore handoff coverage-check` verb was removed).
 
 /**
  * The resume ticket's lower-bound declaration
@@ -1154,8 +1150,7 @@ export const RESUME_COVERAGE_FLOOR =
  * Item-id prefix for one `extra.key_decisions[]` entry (`KD<n>`, 1-based,
  * array order) — spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
  * D1. Exported as a named constant, never inlined at a call site, so the
- * render path (`renderHandoffContent`, this module) and the coverage-check
- * verb (sibling T3, the sole parser of this tag format, D9) cannot drift on
+ * render path (`renderHandoffContent`, this module) and its tests cannot drift on
  * the prefix literal — the same "binary parses a format the binary emitted,
  * no second implementation to drift" discipline D8 states for the grammar as
  * a whole.
@@ -1200,8 +1195,7 @@ export function formatResumeItemId(prefix: string, oneBasedIndex: number): strin
  * for the enforcement shape"). A disposition line is expected to read
  * `${RESUME_DISPOSITION_MARKER} <item-id>: <disposition>` — but this module
  * does not itself write or parse that grammar; it only names the marker so
- * the coverage-check verb (sibling T3, the SOLE parser of this grammar, D9)
- * and this module's own tests key off one literal rather than a hand-typed
+ * this module's own tests key off one literal rather than a hand-typed
  * copy that can drift from what a consumer is actually told to write.
  */
 export const RESUME_DISPOSITION_MARKER = "**[RESUME_DISPOSITION]**";
