@@ -965,7 +965,7 @@ export const LoreInvalidateSchema = z.object({
 export const LoreHandoffSchema = handoffExtraSchema
   // reason: the trail-derived fields are computed by `SessionService.writeHandoff` from the call's session
   // trail (D16); a caller cannot name them, so they are not part of the tool's input.
-  .omit({ by: true, changed_files: true, changed_files_measured: true, trail_gaps: true })
+  .omit({ by: true, changed_files: true, changed_files_measured: true, changed_files_overflow: true, trail_gaps: true })
   .extend({
   harness_run: HARNESS_RUN_FIELD,
 });

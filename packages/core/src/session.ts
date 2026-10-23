@@ -251,8 +251,17 @@ export const handoffChangedFileSchema = z.object({
   path: z.string().min(1),
   sources: z.array(ChangeSourceSchema),
   named_by_author: z.boolean(),
+  /** Distinct runs that touched the path. The stored `sources` keep at most one run (BR-1371); the full run list is derivable from the audit trail. */
+  run_count: z.number().int().min(0).optional(),
 });
 export type HandoffChangedFile = z.infer<typeof handoffChangedFileSchema>;
+
+/** One top-level directory whose changed files are not listed individually (BR-1371). */
+export const handoffChangedFileGroupSchema = z.object({
+  dir: z.string().min(1),
+  files: z.number().int().min(1),
+});
+export type HandoffChangedFileGroup = z.infer<typeof handoffChangedFileGroupSchema>;
 
 /**
  * A part of the session trail the handoff could not list files for: a removed part, or a turn / helper /
@@ -262,6 +271,8 @@ export const handoffTrailGapSchema = z.object({
   kind: z.enum(["removed", "unmeasured"]),
   subject: z.string().min(1),
   detail: z.string().min(1),
+  /** How many gaps of this kind and subject class this entry stands for (absent = 1). `subject`/`detail` are the first one's. */
+  count: z.number().int().min(1).optional(),
 });
 export type HandoffTrailGap = z.infer<typeof handoffTrailGapSchema>;
 
@@ -315,6 +326,8 @@ export const handoffExtraSchema = z.object({
   degraded: z.boolean().optional(),
   changed_files: z.array(handoffChangedFileSchema).optional(),
   changed_files_measured: z.boolean().optional(),
+  /** Changed files beyond the first {@link MAX_LISTED_CHANGED_FILES}, one entry per top-level directory (BR-1371). */
+  changed_files_overflow: z.array(handoffChangedFileGroupSchema).optional(),
   trail_gaps: z.array(handoffTrailGapSchema).optional(),
 });
 
@@ -329,6 +342,9 @@ export type HandoffExtra = z.infer<typeof handoffExtraSchema>;
  */
 export const DEGRADED_HANDOFF_MARKER =
   "⚠ degraded (git-only capture — no key decisions recorded, next_steps may be incomplete)";
+
+/** Files listed one per line in a handoff; the rest are grouped by top-level directory (BR-1371). */
+export const MAX_LISTED_CHANGED_FILES = 150;
 
 function formatChangeSource(source: ChangeSource): string {
   switch (source.kind) {
@@ -356,9 +372,18 @@ function renderChangedFilesSection(extra: HandoffExtra): string[] {
   }
   if (files.length > 0) {
     for (const f of files) {
-      const labels = f.sources.map(formatChangeSource);
+      const runs = f.run_count ?? f.sources.filter((x) => x.kind === "run").length;
+      const labels: string[] = [];
+      if (runs > 0) labels.push(`${runs} ${runs === 1 ? "run" : "runs"}`);
+      for (const src of f.sources) if (src.kind !== "run") labels.push(formatChangeSource(src));
       if (f.named_by_author) labels.push("named by author");
       out.push(`- ${f.path} (${labels.join("; ")})`);
+    }
+    const overflow = extra.changed_files_overflow ?? [];
+    if (overflow.length > 0) {
+      const rest = overflow.reduce((n, g) => n + g.files, 0);
+      out.push("", `${rest} more files, grouped by top-level directory:`);
+      for (const g of overflow) out.push(`- ${g.dir}/ (${g.files} files)`);
     }
   } else if (extra.changed_files_measured !== false) {
     out.push("(none recorded in the session trail)");
@@ -366,7 +391,15 @@ function renderChangedFilesSection(extra: HandoffExtra): string[] {
   const shownGaps = gaps.filter((g) => !(g.kind === "unmeasured" && g.subject === "trail"));
   if (shownGaps.length > 0) {
     out.push("", "Trail gaps:");
-    for (const g of shownGaps) out.push(`- ${g.kind === "removed" ? "removed" : "not measured"}: ${g.subject} — ${g.detail}`);
+    for (const g of shownGaps) {
+      const label = g.kind === "removed" ? "removed" : "not measured";
+      const n = g.count ?? 1;
+      out.push(
+        n > 1
+          ? `- ${label}: ${n} × ${g.subject.split(" ")[0]} (first: ${g.subject} — ${g.detail})`
+          : `- ${label}: ${g.subject} — ${g.detail}`,
+      );
+    }
   }
   return out;
 }
@@ -374,8 +407,20 @@ function renderChangedFilesSection(extra: HandoffExtra): string[] {
 /** The three handoff fields the session trail fills (D16). */
 export interface HandoffChangedFiles {
   readonly changed_files: HandoffChangedFile[];
+  readonly changed_files_overflow?: HandoffChangedFileGroup[];
   readonly changed_files_measured: boolean;
   readonly trail_gaps: HandoffTrailGap[];
+}
+
+/** Collapse gaps to one entry per (kind, subject class), counting the rest; the trail-wide gap stays as is. */
+function groupTrailGaps(gaps: readonly HandoffTrailGap[]): HandoffTrailGap[] {
+  const groups = new Map<string, HandoffTrailGap>();
+  for (const g of gaps) {
+    const key = `${g.kind}|${g.subject.split(" ")[0]}`;
+    const known = groups.get(key);
+    groups.set(key, known === undefined ? { ...g } : { ...known, count: (known.count ?? 1) + 1 });
+  }
+  return [...groups.values()];
 }
 
 /**
@@ -432,15 +477,32 @@ export function mergeTrailIntoChangedFiles(
   }
 
   const authored = new Set(authorFiles);
-  const changed_files: HandoffChangedFile[] = [...sourcesByPath].map(([path, sources]) => ({
-    path,
-    sources: [...sources.values()],
-    named_by_author: authored.has(path),
-  }));
+  const all: HandoffChangedFile[] = [...sourcesByPath].map(([path, sources]) => {
+    const kept: ChangeSource[] = [];
+    let runs = 0;
+    for (const source of sources.values()) {
+      if (source.kind !== "run") kept.push(source);
+      else if (runs++ === 0) kept.push(source);
+    }
+    return { path, sources: kept, named_by_author: authored.has(path), run_count: runs };
+  });
   for (const path of authored) {
-    if (!sourcesByPath.has(path)) changed_files.push({ path, sources: [], named_by_author: true });
+    if (!sourcesByPath.has(path)) all.push({ path, sources: [], named_by_author: true });
   }
-  return { changed_files, changed_files_measured: trail !== null, trail_gaps: gaps };
+  const changed_files = all.slice(0, MAX_LISTED_CHANGED_FILES);
+  const byDir = new Map<string, number>();
+  for (const f of all.slice(MAX_LISTED_CHANGED_FILES)) {
+    const slash = f.path.indexOf("/");
+    const dir = slash > 0 ? f.path.slice(0, slash) : "(root)";
+    byDir.set(dir, (byDir.get(dir) ?? 0) + 1);
+  }
+  const overflow: HandoffChangedFileGroup[] = [...byDir].map(([dir, files]) => ({ dir, files }));
+  return {
+    changed_files,
+    changed_files_measured: trail !== null,
+    ...(overflow.length > 0 ? { changed_files_overflow: overflow } : {}),
+    trail_gaps: groupTrailGaps(gaps),
+  };
 }
 
 /**
