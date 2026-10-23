@@ -84,13 +84,21 @@ function cherryPickOntoMain(branch: string): void {
   git(["checkout", "-q", "--detach", "main"]);
 }
 
-function createClaimedTask(title: string, branch: string): string {
+function recordPass(task: string): void {
+  mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
+}
+
+/**
+ * A claimed task on `branch`. With `evidence: true` (the default) its pass is already on record, so the landing's done
+ * walk (BR-1356) archives it at once; with `evidence: false` the landing leaves it unarchived for a later `lore done`.
+ */
+function createClaimedTask(title: string, branch: string, evidence = true): string {
   taskCounter += 1;
   const task = parseSlug(
     mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
   );
   mustRun(["claim", task, "--worktree", branch]);
-  mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
+  if (evidence) recordPass(task);
   return task;
 }
 
@@ -138,15 +146,19 @@ describe("AC-LRD-1 — lore done decides from the recorded landing only", () => 
 
   it("(b) a landing is recorded, then the branch gets one more commit: exit 4 [floor: not-landed] naming the unlanded commit", () => {
     makeBranch("feat-late");
-    const task = createClaimedTask("Late", "feat-late");
+    // no pass on record yet: the landing's done walk leaves the task unarchived (a task whose floors are all met is
+    // archived by the landing itself, BR-1356, and nothing is left for a later `lore done` to refuse)
+    const task = createClaimedTask("Late", "feat-late", false);
     const landed = integrate("feat-late");
     expect(landed.exitCode, landed.text).toBe(0);
     expect(landed.text).toContain(task);
+    expect(statusOf(task)).not.toBe("archived");
     git(["checkout", "-q", "feat-late"]);
     writeFileSync(join(dir, "late.txt"), "after the landing\n");
     git(["add", "late.txt"]);
     git(["commit", "-q", "-m", "committed after the landing"]);
     git(["checkout", "-q", "--detach", "main"]);
+    recordPass(task);
 
     const refused = runLore(["done", task]);
 
