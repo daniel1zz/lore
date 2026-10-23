@@ -257,6 +257,29 @@ function toListJsonRows(docs: readonly ListedDoc[], claimTtlMinutes: number): Li
   });
 }
 
+/** Rows `lore list --json` returns when the caller gave no `--limit` (BR-1371: command output is bounded). */
+export const DEFAULT_JSON_LIMIT = 200;
+
+/**
+ * The `--json` page of `lore list`: every row when the caller named a `--limit` (their page size already applied),
+ * else at most {@link DEFAULT_JSON_LIMIT} rows, with `truncated: true`, the cap as `limit` and the full matched count
+ * as `total` when more matched. Pure.
+ *
+ * @param rows - the already-rendered rows of the listing
+ * @param explicitLimit - the caller's `--limit`, `undefined` when omitted
+ * @returns `{ docs, total }`, plus `truncated` and `limit` only when the cap cut rows (the shape is otherwise unchanged)
+ * @example
+ *   boundedJsonPage(rows250, undefined) // { docs: <200 rows>, total: 250, truncated: true, limit: 200 }
+ *   boundedJsonPage(rows250, 250)       // { docs: <250 rows>, total: 250 }
+ */
+export function boundedJsonPage<T>(
+  rows: readonly T[],
+  explicitLimit: number | undefined,
+): { docs: T[]; total: number; truncated?: true; limit?: number } {
+  if (explicitLimit !== undefined || rows.length <= DEFAULT_JSON_LIMIT) return { docs: [...rows], total: rows.length };
+  return { docs: rows.slice(0, DEFAULT_JSON_LIMIT), total: rows.length, truncated: true, limit: DEFAULT_JSON_LIMIT };
+}
+
 export default defineLoreCommand({
   meta: {
     name: "list",
@@ -314,7 +337,7 @@ export default defineLoreCommand({
     },
     limit: {
       type: "string",
-      description: "Max documents to return. Omitted → unbounded (current default behavior).",
+      description: `Max documents to return. Omitted: table output is unbounded; --json returns at most ${DEFAULT_JSON_LIMIT} rows and says \`truncated: true\` with the full \`total\` when more matched.`,
     },
     offset: {
       type: "string",
@@ -457,7 +480,7 @@ export default defineLoreCommand({
 
         if (args.json) {
           printLine(inv.io.stdout, 
-            JSON.stringify({ ok: true, data: { docs: toListJsonRows(docs, claimTtlMinutes), total } }, null, 2),
+            JSON.stringify({ ok: true, data: boundedJsonPage(toListJsonRows(docs, claimTtlMinutes), limit) }, null, 2),
           );
           return 0;
         }
@@ -585,7 +608,7 @@ export default defineLoreCommand({
 
         if (args.json) {
           printLine(inv.io.stdout, 
-            JSON.stringify({ ok: true, data: { docs: toListJsonRows(filtered, claimTtlMinutes), total, omitted_invalid: omittedInvalid } }, null, 2),
+            JSON.stringify({ ok: true, data: { ...boundedJsonPage(toListJsonRows(filtered, claimTtlMinutes), limit), omitted_invalid: omittedInvalid } }, null, 2),
           );
           return 0;
         }
@@ -626,7 +649,7 @@ export default defineLoreCommand({
         if (args.json) {
           printLine(inv.io.stdout, 
             JSON.stringify(
-              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
+              { ok: true, data: { ...boundedJsonPage(toListJsonRows(fullDocs, claimTtlMinutes), limit), omitted_invalid: omittedInvalid } },
               null,
               2,
             ),
@@ -677,7 +700,7 @@ export default defineLoreCommand({
         if (args.json) {
           printLine(inv.io.stdout, 
             JSON.stringify(
-              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
+              { ok: true, data: { ...boundedJsonPage(toListJsonRows(fullDocs, claimTtlMinutes), limit), omitted_invalid: omittedInvalid } },
               null,
               2,
             ),
@@ -722,7 +745,7 @@ export default defineLoreCommand({
         if (args.json) {
           printLine(inv.io.stdout, 
             JSON.stringify(
-              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
+              { ok: true, data: { ...boundedJsonPage(toListJsonRows(fullDocs, claimTtlMinutes), limit), omitted_invalid: omittedInvalid } },
               null,
               2,
             ),
@@ -776,7 +799,7 @@ export default defineLoreCommand({
         // absent-metadata grounds even if the exclusion above had regressed. The
         // pre-gated stamp names that dependency at the call site instead; see
         // `withPreGatedLiveStatus`'s JSDoc for the contract it rests on.
-        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total, omitted_invalid: omittedInvalidDefault } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ...boundedJsonPage(withPreGatedLiveStatus(docs), limit), omitted_invalid: omittedInvalidDefault } }, null, 2));
         return 0;
       }
 

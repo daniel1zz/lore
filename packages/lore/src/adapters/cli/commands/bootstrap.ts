@@ -101,26 +101,27 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   );
   lines.push("");
 
-  lines.push(`Active plans (${report.active_plans.length}):`);
-  if (report.active_plans.length > 0) {
-    for (const plan of report.active_plans) {
+  // reason: BR-1371 — the report is bounded (BOOTSTRAP_MAX_BYTES). Idle plans (nothing ready, nothing claimed) print
+  // as a count and only the first BOOTSTRAP_MAX_PLANS busy plans are named; the rest are one pointer line.
+  const busyPlans = report.active_plans.filter((p) => p.task_counts.ready > 0 || p.task_counts.claimed > 0);
+  const idleCount = report.active_plans.length - busyPlans.length;
+  lines.push(`Active plans (${report.active_plans.length}; ${idleCount} idle):`);
+  if (busyPlans.length > 0) {
+    for (const plan of busyPlans.slice(0, BOOTSTRAP_MAX_PLANS)) {
       lines.push(
-        `  - ${plan.slug} "${plan.title}" — ready ${plan.task_counts.ready}, ` +
-          `claimed ${plan.task_counts.claimed}, done ${plan.task_counts.done}, ` +
-          `last activity ${relativeTime(plan.last_activity_at)}`,
+        `  - ${plan.slug} — ready ${plan.task_counts.ready}, claimed ${plan.task_counts.claimed}, ` +
+          `done ${plan.task_counts.done}, ${relativeTime(plan.last_activity_at)}`,
       );
     }
+    if (busyPlans.length > BOOTSTRAP_MAX_PLANS) {
+      lines.push(`  (+${busyPlans.length - BOOTSTRAP_MAX_PLANS} more busy plans: lore list --type plan)`);
+    }
   } else {
-    lines.push("  (none)");
+    lines.push("  (none busy)");
   }
   lines.push("");
 
-  lines.push(
-    `Pending reviews: ${report.pending_reviews.count}` +
-      (report.pending_reviews.slugs.length > 0
-        ? ` (${report.pending_reviews.slugs.join(", ")})`
-        : ""),
-  );
+  lines.push(`Pending reviews: ${report.pending_reviews.count} (lore pending)`);
   lines.push("");
 
   lines.push(`My claims (${by}, ${report.my_claims.length}):`);
@@ -149,9 +150,18 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   }
   lines.push("");
 
-  lines.push(`Latest handoffs (${report.latest_handoffs.length}):`);
-  if (report.latest_handoffs.length > 0) {
-    for (const handoff of report.latest_handoffs) {
+  // reason: BR-1371 — this seat's own handoff (the resume hint's) plus the newest BOOTSTRAP_NEWEST_HANDOFFS, not all.
+  const seatHandoff =
+    report.resume_hint === null
+      ? undefined
+      : report.latest_handoffs.find((h) => h.handoff_slug === report.resume_hint?.handoff_slug);
+  const shownHandoffs = [
+    ...(seatHandoff === undefined ? [] : [seatHandoff]),
+    ...report.latest_handoffs.filter((h) => h !== seatHandoff).slice(0, BOOTSTRAP_NEWEST_HANDOFFS),
+  ];
+  lines.push(`Latest handoffs (${shownHandoffs.length} of ${report.latest_handoffs.length}):`);
+  if (shownHandoffs.length > 0) {
+    for (const handoff of shownHandoffs) {
       lines.push(
         `  - ${handoff.plan_slug ?? "(no plan)"}: ${handoff.handoff_slug} by ${handoff.by} at ${handoff.at}`,
       );
@@ -181,7 +191,34 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   const healthLine = formatMemoryFileHealthLine(report.memory_file_health);
   if (healthLine !== undefined) lines.push(healthLine);
 
-  return lines.join("\n");
+  return capBootstrapText(lines.join("\n"));
+}
+
+/** Plans named in the plain bootstrap report (BR-1371); the rest are a count and a pointer. */
+const BOOTSTRAP_MAX_PLANS = 8;
+/** Newest handoffs named besides the seat's own. */
+const BOOTSTRAP_NEWEST_HANDOFFS = 3;
+/** The plain bootstrap report never exceeds this many bytes (BR-1371). */
+export const BOOTSTRAP_MAX_BYTES = 3072;
+
+/**
+ * Backstop for {@link BOOTSTRAP_MAX_BYTES}: the sections above are bounded by construction except claims and gates,
+ * which belong to the seat; if those alone push the text over, drop whole trailing lines and say so.
+ *
+ * @param text - the rendered report
+ * @returns `text` when it fits, else its leading lines plus a pointer to `--json`, at most the cap
+ */
+function capBootstrapText(text: string): string {
+  if (Buffer.byteLength(text) <= BOOTSTRAP_MAX_BYTES) return text;
+  const note = "\n(output cut at 3 KB: lore bootstrap --json for everything)";
+  const kept: string[] = [];
+  let size = Buffer.byteLength(note);
+  for (const line of text.split("\n")) {
+    size += Buffer.byteLength(line) + 1;
+    if (size > BOOTSTRAP_MAX_BYTES) break;
+    kept.push(line);
+  }
+  return kept.join("\n") + note;
 }
 
 export default defineLoreCommand({

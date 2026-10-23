@@ -71,13 +71,14 @@ import { runMigrateSchema } from "../migrate-schema.js";
 export default defineLoreCommand({
   meta: {
     name: "migrate",
-    description:
-      "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes), or `audit-backfill` (record pre-writer versions as reconstructed audit entries and remove the retired audit cut-off; preview by default, `--apply` writes)",
+    description: "Corpus migration: schema (upgrade the corpus), v1 import and one-off sweeps; see `lore migrate --help`",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill",
+      description:
+        "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill" + "\n" +
+        "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes), or `audit-backfill` (record pre-writer versions as reconstructed audit entries and remove the retired audit cut-off; preview by default, `--apply` writes)",
       required: true,
     },
     from: {

@@ -213,7 +213,13 @@ describe("AC-EI-2 half 7 (REGRESSION): lore status names each AC with a missing 
     expect(data.ac_oracle_file_missing_count).toBe(data.ac_oracle_file_missing.length);
     expect(data.ac_oracle_file_missing.some((m) => m.startsWith(`${SPEC}#AC-EI2-B`))).toBe(false);
 
-    const text = await runLore(["status"]);
+    const counted = await runLore(["status"]);
+    expect(counted.exitCode, counted.stderr).toBe(0);
+    expect(counted.stdout).toContain("Criteria with a missing oracle file:");
+    expect(counted.stdout).not.toContain(`${SPEC}#AC-EI2-A: scripts/ok-one.sh`);
+    expect(counted.stdout).toContain("lore status --detail");
+
+    const text = await runLore(["status", "--detail"]);
     expect(text.exitCode, text.stderr).toBe(0);
     expect(text.stdout).toContain("Criteria with a missing oracle file:");
     expect(text.stdout).toContain(`${SPEC}#AC-EI2-A: scripts/ok-one.sh`);
