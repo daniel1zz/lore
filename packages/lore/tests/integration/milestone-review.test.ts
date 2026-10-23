@@ -541,7 +541,7 @@ describe("milestone review gates close", () => {
     const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
     const plan = { id: "P1", slug: "plan-p1", title: "Plan P1", content: "x", version: 1, extra: {} };
     const task = { id: "T1", slug: "task-t1", title: "T1", content: "x", status: "archived", version: 1, extra: {} };
-    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x" };
+    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x", extra: {} };
     let cited: { rule_id: string; state: string; unknown_reason?: string }[] = [];
     const judgeFailsSnapshot = judgeAnswer({ snapshot_accuracy: { verdict: "fail", reason: "rule BR-1 looks stale", reference: "doc drift" } });
     const service = new MilestoneReviewService({
@@ -573,7 +573,7 @@ describe("milestone review gates close", () => {
   async function refreshHarness(acResult: "pass" | "fail") {
     const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
     const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
-    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x" };
+    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x", extra: {} };
     const bundleOf = (slug: string) => ({
       plan: { id: slug, slug, title: slug, content: "x", version: 1, extra: {} },
       tasks: [{ id: `T-${slug}`, slug: `task-${slug}`, title: "T", content: "x", status: "archived", version: 1, extra: {} }],
@@ -713,9 +713,12 @@ describe("milestone review gates close", () => {
     const rows = (JSON.parse(filed.stdout) as { data: { rows: (AssessRow & { filed_issues?: number[] })[] } }).data.rows;
     expect(rows[0]?.outcome).toBe("FAIL");
     expect(rows[0]?.filed_issues).toEqual([1, 2]);
-    // one issue per failed dimension: title names plan and dimension, body carries the finding.
+    // one issue per root-cause fingerprint (BR-1379): the title names the dimension and ends with `[fp:<12 hex>]`, the
+    // body carries the finding and the full fingerprint.
     const posts = readFileSync(join(judgeDir, "gh-state", "posts.log"), "utf8").trim().split("\n");
-    expect(posts).toEqual([`${plan}: regression`, `${plan}: security`]);
+    expect(posts).toHaveLength(2);
+    expect(posts[0]).toMatch(/^regression: .* \[fp:[0-9a-f]{12}\]$/);
+    expect(posts[1]).toMatch(/^security: .* \[fp:[0-9a-f]{12}\]$/);
     const listed = JSON.parse(readFileSync(join(judgeDir, "gh-state", "issues.json"), "utf8")) as { body: string }[];
     expect(listed[0]?.body).toContain("breaks the old path");
     expect(listed[1]?.body).toContain("unvalidated input reaches a shell");
@@ -875,7 +878,7 @@ describe("milestone review gates close: stale refresh and suite environment", ()
   const bundleWith = (scoped: Record<string, string[]>): core.PlanBundle =>
     ({ tasks: Object.entries(scoped).map(([slug, scope]) => ({ slug, extra: { ac_scope: scope } })) }) as unknown as core.PlanBundle;
 
-  async function refresher(scoped: Record<string, string[]>, wired = true) {
+  async function refresher(scoped: Record<string, string[]>) {
     const { createVerifyStaleRefresher } = await import("../../src/adapters/cli/assess-stale-refresh.js");
     const planCalls: Opts[] = [];
     const adhocCalls: { task: string; opts: Opts }[] = [];
@@ -886,13 +889,9 @@ describe("milestone review gates close: stale refresh and suite environment", ()
         verifyAdhocTask: async (task: { slug: string }, _specs: unknown, opts: Opts) => (adhocCalls.push({ task: task.slug, opts }), core.ok({})),
       } as never,
       getPlanBundle: async () => core.ok(bundleWith(scoped)),
-      ...(wired
-        ? {
-            listDocs: async () => core.ok([]),
-            createAdhocTask: async (_title: string, acId: string) =>
-              (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId] } } as never)),
-          }
-        : {}),
+      listDocs: async () => core.ok([]),
+      createAdhocTask: async (_title: string, acId: string) =>
+        (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId] } } as never)),
       executionRoot: "/tmp/root",
       by: "agent:test",
       nowIso: () => "2026-10-23T00:00:00.000Z",
@@ -934,12 +933,5 @@ describe("milestone review gates close: stale refresh and suite environment", ()
     });
     expect(Object.keys(env).sort()).toEqual(["HOME", "PATH", "TMPDIR"]);
     expect(suiteChildEnv({})).toEqual({});
-  });
-
-  it("milestone review gates close: an unscoped AC with no corpus wiring fails loud and runs nothing", async () => {
-    const r = await refresher({}, false);
-    const out = await r.refresh.runAcs("plan-x", ["AC-9"]);
-    expect(out.ok).toBe(false);
-    expect(r.adhocCalls).toHaveLength(0);
   });
 });

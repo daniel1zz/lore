@@ -63,6 +63,7 @@ import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
+import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
 import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
   IntegrateService,
@@ -265,6 +266,16 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
         return 1;
       }
+      const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
+        spawnDetachedReviewBatch({
+          cwd: projectRoot,
+          corpusDir,
+          execPath: inv.execPath,
+          isCompiled: inv.isCompiled,
+          env: inv.env,
+          harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
+        }),
+      );
       const service = new IntegrateService({
         git: runGit,
         lease: sqliteIntegrationLease,
@@ -307,6 +318,8 @@ export default defineLoreCommand({
             return completions;
           },
         },
+        // BR-1379: after a landing, one detached review batch when plans need review and no lease is live; never waited for
+        ...(reviewBatch !== undefined ? { reviewBatch: { start: () => reviewBatch.start() } } : {}),
         // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
         ownDiff: new OwnDiffJudgment({
           git: runGit,

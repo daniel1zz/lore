@@ -154,6 +154,6 @@ describe("reads counted not logged", () => {
     expect(traceRows(dir, "kind = 'search'")).toBe(1);
     expect(traceRows(dir, "kind = 'gate_deny'")).toBe(1);
     expect(scalar(dir, "SELECT COUNT(*) AS n FROM trace_read_counts")).toBe(0);
-    expect(scalar(dir, "SELECT user_version AS n FROM pragma_user_version")).toBe(35);
+    expect(scalar(dir, "SELECT user_version AS n FROM pragma_user_version")).toBe(36);
   }, 60_000);
 });

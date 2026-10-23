@@ -29,6 +29,8 @@ import {
   type CreateDocInput,
   type DocRecord,
   type LinkType,
+  type LlmMilestoneOutput,
+  type ReviewCauses,
   type LoreError,
   type MilestoneDecisionRef,
   type MilestoneReview,
@@ -88,6 +90,23 @@ export interface MilestoneReviewResult {
 
 function aiError(message: string): LoreError {
   return { code: "AI_PROVIDER_ERROR", message, provider: "milestone-review" };
+}
+
+/**
+ * The measured root causes of a review's failed findings: the failing suite files attributed to the plan (when
+ * `regression` failed) and the contradicted cited rule ids (when `snapshot_accuracy` failed); `undefined` when neither.
+ */
+export function measuredCauses(
+  dimensions: LlmMilestoneOutput["dimensions"],
+  attributedFailingFiles: readonly string[],
+  cited: readonly CitedRuleStateRow[],
+): ReviewCauses | undefined {
+  const regression =
+    dimensions.regression.verdict === "fail" && attributedFailingFiles.length > 0 ? [...new Set(attributedFailingFiles)].sort() : undefined;
+  const contradicted = cited.filter((r) => r.state === "contradicted").map((r) => r.rule_id);
+  const rules = dimensions.snapshot_accuracy.verdict === "fail" && contradicted.length > 0 ? [...new Set(contradicted)].sort() : undefined;
+  if (regression === undefined && rules === undefined) return undefined;
+  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
 }
 
 /** The `milestone` decisions whose document is the plan, its spec or one of its tasks (newest per class+document). */
@@ -233,10 +252,14 @@ export class MilestoneReviewService {
     // reason: optional port so hand-built services (unit tests, MCP stubs) stay valid; `app.ts` always wires it.
     const retiredResult = this.deps.listRetiredAcs !== undefined ? await this.deps.listRetiredAcs(bundle) : ok<RetiredAcRef[]>([]);
     if (!retiredResult.ok) return retiredResult;
+    // reason: BR-1379 root-cause grouping needs the MEASURED causes of the failed findings (not the judge's prose), and
+    // a later batch that only retries filing reads them from the stored review instead of re-judging.
+    const causes = measuredCauses(dimensions, attribution.attributed, citedRulesResult.value);
     const review: MilestoneReview = {
       plan_id: bundle.plan.id,
       ...(retiredResult.value.length > 0 ? { retired_acs: retiredResult.value } : {}),
-      fingerprint: planStateFingerprint(bundle.plan, bundle.tasks),
+      fingerprint: planStateFingerprint(bundle.plan, bundle.tasks, bundle.spec),
+      ...(causes !== undefined ? { causes } : {}),
       overall: overallMilestoneVerdict(dimensions),
       dimensions,
       decisions,

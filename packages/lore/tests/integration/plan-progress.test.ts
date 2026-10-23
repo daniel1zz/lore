@@ -1,8 +1,9 @@
 /**
  * @reads packages/lore/src/adapters/cli/commands
  * @reads packages/lore/src/adapters/cli/commands/*.ts
+ * @reads assets/project/reference-transaction
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of
- *   AC-PCR-1, AC-PCR-2; business rule BR-1379.
+ *   AC-PCR-1, AC-PCR-2, AC-PCR-3, AC-PCR-4, AC-PCR-5; business rule BR-1379.
  *
  * A plan's stored `extra.progress {state, open, total, at}` is written in the SAME store transaction as every task or
  * phase write, in all three stores (InMemory, SQLite, Turso), and backfilled by migration 035.
@@ -18,12 +19,23 @@
  */
 
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ulid } from "ulidx";
-import { DOC_TYPE_ROLE_MAP, type AuditEntry, type DocId, type DocRecord, type VersionRecord } from "@lore/core";
+import { DOC_TYPE_ROLE_MAP, MILESTONE_DIMENSIONS, err, ok, type AuditEntry, type DocId, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type PlanBundle, type VersionRecord } from "@lore/core";
+import { IntegrateService, type IntegrateDeps } from "../../src/service/integrate-service.js";
+import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
+import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
+import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementState } from "../../src/service/milestone-review.js";
+import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
+import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
+import { ReviewBatchLease, REVIEW_BATCH_LEASE_NAME, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
+import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts, type ReviewTriggerDeps } from "../../src/service/review-batch-service.js";
+import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
@@ -481,5 +493,594 @@ describe("backfill, no repair path — migration batch recompute", () => {
       .filter((file) => file.endsWith(".ts"))
       .filter((file) => /recompute|reconcile|repair/i.test(file) || /progress.*(recompute|repair|rebuild)|(recompute|repair|rebuild).*progress/i.test(readFileSync(join(commandsDir, file), "utf8").split("\n").filter((line) => /name:\s*["'`]/.test(line)).join("\n")));
     expect(offenders).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// AC-PCR-3 / AC-PCR-4 / AC-PCR-5 — the post-landing review batch (fake judge, fake suite, fake issue port)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const T0 = Date.parse("2026-10-23T12:00:00.000Z");
+
+/** A plan of the fake world: its bundle, its stored review docs and where its owner decision stands. */
+interface WorldPlan {
+  readonly slug: string;
+  readonly bundle: PlanBundle;
+  readonly docs: DocRecord[];
+  archived: boolean;
+  /** Dimensions the fake judge fails for this plan, with their measured regression files. */
+  failing: MilestoneDimension[];
+  regressionFiles: string[];
+  retired: boolean;
+  retirement: PlanRetirementState;
+  /** Set to make the next `closePlan` fail once. */
+  closeFailures: number;
+}
+
+function stubDoc(partial: Record<string, unknown>): DocRecord {
+  return { deleted_at: null, created_at: "2026-10-01T00:00:00.000Z", updated_at: "2026-10-01T00:00:00.000Z", version: 1, content: "", tags: [], parent_id: null, ...partial } as unknown as DocRecord;
+}
+
+function acOf(id: string, statement: string, superseded = false): Record<string, unknown> {
+  return { id, statement, verify: { mode: "human" }, ...(superseded ? { superseded_by: { spec: "other", ac: "AC-O-1", at: "2026-10-02T00:00:00.000Z", by: "t", reason: "r" } } : {}) };
+}
+
+function makeWorldPlan(slug: string, opts: { acs?: Record<string, unknown>[]; progress?: "complete" | "in-progress" } = {}): WorldPlan {
+  const progress = { state: opts.progress ?? "complete", open: opts.progress === "in-progress" ? 1 : 0, total: 1, at: "2026-10-01T00:00:00.000Z" };
+  const plan = stubDoc({ id: `id-${slug}`, slug, type: "plan", status: "active", title: slug, extra: { progress } });
+  const task = stubDoc({ id: `id-${slug}-t1`, slug: `${slug}-t1`, type: "task", status: "archived", title: "t", extra: {} });
+  const spec = stubDoc({ id: `id-spec-${slug}`, slug: `spec-${slug}`, type: "spec", status: "approved", title: "s", extra: { acceptance_criteria: opts.acs ?? [acOf("AC-W-1", "works")] } });
+  return {
+    slug,
+    bundle: { plan, spec, tasks: [task] } as unknown as PlanBundle,
+    docs: [],
+    archived: false,
+    failing: [],
+    regressionFiles: [],
+    retired: false,
+    retirement: { state: "none" },
+    closeFailures: 0,
+  };
+}
+
+function currentFingerprint(p: WorldPlan): string {
+  return planStateFingerprint(p.bundle.plan, p.bundle.tasks, p.bundle.spec);
+}
+
+/** The in-memory issue tracker the batch files into. */
+class FakeIssuePort implements IssuePort {
+  readonly open: { number: number; title: string; body: string }[] = [];
+  readonly links: { plan: string; issue: number }[] = [];
+  filed = 0;
+  failFilingOnce = false;
+  async findOpenByFingerprint(short: string) {
+    const hit = this.open.find((i) => i.title.includes(`[fp:${short}]`));
+    return ok<IssueRef | undefined>(hit === undefined ? undefined : { number: hit.number });
+  }
+  async file(input: { title: string; body: string }) {
+    if (this.failFilingOnce) {
+      this.failFilingOnce = false;
+      return err<LoreError>({ code: "STORE_ERROR", message: "injected filing failure" });
+    }
+    this.filed += 1;
+    const number = 100 + this.filed;
+    this.open.push({ number, title: input.title, body: input.body });
+    return ok<IssueRef>({ number });
+  }
+  async linkToPlan(plan: string, issue: IssueRef) {
+    if (!this.links.some((l) => l.plan === plan && l.issue === issue.number)) this.links.push({ plan, issue: issue.number });
+    return ok(undefined);
+  }
+}
+
+/** Plans, fake judge, fake suite, fake tracker and a real lease over a store, wired to the real trigger and runner. */
+class World {
+  readonly plans = new Map<string, WorldPlan>();
+  readonly issues = new FakeIssuePort();
+  readonly errors: BatchErrorRecord[] = [];
+  readonly store = new InMemoryStore();
+  judgeCalls: string[] = [];
+  suiteRuns = 0;
+  failJudgeOnce = false;
+  now = T0;
+  spawns = 0;
+  readonly timers: (() => void)[] = [];
+
+  add(plan: WorldPlan): WorldPlan {
+    this.plans.set(plan.slug, plan);
+    return plan;
+  }
+
+  private find(ref: string): WorldPlan {
+    const plan = [...this.plans.values()].find((p) => p.slug === ref || p.bundle.plan.id === ref);
+    if (plan === undefined) throw new Error(`unknown plan ${ref}`);
+    return plan;
+  }
+
+  lease(holder: string): ReviewBatchLease {
+    return new ReviewBatchLease(this.store, holder, () => this.now, (callback) => {
+      this.timers.push(callback);
+      return () => undefined;
+    });
+  }
+
+  triggerDeps(opts: { pending?: Set<string>; leaseLive?: boolean } = {}): ReviewTriggerDeps {
+    return {
+      listPlans: async () => ok([...this.plans.values()].filter((p) => !p.archived).map((p) => p.bundle.plan)),
+      getPlanBundle: async (ref) => ok(this.find(ref).bundle),
+      listReviewDocs: async (planId) => ok(this.find(planId).docs),
+      pendingDecisionSubjects: async () => ok(opts.pending ?? new Set<string>()),
+      linkedOpenIssueTitles: async (planId) => {
+        const slug = this.find(planId).slug;
+        const linked = new Set(this.issues.links.filter((l) => l.plan === slug).map((l) => l.issue));
+        return ok(this.issues.open.filter((i) => linked.has(i.number)).map((i) => i.title));
+      },
+      isLeaseLive: async () => (opts.leaseLive !== undefined ? ok(opts.leaseLive) : this.lease("probe").isLive()),
+      spawnBatch: () => {
+        this.spawns += 1;
+        return ok({ pid: 4242 });
+      },
+    };
+  }
+
+  runner(): ReviewBatchRunner {
+    return new ReviewBatchRunner({ getPlanBundle: async (ref) => ok(this.find(ref).bundle), listReviewDocs: async (planId) => ok(this.find(planId).docs) });
+  }
+
+  ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {
+    const lease = this.lease(holder);
+    return {
+      acquireLease: () => lease.acquire(),
+      settleRetirement: async (bundle) => ok(this.find(bundle.plan.slug).retirement),
+      measureSuite: async () => {
+        this.suiteRuns += 1;
+        return undefined;
+      },
+      reviewPlan: async (ref) => this.judge(ref),
+      closePlan: async (ref) => {
+        const plan = this.find(ref);
+        if (plan.closeFailures > 0) {
+          plan.closeFailures -= 1;
+          return err<LoreError>({ code: "VALIDATION_ERROR", field: "gate", message: "injected close failure" });
+        }
+        plan.archived = true;
+        return ok(undefined);
+      },
+      recordError: async (record) => {
+        this.errors.push(record);
+        return ok(undefined);
+      },
+      filing: new IssueFilingService(this.issues),
+      now: () => new Date(this.now).toISOString(),
+      ...overrides,
+    };
+  }
+
+  /** The fake judge: stores a review of the plan's CURRENT fingerprint. */
+  async judge(ref: string) {
+    const plan = this.find(ref);
+    this.judgeCalls.push(plan.slug);
+    if (this.failJudgeOnce) {
+      this.failJudgeOnce = false;
+      return err<LoreError>({ code: "AI_PROVIDER_ERROR", message: "injected judge failure", provider: "fake" });
+    }
+    const dimensions = Object.fromEntries(
+      MILESTONE_DIMENSIONS.map((d) => [d, { verdict: plan.failing.includes(d) ? "fail" : "pass", reason: plan.failing.includes(d) ? `${d} failed` : "ok", reference: "fixture" }]),
+    ) as MilestoneReview["dimensions"];
+    const review: MilestoneReview = {
+      plan_id: plan.bundle.plan.id,
+      fingerprint: currentFingerprint(plan),
+      overall: plan.failing.length > 0 ? "fail" : "pass",
+      dimensions,
+      decisions: [],
+      ...(plan.retired ? { retired_acs: [{ kind: "superseded" as const, spec: `spec-${plan.slug}`, ac: "AC-W-1", reason: "feature gone", at: "2026-10-02T00:00:00.000Z" }] } : {}),
+      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort() } } : {}),
+      prompt_version: "fixture",
+      diff_source: "fixture",
+    };
+    const doc = stubDoc({
+      id: `rev-${this.judgeCalls.length}`,
+      slug: `review-${plan.slug}-${this.judgeCalls.length}`,
+      type: "knowledge",
+      created_at: new Date(this.now + this.judgeCalls.length).toISOString(),
+      extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review },
+    });
+    plan.docs.push(doc);
+    return ok<MilestoneReviewResult>({ doc, review });
+  }
+}
+
+describe("landing starts the review — trigger set and detached start (AC-PCR-3)", () => {
+  it("HAPPY: a complete plan with no review is in the trigger set and ONE detached batch is spawned", async () => {
+    const world = new World();
+    world.add(makeWorldPlan("p-needs"));
+    const started = await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).start();
+    expect(started).toEqual({ ok: true, value: { state: "started", triggered: 1, pid: 4242 } });
+    expect(world.spawns).toBe(1);
+  });
+
+  it("NEGATIVE: an empty trigger set starts nothing (in-progress, archived, empty and current-and-closed plans are not triggers)", async () => {
+    const world = new World();
+    world.add(makeWorldPlan("p-open", { progress: "in-progress" }));
+    const done = world.add(makeWorldPlan("p-done"));
+    done.archived = true;
+    const service = new ReviewTriggerService(world.triggerDeps({ leaseLive: false }));
+    expect(await service.computeTriggerSet()).toEqual({ ok: true, value: [] });
+    expect(await service.start()).toEqual({ ok: true, value: { state: "empty" } });
+    expect(world.spawns).toBe(0);
+  });
+
+  it("NEGATIVE: a live lease starts nothing, and an expired lease lets the next landing start a batch", async () => {
+    const world = new World();
+    world.add(makeWorldPlan("p-needs"));
+    const holder = await world.lease("batch-a").acquire();
+    expect(holder.ok && holder.value.state).toBe("held");
+    const service = new ReviewTriggerService(world.triggerDeps());
+    expect(await service.start()).toEqual({ ok: true, value: { state: "lease-live", triggered: 1 } });
+    expect(world.spawns).toBe(0);
+    world.now += REVIEW_LEASE_EXPIRY_MS + 1;
+    expect(await service.start()).toMatchObject({ ok: true, value: { state: "started" } });
+    expect(world.spawns).toBe(1);
+  });
+
+  it("STATE: awaiting-owner plans (decision pending) are excluded; once the decision is resolved they are triggered", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-retired"));
+    plan.retired = true;
+    await world.judge("p-retired");
+    const subject = "ac-retire-confirm:p-retired";
+    const waiting = new ReviewTriggerService(world.triggerDeps({ pending: new Set([subject]), leaseLive: false }));
+    expect(await waiting.computeTriggerSet()).toEqual({ ok: true, value: [] });
+    const resolved = new ReviewTriggerService(world.triggerDeps({ pending: new Set(), leaseLive: false }));
+    expect(await resolved.computeTriggerSet()).toEqual({ ok: true, value: [{ plan: "p-retired", need: "owner-resolved" }] });
+  });
+
+  it("STATE: restoring or retiring an AC changes the fingerprint, so a reviewed plan needs review again", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-acs", { acs: [acOf("AC-W-1", "works"), acOf("AC-W-2", "also", true)] }));
+    await world.judge("p-acs");
+    const service = new ReviewTriggerService(world.triggerDeps({ leaseLive: false }));
+    expect((await service.computeTriggerSet()) as unknown).toEqual({ ok: true, value: [{ plan: "p-acs", need: "close" }] });
+    // the owner rejected a retirement: AC-W-2 is live again
+    (plan.bundle.spec as unknown as { extra: Record<string, unknown> }).extra["acceptance_criteria"] = [acOf("AC-W-1", "works"), acOf("AC-W-2", "also")];
+    expect((await service.computeTriggerSet()) as unknown).toEqual({ ok: true, value: [{ plan: "p-acs", need: "review" }] });
+  });
+
+  it("REGRESSION: the fingerprint is the SHA-256 of the four inputs and reads the ACs it is given", () => {
+    const plan = makeWorldPlan("p-fp");
+    const a = planStateFingerprint(plan.bundle.plan, plan.bundle.tasks, plan.bundle.spec);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(planStateFingerprint(plan.bundle.plan, plan.bundle.tasks, undefined)).not.toBe(a);
+    const edited = stubDoc({ extra: { acceptance_criteria: [acOf("AC-W-1", "works differently")] } });
+    expect(planStateFingerprint(plan.bundle.plan, plan.bundle.tasks, edited)).not.toBe(a);
+  });
+});
+
+describe("landing starts the review — IntegrateService hands the landing to the batch without waiting (AC-PCR-3)", () => {
+  const IDENTITY = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  const sh = (cwd: string, args: string[]): string => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY } });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  let root: string;
+  let repo: string;
+  let corpusDir: string;
+
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "lore-landing-review-")));
+    repo = join(root, "repo");
+    corpusDir = join(repo, ".lore");
+    mkdirSync(repo);
+    sh(repo, ["init", "-q", "-b", "main"]);
+    writeFileSync(join(repo, "a.txt"), "a\n");
+    sh(repo, ["add", "."]);
+    sh(repo, ["commit", "-q", "-m", "base"]);
+    for (const name of ["feature-a", "feature-b"]) {
+      sh(repo, ["checkout", "-q", "-b", name, "main"]);
+      writeFileSync(join(repo, `${name}.txt`), `${name}\n`);
+      sh(repo, ["add", "."]);
+      sh(repo, ["commit", "-q", "-m", name]);
+    }
+    sh(repo, ["checkout", "-q", "--detach", "main"]);
+    installShippedGuard(repo, join(root, "guard-hooks"));
+    mkdirSync(corpusDir);
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  function integrateService(logs: string[], reviewBatch: IntegrateDeps["reviewBatch"], clock: () => number): IntegrateService {
+    return new IntegrateService({
+      git: (cwd, args, env) => {
+        const r = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY, ...env } });
+        return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+      },
+      lease: { acquire: () => ok({ kind: "held", release: () => {} }) },
+      corpus: { take: () => ok({ takenAt: "2026-10-23T00:00:00.000Z" }), remove: () => ok(undefined) },
+      runFloor: () => ({ status: 0, output: "" }),
+      ledger: new IntegrateLossLedger(corpusDir),
+      attempts: new IntegrateAttemptLedger(corpusDir, () => "2026-10-23T00:00:00.000Z"),
+      clock,
+      projectRoot: repo,
+      worktreesRoot: join(root, "wt"),
+      log: (line) => logs.push(line),
+      ...(reviewBatch !== undefined ? { reviewBatch } : {}),
+    });
+  }
+
+  it("HAPPY: a landing starts the batch once, returns landed, and the phase record has no review time", async () => {
+    const logs: string[] = [];
+    let starts = 0;
+    let now = 1_700_000_000_000;
+    const service = integrateService(
+      logs,
+      { start: async () => ((starts += 1), ok({ state: "started" as const, triggered: 2, pid: 77 })) },
+      () => now++,
+    );
+    const landed = await service.integrate({ branch: "feature-a", sessionId: "s-review", floorCommand: "true" });
+    expect(landed).toMatchObject({ ok: true, value: { kind: "landed" } });
+    expect(starts).toBe(1);
+    expect(logs).toContain("integrate: review batch started for 2 plan(s) (pid 77); the landing does not wait for it");
+    const record = JSON.parse(readFileSync(join(corpusDir, "integrate-attempts", "feature-a.json"), "utf8")) as { attempts: Record<string, unknown>[] };
+    for (const attempt of record.attempts) expect(Object.keys(attempt).filter((k) => /review/i.test(k))).toEqual([]);
+    expect(logs.filter((l) => l.includes(" phases: ")).every((l) => !/review \d+ms/.test(l))).toBe(true);
+  }, 60_000);
+
+  it("ERROR: a batch that cannot start is a WARNING line; main is still landed", async () => {
+    const logs: string[] = [];
+    const service = integrateService(logs, { start: async () => err({ code: "STORE_ERROR", message: "lease store down" }) }, () => Date.now());
+    const landed = await service.integrate({ branch: "feature-b", sessionId: "s-review-2", floorCommand: "true" });
+    expect(landed).toMatchObject({ ok: true, value: { kind: "landed" } });
+    expect(logs.some((l) => l.startsWith("integrate: WARNING: the review batch was not started: STORE_ERROR"))).toBe(true);
+    expect(existsSync(join(repo, "feature-b.txt")) || sh(repo, ["show", "main:feature-b.txt"]).trim() === "feature-b").toBe(true);
+  }, 60_000);
+});
+
+describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", () => {
+  it("HAPPY: a passing plan is archived as accepted; the suite ran once for the batch", async () => {
+    const world = new World();
+    world.add(makeWorldPlan("p-pass"));
+    const run = await world.runner().runBatch(["p-pass"], world.ports("batch-1"));
+    expect(run).toMatchObject({ ok: true, value: { state: "ran", suiteRuns: 1 } });
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => [r.plan, r.outcome, r.reviewed])).toEqual([["p-pass", "accepted", true]]);
+    expect(world.plans.get("p-pass")?.archived).toBe(true);
+    expect(world.issues.filed).toBe(0);
+  });
+
+  it("HAPPY: two plans with the same failing-file set share ONE issue (fingerprint in its body), both accepted with known defects", async () => {
+    const world = new World();
+    const a = world.add(makeWorldPlan("p-red-a"));
+    const b = world.add(makeWorldPlan("p-red-b"));
+    for (const p of [a, b]) {
+      p.failing = ["regression"];
+      p.regressionFiles = ["packages/x/tests/b.test.ts", "packages/x/tests/a.test.ts"];
+    }
+    const run = await world.runner().runBatch(["p-red-a", "p-red-b"], world.ports("batch-1"));
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects", "accepted-with-known-defects"]);
+    expect(world.issues.filed).toBe(1);
+    const issue = world.issues.open[0];
+    const cause = rootCauseOf({ plan: "p-red-a", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts"] } });
+    expect(issue?.body).toContain(cause.fingerprint);
+    expect(issue?.title).toContain(`[fp:${cause.short}]`);
+    expect(issue?.title).toContain("main red: packages/x/tests/a.test.ts, packages/x/tests/b.test.ts");
+    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-red-a->101", "p-red-b->101"]);
+    expect(a.archived && b.archived).toBe(true);
+    expect(world.suiteRuns).toBe(1);
+  });
+
+  it("BOUNDARY: a different failing-file set is a different fingerprint, so a second issue", async () => {
+    const world = new World();
+    const a = world.add(makeWorldPlan("p-red-a"));
+    const c = world.add(makeWorldPlan("p-red-c"));
+    a.failing = ["regression"];
+    a.regressionFiles = ["a.test.ts"];
+    c.failing = ["regression"];
+    c.regressionFiles = ["c.test.ts"];
+    await world.runner().runBatch(["p-red-a", "p-red-c"], world.ports("batch-1"));
+    expect(world.issues.filed).toBe(2);
+  });
+
+  it("STATE: a second batch hitting the same fingerprint while the issue is open links it and files nothing", async () => {
+    const world = new World();
+    const a = world.add(makeWorldPlan("p-red-a"));
+    a.failing = ["regression"];
+    a.regressionFiles = ["a.test.ts"];
+    await world.runner().runBatch(["p-red-a"], world.ports("batch-1"));
+    expect(world.issues.filed).toBe(1);
+    const later = world.add(makeWorldPlan("p-red-later"));
+    later.failing = ["regression"];
+    later.regressionFiles = ["a.test.ts"];
+    const run = await world.runner().runBatch(["p-red-later"], world.ports("batch-2"));
+    expect(run.ok && run.value.state === "ran" && run.value.rows[0]?.outcome).toBe("accepted-with-known-defects");
+    expect(world.issues.filed).toBe(1);
+    expect(world.issues.links).toContainEqual({ plan: "p-red-later", issue: 101 });
+  });
+
+  it("STATE: the other dimensions group by cited symbols/paths plus the normalised summary, and snapshot_accuracy by contradicted rules", () => {
+    const base = { plan: "p", reference: "", reviewSlug: "r" } as const;
+    const one = rootCauseOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (3 places)" });
+    const two = rootCauseOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (7 places)" });
+    const other = rootCauseOf({ ...base, dimension: "security", reason: "`writeToken` in src/auth/store.ts leaks the token" });
+    expect(two.fingerprint).toBe(one.fingerprint);
+    expect(other.fingerprint).not.toBe(one.fingerprint);
+    const rulesA = rootCauseOf({ ...base, dimension: "snapshot_accuracy", reason: "x", causes: { contradicted_rules: ["BR-2", "BR-1"] } });
+    const rulesB = rootCauseOf({ ...base, dimension: "snapshot_accuracy", reason: "y", causes: { contradicted_rules: ["BR-1", "BR-2"] } });
+    expect(rulesA.fingerprint).toBe(rulesB.fingerprint);
+    expect(rulesA.label).toBe("contradicted rules: BR-1, BR-2");
+  });
+
+  it("STATE: a plan with retired ACs gets one owner decision, waits (complete, not archived), and is archived after acceptance without a new review", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-retired"));
+    plan.retired = true;
+    plan.retirement = { state: "pending", retired: [], pendingId: 9 };
+    const first = await world.runner().runBatch(["p-retired"], world.ports("batch-1"));
+    expect(first.ok && first.value.state === "ran" && first.value.rows[0]).toMatchObject({ outcome: "awaiting-owner", reviewed: true });
+    expect(plan.archived).toBe(false);
+    // a second batch while the decision is pending does not re-review and does not archive
+    const second = await world.runner().runBatch(["p-retired"], world.ports("batch-2"));
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "awaiting-owner", reviewed: false });
+    expect(world.judgeCalls).toEqual(["p-retired"]);
+    // the owner accepts: the next batch archives it with NO new review
+    plan.retirement = { state: "confirmed", retired: [] };
+    const third = await world.runner().runBatch(["p-retired"], world.ports("batch-3"));
+    expect(third.ok && third.value.state === "ran" && third.value.rows[0]).toMatchObject({ outcome: "accepted", reviewed: false });
+    expect(plan.archived).toBe(true);
+    expect(world.judgeCalls).toEqual(["p-retired"]);
+  });
+
+  it("STATE: the suite runs once per batch, however many plans are judged, and not at all when none needs a judgment", async () => {
+    const world = new World();
+    for (const slug of ["p1", "p2", "p3"]) world.add(makeWorldPlan(slug));
+    await world.runner().runBatch(["p1", "p2", "p3"], world.ports("batch-1"));
+    expect(world.suiteRuns).toBe(1);
+    expect(world.judgeCalls).toEqual(["p1", "p2", "p3"]);
+    const idle = new World();
+    const reviewed = idle.add(makeWorldPlan("p-reviewed"));
+    await idle.judge("p-reviewed");
+    reviewed.archived = false;
+    await idle.runner().runBatch(["p-reviewed"], idle.ports("batch-1"));
+    expect(idle.suiteRuns).toBe(0);
+  });
+
+  it("NEGATIVE: a failing review with no tracker configured keeps the plan complete and records a filing error", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-notracker"));
+    plan.failing = ["security"];
+    const run = await world.runner().runBatch(["p-notracker"], world.ports("batch-1", { filing: undefined }));
+    expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing" });
+    expect(plan.archived).toBe(false);
+    expect(world.errors.map((e) => e.stage)).toEqual(["filing"]);
+  });
+});
+
+describe("lease and retry — renewal, takeover, errors, once per fingerprint, owner reject (AC-PCR-5)", () => {
+  it("HAPPY: the batch renews its lease on the 1-minute timer; a start while it runs is busy", async () => {
+    const world = new World();
+    const held = await world.lease("batch-a").acquire();
+    if (!held.ok || held.value.state !== "held") throw new Error("expected held");
+    const before = await world.store.readLease(REVIEW_BATCH_LEASE_NAME);
+    expect(before.ok && before.value?.expires_at).toBe(new Date(T0 + REVIEW_LEASE_EXPIRY_MS).toISOString());
+    world.now += REVIEW_LEASE_RENEW_MS;
+    world.timers[0]?.();
+    await held.value.handle.renewNow(); // the timer callback is fire-and-forget; this awaits the same renewal deterministically
+    const after = await world.store.readLease(REVIEW_BATCH_LEASE_NAME);
+    expect(after.ok && after.value?.expires_at).toBe(new Date(T0 + REVIEW_LEASE_RENEW_MS + REVIEW_LEASE_EXPIRY_MS).toISOString());
+    const second = await world.lease("batch-b").acquire();
+    expect(second.ok && second.value.state).toBe("busy");
+    expect(world.timers.length).toBe(1);
+  });
+
+  it("STATE: a start after expiry takes the lease over, and the dead holder's renewal finds it lost", async () => {
+    const world = new World();
+    const dead = await world.lease("batch-dead").acquire();
+    if (!dead.ok || dead.value.state !== "held") throw new Error("expected held");
+    world.now += REVIEW_LEASE_EXPIRY_MS + 1;
+    const takeover = await world.lease("batch-new").acquire();
+    expect(takeover.ok && takeover.value.state === "held" && takeover.value.tookOver).toBe(true);
+    const renewed = await dead.value.handle.renewNow();
+    expect(renewed).toEqual({ ok: true, value: false });
+    expect(dead.value.handle.lost()).toBe(true);
+  });
+
+  it("ERROR: a review error records an errored row that is not a review; the next batch reviews the plan again", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-judge-error"));
+    world.failJudgeOnce = true;
+    const first = await world.runner().runBatch(["p-judge-error"], world.ports("batch-1"));
+    expect(first.ok && first.value.state === "ran" && first.value.rows[0]).toMatchObject({ outcome: "error", stage: "review" });
+    expect(plan.docs).toEqual([]);
+    expect(plan.archived).toBe(false);
+    expect(world.errors).toHaveLength(1);
+    expect(world.errors[0]).toMatchObject({ planSlug: "p-judge-error", stage: "review", fingerprint: currentFingerprint(plan) });
+    // still in the trigger set: an errored attempt is not a review
+    expect(await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet()).toEqual({ ok: true, value: [{ plan: "p-judge-error", need: "review" }] });
+    const second = await world.runner().runBatch(["p-judge-error"], world.ports("batch-2"));
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted", reviewed: true });
+    expect(world.judgeCalls).toEqual(["p-judge-error", "p-judge-error"]);
+    expect(plan.archived).toBe(true);
+  });
+
+  it("ERROR: a filing error keeps the verdict; the next batch retries only the filing and archives", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-file-error"));
+    plan.failing = ["regression"];
+    plan.regressionFiles = ["a.test.ts"];
+    world.issues.failFilingOnce = true;
+    const first = await world.runner().runBatch(["p-file-error"], world.ports("batch-1"));
+    expect(first.ok && first.value.state === "ran" && first.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing", reviewed: true });
+    expect(plan.docs).toHaveLength(1);
+    expect(plan.archived).toBe(false);
+    expect(await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet()).toEqual({ ok: true, value: [{ plan: "p-file-error", need: "filing" }] });
+    const second = await world.runner().runBatch(["p-file-error"], world.ports("batch-2"));
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted-with-known-defects", reviewed: false });
+    expect(world.judgeCalls).toEqual(["p-file-error"]);
+    expect(world.issues.filed).toBe(1);
+    expect(plan.archived).toBe(true);
+  });
+
+  it("STATE: a plan is reviewed at most once per fingerprint, even when its close failed and is retried", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-close-retry"));
+    plan.closeFailures = 1;
+    const first = await world.runner().runBatch(["p-close-retry"], world.ports("batch-1"));
+    expect(first.ok && first.value.state === "ran" && first.value.rows[0]).toMatchObject({ outcome: "error", stage: "close" });
+    const second = await world.runner().runBatch(["p-close-retry"], world.ports("batch-2"));
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted", reviewed: false });
+    expect(world.judgeCalls).toEqual(["p-close-retry"]);
+  });
+
+  it("STATE: an owner rejection restores the ACs, the fingerprint changes, and the next batch reviews the plan again", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-reject", { acs: [acOf("AC-W-1", "works", true)] }));
+    plan.retired = true;
+    plan.retirement = { state: "pending", retired: [], pendingId: 5 };
+    await world.runner().runBatch(["p-reject"], world.ports("batch-1"));
+    expect(world.judgeCalls).toEqual(["p-reject"]);
+    // the owner rejects: settle carries it out, restoring the criterion (it is live again) and the retirement is gone
+    const restoring: BatchRunPorts["settleRetirement"] = async () => {
+      (plan.bundle.spec as unknown as { extra: Record<string, unknown> }).extra["acceptance_criteria"] = [acOf("AC-W-1", "works")];
+      plan.retired = false;
+      return ok<PlanRetirementState>({ state: "none" });
+    };
+    const run = await world.runner().runBatch(["p-reject"], world.ports("batch-2", { settleRetirement: restoring }));
+    expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "accepted", reviewed: true });
+    expect(world.judgeCalls).toEqual(["p-reject", "p-reject"]);
+    expect(plan.docs[1]?.extra["milestone_review"]).toMatchObject({ fingerprint: currentFingerprint(plan) });
+  });
+
+  it("BOUNDARY: a batch that finds a live lease runs nothing", async () => {
+    const world = new World();
+    world.add(makeWorldPlan("p-busy"));
+    await world.lease("batch-a").acquire();
+    const run = await world.runner().runBatch(["p-busy"], world.ports("batch-b"));
+    expect(run).toMatchObject({ ok: true, value: { state: "busy", holder: "batch-a" } });
+    expect(world.judgeCalls).toEqual([]);
+  });
+});
+
+describe.each(KINDS)("lease and retry — the store lease verbs, %s store", (kind) => {
+  let fx: Fixture;
+  beforeEach(() => {
+    fx = makeFixture(kind);
+    fixtures.push(fx);
+  });
+
+  it("acquire is exclusive until expiry, renew is holder-only, release frees it, an expired lease is taken over", async () => {
+    const name = "review-batch";
+    const t = (ms: number): string => new Date(T0 + ms).toISOString();
+    expect(await fx.store.acquireLease(name, "a", t(0), t(1000))).toEqual({ ok: true, value: { acquired: true, tookOver: false } });
+    expect(await fx.store.acquireLease(name, "b", t(500), t(1500))).toEqual({ ok: true, value: { acquired: false, holder: "a", expires_at: t(1000) } });
+    expect(await fx.store.acquireLease(name, "a", t(600), t(1600))).toEqual({ ok: true, value: { acquired: true, tookOver: false } });
+    expect(await fx.store.renewLease(name, "b", t(9000))).toEqual({ ok: true, value: false });
+    expect(await fx.store.renewLease(name, "a", t(2000))).toEqual({ ok: true, value: true });
+    expect(await fx.store.acquireLease(name, "b", t(2000), t(3000))).toEqual({ ok: true, value: { acquired: true, tookOver: true } });
+    expect(await fx.store.readLease(name)).toEqual({ ok: true, value: { name, holder: "b", expires_at: t(3000) } });
+    expect(await fx.store.releaseLease(name, "a")).toEqual({ ok: true, value: undefined });
+    expect(await fx.store.readLease(name)).toMatchObject({ ok: true, value: { holder: "b" } });
+    expect(await fx.store.releaseLease(name, "b")).toEqual({ ok: true, value: undefined });
+    expect(await fx.store.readLease(name)).toEqual({ ok: true, value: null });
   });
 });

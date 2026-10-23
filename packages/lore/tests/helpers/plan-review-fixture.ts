@@ -22,11 +22,11 @@ import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/servi
 export async function passMilestoneReview(corpus: CorpusService, planRef: string): Promise<void> {
   const bundle = await corpus.getPlanBundle(planRef);
   if (!bundle.ok) throw new Error(`passMilestoneReview: ${JSON.stringify(bundle.error)}`);
-  const { plan, tasks } = bundle.value;
+  const { plan, tasks, spec } = bundle.value;
   const dimension = { verdict: "pass" as const, reason: "fixture review", reference: "test fixture" };
   const review: MilestoneReview = {
     plan_id: plan.id,
-    fingerprint: planStateFingerprint(plan, tasks),
+    fingerprint: planStateFingerprint(plan, tasks, spec),
     overall: "pass",
     dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, dimension])) as MilestoneReview["dimensions"],
     decisions: [],

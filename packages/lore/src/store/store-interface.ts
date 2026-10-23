@@ -282,6 +282,8 @@ export type {
   CheckOutcomeInput,
   CheckOutcomeKind,
   CheckOutcomeStat,
+  LeaseAcquisition,
+  LeaseRecord,
   PendingAskInput,
   PendingAskRecord,
   TraceDenyByCheckpoint,
@@ -295,6 +297,8 @@ export type {
 import type {
   CheckOutcomeInput,
   CheckOutcomeStat,
+  LeaseAcquisition,
+  LeaseRecord,
   PendingAskInput,
   PendingAskRecord,
   ReadDayCount,
@@ -1317,6 +1321,22 @@ export interface StoreInterface {
 
   /** Per-day read counts for days at/after `sinceDay` (`YYYY-MM-DD`), oldest day first. Days with no reads are absent. */
   listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>>;
+
+  /**
+   * Takes the named lease for `holder` with ONE atomic upsert that succeeds only when no row exists, the row has
+   * expired (`expires_at <= nowIso`) or the row is already `holder`'s (BR-1379 review batch lease). `tookOver` is
+   * true when an expired row of another holder was replaced. A live lease of another holder is `acquired: false`.
+   */
+  acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>>;
+
+  /** Moves `holder`'s lease expiry forward; `ok(false)` when the row is no longer `holder`'s (it expired and was taken over). */
+  renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;
+
+  /** Deletes `holder`'s lease row (a no-op when it is not the holder's). */
+  releaseLease(name: string, holder: string): Promise<Result<void, LoreError>>;
+
+  /** The lease row as stored, expired or not; `null` when absent. */
+  readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>>;
 
   /**
    * Append one `check_outcomes` row per element of `rows` in ONE write (migration-033, BR-1373). Append-only:

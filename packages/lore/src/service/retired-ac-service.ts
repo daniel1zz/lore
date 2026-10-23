@@ -112,7 +112,7 @@ export class RetiredAcService {
    */
   async settle(bundle: PlanBundle): Promise<Result<PlanRetirementState, LoreError>> {
     const subjectId = retirementSubjectId(bundle.plan.slug);
-    const fingerprint = planStateFingerprint(bundle.plan, bundle.tasks);
+    const fingerprint = planStateFingerprint(bundle.plan, bundle.tasks, bundle.spec);
     const logged = await this.deps.listDecisionLog();
     if (!logged.ok) return logged;
     const rows = logged.value;

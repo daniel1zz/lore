@@ -19,18 +19,19 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { err, ok, type DocRecord, type LoreError, type PlanBundle, type Result } from "@lore/core";
+import { ok, type DocRecord, type LoreError, type PlanBundle, type Result } from "@lore/core";
 import type { StaleAcRefresherPort } from "../../service/milestone-review-inputs.js";
 import type { VerifyRunnerService } from "../../service/verify-runner-service.js";
+import type { App } from "../../app.js";
 
 /** Dependencies of {@link createVerifyStaleRefresher}. */
 export interface VerifyStaleRefresherDeps {
   readonly verify: Pick<VerifyRunnerService, "verifyPlan" | "verifyAdhocTask">;
   readonly getPlanBundle: (planRef: string) => Promise<Result<PlanBundle, LoreError>>;
   /** Every task and spec of the corpus (ad-hoc lookup and governing-spec resolution). */
-  readonly listDocs?: (type: "task" | "spec") => Promise<Result<DocRecord[], LoreError>>;
+  readonly listDocs: (type: "task" | "spec") => Promise<Result<DocRecord[], LoreError>>;
   /** Creates the ad-hoc task (extra.adhoc, parented to the root PRD by the service) scoped to `acId`. */
-  readonly createAdhocTask?: (title: string, acId: string) => Promise<Result<DocRecord, LoreError>>;
+  readonly createAdhocTask: (title: string, acId: string) => Promise<Result<DocRecord, LoreError>>;
   /** The throwaway main worktree the criteria's commands run in. */
   readonly executionRoot: string;
   /** Actor recorded on the evidence. */
@@ -82,6 +83,36 @@ export function createVerifyStaleRefresher(deps: VerifyStaleRefresherDeps): Stal
   };
 }
 
+/**
+ * The refresher over the real App: the SAME wiring `lore assess` uses and the integration test drives.
+ *
+ * @param app - the corpus service the ad-hoc lookup and creation go through
+ * @param verify - the trusted runner
+ * @param opts - the batch's throwaway main worktree, the actor and the clock
+ */
+export function createAppStaleRefresher(
+  app: Pick<App, "corpusService">,
+  verify: Pick<VerifyRunnerService, "verifyPlan" | "verifyAdhocTask">,
+  opts: { readonly executionRoot: string; readonly by: string; readonly nowIso: () => string },
+): StaleAcRefresherPort {
+  return createVerifyStaleRefresher({
+    verify,
+    getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
+    listDocs: async (type) => {
+      const listed = await app.corpusService.listFull({ type });
+      return listed.ok ? ok(listed.value.docs) : listed;
+    },
+    createAdhocTask: (title, acId) =>
+      app.corpusService.create(
+        { type: "task", title, content: `Re-verifies ${acId} for the milestone review.`, priority: "low", extra: { adhoc: true, ac_scope: [acId] } },
+        { by: opts.by },
+      ),
+    executionRoot: opts.executionRoot,
+    by: opts.by,
+    nowIso: opts.nowIso,
+  });
+}
+
 function declaresOnly(task: DocRecord, acId: string): boolean {
   const scope = task.extra["ac_scope"];
   return task.extra["adhoc"] === true && Array.isArray(scope) && scope.length === 1 && scope[0] === acId;
@@ -89,14 +120,6 @@ function declaresOnly(task: DocRecord, acId: string): boolean {
 
 async function refreshUnscoped(deps: VerifyStaleRefresherDeps, acId: string): Promise<Result<void, LoreError>> {
   const { listDocs, createAdhocTask } = deps;
-  if (listDocs === undefined || createAdhocTask === undefined) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "ac_scope",
-      message: `no task declares ${acId} in its ac_scope and the refresher was wired without corpus access (listDocs/createAdhocTask), so it cannot be re-verified; its rules stay stale`,
-      rule: "BR-1372",
-    });
-  }
   const tasks = await listDocs("task");
   if (!tasks.ok) return tasks;
   const specs = await listDocs("spec");

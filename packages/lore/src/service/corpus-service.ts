@@ -3593,7 +3593,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (!bundleResult.ok) return bundleResult;
       const reviewDocsResult = await this.listMilestoneReviewDocs(existing.id);
       if (!reviewDocsResult.ok) return reviewDocsResult;
-      const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value);
+      const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
       const milestoneReview =
         measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview) : measuredReview;
       planCloseCtx = { ...planCloseCtx, milestoneReview };
@@ -4701,6 +4701,33 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       docs.push(doc);
     }
     return ok(docs);
+  }
+
+  /**
+   * Titles of the issue tasks the plan links with `resolves` that are still open (live, not archived or deprecated).
+   * The review batch reads them to see which failed findings already have their issue filed (BR-1379).
+   *
+   * @param planId - the plan's document id
+   * @returns `ok(titles)` (possibly empty); a store read failure is returned as itself
+   */
+  async listLinkedOpenIssueTitles(planId: string): Promise<Result<string[], LoreError>> {
+    const links = await this.store.findLinks(planId, "out");
+    if (!links.ok) return links;
+    const titles: string[] = [];
+    for (const link of links.value) {
+      if (link.link_type !== "resolves" || link.from_id !== planId) continue;
+      const target = await this.store.find(link.to_id);
+      if (!target.ok) return target;
+      const doc = target.value;
+      if (doc === null || doc.deleted_at !== null || doc.status === "archived" || doc.status === "deprecated") continue;
+      titles.push(doc.title);
+    }
+    return ok(titles);
+  }
+
+  /** The live open-issue reader wired for plan close (`setPlanCloseIssuePort`); `undefined` when no GitHub upstream is configured. */
+  getPlanCloseIssuePort(): PlanCloseIssuePort | undefined {
+    return this.planCloseIssuePort;
   }
 
   /**

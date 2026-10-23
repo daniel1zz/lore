@@ -92,6 +92,8 @@ import type {
   CheckOutcomeStat,
   PendingAskInput,
   PendingAskRecord,
+  LeaseAcquisition,
+  LeaseRecord,
   ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
@@ -175,6 +177,7 @@ import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
+import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -946,6 +949,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-034 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 36 && 36 <= ceiling) {
+      // reason: migration-036 creates review_leases (the review batch's expiring lease, BR-1379) in ONE BEGIN/COMMIT;
+      // a failure rolls back and leaves schema 35.
+      try {
+        this.db.exec(MIGRATION_036_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-035 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3554,6 +3572,53 @@ export class SQLiteStore implements StoreInterface {
         [day],
       );
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>> {
+    try {
+      const prior = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord | null;
+      // reason: ONE atomic upsert whose WHERE admits only an absent, expired or own row (BR-1379); the outcome is
+      // read from RETURNING rows, never the driver's change count (see store CLAUDE.md).
+      const taken = this.db
+        .query(
+          "INSERT INTO review_leases (name, holder, expires_at) VALUES (?, ?, ?) " +
+            "ON CONFLICT(name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at " +
+            "WHERE review_leases.expires_at <= ? OR review_leases.holder = excluded.holder RETURNING name",
+        )
+        .all(name, holder, expiresAtIso, nowIso);
+      if (taken.length > 0) return ok({ acquired: true, tookOver: prior !== null && prior.holder !== holder });
+      const live = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord;
+      return ok({ acquired: false, holder: live.holder, expires_at: live.expires_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
+    try {
+      const rows = this.db.query("UPDATE review_leases SET expires_at = ? WHERE name = ? AND holder = ? RETURNING name").all(expiresAtIso, name, holder);
+      return ok(rows.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async releaseLease(name: string, holder: string): Promise<Result<void, LoreError>> {
+    try {
+      this.db.query("DELETE FROM review_leases WHERE name = ? AND holder = ? RETURNING name").all(name, holder);
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>> {
+    try {
+      const row = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord | null;
+      return ok(row ?? null);
     } catch (e) {
       return wrapStoreError(e);
     }

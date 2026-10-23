@@ -419,6 +419,19 @@ export interface PendingAskRecord extends PendingAskInput {
   readonly is_latest: boolean;
 }
 
+/** One row of `review_leases` (migration-036, BR-1379). */
+export interface LeaseRecord {
+  readonly name: string;
+  readonly holder: string;
+  /** ISO-8601 instant after which the lease is dead. */
+  readonly expires_at: string;
+}
+
+/** Outcome of `acquireLease`: taken (`tookOver` when an expired lease of another holder was replaced) or held by `holder` until `expires_at`. */
+export type LeaseAcquisition =
+  | { readonly acquired: true; readonly tookOver: boolean }
+  | { readonly acquired: false; readonly holder: string; readonly expires_at: string };
+
 /** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
 export interface ReadDayCount {
   /** `YYYY-MM-DD`, UTC. */
