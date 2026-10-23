@@ -54,6 +54,8 @@ export interface BulkWhere {
   readonly olderThanDays?: number;
   /** `0` only: matches plans with no open (non-terminal) member task. Other types never match. */
   readonly openTasks?: 0;
+  /** Slug or id of a plan: keeps only that plan's member tasks. An unknown plan refuses the selection. */
+  readonly plan?: string;
 }
 
 /** Selector: explicit ids XOR a where-expression. */
@@ -134,7 +136,7 @@ export function parseBulkIdRef(token: string): Result<BulkIdRef, LoreError> {
 }
 
 /**
- * Parses `key=value,key=value` (keys: type, status, author, since, tag, older-than=<N>d, open-tasks=0).
+ * Parses `key=value,key=value` (keys: type, status, author, since, tag, plan=<slug|id>, older-than=<N>d, open-tasks=0).
  * An unknown key or value is refused by name, never ignored.
  */
 export function parseBulkWhere(text: string): Result<BulkWhere, LoreError> {
@@ -160,6 +162,7 @@ export function parseBulkWhere(text: string): Result<BulkWhere, LoreError> {
       }
       case "author":
       case "tag":
+      case "plan":
       case "since":
         if (value.length === 0) return err(usage(`where.${key}`, `${key}= needs a value`, value));
         where[key] = value;
@@ -176,7 +179,7 @@ export function parseBulkWhere(text: string): Result<BulkWhere, LoreError> {
         break;
       default:
         return err(
-          usage("where", `unknown where key "${key}" (type, status, author, since, tag, older-than, open-tasks)`, key),
+          usage("where", `unknown where key "${key}" (type, status, author, since, tag, plan, older-than, open-tasks)`, key),
         );
     }
   }
@@ -347,7 +350,17 @@ export class BulkLifecycleService {
       ...(w.tag !== undefined ? { tags: [w.tag] } : {}),
     });
     if (!listed.ok) return listed;
-    let docs = listed.value.docs;
+    // reason: archived/deprecated docs are terminal — no verb can move them, and listing them buried the real
+    // candidates (41 already-closed plans in a `close --where type=plan` preview). Ids stay explicit and unfiltered.
+    let docs = listed.value.docs.filter((d) => !TERMINAL.has(d.status));
+    if (w.plan !== undefined) {
+      const plan = await this.corpus.get(w.plan);
+      if (!plan.ok || plan.value.doc.type !== "plan") {
+        return err(usage("where.plan", `unknown plan "${w.plan}" (give a plan slug or id)`, w.plan));
+      }
+      const planId = plan.value.doc.id;
+      docs = docs.filter((d) => d.type === "task" && isPlanMember(d, planId));
+    }
     if (w.olderThanDays !== undefined) {
       const cutoff = Date.parse(now()) - w.olderThanDays * MS_PER_DAY;
       docs = docs.filter((d) => Date.parse(d.updated_at) < cutoff);

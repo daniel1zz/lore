@@ -41,7 +41,7 @@ export default defineLoreCommand({
     verb: { type: "positional", description: `One of ${BULK_VERBS.join(" | ")}`, required: true },
     where: {
       type: "string",
-      description: 'Select by filters instead of ids: "type=plan,status=active,older-than=30d,open-tasks=0"',
+      description: 'Select by filters instead of ids: "type=task,plan=<slug|id>,tag=...,older-than=30d" or "type=plan,open-tasks=0" (archived/deprecated docs are never selected)',
     },
     apply: { type: "boolean", description: "Write the rows (default: preview only, exit 3 when there are candidates)" },
     reason: { type: "string", description: "Why (required with --apply for archive/deprecate/close); written to every row's audit entry" },
