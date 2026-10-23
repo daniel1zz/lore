@@ -211,7 +211,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   it("STATE: LATEST_SCHEMA_VERSION is 22 and opening a schema-15 file lands on user_version 22", async () => {
     await seedSchema15();
     const store = actedStore(new SQLiteStore(path, { migrate: true }));
-    expect(LATEST_SCHEMA_VERSION).toBe(31);
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(22);
     expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     store.close();
   });

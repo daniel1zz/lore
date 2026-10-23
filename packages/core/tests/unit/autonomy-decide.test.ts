@@ -213,16 +213,17 @@ describe("AC-AU-1 decide(): refuse only for invariant violations", () => {
 describe("AC-AU-1 seeded registry (spec class table)", () => {
   it("every human-always class and every normal class from the spec table is present with its threshold and prior", () => {
     const r: OperationClassRegistry = OPERATION_CLASS_REGISTRY;
-    for (const id of ["governance-loosen", "report-issue", "push-force", "archive-ref-prune"]) {
+    for (const id of ["governance-loosen", "push-force", "archive-ref-prune"]) {
       expect(r[id]?.tier).toBe("human-always");
     }
+    for (const id of ["override-judgment", "override-attestation", "ac-exempt"]) {
+      expect(r[id]?.tier).toBe("milestone");
+    }
+    expect(r["report-issue"]).toBeUndefined();
     const normal: Array<[string, string, number, number]> = [
       ["stash-drop", "loss-free-by-proof", 0.8, 0.95],
       ["worktree-remove", "loss-free-by-proof", 0.8, 0.97],
       ["process-reap", "loss-free-by-proof", 0.85, 0.97],
-      ["override-judgment", "reversible", 0.8, 0.5],
-      ["override-attestation", "reversible", 0.8, 0.5],
-      ["ac-exempt", "reversible", 0.8, 0.5],
       ["verify-new-command", "reversible", 0.8, 0.95],
       ["run-end-stale", "reversible", 0.8, 0.97],
     ];
@@ -236,10 +237,10 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
         expect(c.usesJudge).toBe(false);
       }
     }
-    expect(Object.keys(r)).toHaveLength(12);
+    expect(Object.keys(r)).toHaveLength(11);
   });
 
-  it("stash-drop with measured stash facts -> auto at 0.9; override-judgment at prior C 0.5 -> escalate", () => {
+  it("stash-drop with measured stash facts -> auto at 0.9; override-judgment (milestone class) -> milestone", () => {
     const stash = decide("stash-drop", "stash@{3}", {
       recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated", confidence: 0.95,
     });
@@ -248,13 +249,23 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
     const ov = decide("override-judgment", "task-x", {
       recoverability: "reversible", blast: "calling-session", evidence: "lore-evaluated", confidence: 0.5,
     });
-    expect(ov.verdict).toBe("escalate");
-    expect(ov.score).toBe(0.5);
+    expect(ov.verdict).toBe("milestone");
+    expect(ov.threshold).toBeNull();
   });
 
   it("human-always seeded classes escalate even with every factor 1.0", () => {
-    for (const id of ["governance-loosen", "report-issue", "push-force", "archive-ref-prune"]) {
+    for (const id of ["governance-loosen", "push-force", "archive-ref-prune"]) {
       expect(decide(id, "s", ALL_ONE).verdict).toBe("escalate");
+    }
+  });
+
+  it("report-issue is not a class: it never asks decide(), so an attempt is refused", () => {
+    expect(decide("report-issue", "s", ALL_ONE).verdict).toBe("refuse");
+  });
+
+  it("milestone classes answer milestone even with every factor 1.0 (never auto, never escalate)", () => {
+    for (const id of ["override-judgment", "override-attestation", "ac-exempt"]) {
+      expect(decide(id, "s", ALL_ONE).verdict).toBe("milestone");
     }
   });
 

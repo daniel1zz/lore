@@ -74,7 +74,7 @@ function setup(): Setup {
 
   f.commitOnMain(
     {
-      "package.json": JSON.stringify({ name: "ric-checkout", private: true }),
+      "package.json": JSON.stringify({ name: "ric-checkout", private: true, scripts: { install: "true", build: "true", typecheck: "true" } }),
       [`${CLI}/index.ts`]: `export const COMMAND_LOADERS = {\n  alpha: () => import("./commands/alpha.js"),\n  beta: () => import("./commands/beta.js"),\n};\n`,
       [`${CLI}/lib/result.ts`]: `export const err = (e: { code: string; rule?: string }) => ({ ok: false as const, code: e.code });\n`,
       [`${CLI}/lib/alpha.ts`]: `export function checkAlpha(): undefined {\n  return undefined;\n}\n`,
