@@ -402,6 +402,23 @@ export interface CheckOutcomeStat {
   readonly last_denial: string | null;
 }
 
+/** What lore records when it issues the question for a pending decision (`pending_asks`, migration-034, BR-1374). */
+export interface PendingAskInput {
+  readonly decision_id: number;
+  readonly subject_version: string;
+  readonly nonce: string;
+  /** sha256 of the exact question object lore issued. */
+  readonly question_hash: string;
+  readonly issued_at: string;
+}
+
+/** A persisted `pending_asks` row. `is_latest` is false once a newer ask was issued for the same decision. */
+export interface PendingAskRecord extends PendingAskInput {
+  readonly id: number;
+  readonly used_at: string | null;
+  readonly is_latest: boolean;
+}
+
 /** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
 export interface ReadDayCount {
   /** `YYYY-MM-DD`, UTC. */

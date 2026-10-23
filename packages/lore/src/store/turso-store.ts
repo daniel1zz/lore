@@ -86,6 +86,7 @@ import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migra
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
+import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -136,6 +137,8 @@ import type {
   TraceDenyByCheckpoint,
   CheckOutcomeInput,
   CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
   ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
@@ -1010,6 +1013,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 33) {
         // reason: migration-033 creates check_outcomes (one row per gate/hook run, BR-1373).
         await this.client.executeMultiple(MIGRATION_033_SQL);
+      }
+
+      if (currentVersion < 34) {
+        // reason: migration-034 creates pending_asks (the lore-written question bound to a single-use nonce, BR-1374).
+        await this.client.executeMultiple(MIGRATION_034_SQL);
       }
     })();
 
@@ -3775,6 +3783,55 @@ export class TursoStore implements StoreInterface {
         "write",
       );
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: "INSERT INTO pending_asks (decision_id, subject_version, nonce, question_hash, issued_at) VALUES (?, ?, ?, ?, ?)",
+        args: [input.decision_id, input.subject_version, input.nonce, input.question_hash, input.issued_at],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: `SELECT a.id, a.decision_id, a.subject_version, a.nonce, a.question_hash, a.issued_at, a.used_at,
+                     (a.id = (SELECT MAX(b.id) FROM pending_asks b WHERE b.decision_id = a.decision_id)) AS is_latest
+                FROM pending_asks a WHERE a.nonce = ?`,
+        args: [nonce],
+      });
+      const row = rs.rows[0];
+      if (row === undefined) return ok(null);
+      return ok({
+        id: Number(row["id"]),
+        decision_id: Number(row["decision_id"]),
+        subject_version: rowStr(row, "subject_version"),
+        nonce: rowStr(row, "nonce"),
+        question_hash: rowStr(row, "question_hash"),
+        issued_at: rowStr(row, "issued_at"),
+        used_at: row["used_at"] === null || row["used_at"] === undefined ? null : rowStr(row, "used_at"),
+        is_latest: Number(row["is_latest"]) === 1,
+      });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "UPDATE pending_asks SET used_at = ? WHERE nonce = ? AND used_at IS NULL RETURNING id", args: [usedAt, nonce] });
+      return ok(rs.rows.length === 1);
     } catch (e) {
       return wrapStoreError(e);
     }

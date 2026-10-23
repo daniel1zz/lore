@@ -90,6 +90,8 @@ import type {
   TraceDenyByCheckpoint,
   CheckOutcomeInput,
   CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
   ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
@@ -163,6 +165,7 @@ import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migra
 import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
 import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
 import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
+import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -904,6 +907,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-032 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 34 && 34 <= ceiling) {
+      // reason: migration-034 creates pending_asks (the lore-written question bound to a single-use nonce, BR-1374)
+      // in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 33.
+      try {
+        this.db.exec(MIGRATION_034_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-033 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3427,6 +3445,62 @@ export class SQLiteStore implements StoreInterface {
         }
       })();
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {
+    try {
+      this.db.run(
+        "INSERT INTO pending_asks (decision_id, subject_version, nonce, question_hash, issued_at) VALUES (?, ?, ?, ?, ?)",
+        [input.decision_id, input.subject_version, input.nonce, input.question_hash, input.issued_at],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>> {
+    try {
+      const row = this.db
+        .query(
+          `SELECT a.id, a.decision_id, a.subject_version, a.nonce, a.question_hash, a.issued_at, a.used_at,
+                  (a.id = (SELECT MAX(b.id) FROM pending_asks b WHERE b.decision_id = a.decision_id)) AS is_latest
+             FROM pending_asks a WHERE a.nonce = ?`,
+        )
+        .get(nonce) as {
+        id: number | bigint;
+        decision_id: number | bigint;
+        subject_version: string;
+        nonce: string;
+        question_hash: string;
+        issued_at: string;
+        used_at: string | null;
+        is_latest: number | bigint;
+      } | null;
+      if (row === null) return ok(null);
+      return ok({
+        id: Number(row.id),
+        decision_id: Number(row.decision_id),
+        subject_version: row.subject_version,
+        nonce: row.nonce,
+        question_hash: row.question_hash,
+        issued_at: row.issued_at,
+        used_at: row.used_at,
+        is_latest: Number(row.is_latest) === 1,
+      });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>> {
+    try {
+      // reason: RETURNING + row count, never the driver's affected-row count (see this module's CLAUDE.md invariant).
+      const rows = this.db.query("UPDATE pending_asks SET used_at = ? WHERE nonce = ? AND used_at IS NULL RETURNING id").all(usedAt, nonce);
+      return ok(rows.length === 1);
     } catch (e) {
       return wrapStoreError(e);
     }

@@ -277,6 +277,8 @@ export type {
   CheckOutcomeInput,
   CheckOutcomeKind,
   CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
   TraceDenyByCheckpoint,
   TraceEventInput,
   TraceEventRecord,
@@ -288,6 +290,8 @@ export type {
 import type {
   CheckOutcomeInput,
   CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
   ReadDayCount,
   TraceDenyByCheckpoint,
   TraceEventInput,
@@ -1317,6 +1321,21 @@ export interface StoreInterface {
 
   /** One aggregate per check id (runs, denials, errors, first/last run, last denial), ordered by check id. */
   listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>>;
+
+  /**
+   * Record the question lore issued for a pending decision with its single-use nonce (migration-034, BR-1374).
+   * Append-only; a duplicate nonce is a STORE_ERROR (the nonce column is UNIQUE).
+   */
+  issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>>;
+
+  /** The ask issued under `nonce`, or null when none exists. `is_latest` is computed against the decision's newest ask. */
+  readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>>;
+
+  /**
+   * Marks the ask under `nonce` used at `usedAt` iff it was not used yet. Resolves true when THIS call consumed it,
+   * false when it was already used or does not exist (single use, safe against a concurrent second hook run).
+   */
+  consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>>;
 
   /** Every `gate_deny` row since `window.since`, for the deny→retry-success gap's read-side audit join (idx_trace_kind_actor). Computed by the caller — never stored. */
   listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>>;

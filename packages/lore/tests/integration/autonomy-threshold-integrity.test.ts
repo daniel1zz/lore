@@ -288,7 +288,8 @@ describe("AC-AU-9 thresholds are governed data and fail safe", () => {
     expect(storedRecord(corpus).classes["stash-drop"]?.["threshold"]).toBe(0.8);
     const id = await pendingOf(corpus, "governance-loosen");
     expect(loosen.stderr).toContain(`Pending decision ${id} created`);
-    expect(loosen.stderr).toContain(`lore decide ${id} --accept`);
+    expect(loosen.stderr).toContain("lore pending --ask");
+    expect(loosen.stderr).not.toContain("lore decide");
     expect(loosen.stderr).not.toMatch(/Confirmation code/);
 
     expect((await ptyAccept(corpus, ["bun", "run", DRIVER_TS, corpus.dbPath, String(id), "--accept"])).code).toBe(0);

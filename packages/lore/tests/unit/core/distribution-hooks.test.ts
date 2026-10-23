@@ -29,6 +29,7 @@ const EXPECTED_FILES = [
   "session-start-marker.mjs",
   "user-prompt-turn-start.mjs", // turn-state producers of stop-turn-review (issue #156)
   "post-edit-mark.mjs",
+  "post-ask-decide.mjs",
   // Turn-end review of the main session; replaced stop-doc-sync.mjs and claude-md-guard.sh (spec-interception-moves-off-every-tool-call-one-turn-end-review, AC-TE-5).
   "stop-turn-review.mjs",
   "subagent-context.mjs",
@@ -84,14 +85,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 15 core-governance-and-security hook files", () => {
+  it("declares exactly the 16 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 19 entries (15 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, pre-edit-anchor-gate: 1 = 19
-    expect(HOOK_REGISTRATIONS).toHaveLength(19);
+  it("expands to exactly 20 entries (16 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, pre-edit-anchor-gate: 1, post-ask-decide: 1 = 20
+    expect(HOOK_REGISTRATIONS).toHaveLength(20);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {

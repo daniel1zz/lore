@@ -87,12 +87,12 @@ function renderOutcome(outcome: ProposeOutcome): { text: string; code: number } 
       };
     case "escalated":
       return {
-        text: `Not applied: this change LOOSENS governance (class governance-loosen, human-always):\n${outcome.change.loosened.map((l) => `  ${l}`).join("\n")}\nPending decision ${outcome.pending_id} created. A human answers it with: lore decide ${outcome.pending_id} --accept (or --reject); re-run this same command afterwards.`,
+        text: `Not applied: this change LOOSENS governance (class governance-loosen, human-always):\n${outcome.change.loosened.map((l) => `  ${l}`).join("\n")}\nPending decision ${outcome.pending_id} created. Ask the human in the session (lore pending --ask, then the interactive question tool); re-run this same command after they answer.`,
         code: NEEDS_HUMAN_EXIT,
       };
     case "refused":
       return {
-        text: `Refused: the threshold record fails its integrity check (${outcome.integrity.reason}: ${outcome.integrity.detail}). Resolve the threshold-integrity decision first (lore pending, lore decide).`,
+        text: `Refused: the threshold record fails its integrity check (${outcome.integrity.reason}: ${outcome.integrity.detail}). Resolve the threshold-integrity decision first (lore pending --ask, then ask the human in the session).`,
         code: 1,
       };
   }
