@@ -54,6 +54,7 @@ function report(plans: ReturnType<typeof plan>[], handoffCount: number) {
     })),
     resume_hint: { plan_slug: "plan-7", handoff_slug: "handoff-7" },
     corpus: { total_docs: 900, last_updated: "2026-10-01", open_stale_candidates: 0, code_anchor_specs: 0 },
+    plan_acceptance: { summary: { complete: 0, awaitingReview: 0, awaitingOwner: 0, oldestAgeMs: null }, complete_slugs: [] },
   } as never;
 }
 
