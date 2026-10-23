@@ -73,9 +73,7 @@ export const ALL_TEST_GLOBS: readonly string[] = [
   "packages/dashboard/tests/**/*.test.tsx",
   "packages/dashboard/src/**/*.test.ts",
   "packages/dashboard/src/**/*.test.tsx",
-  // reason: task-t1-structural-test-budget-oracle (spec-a-test-case-s-
-  // timeout-budget-must-be-declared-when-its) — scripts/check-test-budgets.ts
-  // is unit-tested directly (no subprocess) from here. Verified empirically
+  // reason: the repo's own gate scripts (scripts/*.ts) are unit-tested directly (no subprocess) from here. Verified empirically
   // that an explicit `vitest run <path>` CLI argument does NOT add a file
   // outside these globs to the discovered set (it only filters within it) —
   // without this entry the AC oracle commands report "No test files found"

@@ -586,11 +586,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
   });
 
   // ── RESOLUTION SURFACE: SPEC-<n> vs SPEC-00n must never resolve to DIFFERENT docs ──
-  // A standalone case (not folded into the STATE test above) so its 2 spawn-helper calls
-  // stay under scripts/check-test-budgets.mjs's SPAWN_THRESHOLD of 3 — folding it into the
-  // already-5-spawn STATE test would silently orphan that test's entry in
-  // scripts/test-budget-ledger.json (spawnCount 5 -> 6), a change outside this task's own
-  // file anchor (task-main-carries-two-red-e2e-cases-migrate-ordinals-compiled).
+  // A standalone case (not folded into the STATE test above) so each case keeps its own failure report.
   it("RESOLUTION SURFACE: dist/lore get resolves SPEC-1 and SPEC-001 to the SAME document, never silently different ones", async () => {
     // This task's own load-bearing extra assertion: `SPEC-1` vs `SPEC-001` is a RESOLUTION
     // surface, not merely a rendering choice. `parseOrdinalRef` (ordinal.ts:244,

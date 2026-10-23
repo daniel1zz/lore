@@ -13,8 +13,7 @@
  * subprocess `lore init`/`lore setup --project` is exercised, and note it
  * too provisions into its OWN throwaway `mkdtemp` corpus). The pure-function
  * suites above it drive each algorithm directly against literal fixtures —
- * mirrors `scripts/tests/check-test-budgets.test.ts`'s established split
- * between algorithm unit tests and a "real repo tree" `main()` case.
+ * keeps a split between algorithm unit tests and a "real repo tree" `main()` case.
  *
  * Coverage (six dimensions):
  *   HAPPY — a duplicate override is harmless (ABSENCE-only predicate); an

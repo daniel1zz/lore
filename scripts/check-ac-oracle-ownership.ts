@@ -41,10 +41,16 @@
  * Residual (named, not hidden): a script AC whose command names no test file (e.g. a `tsc`
  * or `grep` oracle) has no owning file to check; it is counted in the report, never failed.
  *
- * Usage: bun scripts/check-ac-oracle-ownership.ts [--reader=per-spec-cli]  (the flag selects the slow reference reader)
+ * `--changed` (the integrate floor's `check:ac-oracle-ownership:changed`, BR-1368): judges only the branch's own change against main.
+ * A diff touching no test file exits 0 without reading the corpus. Otherwise the rules run over the touched test files only
+ * (edited/added: their references; deleted or renamed-away: `missing-owner-file` for the live script ACs that name them);
+ * see {@link mainChanged}. The full scan stays in `check:ac-oracle-ownership` (plan close).
+ *
+ * Usage: bun scripts/check-ac-oracle-ownership.ts [--reader=per-spec-cli | --changed]  (the flag selects the slow reference reader)
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { changedFiles, resolveBase, wantsChanged, type ChangedFile } from "./changed-files.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -385,8 +391,59 @@ export function main(
   return 1;
 }
 
+const TEST_FILE_RE = /\.test\.tsx?$/;
+
+/** Injected effects of {@link mainChanged}, so the verdict is testable without a corpus. */
+export interface ChangedOwnershipDeps {
+  readonly changed: () => ChangedFile[];
+  readonly scriptAcs: () => ScriptAc[];
+  /** Content of a touched test file that still exists, or undefined when absent. */
+  readonly readTestFile: (path: string) => string | undefined;
+}
+
+/** The `--changed` verdict: 0 clean (or no test file touched), 1 a rule fired on a touched test file / AC naming one. */
+export function mainChanged(deps: ChangedOwnershipDeps, print: (line: string) => void = console.log): number {
+  const touched = deps.changed().filter((c) => TEST_FILE_RE.test(c.path));
+  if (touched.length === 0) {
+    print("check:ac-oracle-ownership:changed: the diff touches no test file; nothing to judge");
+    return 0;
+  }
+  const touchedPaths = new Set(touched.map((c) => c.path));
+  const acs = deps.scriptAcs();
+  if (acs.length === 0) {
+    print("check:ac-oracle-ownership:changed: FAIL - rule=nothing-scanned: 0 script ACs were visible; refusing to report complete (AS-17).");
+    return 1;
+  }
+  const testFiles: TestFileContent[] = [];
+  for (const path of touchedPaths) {
+    const content = deps.readTestFile(path);
+    if (content !== undefined) testFiles.push({ path, content });
+  }
+  const present = new Set(testFiles.map((t) => t.path));
+  const report = evaluateOwnership(acs, testFiles, (p) => (touchedPaths.has(p) ? present.has(p) : true));
+  // reason: a missing owner of an untouched file is older debt the plan-close full scan reports; here only a touched path counts.
+  const findings = report.findings.filter((f) => f.rule !== "missing-owner-file" || touchedPaths.has(f.path));
+  for (const f of findings) print(`  rule=${f.rule} spec=${f.spec} ac=${f.acId} path=${f.path}`);
+  if (findings.length === 0) {
+    print(`check:ac-oracle-ownership:changed: OK - ${touched.length} touched test file(s), every live script AC naming one still has its owner`);
+    return 0;
+  }
+  print(`check:ac-oracle-ownership:changed: FAIL - ${findings.length} finding(s)`);
+  return 1;
+}
+
 if (import.meta.main) {
   try {
+    if (wantsChanged(process.argv.slice(2))) {
+      const base = resolveBase(process.cwd());
+      process.exit(
+        mainChanged({
+          changed: () => changedFiles(process.cwd(), base),
+          scriptAcs: () => collectScriptAcsBulk(REPO_ROOT).acs,
+          readTestFile: (p) => (existsSync(join(REPO_ROOT, p)) ? readFileSync(join(REPO_ROOT, p), "utf8") : undefined),
+        }),
+      );
+    }
     const reader = process.argv.includes("--reader=per-spec-cli") ? "per-spec-cli" : "bulk";
     process.exit(main(undefined, undefined, undefined, reader));
   } catch (e) {
