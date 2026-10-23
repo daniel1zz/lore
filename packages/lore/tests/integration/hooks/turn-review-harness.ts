@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, makeGitRepo, makeTmpDir, runHook, type HookRun } from "./hook-harness";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { DEFAULT_TEST_RUN, registerTestRun } from "../../helpers/test-run-identity.js";
 
 export const STOP_HOOK = "stop-turn-review.mjs";
 
@@ -60,8 +61,13 @@ export function markEdit(f: TurnFixture, absPath: string, agentId?: string): Hoo
  * becomes the empty stdout the hook prints when nothing is wrong.
  */
 export function stopTurn(f: TurnFixture, extra: Record<string, unknown> = {}): HookRun {
-  const run = runHook(STOP_HOOK, { session_id: f.sid, cwd: f.repo, hook_event_name: "Stop", stop_hook_active: false, ...extra }, f.base);
+  const run = stopTurnUnfiltered(f, extra);
   return { ...run, stdout: withoutSharedCheckoutFinding(run.stdout) };
+}
+
+/** Runs the Stop hook and returns its output as printed, the shared-checkout finding (BR-1349) included. */
+export function stopTurnUnfiltered(f: TurnFixture, extra: Record<string, unknown> = {}): HookRun {
+  return runHook(STOP_HOOK, { session_id: f.sid, cwd: f.repo, hook_event_name: "Stop", stop_hook_active: false, ...extra }, f.base);
 }
 
 function withoutSharedCheckoutFinding(stdout: string): string {
@@ -123,7 +129,9 @@ export function initLoreWithAnchoredSpec(repo: string, anchors: string[]): strin
   const init = runLore(repo, ["init"]);
   if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   disableGates(repo);
-  const args = ["create", "spec", "--title", "Anchored fixture spec", "--kind", "feature", "--no-ai", "--content", "## Overview\n\nBody.", "--json"];
+  // a write is made by a known party (BR-1351): the fixture spec is written by a registered test run, as an installed hook would register it
+  registerTestRun(repo, DEFAULT_TEST_RUN);
+  const args = ["--harness-run", DEFAULT_TEST_RUN, "create", "spec", "--title", "Anchored fixture spec", "--kind", "feature", "--no-ai", "--content", "## Overview\n\nBody.", "--json"];
   for (const a of anchors) args.push("--code-anchor", a);
   const created = runLore(repo, args);
   if (created.status !== 0) throw new Error(`lore create spec failed: ${created.stderr}${created.stdout}`);

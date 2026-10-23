@@ -15,9 +15,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { currentTurnDir, makeGitRepo, makeTmpDir } from "./hook-harness";
-import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import {
-  initLoreWithAnchoredSpec, markEdit, numberedLines, parseBlock, startTurn, stopTurn, writeRepoFile, writeTurnEndSetting,
+  markEdit, numberedLines, parseBlock, startTurn, stopTurn, stopTurnUnfiltered, writeRepoFile, writeTurnEndSetting,
   type TurnFixture,
 } from "./turn-review-harness";
 
@@ -155,22 +154,17 @@ describe("AC-ST-4 source-edit finding over attributed changes", () => {
   });
 
   it("AC-ST-4 attribution unmeasured together with another finding -> one block whose reason also names the source-edit finding as not measured", () => {
-    const f = fixture(null);
-    writeRepoFile(f.repo, "src/anchored.ts", "export const a = 1;\n");
-    past(f.repo, "anchored file");
-    initLoreWithAnchoredSpec(f.repo, ["src/anchored.ts"]);
-    patchLoreConfig(f.repo, "workflow:\n  turn_end:\n    main_session_source_edits: block\n");
-    must(f.repo, ["add", "-A"]);
-    must(f.repo, ["commit", "-qm", "lore project"], PAST);
+    const f = fixture();
     startTurn(f);
     breakStartHead(f);
     sed10(f);
-    rmSync(join(f.repo, "src", "anchored.ts"));
-    const r = stopTurn(f);
+    // the other finding: a shared-checkout change (BR-1349); the anchor-drift finding it replaces was removed (AC-LG-7)
+    writeRepoFile(f.repo, "scratch/left-behind.txt", "stray\n");
+    const r = stopTurnUnfiltered(f); // stopTurn would drop the shared-checkout finding
     expect(r.stdout.trim().split("\n")).toHaveLength(1);
     const block = parseBlock(r);
     expect(block.decision).toBe("block");
-    expect(block.reason).toContain("src/anchored.ts");
+    expect(block.reason).toContain("scratch/left-behind.txt");
     expect(block.reason).toContain("source-edit");
     expect(block.reason).toContain("not measured");
   });

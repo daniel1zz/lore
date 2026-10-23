@@ -12,7 +12,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./hook-harness";
 import {
-  initLoreWithAnchoredSpec, makeFixture, markEdit, numberedLines, parseBlock, startTurn, stopTurn,
+  initLoreWithAnchoredSpec, makeFixture, markEdit, numberedLines, parseBlock, startTurn, stopTurn, stopTurnUnfiltered,
   writeRepoFile, writeTurnEndSetting,
 } from "./turn-review-harness";
 
@@ -99,18 +99,21 @@ describe("AC-TE-3 stop-turn-review", () => {
 
   it("AC-TE-3 two findings in one turn produce ONE block listing both", () => {
     const f = makeFixture("t9", { "src/anchored.ts": "export const a = 1;\n" });
-    const slug = initLoreWithAnchoredSpec(f.repo, ["src/anchored.ts"]);
+    initLoreWithAnchoredSpec(f.repo, ["src/anchored.ts"]);
     git(f.repo, "add", "-A"); git(f.repo, "commit", "-qm", "lore");
     writeTurnEndSetting(f.repo, "block");
     // writeTurnEndSetting replaced the lore config; restore gates-off via a fresh append is unnecessary: reads only
     startTurn(f);
-    rmSync(join(f.repo, "src", "anchored.ts"));
+    // finding (a): a main-session source edit over the allowance; finding (b): a shared-checkout change no edit record explains
+    // (the anchor-drift finding was removed, AC-LG-7: own-diff BR-1355 covers it)
     markEdit(f, writeRepoFile(f.repo, "src/big.ts", FIFTY));
-    const r = stopTurn(f);
+    writeRepoFile(f.repo, "scratch/left-behind.txt", "stray\n");
+    const r = stopTurnUnfiltered(f); // stopTurn would drop finding (b)
     const block = parseBlock(r);
+    expect(block.reason).toContain("Turn-end review: 2 findings");
+    expect(block.reason).toContain("Main-session source edits");
     expect(block.reason).toContain("src/big.ts");
-    expect(block.reason).toContain(slug);
-    expect(block.reason).toContain("src/anchored.ts");
+    expect(block.reason).toContain("scratch/left-behind.txt");
     expect(r.stdout.trim().split("\n")).toHaveLength(1);
   });
 

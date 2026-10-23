@@ -30,7 +30,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { LoreConfigSchema } from "@lore/core";
 import { createApp } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
-import { liveAmbient, liveInvocation, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
+import { registerTestRun } from "../helpers/test-run-identity.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -203,8 +204,10 @@ describe(`${SPEC_QUALIFIED} (a) MCP lore_rule_add results carry no demoted`, () 
       const tool = (server as unknown as { _registeredTools: Record<string, { handler: (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult> }> })
         ._registeredTools["lore_rule_add"];
       if (tool === undefined) throw new Error("lore_rule_add not registered");
+      // an MCP write call is made by a known party: it names the run the agent integration vouches for (BR-1351)
+      registerTestRun(dir, LIVE_TEST_RUN);
       const result = await tool.handler(
-        { leaf, statement: "added over MCP", confidence: "established", enforced_by: "guaranteed", examples: ["example one"], by: "agent:dc2-18" },
+        { leaf, statement: "added over MCP", confidence: "established", enforced_by: "guaranteed", examples: ["example one"], by: "agent:dc2-18", harness_run: LIVE_TEST_RUN },
         {},
       );
       expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
