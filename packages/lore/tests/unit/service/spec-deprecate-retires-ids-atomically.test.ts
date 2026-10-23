@@ -47,6 +47,7 @@ function failingPort(): RuleChangeLandingPort {
   return {
     apply: async () => err(RETIRE_FAILURE),
     planAbandonment: async () => err(RETIRE_FAILURE),
+    planRevival: async () => err(RETIRE_FAILURE),
   };
 }
 
@@ -106,6 +107,7 @@ describe("task-deprecating-a-spec-retires-its-proposed-rule-ids-in-the", () => {
     const specBefore = await reload(world, spec.id);
     const racing: RuleChangeLandingPort = {
       apply: (ref, opts) => world.changes.apply(ref, opts),
+      planRevival: (ref, opts) => world.changes.planRevival(ref, opts),
       planAbandonment: async (ref, opts) => {
         const plan = await world.changes.planAbandonment(ref, opts);
         // a concurrent writer bumps the leaf after the plan was read: the companion write's CAS must miss

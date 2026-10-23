@@ -2555,6 +2555,11 @@ export class SQLiteStore implements StoreInterface {
           this.db.run("ROLLBACK");
           return companionAudit;
         }
+        // reason: the docs triggers only copy a LISTED lifecycle (live|deprecated|retired) onto the registry and keep
+        // the old one otherwise, so a rule taken off its leaf (a rejected abandonment) stays `retired` unless set here.
+        for (const ruleId of companion.propose_rules ?? []) {
+          this.db.prepare("UPDATE rule_registry SET lifecycle = 'proposed' WHERE id = ? AND leaf_doc_id = ?").run(ruleId, companion.id);
+        }
       }
 
       if (stored !== null) {
