@@ -618,7 +618,7 @@ async function runProjectContextProjection(opts: {
   // (exit code + stderr) instead, so the refresh must not see it. The file is never rewritten or deleted.
   const fs: typeof realFs = {
     ...realFs,
-    listDir: async (path: string) => (await realFs.listDir(path)).filter((name) => !held.has(join(path, name))),
+    listDir: async (path: string) => (await realFs.listDir(path)).filter((name) => !held.has(resolve(opts.repoDir, path, name))),
   };
   const refreshed = await runContextRefresh(
     {
