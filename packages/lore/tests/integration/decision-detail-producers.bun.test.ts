@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads packages/lore/src/service/**
 /**
  * AC-HR-1 oracle — every escalating producer records a readable detail: one table row per class

@@ -1,3 +1,4 @@
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/governance/write-spec-rule.md
 /**
