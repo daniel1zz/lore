@@ -85,20 +85,7 @@ describe("AC-BIA-2: a direct rule add is not live until approved", () => {
     expect(shown.stdout).toContain("not in the baseline until approved");
   }, TIMEOUT_MS);
 
-  it("NEGATIVE: approve --item BR-2 without a review that saw it exits 4, naming it, and writes nothing", async () => {
-    const before = corpus.node(corpus.leaf);
-    const refused = await corpus.lore(["approve", corpus.leaf, "--item", "BR-2"]);
-    expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain("BR-2");
-    expect(refused.stderr).toContain("lore review");
-    const after = corpus.node(corpus.leaf);
-    expect(after.version).toBe(before.version);
-    expect(corpus.registryState("BR-2")).toBe("proposed");
-    expect(after.extra.rules?.map((r) => r["id"])).toEqual(["BR-1"]);
-  }, TIMEOUT_MS);
-
-  it("HAPPY: after lore review, approve --item BR-2 makes it live", async () => {
-    await corpus.must(["review", corpus.leaf]);
+  it("HAPPY: approve --item BR-2 makes it live with no review on record (BR-1369: a baseline node never consults a judgment)", async () => {
     const approved = await corpus.lore(["approve", corpus.leaf, "--item", "BR-2"]);
     expect(approved.exitCode).toBe(0);
     expect(approved.stdout).toContain("BR-2");

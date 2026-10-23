@@ -36,7 +36,7 @@ function makeDoc(overrides: Partial<DocRecord>): DocRecord {
 const PARENT_CONTENT = "## D1\n" + "p".repeat(9000) + "\n## D8\nthe late decision\n";
 
 describe("review prompt — parent truncation notice (AC-CRIT-1)", () => {
-  for (const version of ["v1", "v2"]) {
+  for (const version of ["v1", "v3"]) {
     it(`AC-CRIT-1 ${version}: parent over max_context_chars gets a notice with shown/total chars naming D8`, () => {
       const bundle: ReviewBundle = {
         doc: makeDoc({ content: "small body" }),

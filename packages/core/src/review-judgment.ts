@@ -171,48 +171,6 @@ export const supersededCandidateSchema = z.object({
 /** Derived TypeScript type for a superseded-candidate nomination. */
 export type SupersededCandidate = z.infer<typeof supersededCandidateSchema>;
 
-// ─── Advisory Findings (SPEC-053) ────────────────────────────────────────────
-
-/**
- * Enumerated kinds of non-blocking, spec-quality advisory a review judge MAY emit
- * (SPEC-053). The single source of truth for the `advisory[].kind` field below — a
- * typed extension point deliberately chosen over a free-text `reasons[].dimension`
- * string so a new spec-quality advisory (e.g. the deferred requirement→AC completeness
- * oracle) slots in as ONE enum member, Zod-checked, never a magic string convention.
- *
- * `"ac_quantifiability"` — the SPEC-053 dimension: an acceptance criterion that passes
- * the deterministic lexical lint (`lintAcQuantifiability`, `ac-quality.ts`) yet remains
- * SEMANTICALLY un-measurable (e.g. "returns quickly enough" — no abstract wordlist hit,
- * but no threshold either). Advisory only — see `reviewAdvisorySchema`'s contract.
- */
-export const REVIEW_ADVISORY_KINDS = ["ac_quantifiability"] as const;
-
-/** Derived TypeScript type for a review-advisory kind. */
-export type ReviewAdvisoryKind = (typeof REVIEW_ADVISORY_KINDS)[number];
-
-/**
- * One non-blocking advisory finding a review judge MAY emit alongside its verdict
- * (SPEC-053). STRUCTURALLY SEPARATE from `reviewReasonSchema` (decision-driving
- * justifications): an `advisory[]` entry, by contract, NEVER by itself forces
- * `decision: "reject"` — the v2 review prompt instructs the judge accordingly, and the
- * deterministic AC-quantifiability lint (SPEC-052) remains the sole hard gate. `ac_id`
- * is optional (a finding may reference a specific AC or the AC set as a whole).
- *
- * @example
- * reviewAdvisorySchema.parse({
- *   kind: "ac_quantifiability", ac_id: "AC-3",
- *   finding: "'returns quickly enough' declares no measurable threshold",
- * });
- */
-export const reviewAdvisorySchema = z.object({
-  kind: z.enum(REVIEW_ADVISORY_KINDS),
-  ac_id: z.string().optional(),
-  finding: z.string(),
-});
-
-/** Derived TypeScript type for one advisory finding. */
-export type ReviewAdvisory = z.infer<typeof reviewAdvisorySchema>;
-
 // ─── Shared Shape + Escalate Invariant ──────────────────────────────────────
 
 /**
@@ -269,17 +227,6 @@ const reviewJudgmentBaseShape = z.object({
    * `probeStaleness` pass it through verbatim, never re-deriving it.
    */
   superseded_candidate: supersededCandidateSchema.optional(),
-  /**
-   * Non-blocking, spec-quality advisory findings (SPEC-053). Optional on BOTH the raw
-   * LLM output schema and the persisted schema — additive-only, absent means "no advisory
-   * findings" / "predates SPEC-053", never an unknown state (mirrors `truncated`/
-   * `superseded_candidate`'s optional-on-both precedent). Present on the shared base shape
-   * because the v2 review judge emits it directly; `AIProviderService.judgeDoc` passes it
-   * through verbatim, never re-deriving it. By contract these NEVER by themselves force a
-   * `reject` — the v2 prompt states this and the SPEC-052 deterministic lint is the sole
-   * hard gate.
-   */
-  advisory: z.array(reviewAdvisorySchema).optional(),
 });
 
 /**

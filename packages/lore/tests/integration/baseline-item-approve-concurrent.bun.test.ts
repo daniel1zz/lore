@@ -33,77 +33,63 @@ beforeAll(async () => {
 
 afterAll(() => corpus.cleanup());
 
-describe("AC-BIA-3: approval promotes exactly the reviewed revisions", () => {
-  it("HAPPY: two sessions add one rule each; the review sees both; approve promotes both", async () => {
+describe("AC-BIA-3: approval promotes pending revisions item by item, never bound to a review (BR-1369)", () => {
+  it("HAPPY: two sessions add one rule each; approve promotes them with no review on record", async () => {
     await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule added by session A.", ...RULE_ARGS], "session-a");
     await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule added by session B.", ...RULE_ARGS], "session-b");
     // REGRESSION: neither write demoted or replaced the other's revision
     const pending = corpus.node(corpus.leaf).extra.pending?.rules ?? {};
     expect(Object.keys(pending).sort()).toEqual(["BR-2", "BR-3"]);
 
-    await corpus.must(["review", corpus.leaf]);
-    // a third rule written AFTER the review
-    await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule added after the review.", ...RULE_ARGS], "session-a");
+    // a third rule: with no review on record (BR-1369) the approval promotes every pending revision
+    await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule added third.", ...RULE_ARGS], "session-a");
     expect(Object.keys(corpus.node(corpus.leaf).extra.pending?.rules ?? {}).sort()).toEqual(["BR-2", "BR-3", "BR-4"]);
+
+    // --item promotes only the named revision; the others stay pending
+    const approvedOne = await corpus.lore(["approve", corpus.leaf, "--item", "BR-2"]);
+    expect(approvedOne.exitCode).toBe(0);
+    expect(Object.keys(corpus.node(corpus.leaf).extra.pending?.rules ?? {}).sort()).toEqual(["BR-3", "BR-4"]);
 
     const approved = await corpus.lore(["approve", corpus.leaf]);
     expect(approved.exitCode).toBe(0);
-    expect(approved.stdout).toContain("BR-2");
     expect(approved.stdout).toContain("BR-3");
-    expect(approved.stdout).toContain("1 pending: BR-4");
+    expect(approved.stdout).toContain("BR-4");
 
     const node = corpus.node(corpus.leaf);
-    expect(idsOf(node.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3"]);
-    // NEGATIVE: the rule written after the review was not promoted and stays pending (and proposed in the registry)
-    expect(Object.keys(node.extra.pending?.rules ?? {})).toEqual(["BR-4"]);
-    expect(corpus.registryState("BR-4")).toBe("proposed");
-    expect(corpus.registryState("BR-2")).toBe("live");
-    expect(corpus.registryState("BR-3")).toBe("live");
-    expect(node.status).toBe("draft");
+    expect(idsOf(node.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3", "BR-4"]);
+    expect(node.extra.pending).toBeUndefined();
+    for (const id of ["BR-2", "BR-3", "BR-4"]) expect(corpus.registryState(id)).toBe("live");
+    expect(node.status).toBe("approved");
   }, TIMEOUT_MS);
 
-  it("NEGATIVE/STATE: a revision rewritten after the review refuses the approval, naming it; nothing is approved", async () => {
+  it("STATE: a second write to an item replaces its pending revision; --item approves just that one", async () => {
     await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule five, first wording.", ...RULE_ARGS]);
     await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule six.", ...RULE_ARGS]);
-    await corpus.must(["review", corpus.leaf]);
-    const reviewed = corpus.node(corpus.leaf).extra.pending?.rules ?? {};
-    expect(Object.keys(reviewed).sort()).toEqual(["BR-4", "BR-5", "BR-6"]);
-    const firstRevision = reviewed["BR-5"]?.revision_id;
-
-    // a second write to a reviewed item replaces its pending revision
+    const first = corpus.node(corpus.leaf).extra.pending?.rules ?? {};
+    expect(Object.keys(first).sort()).toEqual(["BR-5", "BR-6"]);
     await corpus.must(["rule", "set", "BR-5", "--statement", "Rule five, second wording."]);
     const rewritten = corpus.node(corpus.leaf).extra.pending?.rules ?? {};
     expect(rewritten["BR-5"]?.rule["statement"]).toBe("Rule five, second wording.");
-    expect(rewritten["BR-5"]?.revision_id).not.toBe(firstRevision);
-    expect(rewritten["BR-6"]?.revision_id).toBe(reviewed["BR-6"]?.revision_id);
+    expect(rewritten["BR-5"]?.revision_id).not.toBe(first["BR-5"]?.revision_id);
+    expect(rewritten["BR-6"]?.revision_id).toBe(first["BR-6"]?.revision_id);
 
-    const before = corpus.node(corpus.leaf);
-    const refused = await corpus.lore(["approve", corpus.leaf]);
-    expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain("BR-5");
-    expect(refused.stderr).toContain("changed after the review");
-    const after = corpus.node(corpus.leaf);
-    expect(after.version).toBe(before.version);
-    expect(idsOf(after.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3"]);
-  }, TIMEOUT_MS);
-
-  it("BOUNDARY: --item approves the unchanged reviewed revision while its sibling is stale", async () => {
     const approved = await corpus.lore(["approve", corpus.leaf, "--item", "BR-6"]);
     expect(approved.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
-    expect(idsOf(node.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3", "BR-6"]);
-    expect(Object.keys(node.extra.pending?.rules ?? {}).sort()).toEqual(["BR-4", "BR-5"]);
+    expect(idsOf(node.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3", "BR-4", "BR-6"]);
+    expect(Object.keys(node.extra.pending?.rules ?? {})).toEqual(["BR-5"]);
     expect(corpus.registryState("BR-6")).toBe("live");
     expect(node.status).toBe("draft");
   }, TIMEOUT_MS);
 
   it("STATE: reject --item discards one pending revision and leaves the other", async () => {
+    await corpus.must(["rule", "add", corpus.leaf, "--statement", "Rule seven.", ...RULE_ARGS]);
     const rejected = await corpus.lore(["reject", corpus.leaf, "--item", "BR-5"]);
     expect(rejected.exitCode).toBe(0);
     expect(rejected.stdout).toContain("BR-5");
     const node = corpus.node(corpus.leaf);
-    expect(Object.keys(node.extra.pending?.rules ?? {})).toEqual(["BR-4"]);
-    expect(idsOf(node.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3", "BR-6"]);
+    expect(Object.keys(node.extra.pending?.rules ?? {})).toEqual(["BR-7"]);
+    expect(idsOf(node.extra.rules)).toEqual(["BR-1", "BR-2", "BR-3", "BR-4", "BR-6"]);
     // NEGATIVE: an item that holds no pending revision is refused
     const again = await corpus.lore(["reject", corpus.leaf, "--item", "BR-5"]);
     expect(again.exitCode).toBe(4);
