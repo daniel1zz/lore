@@ -8,7 +8,11 @@
  * STATE (a second removal finds nothing) / REGRESSION (every other byte of the file is identical).
  */
 import { describe, it, expect } from "vitest";
-import { removeRetiredActorIdentityGate } from "../src/retired-actor-identity-migration.js";
+import {
+  removeRetiredActorIdentityGate,
+  removeRetiredAssessBudgetKey,
+  RETIRED_ASSESS_BUDGET_KEYS,
+} from "../src/retired-actor-identity-migration.js";
 
 const KEY = ["actor", "identity"].join("_");
 
@@ -52,5 +56,36 @@ describe("removeRetiredActorIdentityGate", () => {
     const result = removeRetiredActorIdentityGate("workflow: [unclosed\n");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatchObject({ code: "VALIDATION_ERROR", field: "yaml" });
+  });
+});
+
+describe("removeRetiredAssessBudgetKey (the unread ai.assess prompt budgets)", () => {
+  const cut = (text: string, key: (typeof RETIRED_ASSESS_BUDGET_KEYS)[number]) => {
+    const result = removeRetiredAssessBudgetKey(text, key);
+    if (!result.ok) throw new Error(`unexpected error: ${JSON.stringify(result.error)}`);
+    return result.value;
+  };
+
+  it("HAPPY+REGRESSION: the three budgets are cut, max_diff_chars and every other byte stay", () => {
+    let text = "ai:\n  assess:\n    max_plan_chars: 8000\n    max_spec_chars: 12000\n    max_task_chars: 4000\n    max_diff_chars: 90000 # keep\nproject:\n  name: demo\n";
+    for (const key of RETIRED_ASSESS_BUDGET_KEYS) {
+      const found = cut(text, key);
+      expect(found, key).toBeDefined();
+      text = found!.text;
+    }
+    expect(text).toBe("ai:\n  assess:\n    max_diff_chars: 90000 # keep\nproject:\n  name: demo\n");
+  });
+
+  it("STATE+BOUNDARY: a lone key removes the empty parents; a second removal and an absent key find nothing", () => {
+    const first = cut("ai:\n  assess:\n    max_plan_chars: 8000\n", "max_plan_chars");
+    expect(first?.text).toBe("");
+    expect(cut(first!.text, "max_plan_chars")).toBeUndefined();
+    expect(cut("ai:\n  assess:\n    max_diff_chars: 5\n", "max_task_chars")).toBeUndefined();
+  });
+
+  it("NEGATIVE: a flow-style placement is refused by name, nothing rewritten", () => {
+    const result = removeRetiredAssessBudgetKey("ai: { assess: { max_plan_chars: 8000, max_diff_chars: 5 } }\n", "max_plan_chars");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatchObject({ code: "VALIDATION_ERROR", field: "ai.assess.max_plan_chars" });
   });
 });
