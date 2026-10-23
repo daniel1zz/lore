@@ -152,10 +152,10 @@ function vi_silence(): () => void {
 }
 
 describe("check:floor (deriveFloorSteps) is the lean floor (BR-1368)", () => {
-  const fixture = { build: "b", typecheck: "t", "check:a": "a", "check:static": "bun scripts/run-chain.ts --static", "check:floor": "bun scripts/run-chain.ts --floor" };
+  const fixture = { build: "b", typecheck: "t", "check:baseline-coverage:changed": "x", "check:ac-oracle-ownership:changed": "y", "check:a": "a", "check:static": "bun scripts/run-chain.ts --static", "check:floor": "bun scripts/run-chain.ts --floor" };
 
-  it("is install, build, typecheck whatever check:* scripts exist", () => {
-    expect(deriveFloorSteps(fixture)).toEqual(["bun install --frozen-lockfile", "bun run build", "bun run typecheck"]);
+  it("is install, build, typecheck and the two :changed checks whatever other check:* scripts exist", () => {
+    expect(deriveFloorSteps(fixture)).toEqual(["bun install --frozen-lockfile", "bun run build", "bun run typecheck", "bun run check:baseline-coverage:changed", "bun run check:ac-oracle-ownership:changed"]);
     expect(deriveFloorSteps({ ...fixture, "check:brand-new": "n" })).toEqual(deriveFloorSteps(fixture));
   });
 

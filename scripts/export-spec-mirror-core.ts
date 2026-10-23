@@ -186,7 +186,7 @@ export interface MirrorParityResult {
 
 /**
  * Decides mirror parity — PURE, no IO. `fileExists` is injected (mirrors
- * `scripts/check-test-budgets.ts`'s `checkLedger(..., pathExists)` seam) so this is unit-testable
+ * the ledger checkers' `pathExists` seam) so this is unit-testable
  * without touching disk.
  *
  * ⛔ NOT CHECKED BY THIS FUNCTION: file CONTENT. It verifies only (1) COUNT — `fileCountOnDisk ===

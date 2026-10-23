@@ -332,7 +332,7 @@ export function collectViolationsInFile(relPath, content) {
  * RETURNS the process exit code (0 clean / 3 violations found). Never calls
  * `process.exit` — the `import.meta.main` block below is the only place that
  * does — so this stays directly callable from a test (mirrors
- * `check-test-budgets.ts::main` and `check-no-nul-bytes.ts::main`).
+ * `check-no-nul-bytes.ts::main`).
  *
  * @param {string} [repoRoot] - root to scan; defaults to this checkout's own root
  * @returns {number} 0 (clean) or 3 (violations found)
