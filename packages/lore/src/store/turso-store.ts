@@ -2385,6 +2385,13 @@ export class TursoStore implements StoreInterface {
           ] as InValue[],
         });
         await this.appendAuditEntryTx(tx, companion.audit);
+        // reason: the docs triggers keep a registry lifecycle the leaf no longer lists; see SQLiteStore's twin.
+        for (const ruleId of companion.propose_rules ?? []) {
+          await tx.execute({
+            sql: "UPDATE rule_registry SET lifecycle = 'proposed' WHERE id = ? AND leaf_doc_id = ?",
+            args: [ruleId, companion.id] as InValue[],
+          });
+        }
       }
 
       const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(current, updated), version, id);

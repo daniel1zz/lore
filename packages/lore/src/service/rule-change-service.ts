@@ -65,7 +65,7 @@ import { collectLeafRules } from "./rule-index-queries.js";
 import { findOtherSpecChange, findProposal, isLanded, ruleChangesOf } from "./rule-changes.js";
 import { measureLandingEvidence } from "./landing-evidence.js";
 import { approvedRulesOf, pendingRevisionsOf } from "./baseline-items.js";
-import type { AbandonmentPlan, RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
+import type { AbandonedLeafPlan, AbandonmentPlan, RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
 
 /** Immediate re-applies after a CAS miss before the STALE_VERSION error is surfaced. */
 export const MAX_CAS_REAPPLIES = 3;
@@ -395,6 +395,57 @@ export class RuleChangeService implements RuleChangeLandingPort {
         rules: plan.touched,
       })),
     });
+  }
+
+  /**
+   * The reverse of {@link planAbandonment}: the leaf writes that take the "never landed: <spec>" tombstones of
+   * `specRef`'s proposed ids off their leaves, planned and not written. The owner rejected the spec's deprecation
+   * (adr-an-acceptance-criterion-retires-with-the-feature-it: a rejected item is restored and re-planned), so the ids
+   * the deprecation abandoned are proposed again. The caller commits the plan in the SAME transaction as the spec's
+   * status restore and asks the store to mark the ids `proposed` (`CompanionDocWrite.propose_rules`).
+   *
+   * @param specRef - Spec id or slug; a non-spec doc is a VALIDATION_ERROR.
+   * @returns the plan (empty `leaves` when no id of the spec carries its tombstone); the refusal when a leaf is
+   *   unresolvable or unwritable from here.
+   */
+  async planRevival(specRef: string, opts: RuleApplyOpts = {}): Promise<Result<AbandonmentPlan, LoreError>> {
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    const specResult = await this.resolveSpec(specRef);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const stored = readChangeSet(spec);
+    if (!stored.ok) return stored;
+    const proposed = new Set(stored.value.filter((change) => change.op === "add" && !isLanded(change)).map((change) => change.id));
+    const baseline = await this.store.findMany({ type: "baseline" });
+    if (!baseline.ok) return baseline;
+    const tombstone = `never landed: ${spec.slug}`;
+    const leaves: AbandonedLeafPlan[] = [];
+    for (const doc of baseline.value) {
+      if ((doc.deleted_at ?? null) !== null) continue;
+      const rules = approvedRulesOf(doc) as BaselineRule[];
+      const revived = rules.filter((rule) => proposed.has(rule.id) && rule.lifecycle === "retired" && rule.retired_note === tombstone);
+      if (revived.length === 0) continue;
+      if (this.writeAuthority !== undefined) {
+        const verdict = await this.writeAuthority.authorize([doc], "rule-apply", actor);
+        if (!verdict.ok) return verdict;
+      }
+      const ids = revived.map((rule) => rule.id);
+      const extra = { ...doc.extra, rules: rules.filter((rule) => !ids.includes(rule.id)) };
+      const shape = baselineExtraSchema.safeParse(extra);
+      if (!shape.success) {
+        const issue = shape.error.issues[0];
+        return err(validationError(`extra.${issue !== undefined ? issue.path.join(".") : ""}`, `${doc.slug}: ${issue?.message ?? "invalid baseline extra"}`));
+      }
+      leaves.push({
+        leaf: doc,
+        extra,
+        status: doc.status,
+        summary: `Proposed rules restored, deprecation of ${spec.slug} rejected: ${ids.join(", ")}`,
+        details: { operation: "rule-revive", spec: spec.slug, rules: ids },
+        rules: ids,
+      });
+    }
+    return ok({ spec: spec.slug, leaves });
   }
 
   /**

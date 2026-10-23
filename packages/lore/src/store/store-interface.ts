@@ -142,6 +142,11 @@ export interface CompanionDocWrite {
   readonly version: VersionRecord;
   /** The audit row of this doc's write. */
   readonly audit: AuditEntry;
+  /**
+   * Rule ids whose registry row goes back to `proposed` in the same transaction (owned by this doc, which no longer
+   * lists them: the reverse of a "never landed" retirement, BR-1307). Absent: the registry follows the leaf.
+   */
+  readonly propose_rules?: readonly string[];
 }
 
 export interface ProvenanceWriteExtras {
