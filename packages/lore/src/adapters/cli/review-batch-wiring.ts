@@ -86,7 +86,7 @@ export function buildCompletePlanLister(trigger: ReviewTriggerService): ListComp
   return async () => {
     const complete = await trigger.listCompletePlans();
     if (!complete.ok) return complete;
-    return ok(complete.value.map((e) => ({ plan: e.plan, planId: e.planId, completeAt: e.completeAt, awaitingOwner: e.need === "awaiting-owner" })));
+    return ok(complete.value.map((e) => ({ plan: e.plan, planId: e.planId, completeAt: e.completeAt, awaitingOwner: e.need === "awaiting-owner", ...(e.reviewProblem !== undefined ? { reviewProblem: e.reviewProblem } : {}) })));
   };
 }
 

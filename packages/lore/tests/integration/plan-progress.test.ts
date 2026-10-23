@@ -1186,7 +1186,6 @@ describe("an unfileable stored review means needs review; one plan never blocks 
     bad.failing = ["regression"];
     bad.regressionFiles = ["a.test.ts"];
     await world.judge("p-bad"); // stores the incomplete review (no suite_failing_files)
-    world.judgeCalls = [];
     world.suiteFailingFiles = ["a.test.ts"]; // the re-review stores a complete one
     return { world, bad, good };
   }
@@ -1216,7 +1215,7 @@ describe("an unfileable stored review means needs review; one plan never blocks 
     // the first batch re-reviewed (complete review stored) but could not file; the next one retries only the filing
     const second = await world.runner().runBatch(["p-bad"], world.ports("batch-2"));
     expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted-with-known-defects", reviewed: false });
-    expect(world.judgeCalls).toEqual(["p-bad"]);
+    expect(world.judgeCalls).toEqual(["p-bad", "p-bad"]); // the seeding judgment, then exactly one re-review
   });
 
   it("REGRESSION: bootstrap's complete line and checks stats still render; the bad plan counts as awaiting review with its problem as the last review error", async () => {
