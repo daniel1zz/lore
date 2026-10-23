@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as core from "@lore/core";
@@ -30,11 +30,14 @@ interface RunResult {
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 
+/** Extra environment of every spawn: the fake `gh` first on PATH and its state directory (set in `beforeEach`). */
+let extraEnv: Record<string, string> = {};
+
 function runLore(args: string[], cwd: string): RunResult {
   const proc = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:milestone-review-test" },
+    env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:milestone-review-test", ...extraEnv },
   });
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.status ?? 1 };
 }
@@ -82,7 +85,7 @@ function installJudge(pass: string, fail: string): void {
   const script = join(judgeDir, "judge.sh");
   writeFileSync(
     script,
-    `#!/bin/sh\ninput=$(cat)\ncase "$input" in *FAILMARK*) cat "${join(judgeDir, "fail.json")}";; *) cat "${join(judgeDir, "pass.json")}";; esac\n`,
+    `#!/bin/sh\ninput=$(cat)\nprintf '%s\\n=====PROMPT=====\\n' "$input" >> "${join(judgeDir, "prompts.txt")}"\ncase "$input" in *FAILMARK*) cat "${join(judgeDir, "fail.json")}";; *) cat "${join(judgeDir, "pass.json")}";; esac\n`,
   );
   chmodSync(script, 0o755);
   patchLoreConfig(tmpDir, {
@@ -123,10 +126,70 @@ function close(plan: string): RunResult {
   return runLore(["set", plan, "--status", "archived"], tmpDir);
 }
 
+/**
+ * The project's own scripts are the fake suite runner: `check:plan-close` and `test` echo, `test` appends one line to a
+ * counter file per run and reports one failing file. Committed on `main`, so the throwaway worktree the batch run
+ * creates contains them.
+ */
+function installFakeSuiteScripts(): void {
+  const scripts = {
+    "check:plan-close": "echo chain-ok",
+    test: `echo run >> '${join(judgeDir, "suite-runs.txt")}'; echo ' FAIL  tests/unrelated.test.ts > breaks'; exit 1`,
+  };
+  writeFileSync(join(tmpDir, "package.json"), JSON.stringify({ name: "fixture", private: true, scripts }));
+  for (const args of [["add", "package.json"], ["commit", "-q", "-m", "fixture scripts"]]) {
+    const r = spawnSync("git", args, { cwd: tmpDir, encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+  }
+}
+
+/** The fake issue port: a `gh` on PATH over a JSON state file (`issues.json`; every POST appends to it and to `posts.log`). */
+function installFakeGh(): void {
+  const stateDir = join(judgeDir, "gh-state");
+  mkdirSync(join(judgeDir, "bin"), { recursive: true });
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "issues.json"), "[]");
+  const script = join(judgeDir, "bin", "gh");
+  writeFileSync(
+    script,
+    `#!/usr/bin/env bun
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+const dir = ${JSON.stringify(stateDir)};
+const args = process.argv.slice(2);
+const issues = () => JSON.parse(readFileSync(dir + "/issues.json", "utf8"));
+const path = args[1];
+if (path === "user") console.log(JSON.stringify({ login: "fake" }));
+else if (path === "repos/o/r") console.log(JSON.stringify({ id: 777 }));
+else if (path === "repos/o/r/issues?state=all&per_page=100") console.log(JSON.stringify(issues()));
+else if (path === "repos/o/r/issues" && args.includes("POST")) {
+  const field = (name) => (args.find((a) => a.startsWith(name + "=")) ?? "").slice(name.length + 1);
+  const all = issues();
+  const number = all.length + 1;
+  all.push({ number, title: field("title"), state: "open", body: field("body"), labels: [], created_at: "2026-10-23T00:00:00Z" });
+  writeFileSync(dir + "/issues.json", JSON.stringify(all));
+  appendFileSync(dir + "/posts.log", field("title") + "\\n");
+  console.log(JSON.stringify({ number, html_url: "https://example.invalid/o/r/issues/" + number }));
+} else { console.error("fake gh: unsupported " + args.join(" ")); process.exit(1); }
+`,
+  );
+  chmodSync(script, 0o755);
+  extraEnv = { PATH: `${join(judgeDir, "bin")}:${process.env["PATH"] ?? ""}` };
+}
+
+function configureGithubUpstream(): void {
+  patchLoreConfig(tmpDir, { feedback: { upstream: { repo: "o/r" } } });
+}
+
+function readJudgeFile(name: string): string {
+  return existsSync(join(judgeDir, name)) ? readFileSync(join(judgeDir, name), "utf8") : "";
+}
+
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-milestone-review-test-"));
   judgeDir = mkdtempSync(join(tmpdir(), "lore-milestone-judge-"));
   makeCleanTreeRepo(tmpDir);
+  installFakeSuiteScripts();
+  installFakeGh();
   expect(runLore(["init"], tmpDir).exitCode).toBe(0);
   patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");
   installJudge(judgeAnswer(), judgeAnswer());
@@ -303,5 +366,217 @@ describe("milestone review gates close", () => {
     const forged = runLore(["create", "knowledge", "--title", "New assessment", "--sub-type", "assessment", "--content", "x", "--no-ai"], tmpDir);
     expect(forged.exitCode).not.toBe(0);
     expect(forged.stderr).toContain("assessment");
+  });
+
+  // ── Part D, "Review inputs, measured once per batch" and "Accepted with known defects" (task D4) ──
+
+  it("milestone review gates close: the full suite runs ONCE per batch in a throwaway worktree of main and every plan's review sees it", { timeout: 300_000 }, () => {
+    const first = makePlan("Suite one");
+    const second = makePlan("Suite two");
+    const batch = assessRows(["--where", "type=plan,status=approved"]);
+    expect(batch.exitCode, batch.stderr).toBe(0);
+    expect(batch.rows.map((r) => r.plan).sort()).toEqual([first.plan, second.plan].sort());
+    // one run for two plans: the fake `test` script appends one line per run.
+    expect(readJudgeFile("suite-runs.txt").trim().split("\n")).toHaveLength(1);
+    // both prompts carry the one run: the chain and the test command, their exits, the failing file.
+    const prompts = readJudgeFile("prompts.txt").split("=====PROMPT=====").filter((p) => p.trim().length > 0);
+    expect(prompts).toHaveLength(2);
+    for (const prompt of prompts) {
+      expect(prompt).toContain("`bun run check:plan-close` exit 0");
+      expect(prompt).toContain("`bun run test` exit 1");
+      expect(prompt).toContain("tests/unrelated.test.ts");
+    }
+    // the failing file is not tied to either plan (no landed diff), so neither plan's regression fails.
+    expect(batch.rows.every((r) => r.outcome === "PASS")).toBe(true);
+    // the throwaway worktree is gone and the shared checkout is untouched.
+    const worktrees = spawnSync("git", ["worktree", "list", "--porcelain"], { cwd: tmpDir, encoding: "utf8" }).stdout;
+    expect(worktrees.split("\n").filter((l) => l.startsWith("worktree "))).toHaveLength(1);
+    expect(spawnSync("git", ["status", "--porcelain"], { cwd: tmpDir, encoding: "utf8" }).stdout.trim()).toBe("");
+  });
+
+  it("milestone review gates close: a failing test file counts against a plan only when its diff touched the file or a direct import", { timeout: 60_000 }, async () => {
+    const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
+    const stored: { dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
+    const plan = { id: "P1", slug: "plan-p1", title: "Plan P1", content: "x", version: 1, extra: {} };
+    const task = { id: "T1", slug: "task-t1", title: "T1", content: "x", status: "archived", version: 1, extra: {} };
+    const service = new MilestoneReviewService({
+      getPlanBundle: async () => core.ok({ plan, tasks: [task] } as never),
+      getCitedRuleStates: async () => core.ok([]),
+      listDecisionLog: async () => core.ok([]),
+      judge: async () => core.ok(judgeAnswer()),
+      createReviewDoc: async (input) => {
+        stored.push((input.extra as { milestone_review: (typeof stored)[number] }).milestone_review);
+        return core.ok({ id: "R1", slug: "review-1" } as never);
+      },
+      link: async () => core.ok(undefined),
+    });
+    const suite = {
+      status: "measured" as const,
+      commit: "abc123",
+      commands: [{ command: "bun run test", exit_code: 1, output_tail: "" }],
+      skipped: [],
+      failing_test_files: [
+        { file: "tests/touches-import.test.ts", imports: ["src/a.ts"] },
+        { file: "tests/itself-touched.test.ts", imports: [] },
+        { file: "tests/elsewhere.test.ts", imports: ["src/z.ts"] },
+      ],
+    };
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@\n+x\ndiff --git a/tests/itself-touched.test.ts b/tests/itself-touched.test.ts\n@@\n+y\n";
+    const withDiff = await service.review("plan-p1", { diffText: diff, diffSource: "test", maxDiffChars: 100_000, suite });
+    expect(withDiff.ok).toBe(true);
+    const regression = stored[0]?.dimensions["regression"];
+    expect(regression?.verdict).toBe("fail");
+    expect(regression?.reason).toContain("tests/touches-import.test.ts");
+    expect(regression?.reason).toContain("tests/itself-touched.test.ts");
+    expect(regression?.reason).not.toContain("tests/elsewhere.test.ts");
+    // no landed diff: nothing can be tied to the plan, the judge's pass stands.
+    const noDiff = await service.review("plan-p1", { diffSource: "none", maxDiffChars: 100_000, suite });
+    expect(noDiff.ok).toBe(true);
+    expect(stored[1]?.dimensions["regression"]?.verdict).toBe("pass");
+    // a run that was not measured is never read as a failure.
+    const unmeasured = await service.review("plan-p1", { diffText: diff, diffSource: "test", maxDiffChars: 100_000, suite: { status: "not_measured", reason: "no main" } });
+    expect(unmeasured.ok).toBe(true);
+    expect(stored[2]?.dimensions["regression"]?.verdict).toBe("pass");
+  });
+
+  it("milestone review gates close: snapshot_accuracy fails only on a stale cited rule; an unknown rule is n/a with the reason", { timeout: 60_000 }, async () => {
+    const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
+    const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
+    const plan = { id: "P1", slug: "plan-p1", title: "Plan P1", content: "x", version: 1, extra: {} };
+    const task = { id: "T1", slug: "task-t1", title: "T1", content: "x", status: "archived", version: 1, extra: {} };
+    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x" };
+    let cited: { rule_id: string; state: string; unknown_reason?: string }[] = [];
+    const judgeFailsSnapshot = judgeAnswer({ snapshot_accuracy: { verdict: "fail", reason: "rule BR-1 looks stale", reference: "doc drift" } });
+    const service = new MilestoneReviewService({
+      getPlanBundle: async () => core.ok({ plan, tasks: [task], spec } as never),
+      getCitedRuleStates: async () => core.ok(cited),
+      listDecisionLog: async () => core.ok([]),
+      judge: async () => core.ok(judgeFailsSnapshot),
+      createReviewDoc: async (input) => {
+        stored.push((input.extra as { milestone_review: (typeof stored)[number] }).milestone_review);
+        return core.ok({ id: "R1", slug: "review-1" } as never);
+      },
+      link: async () => core.ok(undefined),
+    });
+    cited = [{ rule_id: "BR-1", state: "unknown", unknown_reason: "no-code-anchors" }];
+    expect((await service.review("plan-p1", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("na");
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.reason).toContain("no-code-anchors");
+    expect(stored[0]?.overall).toBe("pass");
+    cited = [{ rule_id: "BR-1", state: "stale" }, { rule_id: "BR-2", state: "unknown", unknown_reason: "dirty" }];
+    expect((await service.review("plan-p1", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
+    expect(stored[1]?.dimensions["snapshot_accuracy"]?.verdict).toBe("fail");
+    expect(stored[1]?.overall).toBe("fail");
+  });
+
+  /** A plan whose review fails on `security` and `regression`, with the fake GitHub configured as the upstream. */
+  function makeFailedPlan(title: string): string {
+    configureGithubUpstream();
+    const { plan } = makePlan(title);
+    installJudge(
+      judgeAnswer({
+        security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection" },
+        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis" },
+      }),
+      judgeAnswer(),
+    );
+    expect(assessRows([plan]).rows[0]?.failed).toEqual(["regression", "security"]);
+    return plan;
+  }
+
+  /** Files an issue through the existing `lore report-issue` path; returns its number. */
+  function fileIssue(title: string): number {
+    const r = runLore(
+      ["report-issue", "--title", title, "--description", "d", "--expected", "e", "--actual", "a", "--severity", "low", "--category", "test", "--json"],
+      tmpDir,
+    );
+    expect(r.exitCode, r.stderr).toBe(0);
+    return (JSON.parse(r.stdout) as { data: { number: number } }).data.number;
+  }
+
+  /** Links the plan to the corpus task minted for `issueNumber` (the existing `resolves` carrier link). */
+  function linkIssue(plan: string, issueNumber: number): void {
+    const linked = runLore(["link", plan, `task-gh-777-${String(issueNumber)}`, "--type", "resolves"], tmpDir);
+    expect(linked.exitCode, linked.stderr).toBe(0);
+  }
+
+  function setIssueState(issueNumber: number, state: "open" | "closed"): void {
+    const file = join(judgeDir, "gh-state", "issues.json");
+    const all = JSON.parse(readFileSync(file, "utf8")) as { number: number; state: string }[];
+    writeFileSync(file, JSON.stringify(all.map((i) => (i.number === issueNumber ? { ...i, state } : i))));
+  }
+
+  it("milestone review gates close: a failing review closes as accepted with known defects only when every failed dimension has an OPEN linked issue", { timeout: 300_000 }, () => {
+    const plan = makeFailedPlan("Accepted");
+    // no linked issue at all: refused, exit 4, even though GitHub has an unrelated open issue.
+    expect(fileIssue("unrelated defect")).toBe(1);
+    const bare = close(plan);
+    expect(bare.exitCode).toBe(4);
+    expect(bare.stderr).toContain("MILESTONE_REVIEW_FAILED");
+    // one failed dimension covered, the other not: refused.
+    expect(fileIssue(`${plan}: security`)).toBe(2);
+    linkIssue(plan, 2);
+    const partial = close(plan);
+    expect(partial.exitCode).toBe(4);
+    expect(statusOf(plan)).toBe("approved");
+    // both covered but the regression issue is CLOSED on GitHub: refused (only OPEN issues count).
+    expect(fileIssue(`${plan}: regression`)).toBe(3);
+    linkIssue(plan, 3);
+    setIssueState(3, "closed");
+    expect(close(plan).exitCode).toBe(4);
+    // both open: the close is accepted and the audit records the issue numbers.
+    setIssueState(3, "open");
+    const accepted = close(plan);
+    expect(accepted.exitCode, accepted.stderr).toBe(0);
+    expect(statusOf(plan)).toBe("archived");
+    const audit = runLore(["audit", plan, "--json"], tmpDir);
+    expect(audit.stdout).toContain("accepted with known defects: #2, #3");
+  });
+
+  it("milestone review gates close: --file-issues files one issue per failed dimension in one call, links them, and the close is then accepted", { timeout: 300_000 }, () => {
+    configureGithubUpstream();
+    const { plan } = makePlan("Filed");
+    installJudge(
+      judgeAnswer({
+        security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection" },
+        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis" },
+      }),
+      judgeAnswer(),
+    );
+    const filed = runLore(["assess", plan, "--file-issues", "--json"], tmpDir);
+    expect(filed.exitCode, filed.stderr).toBe(1);
+    const rows = (JSON.parse(filed.stdout) as { data: { rows: (AssessRow & { filed_issues?: number[] })[] } }).data.rows;
+    expect(rows[0]?.outcome).toBe("FAIL");
+    expect(rows[0]?.filed_issues).toEqual([1, 2]);
+    // one issue per failed dimension: title names plan and dimension, body carries the finding.
+    const posts = readFileSync(join(judgeDir, "gh-state", "posts.log"), "utf8").trim().split("\n");
+    expect(posts).toEqual([`${plan}: regression`, `${plan}: security`]);
+    const listed = JSON.parse(readFileSync(join(judgeDir, "gh-state", "issues.json"), "utf8")) as { body: string }[];
+    expect(listed[0]?.body).toContain("breaks the old path");
+    expect(listed[1]?.body).toContain("unvalidated input reaches a shell");
+    // the issues are linked to the plan, so plan close accepts the failing review.
+    const closed = close(plan);
+    expect(closed.exitCode, closed.stderr).toBe(0);
+    expect(statusOf(plan)).toBe("archived");
+    expect(runLore(["audit", plan, "--json"], tmpDir).stdout).toContain("accepted with known defects: #1, #2");
+  });
+
+  it("milestone review gates close: --file-issues without a GitHub upstream is refused before any review runs (exit 4)", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("No upstream");
+    const refused = runLore(["assess", plan, "--file-issues"], tmpDir);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain("feedback.upstream");
+    expect(readJudgeFile("prompts.txt")).toBe("");
+    expect(readJudgeFile("suite-runs.txt")).toBe("");
+  });
+
+  it("milestone review gates close: a failing review with no linked open issue still refuses the close (exit 4, BR-1372)", { timeout: 300_000 }, () => {
+    const plan = makeFailedPlan("Unlinked");
+    const refused = close(plan);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain("MILESTONE_REVIEW_FAILED");
+    expect(refused.stderr).toContain("BR-1372");
+    expect(refused.stderr).toContain("--file-issues");
+    expect(statusOf(plan)).toBe("approved");
   });
 });

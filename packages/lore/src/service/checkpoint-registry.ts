@@ -1148,6 +1148,7 @@ function describeMilestoneReviewFailure(ctx: GateContext): string {
   switch (review.state) {
     case "pass":
     case "no-tasks":
+    case "accepted":
       return "";
     case "absent":
       return `No milestone review exists for this plan. Run \`lore assess ${slug}\`, then close again.`;
@@ -1159,7 +1160,9 @@ function describeMilestoneReviewFailure(ctx: GateContext): string {
     case "failed":
       return (
         `The latest milestone review (${review.reviewSlug}) failed on: ${review.failed.join(", ")}. ` +
-        `Fix what it names, then run \`lore assess ${slug}\` again.`
+        `Fix what it names, then run \`lore assess ${slug}\` again. Or close it as accepted with known defects: ` +
+        `link an OPEN GitHub issue to the plan for EVERY failed dimension (\`lore assess ${slug} --file-issues\` files and ` +
+        `links one per failed dimension; the issue title must name the dimension).`
       );
   }
 }

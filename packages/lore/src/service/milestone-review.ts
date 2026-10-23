@@ -71,7 +71,18 @@ export type MilestoneReviewCurrency =
   | { readonly state: "absent" }
   | { readonly state: "stale"; readonly reviewed: string; readonly current: string; readonly reviewSlug: string }
   | { readonly state: "failed"; readonly failed: readonly MilestoneDimension[]; readonly reviewSlug: string }
-  | { readonly state: "pass"; readonly reviewSlug: string };
+  | { readonly state: "pass"; readonly reviewSlug: string }
+  /**
+   * Current review fails, but every failed dimension has an OPEN linked issue (Part D, "accepted with known defects").
+   * Never produced by `assessMilestoneCurrency` (pure, no issue facts): `CorpusService.set` upgrades `failed` to this
+   * after reading the linked issues.
+   */
+  | {
+      readonly state: "accepted";
+      readonly reviewSlug: string;
+      readonly failed: readonly MilestoneDimension[];
+      readonly issues: readonly number[];
+    };
 
 /**
  * Judges the latest stored review against the plan's current state.

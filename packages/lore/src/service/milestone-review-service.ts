@@ -42,6 +42,14 @@ import {
 } from "../ai/milestone-review-template.js";
 import { decisionDetailSchema, type DecisionLogRow } from "../store/decision-log.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type CitedRuleStateRow } from "./milestone-review.js";
+import {
+  applyRegressionFloor,
+  applySnapshotRule,
+  attributeSuiteFailures,
+  renderSuiteSection,
+  touchedFilesOfDiff,
+  type SuiteRun,
+} from "./milestone-review-inputs.js";
 
 /** The narrow ports this service needs; `app.ts` binds the real services into them. */
 export interface MilestoneReviewDeps {
@@ -62,6 +70,8 @@ export interface MilestoneReviewOptions {
   /** How the diff was obtained, or why it is absent (stored on the review). */
   readonly diffSource: string;
   readonly maxDiffChars: number;
+  /** The batch's one full-suite run (`lore assess` measures it once); absent = none supplied for this review. */
+  readonly suite?: SuiteRun;
 }
 
 /** A stored review and its document. */
@@ -149,7 +159,11 @@ export class MilestoneReviewService {
         ...(e.ac_ref !== undefined ? { ac_ref: e.ac_ref } : {}),
       })),
     }));
+    const touched = opts.diffText !== undefined && opts.diffText.length > 0 ? touchedFilesOfDiff(opts.diffText) : undefined;
+    const attribution =
+      opts.suite !== undefined ? attributeSuiteFailures(opts.suite, touched) : { attributed: [], unattributed: [] };
     const prompt = buildMilestoneReviewPrompt({
+      suiteSection: renderSuiteSection(opts.suite, attribution, touched !== undefined),
       plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },
       ...(bundle.spec !== undefined ? { spec: { slug: bundle.spec.slug, title: bundle.spec.title, content: bundle.spec.content } } : {}),
       tasks,
@@ -162,7 +176,16 @@ export class MilestoneReviewService {
 
     const judged = await this.judgeWithRetry(prompt, bundle.plan.title);
     if (!judged.ok) return judged;
-    const dimensions = applyDeterministicDimensionRules(judged.value.dimensions);
+    // reason: both measured inputs are applied AFTER the judge so it cannot waive them (Part D): an attributed
+    // failing test file fails regression; with no stale cited rule snapshot_accuracy is n/a, never a fail.
+    const dimensions = applySnapshotRule(
+      applyRegressionFloor(
+        applyDeterministicDimensionRules(judged.value.dimensions),
+        attribution,
+        opts.suite?.status === "measured" ? opts.suite.commit : undefined,
+      ),
+      citedRulesResult.value,
+    );
     const review: MilestoneReview = {
       plan_id: bundle.plan.id,
       fingerprint: planStateFingerprint(bundle.plan, bundle.tasks),
