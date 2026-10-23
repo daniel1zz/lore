@@ -832,7 +832,8 @@ describe("set — status transition validation (B1)", () => {
     if (result.error.code === "INVALID_TRANSITION") {
       expect(result.error.from).toBe("draft");
       expect(result.error.to).toBe("archived");
-      expect(result.error.allowed.sort()).toEqual(["approved", "in-review"]);
+      // draft -> deprecated is a legal edge for every type (BR-1366); draft -> archived still is not.
+      expect(result.error.allowed.sort()).toEqual(["approved", "deprecated", "in-review"]);
     }
   });
 
