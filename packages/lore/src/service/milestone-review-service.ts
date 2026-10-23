@@ -109,7 +109,7 @@ export function measuredCauses(
   if (regression === undefined && rules === undefined) return undefined;
   // reason: BR-1379 / #345 — one failing main suite is ONE root cause, so the whole run's failing set is stored beside
   // the plan's attributed subset; the fingerprint reads the whole set.
-  const suiteSet = regression !== undefined && suiteFailingFiles.length > 0 ? [...new Set(suiteFailingFiles)].sort() : undefined;
+  const suiteSet = regression !== undefined ? [...new Set(suiteFailingFiles)].sort() : undefined;
   return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(suiteSet !== undefined ? { suite_failing_files: suiteSet } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
 }
 

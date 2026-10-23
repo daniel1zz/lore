@@ -86,12 +86,15 @@ export class IssueFilingService {
    * Files and links the findings by root cause.
    *
    * @param findings - every failed dimension of the plans under filing
-   * @returns one group per fingerprint, in first-seen order; each group carries its own error when it failed
+   * @returns one group per fingerprint, in first-seen order; each group carries its own error when it failed; an error
+   *   when any finding has no root cause (a stored regression review lacking `suite_failing_files`)
    */
   async fileFindings(findings: readonly FailedFinding[]): Promise<Result<FilingGroup[], LoreError>> {
     const byFingerprint = new Map<string, { cause: RootCause; findings: FailedFinding[] }>();
     for (const finding of findings) {
-      const cause = rootCauseOf(finding);
+      const caused = rootCauseOf(finding);
+      if (!caused.ok) return caused;
+      const cause = caused.value;
       const group = byFingerprint.get(cause.fingerprint);
       if (group === undefined) byFingerprint.set(cause.fingerprint, { cause, findings: [finding] });
       else group.findings.push(finding);
