@@ -41,6 +41,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:run-register');
 
 /** Resolved from `PATH`: the hook runs in the user's environment, and this is what lets tests substitute a stub. */
 const VERB_BINARY = 'lore';

@@ -43,6 +43,8 @@
 
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:subagent-stop-commit-guard');
 
 /** Allow termination. Used for every non-blocking path, including all failures. */
 function allow() {

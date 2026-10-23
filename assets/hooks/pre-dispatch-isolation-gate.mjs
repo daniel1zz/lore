@@ -44,6 +44,8 @@
 
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-dispatch-isolation-gate');
 
 /** Subagent types whose purpose is writing source/tests. See module doc for why this list is short. */
 const WRITING_AGENTS = new Set(['lore-implementer']);

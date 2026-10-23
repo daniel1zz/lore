@@ -3,8 +3,8 @@
  *
  * Purpose: every autonomy decision made through the service layer is appended to the hash-chained decision log,
  * and the EFFECTIVE verdict of a (class, subject, version) is answered from that log, never from a re-score.
- * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, readPending, readDecisionViews, readAuditItemViews, readDecisionView (pure reads), getPending,
- *   resolvePending, governed, preview, calibration, listAudit, getAudit, resolveAudit, calibrationStats}, DecisionSubject,
+ * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, readPending, readDecisionViews, readDecisionView (pure reads), getPending,
+ *   resolvePending, governed, preview, calibration, calibrationStats}, DecisionSubject,
  *   DecideOutcome.
  * Invariants:
  *   - INV-2 (plan): no public method accepts caller-provided factor values. `decide` takes MEASURED FACTS
@@ -24,8 +24,8 @@
  *   - AC-AU-8: C is COMPUTED here from the class's recorded outcomes (Wilson bound over the last 50 observed
  *     outcomes + 50 pseudo-outcomes at the governed prior) and written into the recorded facts. A caller that passes
  *     `facts.confidence` is refused (VALIDATION_ERROR): there is no caller-supplied C anywhere.
- *   - AC-AU-10: `listAudit` / `resolveAudit` expose the sampling floor's queue; `resolveAudit` is the only writer
- *     of human-tty audit outcomes and demands a HumanChannelProof.
+ *   - No auto decision is queued for a human audit (AC-LG-14): the only human-tty rows this service writes are
+ *     `resolvePending` answers to blocking escalations.
  * Side-effect class: IO (decision_log appends through the injected store; clock via the injected `now`).
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2, AC-AU-3;
@@ -35,8 +35,6 @@ import { decide, err, ok, validationError, type AutonomyDecision, type LoreError
 import {
   AutonomyCalibrationService,
   classConfidence,
-  deriveAuditQueue,
-  type AuditItem,
   type ClassCalibrationStats,
   type ReversalProbe,
 } from "./autonomy-calibration-service.js";
@@ -107,16 +105,11 @@ export interface DecisionServiceDeps {
   readonly reversalProbes?: readonly ReversalProbe[];
 }
 
-/** Which queue a {@link DecisionReadView} belongs to: a blocking open decision, or a non-blocking audit item. */
-export type DecisionReadKind = "decision" | "audit";
-
 /**
- * What the dashboard shows for one open decision or audit item. `summary` is the shared renderer's line (the stored
- * summary or the exact "no detail recorded" label); `detail` is the parsed detail or null. `recommendation` is null
- * for an audit item: nothing was escalated, so nothing recommends an answer.
+ * What the dashboard shows for one open (blocking) decision. `summary` is the shared renderer's line (the stored
+ * summary or the exact "no detail recorded" label); `detail` is the parsed detail or null.
  */
 export interface DecisionReadView {
-  readonly kind: DecisionReadKind;
   readonly id: number;
   readonly class: string;
   readonly subject_id: string;
@@ -131,8 +124,6 @@ export interface DecisionReadView {
   readonly recommendation: { readonly answer: RecommendedAnswer; readonly reason: string } | null;
   /** Command text only; answering stays on the human TTY channel. */
   readonly answer_commands: { readonly accept: string; readonly reject: string };
-  /** Audit items only: 1-based sample position within the class. */
-  readonly audit_sequence: number | null;
 }
 
 function answerCommands(id: number): DecisionReadView["answer_commands"] {
@@ -152,7 +143,6 @@ function parseDetail(raw: string | null | undefined): DecisionDetail | null {
 
 function openDecisionView(p: PendingDecision): DecisionReadView {
   return {
-    kind: "decision",
     id: p.id,
     class: p.class,
     subject_id: p.subject_id,
@@ -166,32 +156,7 @@ function openDecisionView(p: PendingDecision): DecisionReadView {
     detail: parseDetail(p.detail),
     recommendation: { answer: p.recommended, reason: p.recommended_reason },
     answer_commands: answerCommands(p.id),
-    audit_sequence: null,
   };
-}
-
-function auditItemView(row: DecisionLogRow, sequence: number): Result<DecisionReadView, LoreError> {
-  const factors = parseRowFactors(row);
-  if (!factors.ok) return factors;
-  const reasons = parseRowReasons(row);
-  if (!reasons.ok) return reasons;
-  return ok({
-    kind: "audit",
-    id: row.id,
-    class: row.class,
-    subject_id: row.subject_id,
-    subject_version: row.subject_version,
-    opened_at: row.ts,
-    score: row.score,
-    threshold: row.threshold,
-    factors: factors.value,
-    reasons: reasons.value,
-    summary: renderDecisionDetailSummary(row),
-    detail: parseDetail(row.detail),
-    recommendation: null,
-    answer_commands: answerCommands(row.id),
-    audit_sequence: sequence,
-  });
 }
 
 export class DecisionService {
@@ -334,21 +299,6 @@ export class DecisionService {
     });
   }
 
-  /** The audit queue (1 in 10 auto decisions per class), separate from the blocking escalations of `listPending`. */
-  async listAudit(): Promise<Result<AuditItem[], LoreError>> {
-    return this.calibration().auditQueue();
-  }
-
-  /** One audit item by the decision id `lore decide` takes, or null. */
-  async getAudit(decisionId: number): Promise<Result<AuditItem | null, LoreError>> {
-    return this.calibration().getAuditItem(decisionId);
-  }
-
-  /** Human-tty audit answer: `right` -> stood, `wrong` -> reversed. Demands a HumanChannelProof. */
-  async resolveAudit(decisionId: number, answer: "right" | "wrong", reason: string | undefined, proof: HumanChannelProof): Promise<Result<DecisionLogRow, LoreError>> {
-    return this.calibration().recordAudit(decisionId, answer, reason, proof);
-  }
-
   /** Outcome-based counts per class (BR-1005), computed against the GOVERNED registry. */
   async calibrationStats(): Promise<Result<ClassCalibrationStats[], LoreError>> {
     const registry = this.deps.registry === undefined ? await this.governedRegistry() : ok(this.deps.registry);
@@ -458,32 +408,11 @@ export class DecisionService {
     return ok(pending.value.map(openDecisionView));
   }
 
-  /** PURE read: every audit item (sampled auto decision awaiting a human answer) as a view, id ASC. Appends nothing. */
-  async readAuditItemViews(): Promise<Result<DecisionReadView[], LoreError>> {
-    const rows = await this.deps.store.listDecisionLog();
-    if (!rows.ok) return rows;
-    const queue = deriveAuditQueue(rows.value);
-    if (!queue.ok) return queue;
-    const views: DecisionReadView[] = [];
-    for (const item of queue.value) {
-      const row = rows.value.find((r) => r.id === item.id);
-      if (row === undefined) return err({ code: "STORE_ERROR", message: `audit item ${item.id} has no decision_log row` });
-      const view = auditItemView(row, item.sequence);
-      if (!view.ok) return view;
-      views.push(view.value);
-    }
-    return ok(views);
-  }
-
-  /** PURE read: one open decision or audit item by the id `lore decide` takes, or null when neither exists. */
+  /** PURE read: one open decision by the id `lore decide` takes, or null when it is not open. */
   async readDecisionView(id: number): Promise<Result<DecisionReadView | null, LoreError>> {
     const open = await this.readDecisionViews();
     if (!open.ok) return open;
-    const decision = open.value.find((v) => v.id === id);
-    if (decision !== undefined) return ok(decision);
-    const audit = await this.readAuditItemViews();
-    if (!audit.ok) return audit;
-    return ok(audit.value.find((v) => v.id === id) ?? null);
+    return ok(open.value.find((v) => v.id === id) ?? null);
   }
 
   /** Appends a closing marker for every open escalation that is stale; returns how many markers were appended. */

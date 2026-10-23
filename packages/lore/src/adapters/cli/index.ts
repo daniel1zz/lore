@@ -210,6 +210,7 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // trace (SPEC-102) — `lore trace stats`, read/deny observability
     // aggregation surface; see commands/trace.ts's module header.
     trace: () => import("./commands/trace.js"),
+    checks: () => import("./commands/checks.js"),
     // territory / session (spec-multi-session-concurrency-queryable-
     // ownership-checkout §Scope L0, AC-OWN-1/AC-OWN-5) — the two read-only
     // ownership surfaces: `territory` partitions every worktree/branch

@@ -39,6 +39,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-tool-harness-run');
 
 /** Resolved from `PATH`, as for the other blind-pipe hooks. */
 const VERB_BINARY = 'lore';

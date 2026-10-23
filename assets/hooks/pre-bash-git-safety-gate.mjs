@@ -102,6 +102,8 @@ import { spawnSync } from 'node:child_process';
 // GENERATED copy of packages/core/src/shell-cwd.ts (single source; scripts/sync-hook-shell-cwd.ts --check keeps it
 // identical). The ONE cwd-aware shell parser: this hook has no `cd` / `$VAR` handling of its own.
 import { parseShellCommand } from './lib/shell-cwd.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-bash-git-safety-gate');
 
 let payload;
 try {

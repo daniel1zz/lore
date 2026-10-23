@@ -7,6 +7,8 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-no-general-agent-gate');
 
 let payload = {};
 try {

@@ -26,6 +26,8 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { deriveClaudeCodeRunId } from './lib/run-id.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:run-end');
 
 /** Resolved from `PATH`, same as run-register.mjs; lets tests substitute a stub. */
 const VERB_BINARY = 'lore';

@@ -24,6 +24,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:subagent-context');
 
 const SPAWN_TIMEOUT_MS = 8000;
 
