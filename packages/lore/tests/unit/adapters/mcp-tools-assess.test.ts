@@ -174,7 +174,7 @@ describe("lore_assess — milestone review HAPPY (BR-1372)", () => {
     const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as { review: DocRecord };
     const stored = data.review.extra["milestone_review"] as { fingerprint: string; plan_id: string };
     expect(stored.plan_id).toBe(planId);
-    expect(stored.fingerprint).toMatch(/^plan:.+@\d+\|tasks:.+\|landed:none$/);
+    expect(stored.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     const docs = await corpusService.listMilestoneReviewDocs(planId);
     expect(docs.ok && docs.value.map((d) => d.id)).toEqual([data.review.id]);
   });

@@ -540,7 +540,7 @@ describe("milestone review gates close", () => {
     const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
     const plan = { id: "P1", slug: "plan-p1", title: "Plan P1", content: "x", version: 1, extra: {} };
     const task = { id: "T1", slug: "task-t1", title: "T1", content: "x", status: "archived", version: 1, extra: {} };
-    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x" };
+    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x", extra: {} };
     let cited: { rule_id: string; state: string; unknown_reason?: string }[] = [];
     const judgeFailsSnapshot = judgeAnswer({ snapshot_accuracy: { verdict: "fail", reason: "rule BR-1 looks stale", reference: "doc drift" } });
     const service = new MilestoneReviewService({
@@ -572,7 +572,7 @@ describe("milestone review gates close", () => {
   async function refreshHarness(acResult: "pass" | "fail") {
     const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
     const stored: { overall: string; dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
-    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x" };
+    const spec = { id: "S1", slug: "spec-s1", title: "S1", content: "x", extra: {} };
     const bundleOf = (slug: string) => ({
       plan: { id: slug, slug, title: slug, content: "x", version: 1, extra: {} },
       tasks: [{ id: `T-${slug}`, slug: `task-${slug}`, title: "T", content: "x", status: "archived", version: 1, extra: {} }],
@@ -712,9 +712,12 @@ describe("milestone review gates close", () => {
     const rows = (JSON.parse(filed.stdout) as { data: { rows: (AssessRow & { filed_issues?: number[] })[] } }).data.rows;
     expect(rows[0]?.outcome).toBe("FAIL");
     expect(rows[0]?.filed_issues).toEqual([1, 2]);
-    // one issue per failed dimension: title names plan and dimension, body carries the finding.
+    // one issue per root-cause fingerprint (BR-1379): the title names the dimension and ends with `[fp:<12 hex>]`, the
+    // body carries the finding and the full fingerprint.
     const posts = readFileSync(join(judgeDir, "gh-state", "posts.log"), "utf8").trim().split("\n");
-    expect(posts).toEqual([`${plan}: regression`, `${plan}: security`]);
+    expect(posts).toHaveLength(2);
+    expect(posts[0]).toMatch(/^regression: .* \[fp:[0-9a-f]{12}\]$/);
+    expect(posts[1]).toMatch(/^security: .* \[fp:[0-9a-f]{12}\]$/);
     const listed = JSON.parse(readFileSync(join(judgeDir, "gh-state", "issues.json"), "utf8")) as { body: string }[];
     expect(listed[0]?.body).toContain("breaks the old path");
     expect(listed[1]?.body).toContain("unvalidated input reaches a shell");

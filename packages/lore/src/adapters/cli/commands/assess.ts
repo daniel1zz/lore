@@ -24,9 +24,15 @@
  *
  * Inputs measured once per batch (Part D): before the first review `assess` runs `bun run check:plan-close` and
  * `bun run test` ONCE on main's HEAD in a throwaway worktree (`assess-suite-runner.ts`) and hands that one result to
- * every plan's regression dimension. `--file-issues` then files one GitHub issue per failed dimension (title
- * `<plan>: <dimension>`) through the report-issue path and links each to its plan (`assess-file-issues.ts`); plan close
- * accepts a failing review when every failed dimension has such an OPEN linked issue ("accepted with known defects").
+ * every plan's regression dimension. `--file-issues` then files the failed findings BY ROOT CAUSE (BR-1379): one GitHub
+ * issue per fingerprint (title `<dimension>: <cause> [fp:<12 hex>]`, full fingerprint in the body), an open issue with
+ * the fingerprint is linked instead of duplicated, and each issue is linked to every plan sharing it
+ * (`IssueFilingService` over `assess-file-issues.ts`); plan close accepts a failing review when every failed dimension
+ * has such an OPEN linked issue ("accepted with known defects").
+ *
+ * `--where needs-review` selects the post-landing trigger set; `--close` runs the review batch under the store lease
+ * (judge only when no valid review matches the plan's fingerprint, file by root cause, archive). `lore integrate` starts
+ * `lore assess --where needs-review --file-issues --close` detached after a landing.
  *
  * The logic lives in `MilestoneReviewService`; this file resolves flags, derives each plan's diff, renders rows.
  */
