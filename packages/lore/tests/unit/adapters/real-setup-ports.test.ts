@@ -392,8 +392,6 @@ const DECLARED_FILES_IN_SCOPE = [
   // stop-turn-review turn-state producers (issue #156)
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
-  // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
-  "hooks/stop-handoff-coverage.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
   // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
@@ -416,8 +414,6 @@ const DECLARED_FILES_IN_SCOPE = [
   // the anchor gate's two libraries: the top-level-symbol scan of an Edit, and the files a Bash command writes
   "hooks/lib/top-level-symbols.mjs",
   "hooks/lib/shell-writes.mjs",
-  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
-  "hooks/post-edit-bindings.mjs",
   // shared cwd-aware shell parser, generated from packages/core/src/shell-cwd.ts (DCL-4)
   "hooks/lib/shell-cwd.mjs",
   "hooks/lib/turn-state.mjs",
