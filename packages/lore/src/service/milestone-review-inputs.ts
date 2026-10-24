@@ -290,28 +290,52 @@ export interface DimensionCoverage {
   readonly issues: readonly number[];
 }
 
+/** The issue carrier's `extra` field that records which milestone findings (dimension + fingerprint) the issue files. */
+export const MILESTONE_FINDINGS_FIELD = "milestone_findings";
+
+/** One finding an issue covers: written when the batch files or links the issue, read by plan close. */
+export const milestoneFindingSchema = z.object({
+  dimension: z.string().min(1),
+  fingerprint: z.string().min(1),
+});
+export type MilestoneFinding = z.infer<typeof milestoneFindingSchema>;
+
 /**
- * Accepted with known defects (Part D): a failed dimension is covered by an OPEN issue that is linked to the plan and
- * whose title names the dimension (`--file-issues` titles are `<plan>: <dimension>`).
+ * The findings recorded on an issue carrier's `extra`.
+ *
+ * @param extra - an issue task's `extra`
+ * @returns the valid recorded findings; `[]` when none are recorded (an issue linked by hand covers nothing)
+ */
+export function readMilestoneFindings(extra: unknown): MilestoneFinding[] {
+  if (extra === null || typeof extra !== "object") return [];
+  const raw = (extra as Record<string, unknown>)[MILESTONE_FINDINGS_FIELD];
+  const parsed = z.array(milestoneFindingSchema).safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Accepted with known defects (Part D, BR-1379): a failed dimension is covered by an OPEN issue that is linked to the
+ * plan and whose carrier records that dimension (`milestone_findings`, written when the batch files or links the
+ * issue). The issue title is never read.
  *
  * @param failed - the failed dimension ids of the current review
- * @param linked - the issues linked to the plan: `{number, repoId?}` read from the linked issue tasks
+ * @param linked - the issues linked to the plan: `{number, repoId?, dimensions}` read from the linked issue tasks
  * @param listing - the live open issues
  * @returns accepted only when `failed` is non-empty and every entry is covered
  */
 export function coverFailedDimensions(
   failed: readonly string[],
-  linked: readonly { readonly number: number; readonly repoId?: number }[],
+  linked: readonly { readonly number: number; readonly repoId?: number; readonly dimensions: readonly string[] }[],
   listing: OpenIssueListing,
 ): DimensionCoverage {
-  const linkedOpen = listing.open.filter((issue) =>
-    linked.some((l) => l.number === issue.number && (l.repoId === undefined || l.repoId === listing.repoId)),
-  );
+  const linkedOpen = listing.open.flatMap((issue) => {
+    const carrier = linked.find((l) => l.number === issue.number && (l.repoId === undefined || l.repoId === listing.repoId));
+    return carrier === undefined ? [] : [{ number: issue.number, dimensions: carrier.dimensions }];
+  });
   const byDimension: Record<string, number[]> = {};
   const uncovered: string[] = [];
   for (const dimension of failed) {
-    const needle = dimension.toLowerCase();
-    const numbers = linkedOpen.filter((i) => i.title.toLowerCase().includes(needle)).map((i) => i.number);
+    const numbers = linkedOpen.filter((i) => i.dimensions.includes(dimension)).map((i) => i.number);
     byDimension[dimension] = numbers;
     if (numbers.length === 0) uncovered.push(dimension);
   }

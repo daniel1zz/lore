@@ -21,9 +21,9 @@
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
 import { hasIssueReport } from "../../service/issue-resolution.js";
-import type { IssuePort, IssueRef } from "../../service/issue-filing-service.js";
+import type { IssueFinding, IssuePort, IssueRef } from "../../service/issue-filing-service.js";
 import { FINGERPRINT_TITLE_TAG } from "../../service/root-cause-fingerprint.js";
-import type { PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
+import { MILESTONE_FINDINGS_FIELD, readMilestoneFindings, type PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
 import { readGithubIssueRef } from "../../service/resolution-projector.js";
 import { fileGithubIssue, type GithubFilingContext, type GithubUpstreamCfg } from "./report-issue-wiring.js";
 
@@ -75,7 +75,7 @@ export function createGithubIssuePort(
       if (!result.ok) return result;
       return ok({ number: result.value.number, url: result.value.url });
     },
-    linkToPlan: (plan, issue) => linkIssueToPlan(corpusService, plan, issue, cfg.repo, ctx.actor),
+    linkToPlan: (plan, issue, finding) => linkIssueToPlan(corpusService, plan, issue, finding, cfg.repo, ctx.actor),
   };
 }
 
@@ -83,6 +83,7 @@ async function linkIssueToPlan(
   corpusService: CorpusService,
   planRef: string,
   issue: IssueRef,
+  finding: IssueFinding,
   repo: string,
   actor: string,
 ): Promise<Result<void, LoreError>> {
@@ -102,6 +103,17 @@ async function linkIssueToPlan(
       message: `issue #${String(issue.number)} exists but no corpus issue task carries it, so it cannot be linked to plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type resolves\``,
       rule: "BR-1379",
     });
+  }
+  // reason: BR-1379 — the record on the carrier (not the title) is what plan close reads as coverage. Written BEFORE the
+  // link so a link never exists without the record; an unchanged record writes nothing (idempotent retry).
+  const recorded = readMilestoneFindings(issueTask.extra);
+  if (!recorded.some((f) => f.dimension === finding.dimension && f.fingerprint === finding.fingerprint)) {
+    const written = await corpusService.set(
+      issueTask.id,
+      { extra: { ...(issueTask.extra as Record<string, unknown>), [MILESTONE_FINDINGS_FIELD]: [...recorded, { dimension: finding.dimension, fingerprint: finding.fingerprint }] } },
+      { by: actor },
+    );
+    if (!written.ok) return written;
   }
   const linked = await corpusService.link(bundle.value.plan.id, issueTask.id, "resolves", { by: actor });
   if (!linked.ok && linked.error.code !== "DUPLICATE_LINK") return linked;

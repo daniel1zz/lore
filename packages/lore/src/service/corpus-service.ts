@@ -109,7 +109,7 @@ import {
   type CitedRuleStateRow,
   type MilestoneReviewCurrency,
 } from "./milestone-review.js";
-import { coverFailedDimensions, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { coverFailedDimensions, readMilestoneFindings, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
 import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
 import { readGithubIssueRef } from "./resolution-projector.js";
 import type { RuleStateFull } from "./rule-state-service.js";
@@ -1235,13 +1235,19 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (port === undefined) return currency;
     const links = await this.store.findLinks(planId, "out");
     if (!links.ok) return currency;
-    const linked: { number: number; repoId?: number }[] = [];
+    const linked: { number: number; repoId?: number; dimensions: string[] }[] = [];
     for (const link of links.value) {
       if (link.link_type !== "resolves" || link.from_id !== planId) continue;
       const target = await this.store.find(link.to_id);
       if (!target.ok || target.value === null || target.value.deleted_at !== null) continue;
       const ref = readGithubIssueRef(target.value.extra);
-      if (ref !== undefined) linked.push({ number: ref.issueNumber, ...(ref.repo_id !== undefined ? { repoId: ref.repo_id } : {}) });
+      if (ref !== undefined) {
+        linked.push({
+          number: ref.issueNumber,
+          ...(ref.repo_id !== undefined ? { repoId: ref.repo_id } : {}),
+          dimensions: readMilestoneFindings(target.value.extra).map((f) => f.dimension),
+        });
+      }
     }
     if (linked.length === 0) return currency;
     const listing = await port.listOpenIssues();
