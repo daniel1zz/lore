@@ -10,8 +10,9 @@
  * Public surface:
  *   - `GitHubIntakePort` — `new GitHubIntakePort(options)`, then
  *     `verifyTarget()` / `searchDuplicates(title, limit)` /
- *     `fileIssue(input)` / `listIssues()`. Exactly these four ops — never a
- *     fifth public method (the retry/idempotency-lookup orchestration that
+ *     `fileIssue(input)` / `listIssues()`, plus the plan-close reader
+ *     `listOpenIssues()` (all pages, open only, no PRs; #402). Exactly the
+ *     four spec ops and that one read — never another public method (the retry/idempotency-lookup orchestration that
  *     needs to run BEFORE `fileIssue` is a caller concern, wired in
  *     `adapters/cli/report-issue-wiring.ts::fileGithubIssue`, precisely so
  *     this class's own surface stays the four ops the spec names).
@@ -390,6 +391,44 @@ export class GitHubIntakePort {
   }
 
   /**
+   * Lists every OPEN issue (never a pull request) across ALL pages — the plan-close coverage reader (BR-1372, #402).
+   * One `gh api --paginate --slurp` call: `--slurp` wraps the pages into one array of arrays, so a page boundary can
+   * never hide an open issue older than the newest 100. `state=open` is part of the query, and `state` and
+   * `pull_request` are checked again on every entry so a closed issue or a PR can never count as coverage.
+   *
+   * @returns `ok(openIssues[])`, or `err(...)` on a failing `gh` call or a payload that is not an array of pages
+   */
+  async listOpenIssues(): Promise<Result<GithubListedIssue[], LoreError>> {
+    const listResult = await this.runner.run(["api", `repos/${this.repo}/issues?state=open&per_page=100`, "--paginate", "--slurp"]);
+    if (!listResult.ok) return listResult;
+
+    const parsed = z.array(z.array(GithubIssueListEntrySchema)).safeParse(parseJsonSafely(listResult.value.stdout));
+    if (!parsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_issues_open_list_response",
+        message: `gh returned an open-issues payload this module could not parse: ${parsed.error.message}`,
+        value: listResult.value.stdout,
+      });
+    }
+
+    return ok(
+      parsed.data
+        .flat()
+        // reason: the issues endpoint lists pull requests too (they carry `pull_request`); a PR never covers a dimension.
+        .filter((entry) => entry.state === "open" && entry.pull_request === undefined)
+        .map((entry) => ({
+          number: entry.number,
+          title: entry.title,
+          state: entry.state,
+          body: entry.body ?? "",
+          labels: entry.labels.map((label) => label.name),
+          ...(entry.created_at !== undefined ? { createdAt: entry.created_at } : {}),
+        })),
+    );
+  }
+
+  /**
    * Lists every issue in the target repo (open and closed) in ONE batched
    * `gh api` call — AC-GI-12: the call count for N=1 equals the call count
    * for N=50, never one call per issue. Each returned
@@ -399,6 +438,9 @@ export class GitHubIntakePort {
    * `--verify` (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam)
    * reads the current `resolution:*` label off THIS call's result rather
    * than issuing a second `gh api` call per repo.
+   *
+   * Not paginated by design (newest 100): the duplicate search and the read surfaces want a bounded recent view;
+   * plan-close coverage needs completeness and uses {@link listOpenIssues} (#402).
    *
    * @returns `ok(issues[])`, or `err(...)` on the first failing `gh` call
    *   or a malformed response body

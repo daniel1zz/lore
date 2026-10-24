@@ -1701,11 +1701,12 @@ function wirePlanCloseIssues(app: App, config: LoreConfig | undefined, ambient: 
       const port = new GitHubIntakePort({ runner, repo, receiptsPath: join(dirname(dbPath), "issue-receipts-v2.jsonl") });
       const verified = await port.verifyTarget();
       if (!verified.ok) return verified;
-      const listed = await port.listIssues();
+      // reason: #402 — plan close needs EVERY open issue (all pages), not the newest 100 of any state.
+      const listed = await port.listOpenIssues();
       if (!listed.ok) return listed;
       return ok({
         repoId: verified.value.id,
-        open: listed.value.filter((issue) => issue.state === "open").map((issue) => ({ number: issue.number, title: issue.title })),
+        open: listed.value.map((issue) => ({ number: issue.number, title: issue.title })),
       });
     },
   });

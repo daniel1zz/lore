@@ -164,6 +164,7 @@ const path = args[1];
 if (path === "user") console.log(JSON.stringify({ login: "fake" }));
 else if (path === "repos/o/r") console.log(JSON.stringify({ id: 777 }));
 else if (path === "repos/o/r/issues?state=all&per_page=100") console.log(JSON.stringify(issues()));
+else if (path === "repos/o/r/issues?state=open&per_page=100" && args.includes("--paginate")) console.log(JSON.stringify([issues().filter((i) => i.state === "open")]));
 else if (path === "repos/o/r/issues" && args.includes("POST")) {
   const field = (name) => (args.find((a) => a.startsWith(name + "=")) ?? "").slice(name.length + 1);
   const all = issues();
