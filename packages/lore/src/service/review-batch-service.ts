@@ -12,7 +12,7 @@
  *   - Level-triggered: a plan is in the trigger set because of its CURRENT state (complete, not archived, and its
  *     latest valid review does not match the current fingerprint / its filing or close is unfinished / its owner
  *     decision is resolved), never because of an event.
- *   - Awaiting owner (a current review lists retired ACs and the decision is still pending) is NOT in the set; the
+ *   - Awaiting owner (a current review lists retired ACs and the decision is still pending) is NOT in the set, unless that decision no longer matches the plan's current retired list (then it is, so settle withdraws it); the
  *     plan stays complete, not archived, and is not an anomaly.
  *   - Each plan is judged at most once per fingerprint: a review row at the current fingerprint is never re-judged;
  *     an errored attempt is an audit row (`milestone-batch-error`), not a review, so it does not count and the next
@@ -93,6 +93,8 @@ export interface ReviewTriggerDeps {
   readonly listReviewDocs: (planId: string) => Promise<Result<DocRecord[], LoreError>>;
   /** Subject ids with an open pending decision (pure read; nothing is appended). */
   readonly pendingDecisionSubjects: () => Promise<Result<ReadonlySet<string>, LoreError>>;
+  /** True when the plan's pending owner decision lists retirements that differ from its current list (pure read); absent = not wired. */
+  readonly hasStaleOwnerDecision?: (bundle: PlanBundle) => Promise<Result<boolean, LoreError>>;
   /** Titles of the OPEN issues linked (`resolves`) to the plan. */
   readonly linkedOpenIssueTitles: (planId: string) => Promise<Result<string[], LoreError>>;
   /** True when a live lease is held (reads only). */
@@ -210,7 +212,14 @@ export class ReviewTriggerService {
       if (!bundle.ok) return bundle;
       const facts = await planFactsOf(this.deps, bundle.value, progress.state, pending.value);
       if (!facts.ok) return facts;
-      const need = classifyPlan(facts.value);
+      let need = classifyPlan(facts.value);
+      if (need === "awaiting-owner" && this.deps.hasStaleOwnerDecision !== undefined) {
+        // reason: a pending owner decision that no longer matches the plan's retired list is withdrawn by the batch's settle;
+        // without this the plan never reaches settle and the stale question stays in `lore pending` (#354).
+        const stale = await this.deps.hasStaleOwnerDecision(bundle.value);
+        if (!stale.ok) return stale;
+        if (stale.value) need = "owner-resolved";
+      }
       if (need !== "none") set.push({ plan: plan.slug, planId: plan.id, need, completeAt: progress.at, ...(facts.value.unfileableReview !== undefined ? { reviewProblem: facts.value.unfileableReview } : {}) });
     }
     return ok(set);

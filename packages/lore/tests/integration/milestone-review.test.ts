@@ -701,24 +701,28 @@ describe("milestone review gates close", () => {
     const bare = close(plan);
     expect(bare.exitCode).toBe(4);
     expect(bare.stderr).toContain("MILESTONE_REVIEW_FAILED");
-    // one failed dimension covered, the other not: refused.
+    // a hand-filed issue whose TITLE names the dimension and is linked to the plan covers nothing: coverage is the
+    // finding record on the issue's corpus task, never its title.
     expect(fileIssue(`${plan}: security`)).toBe(2);
     linkIssue(plan, 2);
-    const partial = close(plan);
-    expect(partial.exitCode).toBe(4);
+    const titled = close(plan);
+    expect(titled.exitCode).toBe(4);
     expect(statusOf(plan)).toBe("approved");
-    // both covered but the regression issue is CLOSED on GitHub: refused (only OPEN issues count).
-    expect(fileIssue(`${plan}: regression`)).toBe(3);
-    linkIssue(plan, 3);
-    setIssueState(3, "closed");
+    // the supported way: --file-issues records each failed dimension's finding on its issue and links it to the plan.
+    const filed = runLore(["assess", plan, "--file-issues", "--json"], tmpDir);
+    expect(filed.exitCode, filed.stderr).toBe(1);
+    const numbers = (JSON.parse(filed.stdout) as { data: { rows: (AssessRow & { filed_issues?: number[] })[] } }).data.rows[0]?.filed_issues ?? [];
+    expect(numbers).toHaveLength(2);
+    // a covering issue CLOSED on the tracker: refused (only OPEN issues count).
+    setIssueState(numbers[1] as number, "closed");
     expect(close(plan).exitCode).toBe(4);
-    // both open: the close is accepted and the audit records the issue numbers.
-    setIssueState(3, "open");
+    // all open: the close is accepted and the audit records the issue numbers.
+    setIssueState(numbers[1] as number, "open");
     const accepted = close(plan);
     expect(accepted.exitCode, accepted.stderr).toBe(0);
     expect(statusOf(plan)).toBe("archived");
     const audit = runLore(["audit", plan, "--json"], tmpDir);
-    expect(audit.stdout).toContain("accepted with known defects: #2, #3");
+    expect(audit.stdout).toContain(`accepted with known defects: #${String(numbers[0])}, #${String(numbers[1])}`);
   });
 
   it("milestone review gates close: --file-issues files one issue per failed dimension in one call, links them, and the close is then accepted", { timeout: 300_000 }, () => {
@@ -925,6 +929,48 @@ describe("milestone review gates close", () => {
     expect(after.pending_decision).toBeUndefined();
     expect(pendingIds()).toHaveLength(0);
     expect(close(plan).exitCode).toBe(0);
+  });
+
+  it("milestone review gates close: an unattributed old deprecation whose spec has no version history does not error settle for an unrelated plan (#353)", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("Unrelated plan"); // the deprecation below falls inside this plan's time range
+    const spec = createSpec("Old deprecated without history");
+    must(["ac", "add", spec, "AC-GONE-1", "--statement", "gone", "--mode", "human"]);
+    deprecateAs(spec, undefined, null); // a run with no claimed task: the deprecation belongs to no plan
+    // the spec's earlier versions are missing (history trimmed): reading the pre-deprecation status would fail
+    const trim = spawnSync(
+      "bun",
+      [
+        "-e",
+        `import { Database } from "bun:sqlite"; const db = new Database(${JSON.stringify(join(tmpDir, ".lore", "lore.db"))}); ` +
+          `const id = db.query("SELECT id FROM docs WHERE slug = ?").get(${JSON.stringify(spec)}).id; ` +
+          `const top = db.query("SELECT MAX(version) AS v FROM versions WHERE doc_id = ?").get(id).v; ` +
+          `db.query("DELETE FROM versions WHERE doc_id = ? AND version < ?").run(id, top);`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(trim.status, trim.stderr).toBe(0);
+    const result = assessRows([plan]);
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("to read the pre-deprecation status from");
+    expect(result.rows[0]).toMatchObject({ plan });
+    expect((result.rows[0] as AssessRow & { retired_acs?: unknown }).retired_acs).toBeUndefined();
+    expect(pendingIds()).toHaveLength(0);
+  });
+
+  it("milestone review gates close: an awaiting-owner plan whose pending decision lists retirements that no longer match is in the trigger set; the batch withdraws it and the plan proceeds", { timeout: 300_000 }, () => {
+    const { plan, task } = makePlan("Stale owner decision");
+    const specs = retireTwoAcs(task);
+    // the plan is complete (every member terminal) so it is in the batch's reach
+    must(["bulk", "deprecate", task, "--apply", "--reason", "work abandoned"]);
+    const first = assessRows([plan]).rows[0] as AssessRow & { pending_decision?: number };
+    expect(typeof first.pending_decision).toBe("number");
+    expect(pendingIds()).toEqual([first.pending_decision]);
+    must(["delete", specs.old, "--confirm"]); // the plan's attributed list is now empty
+    const batch = assessRows(["--where", "needs-review", "--close"]);
+    expect(batch.exitCode, batch.stderr).toBe(0);
+    expect(batch.rows.map((r) => r.plan)).toEqual([plan]);
+    expect(pendingIds()).toHaveLength(0);
+    expect(statusOf(plan)).toBe("archived");
   });
 
   it("milestone review gates close: a failing review with no linked open issue still refuses the close (exit 4, BR-1372)", { timeout: 300_000 }, () => {

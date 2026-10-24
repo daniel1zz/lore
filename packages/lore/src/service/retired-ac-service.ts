@@ -50,7 +50,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 /** The ports this service needs. */
 export interface RetiredAcDeps {
   readonly store: Pick<StoreInterface, "findMany" | "queryAudit" | "findVersions">;
-  readonly decisions: Pick<DecisionService, "decide" | "listPending" | "withdrawPending">;
+  readonly decisions: Pick<DecisionService, "decide" | "listPending" | "readPending" | "withdrawPending">;
   readonly listDecisionLog: () => Promise<Result<DecisionLogRow[], LoreError>>;
   /** Clears one supersession (matched by its `at`); `ok(false)` when nothing matched. */
   readonly restoreCriterion: (spec: string, ac: string, at: string, reason: string) => Promise<Result<boolean, LoreError>>;
@@ -155,6 +155,24 @@ export class RetiredAcService {
     return ok({ state: "pending", retired, pendingId: raised.value });
   }
 
+  /**
+   * True when this plan has an open retirement decision that no longer matches its current attributed list (a
+   * different subject version, or the list is now empty): `settle` would withdraw it (#354). A pure read.
+   */
+  async hasStalePendingDecision(bundle: PlanBundle): Promise<Result<boolean, LoreError>> {
+    const subjectId = retirementSubjectId(bundle.plan.slug);
+    const pending = await this.deps.decisions.readPending();
+    if (!pending.ok) return pending;
+    const open = pending.value.filter((p) => p.class === GOVERNANCE_LOOSEN_CLASS && p.subject_id === subjectId);
+    if (open.length === 0) return ok(false);
+    const collected = await this.collect(bundle);
+    if (!collected.ok) return collected;
+    if (collected.value.length === 0) return ok(true);
+    const fingerprint = planStateFingerprint(bundle.plan, bundle.tasks, bundle.spec);
+    const version = createHash("sha256").update(`${fingerprint}|${collected.value.map(instanceKey).sort().join(",")}`).digest("hex");
+    return ok(open.some((p) => p.subject_version !== version));
+  }
+
   private async findPending(subjectId: string, version: string): Promise<Result<number | undefined, LoreError>> {
     const pending = await this.deps.decisions.listPending();
     if (!pending.ok) return pending;
@@ -255,12 +273,15 @@ export class RetiredAcService {
     for (const spec of live) {
       const entry = latestDeprecation.get(spec.id as string);
       if (entry === undefined || spec.status !== "deprecated") continue;
-      const previous = await this.previousStatus(spec, entry);
-      if (!previous.ok) return previous;
+      const retiredInPlan = entry.details?.["retired_in_plan"];
+      // reason: a deprecation attributed to no plan is listed for none, so its version history is never read (#353:
+      // an old unattributed deprecation with trimmed history must not error an unrelated plan's settle).
+      if (typeof retiredInPlan !== "string" || retiredInPlan === "") continue;
       const criteria = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
       if (!criteria.success) continue;
+      const previous = await this.previousStatus(spec, entry);
+      if (!previous.ok) return previous;
       const reasonText = entry.details?.["reason"];
-      const retiredInPlan = entry.details?.["retired_in_plan"];
       for (const c of criteria.data) {
         if (c.superseded_by !== undefined) continue;
         found.push({
@@ -269,7 +290,7 @@ export class RetiredAcService {
           ac: c.id,
           reason: typeof reasonText === "string" && reasonText.length > 0 ? reasonText : "spec deprecated",
           at: entry.timestamp,
-          ...(typeof retiredInPlan === "string" && retiredInPlan !== "" ? { retiredInPlan } : {}),
+          retiredInPlan,
           previous_status: previous.value,
         });
       }
