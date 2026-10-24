@@ -33,6 +33,7 @@ import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js"
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementState } from "../../src/service/milestone-review.js";
+import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { issueTitleOf, rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
 import { ReviewBatchLease, REVIEW_BATCH_LEASE_NAME, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
@@ -564,7 +565,7 @@ function currentFingerprint(p: WorldPlan): string {
 /** The in-memory issue tracker the batch files into. */
 class FakeIssuePort implements IssuePort {
   readonly open: { number: number; title: string; body: string }[] = [];
-  readonly links: { plan: string; issue: number }[] = [];
+  readonly links: { plan: string; issue: number; dimensions: string[] }[] = [];
   filed = 0;
   failFilingOnce = false;
   async findOpenByFingerprint(short: string) {
@@ -581,8 +582,10 @@ class FakeIssuePort implements IssuePort {
     this.open.push({ number, title: input.title, body: input.body });
     return ok<IssueRef>({ number });
   }
-  async linkToPlan(plan: string, issue: IssueRef) {
-    if (!this.links.some((l) => l.plan === plan && l.issue === issue.number)) this.links.push({ plan, issue: issue.number });
+  async linkToPlan(plan: string, issue: IssueRef, finding: { dimension: string; fingerprint: string }) {
+    const hit = this.links.find((l) => l.plan === plan && l.issue === issue.number);
+    if (hit === undefined) this.links.push({ plan, issue: issue.number, dimensions: [finding.dimension] });
+    else if (!hit.dimensions.includes(finding.dimension)) hit.dimensions.push(finding.dimension);
     return ok(undefined);
   }
 }
@@ -626,10 +629,11 @@ class World {
       getPlanBundle: async (ref) => ok(this.find(ref).bundle),
       listReviewDocs: async (planId) => ok(this.find(planId).docs),
       pendingDecisionSubjects: async () => ok(opts.pending ?? new Set<string>()),
-      linkedOpenIssueTitles: async (planId) => {
+      // the real predicate over the fake tracker's recorded findings: a title is never read
+      issueCoverage: async (planId, failed) => {
         const slug = this.find(planId).slug;
-        const linked = new Set(this.issues.links.filter((l) => l.plan === slug).map((l) => l.issue));
-        return ok(this.issues.open.filter((i) => linked.has(i.number)).map((i) => i.title));
+        const linked = this.issues.links.filter((l) => l.plan === slug).map((l) => ({ number: l.issue, dimensions: l.dimensions }));
+        return ok(coverFailedDimensions(failed, linked, { repoId: 1, open: this.issues.open.map((i) => ({ number: i.number, title: i.title })) }));
       },
       isLeaseLive: async () => (opts.leaseLive !== undefined ? ok(opts.leaseLive) : this.lease("probe").isLive()),
       spawnBatch: () => {
@@ -1501,5 +1505,48 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
     expect((await closePlan(w)).ok).toBe(false);
     w.open.add(2);
     expect((await closePlan(w)).ok).toBe(true);
+  });
+});
+
+describe("AC-PCR-4 one coverage predicate decides filing-complete and plan close", () => {
+  it("HAPPY: an open issue with the fingerprint tag in its title but no finding record is re-linked (record written, nothing filed) and the plan is archived with known defects in the same batch", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-legacy"));
+    plan.failing = ["regression"];
+    plan.regressionFiles = ["legacy.test.ts"];
+    world.suiteFailingFiles = ["legacy.test.ts"];
+    const cause = causeOf({ plan: "p-legacy", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["legacy.test.ts"], suite_failing_files: ["legacy.test.ts"] } });
+    // an issue filed before the record existed: tag in the title, linked to the plan, no recorded dimension
+    world.issues.open.push({ number: 7, title: `regression: legacy ${`[fp:${cause.short}]`}`, body: "" });
+    world.issues.links.push({ plan: "p-legacy", issue: 7, dimensions: [] });
+    const run = await world.runner().runBatch(["p-legacy"], world.ports("batch-1"));
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects"]);
+    expect(world.issues.filed).toBe(0);
+    expect(world.issues.links).toEqual([{ plan: "p-legacy", issue: 7, dimensions: ["regression"] }]);
+    expect(plan.archived).toBe(true);
+  });
+
+  it("NEGATIVE: the trigger reports filing incomplete for a title-only issue (the record is what counts)", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-legacy2"));
+    plan.failing = ["regression"];
+    plan.regressionFiles = ["l2.test.ts"];
+    world.suiteFailingFiles = ["l2.test.ts"];
+    await world.judge("p-legacy2");
+    world.issues.open.push({ number: 8, title: "regression: anything [fp:whatever]", body: "" });
+    world.issues.links.push({ plan: "p-legacy2", issue: 8, dimensions: [] });
+    const deps = world.triggerDeps();
+    const coverage = await deps.issueCoverage(plan.bundle.plan.id, ["regression"]);
+    expect(coverage.ok && coverage.value.uncovered).toEqual(["regression"]);
+  });
+
+  it("REGRESSION: no title-based coverage check remains in the source", () => {
+    const root = join(__dirname, "../../src");
+    for (const file of ["service/review-batch-service.ts", "service/corpus-service.ts", "adapters/cli/review-batch-wiring.ts"]) {
+      const text = readFileSync(join(root, file), "utf8");
+      expect(text, file).not.toContain("listLinkedOpenIssueTitles");
+      expect(text, file).not.toContain("linkedOpenIssueTitles");
+    }
   });
 });

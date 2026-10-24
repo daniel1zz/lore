@@ -109,7 +109,7 @@ import {
   type CitedRuleStateRow,
   type MilestoneReviewCurrency,
 } from "./milestone-review.js";
-import { coverFailedDimensions, readMilestoneFindings, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { coverFailedDimensions, readMilestoneFindings, type DimensionCoverage, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
 import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
 import { readGithubIssueRef } from "./resolution-projector.js";
 import type { RuleStateFull } from "./rule-state-service.js";
@@ -1231,15 +1231,33 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     planId: string,
     currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
   ): Promise<MilestoneReviewCurrency> {
+    const coverage = await this.coverageOfFailedDimensions(planId, currency.failed);
+    if (!coverage.ok || !coverage.value.accepted) return currency;
+    return { state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues };
+  }
+
+  /**
+   * The ONE coverage predicate (BR-1372, BR-1379): which failed dimensions an OPEN issue linked to the plan covers,
+   * read from the `milestone_findings` record on the linked issue carriers, never from a title. Plan close and the
+   * review batch's "is filing complete" both decide from this.
+   *
+   * @param planId - the plan's document id
+   * @param failed - the failed dimension ids of the current review
+   * @returns the coverage; `err` when no open-issue reader is wired or a store/GitHub read failed (never read as "covered")
+   */
+  async coverageOfFailedDimensions(planId: string, failed: readonly string[]): Promise<Result<DimensionCoverage, LoreError>> {
     const port = this.planCloseIssuePort;
-    if (port === undefined) return currency;
+    if (port === undefined) {
+      return err({ code: "VALIDATION_ERROR", message: "issue coverage cannot be read: no open-issue reader is wired (no GitHub upstream configured)", field: "planCloseIssuePort", rule: "BR-1379" });
+    }
     const links = await this.store.findLinks(planId, "out");
-    if (!links.ok) return currency;
+    if (!links.ok) return links;
     const linked: { number: number; repoId?: number; dimensions: string[] }[] = [];
     for (const link of links.value) {
       if (link.link_type !== "resolves" || link.from_id !== planId) continue;
       const target = await this.store.find(link.to_id);
-      if (!target.ok || target.value === null || target.value.deleted_at !== null) continue;
+      if (!target.ok) return target;
+      if (target.value === null || target.value.deleted_at !== null) continue;
       const ref = readGithubIssueRef(target.value.extra);
       if (ref !== undefined) {
         linked.push({
@@ -1249,12 +1267,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         });
       }
     }
-    if (linked.length === 0) return currency;
     const listing = await port.listOpenIssues();
-    if (!listing.ok) return currency;
-    const coverage = coverFailedDimensions(currency.failed, linked, listing.value);
-    if (!coverage.accepted) return currency;
-    return { state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.issues };
+    if (!listing.ok) return listing;
+    return ok(coverFailedDimensions(failed, linked, listing.value));
   }
 
   /** Present iff {@link setArchiveIssueClosePort} was called. */
@@ -4722,28 +4737,6 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       docs.push(doc);
     }
     return ok(docs);
-  }
-
-  /**
-   * Titles of the issue tasks the plan links with `resolves` that are still open (live, not archived or deprecated).
-   * The review batch reads them to see which failed findings already have their issue filed (BR-1379).
-   *
-   * @param planId - the plan's document id
-   * @returns `ok(titles)` (possibly empty); a store read failure is returned as itself
-   */
-  async listLinkedOpenIssueTitles(planId: string): Promise<Result<string[], LoreError>> {
-    const links = await this.store.findLinks(planId, "out");
-    if (!links.ok) return links;
-    const titles: string[] = [];
-    for (const link of links.value) {
-      if (link.link_type !== "resolves" || link.from_id !== planId) continue;
-      const target = await this.store.find(link.to_id);
-      if (!target.ok) return target;
-      const doc = target.value;
-      if (doc === null || doc.deleted_at !== null || doc.status === "archived" || doc.status === "deprecated") continue;
-      titles.push(doc.title);
-    }
-    return ok(titles);
   }
 
   /** The live open-issue reader wired for plan close (`setPlanCloseIssuePort`); `undefined` when no GitHub upstream is configured. */

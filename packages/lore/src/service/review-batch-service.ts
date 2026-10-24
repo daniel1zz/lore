@@ -35,7 +35,8 @@ import type { MilestoneReviewResult } from "./milestone-review-service.js";
 import type { SuiteRun } from "./milestone-review-inputs.js";
 import { retirementSubjectId } from "./retired-ac-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
-import { fingerprintTag, rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
+import type { DimensionCoverage } from "./milestone-review-inputs.js";
+import { rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
 import { leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
 
 // reason: the constant lives in the pure acceptance view (bootstrap and checks stats read the same rows); re-exported so existing importers keep one name.
@@ -95,8 +96,8 @@ export interface ReviewTriggerDeps {
   readonly pendingDecisionSubjects: () => Promise<Result<ReadonlySet<string>, LoreError>>;
   /** True when the plan's pending owner decision lists retirements that differ from its current list (pure read); absent = not wired. */
   readonly hasStaleOwnerDecision?: (bundle: PlanBundle) => Promise<Result<boolean, LoreError>>;
-  /** Titles of the OPEN issues linked (`resolves`) to the plan. */
-  readonly linkedOpenIssueTitles: (planId: string) => Promise<Result<string[], LoreError>>;
+  /** The plan-close coverage predicate (`CorpusService.coverageOfFailedDimensions`): which failed dimensions an open linked issue's record covers. */
+  readonly issueCoverage: (planId: string, failed: readonly string[]) => Promise<Result<DimensionCoverage, LoreError>>;
   /** True when a live lease is held (reads only). */
   readonly isLeaseLive: () => Promise<Result<boolean, LoreError>>;
   /** Starts the detached batch process; returns once it is spawned (never waits for it). */
@@ -367,7 +368,7 @@ export class ReviewBatchRunner {
 
 /** The facts {@link classifyPlan} decides from, read from the plan's current state. */
 async function planFactsOf(
-  deps: Pick<ReviewTriggerDeps, "listReviewDocs" | "linkedOpenIssueTitles">,
+  deps: Pick<ReviewTriggerDeps, "listReviewDocs" | "issueCoverage">,
   bundle: PlanBundle,
   progressState: "in-progress" | "complete" | "empty",
   pending: ReadonlySet<string>,
@@ -385,10 +386,9 @@ async function planFactsOf(
       const unfileable = unfileableReviewError(bundle.plan.slug, latest.doc.slug, latest.review);
       if (unfileable !== undefined) unfileableReview = messageOf(unfileable);
       else {
-        const titles = await deps.linkedOpenIssueTitles(bundle.plan.id);
-        if (!titles.ok) return titles;
-        const tags = fileableTags(bundle.plan.slug, latest.doc.slug, latest.review);
-        filingIncomplete = tags.some((tag) => !titles.value.some((t) => t.includes(tag)));
+        const coverage = await deps.issueCoverage(bundle.plan.id, failedDimensions(latest.review.dimensions));
+        if (!coverage.ok) return coverage;
+        filingIncomplete = coverage.value.uncovered.length > 0;
       }
     }
     return ok({
@@ -414,9 +414,4 @@ function causesOfReview(planSlug: string, reviewSlug: string, review: MilestoneR
 export function unfileableReviewError(planSlug: string, reviewSlug: string, review: MilestoneReview): LoreError | undefined {
   for (const cause of causesOfReview(planSlug, reviewSlug, review)) if (!cause.ok) return cause.error;
   return undefined;
-}
-
-/** The fingerprint tags a fileable failing review needs an open issue for. */
-function fileableTags(planSlug: string, reviewSlug: string, review: MilestoneReview): string[] {
-  return causesOfReview(planSlug, reviewSlug, review).flatMap((cause) => (cause.ok ? [fingerprintTag(cause.value.short)] : []));
 }

@@ -121,7 +121,7 @@ export function buildReviewTriggerService(
       const pending = await decisions.readPending();
       return pending.ok ? ok(new Set(pending.value.map((p) => p.subject_id))) : pending;
     },
-    linkedOpenIssueTitles: (planId) => app.corpusService.listLinkedOpenIssueTitles(planId),
+    issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
     ...(retired !== undefined ? { hasStaleOwnerDecision: (bundle: PlanBundle) => retired.hasStalePendingDecision(bundle) } : {}),
     isLeaseLive: () => lease.isLive(),
     spawnBatch,
