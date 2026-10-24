@@ -28,9 +28,9 @@
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-3, AC-PCR-4, AC-PCR-5, BR-1379)
  */
 
-import { failedDimensions, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
+import { failedDimensions, milestoneReviewSchema, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
-import { planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
+import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
 import type { SuiteRun } from "./milestone-review-inputs.js";
 import { retirementSubjectId } from "./retired-ac-service.js";
@@ -327,7 +327,7 @@ export class ReviewBatchRunner {
     if (latest !== undefined && latest.review.fingerprint === fingerprint && latest.review.overall === "fail" && (latest.review.retired_acs?.length ?? 0) === 0) {
       const coverage = await this.deps.issueCoverage(planId, failedDimensions(latest.review.dimensions));
       if (!coverage.ok) return fail("review", fingerprint, coverage.error, false);
-      coverFixed = coverage.value.fixed.length > 0;
+      coverFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
     }
     if (latest === undefined || latest.review.fingerprint !== fingerprint || coverFixed) {
       const suite = await measureOnce();
@@ -400,7 +400,7 @@ async function planFactsOf(
         const coverage = await deps.issueCoverage(bundle.plan.id, failedDimensions(latest.review.dimensions));
         if (!coverage.ok) return coverage;
         filingIncomplete = coverage.value.uncovered.length > 0;
-        coveringIssueFixed = coverage.value.fixed.length > 0;
+        coveringIssueFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
       }
     }
     return ok({
@@ -411,6 +411,24 @@ async function planFactsOf(
       ...(unfileableReview !== undefined ? { unfileableReview } : {}),
     });
   }
+}
+
+/**
+ * True when the plan was already re-reviewed at `fingerprint` (two or more valid reviews of that fingerprint: the first
+ * verdict and a re-review it caused).
+ *
+ * reason: bounds the closed-cover loop (#397). A plan re-enters review for a closed covering issue once per
+ * fingerprint; if that re-review still fails and its filing then fails, the next batch retries the filing only. Without
+ * this, every batch re-judged the plan because the failed dimension's only linked issue stayed closed.
+ */
+function closedCoverAlreadyReviewed(docs: readonly DocRecord[], fingerprint: string): boolean {
+  let atFingerprint = 0;
+  for (const doc of docs) {
+    if (doc.type !== "knowledge" || doc.deleted_at !== null || doc.extra["sub_type"] !== MILESTONE_REVIEW_SUB_TYPE) continue;
+    const parsed = milestoneReviewSchema.safeParse(doc.extra["milestone_review"]);
+    if (parsed.success && parsed.data.fingerprint === fingerprint) atFingerprint += 1;
+  }
+  return atFingerprint >= 2;
 }
 
 /** The root-cause results of a stored review's failed dimensions, one per dimension. */
