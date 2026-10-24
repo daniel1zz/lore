@@ -1,6 +1,6 @@
 // @reads packages/lore/src/service/github-intake-port.ts
 /**
- * `GitHubIntakePort.listOpenIssues` — the plan-close open-issue reader (AC-PCR-4, BR-1372): OPEN issues only, every
+ * `GitHubIntakePort.listOpenIssues` — the plan-close open-issue reader (BR-1372, #402): OPEN issues only, every
  * page, pull requests excluded. A fake runner stands in for `gh`; no process is spawned.
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -33,7 +33,7 @@ function portWith(stdout: string): { port: GitHubIntakePort; calls: string[][] }
   return { port: new GitHubIntakePort({ runner, repo: "o/r", receiptsPath: join(dir, "receipts.jsonl") }), calls };
 }
 
-describe("AC-PCR-4 GitHubIntakePort.listOpenIssues", () => {
+describe("GitHubIntakePort.listOpenIssues", () => {
   it("HAPPY: an open issue only on page 2 is returned, from one paginated open-state call", async () => {
     const pages = [Array.from({ length: 100 }, (_, i) => issue(i + 1000)), [issue(5)]];
     const { port, calls } = portWith(JSON.stringify(pages));
