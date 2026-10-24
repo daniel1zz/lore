@@ -61,6 +61,8 @@ export interface PlanReviewFacts {
   readonly ownerPending: boolean;
   /** The latest review failed and some failed finding has no open linked issue yet. */
   readonly filingIncomplete: boolean;
+  /** The latest review failed a dimension whose only linked issue is now closed: the fix is new input (#394). */
+  readonly coveringIssueFixed: boolean;
   /** The stored review at the current fingerprint cannot be filed (see {@link unfileableReviewError}): it is not a valid review. */
   readonly unfileableReview?: string;
 }
@@ -77,13 +79,15 @@ export function classifyPlan(facts: PlanReviewFacts): PlanReviewNeed {
   if (facts.latest === undefined || facts.latest.fingerprint !== facts.fingerprint) return "review";
   // reason: a stored review that cannot be filed is not a review (spec "Error"; #349): the next batch judges the plan again.
   if (facts.unfileableReview !== undefined) return "review";
+  // reason: a closed covering issue means the defect was fixed; the unchanged plan fingerprint must not keep the old verdict (#394).
+  if (facts.latest.overall === "fail" && facts.coveringIssueFixed && facts.latest.retiredCount === 0) return "review";
   if (facts.latest.retiredCount > 0) return facts.ownerPending ? "awaiting-owner" : "owner-resolved";
   if (facts.latest.overall === "fail" && facts.filingIncomplete) return "filing";
   return "close";
 }
 
 /** The ports the batch itself reads through (the runner never decides what is in the trigger set). */
-export type ReviewRunDeps = Pick<ReviewTriggerDeps, "getPlanBundle" | "listReviewDocs">;
+export type ReviewRunDeps = Pick<ReviewTriggerDeps, "getPlanBundle" | "listReviewDocs" | "issueCoverage">;
 
 /** The ports the trigger side reads through and the landing's start writes through (a spawn). */
 export interface ReviewTriggerDeps {
@@ -319,7 +323,13 @@ export class ReviewBatchRunner {
         latest = undefined;
       }
     }
-    if (latest === undefined || latest.review.fingerprint !== fingerprint) {
+    let coverFixed = false;
+    if (latest !== undefined && latest.review.fingerprint === fingerprint && latest.review.overall === "fail" && (latest.review.retired_acs?.length ?? 0) === 0) {
+      const coverage = await this.deps.issueCoverage(planId, failedDimensions(latest.review.dimensions));
+      if (!coverage.ok) return fail("review", fingerprint, coverage.error, false);
+      coverFixed = coverage.value.fixed.length > 0;
+    }
+    if (latest === undefined || latest.review.fingerprint !== fingerprint || coverFixed) {
       const suite = await measureOnce();
       const judged = await ports.reviewPlan(ref, suite);
       // reason: an errored review is recorded as an audit row, NOT a review: it does not count toward once-per-fingerprint.
@@ -379,8 +389,9 @@ async function planFactsOf(
     if (!docs.ok) return docs;
     const latest = selectLatestMilestoneReview(docs.value);
     const base = { status: bundle.plan.status, progressState, fingerprint, ownerPending: pending.has(retirementSubjectId(bundle.plan.slug)) };
-    if (latest === undefined) return ok({ ...base, filingIncomplete: false });
+    if (latest === undefined) return ok({ ...base, filingIncomplete: false, coveringIssueFixed: false });
     let filingIncomplete = false;
+    let coveringIssueFixed = false;
     let unfileableReview: string | undefined;
     if (latest.review.fingerprint === fingerprint && latest.review.overall === "fail") {
       const unfileable = unfileableReviewError(bundle.plan.slug, latest.doc.slug, latest.review);
@@ -389,12 +400,14 @@ async function planFactsOf(
         const coverage = await deps.issueCoverage(bundle.plan.id, failedDimensions(latest.review.dimensions));
         if (!coverage.ok) return coverage;
         filingIncomplete = coverage.value.uncovered.length > 0;
+        coveringIssueFixed = coverage.value.fixed.length > 0;
       }
     }
     return ok({
       ...base,
       latest: { fingerprint: latest.review.fingerprint, overall: latest.review.overall, retiredCount: latest.review.retired_acs?.length ?? 0 },
       filingIncomplete,
+      coveringIssueFixed,
       ...(unfileableReview !== undefined ? { unfileableReview } : {}),
     });
   }

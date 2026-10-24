@@ -286,6 +286,11 @@ export interface DimensionCoverage {
   /** Per failed dimension: the open linked issue numbers that name it. */
   readonly byDimension: Readonly<Record<string, readonly number[]>>;
   readonly uncovered: readonly string[];
+  /**
+   * The uncovered dimensions whose linked issue record names them but whose issue is no longer open (closed: the defect
+   * was fixed). That is new input: the plan needs review again (#394).
+   */
+  readonly fixed: readonly string[];
   /** Every issue number that covers some dimension, ascending. */
   readonly issues: readonly number[];
 }
@@ -334,11 +339,17 @@ export function coverFailedDimensions(
   });
   const byDimension: Record<string, number[]> = {};
   const uncovered: string[] = [];
+  const fixed: string[] = [];
   for (const dimension of failed) {
     const numbers = linkedOpen.filter((i) => i.dimensions.includes(dimension)).map((i) => i.number);
     byDimension[dimension] = numbers;
-    if (numbers.length === 0) uncovered.push(dimension);
+    if (numbers.length === 0) {
+      uncovered.push(dimension);
+      // reason: no open linked issue covers it, so a linked record that names it belongs to an issue that is now closed.
+      const recordedOnLinked = linked.some((l) => l.dimensions.includes(dimension) && (l.repoId === undefined || l.repoId === listing.repoId));
+      if (recordedOnLinked) fixed.push(dimension);
+    }
   }
   const issues = [...new Set(Object.values(byDimension).flat())].sort((a, b) => a - b);
-  return { accepted: failed.length > 0 && uncovered.length === 0, byDimension, uncovered, issues };
+  return { accepted: failed.length > 0 && uncovered.length === 0, byDimension, uncovered, fixed, issues };
 }
