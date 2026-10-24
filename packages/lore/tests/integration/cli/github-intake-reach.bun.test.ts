@@ -102,7 +102,7 @@ import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { VENDOR_INTAKE_REPO } from "@lore/core";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
@@ -394,7 +394,21 @@ let firstIssueNumber: number | undefined;
 const fixturesToClean: string[] = [];
 const issuesToClose: number[] = [];
 
+/**
+ * The test runner replaces HOME with a throwaway directory (vitest.shared.ts::armThrowawayHome), so `gh` cannot find the
+ * developer's `~/.config/gh` login and every real-network case died in `beforeAll` with "gh auth login" (#351). This suite
+ * is a real-network reachability proof (Invariant 2), so it must keep using a real login: point `gh` (and the `dist/lore`
+ * it spawns, which inherits `process.env`) at the real account's config directory. An explicit GH_TOKEN / GH_CONFIG_DIR
+ * wins; with none of them and no config directory the `gh api user` check below still fails loud.
+ */
+function pointGhAtRealLogin(): void {
+  if (process.env["GH_TOKEN"] || process.env["GITHUB_TOKEN"] || process.env["GH_CONFIG_DIR"]) return;
+  const realConfig = join(userInfo().homedir, ".config", "gh");
+  if (existsSync(realConfig)) process.env["GH_CONFIG_DIR"] = realConfig;
+}
+
 beforeAll(() => {
+  pointGhAtRealLogin();
   // dist/lore is built ONCE per run by the runner (scripts/test-global-setup.ts); a test never rebuilds it (TG-24).
   if (!existsSync(DIST_LORE)) {
     throw new Error(`Expected ${DIST_LORE} to exist after the runner's one build`);
