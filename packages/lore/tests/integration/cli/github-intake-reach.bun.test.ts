@@ -102,7 +102,7 @@ import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { VENDOR_INTAKE_REPO } from "@lore/core";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
@@ -211,7 +211,7 @@ function gh(args: string[]): GhResult {
   if (args.some((a) => namesForbiddenRepo(a))) {
     throw new Error(`Refusing to spawn gh with an argument naming ${FORBIDDEN_REPO} (plan Invariant 5)`);
   }
-  const proc = Bun.spawnSync(["gh", ...args]);
+  const proc = Bun.spawnSync(["gh", ...args], { env: { ...process.env } });
   return {
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
@@ -394,7 +394,38 @@ let firstIssueNumber: number | undefined;
 const fixturesToClean: string[] = [];
 const issuesToClose: number[] = [];
 
+/**
+ * The test runner replaces HOME with a throwaway directory (vitest.shared.ts::armThrowawayHome), so `gh` finds neither
+ * the developer's `~/.config/gh` nor, on macOS, the login keychain (located through HOME), and every real-network case
+ * died in `beforeAll` with "gh auth login" (#351). This suite is a real-network reachability proof (Invariant 2), so it
+ * must keep using a real login: read the token ONCE through `gh auth token` run with the real account's HOME and export
+ * it as GH_TOKEN, which `gh` and the `dist/lore` it spawns (inheriting `process.env`) both honour. An explicit GH_TOKEN /
+ * GITHUB_TOKEN wins; if no login can be read the `gh api user` check below still fails loud.
+ */
+/** The account's home from the passwd database (`~name` expansion), NOT `$HOME`/`os.userInfo()`, which follow the throwaway HOME. */
+function passwdHomeDir(): string | undefined {
+  const name = userInfo().username;
+  const lookup =
+    process.platform === "darwin"
+      ? Bun.spawnSync(["dscl", ".", "-read", `/Users/${name}`, "NFSHomeDirectory"])
+      : Bun.spawnSync(["getent", "passwd", name]);
+  if (lookup.exitCode !== 0) return undefined;
+  const out = lookup.stdout.toString().trim();
+  const home = process.platform === "darwin" ? out.replace(/^NFSHomeDirectory:\s*/, "") : out.split(":")[5];
+  return home !== undefined && home.startsWith("/") ? home : undefined;
+}
+
+function exportRealGhToken(): void {
+  if (process.env["GH_TOKEN"] || process.env["GITHUB_TOKEN"]) return;
+  const realHome = passwdHomeDir();
+  if (realHome === undefined) return;
+  const proc = Bun.spawnSync(["gh", "auth", "token"], { env: { ...process.env, HOME: realHome } });
+  const token = proc.stdout.toString().trim();
+  if (proc.exitCode === 0 && token !== "") process.env["GH_TOKEN"] = token;
+}
+
 beforeAll(() => {
+  exportRealGhToken();
   // dist/lore is built ONCE per run by the runner (scripts/test-global-setup.ts); a test never rebuilds it (TG-24).
   if (!existsSync(DIST_LORE)) {
     throw new Error(`Expected ${DIST_LORE} to exist after the runner's one build`);

@@ -229,7 +229,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
 
 /**
  * Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport`
- * shape, REGRESSION-pinned as an exact 11-key set (`architecture`, the architecture tree root or an
+ * shape, REGRESSION-pinned as an exact 12-key set (`architecture`, the architecture tree root or an
  * explicit null, sits right after `root`; session-service.ts::bootstrap). `archive_candidates` (SPEC
  * spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions
  * D4) is the newest, LAST-inserted key (`session-service.ts::bootstrap`'s own
@@ -249,6 +249,8 @@ const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "corpus",
   "active_sessions",
   "archive_candidates",
+  // BR-1379: the complete-plans summary, appended last by commands/bootstrap.ts (always present, even with no complete plan).
+  "plan_acceptance",
 ] as const;
 
 describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-budget contract", () => {
@@ -272,7 +274,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     }
   });
 
-  it("REGRESSION: plain --json on the same corpus has exactly the literal 10-key BootstrapReport set", async () => {
+  it("REGRESSION: plain --json on the same corpus has exactly the literal 12-key BootstrapReport set", async () => {
     const result = await runLore(["bootstrap", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
@@ -280,7 +282,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(envelope.ok).toBe(true);
 
     const keys = Object.keys(envelope.data);
-    expect(keys).toHaveLength(11);
+    expect(keys).toHaveLength(12);
     expect(keys).toEqual([...PLAIN_BOOTSTRAP_REPORT_KEYS]);
     // Never touched by the injection projection: no condensed armed_gates
     // string[], no omitted ledger.
