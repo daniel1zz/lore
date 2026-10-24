@@ -2,6 +2,9 @@
  * @reads packages/lore/src/adapters/cli/commands
  * @reads packages/lore/src/adapters/cli/commands/*.ts
  * @reads assets/project/reference-transaction
+ * @reads packages/lore/src/service/review-batch-service.ts
+ * @reads packages/lore/src/service/corpus-service.ts
+ * @reads packages/lore/src/adapters/cli/review-batch-wiring.ts
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of
  *   AC-PCR-1, AC-PCR-2, AC-PCR-3, AC-PCR-4, AC-PCR-5; business rule BR-1379.
  *
@@ -935,7 +938,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     const run = await world.runner().runBatch(["p-red-later"], world.ports("batch-2"));
     expect(run.ok && run.value.state === "ran" && run.value.rows[0]?.outcome).toBe("accepted-with-known-defects");
     expect(world.issues.filed).toBe(1);
-    expect(world.issues.links).toContainEqual({ plan: "p-red-later", issue: 101 });
+    expect(world.issues.links).toContainEqual({ plan: "p-red-later", issue: 101, dimensions: ["regression"] });
   });
 
   it("STATE: the other dimensions group by cited symbols/paths plus the normalised summary, and snapshot_accuracy by contradicted rules", () => {
