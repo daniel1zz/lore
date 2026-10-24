@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, type LoreError, type PlanBundle, type Result } from "@lore/core";
 import type { App } from "../../app.js";
 import { ReviewBatchLease } from "../../service/review-batch-lease.js";
 import type { ListCompletePlans } from "../../service/check-stats-service.js";
@@ -108,6 +108,7 @@ export function buildReviewTriggerService(
 ): ReviewTriggerService | undefined {
   const lease = buildReviewLease(app, holder);
   const decisions = app.decisionReadService;
+  const retired = app.retiredAcService;
   if (lease === undefined || decisions === undefined) return undefined;
   return new ReviewTriggerService({
     listPlans: async () => {
@@ -121,6 +122,7 @@ export function buildReviewTriggerService(
       return pending.ok ? ok(new Set(pending.value.map((p) => p.subject_id))) : pending;
     },
     linkedOpenIssueTitles: (planId) => app.corpusService.listLinkedOpenIssueTitles(planId),
+    ...(retired !== undefined ? { hasStaleOwnerDecision: (bundle: PlanBundle) => retired.hasStalePendingDecision(bundle) } : {}),
     isLeaseLive: () => lease.isLive(),
     spawnBatch,
   });
