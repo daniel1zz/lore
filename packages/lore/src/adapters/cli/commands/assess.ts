@@ -408,6 +408,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
   const service = new ReviewBatchRunner({
     getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
     listReviewDocs: (planId) => app.corpusService.listMilestoneReviewDocs(planId),
+    issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
   });
   const run = await service.runBatch(input.planRefs, {
     acquireLease: () => lease.acquire(),

@@ -626,6 +626,12 @@ class World {
     });
   }
 
+  async coverage(planId: string, failed: readonly string[]) {
+    const slug = this.find(planId).slug;
+    const linked = this.issues.links.filter((l) => l.plan === slug).map((l) => ({ number: l.issue, dimensions: l.dimensions }));
+    return ok(coverFailedDimensions(failed, linked, { repoId: 1, open: this.issues.open.map((i) => ({ number: i.number, title: i.title })) }));
+  }
+
   triggerDeps(opts: { pending?: Set<string>; leaseLive?: boolean } = {}): ReviewTriggerDeps {
     return {
       listPlans: async () => ok([...this.plans.values()].filter((p) => !p.archived).map((p) => p.bundle.plan)),
@@ -633,11 +639,7 @@ class World {
       listReviewDocs: async (planId) => ok(this.find(planId).docs),
       pendingDecisionSubjects: async () => ok(opts.pending ?? new Set<string>()),
       // the real predicate over the fake tracker's recorded findings: a title is never read
-      issueCoverage: async (planId, failed) => {
-        const slug = this.find(planId).slug;
-        const linked = this.issues.links.filter((l) => l.plan === slug).map((l) => ({ number: l.issue, dimensions: l.dimensions }));
-        return ok(coverFailedDimensions(failed, linked, { repoId: 1, open: this.issues.open.map((i) => ({ number: i.number, title: i.title })) }));
-      },
+      issueCoverage: (planId, failed) => this.coverage(planId, failed),
       isLeaseLive: async () => (opts.leaseLive !== undefined ? ok(opts.leaseLive) : this.lease("probe").isLive()),
       spawnBatch: () => {
         this.spawns += 1;
@@ -647,7 +649,7 @@ class World {
   }
 
   runner(): ReviewBatchRunner {
-    return new ReviewBatchRunner({ getPlanBundle: async (ref) => ok(this.find(ref).bundle), listReviewDocs: async (planId) => ok(this.find(planId).docs) });
+    return new ReviewBatchRunner({ getPlanBundle: async (ref) => ok(this.find(ref).bundle), listReviewDocs: async (planId) => ok(this.find(planId).docs), issueCoverage: (planId, failed) => this.coverage(planId, failed) });
   }
 
   ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {
@@ -1551,5 +1553,62 @@ describe("AC-PCR-4 one coverage predicate decides filing-complete and plan close
       expect(text, file).not.toContain("listLinkedOpenIssueTitles");
       expect(text, file).not.toContain("linkedOpenIssueTitles");
     }
+  });
+});
+
+describe("AC-PCR-5 a fixed covering issue sends its plan back to review", () => {
+  /** A complete plan whose stored review failed regression, covered only by issue #7, which is now closed (absent from the open list). */
+  async function planWithClosedCover() {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-fixed"));
+    plan.failing = ["regression"];
+    plan.regressionFiles = ["fixed.test.ts"];
+    world.suiteFailingFiles = ["fixed.test.ts"];
+    await world.judge("p-fixed");
+    world.issues.links.push({ plan: "p-fixed", issue: 7, dimensions: ["regression"] });
+    return { world, plan };
+  }
+
+  it("HAPPY: a failed dimension covered only by a closed issue is needs-review, not filing", async () => {
+    const { world } = await planWithClosedCover();
+    const set = await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet();
+    expect(set).toEqual({ ok: true, value: [{ plan: "p-fixed", need: "review" }] });
+  });
+
+  it("HAPPY: the batch re-reviews it, and a passing re-review archives it as accepted", async () => {
+    const { world, plan } = await planWithClosedCover();
+    plan.failing = []; // the defect is fixed on main
+    const run = await world.runner().runBatch(["p-fixed"], world.ports("batch-1"));
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["accepted", true]]);
+    expect(world.judgeCalls).toEqual(["p-fixed", "p-fixed"]);
+    expect(plan.archived).toBe(true);
+  });
+
+  it("NEGATIVE: an OPEN covering issue keeps the plan out of review (filing complete, close)", async () => {
+    const { world } = await planWithClosedCover();
+    world.issues.open.push({ number: 7, title: "regression: still broken", body: "" });
+    const set = await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet();
+    expect(set).toEqual({ ok: true, value: [{ plan: "p-fixed", need: "close" }] });
+  });
+
+  it("STATE: a still-failing re-review files a NEW issue instead of linking the closed one, and the next batch does not review again", async () => {
+    const { world, plan } = await planWithClosedCover();
+    const run = await world.runner().runBatch(["p-fixed"], world.ports("batch-1"));
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", true, [101]]]);
+    expect(world.issues.filed).toBe(1);
+    expect(world.issues.links.find((l) => l.issue === 101)).toMatchObject({ plan: "p-fixed", dimensions: ["regression"] });
+    expect(plan.archived).toBe(true);
+  });
+
+  it("REGRESSION: the filing dedupe matches open issues only, never a closed one carrying the fingerprint", async () => {
+    const { world } = await planWithClosedCover();
+    const finding = { plan: "p-fixed", dimension: "regression" as const, reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["fixed.test.ts"], suite_failing_files: ["fixed.test.ts"] } };
+    const cause = causeOf(finding);
+    const filed = await new IssueFilingService(world.issues).fileFindings([finding]); // the tracker holds no open issue: #7 is closed
+    expect(filed.ok && filed.value[0]?.reused).toBe(false);
+    expect(world.issues.filed).toBe(1);
+    expect(world.issues.open[0]?.title).toContain(`[fp:${cause.short}]`);
   });
 });
