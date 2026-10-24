@@ -305,6 +305,11 @@ export interface VerifyPlanOpts {
    */
   allowNewCommands?: boolean;
   /**
+   * Marks every row this run records as a milestone-review refresh row, so the next refresh REPLACES it instead of
+   * growing the task's evidence log (spec-lean-governance Part D). Set only by `assess-stale-refresh.ts`.
+   */
+  milestoneRefresh?: boolean;
+  /**
    * Interactive per-command confirmation hook (SPEC-039 §M2) — invoked ONLY when
    * an AC's command is new/changed AND `allowNewCommands` is not `true` AND the
    * gate is enabled. CLI-only: wired to a TTY prompt when `process.stdin.isTTY`
@@ -1389,6 +1394,7 @@ export class VerifyRunnerService {
           // there is refused (AC-069-16), which this method surfaces verbatim
           // via the `recordResult.ok` check below (no bypass).
           ...(recordAcRef ? { ac_ref: criterion.id } : {}),
+          ...(opts.milestoneRefresh === true ? { milestone_refresh: true as const } : {}),
           ...(outputTail !== "" ? { output_tail: outputTail } : {}),
           attestation: {
             runner: "lore-cli",

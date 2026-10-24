@@ -10,6 +10,8 @@
  * Coverage dimensions:
  *   HAPPY:      an AC no task declares is run through the runner; an ad-hoc task scoped to exactly it holds attested evidence
  *   STATE:      a second refresh reuses the same ad-hoc task (no second task is created)
+ *   REGRESSION: a declaring task already at the 50-row evidence cap no longer blocks the refresh: the row lands on the
+ *               ad-hoc task and the attested-run reader (rule state / landing evidence) sees it (#393)
  *   NEGATIVE:   an AC the governing spec does not declare is refused and no evidence is written for it
  */
 
@@ -18,6 +20,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractEvidence, type CreateDocInput, type DocRecord } from "@lore/core";
+import { indexLatestAttestedRuns, attestedRunKey } from "../../src/service/attested-ac-runs.js";
 import { createApp, type App } from "../../src/app.js";
 import { createAppStaleRefresher } from "../../src/adapters/cli/assess-stale-refresh.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
@@ -25,6 +28,8 @@ import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 let dir: string;
 let app: App;
 let planSlug: string;
+let planId: string;
+let specId: string;
 
 async function must<T>(result: Promise<{ ok: true; value: T } | { ok: false; error: unknown }>, what: string): Promise<T> {
   const done = await result;
@@ -50,6 +55,8 @@ beforeEach(async () => {
   );
   const plan = await must(app.corpusService.create({ type: "plan", title: "Refresh plan", parent_id: spec.id, content: "plan" } as CreateDocInput), "plan");
   planSlug = plan.slug;
+  planId = plan.id;
+  specId = spec.id;
   // a task of the plan that declares NO ac_scope: AC-RF-1 is declared by no task
   await must(
     app.corpusService.create({ type: "task", title: "Unscoped work", parent_id: plan.id, content: "x", extra: { plan_id: plan.id, ac_scope: [] } } as CreateDocInput),
@@ -99,4 +106,33 @@ describe("stale refresh wiring — an AC no task declares is re-verified end to 
     expect(out.ok).toBe(false);
     for (const task of await adhocTasks()) expect(extractEvidence(task)).toEqual([]);
   }, 60_000);
+
+  it("REGRESSION: a declaring task at 50 rows does not block the refresh; the refresh row lands on the ad-hoc task and the latest-attested-run reader sees it (#393)", async () => {
+    const declaring = await must(
+      app.corpusService.create({ type: "task", title: "Declares the criterion", parent_id: planId, content: "x", extra: { plan_id: planId, ac_scope: ["AC-RF-1"] } } as CreateDocInput),
+      "declaring task",
+    );
+    for (let i = 0; i < 50; i++) {
+      await must(
+        app.taskWorkflowService.addEvidence(declaring.id, { oracle: "manual", command: `echo filler-${i}`, result: "pass", recorded_by: "agent:stale-refresh-test", capture_source: "self-report", output_tail: `filler row ${i} of the cap fixture` }),
+        `filler ${i}`,
+      );
+    }
+    for (let round = 0; round < 2; round++) {
+      const out = await refresher().runAcs(planSlug, ["AC-RF-1"]);
+      expect(out, JSON.stringify(out)).toMatchObject({ ok: true });
+    }
+    const all = (await must(app.corpusService.listFull({ type: "task" }), "list tasks")).docs;
+    const declaringAfter = all.find((t) => t.id === declaring.id) as DocRecord;
+    expect(extractEvidence(declaringAfter)).toHaveLength(50);
+    const adhoc = all.filter((t) => t.extra["adhoc"] === true);
+    expect(adhoc).toHaveLength(1);
+    const rows = extractEvidence(adhoc[0] as DocRecord).filter((r) => r.ac_ref === "AC-RF-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ result: "pass", milestone_refresh: true });
+    const plans = (await must(app.corpusService.listFull({ type: "plan" }), "list plans")).docs;
+    const index = indexLatestAttestedRuns({ specs: [{ id: specId, acIds: ["AC-RF-1"] }], plans, tasks: all });
+    expect(index.latest.get(attestedRunKey(specId, "AC-RF-1"))?.result).toBe("pass");
+    expect(index.originTasks.get(attestedRunKey(specId, "AC-RF-1"))?.id).toBe(adhoc[0]?.id);
+  }, 120_000);
 });
