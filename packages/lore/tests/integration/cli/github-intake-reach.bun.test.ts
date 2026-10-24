@@ -211,7 +211,7 @@ function gh(args: string[]): GhResult {
   if (args.some((a) => namesForbiddenRepo(a))) {
     throw new Error(`Refusing to spawn gh with an argument naming ${FORBIDDEN_REPO} (plan Invariant 5)`);
   }
-  const proc = Bun.spawnSync(["gh", ...args]);
+  const proc = Bun.spawnSync(["gh", ...args], { env: { ...process.env } });
   return {
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
@@ -395,20 +395,37 @@ const fixturesToClean: string[] = [];
 const issuesToClose: number[] = [];
 
 /**
- * The test runner replaces HOME with a throwaway directory (vitest.shared.ts::armThrowawayHome), so `gh` cannot find the
- * developer's `~/.config/gh` login and every real-network case died in `beforeAll` with "gh auth login" (#351). This suite
- * is a real-network reachability proof (Invariant 2), so it must keep using a real login: point `gh` (and the `dist/lore`
- * it spawns, which inherits `process.env`) at the real account's config directory. An explicit GH_TOKEN / GH_CONFIG_DIR
- * wins; with none of them and no config directory the `gh api user` check below still fails loud.
+ * The test runner replaces HOME with a throwaway directory (vitest.shared.ts::armThrowawayHome), so `gh` finds neither
+ * the developer's `~/.config/gh` nor, on macOS, the login keychain (located through HOME), and every real-network case
+ * died in `beforeAll` with "gh auth login" (#351). This suite is a real-network reachability proof (Invariant 2), so it
+ * must keep using a real login: read the token ONCE through `gh auth token` run with the real account's HOME and export
+ * it as GH_TOKEN, which `gh` and the `dist/lore` it spawns (inheriting `process.env`) both honour. An explicit GH_TOKEN /
+ * GITHUB_TOKEN wins; if no login can be read the `gh api user` check below still fails loud.
  */
-function pointGhAtRealLogin(): void {
-  if (process.env["GH_TOKEN"] || process.env["GITHUB_TOKEN"] || process.env["GH_CONFIG_DIR"]) return;
-  const realConfig = join(userInfo().homedir, ".config", "gh");
-  if (existsSync(realConfig)) process.env["GH_CONFIG_DIR"] = realConfig;
+/** The account's home from the passwd database (`~name` expansion), NOT `$HOME`/`os.userInfo()`, which follow the throwaway HOME. */
+function passwdHomeDir(): string | undefined {
+  const name = userInfo().username;
+  const lookup =
+    process.platform === "darwin"
+      ? Bun.spawnSync(["dscl", ".", "-read", `/Users/${name}`, "NFSHomeDirectory"])
+      : Bun.spawnSync(["getent", "passwd", name]);
+  if (lookup.exitCode !== 0) return undefined;
+  const out = lookup.stdout.toString().trim();
+  const home = process.platform === "darwin" ? out.replace(/^NFSHomeDirectory:\s*/, "") : out.split(":")[5];
+  return home !== undefined && home.startsWith("/") ? home : undefined;
+}
+
+function exportRealGhToken(): void {
+  if (process.env["GH_TOKEN"] || process.env["GITHUB_TOKEN"]) return;
+  const realHome = passwdHomeDir();
+  if (realHome === undefined) return;
+  const proc = Bun.spawnSync(["gh", "auth", "token"], { env: { ...process.env, HOME: realHome } });
+  const token = proc.stdout.toString().trim();
+  if (proc.exitCode === 0 && token !== "") process.env["GH_TOKEN"] = token;
 }
 
 beforeAll(() => {
-  pointGhAtRealLogin();
+  exportRealGhToken();
   // dist/lore is built ONCE per run by the runner (scripts/test-global-setup.ts); a test never rebuilds it (TG-24).
   if (!existsSync(DIST_LORE)) {
     throw new Error(`Expected ${DIST_LORE} to exist after the runner's one build`);
