@@ -1516,6 +1516,71 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
   });
 });
 
+describe("AC-PCR-4 an issue the batch just filed counts as open at the close of the same run", () => {
+  const REPO = "owner/repo";
+  const REPO_ID = 7;
+  const FP = "c".repeat(64);
+
+  it("HAPPY: the listing has not caught up with the just-filed issue and the plan still closes as accepted with known defects", async () => {
+    const store = actedStore(new InMemoryStore());
+    const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
+    const plan = await seed(store, rawDoc("plan", "Fresh filing plan", {}, "approved"));
+    await seed(store, rawDoc("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
+    const bundle = await corpus.getPlanBundle(plan.id);
+    if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
+    const pass = { verdict: "pass" as const, reason: "ok", reference: "r" };
+    const fail = { verdict: "fail" as const, reason: "broken", reference: "r" };
+    const review: MilestoneReview = {
+      plan_id: plan.id,
+      fingerprint: planStateFingerprint(bundle.value.plan, bundle.value.tasks, bundle.value.spec),
+      overall: "fail",
+      dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d === "regression" ? fail : pass])) as MilestoneReview["dimensions"],
+      decisions: [],
+      prompt_version: "test",
+      diff_source: "test",
+    };
+    const doc = await corpus.createMilestoneReviewDoc({
+      type: "knowledge",
+      title: "Review of fresh filing plan",
+      parent_id: plan.id,
+      extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review },
+      content: renderMilestoneReviewContent(review),
+    });
+    if (!doc.ok) throw new Error(JSON.stringify(doc.error));
+    expect((await corpus.link(doc.value.id, plan.id, "informs")).ok).toBe(true);
+    await seed(store, rawDoc("task", "issue 9", { issue_report: { github: { repo: REPO, number: 9, repo_id: REPO_ID } } }, "approved"));
+    // the listing is empty: GitHub's read has not caught up with the issue the batch filed moments ago
+    corpus.setPlanCloseIssuePort({ listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }) });
+    const port = createGithubIssuePort({ repo: REPO } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, undefined);
+    expect((await port.linkToPlan(plan.slug, { number: 9 }, { dimension: "regression", fingerprint: FP })).ok).toBe(true);
+
+    // without the batch's own filed numbers, or with a number the plan has no record for, the close is refused
+    expect((await corpus.set(plan.id, { status: "archived" })).ok).toBe(false);
+    expect((await corpus.set(plan.id, { status: "archived" }, { trustedOpenIssues: [8] })).ok).toBe(false);
+    const closed = await corpus.set(plan.id, { status: "archived" }, { trustedOpenIssues: [9] });
+    if (!closed.ok) throw new Error(JSON.stringify(closed.error));
+    expect((await reload(store, plan.id)).status).toBe("archived");
+    const audit = await store.queryAudit({ doc_id: plan.id });
+    if (!audit.ok) throw new Error(JSON.stringify(audit.error));
+    expect(JSON.stringify(audit.value)).toContain("accepted with known defects: #9");
+  });
+
+  it("HAPPY: the batch hands the numbers it filed to the close of that plan", async () => {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-fresh"));
+    plan.failing = ["regression"];
+    plan.regressionFiles = ["fresh.test.ts"];
+    world.suiteFailingFiles = ["fresh.test.ts"];
+    const handed: (readonly number[])[] = [];
+    const ports = world.ports("batch-fresh", { closePlan: async (_ref, filed) => { handed.push(filed); return ok(undefined); } });
+    const run = await world.runner().runBatch(["p-fresh"], ports);
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects"]);
+    expect(handed).toEqual([rows[0]?.issues]);
+    expect(handed[0]?.length).toBeGreaterThan(0);
+  });
+});
+
 describe("AC-PCR-4 one coverage predicate decides filing-complete and plan close", () => {
   it("HAPPY: an open issue with the fingerprint tag in its title but no finding record is re-linked (record written, nothing filed) and the plan is archived with known defects in the same batch", async () => {
     const world = new World();
