@@ -262,7 +262,7 @@ describe("retry-path decision: fileGithubIssue does not re-attempt the corpus mi
 
   it("ERROR: a state read that fails is returned, never read as closed (no duplicate filing)", async () => {
     writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
-    ghRunMock.mockResolvedValue(err({ code: "TRANSPORT_UNAVAILABLE", message: "offline" }));
+    ghRunMock.mockResolvedValue(err({ code: "TRANSPORT_UNAVAILABLE", message: "offline", retryable: true }));
     const result = await fileGithubIssue(INPUT, CFG, makeContext(vi.fn()));
 
     expect(result.ok).toBe(false);
