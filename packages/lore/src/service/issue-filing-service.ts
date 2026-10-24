@@ -35,8 +35,18 @@ export interface IssuePort {
   readonly findOpenByFingerprint: (short: string) => Promise<Result<IssueRef | undefined, LoreError>>;
   /** Files ONE new issue. */
   readonly file: (input: IssueInput) => Promise<Result<IssueRef, LoreError>>;
-  /** Links the issue to the plan (the plan-close `resolves` carrier); an existing link is success. */
-  readonly linkToPlan: (plan: string, issue: IssueRef) => Promise<Result<void, LoreError>>;
+  /**
+   * Links the issue to the plan (the plan-close `resolves` carrier) and records on the issue's carrier which finding
+   * (dimension + fingerprint) it files, so plan close reads coverage from the record, never the title; an existing
+   * link is success.
+   */
+  readonly linkToPlan: (plan: string, issue: IssueRef, finding: IssueFinding) => Promise<Result<void, LoreError>>;
+}
+
+/** The finding a filed or reused issue covers. */
+export interface IssueFinding {
+  readonly dimension: MilestoneDimension;
+  readonly fingerprint: string;
 }
 
 /** The content of one new issue. */
@@ -125,7 +135,7 @@ export class IssueFilingService {
     }
     const linked: string[] = [];
     for (const plan of plans) {
-      const result = await this.port.linkToPlan(plan, issue);
+      const result = await this.port.linkToPlan(plan, issue, { dimension: cause.dimension, fingerprint: cause.fingerprint });
       if (!result.ok) return { cause, plans, issue, reused, linked, error: result.error };
       linked.push(plan);
     }

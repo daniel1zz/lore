@@ -25,7 +25,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ulid } from "ulidx";
-import { DOC_TYPE_ROLE_MAP, MILESTONE_DIMENSIONS, err, ok, type AuditEntry, type DocId, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type PlanBundle, type VersionRecord } from "@lore/core";
+import { createGithubIssuePort } from "../../src/adapters/cli/assess-file-issues.js";
+import type { GithubFilingContext, GithubUpstreamCfg } from "../../src/adapters/cli/report-issue-wiring.js";
+import { DOC_TYPE_ROLE_MAP, MILESTONE_DIMENSIONS, err, ok, renderMilestoneReviewContent, type AuditEntry, type DocId, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type PlanBundle, type VersionRecord } from "@lore/core";
 import { IntegrateService, type IntegrateDeps } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
@@ -1374,5 +1376,130 @@ describe("visible and measured — bootstrap complete line, checks stats time-to
     const service = new CheckStatsService({ store: new InMemoryStore(), now: () => nowIso() });
     const report = await service.acceptance(async () => err<LoreError>({ code: "STORE_ERROR", message: "reader down" }));
     expect(report.ok).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// AC-PCR-4 — plan close reads grouped issue coverage from the link record, never from titles
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("AC-PCR-4 plan close reads grouped issue coverage from the link record", () => {
+  const REPO = "owner/repo";
+  const REPO_ID = 7;
+  const FP_A = "a".repeat(64);
+  const FP_B = "b".repeat(64);
+
+  /** A plan with one archived task and a stored failing review on regression and correctness_vs_acs. */
+  async function failingPlan() {
+    const store = actedStore(new InMemoryStore());
+    const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
+    const plan = await seed(store, rawDoc("plan", "Failing plan", {}, "approved"));
+    await seed(store, rawDoc("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
+    const otherPlan = await seed(store, rawDoc("plan", "Other plan", {}, "approved"));
+    const bundle = await corpus.getPlanBundle(plan.id);
+    if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
+    const pass = { verdict: "pass" as const, reason: "ok", reference: "r" };
+    const fail = { verdict: "fail" as const, reason: "broken", reference: "r" };
+    const review: MilestoneReview = {
+      plan_id: plan.id,
+      fingerprint: planStateFingerprint(bundle.value.plan, bundle.value.tasks, bundle.value.spec),
+      overall: "fail",
+      dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d === "regression" || d === "correctness_vs_acs" ? fail : pass])) as MilestoneReview["dimensions"],
+      decisions: [],
+      prompt_version: "test",
+      diff_source: "test",
+    };
+    const doc = await corpus.createMilestoneReviewDoc({
+      type: "knowledge",
+      title: "Review of failing plan",
+      parent_id: plan.id,
+      extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review },
+      content: renderMilestoneReviewContent(review),
+    });
+    if (!doc.ok) throw new Error(JSON.stringify(doc.error));
+    const informs = await corpus.link(doc.value.id, plan.id, "informs");
+    if (!informs.ok) throw new Error(JSON.stringify(informs.error));
+    return { store, corpus, plan, otherPlan, open: new Set<number>(), carriers: new Map<number, DocRecord>() };
+  }
+
+  type World = Awaited<ReturnType<typeof failingPlan>>;
+
+  /** The corpus carrier of GitHub issue `n` (what `lore issue adopt` or the filing mints). */
+  async function issueCarrier(w: World, n: number): Promise<void> {
+    w.carriers.set(n, await seed(w.store, rawDoc("task", `issue ${String(n)}`, { issue_report: { github: { repo: REPO, number: n, repo_id: REPO_ID } } }, "approved")));
+  }
+
+  function wireIssues(w: World) {
+    w.corpus.setPlanCloseIssuePort({
+      listOpenIssues: async () => ok({ repoId: REPO_ID, open: [...w.open].map((number) => ({ number, title: `unrelated words ${String(number)}` })) }),
+    });
+    // the same port the batch and `lore assess --file-issues` link through
+    return createGithubIssuePort({ repo: REPO } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, w.corpus, undefined);
+  }
+
+  async function closePlan(w: World) {
+    return w.corpus.set(w.plan.id, { status: "archived" });
+  }
+
+  it("HAPPY: two failed dimensions covered by two grouped issues (one shared with another plan) close as accepted with known defects", async () => {
+    const w = await failingPlan();
+    await issueCarrier(w, 1);
+    await issueCarrier(w, 2);
+    w.open.add(1).add(2);
+    const port = wireIssues(w);
+    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
+    expect((await port.linkToPlan(w.plan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
+    expect((await port.linkToPlan(w.otherPlan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
+
+    const closed = await closePlan(w);
+    if (!closed.ok) throw new Error(JSON.stringify(closed.error));
+    expect((await reload(w.store, w.plan.id)).status).toBe("archived");
+    const audit = await w.store.queryAudit({ doc_id: w.plan.id });
+    if (!audit.ok) throw new Error(JSON.stringify(audit.error));
+    expect(JSON.stringify(audit.value)).toContain("accepted with known defects: #1, #2");
+  });
+
+  it("NEGATIVE: a failed dimension with no linked open issue refuses with BR-1372 (exit 4)", async () => {
+    const w = await failingPlan();
+    await issueCarrier(w, 1);
+    w.open.add(1);
+    const port = wireIssues(w);
+    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
+    const refused = await closePlan(w);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("VALIDATION_ERROR");
+    expect(JSON.stringify(refused.error)).toContain("MILESTONE_REVIEW_FAILED");
+    expect(JSON.stringify(refused.error)).toContain("BR-1372");
+    expect(JSON.stringify(refused.error)).not.toContain("title must name");
+    expect((await reload(w.store, w.plan.id)).status).toBe("approved");
+  });
+
+  it("NEGATIVE: an issue linked without a finding record covers nothing, whatever its title says", async () => {
+    const w = await failingPlan();
+    await issueCarrier(w, 1);
+    await issueCarrier(w, 2);
+    w.open.add(1).add(2);
+    w.corpus.setPlanCloseIssuePort({
+      listOpenIssues: async () => ok({ repoId: REPO_ID, open: [{ number: 1, title: "regression: broken" }, { number: 2, title: "correctness_vs_acs: broken" }] }),
+    });
+    for (const n of [1, 2]) {
+      const linked = await w.corpus.link(w.plan.id, w.carriers.get(n)!.id, "resolves");
+      expect(linked.ok).toBe(true);
+    }
+    expect((await closePlan(w)).ok).toBe(false);
+  });
+
+  it("STATE: a closed linked issue does not count", async () => {
+    const w = await failingPlan();
+    await issueCarrier(w, 1);
+    await issueCarrier(w, 2);
+    w.open.add(1); // #2 is closed on the tracker
+    const port = wireIssues(w);
+    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
+    expect((await port.linkToPlan(w.plan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
+    expect((await closePlan(w)).ok).toBe(false);
+    w.open.add(2);
+    expect((await closePlan(w)).ok).toBe(true);
   });
 });

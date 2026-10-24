@@ -1161,8 +1161,8 @@ function describeMilestoneReviewFailure(ctx: GateContext): string {
       return (
         `The latest milestone review (${review.reviewSlug}) failed on: ${review.failed.join(", ")}. ` +
         `Fix what it names, then run \`lore assess ${slug}\` again. Or close it as accepted with known defects: ` +
-        `link an OPEN GitHub issue to the plan for EVERY failed dimension (\`lore assess ${slug} --file-issues\` files and ` +
-        `links one per failed dimension; the issue title must name the dimension).`
+        `every failed dimension needs an OPEN GitHub issue linked to the plan that records that dimension ` +
+        `(\`lore assess ${slug} --file-issues\` files the grouped issues and links them with that record).`
       );
   }
 }
