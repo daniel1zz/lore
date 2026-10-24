@@ -73,7 +73,7 @@ export function createGithubIssuePort(
         ctx,
       );
       if (!result.ok) return result;
-      return ok({ number: result.value.number, url: result.value.url });
+      return ok({ number: result.value.number, url: result.value.url, recognisedPrior: result.value.retried });
     },
     linkToPlan: (plan, issue, finding) => linkIssueToPlan(corpusService, plan, issue, finding, cfg.repo, ctx.actor),
   };

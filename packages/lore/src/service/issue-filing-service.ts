@@ -20,14 +20,19 @@
  */
 
 import type { LoreError, MilestoneDimension, Result } from "@lore/core";
-import { ok } from "@lore/core";
+import { err, ok } from "@lore/core";
 import { issueTitleOf, rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
 
 /** A filed or found issue. */
 export interface IssueRef {
   readonly number: number;
   readonly url?: string;
+  /** Set by {@link IssuePort.file} when the tracker returned an issue it filed earlier for the exact title instead of a new one. */
+  readonly recognisedPrior?: boolean;
 }
+
+/** How many disambiguated titles one group tries before failing loud. */
+const MAX_REFILE_ATTEMPTS = 20;
 
 /** What the real tracker and corpus provide; tests pass a fake. */
 export interface IssuePort {
@@ -116,6 +121,34 @@ export class IssueFilingService {
     return ok(groups);
   }
 
+  /**
+   * Files ONE new issue for a fingerprint that has no OPEN issue.
+   *
+   * reason: the tracker recognises an exact title it filed before and hands that issue back (crash-retry recognition).
+   * Here no open issue carries the fingerprint, so a recognised prior issue is a CLOSED one: linking it would cover
+   * nothing and the plan would loop through review forever (#397). The title is disambiguated (the `[fp:..]` tag stays,
+   * so the open-issue search still finds it) until the tracker files a genuinely new issue.
+   */
+  private async fileNew(cause: RootCause, members: readonly FailedFinding[], plans: readonly string[]): Promise<Result<IssueRef, LoreError>> {
+    const baseTitle = issueTitleOf(cause);
+    for (let attempt = 1; attempt <= MAX_REFILE_ATTEMPTS; attempt += 1) {
+      const filed = await this.port.file({
+        title: attempt === 1 ? baseTitle : `${baseTitle} (re-filed ${String(attempt)})`,
+        body: bodyOf(cause, members),
+        fingerprint: cause.fingerprint,
+        dimension: cause.dimension,
+        plans,
+      });
+      if (!filed.ok || filed.value.recognisedPrior !== true) return filed;
+    }
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "file-issues",
+      message: `the tracker returned an earlier issue ${String(MAX_REFILE_ATTEMPTS)} times for fingerprint ${cause.short}; no new issue could be filed`,
+      rule: "BR-1379",
+    });
+  }
+
   private async fileGroup(cause: RootCause, members: readonly FailedFinding[]): Promise<FilingGroup> {
     const plans = [...new Set(members.map((m) => m.plan))].sort();
     const open = await this.port.findOpenByFingerprint(cause.short);
@@ -123,13 +156,7 @@ export class IssueFilingService {
     let issue = open.value;
     const reused = issue !== undefined;
     if (issue === undefined) {
-      const filed = await this.port.file({
-        title: issueTitleOf(cause),
-        body: bodyOf(cause, members),
-        fingerprint: cause.fingerprint,
-        dimension: cause.dimension,
-        plans,
-      });
+      const filed = await this.fileNew(cause, members, plans);
       if (!filed.ok) return { cause, plans, reused: false, linked: [], error: filed.error };
       issue = filed.value;
     }
