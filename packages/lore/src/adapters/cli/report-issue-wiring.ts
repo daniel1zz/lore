@@ -127,6 +127,7 @@
  */
 
 import { basename, dirname, join } from "node:path";
+import { z } from "zod";
 import { exitCli } from "./cli-exit.js";
 import {
   assembleIssueBody,
@@ -572,22 +573,61 @@ export interface GithubReportResult {
  * @returns the matched `{number, url}`, or `undefined` when no prior
  *   successful filing shares this exact title
  */
-function findPriorGithubFiling(
+function findPriorGithubFilings(
   entries: readonly ReceiptV2Entry[],
   title: string,
-): { number: number; url: string } | undefined {
+): { number: number; url: string }[] {
   const intentTitleByKey = new Map<string, string>();
   for (const entry of entries) {
     if ("phase" in entry && entry.phase === "intent") {
       intentTitleByKey.set(entry.idempotency_key, entry.title);
     }
   }
+  const priors: { number: number; url: string }[] = [];
   for (const entry of entries) {
     if ("phase" in entry && entry.phase === "outcome" && intentTitleByKey.get(entry.idempotency_key) === title) {
-      return { number: entry.number, url: entry.url };
+      priors.push({ number: entry.number, url: entry.url });
     }
   }
-  return undefined;
+  // reason: newest first, so a title re-filed after its earlier issue was closed recognises the latest issue.
+  return priors.reverse();
+}
+
+const GithubIssueStateSchema = z.object({ state: z.string() }).passthrough();
+
+/**
+ * The prior filing that is still OPEN, or `undefined` when every prior issue for the title is closed.
+ *
+ * reason: the receipt log exists so a retried IN-FLIGHT filing does not duplicate. A closed prior issue is a fixed
+ * defect, not an in-flight filing: recognising it returned a closed issue that covers nothing, and a review batch that
+ * hit the same fingerprint again looped forever (#397). A state read failure is returned, never read as "closed".
+ */
+async function findOpenPriorFiling(
+  runner: GhRunner,
+  repo: string,
+  priors: readonly { number: number; url: string }[],
+): Promise<Result<{ number: number; url: string } | undefined, LoreError>> {
+  for (const prior of priors) {
+    const read = await runner.run(["api", `repos/${repo}/issues/${String(prior.number)}`]);
+    if (!read.ok) return read;
+    let body: unknown;
+    try {
+      body = JSON.parse(read.value.stdout);
+    } catch {
+      body = undefined;
+    }
+    const parsed = GithubIssueStateSchema.safeParse(body);
+    if (!parsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_issue_response",
+        message: `gh returned an issue payload for #${String(prior.number)} that has no state: ${parsed.error.message}`,
+        value: read.value.stdout,
+      });
+    }
+    if (parsed.data.state === "open") return ok(prior);
+  }
+  return ok(undefined);
 }
 
 /**
@@ -738,7 +778,9 @@ async function mintIssueTask(
  *      PRIOR filing's outcome verbatim (no network call at all, and no
  *      corpus write — see this module's header for why the retry branch
  *      deliberately does not re-attempt the mint) when one exists for the
- *      exact same title ({@link findPriorGithubFiling}).
+ *      exact same title AND that prior issue is still OPEN
+ *      ({@link findPriorGithubFilings}, {@link findOpenPriorFiling}); a closed
+ *      prior issue files a new one with the same title (#397).
  *   2. `verifyTarget()` — fail loud before any write-shaped call.
  *   3. `searchDuplicates()` — advisory; a failure degrades, never blocks.
  *   4. Resolves the reporter's own identity (`resolveLocalRootPrd`,
@@ -766,9 +808,14 @@ export async function fileGithubIssue(
 ): Promise<Result<GithubReportResult, LoreError>> {
   const receiptsPath = join(ctx.consumerCorpusRoot, ".lore", RECEIPT_LOG_V2_FILENAME);
 
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });
+
   const priorReadResult = new ReceiptLogV2(receiptsPath).read();
   if (priorReadResult.ok) {
-    const prior = findPriorGithubFiling(priorReadResult.value.entries, input.title);
+    const priors = findPriorGithubFilings(priorReadResult.value.entries, input.title);
+    const open = priors.length === 0 ? ok(undefined) : await findOpenPriorFiling(runner, cfg.repo, priors);
+    if (!open.ok) return open;
+    const prior = open.value;
     if (prior !== undefined) {
       // Retry-path decision (see this module's header): the corpus mint is
       // NOT re-attempted here. `ctx.corpusService.create` is never called on
@@ -784,7 +831,6 @@ export async function fileGithubIssue(
     }
   }
 
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();
