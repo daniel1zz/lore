@@ -956,6 +956,8 @@ describe("milestone review gates close", () => {
   it("milestone review gates close: an awaiting-owner plan whose pending decision lists retirements that no longer match is in the trigger set; the batch withdraws it and the plan proceeds", { timeout: 300_000 }, () => {
     const { plan, task } = makePlan("Stale owner decision");
     const specs = retireTwoAcs(task);
+    // the plan is complete (every member terminal) so it is in the batch's reach
+    must(["bulk", "deprecate", task, "--apply", "--reason", "work abandoned"]);
     const first = assessRows([plan]).rows[0] as AssessRow & { pending_decision?: number };
     expect(typeof first.pending_decision).toBe("number");
     expect(pendingIds()).toEqual([first.pending_decision]);
