@@ -322,6 +322,12 @@ export interface SetOptions extends WriteActorOpts {
    * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
    */
   readonly plan?: string;
+  /**
+   * Plan close only: GitHub issue numbers the CALLER filed or linked in this very run. They count as open for this
+   * close (open by construction), so the close does not depend on the issue listing having caught up (#402). Coverage
+   * still requires the plan's own `milestone_findings` record on the linked issue; a number without one covers nothing.
+   */
+  readonly trustedOpenIssues?: readonly number[];
 }
 
 /**
@@ -1230,8 +1236,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   private async acceptKnownDefects(
     planId: string,
     currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
+    trustedOpenIssues: readonly number[] = [],
   ): Promise<MilestoneReviewCurrency> {
-    const coverage = await this.coverageOfFailedDimensions(planId, currency.failed);
+    const coverage = await this.coverageOfFailedDimensions(planId, currency.failed, trustedOpenIssues);
     if (!coverage.ok || !coverage.value.accepted) return currency;
     return { state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues };
   }
@@ -1243,9 +1250,14 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    *
    * @param planId - the plan's document id
    * @param failed - the failed dimension ids of the current review
+   * @param trustedOpenIssues - issue numbers the caller filed or linked in this run: counted as open without waiting for the listing (#402)
    * @returns the coverage; `err` when no open-issue reader is wired or a store/GitHub read failed (never read as "covered")
    */
-  async coverageOfFailedDimensions(planId: string, failed: readonly string[]): Promise<Result<DimensionCoverage, LoreError>> {
+  async coverageOfFailedDimensions(
+    planId: string,
+    failed: readonly string[],
+    trustedOpenIssues: readonly number[] = [],
+  ): Promise<Result<DimensionCoverage, LoreError>> {
     const port = this.planCloseIssuePort;
     if (port === undefined) {
       return err({ code: "VALIDATION_ERROR", message: "issue coverage cannot be read: no open-issue reader is wired (no GitHub upstream configured)", field: "planCloseIssuePort", rule: "BR-1379" });
@@ -1269,7 +1281,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     }
     const listing = await port.listOpenIssues();
     if (!listing.ok) return listing;
-    return ok(coverFailedDimensions(failed, linked, listing.value));
+    const listedNumbers = new Set(listing.value.open.map((issue) => issue.number));
+    const trusted = trustedOpenIssues.filter((n) => !listedNumbers.has(n)).map((number) => ({ number, title: "" }));
+    return ok(coverFailedDimensions(failed, linked, { ...listing.value, open: [...listing.value.open, ...trusted] }));
   }
 
   /** Present iff {@link setArchiveIssueClosePort} was called. */
@@ -3622,7 +3636,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (!reviewDocsResult.ok) return reviewDocsResult;
       const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
       const milestoneReview =
-        measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview) : measuredReview;
+        measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview, opts?.trustedOpenIssues): measuredReview;
       planCloseCtx = { ...planCloseCtx, milestoneReview };
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);

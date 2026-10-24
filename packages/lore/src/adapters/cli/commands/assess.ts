@@ -418,8 +418,8 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     },
     measureSuite: input.measureSuite,
     reviewPlan: input.reviewOne,
-    closePlan: async (ref) => {
-      const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor });
+    closePlan: async (ref, filedIssues) => {
+      const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor, trustedOpenIssues: filedIssues });
       return closed.ok ? ok(undefined) : closed;
     },
     recordError: (error) =>
