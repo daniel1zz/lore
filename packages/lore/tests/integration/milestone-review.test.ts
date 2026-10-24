@@ -1032,11 +1032,9 @@ describe("milestone review gates close", () => {
 });
 
 describe("milestone review gates close: stale refresh and suite environment", () => {
-  type Opts = { acIds?: string[]; explicitTaskIdOrSlug?: string; allowNewCommands?: boolean };
-  const bundleWith = (scoped: Record<string, string[]>): core.PlanBundle =>
-    ({ tasks: Object.entries(scoped).map(([slug, scope]) => ({ slug, extra: { ac_scope: scope } })) }) as unknown as core.PlanBundle;
+  type Opts = { acIds?: string[]; explicitTaskIdOrSlug?: string; allowNewCommands?: boolean; milestoneRefresh?: boolean };
 
-  async function refresher(scoped: Record<string, string[]>) {
+  async function refresher() {
     const { createVerifyStaleRefresher } = await import("../../src/adapters/cli/assess-stale-refresh.js");
     const planCalls: Opts[] = [];
     const adhocCalls: { task: string; opts: Opts }[] = [];
@@ -1046,7 +1044,6 @@ describe("milestone review gates close: stale refresh and suite environment", ()
         verifyPlan: async (_plan: string, opts: Opts) => (planCalls.push(opts), core.ok({})),
         verifyAdhocTask: async (task: { slug: string }, _specs: unknown, opts: Opts) => (adhocCalls.push({ task: task.slug, opts }), core.ok({})),
       } as never,
-      getPlanBundle: async () => core.ok(bundleWith(scoped)),
       listDocs: async () => core.ok([]),
       createAdhocTask: async (_title: string, acId: string) =>
         (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId] } } as never)),
@@ -1057,24 +1054,17 @@ describe("milestone review gates close: stale refresh and suite environment", ()
     return { refresh, planCalls, adhocCalls, created };
   }
 
-  it("milestone review gates close: a changed AC command is decided auto (verify-new-command) and re-verified", async () => {
-    const r = await refresher({ "task-a": ["AC-1"] });
-    const out = await r.refresh.runAcs("plan-x", ["AC-1"]);
+  it("milestone review gates close: a changed AC command is decided auto (verify-new-command) and re-verified on the per-AC ad-hoc task, never the declaring task", async () => {
+    const r = await refresher();
+    const out = await r.refresh.runAcs("plan-x", ["AC-1", "AC-9"]);
     expect(out.ok).toBe(true);
-    expect(r.planCalls).toHaveLength(1);
-    expect(r.planCalls[0]?.allowNewCommands).toBe(true);
-    expect(r.planCalls[0]?.explicitTaskIdOrSlug).toBe("task-a");
-  });
-
-  it("milestone review gates close: an AC no task declares is still re-verified through the trusted runner (attested, ad-hoc task)", async () => {
-    const r = await refresher({ "task-a": ["AC-1"] });
-    const out = await r.refresh.runAcs("plan-x", ["AC-9"]);
-    expect(out.ok).toBe(true);
-    expect(r.created).toEqual(["AC-9"]);
+    expect(r.created).toEqual(["AC-1", "AC-9"]);
     expect(r.planCalls).toHaveLength(0);
-    expect(r.adhocCalls).toHaveLength(1);
-    expect(r.adhocCalls[0]?.opts.acIds).toEqual(["AC-9"]);
-    expect(r.adhocCalls[0]?.opts.allowNewCommands).toBe(true);
+    expect(r.adhocCalls.map((c) => c.opts.acIds)).toEqual([["AC-1"], ["AC-9"]]);
+    for (const call of r.adhocCalls) {
+      expect(call.opts.allowNewCommands).toBe(true);
+      expect(call.opts.milestoneRefresh).toBe(true);
+    }
   });
 
   it("milestone review gates close: the runner's environment matches a clean run", async () => {
