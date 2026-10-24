@@ -927,6 +927,46 @@ describe("milestone review gates close", () => {
     expect(close(plan).exitCode).toBe(0);
   });
 
+  it("milestone review gates close: an unattributed old deprecation whose spec has no version history does not error settle for an unrelated plan (#353)", { timeout: 300_000 }, () => {
+    const { plan } = makePlan("Unrelated plan"); // the deprecation below falls inside this plan's time range
+    const spec = createSpec("Old deprecated without history");
+    must(["ac", "add", spec, "AC-GONE-1", "--statement", "gone", "--mode", "human"]);
+    deprecateAs(spec, undefined, null); // a run with no claimed task: the deprecation belongs to no plan
+    // the spec's earlier versions are missing (history trimmed): reading the pre-deprecation status would fail
+    const trim = spawnSync(
+      "bun",
+      [
+        "-e",
+        `import { Database } from "bun:sqlite"; const db = new Database(${JSON.stringify(join(tmpDir, ".lore", "lore.db"))}); ` +
+          `const id = db.query("SELECT id FROM docs WHERE slug = ?").get(${JSON.stringify(spec)}).id; ` +
+          `const top = db.query("SELECT MAX(version) AS v FROM versions WHERE doc_id = ?").get(id).v; ` +
+          `db.query("DELETE FROM versions WHERE doc_id = ? AND version < ?").run(id, top);`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(trim.status, trim.stderr).toBe(0);
+    const result = assessRows([plan]);
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("to read the pre-deprecation status from");
+    expect(result.rows[0]).toMatchObject({ plan });
+    expect((result.rows[0] as AssessRow & { retired_acs?: unknown }).retired_acs).toBeUndefined();
+    expect(pendingIds()).toHaveLength(0);
+  });
+
+  it("milestone review gates close: an awaiting-owner plan whose pending decision lists retirements that no longer match is in the trigger set; the batch withdraws it and the plan proceeds", { timeout: 300_000 }, () => {
+    const { plan, task } = makePlan("Stale owner decision");
+    const specs = retireTwoAcs(task);
+    const first = assessRows([plan]).rows[0] as AssessRow & { pending_decision?: number };
+    expect(typeof first.pending_decision).toBe("number");
+    expect(pendingIds()).toEqual([first.pending_decision]);
+    must(["delete", specs.old, "--confirm"]); // the plan's attributed list is now empty
+    const batch = assessRows(["--where", "needs-review", "--close"]);
+    expect(batch.exitCode, batch.stderr).toBe(0);
+    expect(batch.rows.map((r) => r.plan)).toEqual([plan]);
+    expect(pendingIds()).toHaveLength(0);
+    expect(statusOf(plan)).toBe("archived");
+  });
+
   it("milestone review gates close: a failing review with no linked open issue still refuses the close (exit 4, BR-1372)", { timeout: 300_000 }, () => {
     const plan = makeFailedPlan("Unlinked");
     const refused = close(plan);
