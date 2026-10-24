@@ -537,6 +537,13 @@ export const evidenceEntrySchema = z.object({
    * this field existed carry none and are dated by the (doc_id, details.version) audit join.
    */
   recorded_corpus_rev: z.number().int().min(0).optional(),
+  /**
+   * Marks a row the milestone review's stale refresh wrote (BR-1372, spec-lean-governance Part D). A refresh row is
+   * REPLACED by the next refresh of the same `ac_ref` + runner on the same task instead of appended, so repeated
+   * batches never grow the log (Bazel action cache: one entry per action key). Present-iff-true; written only by the
+   * trusted runner path (`VerifiedEvidenceInput`), never by a self-report.
+   */
+  milestone_refresh: z.literal(true).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({

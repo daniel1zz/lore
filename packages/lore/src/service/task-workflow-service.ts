@@ -759,7 +759,7 @@ export interface DoneResult {
  */
 export type EvidenceInput = Omit<
   EvidenceEntry,
-  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation"
+  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation" | "milestone_refresh"
 > & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /**
@@ -2863,14 +2863,18 @@ export class TaskWorkflowService {
     const task = taskResult.value;
 
     const existing = readEvidence(task);
-    if (existing.length >= 50) {
+    const isRefresh = entry.milestone_refresh === true;
+    if (isRefresh && entry.ac_ref === undefined) {
       return err({
         code: "VALIDATION_ERROR",
-        field: "extra.verification_evidence",
-        message: "Evidence log is full (50 entries max) — cannot append a 51st entry",
-        value: existing.length,
+        field: "milestone_refresh",
+        message: "a milestone refresh row must name the criterion it refreshes (ac_ref)",
+        value: undefined,
       });
     }
+    // reason: a refresh row replaces its own predecessor, so only a NON-refresh append is refused on the raw count;
+    // a refresh is checked against the count AFTER replacement below.
+    if (!isRefresh && existing.length >= 50) return evidenceLogFull(existing.length);
 
     // §M5 (AC-DC-8) — resolve the oracle generation in force for this row's `ac_ref`
     // BEFORE `now()` fires, so the time seam stays as tight to the write as it has
@@ -2917,6 +2921,7 @@ export class TaskWorkflowService {
       ...(acOracleGeneration !== null ? { ac_oracle_generation: acOracleGeneration } : {}),
       recorded_corpus_rev: corpusRev.value,
       ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
+      ...(isRefresh ? { milestone_refresh: true as const } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -2988,9 +2993,14 @@ export class TaskWorkflowService {
     // captured above — NEVER a second `now()` invocation (would break the
     // STALE_VERSION sequential-CAS test recipe, which relies on single-fire).
     const renewedClaim = renewClaimForEvidence(readClaimRecord(task), actor, nowIso);
+    // The previous refresh row(s) of the same criterion and runner leave the log in this SAME write; the version
+    // snapshot keeps them, and the audit row below names what was replaced.
+    const replaced = isRefresh ? existing.filter((row) => isSameRefreshKey(row, parsedEntry.data)) : [];
+    const kept = replaced.length === 0 ? existing : existing.filter((row) => !replaced.includes(row));
+    if (kept.length >= 50) return evidenceLogFull(existing.length);
     const newExtra: Record<string, unknown> = {
       ...task.extra,
-      verification_evidence: [...existing, parsedEntry.data],
+      verification_evidence: [...kept, parsedEntry.data],
       ...(renewedClaim !== null ? { claim: renewedClaim } : {}),
     };
 
@@ -3006,6 +3016,15 @@ export class TaskWorkflowService {
         command: entry.command,
         result: entry.result,
         ...(renewedClaim !== null ? { claim_renewed: true } : {}),
+        ...(replaced.length > 0
+          ? {
+              refresh_replaced: replaced.map((row) => ({
+                ac_ref: row.ac_ref,
+                result: row.result,
+                recorded_at: row.recorded_at,
+              })),
+            }
+          : {}),
       },
       verifyRunIntent || readClaimRecord(task)?.worktree !== undefined,
     );
@@ -6025,4 +6044,24 @@ export class TaskWorkflowService {
     };
     this.telemetry.record(event);
   }
+}
+
+
+/** The shared "log full" refusal of the evidence write path (50 rows max). */
+function evidenceLogFull(count: number): Result<never, LoreError> {
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "extra.verification_evidence",
+    message: "Evidence log is full (50 entries max) — cannot append a 51st entry",
+    value: count,
+  });
+}
+
+/** True iff `row` is a milestone refresh row of the same criterion and runner as `incoming` (the replacement key). */
+function isSameRefreshKey(row: EvidenceEntry, incoming: EvidenceEntry): boolean {
+  return (
+    row.milestone_refresh === true &&
+    row.ac_ref === incoming.ac_ref &&
+    row.attestation?.runner === incoming.attestation?.runner
+  );
 }

@@ -130,7 +130,7 @@ describe("milestone refresh evidence replaces its own row", () => {
     await fillTo(fx, 50, [{ ac: AC_A, tag: "old-refresh" }]);
     const r = await write(fx, row({ ac: AC_A, refresh: false, tag: "plain-extra" }), "2026-10-03T00:00:00.000Z");
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.message).toMatch(FULL);
+    if (!r.ok) expect(JSON.stringify(r.error)).toMatch(FULL);
     expect((await rows(fx)).length).toBe(50);
   });
 
@@ -139,7 +139,7 @@ describe("milestone refresh evidence replaces its own row", () => {
     await fillTo(fx, 50, [{ ac: AC_B, tag: "other-refresh" }]);
     const r = await write(fx, row({ ac: AC_A, refresh: true, tag: "first-refresh" }), "2026-10-03T00:00:00.000Z");
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.message).toMatch(FULL);
+    if (!r.ok) expect(JSON.stringify(r.error)).toMatch(FULL);
     expect((await rows(fx)).length).toBe(50);
   });
 

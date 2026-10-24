@@ -70,6 +70,7 @@ export function createVerifyStaleRefresher(deps: VerifyStaleRefresherDeps): Stal
           by: deps.by,
           nowIso: deps.nowIso(),
           allowNewCommands: true,
+          milestoneRefresh: true,
           executionRoot: { root: deps.executionRoot, mode: "worktree" },
         });
         if (!run.ok) return run;
@@ -135,6 +136,7 @@ async function refreshUnscoped(deps: VerifyStaleRefresherDeps, acId: string): Pr
     by: deps.by,
     nowIso: deps.nowIso(),
     allowNewCommands: true,
+    milestoneRefresh: true,
     executionRoot: { root: deps.executionRoot, mode: "worktree" },
   });
   return run.ok ? ok(undefined) : run;
