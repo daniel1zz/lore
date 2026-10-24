@@ -571,11 +571,15 @@ class FakeIssuePort implements IssuePort {
   readonly links: { plan: string; issue: number; dimensions: string[] }[] = [];
   filed = 0;
   failFilingOnce = false;
+  /** Titles already filed, with their issue number (open or since closed): the real tracker's receipt log recognises an exact title and returns the prior issue. */
+  readonly receipts = new Map<string, number>();
   async findOpenByFingerprint(short: string) {
     const hit = this.open.find((i) => i.title.includes(`[fp:${short}]`));
     return ok<IssueRef | undefined>(hit === undefined ? undefined : { number: hit.number });
   }
   async file(input: { title: string; body: string }) {
+    const prior = this.receipts.get(input.title);
+    if (prior !== undefined) return ok<IssueRef>({ number: prior, recognisedPrior: true });
     if (this.failFilingOnce) {
       this.failFilingOnce = false;
       return err<LoreError>({ code: "STORE_ERROR", message: "injected filing failure" });
@@ -583,6 +587,7 @@ class FakeIssuePort implements IssuePort {
     this.filed += 1;
     const number = 100 + this.filed;
     this.open.push({ number, title: input.title, body: input.body });
+    this.receipts.set(input.title, number);
     return ok<IssueRef>({ number });
   }
   async linkToPlan(plan: string, issue: IssueRef, finding: { dimension: string; fingerprint: string }) {
@@ -1610,5 +1615,56 @@ describe("AC-PCR-5 a fixed covering issue sends its plan back to review", () => 
     expect(filed.ok && filed.value[0]?.reused).toBe(false);
     expect(world.issues.filed).toBe(1);
     expect(world.issues.open[0]?.title).toContain(`[fp:${cause.short}]`);
+  });
+});
+
+describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan re-enters review once per closed cover", () => {
+  /** The plan of the live repro: its failing dimension was covered by issue #7, which is closed, and the tracker remembers #7's exact title. */
+  async function planWithClosedCoverAndReceipt() {
+    const world = new World();
+    const plan = world.add(makeWorldPlan("p-loop"));
+    plan.failing = ["regression"];
+    plan.regressionFiles = ["loop.test.ts"];
+    world.suiteFailingFiles = ["loop.test.ts"];
+    await world.judge("p-loop");
+    world.issues.links.push({ plan: "p-loop", issue: 7, dimensions: ["regression"] });
+    const cause = causeOf({ plan: "p-loop", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["loop.test.ts"], suite_failing_files: ["loop.test.ts"] } });
+    world.issues.receipts.set(issueTitleOf(cause), 7);
+    return { world, plan };
+  }
+
+  it("HAPPY: a re-review failing with the closed cover's fingerprint files a NEW issue and the plan closes as accepted with known defects in the same batch", async () => {
+    const { world, plan } = await planWithClosedCoverAndReceipt();
+    const run = await world.runner().runBatch(["p-loop"], world.ports("batch-1"));
+    const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
+    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", true, [101]]]);
+    expect(world.issues.links.find((l) => l.issue === 101)).toMatchObject({ plan: "p-loop", dimensions: ["regression"] });
+    expect(plan.archived).toBe(true);
+  });
+
+  it("STATE: a second batch with nothing changed does not call the judge for the plan", async () => {
+    const { world, plan } = await planWithClosedCoverAndReceipt();
+    plan.closeFailures = 1;
+    await world.runner().runBatch(["p-loop"], world.ports("batch-1"));
+    expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
+    const second = await world.runner().runBatch(["p-loop"], world.ports("batch-2"));
+    const rows = second.ok && second.value.state === "ran" ? second.value.rows : [];
+    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["accepted-with-known-defects", false]]);
+    expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
+  });
+
+  it("STATE: a plan re-enters review for a closed cover at most once per fingerprint; a filing failure after it is retried as filing only", async () => {
+    const { world, plan } = await planWithClosedCoverAndReceipt();
+    world.issues.failFilingOnce = true;
+    const first = await world.runner().runBatch(["p-loop"], world.ports("batch-1"));
+    expect(first.ok && first.value.state === "ran" ? first.value.rows.map((r) => [r.outcome, r.stage]) : []).toEqual([["error", "filing"]]);
+    expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
+    const set = await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet();
+    expect(set).toEqual({ ok: true, value: [{ plan: "p-loop", need: "filing" }] });
+    const second = await world.runner().runBatch(["p-loop"], world.ports("batch-2"));
+    const rows = second.ok && second.value.state === "ran" ? second.value.rows : [];
+    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", false, [101]]]);
+    expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
+    expect(plan.archived).toBe(true);
   });
 });
