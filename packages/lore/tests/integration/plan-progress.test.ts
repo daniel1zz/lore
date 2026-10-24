@@ -571,15 +571,14 @@ class FakeIssuePort implements IssuePort {
   readonly links: { plan: string; issue: number; dimensions: string[] }[] = [];
   filed = 0;
   failFilingOnce = false;
-  /** Titles already filed, with their issue number (open or since closed): the real tracker's receipt log recognises an exact title and returns the prior issue. */
-  readonly receipts = new Map<string, number>();
   async findOpenByFingerprint(short: string) {
     const hit = this.open.find((i) => i.title.includes(`[fp:${short}]`));
     return ok<IssueRef | undefined>(hit === undefined ? undefined : { number: hit.number });
   }
   async file(input: { title: string; body: string }) {
-    const prior = this.receipts.get(input.title);
-    if (prior !== undefined) return ok<IssueRef>({ number: prior, recognisedPrior: true });
+    // the real port recognises a retried in-flight filing by exact title, and only while that issue is still open
+    const prior = this.open.find((i) => i.title === input.title);
+    if (prior !== undefined) return ok<IssueRef>({ number: prior.number });
     if (this.failFilingOnce) {
       this.failFilingOnce = false;
       return err<LoreError>({ code: "STORE_ERROR", message: "injected filing failure" });
@@ -587,7 +586,6 @@ class FakeIssuePort implements IssuePort {
     this.filed += 1;
     const number = 100 + this.filed;
     this.open.push({ number, title: input.title, body: input.body });
-    this.receipts.set(input.title, number);
     return ok<IssueRef>({ number });
   }
   async linkToPlan(plan: string, issue: IssueRef, finding: { dimension: string; fingerprint: string }) {
@@ -1619,7 +1617,7 @@ describe("AC-PCR-5 a fixed covering issue sends its plan back to review", () => 
 });
 
 describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan re-enters review once per closed cover", () => {
-  /** The plan of the live repro: its failing dimension was covered by issue #7, which is closed, and the tracker remembers #7's exact title. */
+  /** The plan of the live repro: its failing dimension was covered by issue #7, which is closed (absent from the open list). */
   async function planWithClosedCoverAndReceipt() {
     const world = new World();
     const plan = world.add(makeWorldPlan("p-loop"));
@@ -1628,8 +1626,6 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     world.suiteFailingFiles = ["loop.test.ts"];
     await world.judge("p-loop");
     world.issues.links.push({ plan: "p-loop", issue: 7, dimensions: ["regression"] });
-    const cause = causeOf({ plan: "p-loop", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["loop.test.ts"], suite_failing_files: ["loop.test.ts"] } });
-    world.issues.receipts.set(issueTitleOf(cause), 7);
     return { world, plan };
   }
 
