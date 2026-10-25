@@ -21,7 +21,7 @@ import { truncateDiffByFile } from "./diff-truncation.js";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
 
 /** Stamped on every stored review (`prompt_version`). */
-export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-3";
+export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-4";
 
 /** One task's evidence row as the judge sees it. */
 export interface MilestoneEvidenceLine {
@@ -108,7 +108,7 @@ function renderDiff(input: MilestoneReviewPromptInput): string {
  * Builds the milestone review prompt.
  *
  * @param input - the plan, spec, tasks with evidence, cited-rule state, milestone decisions and diff
- * @returns the prompt text; the judge answers with one JSON object `{"dimensions": {<dimension>: {verdict, reason, reference}}}`
+ * @returns the prompt text; the judge answers with one JSON object `{"dimensions": {<dimension>: {verdict, reason, reference, cites}}}`
  * @example
  * buildMilestoneReviewPrompt({ plan, tasks: [], citedRules: [], decisions: [], diffSource: "none", maxDiffChars: 24000 });
  */
@@ -131,6 +131,9 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
   return [
     "You are the milestone reviewer for a finished plan. Judge it on seven dimensions, each separately.",
     "For each dimension give a verdict (pass, fail or na), a reason that cites what you saw, and a reference.",
+    "For every dimension you fail (except regression and snapshot_accuracy, which are measured) also give `cites`: a non-empty",
+    "list of the stable things the finding is about: acceptance-criterion ids, rule ids, file paths or symbols. Use the same",
+    "cite for the same defect on every review; cites identify the defect, so never put prose or wording in them.",
     "Overall the plan passes only if no dimension fails. Use na only when the dimension cannot apply.",
     "",
     "# Dimensions",
@@ -138,7 +141,7 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
     "# Output",
     'Reply with ONE JSON object and nothing else: {"dimensions": {' +
-      MILESTONE_DIMENSIONS.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "..."}`).join(", ") +
+      MILESTONE_DIMENSIONS.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}`).join(", ") +
       "}}",
     "",
     `# Plan ${input.plan.slug}: ${input.plan.title}`,

@@ -693,7 +693,7 @@ class World {
       return err<LoreError>({ code: "AI_PROVIDER_ERROR", message: "injected judge failure", provider: "fake" });
     }
     const dimensions = Object.fromEntries(
-      MILESTONE_DIMENSIONS.map((d) => [d, { verdict: plan.failing.includes(d) ? "fail" : "pass", reason: plan.failing.includes(d) ? `${d} failed` : "ok", reference: "fixture" }]),
+      MILESTONE_DIMENSIONS.map((d) => [d, { verdict: plan.failing.includes(d) ? "fail" : "pass", reason: plan.failing.includes(d) ? `${d} failed` : "ok", reference: "fixture", ...(plan.failing.includes(d) ? { cites: [`src/${d}.ts`] } : {}) }]),
     ) as MilestoneReview["dimensions"];
     const review: MilestoneReview = {
       plan_id: plan.bundle.plan.id,
@@ -946,11 +946,11 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(world.issues.links).toContainEqual({ plan: "p-red-later", issue: 101, dimensions: ["regression"] });
   });
 
-  it("STATE: the other dimensions group by cited symbols/paths plus the normalised summary, and snapshot_accuracy by contradicted rules", () => {
+  it("STATE: the other dimensions group by structured cites, and snapshot_accuracy by contradicted rules", () => {
     const base = { plan: "p", reference: "", reviewSlug: "r" } as const;
-    const one = causeOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (3 places)" });
-    const two = causeOf({ ...base, dimension: "security", reason: "`readToken` in src/auth/session.ts leaks the token (7 places)" });
-    const other = causeOf({ ...base, dimension: "security", reason: "`writeToken` in src/auth/store.ts leaks the token" });
+    const one = causeOf({ ...base, dimension: "security", reason: "leaks the token (3 places)", cites: ["src/auth/session.ts"] });
+    const two = causeOf({ ...base, dimension: "security", reason: "token leak (7 places)", cites: ["src/auth/session.ts"] });
+    const other = causeOf({ ...base, dimension: "security", reason: "leaks the token", cites: ["src/auth/store.ts"] });
     expect(two.fingerprint).toBe(one.fingerprint);
     expect(other.fingerprint).not.toBe(one.fingerprint);
     const rulesA = causeOf({ ...base, dimension: "snapshot_accuracy", reason: "x", causes: { contradicted_rules: ["BR-2", "BR-1"] } });
@@ -1021,15 +1021,15 @@ describe("batch outcomes — one main red issue per suite run, issue titles keep
   });
 
   it("REGRESSION: a finding summary naming AC-ZZ-3 and BR-99999 keeps both ids in the issue title, with [fp:<12hex>]", () => {
-    const finding = { plan: "p", dimension: "security", reason: "AC-ZZ-3 and BR-99999 are violated by the token store", reference: "", reviewSlug: "r" } as const;
+    const finding = { plan: "p", dimension: "security", reason: "AC-ZZ-3 and BR-99999 are violated by the token store", reference: "", cites: ["src/token-store.ts"], reviewSlug: "r" } as const;
     const title = issueTitleOf(causeOf(finding));
     expect(title).toContain("AC-ZZ-3");
     expect(title).toContain("BR-99999");
     expect(title).toMatch(/\[fp:[0-9a-f]{12}\]$/);
   });
 
-  it("STATE: two findings differing only in ids share one fingerprint, yet each title keeps its own ids", () => {
-    const base = { plan: "p", dimension: "security", reference: "", reviewSlug: "r" } as const;
+  it("STATE: two findings with the same cites share one fingerprint, yet each title keeps its own ids", () => {
+    const base = { plan: "p", dimension: "security", reference: "", cites: ["src/token-store.ts"], reviewSlug: "r" } as const;
     const one = causeOf({ ...base, reason: "AC-ZZ-3 and BR-99999 are violated" });
     const two = causeOf({ ...base, reason: "AC-ZZ-9 and BR-99998 are violated" });
     expect(two.fingerprint).toBe(one.fingerprint);
@@ -1038,7 +1038,7 @@ describe("batch outcomes — one main red issue per suite run, issue titles keep
   });
 
   it("BOUNDARY: a long summary is truncated in the title and the tag still ends it", () => {
-    const cause = causeOf({ plan: "p", dimension: "security", reason: `AC-ZZ-3 ${"x".repeat(500)}`, reference: "", reviewSlug: "r" });
+    const cause = causeOf({ plan: "p", dimension: "security", reason: `AC-ZZ-3 ${"x".repeat(500)}`, reference: "", cites: ["src/x.ts"], reviewSlug: "r" });
     const title = issueTitleOf(cause);
     expect(title.length).toBeLessThan(200);
     expect(title.endsWith(`[fp:${cause.short}]`)).toBe(true);

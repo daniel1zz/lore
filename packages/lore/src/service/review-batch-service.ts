@@ -353,6 +353,7 @@ export class ReviewBatchRunner {
         dimension,
         reason: review.dimensions[dimension].reason,
         reference: review.dimensions[dimension].reference,
+        cites: review.dimensions[dimension].cites,
         reviewSlug: latest.doc.slug,
         causes: review.causes,
       }));
@@ -434,7 +435,7 @@ function closedCoverAlreadyReviewed(docs: readonly DocRecord[], fingerprint: str
 /** The root-cause results of a stored review's failed dimensions, one per dimension. */
 function causesOfReview(planSlug: string, reviewSlug: string, review: MilestoneReview): Result<RootCause, LoreError>[] {
   return failedDimensions(review.dimensions).map((dimension) =>
-    rootCauseOf({ plan: planSlug, dimension, reason: review.dimensions[dimension].reason, reference: review.dimensions[dimension].reference, reviewSlug, causes: review.causes }),
+    rootCauseOf({ plan: planSlug, dimension, reason: review.dimensions[dimension].reason, reference: review.dimensions[dimension].reference, cites: review.dimensions[dimension].cites, reviewSlug, causes: review.causes }),
   );
 }
 

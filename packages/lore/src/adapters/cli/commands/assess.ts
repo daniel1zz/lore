@@ -329,6 +329,7 @@ export default defineLoreCommand({
               dimension,
               reason: judgment.reason,
               reference: judgment.reference,
+              cites: judgment.cites,
               reviewSlug: reviewed.value.doc.slug,
               causes: reviewed.value.review.causes,
             });
