@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { liveAmbient, liveWriteContext, actedStore } from "../../live-invocation.js";
 
 const PROJECT = { name: "exempt", author: "tester" };
@@ -42,6 +43,7 @@ let dir: string;
 let app: App;
 let side: SQLiteStore;
 let specId: string;
+let leafId: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "cite-gate-exempt-"));
@@ -68,6 +70,8 @@ beforeEach(async () => {
   for (const statement of ["First rule", "Second rule"]) {
     await must(await rs.addRule(leaf.id, { statement, confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "agent:seed" }), "rule");
   }
+  leafId = leaf.id;
+  await approvePending(side, leaf.id); // a direct rule add is a pending add: live (citable) only once approved
   const spec = await must(await cs.create({ type: "spec", title: "Exempt spec", content: SKELETON} as CreateDocInput), "spec");
   specId = spec.id;
   // Seed criteria while every cite is live (BR-1, BR-2 are the two rules just added).
@@ -129,6 +133,7 @@ describe("cite gate admits exempted uncited criteria (#105)", () => {
 
   it("an exempted criterion revised to cite a retired rule is refused and nothing is written", async () => {
     await must(await app.ruleService!.setRule("BR-2", { lifecycle: "retired", note: "gone" }, { by: "agent:seed" }), "retire BR-2");
+    await approvePending(side, leafId); // the retirement is a pending revision until approved
     await exempt("AC-E-1", FUTURE);
     const before = await version();
     const r = await app.acService!.setCriterion(specId, "AC-E-1", { cites: ["BR-2"] });

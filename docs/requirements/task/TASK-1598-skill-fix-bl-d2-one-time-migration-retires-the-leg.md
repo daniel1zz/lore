@@ -3,11 +3,11 @@ id: TASK-1598
 type: task
 role: plan
 title: "[Skill:fix] BL-D2 one-time migration retires the legacy outline-sync exemption field so BR-250's refusal and listing can go (baseline-close-a-plan)"
-status: draft
+status: archived
 priority: medium
 phase: "P3-stale-and-draft"
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 tags: []
 parent: PLAN-206
 plan: PLAN-206

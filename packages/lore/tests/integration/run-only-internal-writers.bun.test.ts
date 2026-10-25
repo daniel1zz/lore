@@ -83,9 +83,6 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-9 intern
     const provider = new InMemoryAIProvider("claude-cli", { kind: "ok", content: JUDGE_JSON });
     const providers = new Map([[provider.name, provider]]) as unknown as ReadonlyMap<string, AIProvider>;
     const ai = new AIProviderService(providers, provider.name, {}, new NoOpTelemetry(), false, 8000, {
-      max_plan_chars: 8000,
-      max_spec_chars: 12000,
-      max_task_chars: 4000,
       max_diff_chars: 24000,
     });
     const judged = await ai.judgeDoc(bundle.value, runDeterministicChecks(bundle.value), {});

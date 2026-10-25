@@ -100,9 +100,16 @@ function buildFixture(registry: string): Fixture {
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BCR Root"], dir));
   const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch"], dir));
   const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "la", "--title", "BCR Leaf"], dir));
+  const ruleOut = mustRun(["rule", "add", leaf, "--statement", "alpha refusal holds", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e"], dir);
+  const ruleId = (ruleOut.match(/BR-\d+/) ?? [])[0];
+  if (ruleId === undefined) throw new Error(`no rule id in: ${ruleOut}`);
   mustRun(["baseline", "map", leaf, "--command", "alpha"], dir);
-  const sites = JSON.parse(mustRun(["baseline", "sites", "alpha", "--json"], dir)) as { data: { sites: { key: string }[] } };
-  for (const s of sites.data.sites) mustRun(["baseline", "map", leaf, "--site", s.key, "--non-business", "fixture site, accounted for"], dir);
+  // the rule is declared where alpha's refusal is written (BR-1344): the tree, never the corpus, says which rule a site enforces
+  write(
+    dir,
+    `${CLI}/commands/alpha.ts`,
+    `import { err } from "../lib/result.js";\nexport default { run() { return err({ code: "ALPHA_BAD", rule: "${ruleId}" }); } };\n`,
+  );
   return { dir, root, leaf };
 }
 

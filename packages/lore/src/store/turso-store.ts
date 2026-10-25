@@ -20,6 +20,8 @@
 import type { Client, InStatement, InValue, ResultSet, Row, Transaction } from "@libsql/client";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
+import { isSchemaBehind, SchemaBehindError } from "./schema-behind.js";
+import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
@@ -52,6 +54,43 @@ import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { MIGRATION_026_SQL, MigrationFailedError } from "./migrations/migration-026.js";
+import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
+import {
+  auditBindings,
+  conversionAuditEntry,
+  conversionVersionBindings,
+  convertedNodeBindings,
+  INSERT_AUDIT_SQL,
+  INSERT_CONVERSION_VERSION_SQL,
+  MIGRATION_028_SQL,
+  planBaselineItemConversion,
+  PROPOSE_RULE_SQL,
+  requireMigrationActor,
+  SELECT_AUDIT_HEAD_SQL,
+  SELECT_BASELINE_NODES_SQL,
+  SELECT_LAST_APPROVED_SQL,
+  UPDATE_CONVERTED_NODE_SQL,
+  type ApprovedVersionRow,
+  type BaselineNodeRow,
+} from "./migrations/migration-028.js";
+import {
+  collectLandedChanges,
+  MIGRATION_029_SQL,
+  planLandedPromotion,
+  promotedNodeBindings,
+  promotedVersionBindings,
+  promotionAuditEntry,
+  DOCS_TABLE_INFO_SQL,
+  specExtrasSqlFor,
+} from "./migrations/migration-029.js";
+import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
+import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
+import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
+import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
+import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
+import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
+import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
+import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -90,7 +129,6 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
-  NeverReadDoc,
   SearchHit,
   ProposedRuleWrite,
   RuleLeafPatch,
@@ -101,6 +139,13 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  CheckOutcomeInput,
+  CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
+  LeaseAcquisition,
+  LeaseRecord,
+  ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
@@ -157,6 +202,14 @@ import {
   NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
+import {
+  PLAN_MEMBERS_SQL,
+  buildPlanProgressWrite,
+  keepStoredPlanProgress,
+  planIdsAffectedBy,
+  refuseArchivedTerminal,
+  withInitialPlanProgress,
+} from "./plan-progress.js";
 import { stampAuditSurface } from "./audit-surface.js";
 
 // ─── Deferred @libsql/client load (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy) ──
@@ -214,6 +267,20 @@ export function loadLibsqlClientModule(): Promise<typeof import("@libsql/client"
 // function — it pre-resolves the client via `loadLibsqlClientModule()` above
 // and passes it in as `injectedClient`, so it never touches this fallback.
 let cachedLibsqlModuleSync: typeof import("@libsql/client") | null = null;
+
+/**
+ * Resolves `@libsql/client` through the literal-specifier dynamic `import()` and hands the module to the
+ * synchronous construction path below, so a SYNCHRONOUS `new TursoStore(...)` works from the compiled binary too
+ * (spec-defect-clusters-round-2-part-c-criterion-data-demotion D22). This is how `createApp`'s Turso branch stays
+ * synchronous without `createRequire`: an entry that is about to open a sync-enabled corpus awaits this once,
+ * before `createApp`. A project with `sync.enabled` off never calls it, so the native load stays lazy.
+ *
+ * @returns resolves once the module is cached; rejects when `@libsql/client` cannot be loaded
+ */
+export async function primeLibsqlClientForSyncConstruction(): Promise<void> {
+  if (cachedLibsqlModuleSync === null) cachedLibsqlModuleSync = await loadLibsqlClientModule();
+}
+
 function loadLibsqlClientModuleSync(): typeof import("@libsql/client") {
   if (cachedLibsqlModuleSync === null) {
     const req = createRequire(import.meta.url);
@@ -273,6 +340,10 @@ export interface TursoConfig {
   authToken?: string;
   /** Sync interval in seconds for embedded replica. Defaults to 60. */
   syncInterval?: number;
+  /** Permit upgrading an older corpus (same meaning as `SQLiteStoreOptions.migrate`); absent → refuse with `SchemaBehindError`. */
+  migrate?: true;
+  /** Author of the migration's data-conversion writes (same meaning as `SQLiteStoreOptions.migrationActor`). */
+  migrationActor?: string;
 }
 
 /**
@@ -486,6 +557,10 @@ export class TursoStore implements StoreInterface {
   private readonly hasRemote: boolean;
   /** The local corpus file; named by a failed migration. */
   private readonly localPath: string;
+  /** True only when the config carries `migrate: true`; see {@link TursoConfig.migrate}. */
+  private readonly migrateAllowed: boolean;
+  /** See {@link TursoConfig.migrationActor}. */
+  private readonly migrationActor: string | undefined;
 
   /**
    * @param config - Local path + optional remote/auth/interval.
@@ -509,6 +584,8 @@ export class TursoStore implements StoreInterface {
   constructor(config: TursoConfig, injectedClient?: Client) {
     this.hasRemote = Boolean(config.remoteUrl);
     this.localPath = config.localPath;
+    this.migrateAllowed = config.migrate === true;
+    this.migrationActor = config.migrationActor;
     this.client =
       injectedClient !== undefined
         ? injectedClient
@@ -538,6 +615,12 @@ export class TursoStore implements StoreInterface {
       const currentVersion = versionRs.rows[0]
         ? rowNum(versionRs.rows[0], "user_version")
         : 0;
+
+      // reason: a corpus upgrade runs only through `lore migrate schema` (SQLiteStore over the same local file); this
+      // store never rewrites an older corpus as a side effect of opening it. Surfaces as STORE_ERROR via ensureReady().
+      if (!this.migrateAllowed && isSchemaBehind(currentVersion, LATEST_SCHEMA_VERSION)) {
+        throw new SchemaBehindError(this.localPath, currentVersion, LATEST_SCHEMA_VERSION);
+      }
 
       if (currentVersion < 1) {
         await this.client.executeMultiple(MIGRATION_001_SQL);
@@ -812,6 +895,160 @@ export class TursoStore implements StoreInterface {
           throw new MigrationFailedError(26, "executeMultiple (single transaction)", this.localPath, error);
         }
       }
+
+      if (currentVersion < 27) {
+        // reason: migration-027 only moves user_version (see migration-027.ts).
+        await this.client.executeMultiple(MIGRATION_027_SQL);
+      }
+
+      if (currentVersion < 28) {
+        // reason: migration-028 converts every baseline node to approved + pending items (BR-1341), planned by the
+        // same pure function the SQLite store runs, in ONE interactive transaction with the version bump.
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          const nodes = await tx.execute(SELECT_BASELINE_NODES_SQL);
+          for (const row of nodes.rows) {
+            const node: BaselineNodeRow = {
+              id: rowStr(row, "id"),
+              slug: rowStr(row, "slug"),
+              title: rowStr(row, "title"),
+              content: rowStr(row, "content"),
+              status: rowStr(row, "status"),
+              extra: rowStr(row, "extra"),
+              tags: rowStr(row, "tags"),
+              version: rowNum(row, "version"),
+            };
+            step = `convert baseline node ${node.slug}`;
+            const approvedRs = await tx.execute({ sql: SELECT_LAST_APPROVED_SQL, args: [node.id] as InValue[] });
+            const approvedRow = approvedRs.rows[0];
+            const lastApproved: ApprovedVersionRow | undefined =
+              approvedRow === undefined
+                ? undefined
+                : { title: rowStr(approvedRow, "title"), content: rowStr(approvedRow, "content"), extra: rowStr(approvedRow, "extra") };
+            const conversion = planBaselineItemConversion(node, lastApproved);
+            if (conversion === undefined) continue;
+            const by = requireMigrationActor(this.migrationActor, node.slug);
+            const now = new Date().toISOString();
+            await tx.execute({ sql: UPDATE_CONVERTED_NODE_SQL, args: convertedNodeBindings(node, conversion, now) as InValue[] });
+            await tx.execute({ sql: INSERT_CONVERSION_VERSION_SQL, args: conversionVersionBindings(node, conversion, by, now) as InValue[] });
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(conversionAuditEntry(node, conversion, by, now), prevHash) as InValue[] });
+            for (const ruleId of conversion.proposedRuleIds) {
+              await tx.execute({ sql: PROPOSE_RULE_SQL, args: [ruleId, node.id] as InValue[] });
+            }
+          }
+          step = "set user_version 28";
+          await tx.execute(MIGRATION_028_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(28, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
+      }
+
+      if (currentVersion < 29) {
+        // reason: migration-029 promotes pending rule revisions that a landed spec change set accounts for (#323),
+        // planned by the same pure function the SQLite store runs, in ONE interactive transaction with the bump.
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          const docsInfo = await tx.execute(DOCS_TABLE_INFO_SQL);
+          const specRs = await tx.execute(specExtrasSqlFor(docsInfo.rows.some((r) => rowStr(r, "name") === "deleted_at")));
+          const landed = collectLandedChanges(specRs.rows.map((row) => ({ slug: rowStr(row, "slug"), extra: rowStr(row, "extra") })));
+          const nodes = await tx.execute(SELECT_BASELINE_NODES_SQL);
+          for (const row of nodes.rows) {
+            const node: BaselineNodeRow = {
+              id: rowStr(row, "id"),
+              slug: rowStr(row, "slug"),
+              title: rowStr(row, "title"),
+              content: rowStr(row, "content"),
+              status: rowStr(row, "status"),
+              extra: rowStr(row, "extra"),
+              tags: rowStr(row, "tags"),
+              version: rowNum(row, "version"),
+            };
+            step = `promote landed changes on baseline node ${node.slug}`;
+            const plan = planLandedPromotion(node, landed);
+            if (plan === undefined) continue;
+            const by = requireMigrationActor(this.migrationActor, node.slug);
+            const now = new Date().toISOString();
+            await tx.execute({ sql: UPDATE_CONVERTED_NODE_SQL, args: promotedNodeBindings(node, plan, now) as InValue[] });
+            await tx.execute({ sql: INSERT_CONVERSION_VERSION_SQL, args: promotedVersionBindings(node, plan, by, now) as InValue[] });
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(promotionAuditEntry(node, plan, by, now), prevHash) as InValue[] });
+          }
+          step = "set user_version 29";
+          await tx.execute(MIGRATION_029_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(29, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
+      }
+
+      if (currentVersion < 30) {
+        // reason: migration-030 is two-phase like 021 (see migration-030.ts's module JSDoc): the nullable
+        // `runs.message_address` column is added only where `PRAGMA table_info` lacks it.
+        for (const { table, column, ddl } of MIGRATION_030_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_030_SQL);
+      }
+
+      if (currentVersion < 31) {
+        // reason: migration-031 creates the per-day read counter and deletes every per-read `get` trace row (BR-1373).
+        await this.client.executeMultiple(MIGRATION_031_SQL);
+      }
+
+      if (currentVersion < 32) {
+        // reason: migration-032 rebuilds decision_log with the verdict CHECK widened to 'milestone' (BR-1370, AC-LG-8).
+        await this.client.executeMultiple(MIGRATION_032_SQL);
+      }
+
+      if (currentVersion < 33) {
+        // reason: migration-033 creates check_outcomes (one row per gate/hook run, BR-1373).
+        await this.client.executeMultiple(MIGRATION_033_SQL);
+      }
+
+      if (currentVersion < 34) {
+        // reason: migration-034 creates pending_asks (the lore-written question bound to a single-use nonce, BR-1374).
+        await this.client.executeMultiple(MIGRATION_034_SQL);
+      }
+
+      if (currentVersion < 35) {
+        // reason: migration-035 backfills `extra.progress` on every plan (BR-1379).
+        await this.client.executeMultiple(MIGRATION_035_SQL);
+      }
+
+      if (currentVersion < 36) {
+        // reason: migration-036 creates review_leases (the review batch's expiring lease, BR-1379).
+        await this.client.executeMultiple(MIGRATION_036_SQL);
+      }
+
+      if (currentVersion < 37) {
+        // reason: migration-037 widens links.link_type to 'known-defect' and converts the batch's links (#404).
+        await this.client.executeMultiple(MIGRATION_037_SQL);
+      }
     })();
 
     return this._schemaInitPromise;
@@ -1067,7 +1304,7 @@ export class TursoStore implements StoreInterface {
       const existingRow = existingRs.rows[0];
       if (!existingRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1102,10 +1339,12 @@ export class TursoStore implements StoreInterface {
         async (candidate) => {
           try {
             const updateRs = await tx.execute({
-              sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+              sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL RETURNING id",
               args: [candidate, newVersion, id, expectedVersion] as InValue[],
             });
-            if (updateRs.rowsAffected > 0) {
+            // reason: outcomes are decided from RETURNING rows, never the driver's affected-row count
+            // (task-a-version-guarded-store-update-decides-its-outcome-from; same contract as SQLiteStore).
+            if (updateRs.rows.length > 0) {
               return {
                 kind: "success",
                 value: { ...current, ordinal: candidate, version: newVersion },
@@ -1473,7 +1712,7 @@ export class TursoStore implements StoreInterface {
       const existingRow = existingRs.rows[0];
 
       if (!existingRow) {
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1497,7 +1736,7 @@ export class TursoStore implements StoreInterface {
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
                  created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
                  fts_tags = ?
-               WHERE id = ? AND version = ?`,
+               WHERE id = ? AND version = ? RETURNING id`,
           args: [
             updated.slug,
             updated.type,
@@ -1522,7 +1761,7 @@ export class TursoStore implements StoreInterface {
           ] as InValue[],
         });
 
-        if (updateRs.rowsAffected === 0) {
+        if (updateRs.rows.length === 0) {
           // Row exists (checked above) but version didn't match — re-read actual
           const actualRs = await this.client.execute({
             sql: "SELECT version FROM docs WHERE id = ?",
@@ -1532,7 +1771,7 @@ export class TursoStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and UPDATE (race)
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -1667,13 +1906,20 @@ export class TursoStore implements StoreInterface {
    * @see StoreInterface.insertWithProvenance
    */
   async insertWithProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — a plan is born with `extra.progress` (no member yet); applied to doc and v1 snapshot together.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     await this.ensureReady();
     const tx = await this.client.transaction("write");
     try {
+      const terminal = refuseArchivedTerminal(null, doc, await this.readPlanStatusTx(tx, doc));
+      if (terminal !== null) {
+        await tx.rollback();
+        return err(terminal);
+      }
       const tagsJson = JSON.stringify(doc.tags);
       // reason: same shadow-column obligation as insert() — mirrors
       // SQLiteStore.insertDocSync (insertWithProvenance there also delegates
@@ -1731,6 +1977,12 @@ export class TursoStore implements StoreInterface {
 
       await this.appendAuditEntryTx(tx, audit);
 
+      const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(null, doc), version, doc.id);
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(doc);
     } catch (e) {
@@ -1771,13 +2023,20 @@ export class TursoStore implements StoreInterface {
    * never raised that type's MAX).
    */
   async insertWithAllocatedOrdinalAndProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — see insertWithProvenance.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     await this.ensureReady();
     const tx = await this.client.transaction("write");
     try {
+      const terminal = refuseArchivedTerminal(null, doc, await this.readPlanStatusTx(tx, doc));
+      if (terminal !== null) {
+        await tx.rollback();
+        return err(terminal);
+      }
       const maxRs = await tx.execute({
         sql: "SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?",
         args: [doc.type] as InValue[],
@@ -1863,6 +2122,17 @@ export class TursoStore implements StoreInterface {
 
       await this.appendAuditEntryTx(tx, audit);
 
+      const progressResult = await this.reconcilePlanProgressTx(
+        tx,
+        planIdsAffectedBy(null, allocResult.value),
+        version,
+        doc.id,
+      );
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(allocResult.value);
     } catch (e) {
@@ -1884,9 +2154,9 @@ export class TursoStore implements StoreInterface {
    */
   async updateWithProvenance(
     id: DocId,
-    patch: Partial<DocRecord>,
+    rawPatch: Partial<DocRecord>,
     opts: UpdateOpts | undefined,
-    version: VersionRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
@@ -1901,7 +2171,7 @@ export class TursoStore implements StoreInterface {
 
       if (!existingRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       // reason: D6 / QA-2 — liveness is read INSIDE the write transaction (see SQLiteStore's twin).
@@ -1915,11 +2185,20 @@ export class TursoStore implements StoreInterface {
         const refusal = buildNonLiveRuleRefusal(id, lifecycles);
         if (refusal !== null) {
           await tx.rollback();
+          /** @lore-site BR-260 */
           return err(refusal);
         }
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+      // reason: BR-1379 — the stored row, read inside this transaction, judges the write: archived-terminal refusal,
+      // progress kept across a plan edit, and the plans whose progress this write changes.
+      const { patch, version } = keepStoredPlanProgress(current, rawPatch, rawVersion);
+      const terminal = refuseArchivedTerminal(current, { ...current, ...patch }, null);
+      if (terminal !== null) {
+        await tx.rollback();
+        return err(terminal);
+      }
       const updated: DocRecord = {
         ...current,
         ...patch,
@@ -1939,7 +2218,7 @@ export class TursoStore implements StoreInterface {
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
                  created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
                  fts_tags = ?
-               WHERE id = ? AND version = ?`,
+               WHERE id = ? AND version = ? RETURNING id`,
           args: [
             updated.slug,
             updated.type,
@@ -1964,7 +2243,7 @@ export class TursoStore implements StoreInterface {
           ] as InValue[],
         });
 
-        if (updateRs.rowsAffected === 0) {
+        if (updateRs.rows.length === 0) {
           const actualRs = await tx.execute({
             sql: "SELECT version FROM docs WHERE id = ?",
             args: [id],
@@ -1974,7 +2253,7 @@ export class TursoStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and UPDATE (race)
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -2044,6 +2323,97 @@ export class TursoStore implements StoreInterface {
         await this.appendAuditEntryTx(tx, extraAudit);
       }
 
+      // reason: BR-1307 — companion doc writes (a spec's rule retirements on its baseline leaves) share this
+      // write transaction; each is version-guarded and decided from RETURNING rows, and the registry rows follow
+      // the leaf writes through the docs triggers. Any failure rolls back the primary write too.
+      for (const companion of extras?.also_update ?? []) {
+        const companionRs = await tx.execute({ sql: "SELECT * FROM docs WHERE id = ?", args: [companion.id] });
+        const companionRow = companionRs.rows[0];
+        if (!companionRow) {
+          await tx.rollback();
+          return err({ code: "DOC_NOT_FOUND", id: companion.id });
+        }
+        const companionCurrent = rowToDocRecord(libsqlRowToDocRow(companionRow));
+        const merged: DocRecord = { ...companionCurrent, ...companion.patch, id: companionCurrent.id };
+        const mergedTagsJson = JSON.stringify(merged.tags);
+        const mergedShadow = computeFtsShadowValues(merged.title, merged.content, mergedTagsJson);
+        const expectedVersion = companion.opts.expected_version;
+        const companionUpdateRs = await tx.execute({
+          sql: `UPDATE docs SET
+                 slug = ?, type = ?, role = ?, title = ?, status = ?,
+                 priority = ?, content = ?, parent_id = ?, extra = ?,
+                 tags = ?, version = ?, created_at = ?, updated_at = ?,
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
+               WHERE id = ?${expectedVersion !== undefined ? " AND version = ?" : ""} RETURNING id`,
+          args: [
+            merged.slug,
+            merged.type,
+            merged.role,
+            merged.title,
+            merged.status,
+            merged.priority,
+            merged.content,
+            merged.parent_id ?? null,
+            JSON.stringify(merged.extra),
+            mergedTagsJson,
+            merged.version,
+            merged.created_at,
+            merged.updated_at,
+            merged.created_by,
+            merged.deleted_at ?? null,
+            mergedShadow.fts_title,
+            mergedShadow.fts_content,
+            mergedShadow.fts_tags,
+            companion.id,
+            ...(expectedVersion !== undefined ? [expectedVersion] : []),
+          ] as InValue[],
+        });
+        if (companionUpdateRs.rows.length === 0) {
+          await tx.rollback();
+          return err({
+            code: "STALE_VERSION",
+            id: companion.id,
+            expected: expectedVersion ?? companionCurrent.version,
+            actual: companionCurrent.version,
+          });
+        }
+        await tx.execute({
+          sql: `INSERT INTO versions
+                 (doc_id, version, content, extra, status, title,
+                  action, created_at, created_by, change_summary, slug, harness_run)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            companion.version.doc_id,
+            companion.version.version,
+            companion.version.content,
+            JSON.stringify(companion.version.extra),
+            companion.version.status,
+            companion.version.title,
+            companion.version.action,
+            companion.version.created_at,
+            companion.version.created_by,
+            companion.version.change_summary ?? null,
+            companion.version.slug ?? null,
+            companion.version.harness_run ?? null,
+          ] as InValue[],
+        });
+        await this.appendAuditEntryTx(tx, companion.audit);
+        // reason: the docs triggers keep a registry lifecycle the leaf no longer lists; see SQLiteStore's twin.
+        for (const ruleId of companion.propose_rules ?? []) {
+          await tx.execute({
+            sql: "UPDATE rule_registry SET lifecycle = 'proposed' WHERE id = ? AND leaf_doc_id = ?",
+            args: [ruleId, companion.id] as InValue[],
+          });
+        }
+      }
+
+      const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(current, updated), version, id);
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(updated);
     } catch (e) {
@@ -2070,14 +2440,16 @@ export class TursoStore implements StoreInterface {
     const tx = await this.client.transaction("write");
     try {
       const existingRs = await tx.execute({
-        sql: "SELECT id FROM docs WHERE id = ?",
+        sql: "SELECT * FROM docs WHERE id = ?",
         args: [id],
       });
+      const existingRow = existingRs.rows[0];
 
-      if (!existingRs.rows[0]) {
+      if (!existingRow) {
         await tx.rollback();
         return err({ code: "DOC_NOT_FOUND", id });
       }
+      const stored = rowToDocRecord(libsqlRowToDocRow(existingRow));
 
       const now = new Date().toISOString();
       await tx.execute({
@@ -2108,6 +2480,12 @@ export class TursoStore implements StoreInterface {
 
       await this.appendAuditEntryTx(tx, audit);
 
+      const progressResult = await this.reconcilePlanProgressTx(tx, planIdsAffectedBy(stored, null), version, id);
+      if (!progressResult.ok) {
+        await tx.rollback();
+        return progressResult;
+      }
+
       await tx.commit();
       return ok(undefined);
     } catch (e) {
@@ -2120,6 +2498,83 @@ export class TursoStore implements StoreInterface {
     } finally {
       tx.close();
     }
+  }
+
+  /** The status of the live plan a task/phase `doc` is being filed under, or `null` when it has no live plan. */
+  private async readPlanStatusTx(tx: Transaction, doc: DocRecord): Promise<DocRecord["status"] | null> {
+    const planId = planIdsAffectedBy(null, doc)[0];
+    if (planId === undefined) return null;
+    const rs = await tx.execute({
+      sql: "SELECT status FROM docs WHERE id = ? AND type = 'plan' AND deleted_at IS NULL",
+      args: [planId],
+    });
+    const row = rs.rows[0];
+    return row ? (rowStr(row, "status") as DocRecord["status"]) : null;
+  }
+
+  /**
+   * BR-1379 — recompute `extra.progress` of each plan in `planIds` from its member rows and, when it changed, write the
+   * plan (CAS on the version read here, version row, audit row) INSIDE the caller's open write transaction (twin of
+   * `SQLiteStore.reconcilePlanProgressSync`). Returns the refusal; the caller rolls back.
+   */
+  private async reconcilePlanProgressTx(
+    tx: Transaction,
+    planIds: readonly DocId[],
+    primaryVersion: VersionRecord,
+    causeDocId: DocId,
+  ): Promise<Result<void, LoreError>> {
+    for (const planId of planIds) {
+      const planRs = await tx.execute({ sql: "SELECT * FROM docs WHERE id = ?", args: [planId] });
+      const planRow = planRs.rows[0];
+      if (!planRow) continue;
+      const plan = rowToDocRecord(libsqlRowToDocRow(planRow));
+      if (plan.type !== "plan" || plan.deleted_at !== null) continue;
+      const membersRs = await tx.execute({ sql: PLAN_MEMBERS_SQL, args: [planId, planId] as InValue[] });
+      const members = membersRs.rows.map((row) => ({ status: rowStr(row, "status") as DocRecord["status"] }));
+      const write = buildPlanProgressWrite(plan, members, {
+        now: primaryVersion.created_at,
+        actor: primaryVersion.created_by,
+        harnessRun: primaryVersion.harness_run ?? null,
+        causeDocId,
+      });
+      if (write === null) continue;
+      const updateRs = await tx.execute({
+        sql: "UPDATE docs SET extra = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? RETURNING id",
+        args: [
+          JSON.stringify(write.patch.extra),
+          write.patch.version,
+          write.patch.updated_at,
+          planId,
+          write.expectedVersion,
+        ] as InValue[],
+      });
+      if (updateRs.rows.length === 0) {
+        return err({ code: "STALE_VERSION", id: planId, expected: write.expectedVersion, actual: plan.version });
+      }
+      const version = write.version;
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+          version.slug ?? null,
+          version.harness_run ?? null,
+        ] as InValue[],
+      });
+      await this.appendAuditEntryTx(tx, write.audit);
+    }
+    return ok(undefined);
   }
 
   // ── Links ─────────────────────────────────────────────────────────────
@@ -2148,6 +2603,7 @@ export class TursoStore implements StoreInterface {
           from: link.from_id,
           to: link.to_id,
           type: link.link_type,
+          rule: "BR-949",
         });
       }
       return wrapStoreError(e);
@@ -2199,12 +2655,12 @@ export class TursoStore implements StoreInterface {
 
       if (link.link_type === "parent") {
         const updateRs = await tx.execute({
-          sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ?",
+          sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ? RETURNING id",
           args: [link.to_id, link.created_at, link.from_id],
         });
-        if (updateRs.rowsAffected === 0) {
+        if (updateRs.rows.length === 0) {
           await tx.rollback();
-          return err({ code: "DOC_NOT_FOUND", id: link.from_id });
+          return err({ code: "DOC_NOT_FOUND", id: link.from_id, rule: "BR-550" });
         }
       }
 
@@ -2247,10 +2703,10 @@ export class TursoStore implements StoreInterface {
     }
     try {
       const updateRs = await tx.execute({
-        sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ?",
+        sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ? RETURNING id",
         args: [parentId, audit.timestamp, id] as InValue[],
       });
-      if (updateRs.rowsAffected === 0) {
+      if (updateRs.rows.length === 0) {
         await tx.rollback();
         return err({ code: "DOC_NOT_FOUND", id });
       }
@@ -2820,7 +3276,7 @@ export class TursoStore implements StoreInterface {
              tags = ?, version = ?, created_at = ?, updated_at = ?,
              created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
              fts_tags = ?
-           WHERE id = ? AND version = ?`,
+           WHERE id = ? AND version = ? RETURNING id`,
       args: [
         updated.slug,
         updated.type,
@@ -2844,7 +3300,7 @@ export class TursoStore implements StoreInterface {
         patch.expectedVersion,
       ] as InValue[],
     });
-    if (updateRs.rowsAffected === 0) {
+    if (updateRs.rows.length === 0) {
       return err({
         code: "STALE_VERSION",
         id: patch.id,
@@ -3072,7 +3528,7 @@ export class TursoStore implements StoreInterface {
       const registryRow = registryRs.rows[0];
       if (!registryRow) {
         await tx.rollback();
-        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+        return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-640" });
       }
       const owner = rowStr(registryRow, "leaf_doc_id");
       if (owner !== fromLeaf.id) {
@@ -3082,6 +3538,7 @@ export class TursoStore implements StoreInterface {
           field: "fromLeaf.id",
           message: `rule ${ruleId} is registered to leaf ${owner}, not ${fromLeaf.id}`,
           value: fromLeaf.id,
+          rule: "BR-640",
         });
       }
       const nowIso = new Date().toISOString();
@@ -3448,25 +3905,6 @@ export class TursoStore implements StoreInterface {
     }
   }
 
-  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
-    try {
-      await this.ensureReady();
-      const rs = await this.client.execute({
-        sql: `SELECT id, slug FROM docs
-              WHERE deleted_at IS NULL
-              AND id NOT IN (
-                SELECT DISTINCT doc_id FROM trace_events
-                WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
-              )
-              ORDER BY slug ASC, id ASC`,
-        args: [window.since],
-      });
-      return ok(rs.rows.map((row) => ({ id: rowStr(row, "id"), slug: rowStr(row, "slug") })));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
   async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
     // reason: DERIVED from the member list, never a second COUNT(*) — see
     // StoreInterface.countTraceZeroHitSearches's own ⛔ note.
@@ -3475,11 +3913,179 @@ export class TursoStore implements StoreInterface {
     return ok(listResult.value.length);
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
-    // reason: DERIVED from the member list — see listNeverReadDocs above.
-    const listResult = await this.listNeverReadDocs(window);
-    if (!listResult.ok) return listResult;
-    return ok(listResult.value.length);
+  async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: ONE atomic upsert (BR-1373) — a read-then-write pair would lose concurrent increments.
+      await this.client.execute({
+        sql: "INSERT INTO trace_read_counts (day, count) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count = count + 1",
+        args: [day],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  private async readLeaseRow(name: string): Promise<LeaseRecord | null> {
+    const rs = await this.client.execute({ sql: "SELECT name, holder, expires_at FROM review_leases WHERE name = ?", args: [name] });
+    const row = rs.rows[0];
+    return row === undefined ? null : { name: rowStr(row, "name"), holder: rowStr(row, "holder"), expires_at: rowStr(row, "expires_at") };
+  }
+
+  async acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>> {
+    try {
+      await this.ensureReady();
+      const prior = await this.readLeaseRow(name);
+      // reason: ONE atomic upsert whose WHERE admits only an absent, expired or own row (BR-1379); the outcome is
+      // read from RETURNING rows, never the driver's rowsAffected (see store CLAUDE.md).
+      const taken = await this.client.execute({
+        sql:
+          "INSERT INTO review_leases (name, holder, expires_at) VALUES (?, ?, ?) " +
+          "ON CONFLICT(name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at " +
+          "WHERE review_leases.expires_at <= ? OR review_leases.holder = excluded.holder RETURNING name",
+        args: [name, holder, expiresAtIso, nowIso],
+      });
+      if (taken.rows.length > 0) return ok({ acquired: true, tookOver: prior !== null && prior.holder !== holder });
+      const live = await this.readLeaseRow(name);
+      if (live === null) return err({ code: "STORE_ERROR", message: `review lease ${name} vanished during acquire` });
+      return ok({ acquired: false, holder: live.holder, expires_at: live.expires_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "UPDATE review_leases SET expires_at = ? WHERE name = ? AND holder = ? RETURNING name", args: [expiresAtIso, name, holder] });
+      return ok(rs.rows.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async releaseLease(name: string, holder: string): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({ sql: "DELETE FROM review_leases WHERE name = ? AND holder = ? RETURNING name", args: [name, holder] });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      return ok(await this.readLeaseRow(name));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT day, count FROM trace_read_counts WHERE day >= ? ORDER BY day ASC",
+        args: [sinceDay],
+      });
+      return ok(rs.rows.map((row) => ({ day: rowStr(row, "day"), count: Number(row["count"]) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
+    if (rows.length === 0) return ok(undefined);
+    try {
+      await this.ensureReady();
+      // reason: one batch (implicit transaction) so an ingest lands whole or not at all.
+      await this.client.batch(
+        rows.map((row) => ({ sql: "INSERT INTO check_outcomes (check_id, outcome, ts) VALUES (?, ?, ?)", args: [row.check_id, row.outcome, row.ts] })),
+        "write",
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: "INSERT INTO pending_asks (decision_id, subject_version, nonce, question_hash, issued_at) VALUES (?, ?, ?, ?, ?)",
+        args: [input.decision_id, input.subject_version, input.nonce, input.question_hash, input.issued_at],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: `SELECT a.id, a.decision_id, a.subject_version, a.nonce, a.question_hash, a.issued_at, a.used_at,
+                     (a.id = (SELECT MAX(b.id) FROM pending_asks b WHERE b.decision_id = a.decision_id)) AS is_latest
+                FROM pending_asks a WHERE a.nonce = ?`,
+        args: [nonce],
+      });
+      const row = rs.rows[0];
+      if (row === undefined) return ok(null);
+      return ok({
+        id: Number(row["id"]),
+        decision_id: Number(row["decision_id"]),
+        subject_version: rowStr(row, "subject_version"),
+        nonce: rowStr(row, "nonce"),
+        question_hash: rowStr(row, "question_hash"),
+        issued_at: rowStr(row, "issued_at"),
+        used_at: row["used_at"] === null || row["used_at"] === undefined ? null : rowStr(row, "used_at"),
+        is_latest: Number(row["is_latest"]) === 1,
+      });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "UPDATE pending_asks SET used_at = ? WHERE nonce = ? AND used_at IS NULL RETURNING id", args: [usedAt, nonce] });
+      return ok(rs.rows.length === 1);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        `SELECT check_id, COUNT(*) AS runs,
+                SUM(CASE WHEN outcome = 'deny' THEN 1 ELSE 0 END) AS denials,
+                SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+                MIN(ts) AS first_run, MAX(ts) AS last_run,
+                MAX(CASE WHEN outcome = 'deny' THEN ts END) AS last_denial
+           FROM check_outcomes GROUP BY check_id ORDER BY check_id ASC`,
+      );
+      return ok(
+        rs.rows.map((row) => ({
+          check_id: rowStr(row, "check_id"),
+          runs: Number(row["runs"]),
+          denials: Number(row["denials"]),
+          errors: Number(row["errors"]),
+          first_run: rowStr(row, "first_run"),
+          last_run: rowStr(row, "last_run"),
+          last_denial: row["last_denial"] === null || row["last_denial"] === undefined ? null : rowStr(row, "last_denial"),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
@@ -3526,10 +4132,10 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       const rs = await this.client.execute({
-        sql: "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?)",
+        sql: "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?) RETURNING id",
         args: [cutoffIso, batchSize],
       });
-      return ok(Number(rs.rowsAffected));
+      return ok(rs.rows.length);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3566,6 +4172,7 @@ export class TursoStore implements StoreInterface {
           branch: rowStrOrNull(row, "branch"),
           composition: rowStr(row, "composition"),
           registered_at: rowStr(row, "registered_at"),
+          message_address: rowStrOrNull(row, "message_address"),
         } satisfies RunRow),
       );
     } catch (e) {
@@ -3593,6 +4200,7 @@ export class TursoStore implements StoreInterface {
             branch: rowStrOrNull(row, "branch"),
             composition: rowStr(row, "composition"),
             registered_at: rowStr(row, "registered_at"),
+            message_address: rowStrOrNull(row, "message_address"),
           } satisfies RunRow),
         ),
       );
@@ -3606,10 +4214,10 @@ export class TursoStore implements StoreInterface {
       await this.ensureReady();
       // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.
       const updated = await this.client.execute({
-        sql: "UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL",
+        sql: "UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL RETURNING id",
         args: [endedAt, reason, id],
       });
-      if (updated.rowsAffected > 0) return ok("ended");
+      if (updated.rows.length > 0) return ok("ended");
       const found = await this.client.execute({ sql: "SELECT id FROM runs WHERE id = ?", args: [id] });
       return ok(found.rows[0] === undefined ? "unknown-run" : "already-ended");
     } catch (e) {
@@ -3621,10 +4229,10 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       const updated = await this.client.execute({
-        sql: "UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL",
+        sql: "UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL RETURNING id",
         args: [id],
       });
-      return ok(updated.rowsAffected > 0);
+      return ok(updated.rows.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3647,10 +4255,24 @@ export class TursoStore implements StoreInterface {
       await this.ensureReady();
       // reason: the NEWEST registration wins here (unlike the identity columns): a resumed run lives in a new process.
       const updated = await this.client.execute({
-        sql: "UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ?",
+        sql: "UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ? RETURNING id",
         args: [proc.pid, proc.startTime, proc.worktree, id],
       });
-      return ok(updated.rowsAffected > 0);
+      return ok(updated.rows.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: BR-1360 — unconditional, newest registration wins, NULL clears; never part of insertRun (first wins).
+      const updated = await this.client.execute({
+        sql: "UPDATE runs SET message_address = ? WHERE id = ? RETURNING id",
+        args: [address, id],
+      });
+      return ok(updated.rows.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }

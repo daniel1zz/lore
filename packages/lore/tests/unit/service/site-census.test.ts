@@ -18,6 +18,9 @@ interface Site {
   symbol: string;
   code?: string;
   dynamic: boolean;
+  line: number;
+  column: number;
+  rules: string[];
 }
 interface CensusApi {
   listSites(input: { rootDir: string; entry: { file: string; symbol: string } }): Site[];
@@ -25,9 +28,16 @@ interface CensusApi {
 interface CoverageApi {
   computeLeafCoverage(input: {
     sites: Site[];
-    siteMap: Record<string, string[]>;
     liveRuleIds: string[];
-  }): { gaps: string[]; notMeasured: string[]; ok: boolean };
+    statusOf?: (id: string) => "live" | "deprecated" | "retired" | "unknown";
+  }): {
+    mapped: { key: string; file: string; line: number; rule: string }[];
+    gaps: string[];
+    notMeasured: string[];
+    conflicts: { key: string; rules: string[] }[];
+    invalid: { key: string; rule: string; status: string }[];
+    ok: boolean;
+  };
 }
 
 // Variable specifiers: the modules do not exist yet; the file must still load and typecheck.
@@ -105,52 +115,74 @@ describe("computeLeafCoverage", () => {
     return { computeLeafCoverage, sites, dynKey };
   };
 
-  it("3 of 4 mapped -> exactly 1 gap, 1 not_measured, ok=false", async () => {
+  /** The census sites with the rules `declared` names (what the tree would declare at them); the fixture itself declares none. */
+  const declare = (sites: Site[], declared: Record<string, string[]>): Site[] => sites.map((s) => ({ ...s, rules: declared[s.key] ?? [] }));
+
+  it("the fixture tree declares nothing: every keyed site is a gap and the dynamic one is not_measured", async () => {
     const { computeLeafCoverage, sites, dynKey } = await setup();
-    const siteMap = {
-      [KEYED[0]]: ["BR-001"],
-      [KEYED[1]]: ["BR-002"],
-      [KEYED[2]]: ["BR-003"],
-    };
-    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
-    expect(r.gaps).toEqual([KEYED[3]]);
+    expect(sites.every((s) => s.rules.length === 0 && s.line > 0)).toBe(true);
+    const r = computeLeafCoverage({ sites, liveRuleIds: LIVE });
+    expect(r.gaps.sort()).toEqual([...KEYED].sort());
     expect(r.notMeasured).toEqual([dynKey]);
+    expect(r.mapped).toEqual([]);
     expect(r.ok).toBe(false);
   });
 
-  it("a site mapped only to a retired rule id counts as a gap", async () => {
+  it("3 of 4 declared -> exactly 1 gap, 1 not_measured, ok=false", async () => {
     const { computeLeafCoverage, sites, dynKey } = await setup();
-    const siteMap = {
+    const declared = declare(sites, { [KEYED[0]]: ["BR-001"], [KEYED[1]]: ["BR-002"], [KEYED[2]]: ["BR-003"] });
+    const r = computeLeafCoverage({ sites: declared, liveRuleIds: LIVE });
+    expect(r.gaps).toEqual([KEYED[3]]);
+    expect(r.notMeasured).toEqual([dynKey]);
+    expect(r.mapped.map((m) => [m.key, m.rule])).toEqual([[KEYED[0], "BR-001"], [KEYED[1], "BR-002"], [KEYED[2], "BR-003"]].sort());
+    expect(r.ok).toBe(false);
+  });
+
+  it("a site declaring a retired rule id is an invalid declaration naming the id, never mapped", async () => {
+    const { computeLeafCoverage, sites, dynKey } = await setup();
+    const declared = declare(sites, {
       [KEYED[0]]: ["BR-001"],
       [KEYED[1]]: ["BR-002"],
       [KEYED[2]]: ["BR-003"],
       [KEYED[3]]: ["BR-999"],
-      [dynKey]: ["non-business:registry dispatch"],
-    };
-    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
-    expect(r.gaps).toEqual([KEYED[3]]);
+      [dynKey]: ["BR-002"],
+    });
+    const statusOf = (id: string): "live" | "retired" => (id === "BR-999" ? "retired" : "live");
+    const r = computeLeafCoverage({ sites: declared, liveRuleIds: LIVE, statusOf });
+    expect(r.invalid).toEqual([expect.objectContaining({ key: KEYED[3], rule: "BR-999", status: "retired" })]);
+    expect(r.mapped.map((m) => m.key)).not.toContain(KEYED[3]);
     expect(r.ok).toBe(false);
   });
 
-  it("all mapped + dynamic justified with non-business:<reason> -> ok=true", async () => {
+  it("a dynamic site declaring a live rule -> ok=true", async () => {
     const { computeLeafCoverage, sites, dynKey } = await setup();
-    const siteMap = {
+    const declared = declare(sites, {
       [KEYED[0]]: ["BR-001"],
       [KEYED[1]]: ["BR-002"],
       [KEYED[2]]: ["BR-003"],
       [KEYED[3]]: ["BR-001"],
-      [dynKey]: ["non-business:registry dispatch"],
-    };
-    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
-    expect(r).toEqual({ gaps: [], notMeasured: [], ok: true });
+      [dynKey]: ["BR-002"],
+    });
+    const r = computeLeafCoverage({ sites: declared, liveRuleIds: LIVE, statusOf: () => "live" });
+    expect(r).toMatchObject({ gaps: [], notMeasured: [], conflicts: [], invalid: [], ok: true });
+    expect(r.mapped).toHaveLength(5);
   });
 
-  it("all keyed mapped but dynamic unjustified -> not_measured remains, ok=false", async () => {
+  it("a site declaring ANOTHER leaf's live rule is neither this leaf's mapping nor a gap", async () => {
     const { computeLeafCoverage, sites, dynKey } = await setup();
-    const siteMap = Object.fromEntries(KEYED.map((k) => [k, ["BR-001"]]));
-    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
+    const declared = declare(sites, { ...Object.fromEntries(KEYED.map((k) => [k, ["BR-777"]])), [dynKey]: ["BR-777"] });
+    const r = computeLeafCoverage({ sites: declared, liveRuleIds: LIVE, statusOf: () => "live" });
+    expect(r.mapped).toEqual([]);
     expect(r.gaps).toEqual([]);
-    expect(r.notMeasured).toEqual([dynKey]);
+    expect(r.notMeasured).toEqual([]);
+  });
+
+  it("a site declaring two rules is a conflict naming both, and is not mapped for either", async () => {
+    const { computeLeafCoverage, sites } = await setup();
+    const declared = declare(sites, { [KEYED[0]]: ["BR-001", "BR-002"] });
+    const r = computeLeafCoverage({ sites: declared, liveRuleIds: LIVE, statusOf: () => "live" });
+    expect(r.conflicts).toEqual([expect.objectContaining({ key: KEYED[0], rules: ["BR-001", "BR-002"] })]);
+    expect(r.mapped.map((m) => m.key)).not.toContain(KEYED[0]);
     expect(r.ok).toBe(false);
   });
 });
@@ -216,7 +248,7 @@ describe("listSites: interface-method calls are not_measured sites", () => {
     const { listSites } = await loadFidelity();
     const { computeLeafCoverage } = await loadCoverage();
     const sites = mainSites(listSites({ rootDir: ifaceRoot, entry: entryCapped }));
-    const r = computeLeafCoverage({ sites, siteMap: {}, liveRuleIds: [] });
+    const r = computeLeafCoverage({ sites, liveRuleIds: [] });
     expect(r.notMeasured.some((k) => k.includes("CappedStore#insertCapped"))).toBe(true);
   });
 });

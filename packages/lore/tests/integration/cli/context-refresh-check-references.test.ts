@@ -88,13 +88,13 @@ describe("context refresh --check resolves code references", () => {
     put(
       dir,
       ".lore/context/frag.md",
-      ["---", "id: project-frag", "title: Frag", 'audience: ["subagent:*"]', "mode: static", "---", "Run `bun run no-such-script`.", ""].join("\n"),
+      ["---", "id: project-frag", "title: Frag", "inject: [subagent-start]", "---", "Run `bun run no-such-script`.", ""].join("\n"),
     );
 
     const { exitCode, output } = refreshCheck(dir);
 
     expect(exitCode).not.toBe(0);
-    expect(output).toContain(".lore/context/frag.md:7");
+    expect(output).toContain(".lore/context/frag.md:6");
     expect(output).toContain("script_missing");
   });
 

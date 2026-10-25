@@ -29,10 +29,6 @@
  *               — the binding-on-future-counts requirement)
  *   BOUNDARY:   a genuinely EMPTY corpus reports every count as 0 with a
  *               matching EMPTY member list (never a mismatch at the floor)
- *   STATE:      lore assess's capture_source ratio (computeCaptureSource
- *               Distribution/formatCaptureSourceLine, moved to assess-
- *               render.ts specifically so this vitest file can drive them
- *               directly — commands/assess.ts itself is bun-only)
  *   ERROR:      the generic scan — EVERY `*_count` key `lore status --json`
  *               reports, read at TEST TIME (never a hand-listed set), has an
  *               enumerator whose member count matches
@@ -47,8 +43,6 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import type { DocRecord, PlanBundle } from "@lore/core";
-import { computeCaptureSourceDistribution, formatCaptureSourceLine } from "../../../src/adapters/cli/assess-render.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -219,110 +213,6 @@ describe("AC-FR-5 — capture_source visibility + generic count↔enumerator con
       expect(result.members?.length, `field "${field}": member array length mismatch`).toBe(reported);
     }
   });
-
-  it("REGRESSION: a legacy row with capture_source ABSENT is counted as self-report by computeCaptureSourceDistribution, never silently dropped", () => {
-    const legacyTask: DocRecord = {
-      id: "task-legacy-1",
-      slug: "task-legacy-evidence",
-      type: "task",
-      title: "Legacy Task",
-      status: "draft",
-      content: "body",
-      parent_id: null,
-      extra: {
-        verification_evidence: [
-          {
-            oracle: "tsc",
-            command: "bun run typecheck",
-            result: "pass",
-            recorded_at: "2026-01-01T00:00:00.000Z",
-            recorded_by: "agent:legacy",
-            // capture_source deliberately ABSENT — simulating pre-D5 data.
-          },
-        ],
-      },
-      version: 1,
-      created_at: "2026-01-01T00:00:00.000Z",
-      updated_at: "2026-01-01T00:00:00.000Z",
-      deleted_at: null,
-    } as unknown as DocRecord;
-
-    const bundle: PlanBundle = {
-      plan: { ...legacyTask, id: "plan-1", slug: "plan-legacy", type: "plan" } as unknown as DocRecord,
-      tasks: [legacyTask],
-    };
-
-    const distribution = computeCaptureSourceDistribution(bundle);
-    expect(distribution.runnerCount).toBe(0);
-    expect(distribution.selfReportCount).toBe(1);
-    expect(distribution.ratio).toBe(0);
-  });
-
-  it("STATE: lore assess's capture_source ratio — computeCaptureSourceDistribution/formatCaptureSourceLine render alongside attested_evidence_ratio", () => {
-    const runnerTask: DocRecord = {
-      id: "task-r1",
-      slug: "task-runner",
-      type: "task",
-      title: "Runner Task",
-      status: "draft",
-      content: "body",
-      parent_id: null,
-      extra: {
-        verification_evidence: [
-          {
-            oracle: "test",
-            command: "bunx vitest run x.test.ts",
-            result: "pass",
-            recorded_at: "2026-01-01T00:00:00.000Z",
-            recorded_by: "agent:runner",
-            capture_source: "runner",
-          },
-        ],
-      },
-      version: 1,
-      created_at: "2026-01-01T00:00:00.000Z",
-      updated_at: "2026-01-01T00:00:00.000Z",
-      deleted_at: null,
-    } as unknown as DocRecord;
-    const selfReportTask: DocRecord = {
-      ...runnerTask,
-      id: "task-s1",
-      slug: "task-self-report",
-      extra: {
-        verification_evidence: [
-          {
-            oracle: "manual",
-            command: "manual check",
-            result: "pass",
-            recorded_at: "2026-01-01T00:00:00.000Z",
-            recorded_by: "agent:human",
-            capture_source: "self-report",
-          },
-        ],
-      },
-    } as unknown as DocRecord;
-
-    const bundle: PlanBundle = {
-      plan: { ...runnerTask, id: "plan-2", slug: "plan-mixed", type: "plan" } as unknown as DocRecord,
-      tasks: [runnerTask, selfReportTask],
-    };
-
-    const distribution = computeCaptureSourceDistribution(bundle);
-    expect(distribution.runnerCount).toBe(1);
-    expect(distribution.selfReportCount).toBe(1);
-    expect(distribution.ratio).toBe(0.5);
-
-    // Alongside the attested ratio the assessment result already carries.
-    const line = formatCaptureSourceLine(distribution, 0.75);
-    expect(line).toContain("1 runner");
-    expect(line).toContain("1 self-report");
-    expect(line).toContain("0.50");
-    expect(line).toContain("attested_evidence_ratio 0.75");
-
-    // A legacy pre-SPEC-040 result carries no `facts` at all — additive, never thrown.
-    const lineWithoutAttested = formatCaptureSourceLine(distribution, undefined);
-    expect(lineWithoutAttested).not.toContain("attested_evidence_ratio");
-  });
 });
 
 // ─── runner-unattested bucket (issue #48, BR-1073) — AC-EH-2 c, d, e ──────────
@@ -413,52 +303,5 @@ describe("AC-EH-2 c/d — status counts and enumerates runner-unattested as its 
     expect(result.count).toBe(1);
     expect(result.members).toHaveLength(1);
     expect(result.members?.[0]).toContain(unattestedTask);
-  });
-});
-
-describe("AC-EH-2 e — computeCaptureSourceDistribution / formatCaptureSourceLine render runner-unattested under its own label", () => {
-  it("the distribution carries a distinct runnerUnattestedCount and the line names it, separate from runner and self-report", () => {
-    const rowOf = (capture_source: string | undefined) => ({
-      oracle: "test",
-      command: "bunx vitest run x.test.ts",
-      result: "pass",
-      recorded_at: "2026-01-01T00:00:00.000Z",
-      recorded_by: "agent:x",
-      ...(capture_source === undefined ? {} : { capture_source }),
-    });
-    const taskOf = (id: string, rows: unknown[]): DocRecord =>
-      ({
-        id,
-        slug: id,
-        type: "task",
-        title: id,
-        status: "draft",
-        content: "body",
-        parent_id: null,
-        extra: { verification_evidence: rows },
-        version: 1,
-        created_at: "2026-01-01T00:00:00.000Z",
-        updated_at: "2026-01-01T00:00:00.000Z",
-        deleted_at: null,
-      }) as unknown as DocRecord;
-    const bundle: PlanBundle = {
-      plan: taskOf("plan-eh", []) as unknown as DocRecord,
-      tasks: [
-        taskOf("t-a", [rowOf("runner"), rowOf("runner")]),
-        taskOf("t-b", [rowOf("self-report"), rowOf(undefined)]),
-        taskOf("t-c", [rowOf("runner-unattested")]),
-      ],
-    };
-
-    const distribution = computeCaptureSourceDistribution(bundle) as unknown as Record<string, number>;
-    expect(distribution["runnerCount"]).toBe(2);
-    expect(distribution["selfReportCount"]).toBe(2);
-    // reason: field name pinned by the paired implement task; absent today.
-    expect(distribution["runnerUnattestedCount"]).toBe(1);
-
-    const line = formatCaptureSourceLine(distribution as unknown as Parameters<typeof formatCaptureSourceLine>[0], undefined);
-    expect(line).toContain("2 runner /");
-    expect(line).toContain("2 self-report");
-    expect(line).toContain("1 runner-unattested");
   });
 });

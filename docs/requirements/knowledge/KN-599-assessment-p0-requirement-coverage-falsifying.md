@@ -3,10 +3,10 @@ id: KN-599
 type: knowledge
 role: knowledge
 title: "Assessment: P0 requirement coverage: falsifying criteria for 8 rules (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-166
 links:

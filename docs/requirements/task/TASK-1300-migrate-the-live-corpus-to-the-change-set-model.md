@@ -3,11 +3,11 @@ id: TASK-1300
 type: task
 role: plan
 title: "Migrate the live corpus to the change-set model"
-status: approved
+status: deprecated
 priority: medium
 phase: "migration"
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-151
 plan: PLAN-151

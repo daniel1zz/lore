@@ -25,7 +25,7 @@ The command table (name, command, description) is generated below from `package.
 
 ## Architecture
 
-Repo-wide invariants. The why, the layer stack, the service table and per-module facts are tier 2: module CLAUDE.md files and `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
+Repo-wide invariants. Current-state architecture (modules, layers, standards, decisions, debt): the architecture tree, `lore get baseline-lore-architecture` (current state `baseline-architecture-current-state`, standards `baseline-architecture-standards`). The why, the layer stack, the service table and per-module facts are also in module CLAUDE.md files and `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 - **Result<T, LoreError>**: no exception crosses a service boundary; every service method returns `Promise<Result<…>>` built with `ok()` / `err()` from `@lore/core`.
 - Services depend on the async `StoreInterface`, never on a concrete store. ⛔ No silent fallback: a missing required input fails loud.
@@ -33,7 +33,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - ⛔ `@lore/core`'s default barrel never imports a Node builtin; Node IO lives in `@lore/core/node`, which `packages/dashboard/src/**` never imports.
 - A doc has `id` (ULID, immutable) and `slug` (editable); services accept either via `corpusService.resolve`.
 - Gates run in the service layer, so CLI, MCP and HTTP writes are gated identically.
-- Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/lifecycle.ts` is the only authority. Editing an approved living doc resets it to `draft`; a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
+- Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/lifecycle.ts` is the only authority. Editing an approved living doc resets it to `draft` (a baseline node is the exception: a write adds a pending revision of the ONE item it changes, status is derived, `lore review` then `lore approve [--item]` promotes it); a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
 - ⛔ A listed doc is not proven live; validity is authoritative only by direct address.
 - ⛔ The corpus is the ONLY spec index: read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
 
@@ -42,7 +42,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - ⛔ Eval every skill, hook, agent and gate we depend on; a broken or misleading one is a defect — fix it now or record the correct path.
 - ⛔ Fix a lore defect at its mechanism root, on a surface that SHIPS (binary output, or `assets/` + manifest), and verify it from a fresh consumer install — never only in this repo, this machine's `~/.claude/`, or a hand-edited consumer config.
 - New findings go only to the corpus (`lore create knowledge --sub-type retro`); this file never carries incident narratives.
-- ⛔ Never `lore report-issue` from this repo — the issue channel is for consumers of lore. A lore defect found here is fixed now when simple (≤2 files, an existing oracle proves the fix, no approved-spec behaviour changes), else recorded as a task in a plan (BR-1153).
+- ⛔ A problem found here is fixed now when simple (≤2 files, an existing oracle proves the fix, no approved-spec behaviour changes), else file it as an issue (`lore report-issue`, also in this repo); a task names the issues it resolves, never a task whose subject is the problem (BR-1153).
 - Standing lessons (oracle design, mirror export, test selection, governance tooling quirks) and their slugs: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 # ─── lore governance (managed) ───
@@ -60,7 +60,7 @@ Folders with their own memory file — read it before working there:
 - [`packages/lore/src/service`](packages/lore/src/service/CLAUDE.md) — Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`.
 - [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape.
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
-<!-- lore:managed section=command-table hash=9de9f53a -->
+<!-- lore:managed section=command-table hash=884be12a -->
 Documented commands (package.json `lore.documentedScripts`):
 - `dev`: `bun run packages/lore/src/index.ts` — Run the lore CLI from source; arguments after the script name go to lore.
 - `build`: `bun run scripts/build.ts` — Compile the standalone binary to dist/lore.
@@ -69,7 +69,8 @@ Documented commands (package.json `lore.documentedScripts`):
 - `test`: `bun scripts/oracle-lock.ts bun scripts/run-chain.ts` — Take the checkout's oracle lock, then run each check script and test:vitest in a fixed order; every step runs and a per-step exit table prints.
 - `test:changed`: `bun scripts/changed-tests.ts` — Select and run the tests a change can affect, printing a reason per file; --list previews, an optional ref sets the diff base.
 - `test:file`: `bun scripts/test-file.ts` — Run the named test files, each on the runner that collects it (Bun, or Node for files in vitest.node-files.ts); -t <name> and other flags pass through.
-- `check:floor`: `bun scripts/run-chain.ts --floor` — Build, typecheck and run every check: script except the corpus-dependent ones (the integrate floor).
+- `check:floor`: `bun scripts/run-chain.ts --floor` — Install, build and typecheck (the integrate floor); --list prints the step names.
+- `check:plan-close`: `bun scripts/run-chain.ts --plan-close` — Run every check: script the integrate floor does not (the plan-close chain); --list prints the names.
 - `check:memory-files`: `bun run packages/lore/src/index.ts context refresh --check` — Run `lore context refresh --check`: exit 1 when CLAUDE.md or a lore rules file differs from a fresh refresh, or the root file is over its ceiling.
 <!-- lore:managed section=governance-pointer hash=760d2396 -->
 ## Finding Live Project State

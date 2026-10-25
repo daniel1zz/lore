@@ -75,6 +75,7 @@ import {
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import type { Fragment, FragmentFrontmatter } from "@lore/core";
 import { LORE_CONTEXT_VARIABLES, configVariableValues } from "../../src/service/context-variables-registry";
@@ -174,8 +175,8 @@ function nonce(tag: string): string {
 }
 
 interface FragmentSpec {
-  readonly audience: readonly string[];
-  readonly mode: "static" | "dynamic";
+  readonly inject: readonly string[];
+  readonly agents?: readonly string[];
   readonly body: string;
   readonly when?: Record<string, readonly string[]>;
 }
@@ -186,8 +187,8 @@ function writeFragment(dir: string, id: string, spec: FragmentSpec): string {
     "---",
     `id: ${id}`,
     `title: fixture ${id}`,
-    `audience: [${spec.audience.map((a) => JSON.stringify(a)).join(", ")}]`,
-    `mode: ${spec.mode}`,
+    `inject: [${spec.inject.join(", ")}]`,
+    ...(spec.agents !== undefined ? [`agents: [${spec.agents.join(", ")}]`] : []),
     ...(spec.when !== undefined ? [`when: ${JSON.stringify(spec.when)}`] : []),
     "---",
     "",
@@ -207,8 +208,7 @@ function writeGlobalConfig(sb: Sandbox, yaml: string): void {
 }
 
 function appendProjectConfig(sb: Sandbox, yaml: string): void {
-  const path = join(sb.corpus, ".lore", "config.yaml");
-  writeFileSync(path, `${readFileSync(path, "utf8")}${yaml}`, "utf8");
+  patchLoreConfig(sb.corpus, yaml);
 }
 
 function readJson(path: string): Record<string, unknown> {
@@ -301,17 +301,19 @@ function expandShippedBody(fm: unknown, rawFile: string, rawBody: string, file: 
   const bodyLineOffset = rawFile.slice(0, rawFile.length - rawBody.length).split("\n").length - 1;
   const fragment: Fragment = { frontmatter: fm as FragmentFrontmatter, body: rawBody, layer: "shipped", path: file, bodyLineOffset };
   // reason: the fixture projects set no workflow.integrate.floor_command, so `integrate_floor` renders its "not set" text.
+  const variables = configVariableValues({}, {}, "rules:project");
+  if (!variables.ok) throw new Error(`config variables failed: ${JSON.stringify(variables.error)}`);
   const result = expandFragments(
     [fragment],
     "rules:project",
-    { invocation: configVariableValues({}, {}, "rules:project") },
+    { invocation: variables.value },
     LORE_CONTEXT_VARIABLES,
   );
   if (!result.ok) throw new Error(`shipped fragment ${file} failed to expand: ${JSON.stringify(result.error)}`);
   return (result.value[0] as Fragment).body.trim();
 }
 
-/** Shipped static `main` fragments with no `when` clause, parsed from assets/context (empty when the dir is absent). */
+/** Shipped `launch` fragments with no `when` clause, parsed from assets/context (empty when the dir is absent). */
 function shippedStaticMainFragments(): { id: string; body: string }[] {
   const dir = join(ASSETS_DIR, "context");
   if (!existsSync(dir)) return [];
@@ -320,8 +322,8 @@ function shippedStaticMainFragments(): { id: string; body: string }[] {
     const raw = readFileSync(join(dir, f), "utf8");
     const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(raw);
     if (m === null) continue;
-    const fm = parseYaml(m[1] as string) as { id?: string; audience?: string[]; mode?: string; when?: unknown };
-    if (fm.mode === "static" && Array.isArray(fm.audience) && fm.audience.includes("main") && fm.when === undefined) {
+    const fm = parseYaml(m[1] as string) as { id?: string; inject?: string[]; when?: unknown };
+    if (Array.isArray(fm.inject) && fm.inject.includes("launch") && fm.when === undefined) {
       out.push({ id: String(fm.id), body: expandShippedBody(fm, raw, m[2] as string, f) });
     }
   }
@@ -363,8 +365,7 @@ describe("AC-CF-4 lore fragments check enumerates every agent type and refuses o
     expect(lore(sb, "fragments", "check").code).toBe(0);
 
     writeFragment(projectCtxDir(sb), "cf4-oversized", {
-      audience: ["subagent:*"],
-      mode: "dynamic",
+      inject: ["subagent-start"],
       body: "padding ".repeat(1_400),
     });
     const r = lore(sb, "fragments", "check");
@@ -381,7 +382,7 @@ describe("AC-CF-4 lore fragments check enumerates every agent type and refuses o
     expect(lore(sb, "fragments", "check").code).toBe(0); // control: fresh rules files are clean
 
     // MISSING: a new static main fragment has no rules file yet.
-    writeFragment(projectCtxDir(sb), "cf4-drift", { audience: ["main"], mode: "static", body: `Drift body ${nonce("cf4")}` });
+    writeFragment(projectCtxDir(sb), "cf4-drift", { inject: ["launch"], body: `Drift body ${nonce("cf4")}` });
     const missing = lore(sb, "fragments", "check");
     expect(missing.code).not.toBe(0);
     expect(combined(missing)).toContain("lore-cf4-drift.md");
@@ -389,7 +390,7 @@ describe("AC-CF-4 lore fragments check enumerates every agent type and refuses o
     expect(lore(sb, "fragments", "check").code).toBe(0); // the missing file was the only cause
 
     // CHANGED: the fragment source changes after the rules file was rendered.
-    writeFragment(projectCtxDir(sb), "cf4-drift", { audience: ["main"], mode: "static", body: `Drift body v2 ${nonce("cf4b")}` });
+    writeFragment(projectCtxDir(sb), "cf4-drift", { inject: ["launch"], body: `Drift body v2 ${nonce("cf4b")}` });
     const changed = lore(sb, "fragments", "check");
     expect(changed.code).not.toBe(0);
     expect(combined(changed)).toContain("lore-cf4-drift.md");
@@ -463,7 +464,7 @@ describe("AC-CF-6 project lore rules files render, diverged_skip and prune (D15)
     const sb = makeSandbox();
     contextInit(sb);
     const n = nonce("cf6");
-    writeFragment(projectCtxDir(sb), "cf6-project", { audience: ["main"], mode: "static", body: `Project rule ${n}` });
+    writeFragment(projectCtxDir(sb), "cf6-project", { inject: ["launch"], body: `Project rule ${n}` });
 
     expect(lore(sb, "context", "refresh").code).toBe(0);
 
@@ -481,7 +482,7 @@ describe("AC-CF-6 project lore rules files render, diverged_skip and prune (D15)
   it("a hand edit of a lore rules file makes the next refresh report diverged_skip and leaves that file's bytes unchanged", () => {
     const sb = makeSandbox();
     contextInit(sb);
-    writeFragment(projectCtxDir(sb), "cf6-project", { audience: ["main"], mode: "static", body: `Project rule ${nonce("cf6b")}` });
+    writeFragment(projectCtxDir(sb), "cf6-project", { inject: ["launch"], body: `Project rule ${nonce("cf6b")}` });
     expect(lore(sb, "context", "refresh").code).toBe(0);
 
     const path = join(projectRulesDir(sb), "lore-cf6-project.md");
@@ -502,7 +503,7 @@ describe("AC-CF-6 project lore rules files render, diverged_skip and prune (D15)
   it("a fragment deleted from the project layer has its lore-<id>.md pruned while a non-lore team.md and the still-selected files stay byte-unchanged", () => {
     const sb = makeSandbox();
     contextInit(sb);
-    const fragPath = writeFragment(projectCtxDir(sb), "cf6-doomed", { audience: ["main"], mode: "static", body: `Doomed ${nonce("cf6c")}` });
+    const fragPath = writeFragment(projectCtxDir(sb), "cf6-doomed", { inject: ["launch"], body: `Doomed ${nonce("cf6c")}` });
     mkdirSync(projectRulesDir(sb), { recursive: true });
     const teamPath = join(projectRulesDir(sb), "team.md");
     const teamBytes = "# Team rule (not lore-owned)\n\nKeep me exactly.\n";
@@ -531,7 +532,7 @@ describe("AC-CF-7 subagent hook delivers project fragment via lore fragments ren
   it("SubagentStart for lore-implementer carries a project-only nonce and not the old hard-coded executor text", () => {
     const sb = makeSandbox();
     const n = nonce("cf7");
-    writeFragment(projectCtxDir(sb), "cf7-project", { audience: ["subagent:*"], mode: "static", body: `Subagent rule ${n}` });
+    writeFragment(projectCtxDir(sb), "cf7-project", { inject: ["subagent-start"], body: `Subagent rule ${n}` });
 
     const { run: r, out } = subagentHook(sb, "lore-implementer");
     expect(r.code).toBe(0);
@@ -541,12 +542,12 @@ describe("AC-CF-7 subagent hook delivers project fragment via lore fragments ren
     expect((out as HookOut).additionalContext).not.toContain(OLD_EXECUTOR_SENTINEL);
   });
 
-  it("a nonce addressed only to subagent:lore-reviewer does not reach lore-implementer (audience is not widened to *)", () => {
+  it("a nonce addressed only to subagent:lore-reviewer does not reach lore-implementer (the agents filter is not widened to every helper)", () => {
     const sb = makeSandbox();
     const reviewerOnly = nonce("cf7r");
     const everyone = nonce("cf7e");
-    writeFragment(projectCtxDir(sb), "cf7-reviewer-only", { audience: ["subagent:lore-reviewer"], mode: "static", body: `Reviewer ${reviewerOnly}` });
-    writeFragment(projectCtxDir(sb), "cf7-everyone", { audience: ["subagent:*"], mode: "static", body: `Everyone ${everyone}` });
+    writeFragment(projectCtxDir(sb), "cf7-reviewer-only", { inject: ["subagent-start"], agents: ["lore-reviewer"], body: `Reviewer ${reviewerOnly}` });
+    writeFragment(projectCtxDir(sb), "cf7-everyone", { inject: ["subagent-start"], body: `Everyone ${everyone}` });
 
     const { out } = subagentHook(sb, "lore-implementer");
     expect(out).not.toBeNull();
@@ -616,7 +617,7 @@ describe("AC-CF-10 hook failure is loud and non-blocking", () => {
     mkdirSync(projectCtxDir(sb), { recursive: true });
     writeFileSync(
       join(projectCtxDir(sb), "cf10-broken.md"),
-      "---\nid: cf10-broken\ntitle: broken\naudience: [nobody-at-all]\nmode: sometimes\n---\nbody\n",
+      "---\nid: cf10-broken\ntitle: broken\ninject: [nobody-at-all]\n---\nbody\n",
       "utf8",
     );
 
@@ -628,7 +629,7 @@ describe("AC-CF-10 hook failure is loud and non-blocking", () => {
 
   it("an over-budget project fragment makes the hook exit 0 with BUDGET_EXCEEDED in additionalContext", () => {
     const sb = makeSandbox();
-    writeFragment(projectCtxDir(sb), "cf10-huge", { audience: ["subagent:*"], mode: "dynamic", body: "overflow ".repeat(1_300) });
+    writeFragment(projectCtxDir(sb), "cf10-huge", { inject: ["subagent-start"], body: "overflow ".repeat(1_300) });
 
     const { run: r, out } = subagentHook(sb, "lore-implementer");
     expect(r.code).toBe(0);
@@ -648,22 +649,28 @@ describe("AC-CF-11 / AC-CF-12 re-baselined: the session-start fragments hook and
     expect(existsSync(join(sb.home, ".claude", "hooks", "session-start-fragments.mjs"))).toBe(false);
   });
 
-  it("a dynamic main fixture is refused by `fragments check` (exit 4, id named) instead of being re-injected", () => {
+  it("an old-format (audience/mode) fixture is refused by `fragments check` (exit 4, file named, migration command named) instead of being re-injected", () => {
     const sb = makeSandbox();
-    writeFragment(projectCtxDir(sb), "cf11-dynamic", { audience: ["main"], mode: "dynamic", body: `Dynamic rule ${nonce("cf11")}` });
+    mkdirSync(projectCtxDir(sb), { recursive: true });
+    writeFileSync(
+      join(projectCtxDir(sb), "cf11-dynamic.md"),
+      `---\nid: cf11-dynamic\ntitle: old\naudience: [main]\nmode: dynamic\n---\nDynamic rule ${nonce("cf11")}\n`,
+      "utf8",
+    );
     const r = lore(sb, "fragments", "check");
     expect(r.code).toBe(4);
     expect(r.stderr).toContain("cf11-dynamic");
+    expect(r.stderr).toContain("lore migrate fragments");
   });
 
   it("the stale-rules backstop moved from the session hook to `fragments check`: a stale lore rules file is a rules_drift finding", () => {
     const sb = makeSandbox();
     contextInit(sb);
     const id = "cf12-static";
-    writeFragment(projectCtxDir(sb), id, { audience: ["main"], mode: "static", body: `Original static ${nonce("cf12-orig")}` });
+    writeFragment(projectCtxDir(sb), id, { inject: ["launch"], body: `Original static ${nonce("cf12-orig")}` });
     expect(lore(sb, "context", "refresh").code).toBe(0);
     expect(lore(sb, "fragments", "check").stderr).not.toContain("rules_drift");
-    writeFragment(projectCtxDir(sb), id, { audience: ["main"], mode: "static", body: `Changed static ${nonce("cf12-changed")}` });
+    writeFragment(projectCtxDir(sb), id, { inject: ["launch"], body: `Changed static ${nonce("cf12-changed")}` });
     const stale = lore(sb, "fragments", "check");
     expect(stale.code).toBe(4);
     expect(stale.stderr).toContain("rules_drift");
@@ -676,7 +683,7 @@ describe("AC-CF-15 user scope refresh writes lore rules files under HOME/.claude
   it("lore context refresh --scope user writes HOME/.claude/rules/lore-<id>.md for user-layer static main fragments only; HOME CLAUDE.md and rules/mine.md stay byte-identical", () => {
     const sb = makeSandbox();
     const n = nonce("cf15");
-    writeFragment(userCtxDir(sb), "cf15-user", { audience: ["main"], mode: "static", body: `User rule ${n}` });
+    writeFragment(userCtxDir(sb), "cf15-user", { inject: ["launch"], body: `User rule ${n}` });
 
     const claudeDir = join(sb.home, ".claude");
     mkdirSync(join(claudeDir, "rules"), { recursive: true });

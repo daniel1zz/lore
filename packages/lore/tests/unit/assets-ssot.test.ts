@@ -404,9 +404,9 @@ const DECLARED_FILES = [
   "hooks/session-start-marker.mjs",
   // stop-turn-review turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
   "hooks/user-prompt-turn-start.mjs",
+  "hooks/user-prompt-fragments.mjs",
   "hooks/post-edit-mark.mjs",
-  // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
-  "hooks/stop-handoff-coverage.mjs",
+  "hooks/post-ask-decide.mjs",
   // stop-turn-review (turn-end review of the main session, spec-interception-moves-off-every-tool-call-one-turn-end-review;
   // in HOOK_REGISTRATIONS on Stop; replaced stop-doc-sync.mjs and claude-md-guard.sh)
   "hooks/stop-turn-review.mjs",
@@ -432,9 +432,12 @@ const DECLARED_FILES = [
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
   // pre-edit-anchor-gate (a helper's edit outside its claim's anchors is declared via `lore anchor declare` or denied; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-edit-anchor-gate.mjs",
-  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
-  "hooks/post-edit-bindings.mjs",
+  // the anchor gate's two libraries: the top-level-symbol scan of an Edit, and the files a Bash command writes
+  "hooks/lib/top-level-symbols.mjs",
+  "hooks/lib/shell-writes.mjs",
   "hooks/lib/turn-state.mjs",
+  // every hook's one-line outcome recorder (BR-1373): appends pass|deny|error to the local outcomes file at exit
+  "hooks/lib/check-outcome.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library
   "hooks/session-trail-start.mjs",
   "hooks/subagent-trail.mjs",
@@ -464,9 +467,12 @@ const DECLARED_FILES = [
   "context/evidence-attestation.md",
   "context/dispatch-bundle.md",
   "context/worktree-dispatch.md",
+  // spec-human-decisions-are-asked-in-the-session-and-recorded-by (AC-ASK-3, BR-1375): the ask-then-execute rule
+  "context/ask-then-execute.md",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
+  "governance/write-spec-rule.md",
 ] as const;
 
 const SKILL_MD_FILES = DECLARED_FILES.filter((f) => f.endsWith("SKILL.md"));
@@ -532,7 +538,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the snapshot-never-current-state rule, the UPSTREAM_NOT_APPROVED freeze, the verify exit-code rule and the piped-exit-code reason.
 // RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
-  "context/corpus-workflow-3-execute.md": "f86cfd7cca00e67d45f8f702d34c1b29f0ed8afd1538798278200b15bad808d8",
+// RE-BASELINE (task-shipped-guidance-teaches-lore-evidence-result-pass-output-2): the pass-evidence bullet now teaches `--capture` (the gate refuses a hand-authored tail for --result pass).
+  "context/corpus-workflow-3-execute.md": "de48d3aa4b12a74f23dd8bbc614d6d02181789acf983971c0a8f0baced1b115b",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
@@ -546,7 +553,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
   // RE-BASELINE (task-skill-implement-close-fragment-scopes-defect-reports-br, BR-1153): the report-issue bullet gains the scope rule (lore defects only, one root cause per report, repo upkeep to plan/task).
   // RE-BASELINE (orchestrator-owned doc change, spec-the-approval-judge-rejects-patch-shaped-designs-design D3): adds the lesson-changes-a-mechanism bullet after the invalidate bullet.
-  "context/corpus-workflow-4-close.md": "91f727466e49304d1632eb6b24e4ef7b52715c493ba4d1abf18a42e6b1806219",
+  // RE-BASELINE (task-igh-t1-close-guidance-and-root-claude-md-file-every, BR-1153): the report-issue bullet now routes every problem not fixed in place to an issue (also in lore's own repo); a task names the issues it resolves, never a task whose subject is the problem; lore defects go to `lore report-issue`, every other problem to the project's own issue tracker (the two coincide in lore's own repo).
+  "context/corpus-workflow-4-close.md": "7c7e6c3e5c6840ff5ca9d0306c7e9c970a859090a3b0915448ea49abfbad21c6",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
@@ -690,7 +698,7 @@ describe("assets-ssot — BOUNDARY", () => {
   // retired single-file wrapper. The fragments carry NO wrapper tags by design (the renderer owns
   // framing), so the corrected claims are: schema-valid frontmatter, unique prefixed ids, tag-free
   // bodies, and verbatim bodies (sha256 pins measured equal to the deleted file's sections).
-  it("every corpus-workflow fragment parses with FragmentFrontmatterSchema (audience [main], mode static, id corpus-workflow-*)", () => {
+  it("every corpus-workflow fragment parses with FragmentFrontmatterSchema (inject [launch], id corpus-workflow-*)", () => {
     const ids: string[] = [];
     for (const rel of CORPUS_WORKFLOW_FRAGMENT_RELS) {
       const split = splitFrontmatter(readRequiredFile(join(ASSETS_ROOT, rel)), "strict");
@@ -699,8 +707,7 @@ describe("assets-ssot — BOUNDARY", () => {
       const parsed = FragmentFrontmatterSchema.safeParse(parseYaml(split.frontmatter));
       expect(parsed.success, rel).toBe(true);
       if (!parsed.success) continue;
-      expect(parsed.data.audience).toEqual(["main"]);
-      expect(parsed.data.mode).toBe("static");
+      expect(parsed.data.inject).toEqual(["launch"]);
       expect(parsed.data.id.startsWith("corpus-workflow-")).toBe(true);
       ids.push(parsed.data.id);
     }

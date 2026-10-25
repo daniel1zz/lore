@@ -153,7 +153,7 @@ export function formatReadyLine(record: ReadyRecord): string {
 }
 
 /** Render one session grouping line, e.g. "  - alice @hostA:/w1 [b1] tasks: task-a (newest T1)". */
-function formatSessionLine(session: ReadySession): string {
+export function formatSessionLine(session: ReadySession): string {
   const location =
     session.machine !== undefined || session.worktree !== undefined
       ? ` @${session.machine ?? "?"}:${session.worktree ?? "?"}`
@@ -167,20 +167,15 @@ function formatSessionLine(session: ReadySession): string {
   // would be indistinguishable from a truthful single-session report, which is how
   // an orchestrator came to treat this list as proof it was alone.
   const session_id = ` session:${session.session_id ?? "(not measured)"}`;
-  return `  - ${session.by}${location}${session_id}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
+  // reason: BR-1363 — the address is printed on every line, `none` included, so a reader can tell "no address
+  // recorded" from a build that does not report one.
+  const address = ` address:${session.message_address ?? "none"}`;
+  return `  - ${session.by}${location}${session_id}${address}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
 }
 
-/**
- * Render one anchor-conflict advisory line. `session_verdict` is present only when
- * the holder shares the conflicting task's own actor string — without it, a
- * same-actor conflict reads as a self-contradiction ("conflicts with myself")
- * rather than as the cross-session collision it is
- * (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
- */
+/** Render one anchor-conflict advisory line: the task, the holder of the overlapping claim and the overlapping paths. */
 function formatAnchorConflictLine(conflict: AnchorConflict): string {
-  const session =
-    conflict.session_verdict !== undefined ? ` (same actor, session: ${conflict.session_verdict})` : "";
-  return `  - ${conflict.task_slug} conflicts with ${conflict.holder}${session} on: ${conflict.paths.join(", ")}`;
+  return `  - ${conflict.task_slug} conflicts with ${conflict.holder} on: ${conflict.paths.join(", ")}`;
 }
 
 export default defineLoreCommand({

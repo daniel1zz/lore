@@ -102,10 +102,12 @@ import { spawnSync } from 'node:child_process';
 // GENERATED copy of packages/core/src/shell-cwd.ts (single source; scripts/sync-hook-shell-cwd.ts --check keeps it
 // identical). The ONE cwd-aware shell parser: this hook has no `cd` / `$VAR` handling of its own.
 import { parseShellCommand } from './lib/shell-cwd.mjs';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-bash-git-safety-gate');
 
 let payload;
 try {
-  payload = JSON.parse(readFileSync(0, 'utf-8'));
+  payload = noteHookCwd(JSON.parse(readFileSync(0, 'utf-8')));
 } catch {
   process.exit(0); // malformed input — best-effort hook, let the call through
 }
@@ -902,9 +904,10 @@ function isCommandPositionMatch(segment, pattern) {
 }
 
 // ── lore-decide-gate (spec-autonomy-phase-1 AC-AU-3, adr-autonomy D7) ─────────
-// `lore decide` is the HUMAN's channel for answering a pending autonomy decision. An agent's Bash call may never
-// run it, whatever the outcome would be: the verb itself refuses non-TTY / agent-ancestry callers, and this rule
-// stops the attempt before it starts. Same command-position matching as the git rules (a quoted mention such as
+// `lore decide` (with or without --from-harness, BR-1374) records a HUMAN's answer to a pending autonomy decision.
+// An agent's Bash call may never run it, whatever the outcome would be: the terminal path refuses non-TTY /
+// agent-ancestry callers, the in-session path is fed only by the PostToolUse hook, and this rule stops the attempt
+// before it starts. Same command-position matching as the git rules (a quoted mention such as
 // `git commit -m "… lore decide …"` or `echo lore decide` never fires). Allows wrappers (`env`, `sudo`, `npx`, …),
 // a path-qualified binary, global flags before the verb, and `bun|node run …/index.(ts|js) decide`.
 // reason: the git refusals below are untouched; this block only ADDS a deny and exits 2 like they do.
@@ -920,10 +923,10 @@ for (const pair of segmentPairs) {
     process.stderr.write(
       `\n⛔ [lore-decide-gate] BLOCKED — rule ${LORE_DECIDE_RULE_NAME}.\n` +
         `Segment : ${target.raw}\n` +
-        `Why     : \`lore decide\` answers a pending decision and is the human's own channel (interactive terminal, ` +
-        `nonce typed back). An agent's Bash call may never run it.\n` +
-        `Safer   : Run \`lore pending\` to read the open decision, tell the user its id, and ask them to run ` +
-        `\`lore decide <id> --accept|--reject\` in their own terminal.\n`,
+        `Why     : \`lore decide\` records a human's answer to a pending decision, with or without --from-harness. ` +
+        `An agent's Bash call may never run it; the human's answer is recorded by the PostToolUse hook.\n` +
+        `Safer   : Run \`lore pending --ask\`, pass each question it prints verbatim to the AskUserQuestion tool, ` +
+        `then carry out the human's answer yourself.\n`,
     );
     process.exit(2);
   }

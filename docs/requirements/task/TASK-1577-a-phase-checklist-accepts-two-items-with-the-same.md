@@ -3,10 +3,10 @@ id: TASK-1577
 type: task
 role: plan
 title: "A phase checklist accepts two items with the same id; drop/check/edit then act on the first only"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-198
 plan: PLAN-198

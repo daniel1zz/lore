@@ -3,10 +3,10 @@ id: KN-144
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-056 phase execution model (Strategy A) (2026-07-19)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-19
-updated: 2026-07-26
+updated: 2026-10-23
 tags: []
 parent: PLAN-068
 links:

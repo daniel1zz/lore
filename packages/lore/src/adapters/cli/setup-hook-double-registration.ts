@@ -6,7 +6,7 @@
  * layer (`<claudeDir>/settings.json`). Claude Code runs the user AND the
  * project layer (`<project>/.claude/settings.json`, `.claude/settings.local.json`),
  * so a project that also registers the same lore-managed hook file for the same
- * event fires it twice per event (observed: stop-handoff-coverage's block
+ * event fires it twice per event (observed: a Stop hook's block
  * message printed twice).
  *
  * Invariants:
@@ -84,6 +84,7 @@ function readRegistrations(settingsPath: string): Result<Set<string> | null, Lor
       field: "settings",
       message: `lore setup --check: cannot read hook registrations from "${settingsPath}": ${cause instanceof Error ? cause.message : String(cause)}`,
       value: settingsPath,
+      rule: "BR-1182",
     });
   }
   const parsed = settingsHooksSchema.safeParse(json);
@@ -93,6 +94,7 @@ function readRegistrations(settingsPath: string): Result<Set<string> | null, Lor
       field: "settings",
       message: `lore setup --check: "${settingsPath}" has an unexpected hooks shape: ${parsed.error.message}`,
       value: settingsPath,
+      rule: "BR-1182",
     });
   }
 

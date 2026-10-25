@@ -3,10 +3,10 @@ id: TASK-1578
 type: task
 role: plan
 title: "lore ac exempt help says the criterion must be uncited, but the service never checks citation"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-199
 plan: PLAN-199

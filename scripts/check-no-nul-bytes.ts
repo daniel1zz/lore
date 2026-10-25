@@ -7,7 +7,7 @@
  * Purpose: a literal NUL byte typed into a template-literal separator (or
  * anywhere else) inside a tracked TEXT source file is invisible in an
  * editor and passes every semantic oracle (tsc, vitest, this repo's own
- * `check-test-budgets.ts`) unchanged — but git's binary-file heuristic
+ * `check-no-timer-retry.ts`) unchanged — but git's binary-file heuristic
  * sniffs only the FIRST 8000 BYTES of a file and, on finding a NUL there,
  * renders the WHOLE file as `Bin 0 -> N bytes`: no diff, unreviewable, in a
  * repo whose entire review discipline is diff-based. A file whose NUL
@@ -27,8 +27,7 @@
  * against. A raw-NUL-byte scan has nothing to do with the lore corpus;
  * gating it there would make it silently inert on any clone/fork without
  * `lore` installed — a strictly WEAKER guarantee than this repo's existing
- * convention for structural source-tree oracles (`check-test-budgets.ts`,
- * `check-no-timer-retry.ts`, `check-ac-ref-integrity.ts`): a
+ * convention for structural source-tree oracles (`check-no-timer-retry.ts`, `check-ac-ref-integrity.ts`): a
  * `scripts/check-*.ts` module with a companion `scripts/tests/*.test.ts`
  * that calls `main()` directly against the REAL repo tree and asserts exit
  * 0 — picked up unconditionally by `bun run test` / `test:vitest` (both
@@ -267,8 +266,7 @@ export function main(repoRoot: string = REPO_ROOT): number {
       `\ncheck:no-nul-bytes FAILED — ${violations.length} git-tracked text-source file(s) contain a raw NUL byte:\n` +
         violations.map((v) => `  ${v.path}  offset(s): ${v.offsets.join(", ")}`).join("\n") +
         "\n\nReplace each raw NUL with an escape sequence (`\\0`), ideally behind a named " +
-        "constant documenting why a NUL separator is safe at that site — see " +
-        "scripts/check-test-budgets.ts's `KEY_SEP` for the pattern. A raw NUL inside git's " +
+        "constant documenting why a NUL separator is safe at that site. A raw NUL inside git's " +
         "first-8000-byte binary-sniff window makes the WHOLE FILE unreviewable " +
         "(`git show --stat` reports `Bin 0 -> N bytes`, no diff at all).\n",
     );

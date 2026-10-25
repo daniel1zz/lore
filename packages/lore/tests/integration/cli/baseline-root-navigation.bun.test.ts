@@ -287,7 +287,8 @@ describe("baseline root navigation (BL-6)", () => {
   describe("bootstrap without a baseline root (byte-identical to before)", () => {
     it("prints the PRD on the Root line exactly as before and no Strategy line", () => {
       const lines = bootstrapText(control).split("\n");
-      expect(lines.slice(0, 3)).toEqual([`── lore bootstrap (${ACTOR}) ──`, `Root: ${control.prds[0]} "Control PRD"`, ""]);
+      // The `Architecture:` line is the one intended addition (explicit absence, bootstrap-architecture-root.bun.test.ts).
+      expect(lines.slice(0, 4)).toEqual([`── lore bootstrap (${ACTOR}) ──`, `Root: ${control.prds[0]} "Control PRD"`, "Architecture: (none)", ""]);
       expect(lines.some((l) => l.startsWith("Strategy:"))).toBe(false);
     });
 

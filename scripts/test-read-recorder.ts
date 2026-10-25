@@ -23,6 +23,7 @@ import {
   toRepoRelative,
   UndeclaredTestInputError,
 } from "./test-read-log";
+import { rewriteLoreStart } from "./test-known-party-spawn";
 
 const realFs = createRequire(import.meta.url)("node:fs") as { appendFileSync(path: string, data: string): void };
 // reason: an EMPTY value means "not set" so a fixture run can switch an inherited report mode off.
@@ -36,6 +37,25 @@ interface BunGlobal {
   file: (path: unknown, ...rest: unknown[]) => unknown;
   spawn: (cmd: unknown, ...rest: unknown[]) => unknown;
   spawnSync: (cmd: unknown, ...rest: unknown[]) => unknown;
+}
+
+/**
+ * `Bun.spawn*` arguments as a known party starts `lore` (scripts/test-known-party-spawn.ts): `(argv, options?)` or `({ cmd, ...options })`.
+ * Anything that is not a `lore` start is returned unchanged.
+ */
+function withKnownParty(first: unknown, rest: unknown[]): [unknown, ...unknown[]] {
+  if (Array.isArray(first)) {
+    const options = (rest[0] ?? {}) as { cwd?: unknown; env?: unknown };
+    const rewritten = rewriteLoreStart((first as unknown[]).map(String), options);
+    if (rewritten === undefined) return [first, ...rest];
+    const nextOptions = rewritten.env === undefined ? rest[0] : { ...options, env: rewritten.env };
+    return [rewritten.argv, ...(nextOptions === undefined && rest.length <= 1 ? [] : [nextOptions]), ...rest.slice(1)];
+  }
+  const options = first as { cmd?: readonly string[]; cwd?: unknown; env?: unknown } | undefined;
+  if (options?.cmd === undefined) return [first, ...rest];
+  const rewritten = rewriteLoreStart(options.cmd.map(String), options);
+  if (rewritten === undefined) return [first, ...rest];
+  return [{ ...options, cmd: rewritten.argv, ...(rewritten.env === undefined ? {} : { env: rewritten.env }) }, ...rest];
 }
 
 function spawnArgv(first: unknown, second: unknown): { argv: readonly string[]; cwd: unknown } {
@@ -58,7 +78,7 @@ function patchBunApis(): void {
     bun[name] = (cmd, ...rest) => {
       const { argv, cwd } = spawnArgv(cmd, rest[0]);
       if (argv.length > 0) recordSpawn(argv[0], argv.slice(1), cwd);
-      return original(cmd, ...rest);
+      return original(...withKnownParty(cmd, rest));
     };
   }
 }

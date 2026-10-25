@@ -14,7 +14,7 @@
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-9.
  */
-import { applyClassEdit, type ClassEdit, type GovernedThresholds, type Invocation, type LoreError, type Result, RECOVERABILITY_SCORE } from "@lore/core";
+import { applyClassEdit, retireClass, type ClassEdit, type GovernedThresholds, type Invocation, type LoreError, type Result, RECOVERABILITY_SCORE } from "@lore/core";
 
 import { defineLoreCommand } from "../cli-exit.js";
 import { DecisionService } from "../../../service/decision-service.js";
@@ -59,8 +59,8 @@ function fail(inv: Invocation, error: LoreError): number {
 
 function renderGoverned(governed: GovernedAutonomy): string {
   const rows = Object.entries(governed.record.classes).map(([id, c]) =>
-    c.tier === "human-always"
-      ? [id, "human-always", "-", "-", "-", String(c.usesJudge)]
+    c.tier !== "normal"
+      ? [id, c.tier, "-", "-", "-", String(c.usesJudge)]
       : [id, "normal", String(c.threshold), String(c.priorConfidence), c.declaredRecoverability, String(c.usesJudge)],
   );
   const table = formatTable(["class", "tier", "threshold", "prior C", "declared R", "judge"], rows);
@@ -87,12 +87,12 @@ function renderOutcome(outcome: ProposeOutcome): { text: string; code: number } 
       };
     case "escalated":
       return {
-        text: `Not applied: this change LOOSENS governance (class governance-loosen, human-always):\n${outcome.change.loosened.map((l) => `  ${l}`).join("\n")}\nPending decision ${outcome.pending_id} created. A human answers it with: lore decide ${outcome.pending_id} --accept (or --reject); re-run this same command afterwards.`,
+        text: `Not applied: this change LOOSENS governance (class governance-loosen, human-always):\n${outcome.change.loosened.map((l) => `  ${l}`).join("\n")}\nPending decision ${outcome.pending_id} created. Ask the human in the session (lore pending --ask, then the interactive question tool); re-run this same command after they answer.`,
         code: NEEDS_HUMAN_EXIT,
       };
     case "refused":
       return {
-        text: `Refused: the threshold record fails its integrity check (${outcome.integrity.reason}: ${outcome.integrity.detail}). Resolve the threshold-integrity decision first (lore pending, lore decide).`,
+        text: `Refused: the threshold record fails its integrity check (${outcome.integrity.reason}: ${outcome.integrity.detail}). Resolve the threshold-integrity decision first (lore pending --ask, then ask the human in the session).`,
         code: 1,
       };
   }
@@ -138,7 +138,8 @@ const set = defineLoreCommand({
   meta: { name: "set", description: "Edit one class's governed values; tightening applies, loosening escalates to the human" },
   args: {
     class: { type: "positional", description: "Operation class id (see `lore autonomy show`)", required: true },
-    tier: { type: "string", description: "normal | human-always" },
+    tier: { type: "string", description: "normal | human-always | milestone (milestone/normal are loosenings: human-only)" },
+    retire: { type: "boolean", description: "Remove a class the code table no longer has (retiring a human-always class is a loosening: human-only)" },
     threshold: { type: "string", description: "Auto threshold in [0,1] (normal classes)" },
     prior: { type: "string", description: "Prior confidence C in [0,1] (normal classes)" },
     recoverability: { type: "string", description: `Declared recoverability: ${Object.keys(RECOVERABILITY_SCORE).join(" | ")}` },
@@ -150,8 +151,15 @@ const set = defineLoreCommand({
     const edit: { -readonly [K in keyof ClassEdit]: ClassEdit[K] } = {};
     const problems: string[] = [];
     if (args.tier !== undefined) {
-      if (args.tier === "normal" || args.tier === "human-always") edit.tier = args.tier;
-      else problems.push(`--tier must be normal or human-always, got "${String(args.tier)}"`);
+      if (args.tier === "normal" || args.tier === "human-always" || args.tier === "milestone") edit.tier = args.tier;
+      else problems.push(`--tier must be normal, human-always or milestone, got "${String(args.tier)}"`);
+    }
+    if (args.retire === true) {
+      if (args.tier !== undefined || args.threshold !== undefined || args.prior !== undefined || args.recoverability !== undefined || args.judge !== undefined) {
+        inv.io.stderr.write("Error: --retire takes no other edit flag\n");
+        return 4;
+      }
+      return await withDecisions(inv, (opened) => propose(inv, opened, (current) => retireClass(current, String(args.class))));
     }
     for (const [flag, key] of [["threshold", "threshold"], ["prior", "priorConfidence"]] as const) {
       const raw = args[flag];
@@ -168,7 +176,7 @@ const set = defineLoreCommand({
       if (args.judge === "true" || args.judge === "false") edit.usesJudge = args.judge === "true";
       else problems.push('--judge must be "true" or "false"');
     }
-    if (problems.length === 0 && Object.keys(edit).length === 0) problems.push("nothing to change: pass at least one of --tier --threshold --prior --recoverability --judge");
+    if (problems.length === 0 && Object.keys(edit).length === 0) problems.push("nothing to change: pass at least one of --tier --threshold --prior --recoverability --judge --retire");
     if (problems.length > 0) {
       inv.io.stderr.write(`Error: ${problems.join("; ")}\n`);
       return 4;

@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref AC-CP-4 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D4)
  *
@@ -48,11 +50,11 @@
  *       false` in the project config, succeeds. Vacuously true today (see
  *       above); becomes a real two-sided control once (a) is green.
  *   (c) STRUCTURAL SAME-PATH CHECK — `GateCheckpointConfigSchema`'s own shape
- *       enumerates exactly seven sub-predicate keys as a SET, each carrying
+ *       enumerates exactly six sub-predicate keys as a SET, each carrying
  *       the identical `.strict()` enabled-boolean shape, and each key's
  *       resolver is reachable through the SAME naming-convention dispatch
- *       (`resolve<PascalCase(key)>GateEnabled`) that the six pre-existing
- *       keys already use — so a seventh predicate wired PAST that convention
+ *       (`resolve<PascalCase(key)>GateEnabled`) that the five pre-existing
+ *       keys already use — so a sixth predicate wired PAST that convention
  *       (e.g. a schema key with no matching exported resolver, or a resolver
  *       named off-pattern) goes RED. Pure, in-process, no subprocess spawn.
  *
@@ -63,7 +65,8 @@
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -278,8 +281,8 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
       // Same map key `resolveForeignCorpusWriteGateEnabled` reads
       // (config.ts) — "corpus-write", deliberately not one of the four real
       // GateCheckpoint ids, per D4's "NOT scoped to task-claim" constraint.
-      appendFileSync(
-        join(repoRoot, ".lore", "config.yaml"),
+      patchLoreConfig(
+        repoRoot,
         ["workflow:", "  gates:", "    corpus-write:", "      foreign_corpus_write:", "        enabled: false", ""].join(
           "\n",
         ),
@@ -308,11 +311,9 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
 
   const EXPECTED_SUB_PREDICATE_KEYS = [
     "anchor_overlap",
-    "actor_identity",
     "ac_quantifiable",
     "oracle_coverage",
     "requires_uat",
-    "cited_rule_check",
     "foreign_corpus_write",
   ] as const;
 
@@ -336,15 +337,15 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
   }
 
   /**
-   * The SHARED keyed-dispatch lookup this AC drives with all seven keys:
-   * every `resolve*GateEnabled` helper in config.ts (six pre-existing plus
+   * The SHARED keyed-dispatch lookup this AC drives with all six keys:
+   * every `resolve*GateEnabled` helper in config.ts (five pre-existing plus
    * `foreign_corpus_write`) is named by the SAME convention —
    * `resolve` + PascalCase(snake_case key) + `GateEnabled` — verified against
-   * all six pre-existing names before being trusted here (anchor_overlap ->
-   * resolveAnchorOverlapGateEnabled, actor_identity -> resolveActorIdentityGateEnabled,
+   * all five pre-existing names before being trusted here (anchor_overlap ->
+   * resolveAnchorOverlapGateEnabled,
    * ac_quantifiable -> resolveAcQuantifiableGateEnabled, oracle_coverage ->
-   * resolveOracleCoverageGateEnabled, requires_uat -> resolveRequiresUatGateEnabled,
-   * cited_rule_check -> resolveCitedRuleCheckGateEnabled). A seventh predicate whose resolver
+   * resolveOracleCoverageGateEnabled, requires_uat -> resolveRequiresUatGateEnabled).
+   * (`cited_rule_check` left the set when plan close became review-only, BR-1372.) A further predicate whose resolver
    * is missing, misnamed, or not re-exported from `@lore/core` is invisible to
    * every ACTUAL caller (gate-enforcer.ts / commands/gate.ts import by this
    * exact name) exactly as it would be invisible to this lookup.
@@ -357,7 +358,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
     return `resolve${pascal}GateEnabled`;
   }
 
-  it("(c) STRUCTURAL SAME-PATH CHECK: GateCheckpointConfigSchema carries exactly seven sub-predicate keys as a set, each with the identical .strict() enabled-boolean shape, each reachable through the shared naming-convention dispatch", () => {
+  it("(c) STRUCTURAL SAME-PATH CHECK: GateCheckpointConfigSchema carries exactly five sub-predicate keys as a set, each with the identical .strict() enabled-boolean shape, each reachable through the shared naming-convention dispatch", () => {
     const shape = GateCheckpointConfigSchema.shape as Record<string, z.ZodTypeAny>;
     const actualSubPredicateKeys = Object.keys(shape).filter((k) => k !== "enabled");
 
@@ -368,7 +369,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
     if (!setsMatch) {
       throw new Error(
         `AC-CP-4(c): GateCheckpointConfigSchema's sub-predicate keys are ` +
-          `${JSON.stringify([...actualSet].sort())}, expected exactly the seven-key SET ` +
+          `${JSON.stringify([...actualSet].sort())}, expected exactly the five-key SET ` +
           `${JSON.stringify([...expectedSet].sort())}.`,
       );
     }

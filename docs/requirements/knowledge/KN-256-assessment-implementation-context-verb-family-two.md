@@ -3,10 +3,10 @@ id: KN-256
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — context verb family (two-zone CLAUDE.md, admission checks, skill retirement) (2026-08-01)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-23
 tags: []
 parent: PLAN-088
 links:

@@ -17,7 +17,8 @@
  *   2. spawn `lore run register --harness claude-code --session S --harness-pid <ppid>`
  *      (the harness process that spawned this hook; AC-AU-5), plus
  *      `--agent-id A --agent-type T` when the payload carries a string
- *      `agent_id` (SubagentStart)
+ *      `agent_id` (SubagentStart); on SessionStart only, `--messaging-socket <raw path>` when the environment
+ *      variable CLAUDE_CODE_MESSAGING_SOCKET is non-empty (BR-1360)
  *   3. success -> print nothing; failure -> print ONE hook-JSON line whose
  *      additionalContext names the failure
  *
@@ -25,13 +26,14 @@
  *
  * Exit status is 0 on every path, so a registration fault can never block a
  * session or a helper. The fault is not swallowed: the single additionalContext
- * line tells the session why its writes will be unattested.
+ * line tells the session why its writes will be refused (a write naming an
+ * unregistered run is refused, never recorded unattested).
  *
  * ## Invariant: this file holds no grammar (spec D10)
  *
- * Run-id derivation, parent linkage and fragment composition belong to the
- * `lore run register` verb. This file only forwards the identifiers it was
- * given.
+ * Run-id derivation, parent linkage, fragment composition and the messaging-address grammar (`uds:<path>`)
+ * belong to the `lore run register` verb. This file only forwards the identifiers it was given, the socket path
+ * included, raw.
  *
  * @spec_ref spec-run-identity-slice-1-harness-attested-runs-attested D7, D10;
  *   AC-RID-3
@@ -39,6 +41,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:run-register');
 
 /** Resolved from `PATH`: the hook runs in the user's environment, and this is what lets tests substitute a stub. */
 const VERB_BINARY = 'lore';
@@ -60,7 +64,7 @@ const CHILD_OUTPUT_BYTE_CEILING = 16 * 1024 * 1024;
  * @returns {never}
  */
 function reportAndExit(eventName, reason) {
-  const text = `run-register: ${reason}; this run's writes will be unattested`.replace(/\s*[\r\n]+\s*/g, ' ');
+  const text = `run-register: ${reason}; this run's writes will be refused until it is registered (see \`lore setup\`)`.replace(/\s*[\r\n]+\s*/g, ' ');
   process.stdout.write(
     `${JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: text } })}\n`,
   );
@@ -69,7 +73,7 @@ function reportAndExit(eventName, reason) {
 
 let payload;
 try {
-  payload = JSON.parse(readFileSync(0, 'utf8'));
+  payload = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
 } catch (cause) {
   reportAndExit(DEFAULT_EVENT_NAME, `malformed hook payload on stdin (${String(cause)})`);
 }
@@ -91,6 +95,14 @@ const argv = ['run', 'register', '--harness', HARNESS, '--session', payload.sess
 if (typeof payload.agent_id === 'string') {
   argv.push('--agent-id', payload.agent_id);
   if (typeof payload.agent_type === 'string') argv.push('--agent-type', payload.agent_type);
+}
+
+// reason: BR-1360 — only the main run (SessionStart) carries an address; a subagent shares its session's socket and
+// registers none. The path is forwarded raw: the `uds:` grammar is the verb's (D10 above). Unset or empty -> no flag,
+// which makes the register clear any previously stored address.
+const messagingSocket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+if (typeof payload.agent_id !== 'string' && typeof messagingSocket === 'string' && messagingSocket !== '') {
+  argv.push('--messaging-socket', messagingSocket);
 }
 
 const child = spawnSync(VERB_BINARY, argv, {

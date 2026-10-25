@@ -42,7 +42,7 @@
  * Source: spec-a-spec-carries-its-rule-changes-the-baseline-takes-them (Model, Scope, Edge cases); BR-1069.
  */
 
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, validationError, type Result } from "@lore/core";
 import type { DocRecord, DocStatus, LoreError, RuleChange } from "@lore/core";
 import {
   baselineExtraSchema,
@@ -64,7 +64,8 @@ import { resolveDoc } from "./resolve.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { findOtherSpecChange, findProposal, isLanded, ruleChangesOf } from "./rule-changes.js";
 import { measureLandingEvidence } from "./landing-evidence.js";
-import type { RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
+import { approvedRulesOf, pendingRevisionsOf } from "./baseline-items.js";
+import type { AbandonedLeafPlan, AbandonmentPlan, RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
 
 /** Immediate re-applies after a CAS miss before the STALE_VERSION error is surfaced. */
 export const MAX_CAS_REAPPLIES = 3;
@@ -99,12 +100,6 @@ export interface RuleChangeList {
   /** The spec's slug. */
   spec: string;
   changes: RuleChange[];
-}
-
-function validationError(field: string, message: string, value?: unknown): LoreError {
-  return value === undefined
-    ? { code: "VALIDATION_ERROR", field, message }
-    : { code: "VALIDATION_ERROR", field, message, value };
 }
 
 function staleExhausted(id: string): LoreError {
@@ -316,24 +311,25 @@ export class RuleChangeService implements RuleChangeLandingPort {
     return err(validationError(
       "rule_changes",
       `cannot land the rule changes of ${spec.slug}: ${parts.join("; ")}; then re-run \`lore rule apply ${spec.slug}\``,
-      { shortfalls: measured.shortfalls, unproven: measured.unproven },
+      { shortfalls: measured.shortfalls, unproven: measured.unproven }, "BR-1210",
     ));
   }
 
   /**
-   * Write every touched leaf exactly once. All leaf plans are computed (and shape-validated) BEFORE the first
-   * write, so a refusal on one leaf leaves the tree untouched; a STALE_VERSION re-plans that leaf on a fresh read.
+   * Plan every touched leaf without writing: all leaf plans are computed (and shape-validated) and each leaf's
+   * write authorized, so a refusal on one leaf leaves the tree untouched.
+   *
+   * @returns one entry per leaf the changes actually alter (a leaf whose plan is a no-op is skipped).
    */
-  private async writeLeaves(
+  private async planLeafWrites(
     spec: DocRecord,
     changes: readonly RuleChange[],
     mode: "land" | "abandon",
     actor: string,
-  ): Promise<Result<RuleApplyLeafWrite[], LoreError>> {
+  ): Promise<Result<Array<{ leaf: DocRecord; changes: RuleChange[]; plan: LeafPlan }>, LoreError>> {
     if (changes.length === 0) return ok([]);
-    const registry = await this.store.listRuleRegistry();
-    if (!registry.ok) return registry;
-    const states = new Map(registry.value.map((row) => [row.id, row.lifecycle as string]));
+    const states = await this.readRuleStates();
+    if (!states.ok) return states;
     const baseline = await this.store.findMany({ type: "baseline" });
     if (!baseline.ok) return baseline;
     const owners = collectLeafRules(baseline.value);
@@ -347,19 +343,126 @@ export class RuleChangeService implements RuleChangeLandingPort {
       groups.set(leaf.value.id as string, group);
     }
 
-    const planned: Array<{ leaf: DocRecord; changes: RuleChange[] }> = [];
+    const planned: Array<{ leaf: DocRecord; changes: RuleChange[]; plan: LeafPlan }> = [];
     for (const group of groups.values()) {
       const fresh = await this.readDoc(group.leafId);
       if (!fresh.ok) return fresh;
-      const plan = planLeaf(fresh.value, group.changes, spec.slug, mode, states);
+      const plan = planLeaf(fresh.value, group.changes, spec.slug, mode, states.value);
       if (!plan.ok) return plan;
       if (plan.value === undefined) continue;
       if (this.writeAuthority !== undefined) {
         const verdict = await this.writeAuthority.authorize([fresh.value], "rule-apply", actor);
         if (!verdict.ok) return verdict;
       }
-      planned.push({ leaf: fresh.value, changes: group.changes });
+      planned.push({ leaf: fresh.value, changes: group.changes, plan: plan.value });
     }
+    return ok(planned);
+  }
+
+  /** The registry's rule id to lifecycle map, read once per plan. */
+  private async readRuleStates(): Promise<Result<Map<string, string>, LoreError>> {
+    const registry = await this.store.listRuleRegistry();
+    if (!registry.ok) return registry;
+    return ok(new Map(registry.value.map((row) => [row.id, row.lifecycle as string])));
+  }
+
+  /**
+   * BR-1307 - the leaf writes that retire a spec's still-proposed ids "never landed: <spec>", planned and not
+   * written: the corpus commits them with the spec's move to `deprecated` in ONE transaction.
+   *
+   * @param specRef - Spec id or slug; a non-spec doc is a VALIDATION_ERROR.
+   * @returns the plan (empty `leaves` when nothing is proposed or every id is already retired); the refusal when a
+   *   leaf is unresolvable, unwritable from here, or the stored change set is corrupt.
+   */
+  async planAbandonment(specRef: string, opts: RuleApplyOpts = {}): Promise<Result<AbandonmentPlan, LoreError>> {
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    const specResult = await this.resolveSpec(specRef);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const stored = readChangeSet(spec);
+    if (!stored.ok) return stored;
+    const abandoned = stored.value.filter((change) => change.op === "add" && !isLanded(change));
+    const planned = await this.planLeafWrites(spec, abandoned, "abandon", actor);
+    if (!planned.ok) return planned;
+    return ok({
+      spec: spec.slug,
+      leaves: planned.value.map(({ leaf, plan }) => ({
+        leaf,
+        extra: plan.extra,
+        status: leaf.status, // reason: BR-1211 — a landed change set is approved by its spec; the leaf's status is untouched
+        summary: `Proposed rules retired, never landed (${spec.slug}): ${plan.touched.join(", ")}`,
+        details: { operation: "rule-abandon", spec: spec.slug, rules: plan.touched },
+        rules: plan.touched,
+      })),
+    });
+  }
+
+  /**
+   * The reverse of {@link planAbandonment}: the leaf writes that take the "never landed: <spec>" tombstones of
+   * `specRef`'s proposed ids off their leaves, planned and not written. The owner rejected the spec's deprecation
+   * (adr-an-acceptance-criterion-retires-with-the-feature-it: a rejected item is restored and re-planned), so the ids
+   * the deprecation abandoned are proposed again. The caller commits the plan in the SAME transaction as the spec's
+   * status restore and asks the store to mark the ids `proposed` (`CompanionDocWrite.propose_rules`).
+   *
+   * @param specRef - Spec id or slug; a non-spec doc is a VALIDATION_ERROR.
+   * @returns the plan (empty `leaves` when no id of the spec carries its tombstone); the refusal when a leaf is
+   *   unresolvable or unwritable from here.
+   */
+  async planRevival(specRef: string, opts: RuleApplyOpts = {}): Promise<Result<AbandonmentPlan, LoreError>> {
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    const specResult = await this.resolveSpec(specRef);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const stored = readChangeSet(spec);
+    if (!stored.ok) return stored;
+    const proposed = new Set(stored.value.filter((change) => change.op === "add" && !isLanded(change)).map((change) => change.id));
+    const baseline = await this.store.findMany({ type: "baseline" });
+    if (!baseline.ok) return baseline;
+    const tombstone = `never landed: ${spec.slug}`;
+    const leaves: AbandonedLeafPlan[] = [];
+    for (const doc of baseline.value) {
+      if ((doc.deleted_at ?? null) !== null) continue;
+      const rules = approvedRulesOf(doc) as BaselineRule[];
+      const revived = rules.filter((rule) => proposed.has(rule.id) && rule.lifecycle === "retired" && rule.retired_note === tombstone);
+      if (revived.length === 0) continue;
+      if (this.writeAuthority !== undefined) {
+        const verdict = await this.writeAuthority.authorize([doc], "rule-apply", actor);
+        if (!verdict.ok) return verdict;
+      }
+      const ids = revived.map((rule) => rule.id);
+      const extra = { ...doc.extra, rules: rules.filter((rule) => !ids.includes(rule.id)) };
+      const shape = baselineExtraSchema.safeParse(extra);
+      if (!shape.success) {
+        const issue = shape.error.issues[0];
+        return err(validationError(`extra.${issue !== undefined ? issue.path.join(".") : ""}`, `${doc.slug}: ${issue?.message ?? "invalid baseline extra"}`));
+      }
+      leaves.push({
+        leaf: doc,
+        extra,
+        status: doc.status,
+        summary: `Proposed rules restored, deprecation of ${spec.slug} rejected: ${ids.join(", ")}`,
+        details: { operation: "rule-revive", spec: spec.slug, rules: ids },
+        rules: ids,
+      });
+    }
+    return ok({ spec: spec.slug, leaves });
+  }
+
+  /**
+   * Write every touched leaf exactly once. A STALE_VERSION re-plans that leaf on a fresh read.
+   */
+  private async writeLeaves(
+    spec: DocRecord,
+    changes: readonly RuleChange[],
+    mode: "land" | "abandon",
+    actor: string,
+  ): Promise<Result<RuleApplyLeafWrite[], LoreError>> {
+    const plannedAll = await this.planLeafWrites(spec, changes, mode, actor);
+    if (!plannedAll.ok) return plannedAll;
+    const planned = plannedAll.value;
+    const stateRead = await this.readRuleStates();
+    if (!stateRead.ok) return stateRead;
+    const states = stateRead.value;
 
     const written: RuleApplyLeafWrite[] = [];
     for (const { leaf, changes: leafChanges } of planned) {
@@ -374,7 +477,9 @@ export class RuleChangeService implements RuleChangeLandingPort {
         const summary = mode === "land"
           ? `Rule changes landed from ${spec.slug}: ${plan.value.touched.join(", ")}`
           : `Proposed rules retired, never landed (${spec.slug}): ${plan.value.touched.join(", ")}`;
-        const committed = await this.commitDoc(fresh.value, plan.value.extra, resolveStatusAfterContractEdit(fresh.value.status, true), summary, actor, {
+        // reason: BR-1211 — landing writes the APPROVED version of each changed rule and demotes nothing: the spec that
+        // carried the change set was reviewed and approved, so the leaf keeps its status.
+        const committed = await this.commitDoc(fresh.value, plan.value.extra, fresh.value.status, summary, actor, {
           operation: mode === "land" ? "rule-apply" : "rule-abandon",
           spec: spec.slug,
           rules: plan.value.touched,
@@ -445,14 +550,14 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const resolved = await resolveDoc(this.store, leafRef);
     if (!resolved.ok) return resolved;
     if (resolved.value.type !== "baseline" || ruleIdPrefixOfNode(resolved.value.extra) !== "BR") {
-      return err(validationError("leaf", `a rule lands on a business leaf; '${leafRef}' is not one`, leafRef));
+      return err(validationError("leaf", `a rule lands on a business leaf; '${leafRef}' is not one`, leafRef, "BR-1232"));
     }
     return ok(resolved.value);
   }
 
   private ownerOf(ruleId: string, owners: ReadonlyMap<string, { leaf: DocRecord }>): Result<DocRecord, LoreError> {
     const owner = owners.get(ruleId);
-    if (owner === undefined) return err(validationError("id", `${ruleId} is not a rule of the baseline`, ruleId));
+    if (owner === undefined) return err(validationError("id", `${ruleId} is not a rule of the baseline`, ruleId, "BR-1232"));
     return ok(owner.leaf);
   }
 
@@ -581,7 +686,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         ...(fields.value.enforced_by !== undefined ? { enforced_by: fields.value.enforced_by } : {}),
       };
       if (JSON.stringify(amended) === JSON.stringify(entry.value)) {
-        return err(validationError("change", `an amend must change something: ${entry.value.id} already has exactly this statement, examples and enforced_by`, entry.value.id));
+        return err(validationError("change", `an amend must change something: ${entry.value.id} already has exactly this statement, examples and enforced_by`, entry.value.id, "BR-1287"));
       }
       const next = ruleChangesOf(spec.extra).map((c) => (c.id === amended.id ? amended : c));
       const status = exit.value.keepStatus ? spec.status : resolveStatusAfterContractEdit(spec.status, true);
@@ -621,7 +726,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
       const spec = fresh.value;
       const existing = ruleChangesOf(spec.extra);
       const entry = existing.find((c) => c.id === input.id);
-      const refuse = (why: string) => err(validationError("id", `a withdraw removes an entry of ${spec.slug}'s change set: ${input.id} ${why}`, input.id));
+      const refuse = (why: string) => err(validationError("id", `a withdraw removes an entry of ${spec.slug}'s change set: ${input.id} ${why}`, input.id, "BR-1311"));
       if (entry === undefined) return refuse("is not in this spec's change set");
       if (isLanded(entry)) return refuse("already landed; a landed entry is history");
       if (entry.op === "add") return refuse("is a proposed add; its reserved id is released by deprecating the spec, not by a withdraw");
@@ -648,7 +753,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
   private async findOwnProposedAdd(spec: DocRecord, ruleId: string): Promise<Result<Extract<RuleChange, { op: "add" }>, LoreError>> {
     const own = ruleChangesOf(spec.extra).find((c) => c.id === ruleId);
     if (own !== undefined && own.op === "add" && !isLanded(own)) return ok(own);
-    const refuse = (why: string) => err(validationError("id", `an amend rewrites a proposed entry of ${spec.slug}: ${ruleId} ${why}`, ruleId));
+    const refuse = (why: string) => err(validationError("id", `an amend rewrites a proposed entry of ${spec.slug}: ${ruleId} ${why}`, ruleId, "BR-1287"));
     if (own !== undefined && isLanded(own)) return refuse("already landed; a landed entry is history");
     if (own !== undefined) return refuse(`is a ${own.op} of this spec, not a proposed add (re-propose the ${own.op} instead)`);
     const specs = await this.store.findMany({ type: "spec" });
@@ -668,7 +773,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
    */
   private async checkAmendable(spec: DocRecord, change: Exclude<RuleChange, { op: "add" }>): Promise<Result<void, LoreError>> {
     if (ruleChangesOf(spec.extra).some((entry) => entry.id === change.id && isLanded(entry))) {
-      return err(validationError("id", `${change.id} already landed from ${spec.slug}; a landed entry is history and cannot be re-proposed`, change.id));
+      return err(validationError("id", `${change.id} already landed from ${spec.slug}; a landed entry is history and cannot be re-proposed`, change.id, "BR-1208"));
     }
     const baseline = await this.store.findMany({ type: "baseline" });
     if (!baseline.ok) return baseline;
@@ -682,7 +787,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         : live === undefined
           ? `${change.id} is not a rule of the baseline`
           : `${change.id} is ${live.lifecycle}, not live`;
-      return err(validationError("id", `a ${change.op} names a LIVE rule: ${why}`, change.id));
+      return err(validationError("id", `a ${change.op} names a LIVE rule: ${why}`, change.id, "BR-1207"));
     }
     const other = findOtherSpecChange(change.id, specs.value, spec.id as string);
     if (other !== undefined) {
@@ -690,7 +795,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         "id",
         `${change.id} is already ${other.change.op === "retire" ? "retired" : "modified"} by the unlanded change set of ${other.spec.slug}; ` +
           `that spec must land or be deprecated before another spec changes it`,
-        change.id,
+        change.id, "BR-1207",
       ));
     }
     return ok(undefined);
@@ -714,7 +819,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         return err(validationError(
           "correction.reason",
           'a correction needs a non-empty reason (--correction "<why this is a fix, not a change>")',
-          correction.reason,
+          correction.reason, "BR-1208",
         ));
       }
       const lock = await this.recordLock.resolve(spec);
@@ -741,7 +846,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
       const resolved = await resolveDoc(this.store, change.leaf);
       if (!resolved.ok) return resolved;
       if (resolved.value.type !== "baseline" || ruleIdPrefixOfNode(resolved.value.extra) !== "BR") {
-        return err(validationError("leaf", `an add lands on a business leaf; '${change.leaf}' is not one`, change.leaf));
+        return err(validationError("leaf", `an add lands on a business leaf; '${change.leaf}' is not one`, change.leaf, "BR-1206"));
       }
       leaf = resolved.value;
     } else {
@@ -784,7 +889,7 @@ function readChangeSet(spec: DocRecord): Result<RuleChange[], LoreError> {
     const issue = parsed.error.issues[0];
     return err(validationError(
       `extra.rule_changes${issue !== undefined && issue.path.length > 0 ? `.${issue.path.join(".")}` : ""}`,
-      `the stored change set of ${spec.slug} is invalid: ${issue?.message ?? "invalid"}`,
+      `the stored change set of ${spec.slug} is invalid: ${issue?.message ?? "invalid"}`, undefined, "BR-1209",
     ));
   }
   return ok(parsed.data);
@@ -808,20 +913,32 @@ function planLeaf(
   mode: "land" | "abandon",
   states: ReadonlyMap<string, string>,
 ): Result<LeafPlan | undefined, LoreError> {
-  const rules: BaselineRule[] = Array.isArray(leaf.extra["rules"]) ? [...(leaf.extra["rules"] as BaselineRule[])] : [];
+  const rules: BaselineRule[] = [...(approvedRulesOf(leaf) as BaselineRule[])];
   const touched: string[] = [];
+  const pendingDirect = pendingRevisionsOf(leaf).rules;
   for (const change of changes) {
+    // reason: BR-1211 — a rule a direct write has revised and nobody has approved yet cannot also be landed by a spec:
+    // the landing would approve over a revision no review has seen. Refused naming the rule, nothing written.
+    if (pendingDirect[change.id] !== undefined && !(mode === "abandon" && change.op !== "add")) {
+      return err(validationError(
+        "id",
+        `${change.id} on ${leaf.slug} holds a pending direct revision (${pendingDirect[change.id]?.revision_id ?? "?"}); ` +
+          `approve it (\`lore review ${leaf.slug}\`, \`lore approve ${leaf.slug} --item ${change.id}\`) or discard it ` +
+          `(\`lore reject ${leaf.slug} --item ${change.id}\`), then re-run \`lore rule apply ${specSlug}\``,
+        change.id, "BR-1211",
+      ));
+    }
     const index = rules.findIndex((rule) => rule.id === change.id);
     const current = index === -1 ? undefined : rules[index];
     if (change.op === "add") {
       if (current !== undefined) {
         if (mode === "land" && current.lifecycle !== "live") {
-          return err(validationError("id", `${change.id} is ${current.lifecycle} in ${leaf.slug}; a spec proposing it cannot land it`, change.id));
+          return err(validationError("id", `${change.id} is ${current.lifecycle} in ${leaf.slug}; a spec proposing it cannot land it`, change.id, "BR-1232"));
         }
         continue;
       }
       if (states.get(change.id) !== "proposed") {
-        return err(validationError("id", `${change.id} is not a proposed rule id (registry state: ${states.get(change.id) ?? "unknown"})`, change.id));
+        return err(validationError("id", `${change.id} is not a proposed rule id (registry state: ${states.get(change.id) ?? "unknown"})`, change.id, "BR-1232"));
       }
       const base = { id: change.id, statement: change.statement, enforced_by: change.enforced_by, examples: change.examples };
       rules.push(
@@ -833,13 +950,13 @@ function planLeaf(
       continue;
     }
     if (mode === "abandon") continue;
-    if (current === undefined) return err(validationError("id", `${change.id} is not on ${leaf.slug}; it moved or was removed since it was proposed`, change.id));
+    if (current === undefined) return err(validationError("id", `${change.id} is not on ${leaf.slug}; it moved or was removed since it was proposed`, change.id, "BR-1232"));
     if (change.op === "retire") {
       if (current.lifecycle === "retired") continue;
       rules[index] = { ...current, lifecycle: "retired", retired_note: change.note };
     } else {
       if (current.lifecycle !== "live") {
-        return err(validationError("id", `${change.id} is ${current.lifecycle}; a modify names a live rule`, change.id));
+        return err(validationError("id", `${change.id} is ${current.lifecycle}; a modify names a live rule`, change.id, "BR-1232"));
       }
       const next: BaselineRule = {
         ...current,
@@ -878,12 +995,12 @@ function shapeAmend(input: AmendInput): Result<AmendInput, LoreError> {
     const issue = parsed.success ? undefined : parsed.error.issues[0];
     return err(validationError(
       issue !== undefined && issue.path.length > 0 ? String(issue.path[0]) : "change",
-      issue !== undefined ? issue.message : "invalid rule change",
+      issue !== undefined ? issue.message : "invalid rule change", undefined, "BR-1206",
     ));
   }
   const { statement, examples, enforced_by } = parsed.data;
   if (statement === undefined && examples === undefined && enforced_by === undefined) {
-    return err(validationError("change", "an amend must change at least one of statement, examples, enforced_by"));
+    return err(validationError("change", "an amend must change at least one of statement, examples, enforced_by", undefined, "BR-1287"));
   }
   return ok({
     op: "amend",
@@ -906,14 +1023,14 @@ function shapeInput(input: Exclude<ProposeRuleChangeInput, { op: "amend" | "with
     const issue = parsed.error.issues[0];
     return err(validationError(
       issue !== undefined && issue.path.length > 0 ? String(issue.path[0]) : "change",
-      issue !== undefined ? issue.message : "invalid rule change",
+      issue !== undefined ? issue.message : "invalid rule change", undefined, "BR-1206",
     ));
   }
   if (parsed.data.op === "modify" && parsed.data.statement === undefined && parsed.data.examples === undefined && parsed.data.enforced_by === undefined) {
-    return err(validationError("change", "a modify must change at least one of statement, examples, enforced_by"));
+    return err(validationError("change", "a modify must change at least one of statement, examples, enforced_by", undefined, "BR-1206"));
   }
   if (parsed.data.op === "retire" && parsed.data.note.trim().length === 0) {
-    return err(validationError("note", "a retire needs a non-blank note naming why the rule is no longer true"));
+    return err(validationError("note", "a retire needs a non-blank note naming why the rule is no longer true", undefined, "BR-1206"));
   }
   return ok(parsed.data);
 }

@@ -3,7 +3,7 @@ id: TASK-1602
 type: task
 role: plan
 title: "[Skill:implement] DN5-2 lore rule propose amend: reword a proposed rule in place, audited on a locked spec"
-status: draft
+status: archived
 priority: medium
 phase: "P1"
 created: 2026-10-18

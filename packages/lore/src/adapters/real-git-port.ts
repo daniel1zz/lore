@@ -199,6 +199,7 @@ function gitFailure(args: string[], result: GitRunResult): LoreError {
   return {
     code: "STORE_ERROR",
     message: `git ${args.join(" ")} exited ${result.exitCode}: ${result.stderr.slice(0, STDERR_TAIL_MAX_CHARS)}`,
+    rule: "BR-399",
   };
 }
 
@@ -219,6 +220,7 @@ function parseUnmergedCount(stdout: string, args: string[], cwd: string): Result
     return err({
       code: "STORE_ERROR",
       message: `git ${args.join(" ")} in "${cwd}" produced a non-numeric count: "${trimmed}"`,
+      rule: "BR-394",
     });
   }
   return ok(Number.parseInt(trimmed, 10));
@@ -381,6 +383,7 @@ export function countUnmergedCommitsSync(cwd: string, branch: string, into: stri
     return err({
       code: "STORE_ERROR",
       message: `git ${args.join(" ")} in "${cwd}" failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      rule: "BR-394",
     });
   }
 }
@@ -764,6 +767,7 @@ export class RealGitPort implements GitPort {
   async worktreeList(): Promise<Result<WorktreeInfo[], LoreError>> {
     const args = ["worktree", "list", "--porcelain"];
     const result = await runGit(this.repoRoot, args);
+    /** @lore-site BR-399 */
     if (result.exitCode !== 0) return err(gitFailure(args, result));
 
     const entries = parsePorcelainWorktreeList(result.stdout).map((entry) => {
@@ -794,6 +798,7 @@ export class RealGitPort implements GitPort {
   async branchDelete(branch: string): Promise<Result<void, LoreError>> {
     const args = ["branch", "-D", branch];
     const result = await runGit(this.repoRoot, args);
+    /** @lore-site BR-378 */
     if (result.exitCode !== 0) return err(gitFailure(args, result));
     return ok(undefined);
   }

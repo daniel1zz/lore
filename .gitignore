@@ -1,5 +1,5 @@
 dist/
-node_modules/
+node_modules
 # @tanstack/router-cli codegen scratch. `bun run typecheck` and the dashboard
 # prebuild both invoke the generator, which writes here, so leaving it
 # untracked-but-not-ignored made every local typecheck/build dirty the tree.
@@ -32,7 +32,6 @@ packages/dashboard/.tanstack/
 coverage/
 
 .agent-worktree-marker
-docs/.docman/
 packages/*/node_modules
 packages/*/dist
 .lore/local-key

@@ -671,7 +671,7 @@ describe("HttpAIProvider.modelId — ModelAwareProvider capability (spec-tiered-
 // HttpAIProvider's actual configured model — never the provider (registry) name.
 
 describe("HttpAIProvider wired into AIProviderService — ai_provenance.model (spec-tiered-review-ledger-fast-track-judgment-required-promote#AC-TIER-10)", () => {
-  const assessBudgets = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
+  const assessBudgets = { max_diff_chars: 24000 };
 
   function makeTelemetry(): Telemetry {
     return { record: vi.fn(), emit: vi.fn(), close: vi.fn() };

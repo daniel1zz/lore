@@ -1,9 +1,10 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref task-skill-fix-a-blocks-edge-in-a-feature-branch-plan-is-met (ad hoc, no spec)
  *
  * A plan that lands through ONE integration branch can never archive a blocker until that branch reaches
- * main (`lore done`'s unmerged-branch floor), so its `blocks` edges used to read blocked until the final
+ * main (`lore done`'s not-landed floor), so its `blocks` edges used to read blocked until the final
  * landing. A plan may now declare `extra.integration_branch` (`lore plan integration-branch`): for
  * READINESS a blocker whose own work is on that branch counts as met, labelled "met on <branch>, not on
  * main"; `lore done` still judges landing against main.
@@ -22,6 +23,8 @@ import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -67,10 +70,9 @@ function statusOf(slug: string, cwd: string): string {
 }
 
 function relaxPlanGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", ""].join("\n"),
-    "utf8",
+  patchLoreConfig(
+    dir,
+    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
   );
 }
 
@@ -119,6 +121,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lore-feature-branch-blocks-"));
   makeCleanTreeRepo(dir);
   mustRun(["init"], dir);
+  appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n"); // `lore integrate` keeps its worktree there
   relaxPlanGates(dir);
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Blocks PRD", "--content", "root", "--no-ai"], dir));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Blocks Plan", "--parent", prd, "--content", "x", "--no-ai"], dir));
@@ -161,9 +164,14 @@ describe("a blocks edge in a feature-branch plan is met when the blocker landed 
     capturePass(a);
     const refused = runLore(["done", a], dir);
     expect(refused.exitCode).toBe(4);
-    expect(refused.text).toContain("[floor: unmerged-branch]");
+    expect(refused.text).toContain("[floor: not-landed]");
 
     git(["merge", "-q", "--no-ff", "-m", "land I on main", INTEGRATION], dir);
+    // both branches are on main now; integrate finds each already integrated and records the landing on its claimant
+    git(["checkout", "-q", "--detach", "main"], dir); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+    mustRun(["integrate", "feat-a", "--session", "blocks-session"], dir);
+    mustRun(["integrate", "feat-b", "--session", "blocks-session"], dir);
     capturePass(b);
     expect(runLore(["done", a], dir).exitCode).toBe(0);
     expect(runLore(["done", b], dir).exitCode).toBe(0);

@@ -1,4 +1,5 @@
 // @spawns dist/lore
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * record-lock-compiled.bun.test.ts — AC-DR-5: the record-edit gate and its read surfaces, observed from the
  * REAL compiled binary on a throwaway corpus.
@@ -22,7 +23,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import yaml from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
@@ -41,6 +42,9 @@ const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/
 const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 let dir = "";
+
+/** The run the MCP calls name (BR-1351): the same session the CLI calls run as, which the test spawn rewrite registers in this corpus. */
+const MCP_RUN = "cc:a77e57e1-aaaa-bbbb-cccc-222222222222";
 
 function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {};
@@ -114,10 +118,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     mustLore(["create", "prd", "--title", "Record Lock PRD", "--content", "PRD body.", "--no-ai"]);
     // SPEC-103 M2's review-judgment checkpoint defaults spec/adr into `judgment_required_types`; disabled so the
     // approvals below are fixture steps, not the behaviour under test.
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-    const workflow = { ...(existing["workflow"] as Record<string, unknown> | undefined), review: { judgment_required_types: [] } };
-    writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow }), "utf8");
+    patchLoreConfig(dir, { workflow: { review: { judgment_required_types: [] } } });
 
     lockedSpec = createApprovedSpec("Locked Spec", "AC-LK-1");
     newerSpec = parseSlug(
@@ -196,18 +197,18 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     await withMcp(async (c) => {
       const single = await c.callTool({
         name: "lore_set",
-        arguments: { id_or_slug: lockedSpec, content: "## Overview\n\nMcp rewrite.\n" },
+        arguments: { harness_run: MCP_RUN, id_or_slug: lockedSpec, content: "## Overview\n\nMcp rewrite.\n" },
       });
       expect(single.isError).toBe(true);
       expect(textOf(single)).toContain("gate:record-edit");
 
       const batch = await c.callTool({
         name: "lore_batch",
-        arguments: { operations: [{ op: "set", args: { id_or_slug: lockedSpec, content: "## Overview\n\nBatch rewrite.\n" } }] },
+        arguments: { harness_run: MCP_RUN, operations: [{ op: "set", args: { id_or_slug: lockedSpec, content: "## Overview\n\nBatch rewrite.\n" } }] },
       });
       expect(textOf(batch)).toContain("gate:record-edit");
 
-      const reopen = await c.callTool({ name: "lore_reopen", arguments: { id_or_slug: reopenMcpSpec, reason: "r" } });
+      const reopen = await c.callTool({ name: "lore_reopen", arguments: { harness_run: MCP_RUN, id_or_slug: reopenMcpSpec, reason: "r" } });
       expect(reopen.isError ?? false).toBe(false);
     });
     expect(mustLore(["get", reopenMcpSpec])).toContain("Status: draft");

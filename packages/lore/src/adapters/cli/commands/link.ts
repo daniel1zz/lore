@@ -76,7 +76,7 @@ export default defineLoreCommand({
     const { args } = context;
     const inv = invocationOf(context);
     const hasInfer = args.infer === true;
-    const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+    const resolvedActor = resolveActor(inv);
 
     const { app } = loadLoreApp({ inv });
     try {

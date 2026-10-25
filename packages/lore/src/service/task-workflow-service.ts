@@ -321,7 +321,6 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { AuditEntry, LoreError } from "@lore/core";
-import type { ActorSource } from "@lore/core/node";
 import {
   evidenceEntrySchema,
   taskClaimSchema,
@@ -336,6 +335,7 @@ import {
   sessionIdDiscriminator,
   normalizeFileAnchors,
   extractFileAnchors,
+  fileAnchorPath,
   anchorsOverlap,
   computeAcScopeEdit,
   extractDeclaredAcScope,
@@ -378,6 +378,7 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 import type { StampOutcome } from "./git-state-stamp.js";
 import { loadStampBindingContext, readRecordedCorpusRev } from "./stamp-binding-reader.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
@@ -389,6 +390,7 @@ import {
   measureAnchorRemoval,
   resolveClaimHead,
   type AnchorRemovalVerdict,
+  type ListedWorktree,
   type RecordedWorktree,
   type WorktreeGitProbe,
   type WorktreeOutcome,
@@ -397,15 +399,14 @@ import type { WorktreeRemovalFactsPort } from "./worktree-removal-test.js";
 import {
   commitRangeFromLanding,
   commitRangeNote,
-  findLandingInMainLog,
-  MAIN_FIRST_PARENT_LOG_FORMAT,
   readTaskLanding,
-  type LandingFact,
+  type LandingRequest,
   type TaskCommitRange,
   type TaskLanding,
 } from "./task-commit-range.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
-import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
+import type { SiblingClaimInfo } from "./gate-predicates.js";
+import { resolveMessageAddressByRun } from "./holder-message-address.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import { AC_REF_NOT_ON_PARENT_SPEC, AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "./ac-ref-messages.js";
@@ -460,19 +461,6 @@ export interface ClaimOpts {
    * per call — never carried forward on a refresh.
    */
   corpusScope?: string;
-  /**
-   * How `by` was resolved (spec claim-time-actor-identity-guard-zero-evidence-
-   * release-advis, AC-IDENTITY-REJECT) — CLI: `resolveActorWithIdentitySource`'s
-   * SPEC-071 session tier > worktree tier > OS-username-fallback
-   * chain (`ActorSource`, `@lore/core/node`); MCP: `actorSourceOfName` of the
-   * call's name source (`adapters/mcp/call-scope.ts`). `undefined` (a caller
-   * that never resolved/threaded one — e.g. a hand-built test `ClaimOpts`)
-   * behaves identically to any non-`"os-fallback"` value: `actorIdentityGuard`
-   * (`gate-predicates.ts`) is a vacuous pass. GATE-CONTEXT-ONLY — never
-   * persisted onto the written `TaskClaim` (spec §Scope: "OUT: storing
-   * identity source on the doc").
-   */
-  identitySource?: ActorSource;
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
@@ -583,6 +571,12 @@ export interface DoneOpts {
    */
   noNewTestsReason?: string;
   /**
+   * Free-text justification for this close (`lore bulk done --reason`, spec-lean-governance-batch-verbs-judgment-only-at-
+   * milestones BR-1366): written verbatim to every lifecycle step's audit entry as `details.reason`. Unlike
+   * {@link overrideReason} it relaxes NO floor — it is a note, never an escape hatch. Absent adds no key.
+   */
+  reason?: string;
+  /**
    * The caller's harness session id (`CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID`, resolved by the CLI) — the
    * "mine" side of the worktree-removal test's owned-or-abandoned clause (spec-one-worktree-removal-test-for-the-
    * guard-lore-done-and-a D2). Absent = unknown: never the owner of anything.
@@ -645,8 +639,8 @@ export type DoneFloorId =
   | "unfiltered-test-file"
   // reason: DCL-1 (e) — evaluated by `evaluateDoneFloors` right after `attested-pass`.
   | "latest-attested-fail"
-  // reason: DCL-1 (a) — async (needs git); evaluated by `findUnlandedWorkFloor` before `missing-oracle-file`.
-  | "unmerged-branch"
+  // reason: BR-1291 — async (needs git); evaluated by `findNotLandedFloor` before `missing-oracle-file`.
+  | "not-landed"
   // reason: AC-TG-6 — evaluated after the four synchronous floors, by `findMissingOracleFileFloor` (async: resolves criteria).
   | "missing-oracle-file";
 
@@ -663,7 +657,7 @@ function doneFloorRefusal(
 ): Result<{ refusal: DoneFloorRefusal }, never> {
   // reason: DCL-1 — the rule's name is part of the TEXT too (`done`/`set` print only the message), so a reader
   // and a test can name the refusing floor without parsing `details`.
-  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor } } } });
+  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor }, rule: "BR-1292" } } });
 }
 
 export interface DoneResult {
@@ -765,7 +759,7 @@ export interface DoneResult {
  */
 export type EvidenceInput = Omit<
   EvidenceEntry,
-  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation"
+  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation" | "milestone_refresh"
 > & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /**
@@ -849,17 +843,6 @@ export interface AnchorConflict {
   task_slug: string;
   holder: string;
   paths: string[];
-  /**
-   * Present ONLY when `holder` equals the conflicting task's OWN claim holder —
-   * i.e. the two claims share an actor string and the conflict rests on the
-   * SESSION dimension (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
-   * `"different-session"` = two measured, provably different sessions;
-   * `"not-measured"` = at least one side recorded no session id, so this advisory
-   * reports an overlap it could NOT clear rather than staying silent (the gate
-   * refuses the same claim). ABSENT for an ordinary foreign-actor conflict, so
-   * every pre-existing consumer sees a byte-identical entry.
-   */
-  session_verdict?: SessionComparison;
 }
 
 /**
@@ -946,20 +929,17 @@ const defaultNow = (): string => new Date().toISOString();
 
 
 /**
- * The stored lease as a {@link ClaimHolder} for core's `hasClaimConflict` (D6). `legacy` = the RAW stored claim
- * has no `harness_run` KEY at all (written before runs existed, BR-1042) — read from the raw value because
- * the parsed claim cannot tell an absent key from `null` (unattested).
+ * The stored lease as a {@link ClaimHolder} for core's `hasClaimConflict` (D6): its name and the run that took it
+ * (`null` for a lease written before runs existed, which belongs to no run).
  *
  * @param stale - Staleness the caller wants judged: claim paths pass the real staleness; release passes `false`
  *   (a stale holder still releases by its own identity — staleness only unlocks TAKEOVER by a claim).
  */
-export function buildClaimHolder(doc: DocRecord, claim: TaskClaim, stale: boolean): ClaimHolder {
-  const raw = doc.extra["claim"] as Record<string, unknown>;
-  const legacy = !Object.hasOwn(raw, "harness_run");
-  return { by: claim.by, harnessRun: (claim.harness_run ?? null) as RunId | null, legacy, stale };
+export function buildClaimHolder(claim: TaskClaim, stale: boolean): ClaimHolder {
+  return { by: claim.by, harnessRun: (claim.harness_run ?? null) as RunId | null, stale };
 }
 
-/** The acting party of a claim/release: its name and the run it explicitly carries (null = unattested). */
+/** The acting party of a claim/release: its name and the run it acts as (null = no run was resolved). */
 export function buildClaimParty(opts: { by: string; harnessRun?: RunId | null }): ClaimParty {
   return { by: opts.by, harnessRun: opts.harnessRun ?? null };
 }
@@ -980,7 +960,7 @@ function applyEffectiveClaimStaleness(
   });
 }
 
-/** `CLAIM_CONFLICT` naming the holder, the holding run (absent for a legacy claim) and the claim's age (BR-1040/BR-1043). */
+/** `CLAIM_CONFLICT` naming the holder, the holding run (`null` for a lease with no run) and the claim's age (BR-1040/BR-1043). */
 export function buildClaimConflictError(
   docId: string,
   claim: TaskClaim,
@@ -992,7 +972,7 @@ export function buildClaimConflictError(
     id: docId,
     holder: claim.by,
     age_minutes: ageMinutesBetween(nowIso, claim.at),
-    ...(holder.legacy ? {} : { holder_run: holder.harnessRun }),
+    holder_run: holder.harnessRun,
   };
 }
 
@@ -1106,20 +1086,19 @@ export async function buildEffectiveAnchorGateContext(
   siblings: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
-  candidateSessionId?: string,
 ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
   return applyEffectiveSiblingStaleness(
     store,
-    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes, candidateSessionId),
+    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes),
     siblings,
     nowIso,
     ttlMinutes,
   );
 }
 
-/** History wording for the run on a claim/release: the run id, or `unattested`. */
+/** History wording for the run on a claim/release: the run id, or `none` for a lease or caller with no run. */
 export function describeClaimRun(run: string | null | undefined): string {
-  return run ?? "unattested";
+  return run ?? "none";
 }
 
 /**
@@ -1167,7 +1146,7 @@ function readEvidence(task: DocRecord): EvidenceEntry[] {
  * (absent, `false`, or a corrupted non-boolean value from a legacy row)
  * reads as "not declared", never a thrown error.
  */
-function readRedFirstDeclared(task: DocRecord): boolean {
+export function readRedFirstDeclared(task: DocRecord): boolean {
   return task.extra["red_first"] === true;
 }
 
@@ -1378,6 +1357,16 @@ function toRepoRelativeExecutionRoot(executionRoot: string | undefined, repoRoot
 }
 
 /**
+ * The test FILES a task's anchors name, deduplicated, in declaration order — the one extraction both the
+ * `unfiltered-test-file` floor ({@link findMissingUnfilteredTestFileRuns}) and the claim-time
+ * {@link definitionOfDone} read, so neither keeps its own list.
+ */
+function declaredTestFileAnchors(task: DocRecord): string[] {
+  // reason: a `path#Symbol` test anchor names the same file as its bare path; the floor asks about FILES.
+  return [...new Set(extractFileAnchors(task).filter(isTestFileAnchor).map(fileAnchorPath))];
+}
+
+/**
  * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
  * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
  * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
@@ -1406,12 +1395,12 @@ function toRepoRelativeExecutionRoot(executionRoot: string | undefined, repoRoot
  * @returns Every anchor lacking a satisfying row, in declaration order —
  *   `[]` iff every declared test-file anchor is satisfied (or none exist).
  */
-function findMissingUnfilteredTestFileRuns(
+export function findMissingUnfilteredTestFileRuns(
   task: DocRecord,
   evidence: EvidenceEntry[],
   repoRoot: string | undefined,
 ): string[] {
-  const testFileAnchors = extractFileAnchors(task).filter(isTestFileAnchor);
+  const testFileAnchors = declaredTestFileAnchors(task);
   if (testFileAnchors.length === 0) return [];
 
   // reason: F7 — each row contributes its OWN attested `attestation.execution_root`
@@ -1506,7 +1495,7 @@ function findMissingUnfilteredTestFileRuns(
  * @example
  * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no ac_scope key at all
  */
-function requiresNoNewTestsDeclaration(
+export function requiresNoNewTestsDeclaration(
   task: DocRecord,
   evidence: EvidenceEntry[],
   supersession?: DeclaredScopeSupersession,
@@ -1520,6 +1509,44 @@ function requiresNoNewTestsDeclaration(
   // (unresolvable) means nothing is assumed superseded — fail closed.
   if (acScope.length > 0 && supersession !== undefined && supersession.live.length === 0) return false;
   return !evidence.some(isRunnerProducedRedRun);
+}
+
+/** What `lore done` will demand of a task, computed before the work starts (BR-1357). */
+export interface DefinitionOfDone {
+  /** Anchored test files that each need an attested UNFILTERED passing run (the `unfiltered-test-file` floor). */
+  readonly unfiltered_pass_files: string[];
+  /** Whether a runner-produced red run must be on record (the `red-first` / `no-new-tests` floors). */
+  readonly red_required: boolean;
+  /** Declared ac_scope ids that `lore verify` runs: live (not superseded) script-mode criteria. */
+  readonly verify_acs: string[];
+}
+
+/**
+ * The definition of done of `task`, as DATA, from the done floors' own predicates (BR-1357): the test-file list is
+ * {@link declaredTestFileAnchors} (what {@link findMissingUnfilteredTestFileRuns} reports with no evidence), and
+ * `red_required` is {@link readRedFirstDeclared} or {@link requiresNoNewTestsDeclaration} evaluated with no evidence
+ * (the arming test of floors 2 and 4). Pure: no store, no git, no evidence read.
+ *
+ * @param task - the task
+ * @param criteria - the governing spec's criteria; `null` when they cannot be resolved (then every declared ac_scope
+ *   id is listed, because nothing proves it is superseded or not script-mode: fail closed)
+ * @example
+ * definitionOfDone(taskAnchoringTestsAndSrc, criteria) // { unfiltered_pass_files: ["tests/a.test.ts"], red_required: true, verify_acs: ["AC-X-1"] }
+ */
+export function definitionOfDone(task: DocRecord, criteria: readonly AcceptanceCriterion[] | null): DefinitionOfDone {
+  const scope = extractDeclaredAcScope(task);
+  const supersession =
+    scope !== undefined && scope.length > 0 && criteria !== null ? partitionDeclaredScopeBySupersession(scope, criteria) : undefined;
+  const verifyAcs = (scope ?? []).filter((acId) => {
+    if (criteria === null) return true;
+    const criterion = criteria.find((c) => c.id === acId);
+    return criterion !== undefined && !isAcSuperseded(criterion) && criterion.verify.mode === "script";
+  });
+  return {
+    unfiltered_pass_files: declaredTestFileAnchors(task),
+    red_required: readRedFirstDeclared(task) || requiresNoNewTestsDeclaration(task, [], supersession),
+    verify_acs: verifyAcs,
+  };
 }
 
 /**
@@ -1593,6 +1620,7 @@ export function rejectBlankClaimWorktree(worktree: string | undefined): Result<v
       field: "worktree",
       message: "--worktree must not be empty or whitespace-only",
       value: worktree,
+      rule: "BR-136",
     });
   }
   return ok(undefined);
@@ -1717,34 +1745,6 @@ function isTerminalStatus(status: DocStatus): boolean {
 }
 
 /**
- * Rejects any candidate task anchor containing `#` — the SPEC code-anchor grammar's
- * delimiter (`path[#Symbol]`, SPEC-045 §Design Decisions D1/D6) is not valid on a
- * TASK's `file_anchors`, which is always a plain repo-relative path/dir scope.
- * Applied at the task-anchor AUTHORING seams that can introduce NEW state
- * (`setAnchors`/`addAnchors` — CLI `--anchor` at create time is validated by
- * `CorpusService._createImpl`'s existing file_anchors branch, which has no `#`
- * either since `normalizeFileAnchors` never special-cases it; this guard is the
- * dedicated check named by SPEC-045 D6 for the two RMW mutation verbs). Deliberately
- * NOT applied to `removeAnchors` — a removal candidate never creates new stored
- * state, and a stored legacy `#`-carrying entry (however it got there) must stay
- * removable.
- */
-function rejectHashInTaskAnchors(anchors: string[]): Result<void, LoreError> {
-  const offending = anchors.find((a) => a.includes("#"));
-  if (offending !== undefined) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "file_anchors",
-      message:
-        `task file_anchors must not contain "#" — that is the SPEC code-anchor grammar ` +
-        `(path[#Symbol], SPEC-045), not valid on a task's file_anchors: "${offending}"`,
-      value: offending,
-    });
-  }
-  return ok(undefined);
-}
-
-/**
  * Rejects a self-reported non-pass evidence write (`result: "fail"` or
  * `"expected-fail"`) whose `output_tail` is absent or whitespace-only
  * (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D1/§D3). A
@@ -1809,6 +1809,7 @@ export function rejectMissingNonPassOutputTail(
       "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
       "MCP: output_tail).",
     value: outputTail,
+    rule: "BR-149",
   });
 }
 
@@ -1915,6 +1916,7 @@ export function rejectMissingPassOutputTail(
       "accepts), or use --oracle manual for a check with nothing capturable (still needs a " +
       "genuine non-empty --output-tail/--output-tail-file describing exactly what was checked).",
     value: outputTail,
+    rule: "BR-150",
   });
 }
 
@@ -1972,6 +1974,7 @@ export function rejectCallerGitStamp(entry: EvidenceInput): LoreError | undefine
         field,
         message: `${field} is measured by the verify runner from git (not a valid evidence input field)`,
         value: inCapture ? (captured as Record<string, unknown>)[field] : raw[field],
+        rule: "BR-148",
       };
     }
   }
@@ -2073,6 +2076,7 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
       `trimmed command shorter than 3 characters is rejected unless it is one of the ` +
       `allowlisted short commands (${allowlist})`,
     value: command,
+    rule: "BR-161",
   });
 }
 
@@ -2342,6 +2346,31 @@ function buildNoWorktreeMismatchRefusal(opts: {
 
 /** Why a worktree measurement is absent on a service built without a probe (bare test construction). */
 const NO_WORKTREE_PROBE_REASON = "no worktree probe is wired into this TaskWorkflowService";
+
+/** A working copy as a claim named it: the `--worktree` value (path or branch name) and the branch the claim captured. */
+interface ClaimedWorkingCopy {
+  readonly name: string;
+  readonly branch?: string;
+}
+
+/** Trailing slashes never make two spellings of one path different working copies. */
+function normalizeWorkingCopyName(name: string): string {
+  return name.length > 1 ? name.replace(/\/+$/, "") : name;
+}
+
+/**
+ * Whether two claims name ONE working copy (BR-1337): the same spelling, or a path and a branch name where the path's
+ * branch is that name. Two different paths never match through a shared branch name: separate repositories each have
+ * a `main`, and a branch name alone does not identify a working copy.
+ */
+function isSameWorkingCopy(a: ClaimedWorkingCopy, b: ClaimedWorkingCopy): boolean {
+  if (normalizeWorkingCopyName(a.name) === normalizeWorkingCopyName(b.name)) return true;
+  const aIsPath = isAbsolute(a.name);
+  const bIsPath = isAbsolute(b.name);
+  if (aIsPath && !bIsPath) return a.branch !== undefined && a.branch === b.name;
+  if (bIsPath && !aIsPath) return b.branch !== undefined && b.branch === a.name;
+  return false;
+}
 
 export class TaskWorkflowService {
   private readonly telemetry: Telemetry;
@@ -2834,14 +2863,18 @@ export class TaskWorkflowService {
     const task = taskResult.value;
 
     const existing = readEvidence(task);
-    if (existing.length >= 50) {
+    const isRefresh = entry.milestone_refresh === true;
+    if (isRefresh && entry.ac_ref === undefined) {
       return err({
         code: "VALIDATION_ERROR",
-        field: "extra.verification_evidence",
-        message: "Evidence log is full (50 entries max) — cannot append a 51st entry",
-        value: existing.length,
+        field: "milestone_refresh",
+        message: "a milestone refresh row must name the criterion it refreshes (ac_ref)",
+        value: undefined,
       });
     }
+    // reason: a refresh row replaces its own predecessor, so only a NON-refresh append is refused on the raw count;
+    // a refresh is checked against the count AFTER replacement below.
+    if (!isRefresh && existing.length >= 50) return evidenceLogFull(existing.length);
 
     // §M5 (AC-DC-8) — resolve the oracle generation in force for this row's `ac_ref`
     // BEFORE `now()` fires, so the time seam stays as tight to the write as it has
@@ -2888,6 +2921,7 @@ export class TaskWorkflowService {
       ...(acOracleGeneration !== null ? { ac_oracle_generation: acOracleGeneration } : {}),
       recorded_corpus_rev: corpusRev.value,
       ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
+      ...(isRefresh ? { milestone_refresh: true as const } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -2959,9 +2993,14 @@ export class TaskWorkflowService {
     // captured above — NEVER a second `now()` invocation (would break the
     // STALE_VERSION sequential-CAS test recipe, which relies on single-fire).
     const renewedClaim = renewClaimForEvidence(readClaimRecord(task), actor, nowIso);
+    // The previous refresh row(s) of the same criterion and runner leave the log in this SAME write; the version
+    // snapshot keeps them, and the audit row below names what was replaced.
+    const replaced = isRefresh ? existing.filter((row) => isSameRefreshKey(row, parsedEntry.data)) : [];
+    const kept = replaced.length === 0 ? existing : existing.filter((row) => !replaced.includes(row));
+    if (kept.length >= 50) return evidenceLogFull(existing.length);
     const newExtra: Record<string, unknown> = {
       ...task.extra,
-      verification_evidence: [...existing, parsedEntry.data],
+      verification_evidence: [...kept, parsedEntry.data],
       ...(renewedClaim !== null ? { claim: renewedClaim } : {}),
     };
 
@@ -2977,6 +3016,15 @@ export class TaskWorkflowService {
         command: entry.command,
         result: entry.result,
         ...(renewedClaim !== null ? { claim_renewed: true } : {}),
+        ...(replaced.length > 0
+          ? {
+              refresh_replaced: replaced.map((row) => ({
+                ac_ref: row.ac_ref,
+                result: row.result,
+                recorded_at: row.recorded_at,
+              })),
+            }
+          : {}),
       },
       verifyRunIntent || readClaimRecord(task)?.worktree !== undefined,
     );
@@ -3109,10 +3157,16 @@ export class TaskWorkflowService {
     // the exact same "now", within one claim() call.
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
+    const gateResult = await this.enforceClaimGate(task, opts, nowIso);
     if (!gateResult.ok) return gateResult;
 
+    const holderResult = await this.refuseWhileWorkingCopyHoldsUnlandedTask(task, opts);
+    if (!holderResult.ok) return holderResult;
+
     const existingClaim = readClaimRecord(task);
+    // reason: BR-1353 — measured before anything is written, so a refused claim persists nothing.
+    const offMainResult = await this.refuseFirstClaimOffMain(task, opts, existingClaim?.branch);
+    if (!offMainResult.ok) return offMainResult;
     const claimant = buildClaimParty(opts);
     let carryForward = false;
     let inheritedDirtyWorktree: string | undefined;
@@ -3125,7 +3179,7 @@ export class TaskWorkflowService {
       const stale = staleResult.value;
       // reason: spec-run-identity-slice-1 D6 / invariant I2 — the ONE conflict predicate lives in core
       // (`hasClaimConflict`); both claim paths call it, never `existingClaim.by === opts.by`.
-      const holder = buildClaimHolder(task, existingClaim, stale);
+      const holder = buildClaimHolder(existingClaim, stale);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
         return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
@@ -3175,8 +3229,7 @@ export class TaskWorkflowService {
         // §Opt-in). `buildTaskClaim` never carries it forward.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
         ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
-        // reason: BR-1040/BR-1042 — a new claim ALWAYS stores the key (null when unattested); only a legacy
-        // claim lacks it, and a legacy claim is never written here without being replaced by this one.
+        // reason: BR-1040 — the claim always names the run that took it; the store refuses one that does not (BR-1352).
         harness_run: claimant.harnessRun,
       },
       carryForward,
@@ -3187,11 +3240,10 @@ export class TaskWorkflowService {
         : builtClaim;
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
-    const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
+    const previousHolderRun = existingClaim === undefined ? undefined : (existingClaim.harness_run ?? null);
     const takeoverNote =
-      existingClaim !== undefined &&
-      (existingClaim.by !== opts.by || (previousHolderRun !== undefined && (previousHolderRun ?? null) !== claimant.harnessRun))
-        ? ` (previous holder: ${existingClaim.by}${previousHolderRun === undefined ? "" : `, run ${describeClaimRun(previousHolderRun)}`}; claiming run ${describeClaimRun(claimant.harnessRun)})`
+      existingClaim !== undefined && previousHolderRun !== claimant.harnessRun
+        ? ` (previous holder: ${existingClaim.by}, run ${describeClaimRun(previousHolderRun)}; claiming run ${describeClaimRun(claimant.harnessRun)})`
         : claimant.harnessRun !== null
           ? ` (run ${claimant.harnessRun})`
           : "";
@@ -3254,7 +3306,7 @@ export class TaskWorkflowService {
     // caller observing success) — documented, not eliminated: closing it fully would
     // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
     // 不引入 daemon/锁表/mutex 行").
-    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
+    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -3291,6 +3343,98 @@ export class TaskWorkflowService {
     }
 
     return writeResult;
+  }
+
+  /**
+   * BR-1353: a task's FIRST claim from a linked worktree is refused when the worktree's HEAD carries commits not on
+   * the integration branch. A claim starts from main; commits carried in from another unlanded branch would be
+   * judged as this task's own at landing. A later claim on a branch an earlier claim of this task already recorded
+   * (the current claim record or any claim audit row) is exempt: those are the task's own commits.
+   *
+   * Applies only when `--worktree` names an existing path that is a LINKED worktree (not the main checkout); a branch
+   * name or a path that does not exist names no working copy to measure. When it applies, every git read must
+   * succeed: an unreadable worktree list, integration branch or commit count REFUSES (fail loud), never passes.
+   * An unwired probe (bare unit construction; `app.ts` always wires one) skips the check.
+   *
+   * @param currentClaimBranch - `branch` of the claim record the task holds now, when it holds one
+   * @returns `err(VALIDATION_ERROR)` field `gate:task-claim:first-claim-off-main` naming BR-1353, the commit count and
+   *   (when found) the local branch whose tip contains those commits; `ok` otherwise
+   */
+  private async refuseFirstClaimOffMain(
+    task: DocRecord,
+    opts: ClaimOpts,
+    currentClaimBranch: string | undefined,
+  ): Promise<Result<void, LoreError>> {
+    const target = opts.worktree;
+    const probe = this.worktreeProbe;
+    if (target === undefined || probe === undefined || !probe.pathExists(target)) return ok(undefined);
+    const field = "gate:task-claim:first-claim-off-main";
+    const unreadable = (what: string, reason: string): Result<void, LoreError> =>
+      err({
+        code: "VALIDATION_ERROR",
+        field,
+        message:
+          `Task "${task.slug}": BR-1353 cannot be checked because ${what} is unreadable (${reason}); ` +
+          `the claim is refused rather than allowed unmeasured.`,
+        value: { worktree: target, reason },
+      });
+
+    const listed = probe.listWorktrees(target);
+    if (!listed.ok) return unreadable(`the worktree list of ${target}`, listed.reason);
+    const real = probe.realPath(target);
+    const index = listed.value.findIndex((entry) => probe.realPath(entry.path) === real);
+    // reason: index 0 is the main checkout and a path matching no entry is not a worktree root: neither is a linked
+    // worktree, and BR-1353 is about a linked worktree's own HEAD.
+    if (index <= 0) return ok(undefined);
+    const ownBranch = (listed.value[index] as ListedWorktree).branch;
+
+    const integration = probe.integrationBranch(target);
+    if (!integration.ok) return unreadable("the integration branch", integration.reason);
+    const ahead = probe.countCommits(target, `${integration.value}..HEAD`);
+    if (!ahead.ok) return unreadable(`the commit count ${integration.value}..HEAD in ${target}`, ahead.reason);
+    if (ahead.value === 0) return ok(undefined);
+
+    if (ownBranch !== undefined) {
+      const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+      if (!auditResult.ok) return auditResult;
+      const recordedBranches = new Set<string>(
+        auditResult.value.flatMap((row) => {
+          const branch = row.details?.["branch"];
+          return typeof branch === "string" ? [branch] : [];
+        }),
+      );
+      if (currentClaimBranch !== undefined) recordedBranches.add(currentClaimBranch);
+      if (recordedBranches.has(ownBranch)) return ok(undefined);
+    }
+
+    const head = probe.headSha(target);
+    const sources =
+      head.ok && probe.branchesContaining !== undefined ? probe.branchesContaining(target, head.value) : undefined;
+    const sourceBranches =
+      sources !== undefined && sources.ok
+        ? sources.value.filter((name) => name !== ownBranch && name !== integration.value)
+        : [];
+    const commits = `${ahead.value} commit${ahead.value === 1 ? "" : "s"}`;
+    const fromNote = sourceBranches.length > 0 ? `, the commits of branch ${sourceBranches.join(", ")}` : "";
+    return err({
+      code: "VALIDATION_ERROR",
+      field,
+      message:
+        `Task "${task.slug}": a first claim starts from ${integration.value} (BR-1353), but worktree ${target} carries ` +
+        `${commits} not on ${integration.value}${fromNote}. Land that work first (\`lore integrate <branch>\`), or cut ` +
+        `this worktree from ${integration.value} (\`git worktree add -b <name> <path> ${integration.value}\`) and claim from there.`,
+      value: { worktree: target, commits: ahead.value, branches: sourceBranches, rule: "BR-1353" },
+    });
+  }
+
+  /**
+   * The definition of done of `task` for claim time (BR-1357): {@link definitionOfDone} over the criteria of the spec
+   * that governs the task. An unresolvable criterion set (a task with no governing spec, or a failed lookup) yields
+   * the `null`-criteria reading, which lists every declared ac_scope id.
+   */
+  async describeDefinitionOfDone(task: DocRecord): Promise<DefinitionOfDone> {
+    const criteria = await this.resolveFloorCriteria(task);
+    return definitionOfDone(task, criteria.ok ? criteria.value : null);
   }
 
   /**
@@ -3418,9 +3562,8 @@ export class TaskWorkflowService {
     const nowIso = now();
     const releaser = buildClaimParty(opts);
     // reason: BR-1043 — stale=false: a stale holder still releases by its own identity; staleness only
-    // unlocks takeover by a CLAIM. Only a `refresh` verdict (same run, or by-name for a legacy / fully
-    // unattested pair) is the holder.
-    const holder = buildClaimHolder(task, existingClaim, false);
+    // unlocks takeover by a CLAIM. Only a `refresh` verdict (the SAME run) is the holder; a name is never one.
+    const holder = buildClaimHolder(existingClaim, false);
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
       return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
@@ -3439,7 +3582,7 @@ export class TaskWorkflowService {
     const newExtra: Record<string, unknown> = { ...task.extra };
     delete newExtra["claim"];
 
-    const heldRunNote = holder.legacy ? "" : `, run ${describeClaimRun(holder.harnessRun)}`;
+    const heldRunNote = `, run ${describeClaimRun(holder.harnessRun)}`;
     const forcedNote = !isHolder
       ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
       : "";
@@ -3451,7 +3594,7 @@ export class TaskWorkflowService {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
-      ...(holder.legacy ? {} : { previous_run: holder.harnessRun }),
+      previous_run: holder.harnessRun,
       harness_run: releaser.harnessRun,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
@@ -4066,55 +4209,76 @@ export class TaskWorkflowService {
   }
 
   /**
-   * The `unmerged-branch` floor (DCL-1 (a), issue #171): the work a task claims must have LANDED on the
-   * integration branch before the task archives. Measured from the claim's recorded worktree/branch — the
-   * current claim's, else the latest one the claim audit history recorded (same pick as
-   * {@link recordCommitRange}) — by `git rev-list --count <main>..<head>` (0 ⇒ head is an ancestor of main).
+   * The `not-landed` floor (BR-1291, spec-a-task-is-archived-only-on-a-landing-lore-recorded-one): a task whose
+   * claim ever named a working copy archives only when `lore integrate` recorded a landing on it
+   * (`extra.landing`) whose landed commit is on the integration branch, and its claimed branch — if the ref still
+   * exists — holds no commit outside that branch (work committed after the landing). The claimed working copy's own
+   * head is never consulted, and there is no fail-open path: an unwired probe, an unreadable integration branch or
+   * an unreadable commit count REFUSES. A claimed branch whose ref is gone counts as having no unlanded commits
+   * (`git branch -d` only deletes a merged branch, and the landing record is what proves it landed).
    *
-   * Fail-open cases, each deliberate and visible: no claim ever recorded a worktree/branch (nothing to
-   * test — adhoc and orchestrator-run tasks), no worktree probe wired (bare unit construction), the head
-   * or the integration branch cannot be read (a deleted branch/worktree: `git branch -d` only deletes a
-   * merged branch). `recordCommitRange` writes the same unreadable-head fact into `extra.commit_range` as
-   * `not-measured` with its reason on every `lore done`, so "not measured" is never recorded as "landed".
+   * Not armed (returns `ok(null)`) for a task whose claims never named a working copy (adhoc and orchestrator-run
+   * tasks have no branch to land).
    *
-   * @returns `ok(refusal)` naming the unmerged branch and its unlanded commit count; `ok(null)` otherwise;
+   * @returns `ok(refusal)` named `not-landed` (naming the branch and how to land it); `ok(null)` when landed;
    *   `err` only when the claim audit history itself is unreadable.
    */
-  private async findUnlandedWorkFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const probe = this.worktreeProbe;
-    if (probe === undefined) return ok(null);
+  private async findNotLandedFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
     const recordedResult = await this.readRecordedWorktrees(task);
     if (!recordedResult.ok) return recordedResult;
-    const currentWorktree = readClaimRecord(task)?.worktree;
-    const recorded =
-      recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
-    if (recorded === undefined) return ok(null);
-
-    const cwd = probe.currentWorkingDirectory();
-    const head = resolveClaimHead(probe, recorded.path, cwd);
-    if (!head.ok) return ok(null);
-    const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return ok(null);
-    const unlanded = probe.countCommits(cwd, `${integration.value}..${head.value.sha}`);
-    if (!unlanded.ok || unlanded.value === 0) return ok(null);
-
-    const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
-      code: "VALIDATION_ERROR",
-      field: "extra.claim",
-      message:
-        `Task "${task.slug}" was claimed on "${recorded.path}" whose head ${head.value.sha.slice(0, 12)} is NOT ` +
-        `on ${integration.value}: ${unlanded.value} commit(s) are not merged — lore done archives only landed work. ` +
-        `Land the branch (\`lore integrate\` / merge it into ${integration.value}), ` +
-        `then re-run \`lore done ${task.slug}\`. [floor: unmerged-branch]`,
-      value: { branch: recorded.path, head: head.value.sha, integration: integration.value, unmerged: unlanded.value },
+    if (recordedResult.value.length === 0) return ok(null);
+    const claimedOn = recordedResult.value.map((r) => r.path).join(", ");
+    const refuse = (why: string, value: Record<string, unknown>): Result<DoneFloorRefusal, LoreError> => {
+      const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
+        code: "VALIDATION_ERROR",
+        field: "extra.landing",
+        message:
+          `Task "${task.slug}" was claimed on ${claimedOn} and lore done archives only work whose landing lore integrate ` +
+          `recorded: ${why}. Land the branch with \`lore integrate <branch>\` (it records the landing on this task, also ` +
+          `when the branch is already integrated), then re-run \`lore done ${task.slug}\`. [floor: not-landed]`,
+        value: { claimed_on: claimedOn, ...value },
+      };
+      return ok({ floor: "not-landed", error: { ...error, details: { floor: "not-landed" } } });
     };
-    return ok({ floor: "unmerged-branch", error: { ...error, details: { floor: "unmerged-branch" } } });
+
+    const landing = readTaskLanding(task.extra);
+    if (landing === undefined) return refuse("no landing is recorded on it", { reason: "no-landing" });
+    const probe = this.worktreeProbe;
+    if (probe === undefined) return refuse(`the landing cannot be checked against main (${NO_WORKTREE_PROBE_REASON})`, { reason: "unmeasurable" });
+    const cwd = probe.currentWorkingDirectory();
+    const integration = probe.integrationBranch(cwd);
+    if (!integration.ok) return refuse(`the integration branch is unreadable (${integration.reason})`, { reason: "unmeasurable" });
+    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
+    if (!offMain.ok) return refuse(`the landing commit ${landing.landing_commit.slice(0, 12)} cannot be checked (${offMain.reason})`, { reason: "unmeasurable" });
+    if (offMain.value > 0) {
+      return refuse(`its landing commit ${landing.landing_commit.slice(0, 12)} is not on ${integration.value}`, {
+        reason: "landing-not-on-main",
+        landing_commit: landing.landing_commit,
+      });
+    }
+
+    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+    if (!auditResult.ok) return auditResult;
+    for (const name of await this.landingCandidateNames(auditResult.value, task)) {
+      const tip = probe.branchTip(cwd, name);
+      if (!tip.ok) continue; // reason: no such branch ref (a path name, or a branch deleted after it landed)
+      const ahead = probe.countCommits(cwd, `${integration.value}..${tip.value}`);
+      if (!ahead.ok) return refuse(`branch ${name} cannot be compared with ${integration.value} (${ahead.reason})`, { reason: "unmeasurable", branch: name });
+      if (ahead.value > 0) {
+        return refuse(`branch ${name} has ${ahead.value} commit(s) not on ${integration.value} (committed after the landing)`, {
+          reason: "commits-after-landing",
+          branch: name,
+          unmerged: ahead.value,
+        });
+      }
+    }
+    return ok(null);
   }
 
   /**
    * One {@link AnchorRemovalVerdict} per anchored test file that still lacks an attested unfiltered run — the
    * input of the `unfiltered-test-file` floor's "removed by this task" exception. Measured from the claim's
-   * recorded worktree/branch exactly as {@link findUnlandedWorkFloor} picks it; git is spawned only for an
+   * recorded worktree/branch (the current claim's, else the latest the audit history recorded); git is spawned only for an
    * anchor the floor would otherwise refuse, so a fully-attested task costs nothing.
    *
    * A task whose claims never recorded a worktree has no branch that could have deleted anything: its anchors
@@ -4152,7 +4316,7 @@ export class TaskWorkflowService {
 
   /** The async floors, in order: landed work, then oracle-file existence. The first refusal wins. */
   private async findAsyncFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const unlanded = await this.findUnlandedWorkFloor(task);
+    const unlanded = await this.findNotLandedFloor(task);
     if (!unlanded.ok || unlanded.value !== null) return unlanded;
     return this.findMissingOracleFileFloor(task);
   }
@@ -4218,9 +4382,9 @@ export class TaskWorkflowService {
       // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
       const staleResult = await this.isClaimEffectivelyStale(claim, nowIso, new Map());
       if (!staleResult.ok) return staleResult;
-      const holder = buildClaimHolder(task, claim, staleResult.value);
+      const holder = buildClaimHolder(claim, staleResult.value);
       if (hasClaimConflict(holder, buildClaimParty(opts)).kind === "conflict") {
-        const runNote = holder.legacy ? "" : ` (run ${describeClaimRun(holder.harnessRun)})`;
+        const runNote = ` (run ${describeClaimRun(holder.harnessRun)})`;
         return err({
           code: "VALIDATION_ERROR",
           field: "extra.claim",
@@ -4266,6 +4430,7 @@ export class TaskWorkflowService {
           // precedent in evidence-precheck.ts).
           ...(overrideReason !== undefined ? { overrideReason } : {}),
           ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
         },
       );
       if (!stepResult.ok) return stepResult;
@@ -4323,17 +4488,46 @@ export class TaskWorkflowService {
    * protocol) and `branch` (auto-captured), plus the current claim's. `lore integrate <branch>` matches on these.
    */
   private static claimedNames(auditRows: readonly AuditEntry[], task: DocRecord): string[] {
-    const names = new Set<string>();
-    for (const row of auditRows) {
-      for (const key of ["worktree", "branch"] as const) {
-        const value = row.details?.[key];
-        if (typeof value === "string" && value.trim() !== "") names.add(value);
-      }
-    }
+    // reason: one derivation shared with `lore integrate`'s own-diff judgment (branch-membership.ts), so a landing and the
+    // judgment that preceded it agree on whose branch it is.
+    return claimedNamesOf(auditRows, task);
+  }
+
+  /**
+   * Every working copy `task`'s claims named: each claim audit row's `worktree` paired with the `branch` that claim
+   * captured, plus the current claim's. Rows without a `worktree` name no working copy.
+   */
+  private static claimedWorkingCopies(auditRows: readonly AuditEntry[], task: DocRecord): ClaimedWorkingCopy[] {
+    const copies = new Map<string, ClaimedWorkingCopy>();
+    const add = (name: unknown, branch: unknown): void => {
+      if (typeof name !== "string" || name.trim() === "") return;
+      const prior = copies.get(name);
+      const captured = typeof branch === "string" && branch.trim() !== "" ? branch : prior?.branch;
+      copies.set(name, { name, ...(captured !== undefined ? { branch: captured } : {}) });
+    };
+    for (const row of auditRows) add(row.details?.["worktree"], row.details?.["branch"]);
     const current = readClaimRecord(task);
-    if (current?.worktree !== undefined) names.add(current.worktree);
-    if (current?.branch !== undefined) names.add(current.branch);
-    return [...names];
+    add(current?.worktree, current?.branch);
+    return [...copies.values()];
+  }
+
+  /**
+   * The `base_sha` of the most recent claim of a task that named `branch` (as its `branch` or its `worktree`), from
+   * the claim audit rows (they survive release); `undefined` when no such claim recorded one.
+   */
+  private static claimBaseFor(auditRows: readonly AuditEntry[], branch: string): string | undefined {
+    const named = auditRows
+      .filter((row) => row.details?.["branch"] === branch || row.details?.["worktree"] === branch)
+      .filter((row) => typeof row.details?.["base_sha"] === "string" && row.details["base_sha"] !== "")
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const latest = named[named.length - 1]?.details?.["base_sha"];
+    return typeof latest === "string" ? latest : undefined;
+  }
+
+  /** The branch checked out in `worktree`, read through the injected git port; `undefined` when it cannot be measured. */
+  private async measuredBranchOf(worktree: string): Promise<string | undefined> {
+    const measurement = await this.detectBranch(worktree);
+    return measurement.status === "measured" ? measurement.branch : undefined;
   }
 
   /**
@@ -4354,35 +4548,61 @@ export class TaskWorkflowService {
   }
 
   /**
-   * Records a landing (`extra.landing`) on every task whose claim, current or historical (claim audit), recorded
-   * `landing.branch`, through the one write route (`writer.writeDoc`). Called by `lore integrate` after main moved.
-   * Idempotent: a task already holding the same landing is reported, not rewritten. Every task is attempted; the first
+   * Records a landing (`extra.landing`) on every task not archived or deprecated whose claim, current or historical
+   * (claim audit), recorded `landing.branch` (or a working copy on it), or that belongs to a plan whose declared
+   * integration branch is `landing.branch` (BR-1348), through the one write route
+   * (`writer.writeDoc`). Called by `lore integrate` after main moved, and when the branch is found already integrated.
+   * Idempotent: a task already holding a landing of the same branch head is reported, not rewritten. Every task is attempted; the first
    * write failure is returned after the rest were tried.
    *
    * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
    */
-  async recordLanding(landing: LandingFact, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
+  async recordLanding(request: LandingRequest, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
+    const { base_from_claim: baseFromClaim, ...landing } = request;
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
     if (!auditResult.ok) return auditResult;
+    const plansResult = await this.store.findMany({ type: "plan" });
+    if (!plansResult.ok) return plansResult;
+    const integrationBranches = planIntegrationBranches(plansResult.value);
     const nowIso = now();
     const slugs: string[] = [];
     let firstFailure: LoreError | undefined;
     for (const task of tasksResult.value) {
+      // reason: BR-1336 — a finished task is never rewritten by a later landing of a branch it once claimed.
+      if (task.status === "archived" || task.status === "deprecated") continue;
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
-      if (!(await this.landingCandidateNames(rows, task)).includes(landing.branch)) continue;
+      // reason: BR-1348 — the tasks of a branch are those claimed on it AND every task of a plan whose declared
+      // integration branch it is (the own-diff judgment at integrate judged the branch against exactly these).
+      const ofBranch =
+        isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ||
+        (await this.landingCandidateNames(rows, task)).includes(landing.branch);
+      if (!ofBranch) continue;
       const existing = readTaskLanding(task.extra);
-      if (
-        existing !== undefined &&
-        existing.branch === landing.branch &&
-        existing.branch_head === landing.branch_head &&
-        existing.landing_commit === landing.landing_commit
-      ) {
+      // reason: BR-1336 — "holds no landing for that head": a task already carrying a landing of this branch head is
+      // reported, not rewritten (an already-integrated re-run must not replace the real merge commit's record).
+      if (existing !== undefined && existing.branch === landing.branch && existing.branch_head === landing.branch_head) {
         slugs.push(task.slug);
         continue;
       }
-      const record: TaskLanding = { ...landing, recorded_at: nowIso };
+      // reason: BR-1336 — a branch found already on main has no merge to measure; the range starts at this task's own
+      // claim base (the audit row survives release). A claim that recorded none is a failure naming the task, never a guess.
+      let mainBefore = landing.main_before;
+      if (baseFromClaim === true) {
+        const claimBase = TaskWorkflowService.claimBaseFor(rows, landing.branch);
+        if (claimBase === undefined) {
+          firstFailure ??= {
+            code: "VALIDATION_ERROR",
+            field: "claim.base_sha",
+            message: `${task.slug}: no claim of this task recorded a base_sha for ${landing.branch}, so its landing range has no start`,
+            value: task.slug,
+          };
+          continue;
+        }
+        mainBefore = claimBase;
+      }
+      const record: TaskLanding = { ...landing, main_before: mainBefore, recorded_at: nowIso };
       const written = await this.writer.writeDoc({
         doc: task,
         // a re-landing replaces `landing` (singular) but the replaced one is appended to `landing_history`, so nothing is lost
@@ -4416,117 +4636,96 @@ export class TaskWorkflowService {
   }
 
   /**
-   * The landing `lore done` derives the commit range from: the recorded `extra.landing`, else BACKFILLED from main's
-   * first-parent history — the `merge(<branch>)` commit `lore integrate` left — for a branch name one of the task's
-   * claims recorded. Otherwise `unresolved` with the REASON (log unreadable, or no `merge(<name>)` commit for the
-   * claimed `candidates`) — an unreadable log is never read as "no landing", and the caller records the reason.
-   * `none` only when no claim recorded any name (nothing to look for).
+   * BR-1337 — one working copy carries one unlanded task. A claim naming a working copy is refused (exit 4, nothing
+   * written) while ANOTHER task not archived or deprecated has a claim, current or in its audit history, that named
+   * the same working copy (same name, or the same branch) and holds no landing whose commit is on the integration
+   * branch. The same actor and the same session are refused alike. An unmeasurable landing counts as not landed.
+   *
+   * @returns `ok(undefined)` when `opts.worktree` is absent or no other task holds the working copy unlanded;
+   *   `err(VALIDATION_ERROR)` naming the holding task otherwise.
    */
-  private async resolveLanding(
-    task: DocRecord,
-    nowIso: string,
-  ): Promise<
-    | { kind: "found"; landing: TaskLanding; source: "recorded" | "backfilled" }
-    | { kind: "unresolved"; reason: string; candidates: string[] }
-    | { kind: "none" }
-  > {
-    const recorded = readTaskLanding(task.extra);
-    if (recorded !== undefined) return { kind: "found", landing: recorded, source: "recorded" };
-    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
-    if (!auditResult.ok) return { kind: "none" }; // reason: recordCommitRange reports the unreadable claim history itself
-    const candidates = await this.landingCandidateNames(auditResult.value, task);
-    if (candidates.length === 0) return { kind: "none" };
-    const probe = this.worktreeProbe;
-    if (probe?.firstParentLog === undefined) {
-      return { kind: "unresolved", reason: `log unreadable: ${NO_WORKTREE_PROBE_REASON}`, candidates };
+  private async refuseWhileWorkingCopyHoldsUnlandedTask(task: DocRecord, opts: ClaimOpts): Promise<Result<void, LoreError>> {
+    if (opts.worktree === undefined) return ok(undefined);
+    const claimantBranch =
+      opts.branch ?? (isAbsolute(opts.worktree) ? await this.measuredBranchOf(opts.worktree) : undefined);
+    const claimant: ClaimedWorkingCopy = { name: opts.worktree, ...(claimantBranch !== undefined ? { branch: claimantBranch } : {}) };
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const auditResult = await this.store.queryAudit({ action: "claim" });
+    if (!auditResult.ok) return auditResult;
+    for (const other of tasksResult.value) {
+      if (other.id === task.id || other.status === "archived" || other.status === "deprecated") continue;
+      const rows = auditResult.value.filter((row) => row.doc_id === other.id);
+      const held = TaskWorkflowService.claimedWorkingCopies(rows, other);
+      let sameCopy = false;
+      for (const copy of held) {
+        // reason: a recorded path whose claim captured no branch is measured live, but only when the claimant named a
+        // branch (a path-vs-path comparison never needs it, and two repos may both have a branch called `main`).
+        const heldBranch =
+          copy.branch ?? (isAbsolute(copy.name) && !isAbsolute(claimant.name) ? await this.measuredBranchOf(copy.name) : undefined);
+        if (isSameWorkingCopy(claimant, { name: copy.name, ...(heldBranch !== undefined ? { branch: heldBranch } : {}) })) {
+          sameCopy = true;
+          break;
+        }
+      }
+      if (!sameCopy) continue;
+      if (await this.isLandingOnMain(other)) continue;
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.claim.worktree",
+        message:
+          `Working copy "${opts.worktree}" already carries task "${other.slug}", whose work has not landed: one working ` +
+          `copy carries one unlanded task. Land it first (\`lore integrate <branch>\` records the landing on ${other.slug}), ` +
+          `or claim "${task.slug}" from another working copy. Nothing was written.`,
+        value: { working_copy: opts.worktree, holding_task: other.slug },
+      });
     }
+    return ok(undefined);
+  }
+
+  /** Whether `task` holds a landing whose commit is on the integration branch; any unmeasurable step answers false. */
+  private async isLandingOnMain(task: DocRecord): Promise<boolean> {
+    const landing = readTaskLanding(task.extra);
+    const probe = this.worktreeProbe;
+    if (landing === undefined || probe === undefined) return false;
     const cwd = probe.currentWorkingDirectory();
     const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return { kind: "unresolved", reason: `log unreadable: ${integration.reason}`, candidates };
-    const log = probe.firstParentLog(cwd, integration.value, MAIN_FIRST_PARENT_LOG_FORMAT);
-    if (!log.ok) return { kind: "unresolved", reason: `log unreadable: ${log.reason}`, candidates };
-    for (const name of candidates) {
-      const found = findLandingInMainLog(log.value, name);
-      if (found !== undefined) return { kind: "found", landing: { ...found, recorded_at: nowIso }, source: "backfilled" };
-    }
-    return { kind: "unresolved", reason: `no merge(<name>) commit on ${integration.value} for claimed names ${candidates.join(", ")}`, candidates };
+    if (!integration.ok) return false;
+    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
+    return offMain.ok && offMain.value === 0;
   }
 
   /**
-   * Measures and writes `extra.commit_range` (see `task-commit-range.ts`). Never refuses `done` on
-   * a measurement problem — an unmeasurable range is RECORDED as `not-measured` with its reason, so
-   * `lore assess` can tell "not measured" from "no commits"; only a failed store write is an error.
-   * The worktree is the current claim's, else the latest one the claim audit history recorded
-   * (a released claim drops `extra.claim` but its audit row survives).
+   * Writes `extra.commit_range` (see `task-commit-range.ts`) from the landing `lore integrate` recorded on the task.
+   * Nothing else is a source: the claimed working copy's head is never measured and main's history is never searched
+   * (BR-1291). A task whose claims named no working copy has no landing, so its range is RECORDED as `not-measured`
+   * with that reason, which `lore assess` tells apart from "no commits". Only a failed store write is an error.
    */
   private async recordCommitRange(task: DocRecord, nowIso: string, by: string): Promise<Result<DocRecord, LoreError>> {
-    // reason: a task's commit range is a fact of its LANDING, not of its last claim — an evidence re-claim from a
-    // worktree of main must not replace it (the DCL-1 / DCL-4 defect). Recorded landing first, else backfilled.
-    const landed = await this.resolveLanding(task, nowIso);
-    const unresolved = landed.kind === "unresolved" ? landed : undefined;
-    if (landed.kind === "found") {
-      const landedRange = commitRangeFromLanding(landed.landing, nowIso);
+    const landing = readTaskLanding(task.extra);
+    if (landing !== undefined) {
+      const landedRange = commitRangeFromLanding(landing, nowIso);
       return this.writeTaskExtra(
         task,
-        { ...task.extra, landing: landed.landing, commit_range: landedRange },
+        { ...task.extra, commit_range: landedRange },
         nowIso,
         by,
-        `lore done: recorded commit range from the ${landed.source} landing of ${landed.landing.branch}: ${landed.landing.main_before.slice(0, 12)}..${landedRange.head.slice(0, 12)}`,
+        `lore done: recorded commit range from the landing of ${landing.branch}: ${landing.main_before.slice(0, 12)}..${landedRange.head.slice(0, 12)}`,
         "update",
-        { by, commit_range: landedRange, landing: landed.landing, landing_source: landed.source },
+        { by, commit_range: landedRange, landing },
       );
     }
-    const notMeasured = (reason: string): TaskCommitRange => ({
+    const range: TaskCommitRange = {
       state: "not-measured",
-      reason,
-      ...(unresolved !== undefined ? { candidates: unresolved.candidates } : {}),
+      reason: "no landing is recorded on this task (no claim named a working copy that lore integrate landed)",
       recorded_at: nowIso,
-    });
-    let range: TaskCommitRange;
-    const recordedResult = await this.readRecordedWorktrees(task);
-    if (!recordedResult.ok) {
-      range = notMeasured(`claim history unreadable: ${recordedResult.error.code}`);
-    } else {
-      const currentWorktree = readClaimRecord(task)?.worktree;
-      const recorded =
-        recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
-      if (recorded === undefined) {
-        range = notMeasured("no claim recorded a worktree, so there is no HEAD to measure");
-      } else {
-        const head =
-          this.worktreeProbe === undefined
-            ? ({ ok: false, reason: NO_WORKTREE_PROBE_REASON } as const)
-            : resolveClaimHead(this.worktreeProbe, recorded.path, this.worktreeProbe.currentWorkingDirectory());
-        if (!head.ok) {
-          range = notMeasured(`worktree/branch ${recorded.path} HEAD unreadable: ${head.reason}${unresolved !== undefined ? `; landing: ${unresolved.reason}` : ""}`);
-        } else if (recorded.baseSha !== undefined && head.value.sha === recorded.baseSha) {
-          // reason: a claim whose head equals its base holds no work (a detached worktree of main, the evid-* evidence
-          // re-claim): recording it as the task's range is the DCL-1/DCL-4 defect, so it is never recorded.
-          range = notMeasured(
-            `the claim on ${recorded.path} has head == base (${head.value.sha.slice(0, 12)}), so it holds no work${unresolved !== undefined ? `; landing: ${unresolved.reason}` : "; no landing recorded"}`,
-          );
-        } else {
-          range = {
-            state: "recorded",
-            head: head.value.sha,
-            head_source: head.value.source,
-            ...(recorded.baseSha !== undefined ? { base: recorded.baseSha } : {}),
-            worktree: recorded.path,
-            // reason: the claim's range is kept (a manual merge leaves no merge(<name>) commit) but says out loud that no landing was found
-            ...(unresolved !== undefined ? { landing_unresolved: unresolved.reason } : {}),
-            recorded_at: nowIso,
-          };
-        }
-      }
-    }
+    };
     return this.writeTaskExtra(
       task,
       { ...task.extra, commit_range: range },
       nowIso,
       by,
-      range.state === "recorded"
-        ? `lore done: recorded commit range ${range.base === undefined ? "(head only)" : range.base.slice(0, 12)}..${range.head.slice(0, 12)}`
-        : `lore done: commit range not measured (${range.reason})`,
+      `lore done: commit range not measured (${range.reason})`,
       "update",
       { by, commit_range: range },
     );
@@ -4669,9 +4868,8 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
-    const hashRejectResult = rejectHashInTaskAnchors(anchors);
-    if (!hashRejectResult.ok) return hashRejectResult;
-
+    // `path#Symbol` is a valid task anchor (a hold scoped to one top-level symbol); `normalizeFileAnchors` owns
+    // the grammar, so a malformed `#` entry is refused there.
     const normalizedResult = normalizeFileAnchors(anchors);
     if (!normalizedResult.ok) return normalizedResult;
 
@@ -4711,9 +4909,6 @@ export class TaskWorkflowService {
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
-
-    const hashRejectResult = rejectHashInTaskAnchors(anchors);
-    if (!hashRejectResult.ok) return hashRejectResult;
 
     const existing = extractFileAnchors(task);
     const normalizedResult = normalizeFileAnchors([...existing, ...anchors]);
@@ -5108,6 +5303,9 @@ export class TaskWorkflowService {
       staleByTask.value,
     );
 
+    const addressByRun = await resolveMessageAddressByRun(this.store, tasks);
+    if (!addressByRun.ok) return addressByRun;
+
     const { anchorConflicts, anchorlessSlugs } = this.computeAnchorAdvisories(tasks, nowIso, staleByTask.value);
     const recordsWithAnchorless = records.map((r) =>
       anchorlessSlugs.has(r.task.slug) ? { ...r, anchorless: true } : r,
@@ -5116,7 +5314,7 @@ export class TaskWorkflowService {
     return ok({
       records: recordsWithAnchorless,
       counts: computeReadyCounts(recordsWithAnchorless),
-      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value),
+      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value, addressByRun.value),
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
     });
@@ -5126,7 +5324,7 @@ export class TaskWorkflowService {
    * Which unarchived blockers of `plan` have LANDED on the plan's declared integration branch
    * (`plan.extra.integration_branch`) — the readiness-only relaxation of "a blocker is met when archived".
    *
-   * A blocker qualifies iff its recorded claim head (same pick as {@link findUnlandedWorkFloor}) is an
+   * A blocker qualifies iff its recorded claim head (the claim's worktree or branch tip, via `resolveClaimHead`) is an
    * ancestor of the integration branch (`rev-list --count <branch>..<head>` is 0) AND carries at least
    * one commit past its claim-time base — a claim that has done no work has a head that is trivially an
    * ancestor of everything, and must NOT unblock its dependents.
@@ -5322,17 +5520,13 @@ export class TaskWorkflowService {
    * `SessionService.bootstrap`'s corpus-wide scope).
    *
    * `anchor_conflicts`: for each task declaring ≥1 anchor, every OTHER task in
-   * `tasks` holding a FRESH claim in a DIFFERENT SESSION (a different actor, or
-   * the same actor in a provably-different / unmeasurable session — see
-   * `compareClaimSessions`) whose anchors overlap.
+   * `tasks` holding a FRESH claim by a DIFFERENT RUN whose anchors overlap. A lease or
+   * claimant with no run is nobody's, so it is reported too.
    *
-   * The session dimension is here, and not just in the gate, because this report
+   * The run comparison is here, and not just in the gate, because this report
    * and the `task-claim` gate must never disagree: an advisory that printed "no
    * conflicts" while `lore claim` refused the very same pair would train
-   * operators to distrust the refusal
-   * (task-two-concurrent-orchestrators-both-resolve-to-agent-main). It reuses
-   * `compareClaimSessions` (`gate-predicates.ts`) rather than re-comparing the
-   * ids inline, so the two surfaces share ONE definition of "same session".
+   * operators to distrust the refusal.
    *
    * `anchorless`: the SET of task slugs that hold a FRESH claim, declare NO
    * anchors themselves, while at least one OTHER task in `tasks` declares
@@ -5358,23 +5552,14 @@ export class TaskWorkflowService {
           if (otherClaim === undefined) continue;
           if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
           // reason: BR-1056 — same holder means same RUN. Two runs that share a derived name are TWO holders and
-          // stay reported; only legacy / both-unattested claims fall back to the name (`hasClaimConflict`).
+          // stay reported; a lease or claim with no run is nobody's and stays reported too.
           const sameHolder =
             taskClaim !== undefined &&
             hasClaimConflict(
-              buildClaimHolder(other, otherClaim, false),
+              buildClaimHolder(otherClaim, false),
               buildClaimParty({ by: taskClaim.by, harnessRun: (taskClaim.harness_run ?? null) as RunId | null }),
             ).kind === "refresh";
-          if (sameHolder && taskClaim !== undefined && (taskClaim.harness_run ?? null) !== null) continue;
-          const sameActor = sameHolder;
-          const sessionVerdict = sameActor
-            ? compareClaimSessions(taskClaim.session_id, otherClaim.session_id)
-            : undefined;
-          // reason: a shared actor string alone no longer clears the overlap —
-          // only a PROVEN shared session does. `sameActor` with a
-          // different/unmeasured session is reported, matching what the
-          // `task-claim` gate would refuse for the same pair.
-          if (sessionVerdict === "same-session") continue;
+          if (sameHolder) continue;
           const otherAnchors = extractFileAnchors(other);
           if (otherAnchors.length === 0) continue;
           const overlap = anchorsOverlap(taskAnchors, otherAnchors);
@@ -5383,7 +5568,6 @@ export class TaskWorkflowService {
               task_slug: task.slug,
               holder: otherClaim.by,
               paths: overlap.pairs.map(([a]) => a),
-              ...(sessionVerdict !== undefined ? { session_verdict: sessionVerdict } : {}),
             });
           }
         }
@@ -5601,25 +5785,15 @@ export class TaskWorkflowService {
    * `gate` dependency (see constructor JSDoc).
    *
    * @param task - The task `claim()` is about to write a lease onto.
-   * @param opts - The FULL `claim()` opts — `.by` feeds `noAnchorOverlap`'s
-   *   "different actor" test; `.identitySource`/`.worktree`/`.machine` (spec
-   *   claim-time-actor-identity-guard-zero-evidence-release-advis, AC-
-   *   IDENTITY-REJECT) feed `actorIdentityGuard`'s collision-signature test —
-   *   all read straight from `opts`, no extra IO.
+   * @param opts - The FULL `claim()` opts — `.harnessRun` feeds `noAnchorOverlap`'s
+   *   "different run" test, read straight from `opts`, no extra IO.
    * @param nowIso - The SAME "now" `_claimImpl` resolved before calling this
    *   (D5 seam pinning) — drives sibling claim staleness, never re-resolved here.
-   * @param candidateSessionId - The session instance `_claimImpl` captured for
-   *   this claim (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
-   *   Threaded rather than re-captured so the PRE-write check, the claim record
-   *   actually written, and the POST-write TOCTOU re-check all reason about ONE
-   *   captured value — a second capture could disagree with the persisted claim.
-   *   `undefined` ⇒ not measured, which makes a same-actor overlap a refusal.
    */
   private async enforceClaimGate(
     task: DocRecord,
     opts: ClaimOpts,
     nowIso: string,
-    candidateSessionId: string | undefined,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -5638,7 +5812,7 @@ export class TaskWorkflowService {
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso, candidateSessionId);
+      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
@@ -5647,11 +5821,11 @@ export class TaskWorkflowService {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateSessionId);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
       } else {
-        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateSessionId);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
       }
@@ -5661,7 +5835,6 @@ export class TaskWorkflowService {
       ...ctx,
       targetIdOrSlug: task.slug,
       anchorOverlapEnabled: this.gate.enforcer.isTaskClaimAnchorOverlapEnabled(),
-      actorIdentityEnabled: this.gate.enforcer.isTaskClaimActorIdentityEnabled(),
       // reason: `exactOptionalPropertyTypes` — `GateContext`'s optional string
       // fields reject an EXPLICIT `undefined` value on a present key, so an
       // omitted `opts.*` field must omit the ctx key entirely rather than
@@ -5669,9 +5842,6 @@ export class TaskWorkflowService {
       // `...(x !== undefined ? {y: x} : {})` pattern elsewhere).
       // reason: BR-1056 — the gate's overlap test compares holders by RUN; passed explicitly, never ambient.
       candidateRun: opts.harnessRun ?? null,
-      ...(opts.identitySource !== undefined ? { candidateIdentitySource: opts.identitySource } : {}),
-      ...(opts.worktree !== undefined ? { candidateWorktree: opts.worktree } : {}),
-      ...(opts.machine !== undefined ? { candidateMachine: opts.machine } : {}),
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — `task.id` is the RESOLVED task doc's real id, threaded
       // ONLY for `GateEnforcer.enforce`'s own `gate_passed` audit `doc_id` (never
@@ -5689,9 +5859,8 @@ export class TaskWorkflowService {
     task: DocRecord,
     siblings: readonly DocRecord[],
     nowIso: string,
-    candidateSessionId?: string,
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
-    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateSessionId);
+    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes);
   }
 
   /**
@@ -5810,7 +5979,7 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    escapes: { overrideReason?: string; noNewTestsReason?: string } = {},
+    escapes: { overrideReason?: string; noNewTestsReason?: string; reason?: string } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const written = await this.writer.writeDoc({
       doc: task,
@@ -5829,6 +5998,7 @@ export class TaskWorkflowService {
         ...(escapes.noNewTestsReason !== undefined
           ? { no_new_tests_reason: escapes.noNewTestsReason, no_new_tests_declared: true }
           : {}),
+        ...(escapes.reason !== undefined ? { reason: escapes.reason } : {}),
       },
       auditSessionId: `done-${task.id}`,
       lock: "none",
@@ -5869,4 +6039,24 @@ export class TaskWorkflowService {
     };
     this.telemetry.record(event);
   }
+}
+
+
+/** The shared "log full" refusal of the evidence write path (50 rows max). */
+function evidenceLogFull(count: number): Result<never, LoreError> {
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "extra.verification_evidence",
+    message: "Evidence log is full (50 entries max) — cannot append a 51st entry",
+    value: count,
+  });
+}
+
+/** True iff `row` is a milestone refresh row of the same criterion and runner as `incoming` (the replacement key). */
+function isSameRefreshKey(row: EvidenceEntry, incoming: EvidenceEntry): boolean {
+  return (
+    row.milestone_refresh === true &&
+    row.ac_ref === incoming.ac_ref &&
+    row.attestation?.runner === incoming.attestation?.runner
+  );
 }

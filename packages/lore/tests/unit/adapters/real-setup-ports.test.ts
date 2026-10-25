@@ -391,9 +391,9 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/stop-turn-review.mjs",
   // stop-turn-review turn-state producers (issue #156)
   "hooks/user-prompt-turn-start.mjs",
+  "hooks/user-prompt-fragments.mjs",
   "hooks/post-edit-mark.mjs",
-  // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
-  "hooks/stop-handoff-coverage.mjs",
+  "hooks/post-ask-decide.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
   // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
@@ -407,14 +407,16 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/run-register.mjs",
   // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
   "hooks/run-end.mjs",
+  "hooks/lib/check-outcome.mjs",
   "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
   // pre-helper-foreign-working-copy-gate (isolated helper writing into a foreign git working copy, BR-1092; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
   // pre-edit-anchor-gate (a helper's edit outside its claim's anchors is declared via `lore anchor declare` or denied; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-edit-anchor-gate.mjs",
-  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
-  "hooks/post-edit-bindings.mjs",
+  // the anchor gate's two libraries: the top-level-symbol scan of an Edit, and the files a Bash command writes
+  "hooks/lib/top-level-symbols.mjs",
+  "hooks/lib/shell-writes.mjs",
   // shared cwd-aware shell parser, generated from packages/core/src/shell-cwd.ts (DCL-4)
   "hooks/lib/shell-cwd.mjs",
   "hooks/lib/turn-state.mjs",

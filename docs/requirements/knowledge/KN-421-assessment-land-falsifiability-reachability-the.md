@@ -3,10 +3,10 @@ id: KN-421
 type: knowledge
 role: knowledge
 title: "Assessment: Land falsifiability reachability: the attested-red runner, a guard that means what it says, feedable checkpoints, and a mirror whose drift trips (2026-08-11)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-23
 tags: []
 parent: PLAN-076
 links:

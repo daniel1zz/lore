@@ -1,18 +1,18 @@
 /**
  * Verify an invocation identity's run against the corpus's run registry — ONCE per identity, by the caller
- * (spec-run-identity-slice-1 D7; BR-1035).
+ * (spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 3; BR-1351, BR-1032).
  *
- * Purpose: an identity carries a claimed `harnessRun` from the harness flag/argument; the corpus is the only
- * authority on whether that run is registered. An unregistered id is downgraded to unattested (`harnessRun`
- * null, name and source kept) with ONE warning naming the id — never refused, never guessed. Every consumer of
- * the identity (the write-context wrapper that stamps rows, claim/release deciding by run) MUST use the value
- * this returns, so one operation never has two answers about its run.
+ * Purpose: an identity carries a run from the harness flag/argument or a human session file; the corpus is the only
+ * authority on whether that run is registered. A run the registry does not know is REFUSED (VALIDATION_ERROR, exit 4,
+ * naming `lore session start --human <name>` and `lore setup`), never downgraded to an unattested write and never
+ * guessed. Every consumer of the identity (the write-context wrapper that stamps rows, claim/release deciding by
+ * run) uses the value this returns, so one operation never has two answers about its run.
  *
  * Public surface: {@link verifyInvocationIdentity}, {@link VerifiedIdentityStore}.
- * Side-effect class: IO (one `getRun` read) + the injected `warn` sink. Adapter-agnostic: CLI entry and the
- * MCP adapter both call it; neither owns it.
+ * Side-effect class: IO (one `getRun` read). Adapter-agnostic: CLI entry and the MCP adapter both call it.
  */
 import { err, ok, type InvocationIdentity, type LoreError, type Result } from "@lore/core";
+import { refusalNamingHowToBecomeKnown, UnknownPartyError } from "@lore/core/node";
 import type { StoreInterface } from "../store/store-interface.js";
 
 /** The one store capability the check needs. */
@@ -20,23 +20,23 @@ export type VerifiedIdentityStore = Pick<StoreInterface, "getRun">;
 
 /**
  * @param store - Store the run registry lives in (the App-selected store, D-007).
- * @param identity - Identity as resolved from flag/argument/env (run not yet verified).
- * @param warn - Sink for the single unregistered-run warning.
- * @returns the identity with `harnessRun` kept when registered (or absent), set to null when unregistered;
- *   the store's own error when the lookup fails (no silent downgrade).
+ * @param identity - Identity as resolved by the entry (its run not yet verified).
+ * @returns the same identity when it has no run (an unresolved identity is refused at its first write, not here:
+ *   reads proceed) or its run is registered; VALIDATION_ERROR naming how to become a known party when the run is
+ *   unregistered; the store's own error when the lookup fails (no silent downgrade).
  */
 export async function verifyInvocationIdentity(
   store: VerifiedIdentityStore,
   identity: InvocationIdentity,
-  warn: (line: string) => void,
 ): Promise<Result<InvocationIdentity, LoreError>> {
   const claimedRun = identity.harnessRun;
   if (claimedRun === null) return ok(identity);
   const found = await store.getRun(claimedRun);
   if (!found.ok) return err(found.error);
   if (found.value !== null) return ok(identity);
-  warn(
-    `warning: --harness-run ${claimedRun} is not a registered run; this write is recorded unattested (register it with \`lore run register\`)`,
+  return err(
+    new UnknownPartyError(
+      refusalNamingHowToBecomeKnown(`Run ${claimedRun} is not a registered run in this corpus (register it with \`lore run register\`).`),
+    ).loreError,
   );
-  return ok({ ...identity, harnessRun: null });
 }

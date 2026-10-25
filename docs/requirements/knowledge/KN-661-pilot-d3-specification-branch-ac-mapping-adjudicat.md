@@ -3,10 +3,10 @@ id: KN-661
 type: knowledge
 role: knowledge
 title: "Pilot D3: specification-branch AC mapping, adjudication and citations"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: [baseline, pilot]
 parent: PLAN-172
 links:

@@ -14,7 +14,7 @@
  *
  * Coverage:
  *   HAPPY:      verify of a script AC citing a rule, from the worktree, exits 0 and records an attested row
- *   NEGATIVE:   an UNRELATED baseline write (`baseline map --sites-file`) from the same unscoped worktree is still
+ *   NEGATIVE:   an UNRELATED baseline write (`baseline map --command`) from the same unscoped worktree is still
  *               refused (exit 4, gate:corpus-write:foreign-provenance) and lands nothing
  *   REGRESSION: verify from the main checkout is untouched
  */
@@ -25,6 +25,7 @@ import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -97,8 +98,8 @@ beforeAll(() => {
   git(repo, ["commit", "-q", "-m", "init"]);
 
   mustRun(["init"], repo);
-  appendFileSync(
-    join(repo, ".lore", "config.yaml"),
+  patchLoreConfig(
+    repo,
     [
       "workflow:",
       "  gates:",
@@ -136,7 +137,7 @@ beforeAll(() => {
   plan = slugOf(mustRun(["create", "plan", "--title", "VWT Plan", "--parent", spec, "--content", "x", "--no-ai"], repo).stdout);
 
   sitesFile = join(worktrees, "rows.json");
-  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", nonBusiness: "fixture site, not business behaviour" }]));
+  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", rules: [ruleId] }]));
 });
 
 afterAll(() => {
@@ -163,7 +164,7 @@ describe("lore verify from a linked worktree (derived baseline write)", () => {
     expect(rows.some((r) => r.result === "pass" && r.attestation !== undefined)).toBe(true);
 
     const before = leafVersion();
-    const write = runLore(["baseline", "map", leaf, "--sites-file", sitesFile], wt, actor);
+    const write = runLore(["baseline", "map", leaf, "--command", "sample-write"], wt, actor);
     expect(write.exitCode).toBe(4);
     expect(write.stderr + write.stdout).toContain(FOREIGN_TOKEN);
     expect(leafVersion()).toBe(before);

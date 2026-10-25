@@ -1,7 +1,8 @@
+// @reads assets/project/reference-transaction
 /**
  * The landing lookup matches what `lore integrate` actually writes: the merge commit is named by the BRANCH
  * (`merge(<branch>)`), while a claim from a linked worktree records the worktree PATH. Both `recordLanding`
- * (integrate time) and the done-time backfill must therefore derive their candidate names from the claim's
+ * (integrate time) and the done-time `not-landed` floor must therefore derive their candidate names from the claim's
  * branch, read from git when the claim recorded only the path.
  *
  * Throwaway git repo + InMemoryStore only (never the repo's `.lore/`). The existing commit-range-from-landing
@@ -9,8 +10,8 @@
  *
  *   LAND-NAME (a): claim from a linked worktree (path) whose claim recorded no branch -> integrate B ->
  *     extra.landing names B and the merge commit; done prints no "commit range taken from the claim" note.
- *   LAND-NAME (b): same, but the landing record is missing (integrate without a recorder) -> done backfills it
- *     from `merge(B)` through the same candidate derivation.
+ *   LAND-NAME (b): same, but the landing record is missing (integrate without a recorder) -> done refuses
+ *     `not-landed`; nothing is backfilled from `merge(B)` (BR-1291).
  *   LAND-NAME (c): the claim recorded its branch (auto-capture) -> same outcome (control, must stay green).
  *   NEGATIVE: landing a branch no claim's worktree is on records nothing.
  */
@@ -32,6 +33,8 @@ import { IntegrateService, type IntegrateGit } from "../../src/service/integrate
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { actedStore } from "../live-invocation.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -79,14 +82,14 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   writeFileSync(join(repo, "seed.txt"), "seed\n");
   run(repo, "add", "seed.txt");
   run(repo, "commit", "-q", "-m", "seed");
+  // the shared checkout is a detached view of main and the shipped guard is installed: integrate refuses to run without it
+  run(repo, "checkout", "-q", "--detach", "main");
+  installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
   const worktreesRoot = join(repo, ".claude", "worktrees");
   mkdirSync(worktreesRoot, { recursive: true });
   const worktree = join(worktreesRoot, BRANCH);
   run(repo, "worktree", "add", "-q", "-b", BRANCH, worktree, "main");
   const realWorktree = realpathSync(worktree);
-  writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
-  run(realWorktree, "add", "own-file.txt");
-  run(realWorktree, "commit", "-q", "-m", "feat: the branch's own work");
 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -117,9 +120,13 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
     "2026-10-19T09:00:00.000Z",
   );
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
-  const claim = await svc.claim(task.value.id, { by: "alice", worktree: realWorktree });
+  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: realWorktree });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   claiming = false;
+  // reason: BR-1353 — a first claim starts from main, so the branch's own work is committed AFTER the claim.
+  writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
+  run(realWorktree, "add", "own-file.txt");
+  run(realWorktree, "commit", "-q", "-m", "feat: the branch's own work");
   return { repo, worktree: realWorktree, svc, store, taskId: task.value.id };
 }
 
@@ -148,7 +155,7 @@ async function landAndFinish(f: Fixture, withRecorder: boolean) {
   expect(run(f.repo, "log", "-1", "--format=%s", "main").startsWith(`merge(${BRANCH})`)).toBe(true);
   const afterLand = await f.store.find(f.taskId);
   const landing = afterLand.ok && afterLand.value !== null ? afterLand.value.extra["landing"] : "unreadable";
-  const done = await f.svc.done(f.taskId, { by: "alice" });
+  const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
   return { mergeSha, landing, done };
 }
 
@@ -164,13 +171,12 @@ describe("LAND-NAME: the landing lookup matches the branch name `lore integrate`
     expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", head_source: "landing", landing_commit: mergeSha });
   }, 60_000);
 
-  it("LAND-NAME (b): no landing record, path-only claim -> done backfills from merge(<branch>) with no 'taken from the claim' note", async () => {
+  it("LAND-NAME (b): no landing record, path-only claim -> done is refused [floor: not-landed]; nothing is backfilled from merge(<branch>)", async () => {
     const f = await fixture(false);
-    const { mergeSha, done } = await landAndFinish(f, false);
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    expect(done.value.commit_range_note).toBeUndefined();
-    expect(done.value.task.extra["landing"]).toMatchObject({ branch: BRANCH, landing_commit: mergeSha });
+    const { landing, done } = await landAndFinish(f, false);
+    expect(landing).toBeUndefined();
+    expect(done.ok).toBe(false);
+    expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
   }, 60_000);
 
   it("LAND-NAME (c): control, the claim recorded its branch (auto-capture) -> same outcome", async () => {

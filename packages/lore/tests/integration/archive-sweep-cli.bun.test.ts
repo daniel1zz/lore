@@ -58,6 +58,8 @@ import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -92,29 +94,16 @@ function parseSlug(stdout: string): string {
  * Disables the plan-close gate — irrelevant to THIS suite's scope (the R2-R4
  * sweep verb, not R1's cascade/gate interplay).
  *
- * APPENDS the override (never a wholesale `writeFileSync` overwrite): by the
- * time any caller runs this, `lore init` has already written `.lore/config.yaml`
- * with a REQUIRED top-level `project:` key (`LoreConfigSchema`, no `.optional()`
- * on that field). An overwrite that omitted it produced a schema-invalid file
- * that `loadLoreApp` silently treats as `rawConfig = undefined` (documented
- * SPEC-030 non-goal) — the override below would then never be read and the
- * checkpoint would stay armed while looking disabled (this file's own
+ * MERGES the override into the config `lore init` wrote (`patchLoreConfig`, never a
+ * wholesale overwrite and never a raw append): `lore init` seeds a `workflow:` block
+ * and a REQUIRED top-level `project:` key, so an overwrite that omitted `project:`
+ * (or an append of a second `workflow:` key) produced a file the loader refuses
+ * (BR-926; before it was silently dropped, leaving the checkpoint armed while
+ * looking disabled — this file's own
  * task-archive-sweep-gate-disable-is-silently-inert-a-wholesale regression).
- * Appending a single top-level `workflow:` key is safe here specifically
- * because `lore init`'s config never seeds one itself (`commands/init.ts`'s own
- * module doc) — see `cli-drift.bun.test.ts`'s `disableAllGates` for the same
- * precedent. Callers that need this ALONGSIDE another `workflow.*` override on
- * the SAME file must use a parse-merge-rewrite helper instead (two raw
- * `workflow:` keys is invalid YAML) — none of this file's tests do.
  */
 function disablePlanCloseGate(dir: string): void {
-  const configPath = join(dir, ".lore", "config.yaml");
-  appendFileSync(
-    configPath,
-    // reason: continues the `workflow:` block `beforeEach` seeds (two raw `workflow:` keys are invalid YAML).
-    ['  gates:', '    "plan-close":', "      enabled: false", ""].join("\n"),
-    "utf8",
-  );
+  patchLoreConfig(dir, ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", ""].join("\n"));
 }
 
 let tmpDir: string;
@@ -125,9 +114,8 @@ beforeEach(() => {
   const initResult = runLore(["init"], tmpDir);
   expect(initResult.exitCode).toBe(0);
   // reason: plans are judged by default (BR-281 / BR-1237); these fixtures approve a plan only to reach the
-  // archive behaviour under test, never review-judgment. Seeds the one top-level `workflow:` key that
-  // `disablePlanCloseGate` below continues.
-  appendFileSync(join(tmpDir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
+  // archive behaviour under test, never review-judgment. `disablePlanCloseGate` below merges into the same file.
+  patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");
 });
 
 afterEach(() => {
@@ -156,11 +144,8 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     const approveResult = runLore(["set", planSlug, "--status", "approved"], tmpDir);
     expect(approveResult.exitCode).toBe(0);
 
-    const archivePlanResult = runLore(["set", planSlug, "--status", "archived"], tmpDir);
-    expect(archivePlanResult.exitCode).toBe(0);
-
-    // Task created AFTER the plan already archived — a genuine R4 straggler, never
-    // touched by the R1 cascade (which only ever sees children present AT close time).
+    // A genuine R4 straggler: an open task under an archived plan, never touched by the R1 cascade. BR-1379 no longer
+    // lets the write path create one (archived is terminal), so the plan is archived directly after the task exists.
     const taskResult = runLore(
       [
         "create",
@@ -191,6 +176,7 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
       tmpDir,
     );
     expect(evidenceResult.exitCode).toBe(0);
+    archivePlanWithoutCascade(tmpDir, planSlug);
 
     const sweepResult = runLore(["archive", "--sweep", "--json"], tmpDir);
     expect(sweepResult.exitCode).toBe(3);
@@ -234,7 +220,6 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
       ).stdout,
     );
     expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
-    expect(runLore(["set", planSlug, "--status", "archived"], tmpDir).exitCode).toBe(0);
 
     // Straggler with NO evidence: `lore done` would refuse it with floor `attested-pass`.
     const taskSlug = parseSlug(
@@ -258,6 +243,7 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
     } finally {
       db.close();
     }
+    archivePlanWithoutCascade(tmpDir, planSlug); // BR-1379: legacy straggler shape, see the helper
 
     const applyResult = runLore(["archive", "--apply", "--json"], tmpDir);
     expect(applyResult.exitCode).toBe(0);

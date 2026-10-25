@@ -70,6 +70,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";

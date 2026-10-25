@@ -160,17 +160,6 @@ export const RULE_1_ALLOWLIST: readonly AllowlistEntry[] = [
       "→ zero hits, i.e. no branch in the file reads either field.",
   },
   {
-    file: "packages/lore/src/ai/assess-template.ts",
-    functions: ["renderCoverageCell", "renderFactsSection"],
-    reason:
-      "REAL AcCoverageFact reads, but COUNT DISPLAY only: `renderCoverageCell` renders the literal string " +
-      '`"N pass, M fail"` for the assess prompt and `renderFactsSection` renders one markdown table row per ' +
-      "fact. Neither branches on the values, and neither produces a glyph (which is why RULE 2 does not fire " +
-      "on them either). Measured 2026-08-23 with this allowlist emptied: 6 reads, at assess-template.ts:604/605 " +
-      "(two each) and :833 (two). Checkable: `grep -n 'fact.fail >\\|fact.pass >' packages/lore/src/ai/assess-template.ts` " +
-      "→ zero hits.",
-  },
-  {
     file: "packages/core/src/evidence-panel.ts",
     functions: ["deriveEvidenceTallyStatus", "summarizeForAdjudicationBar"],
     reason:

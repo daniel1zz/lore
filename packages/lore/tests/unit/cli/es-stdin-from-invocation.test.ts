@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * ES-E: stdin and whether it is a terminal come from the Invocation, not from the process
  * (spec-process-state-end-state-one-invocation-per-entry-returned Goal 1 / D1, rule AS-26).
@@ -10,7 +12,8 @@
  * whose `io.stdin` is a test stream; both commands used to read `process.stdin` / `process.stdin.isTTY`.
  */
 
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -113,8 +116,8 @@ async function verifyFixture(name: string): Promise<{ home: string; cwd: string;
     return slug;
   };
   await run(["init"]);
-  appendFileSync(
-    join(cwd, ".lore", "config.yaml"),
+  patchLoreConfig(
+    cwd,
     [
       "workflow:",
       "  gates:",

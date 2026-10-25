@@ -3,10 +3,10 @@ id: KN-598
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline close-out fixes (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-165
 links:

@@ -238,6 +238,7 @@ export function readGovernanceAsset(
         }`,
         field: "assetsRoot",
         value: assetsRoot,
+        rule: "BR-857",
       },
     };
   }

@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore create task --anchor` / `lore anchor add` / `lore ready --json` — the
  * author→trip end-to-end oracle for
@@ -49,7 +51,9 @@
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
-import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
@@ -91,8 +95,8 @@ async function mustRun(args: string[], cwd: string): Promise<RunResult> {
 
 /** Mirrors `cli-drift.bun.test.ts`'s helper — appends, never rewrites (`project:` is required). */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -154,6 +158,8 @@ let planSlug: string;
 
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-anchor-resolve-"));
+  // a claim's recorded worktree is measured through `git worktree list` (BR-1353), so the fixture is a git repository
+  makeCleanTreeRepo(tmpDir);
   await mustRun(["init"], tmpDir);
   disableAllGates(tmpDir);
   // Fixture working tree: one real file and one real directory inside the probe

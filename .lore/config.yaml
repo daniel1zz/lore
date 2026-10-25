@@ -18,8 +18,6 @@ context:
     root:
       max_lines: 220
       max_bytes: 24576
-audit:
-  verify_since: "2026-07-06T12:02:00Z"
 # SPEC-058 verification profiles — per-spec_kind oracle-coverage floors.
 # Armed on this corpus 2026-07-21: the mechanism shipped in SPEC-058 but was
 # only ever seeded by `lore setup --project`, so this (pre-SPEC-058) corpus
@@ -34,6 +32,9 @@ workflow:
     floor_command: "bun install --frozen-lockfile && bun run check:floor"
     # After a landing refreshes the shared checkout, rebuild its dist/lore (the binary ~/.local/bin/lore links to).
     post_refresh_command: "bun run build"
+    # The BRANCH binary's `lore migrate schema` (integrate appends --json): run on the floor's corpus snapshot before the floor
+    # (install first: the fresh integration worktree has no node_modules of its own), then once on the live corpus after the rebuild.
+    migrate_command: "bun install --frozen-lockfile && bun run packages/lore/src/index.ts migrate schema"
   # The main agent dispatches all source changes to implementer agents in this repo
   # (adr-rule-delivery-tiers-gate-hook-skill-and-optimistic); stop-turn-review checks it once per turn.
   turn_end:
@@ -59,13 +60,7 @@ workflow:
     # acCountMeetsFloor). No required_oracles: no oracle-coverage floor either.
     domain-overview:
       min_acs: 0
-  # plan-close cited-rule check (BR-984) ARMED. Armed 2026-07-26 as the prd-outline sync switch
-  # (SPEC-080 Phase 3); that predicate is retired and the switch was renamed for what it now
-  # switches, `cited_rule_check` (BL-D3, was `prd_sync`).
   gates:
-    plan-close:
-      cited_rule_check:
-        enabled: true
     # Citation gate (SPEC-157 C4) ARMED 2026-10-09 on all 12 baseline branches after the fast-mode
     # exit passed (knowledge-fast-mode-re-assessment-after-remediation-ac-bls2-13). A NEW or REVISED
     # criterion must cite a live rule; untouched legacy criteria are never refused. Roll back: mode report.

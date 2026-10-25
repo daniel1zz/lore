@@ -6,10 +6,10 @@ title: "Baseline slice 2: completeness census, per-branch citation gate, claim-s
 status: approved
 priority: medium
 created: 2026-10-08
-updated: 2026-10-17
+updated: 2026-10-19
 tags: []
 links:
-  - {id: SPEC-205, type: implements}
+  - {id: SPEC-235, type: implements}
   - {id: ADR-042, type: relates-to}
   - {id: SPEC-156, type: relates-to}
 ---
@@ -258,7 +258,7 @@ sequenceDiagram
 - [⚑] [script] AC-BLS2-4: Store migration 14 adds rule lifecycle and version to the registry plus citation and depends-on index tables, backfilled from documents; status reports any index-vs-document mismatch as a count, 0 on a clean corpus
   script: test — bunx --bun vitest run packages/lore/tests/unit/store/migration-014.bun.test.ts && echo 'AC-BLS2-4 PASS: migration-014 backfill matches documents; mismatch count 0'
   other_command=6
-- [⚑] [script] AC-BLS2-5: The site census lists every refusal site reachable from a command keyed file#symbol#code; coverage on a fixture leaf with 1 unmapped site and 1 dynamically dispatched site reports exactly 1 gap and 1 not_measured and exits non-zero
+- [⊖] [script] AC-BLS2-5: The site census lists every refusal site reachable from a command keyed file#symbol#code; coverage on a fixture leaf with 1 unmapped site and 1 dynamically dispatched site reports exactly 1 gap and 1 not_measured and exits non-zero
   script: test — bunx vitest run packages/lore/tests/unit/service/site-census.test.ts && echo 'AC-BLS2-5 PASS: census + coverage report 1 gap and 1 not_measured on the fixture'
   other_command=3
 - [⚑] [script] AC-BLS2-6: rule show prints a rule's statement, leaf, confidence, state and citing criteria; rule find resolves by spec, by file through code anchors, and by text; rule impact lists citing criteria and transitively dependent leaves and reports a 3-leaf depends-on cycle by its members in under 1 second
@@ -278,11 +278,11 @@ sequenceDiagram
 - [⊘] [script] AC-BLS2-11: With no baseline documents, every pre-existing command output is byte-identical to slice 1; with baseline documents and gate mode off, the gate has no effect at all (0 refusals, 0 would-refuse audit rows, ac add/set/get/feed outputs identical to the no-baseline control apart from slice-1 baseline hints) and the status baseline block differs only by the C4/C5 fields index_mismatch and exemptions_*
   script: test — bunx --bun vitest run packages/lore/tests/e2e/baseline-slice2-rollback.bun.test.ts && echo 'AC-BLS2-11 PASS: mode off / no baseline docs: outputs byte-identical to slice 1'
   other_command=6
-- [⊘] [script] AC-BLS2-12: After the completeness backfill, the specification and execution branches each report 0 coverage gaps and 0 unaccounted not_measured sites on the live corpus (read-only check)
+- [⊖] [script] AC-BLS2-12: After the completeness backfill, the specification and execution branches each report 0 coverage gaps and 0 unaccounted not_measured sites on the live corpus (read-only check)
   script: other — bun run packages/lore/src/index.ts baseline coverage baseline-specification-and-acceptance && bun run packages/lore/src/index.ts baseline coverage baseline-execution && echo 'AC-BLS2-12 PASS: specification and execution report 0 coverage gaps (census run from source; binary path tracked as #58)'
   other_command=10
-- [⊘] [ai] AC-BLS2-13: Fast mode (owner choice A 2026-10-09): the gate is armed on a branch only after ALL 12 branches are migrated and (1) every branch's leaves report 0 coverage gaps; (2) 0 established or observed rules in any branch lack a citing live script-mode criterion; (3) one cross-branch blind probe of 20 questions, written from code only by an author who never read any baseline branch, frozen before the first document of the 9 fast-mode branches — or, after a recorded failed attempt, ONE re-probe per remediation revision frozen before that revision's first corpus write, earlier attempts kept on record — is answered by a reader holding all 12 branches at >= 2.0 points (of 20) above a corpus-only control reader on the same probe, with 0 confident-wrong for the baseline reader, separate graders, the same fixed scoring rules as the review attempts; (4) a sampled fidelity judge finds >= 90% faithful over up to 20 (criterion, rule) pairs per branch, drawn after the last citation addition or repointing (removals of cites judged unfaithful may follow the measurement and are recorded, since a removal cannot lower fidelity). Legacy criteria are NOT required to be cited or exempted: the gate refuses only added or revised criteria
-  ai: Pass only if the fast-mode assessment records: per-branch coverage exit 0 for all 12 branches; established|observed rule
+- [⊘] [ai] AC-BLS2-13: Fast mode (owner choice A 2026-10-09): the gate is armed on a branch only after ALL 12 branches are migrated and (2) 0 established or observed rules in any branch lack a citing live script-mode criterion; (3) one cross-branch blind probe of 20 questions, written from code only by an author who never read any baseline branch, frozen before the first document of the 9 fast-mode branches — or, after a recorded failed attempt, ONE re-probe per remediation revision frozen before that revision's first corpus write, earlier attempts kept on record — is answered by a reader holding all 12 branches at >= 2.0 points (of 20) above a corpus-only control reader on the same probe, with 0 confident-wrong for the baseline reader, separate graders, the same fixed scoring rules as the review attempts; (4) a sampled fidelity judge finds >= 90% faithful over up to 20 (criterion, rule) pairs per branch, drawn after the last citation addition or repointing (removals of cites judged unfaithful may follow the measurement and are recorded, since a removal cannot lower fidelity). Legacy criteria are NOT required to be cited or exempted: the gate refuses only added or revised criteria
+  ai: Pass only if the fast-mode assessment records: established|observed rules without a live script-mode citation == 0; the 
 - [⚑] [ai] AC-BLS2-14: After all branches are armed, an independent sampled judge finds at least 90% of at least 100 sampled (criterion, cited rule) pairs faithful, and flags every rule cited by more than 5% of criteria as a probable catch-all
   ai: Pass only if the 2c fidelity record shows sample size >= 100 drawn by a recorded seed, faithful share >= 90%, rule text 
 - [⚑] [script] AC-BLS2-15: The census is complete and deterministic: (1) every expression whose contextual type is the product error type is a site, whether or not it is wrapped in err(), including errors built in core pure functions and CLI usage refusals reachable from the command; (2) sites in one function with different field values are distinct keys; (3) the same commit yields byte-identical site keys under 2 different node_modules layouts
@@ -306,7 +306,7 @@ sequenceDiagram
 - [⚑] [script] AC-BLS2-22: Session resume for a claimed task (describe 'resume lists rule changes since claim (BL-15)'): a governing rule whose statement, confidence or lifecycle changed after the claim's timestamp is listed with old and new value; a rule retired since the claim is listed as retired; with no change the output has the one line 'governing rules unchanged since claim'; a change made before the claim is not listed
   script: test — bunx vitest run packages/lore/tests/unit/service/resume-rule-diff.test.ts && echo 'AC-BLS2-22 PASS: resume shows rule changes since claim, retired listed, unchanged line, pre-claim changes excluded'
   other_command=2
-- [⚑] [script] AC-BLS2-23: lore baseline fidelity --exclusions (describe 'exclusion sampling (C7)'): a seeded sample of non-business site_map entries is judged by the stub AI, the record stores each verdict and the wrong share, same seed -> same entries, and no site_map changes
+- [⊖] [script] AC-BLS2-23: lore baseline fidelity --exclusions (describe 'exclusion sampling (C7)'): a seeded sample of non-business site_map entries is judged by the stub AI, the record stores each verdict and the wrong share, same seed -> same entries, and no site_map changes
   script: test — bunx vitest run packages/lore/tests/unit/service/fidelity-sample.test.ts && echo 'AC-BLS2-23 PASS: exclusion sampling deterministic, recorded, read-only'
   other_command=2
 

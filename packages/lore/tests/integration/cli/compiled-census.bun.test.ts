@@ -11,8 +11,8 @@
  * symlinks `packages/` and `node_modules/`; the repo's own `.lore/` is never touched). The census
  * verbs read source files and the throwaway corpus only.
  *
- * Dimensions: HAPPY (sites listed; coverage of a fully mapped specification-branch leaf -> 0),
- * NEGATIVE (an unmapped leaf -> 1 and names a site, never a typescript-unavailable error),
+ * Dimensions: HAPPY (sites listed; coverage of a fully mapped specification-branch leaf -> fully mapped),
+ * NEGATIVE (an unmapped leaf -> reported (exit 0) and names a site, never a typescript-unavailable error),
  * REGRESSION (no output ever contains `typescript-unavailable`).
  *
  * @spec_ref AC-BLC-4
@@ -121,26 +121,20 @@ describe("compiled dist/lore: lore baseline sites", () => {
 });
 
 describe("compiled dist/lore: lore baseline coverage (specification branch leaf)", () => {
-  it("an unmapped leaf is INCOMPLETE (exit 1) and names a census site, not a typescript error", () => {
+  it("an unmapped leaf is reported (exit 0, report only) and names a census site, not a typescript error", () => {
     mustRun(["baseline", "map", leaf, "--command", COMMAND], repo);
     const r = runLore(["baseline", "coverage", leaf], repo);
     expect(r.stderr + r.stdout).not.toContain("typescript-unavailable");
-    expect(r.exitCode).toBe(1);
+    expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain(sites[0]!.key);
   });
 
-  it("every census site mapped -> coverage exits 0 with at least one site counted", async () => {
-    mustRun(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-1"], repo);
-    for (const s of sites.slice(1)) {
-      mustRun(["baseline", "map", leaf, "--site", s.key, "--non-business", "plumbing, not business behaviour"], repo);
-      // reason: each mustRun blocks the worker's event loop; under load this loop exceeds 60 s, and vitest's
-      // worker->main RPC ("onTaskUpdate") times out after 60 s of an unserviced loop (unhandled error, exit 1).
-      // Yielding once per iteration lets the reply be processed (TG-23).
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const r = runLore(["baseline", "coverage", leaf], repo);
+  it("the leaf's census counts every reached site (report only, exit 0); declarations are read from the tree by the compiled binary", () => {
+    const r = runLore(["baseline", "coverage", leaf, "--json"], repo);
     expect(r.stderr + r.stdout).not.toContain("typescript-unavailable");
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/complete - [1-9]\d* site\(s\)/);
+    const report = (JSON.parse(r.stdout) as { data: { leaves: { sites: number; measured_by: string }[] } }).data.leaves[0]!;
+    expect(report.measured_by).toBe("commands");
+    expect(report.sites).toBe(sites.length);
   });
 });

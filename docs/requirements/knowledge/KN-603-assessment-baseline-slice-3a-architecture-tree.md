@@ -3,10 +3,10 @@ id: KN-603
 type: knowledge
 role: knowledge
 title: "Assessment: Baseline slice 3a: architecture tree, baseline-root navigation, requirements to rules, outline retirement, distribution (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-167
 links:

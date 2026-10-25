@@ -70,8 +70,7 @@
  * break `git push` in every consumer repo that installs that hook (the
  * referenced files do not exist there). Instead this module is armed the
  * same way every sibling structural checker in `scripts/` already is
- * (`check-ordinal-write-sites.mjs`, `check-test-budgets.ts`,
- * `check-no-nul-bytes.ts`): the paired `.test.ts`'s REGRESSION suite calls
+ * (`check-ordinal-write-sites.mjs`, `check-no-nul-bytes.ts`): the paired `.test.ts`'s REGRESSION suite calls
  * `main()` with no injected `repoRoot` and asserts exit 0 against the real
  * checkout, and that file is picked up automatically by `bun run test`'s
  * `test:vitest` step (the `scripts/tests` test-file include glob declared in
@@ -159,10 +158,9 @@ export const RATIONALE_PLACEHOLDER_TOKENS: readonly string[] = ["TODO", "TBD", "
  *     not a size recommendation, so neither raising the code default nor
  *     shipping this tightened number to the template is correct — see that
  *     entry's own field-level JSDoc in `contextConfigSchema`.
- *   - `workflow.gates` — per-checkpoint gate arming (e.g. `plan-close`'s
- *     `cited_rule_check` sub-predicate, `resolveCitedRuleCheckGateEnabled`) is a deliberate,
- *     default-OFF corpus-maturity decision (SPEC-080 Migration Plan Phase 0)
- *     — this repo armed it only after 5 observed clean plan-closes. Shipping
+ *   - `workflow.gates` — per-checkpoint gate arming (e.g. the `ac-cite`
+ *     citation gate's armed branches) is a deliberate,
+ *     corpus-maturity decision — this repo armed it only after the fast-mode exit passed. Shipping
  *     any one project's arming choice to every fresh corpus would force
  *     unearned strictness on projects that have not reached that maturity.
  *   - `ai.assess.max_diff_chars` / `workflow.evidence.capture_timeout_ms` —
@@ -197,13 +195,12 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
     rationale: "The command that rebuilds the shared checkout's build artifacts after lore integrate refreshed its view (this repo: bun run build) is the project's own build; it has no meaningful shipped default and integrate reports 'skipped' when it is absent.",
   },
   {
-    key: "project.author",
-    rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
+    key: "workflow.integrate.migrate_command",
+    rationale: "The command line of the project's own `lore migrate schema` (this repo: bun run packages/lore/src/index.ts migrate schema) that lore integrate runs on the floor's corpus snapshot and then on the live corpus names a project-specific binary location; it has no meaningful shipped default and integrate reports 'skipped' when it is absent.",
   },
   {
-    key: "audit.verify_since",
-    rationale:
-      "Names the audit hash-chain watermark for THIS corpus's own history; a shared default would misdate every other corpus's chain.",
+    key: "project.author",
+    rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
   },
   {
     key: "feedback.upstream",
@@ -233,7 +230,7 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
   {
     key: "workflow.gates",
     rationale:
-      "Per-checkpoint gate arming is a deliberate, corpus-maturity opt-in (e.g. plan-close's cited_rule_check sub-predicate is default-OFF); shipping one project's arming choice would force unearned strictness on every fresh corpus.",
+      "Per-checkpoint gate arming is a deliberate, corpus-maturity opt-in (e.g. the ac-cite citation gate's armed branches); shipping one project's arming choice would force unearned strictness on every fresh corpus.",
   },
 ];
 
@@ -257,7 +254,6 @@ export const ZOD_DEFAULTABLE_SECTIONS: readonly string[] = [
   "defaults",
   "ai",
   "workflow",
-  "audit",
   "feedback",
   "verify",
   "setup",
@@ -416,7 +412,7 @@ export function deepEqualJsonValue(a: unknown, b: unknown): boolean {
  *
  * @example
  *   isAllowlistedKey("project.name", PROJECT_SPECIFIC_KEYS) // => true
- *   isAllowlistedKey("workflow.gates.\"plan-close\".cited_rule_check.enabled", PROJECT_SPECIFIC_KEYS) // => true
+ *   isAllowlistedKey("workflow.gates.\"ac-cite\".mode", PROJECT_SPECIFIC_KEYS) // => true
  *   isAllowlistedKey("workflow.evidence.capture_timeout_ms", PROJECT_SPECIFIC_KEYS) // => false
  */
 export function isAllowlistedKey(path: string, allowlist: readonly ProjectSpecificKeyEntry[]): boolean {

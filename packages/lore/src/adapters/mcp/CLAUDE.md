@@ -1,5 +1,7 @@
 # Module: adapters/mcp
 
+Architecture card: `baseline-module-card-mcp-adapter`
+
 ## Purpose
 
 MCP stdio server adapter: `lore_*` tools and fast-path registration. Entered via `lore --mcp-server`
@@ -35,9 +37,10 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
 - **No MCP write tool declares `by`** (AC-ROI-1, BR-1055) — only the read-side filters `lore_feed`/`lore_bootstrap` do (pinned in `adapters/read-side-by-filters.ts`). Every object schema is registered `.strict()` (the one refine-wrapped read tool, `lore_rule_find`, never took `by`), so a caller naming `by` (or `reviewer`) is REFUSED, never stripped. Every write tool takes an optional
   `harness_run` (spec-run-identity-slice-1). A schema that declares
   `harness_run` is an ATTESTED tool: `call-scope.ts::McpCallScope.run` builds ONE
-  identity per call (from `harness_run` alone; the name is the server's session/OS tier), opens a
-  call-scoped App via `App.forWriteContext` (store wrapped for that identity,
-  run verified once), runs the handler, closes it. Handlers get `by`/`recorded_by`
+  identity per call (from `harness_run` alone; the name derives from that run, and a call
+  without one has no known party: its writes are refused, its reads proceed), opens a
+  call-scoped App via `App.forWriteContext` (store wrapped for that identity; the run is
+  verified at the first write and an unregistered run is refused), runs the handler, closes it. Handlers get `by`/`recorded_by`
   FILLED from the call's resolved name and never see `harness_run`; claim/release
   read the verified run from `requireCallIdentity`. One call = one identity, so a
   `lore_batch` stamps every operation alike. The long-lived server's env is never
@@ -78,7 +81,8 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
 
 - `lore_create/get/set/search/list/tree/link/pending/approve` — core CRUD, mirrors CLI. `lore_create` also takes optional `file_anchors`/`supersedes`.
 - `lore_claim/release/evidence_add/ready` (SPEC-025) — task workflow; the writer is the call's own identity. `evidence_add` runs the oracle-file-existence precheck before dispatch, supports `ac_ref`/`checklist_ref`, and takes `capture: boolean` — the MCP peer of the CLI's `lore evidence --capture` (task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no): the server runs `command` itself via the shared `../evidence-capture.ts::captureOracleCommand`, cross-checks the real exit code against `result`, and records the child's real stdout+stderr as `output_tail`. `capture: true` REQUIRES `caller_cwd` (refused when absent — this server's own `process.cwd()` was fixed at startup and is not the caller's directory); mutually exclusive with `output_tail` and `oracle: "manual"` via the CLI's own `findCaptureFlagConflict`. The capture WINDOW comes from `workflow.evidence.capture_timeout_ms` via `resolveCaptureTimeoutMs(getConfig?.())`, called per invocation so a long-lived server observes a mid-session config edit (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed — it previously passed nothing and silently ran at the schema default while the CLI honoured the knob; the loud-timeout half was already shared, which is why only an assertion on the ENFORCED window catches this class).
-- `lore_assess` (SPEC-026) — plan-outcome AI judge; no non-AI mode, `summary` Markdown digest via `assess-render.ts`.
+- `lore_bulk` / `lore_done` / `lore_reject` — `lore_bulk` is `lore bulk` (same `BulkLifecycleService`: ids XOR `where`, preview default, `apply` writes per-row results); `lore_done` is `lore done` for a task (same floors); `lore_reject` is `lore reject`.
+- `lore_assess` (BR-1372) — the milestone review of one plan (seven dimensions, stored `milestone-review` doc); no non-AI mode.
 - `lore_audit` (SPEC-035) — filtered audit query; `verify: true` runs the versions⋈audit completeness oracle.
 - `lore_review` (SPEC-034) — single-doc structured review judgment; deterministic pre-checks short-circuit before the AI provider.
 - `lore_verify` (SPEC-039) — attested script-AC runner; `allow_new_commands` replaces the CLI's TTY approval prompt (MCP is non-interactive).
@@ -93,7 +97,6 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
 
 - `index.ts` — `startMcpServer(app, getConfig?)`; wires `McpServer` + `StdioServerTransport`.
 - `tools.ts` — the tool registrations, schema constants, Zod input shapes.
-- `assess-render.ts` — `buildAssessSummaryText(result)` — Markdown digest for `lore_assess`'s `summary` field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements.
 

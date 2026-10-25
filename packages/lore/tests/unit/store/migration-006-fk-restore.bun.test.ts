@@ -58,6 +58,7 @@ import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.j
 import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -117,7 +118,7 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
     // the head — a fresh store runs every migration up to it, not just
     // through migration-006. This test's own concern (FK enforcement
     // restored after migration-006) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(foreignKeysEnabled(db)).toBe(true);
 
     store.close();

@@ -3,10 +3,10 @@ id: KN-175
 type: knowledge
 role: knowledge
 title: "Assessment: Close two typecheck blind spots and correct the stale comments that understate them (2026-08-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-077
 links:

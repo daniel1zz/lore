@@ -1,33 +1,37 @@
 /**
- * Per-invocation identity resolution (spec run-identity-slice-1 D1, D8, D11; BR-1032, BR-1033).
+ * Per-invocation identity resolution (spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 1-3;
+ * BR-1055, BR-1032, BR-1350, BR-1351).
  *
- * Purpose: turn one CLI invocation's argv + env into an {@link InvocationIdentity}
- * (which run vouched for it, and what name the writer claimed with its source),
- * and hand back argv with the harness-owned `--harness-run <id>` removed.
+ * Purpose: turn one CLI invocation's argv + env into an {@link InvocationIdentity}: the known party it writes as
+ * (an attested agent run, or the human session registered for this checkout) or the reason it has none, and hand
+ * back argv with the harness-owned `--harness-run <id>` removed.
  *
- * Public surface: {@link resolveInvocationIdentity}, {@link RunIdentityArgumentError},
- * {@link InvocationResolution}.
+ * Public surface: {@link resolveInvocationIdentity}, {@link RunIdentityArgumentError}, {@link UnknownPartyError},
+ * {@link HumanSessionBinding}, {@link InvocationResolution}, {@link refusalNamingHowToBecomeKnown}.
  *
- * @invariant `harnessRun` comes ONLY from the `--harness-run` flag; `--by`
- *   never produces attestation (names are not attestation, BR-1033).
- * @invariant `claimed` is never empty: tiers are --by > session >
- *   working copy > OS user (D11), reusing {@link resolveActorOrUnresolved}. When only a failed OS lookup is left the
- *   identity is UNRESOLVED (`claimed: null` + reason), never a substitute name. The environment never supplies a
- *   name (BR-1055).
+ * @invariant There are exactly two sources here: the `--harness-run` flag (an agent run the integration vouched for,
+ *   source `run`) and a human session (source `human`). The explicit `--by` layer, the environment session-id name,
+ *   the working-copy name and the computer user name are gone: no name is ever supplied by the writer.
+ * @invariant A process carrying an agent harness marker (`hasAgentHarnessMarker`) NEVER uses a human session: an
+ *   agent does not write under a person's session (BR-1350).
+ * @invariant `--harness-run` must name an AGENT run (`cc:...`); a `human:` / `api-key:` / `dashboard:` run id cannot
+ *   be claimed from the command line, so no caller can write as a person by naming that person's run.
  *
- * Side-effect class: pure given its arguments (env, OS-user value, worktree probe are supplied). Lives under
- * `@lore/core/node` for the same barrel-isolation reason as actor-resolution-node.ts.
+ * Side-effect class: pure given its arguments (env and the human-session lookup are supplied). Lives under
+ * `@lore/core/node` for the same barrel-isolation reason as the rest of the node-only identity files.
  */
 
-import { resolveActorOrUnresolved } from "./actor-resolution-node.js";
-import type { OsUser } from "./invocation.js";
-import type { WorktreeAwareActorSource } from "./actor-resolution-node.js";
-import { HARNESS_RUN_FLAG } from "./run-identity.js";
-import type { InvocationIdentity, NameSource, RunId } from "./run-identity.js";
+import type { LoreError } from "./errors.js";
+import {
+  HARNESS_RUN_FLAG,
+  hasAgentHarnessMarker,
+  isAgentRunId,
+  nameOfAgentRun,
+  type InvocationIdentity,
+  type RunId,
+} from "./run-identity.js";
 
-const BY_FLAG = "--by";
-
-/** An invocation's `--by` / `--harness-run` flag was malformed (missing or empty value). */
+/** An invocation's `--harness-run` flag was malformed (missing, empty or not an agent run). */
 export class RunIdentityArgumentError extends Error {
   readonly flag: string;
   readonly reason: string;
@@ -40,22 +44,44 @@ export class RunIdentityArgumentError extends Error {
   }
 }
 
+/** The human session registered for a checkout, as the entry reads it: who it is and the run it writes under. */
+export interface HumanSessionBinding {
+  readonly name: string;
+  readonly run: RunId;
+}
+
+/**
+ * The refusal text of a write with no known party (BR-1351): names how a person and an agent integration each
+ * become one. `lead` says why this write has none.
+ */
+export function refusalNamingHowToBecomeKnown(lead: string): string {
+  return (
+    `${lead} Every write is made by a known party: ` +
+    "a person registers with `lore session start --human <name>`; " +
+    "an agent integration is installed with `lore setup` so its writes carry an attested run."
+  );
+}
+
+/**
+ * A write found its invocation without a known party (no attested run, no applicable human session) or naming a run
+ * the registry does not know. A refusal, never a wiring defect: `loreError` is VALIDATION_ERROR (exit 4 on the CLI).
+ */
+export class UnknownPartyError extends Error {
+  readonly loreError: Extract<LoreError, { code: "VALIDATION_ERROR" }>;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "UnknownPartyError";
+    this.loreError = { code: "VALIDATION_ERROR", field: "identity", message };
+  }
+}
+
 /** Result of {@link resolveInvocationIdentity}. */
 export interface InvocationResolution {
   readonly identity: InvocationIdentity;
   /** Input argv with `--harness-run <id>` removed; a new array, the input is never mutated. */
   readonly argv: string[];
 }
-
-// reason: total over ActorSource (minus os-fallback) so a new member fails compilation; `env` stays
-// mapped only because the type member remains — nothing produces it (BR-1055).
-const NAME_SOURCE_BY_ACTOR_SOURCE: Record<WorktreeAwareActorSource, NameSource> = {
-  explicit: "flag",
-  env: "env",
-  session: "session",
-  "worktree-derived": "worktree",
-  "os-fallback": "os",
-};
 
 /** Value of a `--flag <v>` / `--flag=<v>` token at `index`, or null when the token is another flag. */
 function readFlagAt(argv: readonly string[], index: number, flag: string): { value: string; consumed: number } | null {
@@ -75,54 +101,72 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  * Resolve the identity of one lore invocation.
  *
  * @param argv - Command-line tokens after the program name; not mutated.
- * @param env - Environment to read session ids from (`Invocation.env`).
- * @param osUser - The entry's recorded OS-username lookup for the os-fallback tier (see `resolveActorWithSource`).
- * @param detectWorktree - Working-copy tier probe `() => "agent:<branch>" | undefined`, closed over
- *   the invocation cwd by the caller. `detectWorktreeDerivedActor` lives in packages/lore
- *   (adapters/cli/utils.ts), which core cannot import, so the CLI injects it; when omitted that
- *   tier is skipped.
+ * @param env - Environment to look for an agent harness marker in (`Invocation.env`).
+ * @param humanSession - Looks up the human session registered for this checkout; called ONLY when the invocation
+ *   carries no harness run and no agent harness marker. `null` = no open session.
  * @returns the identity and argv with `--harness-run <id>` removed.
- * @throws {RunIdentityArgumentError} when `--by` / `--harness-run` has no value or an empty value
- *   (an empty `--by` must not silently fall through to a lower tier).
- * @returns an identity whose name is unresolved (never a throw) when no tier names the writer and `osUser` is a failure
+ * @throws {RunIdentityArgumentError} when `--harness-run` has no value, an empty value, or names a run that is not
+ *   an agent run.
  * @example
- *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {}, { ok: true, name: "os-user" })
- *   // => { identity: { harnessRun: "cc:S1", claimed: "x", claimedSource: "flag" }, argv: ["claim", "t", "--by", "x"] }
+ *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1"], {}, () => null)
+ *   // => { identity: { harnessRun: "cc:S1", claimed: "agent:session-s1", claimedSource: "run" }, argv: ["claim", "t"] }
+ * @example
+ *   resolveInvocationIdentity(["set", "x"], {}, () => ({ name: "dana", run: "human:0123456789abcdef" }))
+ *   // => { identity: { harnessRun: "human:0123456789abcdef", claimed: "dana", claimedSource: "human" }, argv: ["set", "x"] }
  */
 export function resolveInvocationIdentity(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
-  osUser: OsUser,
-  detectWorktree?: () => string | undefined,
+  humanSession: () => HumanSessionBinding | null,
 ): InvocationResolution {
   const remaining: string[] = [];
   let harnessRun: string | null = null;
-  let by: string | undefined;
 
   for (let i = 0; i < argv.length; ) {
     const runFlag = readFlagAt(argv, i, HARNESS_RUN_FLAG);
     if (runFlag !== null) {
       if (runFlag.value.trim() === "") throw new RunIdentityArgumentError(HARNESS_RUN_FLAG, "value must not be empty");
+      if (!isAgentRunId(runFlag.value)) {
+        throw new RunIdentityArgumentError(HARNESS_RUN_FLAG, `${JSON.stringify(runFlag.value)} is not an agent run (expected a run id such as cc:<session>)`);
+      }
       harnessRun = runFlag.value;
       i += runFlag.consumed;
       continue;
     }
-    const byFlag = readFlagAt(argv, i, BY_FLAG);
-    if (byFlag !== null) {
-      if (byFlag.value.trim() === "") throw new RunIdentityArgumentError(BY_FLAG, "value must not be empty");
-      by = byFlag.value;
-    }
-    // reason: `--by` stays in the returned argv — downstream command parsing still owns it.
+    // reason: `--by` stays in the returned argv untouched — a few commands give it their own meaning (`ac supersede`,
+    // `feed`); it is NOT identity and never reaches the resolution below (BR-1055).
     remaining.push(argv[i] as string);
     i++;
   }
 
-  const resolved = resolveActorOrUnresolved(by, env, osUser, detectWorktree ?? (() => undefined));
-  const run = harnessRun as RunId | null;
-  const identity: InvocationIdentity =
-    resolved.source === "unresolved"
-      ? { harnessRun: run, claimed: null, claimedSource: null, unresolvedReason: resolved.reason }
-      : { harnessRun: run, claimed: resolved.actor, claimedSource: NAME_SOURCE_BY_ACTOR_SOURCE[resolved.source] };
+  if (harnessRun !== null) {
+    const run = harnessRun as RunId;
+    let name: string;
+    try {
+      name = nameOfAgentRun(run);
+    } catch (cause) {
+      throw new RunIdentityArgumentError(HARNESS_RUN_FLAG, cause instanceof Error ? cause.message : String(cause));
+    }
+    return { identity: { harnessRun: run, claimed: name, claimedSource: "run" }, argv: remaining };
+  }
 
-  return { identity, argv: remaining };
+  if (hasAgentHarnessMarker(env)) {
+    return {
+      identity: unresolvedIdentity(refusalNamingHowToBecomeKnown("This process runs inside an agent harness but carries no attested run, and an agent never writes under a person's session.")),
+      argv: remaining,
+    };
+  }
+  const session = humanSession();
+  if (session !== null) {
+    return { identity: { harnessRun: session.run, claimed: session.name, claimedSource: "human" }, argv: remaining };
+  }
+  return {
+    identity: unresolvedIdentity(refusalNamingHowToBecomeKnown("This write has no attested agent run and no open human session in this checkout.")),
+    argv: remaining,
+  };
+}
+
+/** An identity with no known party and the refusal `reason` its writes end with. */
+export function unresolvedIdentity(reason: string): InvocationIdentity {
+  return { harnessRun: null, claimed: null, claimedSource: null, unresolvedReason: reason };
 }

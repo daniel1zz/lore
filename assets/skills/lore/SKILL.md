@@ -66,7 +66,7 @@ Advisory lease + append-only oracle evidence, for agents executing plan tasks:
 ```bash
 lore claim <task> [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
 lore evidence <task> --oracle tsc|test|lint|build|e2e|manual|other \
-  --command "<cmd>" --result pass|fail [--output-tail "..." | --output-tail-file <path>]
+  --command "<cmd>" --result pass|fail --capture   # --capture: runner spawns --command and records its output; pass needs it (manual: --output-tail instead)
 lore release <task> [--reason "why"] [--force]   # non-holder needs --force
 lore ready <plan> [--json]     # computed readiness over blocks links — never stored
 ```
@@ -92,7 +92,7 @@ Approve/reject implicitly capture a calibration record against the doc's latest 
 ## Feedback loop (SPEC-026 / SPEC-035)
 
 ```bash
-lore assess <plan> [--diff HEAD~3..HEAD | --diff-file <path>]   # LLM-as-judge: plan vs spec ACs + task evidence → knowledge doc (sub_type=assessment) linked informs→plan
+lore assess <plan>... | --where "<filters>"   # milestone review (7 dimensions, one row per plan, exit 0 all pass / 1 any fail) → knowledge doc (sub_type=milestone-review) linked informs→plan; plan close needs a passing review of the plan's current state
 lore audit [<doc>] [--actor <a>] [--action <act>] [--since <ISO>] [--limit N]   # decision trail (create|update|approve|reject|claim|release|evidence|judge|…)
 lore audit --verify                   # completeness oracle: versions ⋈ audit reconcile
 lore calibration --stats [--doc-type spec] [--prompt-version v1]   # human-vs-AI agreement per doc_type × prompt_version, Wilson lower bound
@@ -123,6 +123,15 @@ lore sync-docs [--from <dir>] [--dry-run]    # backfill disk .md spec files → 
 
 - MCP (preferred for agents): `lore --mcp-server` — {{lore:mcp_tool_count}} `lore_*` tools: full-field CRUD, review/judgment (`lore_review`, `lore_pending` with `include_judgments`), task workflow (`lore_claim` / `lore_release` / `lore_evidence_add` / `lore_ready` — `by` is required explicitly), `lore_assess`, `lore_audit`. 
 - HTTP API: `lore serve` + `lore agent create --name <agent>` to issue API keys (`lore agent list|revoke`).
+
+## Who can write
+
+Every write is made by a known party; there are two ways to be one.
+
+- An agent: its writes carry the run its integration attests. Install the integration with `lore setup`. A process inside an agent harness never starts a human session.
+- A person working by hand: run `lore session start --human <name>` once per checkout. Writes from that checkout are then recorded as `<name>` until `lore session end`. `lore session show` (no id) names the open session; `lore session end` closes it (exit 3 if none is open). A second `start` while one is open is refused.
+
+With neither, writes are refused (exit 4); reads still work.
 
 ## Conventions
 

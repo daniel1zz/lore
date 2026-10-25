@@ -8,9 +8,9 @@ priority: medium
 created: 2026-07-26
 updated: 2026-07-26
 tags: []
-parent: SPEC-204
+parent: SPEC-244
 links:
-  - {id: SPEC-204, type: informs}
+  - {id: SPEC-244, type: informs}
 ---
 ## Context
 The 6-role ideation panel (knowledge-ideation-dashboard-capability-expansion-6-role) recommended a narrower adjudication cockpit; 4/6 roles warned of dual-write-surface consistency cost.

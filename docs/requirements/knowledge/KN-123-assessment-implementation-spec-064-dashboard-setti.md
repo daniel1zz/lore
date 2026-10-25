@@ -3,10 +3,10 @@ id: KN-123
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-064 Dashboard Settings UI (2026-07-22)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-22
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-059
 links:

@@ -11,6 +11,9 @@
  *   runner points at.
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 /** Runs `lore <args>` in the corpus under test; returns stdout; throws when the command fails. */
 export type LoreRunner = (args: string[]) => string;
 
@@ -69,8 +72,26 @@ export function ensureLiveRuleViaCli(lore: LoreRunner, corpusKey: string, prdSlu
   ]);
   const ruleId = out.match(/\bBR-\d+\b/)?.[0];
   if (ruleId === undefined) throw new Error(`no rule id in: ${out}`);
+  approveFixtureNodes(corpusKey, [root, branch, leaf]);
   ruleByCorpus.set(corpusKey, ruleId);
   return ruleId;
+}
+
+const APPROVE_SCRIPT = join(new URL(".", import.meta.url).pathname, "approve-nodes-cli.ts");
+
+/**
+ * `rule add` is a PENDING add (BR-626) and a new node is born draft: the fixture rule is citable only once its leaf is
+ * approved. The corpus is addressed by its directory (`corpusKey`, which every caller passes) and approved through a bare
+ * `ReviewService` in a spawned script (these fixtures are synchronous), so no AI judge is needed.
+ *
+ * @throws Error when the corpus file is missing or the approval is refused
+ */
+export function approveFixtureNodes(corpusKey: string, nodes: readonly string[] | "all"): void {
+  const dbPath = join(corpusKey, ".lore", "lore.db");
+  if (!existsSync(dbPath)) throw new Error(`live-rule fixture: no corpus file at ${dbPath} (pass the corpus directory as corpusKey)`);
+  const targets = nodes === "all" ? ["--all"] : [...nodes];
+  const run = Bun.spawnSync(["bun", "run", APPROVE_SCRIPT, dbPath, ...targets], { env: process.env });
+  if (run.exitCode !== 0) throw new Error(`live-rule fixture: approving ${targets.join(", ")} failed: ${run.stderr.toString()}`);
 }
 
 /**
@@ -128,6 +149,7 @@ export async function ensureLiveRuleViaAsyncCli(lore: AsyncLoreRunner, corpusKey
   ]);
   const ruleId = out.match(/\bBR-\d+\b/)?.[0];
   if (ruleId === undefined) throw new Error(`no rule id in: ${out}`);
+  approveFixtureNodes(corpusKey, [root, branch, leaf]);
   ruleByCorpus.set(corpusKey, ruleId);
   return ruleId;
 }

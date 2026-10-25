@@ -29,7 +29,8 @@
  * ## Invariant: fail-open (spec D7)
  *
  * Every fault — bad stdin, lore absent, non-zero child — exits 0 with nothing
- * on stdout, so the tool call proceeds un-rewritten and is simply unattested.
+ * on stdout, so the tool call proceeds un-rewritten; a lore write in it carries no
+ * run and is then refused (no known party).
  * A failed child's stdout is never relayed, since it may be partial.
  *
  * @spec_ref spec-run-identity-slice-1-harness-attested-runs-attested D7, D10,
@@ -38,6 +39,8 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:pre-tool-harness-run');
 
 /** Resolved from `PATH`, as for the other blind-pipe hooks. */
 const VERB_BINARY = 'lore';
@@ -73,7 +76,7 @@ try {
 
 let payload;
 try {
-  payload = JSON.parse(rawStdin.toString('utf8'));
+  payload = noteHookCwd(JSON.parse(rawStdin.toString('utf8')));
 } catch {
   process.exit(0);
 }

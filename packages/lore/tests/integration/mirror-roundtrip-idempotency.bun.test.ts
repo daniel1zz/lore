@@ -78,6 +78,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -134,9 +135,8 @@ interface JsonEnvelope<T> {
  *  compiled AC-084-5 e2e suite's precedent) — this suite's concern is the
  *  export<->migrate seam, not spec-create skeleton-content gating. */
 function disableAllGates(dir: string): void {
-  writeFileSync(
-    join(dir, ".lore", "config.yaml"),
-    readFileSync(join(dir, ".lore", "config.yaml"), "utf8") +
+  patchLoreConfig(
+    dir,
       [
         "workflow:",
         "  gates:",
@@ -150,7 +150,6 @@ function disableAllGates(dir: string): void {
         "      enabled: false",
         "",
       ].join("\n"),
-    "utf8",
   );
 }
 

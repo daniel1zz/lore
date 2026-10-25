@@ -36,14 +36,7 @@
  * Side-effect class: pure. No store, no IO, no config access.
  */
 
-import {
-  PLAN_CLOSE_FIELD,
-  ATTESTATION_FLOOR_FIELD,
-  ATTESTATION_SCOPE_UNDECLARED_FIELD,
-  ATTESTATION_EXEMPT_KIND_FIELD,
-  CITED_RULE_STATE_FIELD,
-  ASSESSMENT_FRESHNESS_FIELD,
-} from "./gate-predicates.js";
+import { PLAN_CLOSE_FIELD, MILESTONE_REVIEW_FIELD } from "./gate-predicates.js";
 
 /**
  * One `plan-close` predicate's contract: the invariant it exists to protect,
@@ -68,14 +61,7 @@ export interface PredicateContract {
  * deliberate edit to this array (and, structurally, to {@link PlanCloseField}
  * below and {@link PREDICATE_CONTRACTS}).
  */
-export const PLAN_CLOSE_FIELDS = [
-  PLAN_CLOSE_FIELD,
-  ATTESTATION_FLOOR_FIELD,
-  ATTESTATION_SCOPE_UNDECLARED_FIELD,
-  ATTESTATION_EXEMPT_KIND_FIELD,
-  CITED_RULE_STATE_FIELD,
-  ASSESSMENT_FRESHNESS_FIELD,
-] as const;
+export const PLAN_CLOSE_FIELDS = [PLAN_CLOSE_FIELD, MILESTONE_REVIEW_FIELD] as const;
 
 /**
  * The union of `field` values `checkPlanClose` can emit — built FROM
@@ -103,104 +89,26 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
     known_false_pass: [],
     known_false_block: [],
   },
-  [ATTESTATION_FLOOR_FIELD]: {
+  [MILESTONE_REVIEW_FIELD]: {
     invariant:
-      "Every claimed-and-attestable acceptance criterion, and every evidence-bearing task, " +
-      "that a closing plan reports as verified was actually run by a trusted oracle, not " +
-      "merely self-reported.",
+      "A plan closes only over a milestone review of the state it is actually in: the review's seven " +
+      "dimensions (correctness against ACs, spec conformance, regression, design necessity, snapshot " +
+      "accuracy, concurrency safety, security) each hold, and nothing about the plan changed since.",
     measured:
-      "Four conditions (attestationFloor, delegating to deriveAttestationSummary; the stamp axis, " +
-      "SPEC-143 AC-CT-3, is read FIRST: (0) no evidence-bearing task whose runner-attested rows " +
-      "are ALL `unbound` — recorded after the corpus's state-binding-armed audit row with no " +
-      "valid state stamp — a pre-arming `legacy_unbound` row and an unarmed corpus are accepted); (1) every " +
-      "task carrying verification_evidence carries >= 1 runner-attested entry; (2) every " +
-      "CLAIMED-AND-ATTESTABLE acceptance criterion (declared script-mode, referenced by >= 1 " +
-      "evidence entry) carries >= 1 runner-attested entry; (3) the plan-wide attested/evidence " +
-      "ratio >= min_ratio, ONLY when min_ratio is explicitly configured.",
+      "milestoneReviewCurrent over assessMilestoneCurrency: the latest knowledge/milestone-review doc " +
+      "informs-linked to the plan, its stored fingerprint (plan id@version, every task id@version, the " +
+      "main commit that last landed one of its tasks) compared with the fingerprint now, and its " +
+      "dimensions checked for a `fail`. No review, a review of an older state, or a failing dimension refuses (BR-1372).",
     known_false_pass: [
-      "a plan claiming NO acceptance criteria at all passes the per-claimed-AC coverage " +
-        "conjunct vacuously (flagged earlier by plan-promote's verify-reachability advisory)",
-      "an unpopulated `planClaimedAcCoverage` ctx field used to fabricate an empty declared-" +
-        "criteria set and pass the coverage conjunct vacuously (fixed here; recorded because " +
-        "the delta is what the table exists to make readable)",
-      "a plan-wide run attests every claimed acceptance criterion regardless of which task's " +
-        "own declared scope it belongs to — measured across 8 tasks x 16 attested entries " +
-        "produced by 8 unrestricted `lore verify` runs on plan-implementation-plan-close-" +
-        "predicates-measure-invariants, the per-claimed-AC coverage conjunct passes while the " +
-        "invariant that EACH task's declared scope was actually exercised remains unproven",
+      "the judge is a model: a dimension it marks pass can still be wrong, which is why every dimension carries " +
+        "a reason and a reference a person can check, and a failing review never closes",
+      "a diff that could not be derived (no recorded landing) leaves the code-facing dimensions judged from " +
+        "documents and evidence only; the review records the diff source it had",
     ],
     known_false_block: [
-      "a plan whose claimed ACs are all attested but whose self-reported development evidence " +
-        "dominates the trail, when min_ratio is explicitly configured",
+      "any edit to the plan or one of its tasks after the review (even a cosmetic one that bumps a version) makes " +
+        "the review stale; the recovery is to run `lore assess` again",
     ],
-  },
-  [ATTESTATION_SCOPE_UNDECLARED_FIELD]: {
-    invariant:
-      "Work a closing plan reports as verified was audited against a scope its own task " +
-      "authors DECLARED — evidence must never be the thing that defines the set of criteria " +
-      "the evidence is judged against.",
-    measured:
-      "attestationFloor's third branch: reached only when the plan carries >= 1 verification " +
-      "evidence entry (the zero-evidence case returns notApplicable('no-evidence') first) AND " +
-      "deriveDeclaredScopeCoverage reports scope_undeclared — i.e. at least one EVIDENCE-BEARING " +
-      "task carries no readable extra.ac_scope. A task with no evidence is never consulted; an " +
-      "explicitly EMPTY ac_scope: [] is a declaration and satisfies this.",
-    known_false_pass: [
-      "one evidence-bearing task declaring a scope satisfies the conjunct for the WHOLE plan " +
-        "only if no OTHER evidence-bearing task is undeclared — but a task declaring a scope it " +
-        "did not actually exercise is indistinguishable here from one that did (the per-task " +
-        "declared-vs-exercised comparison is the attestation-floor field's own known delta)",
-    ],
-    known_false_block: [
-      "a legacy plan whose work predates the extra.ac_scope field entirely is denied at close " +
-        "even though its evidence may be sound — this is the deliberate one-time retroactive " +
-        "sweep (knowledge-retro-a-newly-built-gate-leaves-every-pre-existing); the audited " +
-        "recoveries are `lore scope add` or a typed plan-level attestation exemption",
-    ],
-  },
-  [ATTESTATION_EXEMPT_KIND_FIELD]: {
-    invariant:
-      "A plan declaring an attestation exemption must classify WHY under a closed taxonomy — " +
-      "a bare `attestation_exempt: true` with no typed kind must never silently satisfy the floor.",
-    measured:
-      "attestationExemptKindValid: vacuous pass when extra.attestation_exempt is not true; " +
-      "otherwise extra.attestation_exempt_kind validated against attestationExemptKindSchema " +
-      "(@lore/core) via .safeParse.",
-    known_false_pass: [],
-    known_false_block: [],
-  },
-  [CITED_RULE_STATE_FIELD]: {
-    invariant:
-      "A plan must not close over a baseline rule its spec's criteria cite while that rule is " +
-      "contradicted by a failing attested run, or stale (a citing spec's code anchors changed after " +
-      "the latest attested pass of its criterion, by any plan).",
-    measured:
-      "citedRuleStateClean over the offending list the caller derives from RuleStateService.full(): " +
-      "the rules cited by spec.extra.acceptance_criteria[].cites of the plan's resolved ancestor spec, " +
-      "filtered to state contradicted or stale. verified, unverified and unknown never refuse.",
-    known_false_pass: [
-      "a rule whose state is unknown (git unavailable, dirty run, no code anchors) or unverified " +
-        "(no attested run at all) is not refused even though nothing proves it holds",
-      "a fresh attested pass recorded by ANOTHER plan on the same spec makes the rule verified for " +
-        "this plan too — rule state is a function of the latest run per (spec, criterion), not of the " +
-        "closing plan's own tasks",
-    ],
-    known_false_block: [
-      "a rule that is stale only because an unrelated edit touched a shared code anchor path is " +
-        "refused although the behaviour it states still holds; the recovery is a fresh attested run",
-    ],
-  },
-  [ASSESSMENT_FRESHNESS_FIELD]: {
-    invariant:
-      "A plan's stored `lore assess` judgment must not predate task activity that landed AFTER " +
-      "it — the corpus's permanent quality record must never describe an intermediate state.",
-    measured:
-      "assessmentFreshness: vacuous pass when there is no linked assessment or no evidence/done " +
-      "task activity at all; otherwise the newest assessment's created_at compared " +
-      "lexicographically (ISO-8601) against the newest evidence/done AUDIT-row timestamp among " +
-      "the plan's tasks — never a doc's updated_at.",
-    known_false_pass: [],
-    known_false_block: [],
   },
 };
 
@@ -259,7 +167,7 @@ export const RECORD_EDIT_CONTRACT: Record<typeof RECORD_EDIT_FIELD, PredicateCon
  *   operator-facing explanation, not a machine-consumed payload).
  * @example
  * renderPredicateContractsExplain("plan-close");
- *   // => "Predicate contract table — plan-close:\n\nfield: uat\n..." (all 5 fields)
+ *   // => "Predicate contract table — plan-close:\n\nfield: uat\n..." (both fields)
  * @example
  * renderPredicateContractsExplain("spec-create");
  *   // => "No predicate contract table is recorded for checkpoint \"spec-create\" yet — ..."

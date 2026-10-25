@@ -3,10 +3,10 @@ id: KN-436
 type: knowledge
 role: knowledge
 title: "Assessment: Land read-side reachability: enumerable trace counts, knowledge code anchors under check-drift, and a store-level sub-type filter (2026-08-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-126
 links:

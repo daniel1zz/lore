@@ -2,13 +2,14 @@
  * `lore fragments render | check | pointers` — read-only, hook-facing context-fragment verbs.
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D7, D12, D13).
  *
- *   - `render --outlet hook:subagent-start [--agent-type T] [--cwd P] [--explain]`
- *       prints `{"hookSpecificOutput":{"hookEventName","additionalContext"}}` to stdout. For a hook
+ *   - `render --outlet hook:subagent-start|hook:user-prompt [--agent-type T] [--cwd P] [--explain]`
+ *       prints `{"hookSpecificOutput":{"hookEventName","additionalContext"}}` to stdout; an EMPTY hook:user-prompt
+ *       selection prints `{}` (nothing to add to the turn). For a hook
  *       outlet ANY failure still exits 0 and emits a <= 400-char banner carrying the error code (D12:
  *       hooks never block start, never emit nothing). `--outlet hook:session-start` is RETIRED (BR-912): exit 2
  *       with a stderr line naming it, never a render.
  *   - `check [--json]` enumerates every outlet × agent type; exits 4 on cap overflow, rules-file drift,
- *       override refusal, a dynamic main-session fragment (BR-1066) or Claude Code `language` drift (findings on stderr, or in the JSON report).
+ *       override refusal, a shipped fragment naming `user-prompt` or Claude Code `language` drift (findings on stderr, or in the JSON report).
  *   - `pointers --cwd P` prints the project pointer lines (<= POINTER_CEILING chars).
  *
  * Bootstrap-stage exemption (adapters/cli/CLAUDE.md "Key Invariants" #4, same as commands/governance.ts):
@@ -63,6 +64,7 @@ type Action = (typeof ACTIONS)[number];
 
 const HOOK_EVENT_NAMES: Readonly<Record<HookOutlet, string>> = {
   "hook:subagent-start": "SubagentStart",
+  "hook:user-prompt": "UserPromptSubmit",
 };
 
 /** The retired session-start outlet id (BR-912): refused with a usage error, never rendered. */
@@ -235,6 +237,11 @@ function usageError(io: CliIo, message: string): ExitReport {
 }
 
 function emitHookJson(io: CliIo, outlet: HookOutlet, additionalContext: string): void {
+  // reason: an empty per-turn selection adds nothing to the turn; a wrapped empty additionalContext would still be an injection event.
+  if (outlet === "hook:user-prompt" && additionalContext === "") {
+    io.stdout.write("{}\n");
+    return;
+  }
   io.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: HOOK_EVENT_NAMES[outlet], additionalContext } })}\n`,
   );
 }
@@ -244,7 +251,7 @@ async function runRender(args: Record<string, unknown>, cwd: string, inv: Invoca
   if (outlet === RETIRED_SESSION_START_OUTLET) {
     return usageError(inv.io, 
       `lore fragments render: outlet ${RETIRED_SESSION_START_OUTLET} is retired; the only render target is ${HOOK_OUTLETS.join("|")}. ` +
-        "Session-start upgrade advice comes from the session-start-resume hook, and dynamic main fragments are refused by `lore fragments check`.",
+        "Session-start upgrade advice comes from the session-start-resume hook; per-turn fragments use hook:user-prompt.",
     );
   }
   if (!isHookOutlet(outlet)) {
@@ -265,7 +272,10 @@ async function runRender(args: Record<string, unknown>, cwd: string, inv: Invoca
   if (args["explain"] === true) {
     for (const row of result.value.explain) inv.io.stderr.write(`explain: ${row.id} layer=${row.layer} chars=${row.chars}\n`);
   }
-  emitHookJson(inv.io, outlet, result.value.additionalContext);
+  // `--with-pointers`: one hook process gets fragments + project pointers from ONE lore call (AC-LG-7).
+  const pointers = args["with-pointers"] === true ? (await collectPointerText(cwd, inv)).trim() : "";
+  const context = [result.value.additionalContext, pointers].filter((part) => part !== "").join("\n\n");
+  emitHookJson(inv.io, outlet, context);
   return 0;
 }
 
@@ -297,7 +307,8 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   return 0;
 }
 
-async function runPointers(cwd: string, inv: Invocation): Promise<number> {
+/** Builds the project pointer lines (one `lore bootstrap --json` spawn); a skip reason other than no-corpus goes to stderr. */
+async function collectPointerText(cwd: string, inv: Invocation): Promise<string> {
   const projectRoot = resolveProjectRoot(cwd);
   // reason: from source the re-run is `bun <source entry>`; the Invocation carries no entry-script path, and the
   // entry (`packages/lore/src/index.ts`, the `bin` of packages/lore) is fixed relative to this module.
@@ -317,7 +328,12 @@ async function runPointers(cwd: string, inv: Invocation): Promise<number> {
   if (result.skipped !== undefined && result.skipped !== "no-corpus") {
     inv.io.stderr.write(`lore fragments pointers: no pointers emitted (${result.skipped})\n`);
   }
-  if (result.text.length > 0) inv.io.stdout.write(result.text);
+  return result.text;
+}
+
+async function runPointers(cwd: string, inv: Invocation): Promise<number> {
+  const text = await collectPointerText(cwd, inv);
+  if (text.length > 0) inv.io.stdout.write(text);
   return 0;
 }
 
@@ -326,15 +342,16 @@ export default defineLoreCommand({
     name: "fragments",
     description:
       "Read-only context-fragment verbs, bootstrap-stage (no corpus DB): " +
-      "`render --outlet hook:subagent-start` (hook JSON), " +
-      "`check [--json]` (caps, rules-file drift, override refusal, dynamic main fragments, language drift), " +
+      "`render --outlet hook:subagent-start|hook:user-prompt` (hook JSON), " +
+      "`check [--json]` (caps, rules-file drift, override refusal, shipped per-turn fragments, language drift), " +
       "`pointers --cwd P` (project pointer lines).",
   },
   args: {
     action: { type: "positional", description: "render | check | pointers", required: false },
-    outlet: { type: "string", description: "render: hook:subagent-start" },
+    outlet: { type: "string", description: "render: hook:subagent-start | hook:user-prompt" },
     "agent-type": { type: "string", description: "render: subagent type for hook:subagent-start" },
     cwd: { type: "string", description: "Project directory (default: current directory)" },
+    "with-pointers": { type: "boolean", description: "render: append the project pointer lines to the hook context", default: false },
     explain: { type: "boolean", description: "render: print per-fragment id/layer/chars to stderr", default: false },
     json: { type: "boolean", description: "check: print the report as JSON", default: false },
   },

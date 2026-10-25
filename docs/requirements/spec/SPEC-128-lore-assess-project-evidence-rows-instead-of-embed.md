@@ -3,10 +3,10 @@ id: SPEC-128
 type: spec
 role: spec
 title: "lore assess: project evidence rows instead of embedding the task body, and never author an absence finding against content the judge could not read"
-status: approved
+status: deprecated
 priority: high
 created: 2026-08-01
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 # lore assess: project evidence rows instead of embedding the task body, and never author an absence finding against content the judge could not read

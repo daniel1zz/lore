@@ -3,10 +3,10 @@ id: KN-437
 type: knowledge
 role: knowledge
 title: "Assessment: Land defect-channel honesty: a resolution-keyed cap, two non-derogatory terminal states, corpus-naming reads, and AC oracle generations (2026-08-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-127
 links:

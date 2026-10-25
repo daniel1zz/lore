@@ -58,12 +58,6 @@ if [ "$code" -ne 0 ]; then
   echo "pre-push: PRD outline budget check failed (exit $code) — tighten the over-budget section(s) (lore status --check-prd-budget) or push with --no-verify" >&2
   exit 1
 fi
-lore status --check-claude-md
-code=$?
-if [ "$code" -ne 0 ]; then
-  echo "pre-push: CLAUDE.md check failed (exit $code) — read the findings above: a budget finding means trim or evict the over-ceiling file(s), a section_missing / section_order finding means add or reorder the named root H2 section (lore status --check-claude-md); run \`lore governance claude-md\` for the content contract, or push with --no-verify" >&2
-  exit 1
-fi
 # Anchor-coverage ratchet, LAST because it is the only step here that is not the
 # `lore` binary: it is a REPO SCRIPT (scripts/check-anchor-coverage.ts), so the
 # fail-open preamble above — which gates on `lore` and `.lore/` — does not cover
@@ -93,28 +87,6 @@ if [ -f "$anchor_coverage_checker" ] && command -v bun >/dev/null 2>&1; then
   esac
 fi
 
-# Prose-pin guard (AC-TG-4): a test asserting a 5+ word sentence of shipped or
-# governing prose (assets, CLAUDE.md, SKILL.md, rules, docs) pins phrasing, not
-# behavior. Guarded by file existence AND `bun`, like the anchor-coverage step
-# above (a third-party project has no such script). Exit 1 = a pin or stale
-# ledger row the pusher must fix; any other code = the scan itself failed.
-prose_pin_checker="$(git rev-parse --show-toplevel)/scripts/check-prose-pins.ts"
-if [ -f "$prose_pin_checker" ] && command -v bun >/dev/null 2>&1; then
-  bun "$prose_pin_checker"
-  code=$?
-  case "$code" in
-    0) ;;
-    1)
-      echo "pre-push: prose-pin check failed (exit $code) — the report above names file:line; assert a heading or key token instead of the sentence, or add a row (consumer + reason) to scripts/prose-pin-ledger.json; or push with --no-verify" >&2
-      exit 1
-      ;;
-    *)
-      echo "pre-push: prose-pin check could not complete its scan (exit $code) — diagnose with \`bun scripts/check-prose-pins.ts\`, or push with --no-verify" >&2
-      exit 1
-      ;;
-  esac
-fi
-
 # Autonomy threshold integrity (AC-AU-9, ADR D8). Two checks, both on the `lore` binary:
 #  1. the governed threshold record still matches its decision-log chain — an edit made outside lore makes every
 #     autonomy class escalate, and a push that ships that state is refused (`lore status --check-autonomy-thresholds`);
@@ -126,7 +98,7 @@ fi
 lore status --check-autonomy-thresholds
 code=$?
 if [ "$code" -ne 0 ]; then
-  echo "pre-push: autonomy threshold integrity check failed (exit $code) — the threshold record was edited outside lore (lore status --check-autonomy-thresholds names it; a human restores trust with lore pending / lore decide), or push with --no-verify" >&2
+  echo "pre-push: autonomy threshold integrity check failed (exit $code) — the threshold record was edited outside lore (lore status --check-autonomy-thresholds names it; the human restores trust by answering the question lore pending --ask writes, in the agent session), or push with --no-verify" >&2
   exit 1
 fi
 lore autonomy verify-pushed-heads --record

@@ -19,7 +19,7 @@
  *     judgeDoc verbatim — even when the model's own JSON response includes its own `checks`
  *     field (llmReviewOutputSchema allows but ignores it), the deterministic pre-checks win
  *   - judge.provider === judge.model === activeProviderName (documented limitation);
- *     judge.prompt_version === REVIEW_PROMPT_VERSION ("v2" since SPEC-053)
+ *     judge.prompt_version === REVIEW_PROMPT_VERSION
  *
  * Adversarial angles:
  *   - A hardcoded-return service (`return ok({..., checks: someFixedArray})`) would defeat a
@@ -34,6 +34,7 @@
  * @spec_ref SPEC-034 §2, §4
  */
 
+import { REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, vi } from "vitest";
@@ -80,7 +81,7 @@ function makeReviewService(opts: { provider: InMemoryAIProvider; aiTelemetryEnab
     telemetry,
     opts.aiTelemetryEnabled ?? true,
     8000,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
+    { max_diff_chars: 24000 },
   );
   return { service, telemetry, emitCalls };
 }
@@ -155,7 +156,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
     expect(result.value.doc_version).toBe(bundle.doc.version);
   });
 
-  it("judge identity: provider === model === activeProviderName, prompt_version === 'v3'", async () => {
+  it("judge identity: provider === model === activeProviderName, prompt_version === REVIEW_PROMPT_VERSION", async () => {
     const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("my-custom-provider", { kind: "ok", content: VALID_JSON });
@@ -167,9 +168,9 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
     expect(result.value.judge).toEqual({
       provider: "my-custom-provider",
       model: "my-custom-provider",
-      // reason: judgeDoc stamps the currently-active REVIEW_PROMPT_VERSION (v1 → v2 SPEC-053, v2 → v3 #126),
-      // so a real judge run now records "v5" (v3 → v4 BR-1237, v4 → v5 refined design_necessity rule).
-      prompt_version: "v5",
+      // reason: judgeDoc stamps the currently-active REVIEW_PROMPT_VERSION; read from the constant so a version bump
+      // (v7 removed the AC-quantifiability advisory, BR-1369) never leaves a stale literal here.
+      prompt_version: REVIEW_PROMPT_VERSION,
     });
   });
 

@@ -3,7 +3,7 @@
  * Extracted from `commands/pending.ts` for testability — `commands/pending.ts`
  * transitively imports `loader.ts` (`bun:sqlite`), which vitest cannot resolve,
  * but this module imports only `@lore/core` + `./utils.js` (both vitest-safe).
- * Mirrors `assess-render.ts`/`review-render.ts`'s identical split, same reason.
+ * Mirrors `status-stamp-verdict.ts`/`review-render.ts`'s identical split, same reason.
  *
  * Public surface:
  *   - PENDING_TABLE_HEADERS — the column header row (SSOT — `commands/pending.ts`

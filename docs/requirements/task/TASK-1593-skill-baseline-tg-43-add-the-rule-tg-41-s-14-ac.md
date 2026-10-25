@@ -3,7 +3,7 @@ id: TASK-1593
 type: task
 role: plan
 title: "[Skill:baseline] TG-43 add the rule TG-41's 14 AC corrections need, then replace their citation exemptions (expire 2026-11-17)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 3b: one runner"
 created: 2026-10-18

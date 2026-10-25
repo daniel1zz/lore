@@ -3,10 +3,10 @@ id: KN-476
 type: knowledge
 role: knowledge
 title: "Assessment: Teach the change-scoped selector about hooks/ and assets/, so a hook edit can no longer silence the two tests that prove pre-push is wired (2026-08-19)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-19
-updated: 2026-08-19
+updated: 2026-10-23
 tags: []
 parent: PLAN-130
 links:

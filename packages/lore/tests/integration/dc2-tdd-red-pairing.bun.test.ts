@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/**
+// @reads assets/project/reference-transaction
 // @reads packages/lore/package.json
 // @reads package.json
 // @reads scripts/embed-assets-manifest.mjs
@@ -17,11 +18,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { buildManifest } from "../../../../scripts/embed-assets-manifest.mjs";
 
@@ -137,7 +140,12 @@ describe(`${ID} (b) — one red-first task closes red then green`, () => {
     git(["commit", "-q", "-m", "implementation"], dir);
     mustRun(["evidence", task, "--oracle", "test", "--command", cmd, "--result", "pass", "--capture"], dir);
     git(["checkout", "-q", "main"], dir);
-    git(["merge", "-q", "--no-ff", "-m", "land", "feat-red-first"], dir);
+    // landed through `lore integrate`, which records the landing `lore done` requires (BR-1291)
+    appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
+    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
+    git(["checkout", "-q", "--detach", "main"], dir); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+    mustRun(["integrate", "feat-red-first", "--session", "dc2-red-session"], dir);
 
     const closed = runLore(["done", task], dir);
     expect(closed.text).not.toMatch(/\[floor:/);

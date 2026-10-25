@@ -21,6 +21,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getSessionDir, readHookPayload } from './lib/turn-state.mjs';
 import { readHeadState, snapshotWorkingTree } from './lib/session-trail.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:user-prompt-turn-start');
 
 /**
  * The record written to `turn-start-snapshot.json`. When no snapshot could be taken (not a repo /

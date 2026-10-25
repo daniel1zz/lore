@@ -3,7 +3,7 @@ id: TASK-1600
 type: task
 role: plan
 title: "[Skill:fix] TG-44 an exemption whose criterion now cites a live rule stops counting as active (satisfied state), so replacing exemptions with cites frees the 10% cap"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 3b: one runner"
 created: 2026-10-18

@@ -3,7 +3,7 @@ id: PLAN-208
 type: plan
 role: plan
 title: "Ambient state read once at the entry: owned-only prune, user-state guard, rooted writes, one Invocation"
-status: approved
+status: deprecated
 priority: high
 created: 2026-10-18
 updated: 2026-10-18

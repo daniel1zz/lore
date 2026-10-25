@@ -1,5 +1,7 @@
 // @spawns scripts/seed-write-spec-rule.ts
 // @reads scripts/check-unclaimed-oracle.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore invalidate` / `lore create --supersedes` / `--include-invalid` / `lore status`
  * warning — CLI-adapter exit-code + wiring contract tests (SPEC-043 §Design Decisions
@@ -43,7 +45,7 @@
  * is the sole executable venue for it): the "--raw NEVER carries the banner"
  * REGRESSION check is exercised HERE (compiled-binary spawn) rather than in AC-MH-7's
  * vitest suite, because `get.ts` transitively imports `loader.ts` → `bun:sqlite`,
- * which vitest cannot resolve (same constraint documented on `assess-render.ts`/
+ * which vitest cannot resolve (same constraint documented on `status-stamp-verdict.ts`/
  * `handoff-input.ts`). AC-MH-7's vitest suite covers the banner FORMAT pinned cases
  * (no-reason, deleted-successor, no-banner-on-valid) via the shared
  * `renderDocMarkdown`/`ExportDocsService` functions `get.ts` itself delegates to.
@@ -124,7 +126,8 @@ async function createPlan(tmpDir: string, title: string): Promise<string> {
  *  compiled binary, mirroring how CI/deploy runs this script (module header). */
 function seedFeedingSkill(tmpDir: string): { slug: string } {
   const dbPath = join(tmpDir, ".lore", "lore.db");
-  const proc = Bun.spawnSync(["bun", SEED_SCRIPT, dbPath]);
+  // reason: cwd is the corpus, so the test run's known-party spawn rewrite registers the seed's run in THIS corpus.
+  const proc = Bun.spawnSync(["bun", SEED_SCRIPT, dbPath], { cwd: tmpDir });
   if (proc.exitCode !== 0) {
     throw new Error(`seed-write-spec-rule failed: ${proc.stderr.toString()}`);
   }

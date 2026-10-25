@@ -1,9 +1,9 @@
 // @layer service-review-truncation-record AC-ADF-8
 /**
- * AC-CRIT-2 — every cut section (doc body AND parent) is RECORDED on the stored judgment as
- * `truncation: [{section, shown_chars, total_chars}]` with the real lengths, `truncated: true`
- * stays for a cut body (AC-ADF-8), inputs that fit store NO `truncation` key, and the CLI
- * prints one line per cut section.
+ * AC-CRIT-2 — every cut section is RECORDED on the stored judgment as
+ * `truncation: [{section, shown_chars, total_chars}]` with the real lengths, inputs that fit store NO
+ * `truncation` key, and the CLI prints one line per cut section. Since D9 (BR-268) only the parent can be cut:
+ * the document under review is rendered whole and no judgment is stamped `truncated`.
  *
  * @spec_ref AC-CRIT-2
  */
@@ -37,8 +37,8 @@ function makeReviewService(provider: InMemoryAIProvider) {
     telemetry,
     false,
     8000,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
-    { max_doc_chars: 12000, max_context_chars: 8000 },
+    { max_diff_chars: 24000 },
+    { max_context_chars: 8000 },
   );
 }
 
@@ -70,27 +70,24 @@ async function judgeAndRecord(parentContent: string, specContent: string) {
 }
 
 describe("review judgment — truncation record (AC-CRIT-2)", () => {
-  it("AC-CRIT-2: body and parent both cut -> truncated stays true, two entries with the REAL lengths, two CLI lines", async () => {
+  it("AC-CRIT-2: a long body and a cut parent -> only the parent is recorded, with the REAL lengths, one CLI line, no truncated stamp", async () => {
     const parent = "## P1\n" + "p".repeat(9500) + "\n## D8\nlate\n";
     const body = "## B1\n" + "b".repeat(13000);
     const { bundle, judgment } = await judgeAndRecord(parent, body);
 
-    expect(judgment.truncated).toBe(true);
-    expect(judgment.truncation).toHaveLength(2);
-    const doc = judgment.truncation!.find((t) => t.section === "doc")!;
-    const par = judgment.truncation!.find((t) => t.section === "parent")!;
-    expect(doc.total_chars).toBe(bundle.doc.content.length);
-    expect(doc.shown_chars).toBe(12000);
+    expect(judgment.truncated).toBeUndefined();
+    expect(judgment.truncation).toHaveLength(1);
+    const par = judgment.truncation![0]!;
+    expect(par.section).toBe("parent");
     expect(par.total_chars).toBe(bundle.parent!.content.length);
     expect(par.shown_chars).toBe(8000);
 
     const block = renderTruncationBlock(judgment);
-    expect(block.split("\n").filter((l) => l.includes(" cut: "))).toHaveLength(2);
-    expect(block).toContain(`doc cut: showed 12000 of ${bundle.doc.content.length} chars`);
+    expect(block.split("\n").filter((l) => l.includes(" cut: "))).toHaveLength(1);
     expect(block).toContain(`parent cut: showed 8000 of ${bundle.parent!.content.length} chars`);
   });
 
-  it("only the parent cut -> no truncated flag, one parent entry (AC-ADF-8 flag stays doc-only)", async () => {
+  it("only the parent cut -> no truncated flag, one parent entry", async () => {
     const { judgment } = await judgeAndRecord("## P1\n" + "p".repeat(9500), "small body");
     expect(judgment.truncated).toBeUndefined();
     expect(judgment.truncation).toHaveLength(1);

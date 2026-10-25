@@ -56,10 +56,9 @@
  *          files edited by hand, named) and the command to run before other work
  *          (`lore setup`, `lore setup --project`). Hand-edited files are named
  *          and never advised to be replaced. Both in sync -> nothing. No rule
- *          text is injected. A missing / unparseable / expired cache fires a
- *          DETACHED, UNREF'D refresh of that side (`lore setup --check --json` /
- *          `lore setup --project --check --json` in the repo; never awaited) and
- *          is never read as "in sync". `LORE_SETUP_NO_CHECK=1` is a hard
+ *          text is injected. A missing / unparseable / expired cache
+ *          is never read as "in sync" and emits nothing; the hook spawns no
+ *          `lore setup --check` (only `lore setup` writes the cache). `LORE_SETUP_NO_CHECK=1` is a hard
  *          kill-switch checked BEFORE any cache read.
  *
  *          Known gap (documented, not silently dropped): SPEC-076 §C6's
@@ -99,8 +98,10 @@ import {
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { spawnSync, spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readHookPayload, resolveSessionId } from './lib/turn-state.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:session-start-resume');
 
 // No longer read for a roster (removed 2026-07-17 — harness lists agents
 // natively); retained because Phase D derives <claude-dir> as its dirname,
@@ -382,23 +383,6 @@ Action: Check installation. Non-critical features are unaffected.`;
 // ── Phase F: session-start upgrade advisory — cache-first, global + project ─
 // See this file's module-header "Phase F" note for the full contract.
 
-/**
- * Fires a DETACHED, UNREF'D `lore setup [--project] --check --json` refresh —
- * never awaited, never blocks this session. `scopeArgs` / `tailArgs` wrap the
- * fixed `--check --json`; `cwd` pins the project refresh to
- * the repo whose cache was read. An 'error' listener turns a missing `lore`
- * binary (ENOENT) into a swallowed async event — fail-open (I6).
- */
-function spawnDetachedSetupCheck(scopeArgs, tailArgs, cwd) {
-  try {
-    const child = spawn('lore', ['setup', ...scopeArgs, '--check', '--json', ...tailArgs], { detached: true, stdio: 'ignore', ...(cwd ? { cwd } : {}) });
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    // Fail-open — spawn() throwing synchronously (rare) must never block session start.
-  }
-}
-
 /** Nearest ancestor of `start` holding a `.lore/` directory, or null (no project side then). */
 function findProjectRoot(start) {
   let dir = resolve(start);
@@ -418,7 +402,7 @@ function findProjectRoot(start) {
  * Reads one check cache. Returns { kind: 'usable', cache } for a parsed,
  * well-shaped, <24h cache; { kind: 'refresh' } for a missing / unparseable /
  * mis-shaped / expired one. A cache that fails to parse is NEVER read as
- * "in sync" (BR-1086) — it schedules a refresh instead.
+ * "in sync" (BR-1086) — it yields no advisory for that side.
  */
 function readCheckCache(cachePath) {
   let cache = null;
@@ -486,22 +470,20 @@ try {
       label: 'global',
       command: '`lore setup`',
       read: readCheckCache(join(claudeDir, SETUP_CHECK_CACHE_FILENAME)),
-      refresh: () => spawnDetachedSetupCheck([], ['--claude-dir', claudeDir]),
     }];
     if (projectRoot !== null) {
       sides.push({
         label: 'project',
         command: '`lore setup --project`',
         read: readCheckCache(join(projectRoot, PROJECT_CHECK_CACHE_RELATIVE_PATH)),
-        refresh: () => spawnDetachedSetupCheck(['--project'], [], projectRoot),
       });
     }
 
     const behind = [];
     for (const side of sides) {
-      if (side.read.kind === 'refresh') {
-        side.refresh(); // this session gets nothing from this side; the NEXT one may see a fresh cache
-      } else if (side.read.cache.status === 'stale' && side.read.cache.reminder_enabled !== false) {
+      // a missing / expired / unreadable cache says nothing about this side (never read as "in sync");
+      // only `lore setup` writes the cache — this hook spawns no `lore setup --check` (AC-LG-7).
+      if (side.read.kind === 'usable' && side.read.cache.status === 'stale' && side.read.cache.reminder_enabled !== false) {
         // `reminder_enabled === false` is stamped only when `setup.check_reminder`
         // resolved to false; absence (legacy cache) means enabled — fail-open.
         behind.push({ ...describeBehindSide(side.label, side.read.cache), command: side.command });

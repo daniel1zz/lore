@@ -4,7 +4,7 @@
  * Purpose: turn "is this process a human on an interactive terminal, outside any agent harness?" into one checked
  * proof (`HumanChannelProof`) that `DecisionService.resolvePending` demands before it writes a `human-tty` record.
  * Public surface: checkHumanChannelPreconditions, confirmHumanNonce, proveHumanChannel, findAgentHarnessAncestor,
- *   findAgentEnvMarker, snapshotAncestry, isIssuedHumanChannelProof, HumanChannelPorts, HumanChannelProof,
+ *   findAgentEnvMarker, snapshotAncestry, isIssuedHumanChannelProof, issueHarnessAskProof, HumanChannelPorts, HumanChannelProof,
  *   HumanChannelRefusal, HUMAN_CHANNEL_REFUSAL_EXIT.
  * Invariants:
  *   - Checks run in a fixed order and the FIRST failure names its rule: `tty-required` (stdin AND stdout are a TTY,
@@ -68,24 +68,34 @@ export interface AncestrySnapshotEntry {
 
 /** The controlling terminal (/dev/tty in production). */
 export interface HumanTerminal {
+  /** @lore-site BR-1250 */
   write(text: string): void;
   /** Blocks until the human submits a line; returns it without the line terminator. */
+  /** @lore-site BR-1250 */
   readLine(): string;
   close(): void;
 }
 
 /** Everything the channel needs from the outside world; production wiring is adapters/real-human-channel-port.ts. */
 export interface HumanChannelPorts {
+  /** @lore-site BR-1249 */
   stdinIsTty(): boolean;
+  /** @lore-site BR-1249 */
   stdoutIsTty(): boolean;
+  /** @lore-site BR-1249 */
   env(): Readonly<Record<string, string | undefined>>;
   /** argv after the program name, as the OS delivered it (before any harness-run flag stripping). */
+  /** @lore-site BR-1249 */
   argv(): readonly string[];
+  /** @lore-site BR-1249 */
   selfPid(): number;
+  /** @lore-site BR-1249 */
   readProcessTable(): HumanChannelOutcome<readonly ProcessEntry[], string>;
   /** Fresh per call. */
+  /** @lore-site BR-1250 */
   newNonce(): string;
   /** null when the process has no controlling terminal. */
+  /** @lore-site BR-1249 */
   openTerminal(): HumanTerminal | null;
 }
 
@@ -95,6 +105,8 @@ declare const humanChannelProofBrand: unique symbol;
 export interface HumanChannelProof {
   readonly [humanChannelProofBrand]: true;
   readonly channel: "human-tty";
+  /** How the human answered: at a terminal (`terminal`) or in the agent session through the harness (`harness-ask`, BR-1374). */
+  readonly via: "terminal" | "harness-ask";
   readonly ancestry: readonly AncestrySnapshotEntry[];
   readonly verified_at: string;
 }
@@ -235,6 +247,7 @@ export function confirmHumanNonce(
     }
     const proof = {
       channel: "human-tty" as const,
+      via: "terminal" as const,
       ancestry: preconditions.ancestry,
       verified_at: new Date().toISOString(),
     } as unknown as HumanChannelProof;
@@ -243,6 +256,20 @@ export function confirmHumanNonce(
   } finally {
     terminal.close();
   }
+}
+
+/**
+ * The proof for an answer the harness reported (BR-1374): the human picked Accept or Reject in the interactive question
+ * lore wrote, and the PostToolUse hook handed that answer to `lore decide --from-harness`.
+ *
+ * ⛔ Call ONLY after `service/harness-answer.ts` verified the nonce (issued, latest, unused, consumed now), the decision
+ * id and subject version, and that the question hashes to the value bound to the nonce. No ancestry is recorded: the
+ * caller is a hook under the harness by design.
+ */
+export function issueHarnessAskProof(verifiedAt: string): HumanChannelProof {
+  const proof = { channel: "human-tty" as const, via: "harness-ask" as const, ancestry: [], verified_at: verifiedAt } as unknown as HumanChannelProof;
+  issuedProofs.add(proof);
+  return proof;
 }
 
 /** Preconditions then nonce in one call — the injectable seam in-process callers and tests use. */

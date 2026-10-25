@@ -739,13 +739,22 @@ describe("OutlineService.resolve", () => {
         countTraceEventsByKind: (window) => store.countTraceEventsByKind(window),
         countTraceDenyByCheckpoint: (window) => store.countTraceDenyByCheckpoint(window),
         countTraceZeroHitSearches: (window) => store.countTraceZeroHitSearches(window),
-        countNeverReadDocs: (window) => store.countNeverReadDocs(window),
         // reason: spec-a-write-side-fact-with-no-read-side-address-counts-with-no
         // §Scope M1 — new required StoreInterface methods (the member lists the
         // two counts above are now DERIVED from); mechanical addition (same class
         // of fix as every other explicit delegate above).
         listTraceZeroHitSearches: (window, opts) => store.listTraceZeroHitSearches(window, opts),
-        listNeverReadDocs: (window) => store.listNeverReadDocs(window),
+        incrementReadCount: (day) => store.incrementReadCount(day),
+        listReadCounts: (sinceDay) => store.listReadCounts(sinceDay),
+        acquireLease: (name, holder, nowIso, expiresAtIso) => store.acquireLease(name, holder, nowIso, expiresAtIso),
+        renewLease: (name, holder, expiresAtIso) => store.renewLease(name, holder, expiresAtIso),
+        releaseLease: (name, holder) => store.releaseLease(name, holder),
+        readLease: (name) => store.readLease(name),
+        appendCheckOutcomes: (rows) => store.appendCheckOutcomes(rows),
+        listCheckOutcomeStats: () => store.listCheckOutcomeStats(),
+        issuePendingAsk: (input) => store.issuePendingAsk(input),
+        readPendingAsk: (nonce) => store.readPendingAsk(nonce),
+        consumePendingAsk: (nonce, usedAt) => store.consumePendingAsk(nonce, usedAt),
         listTraceGateDenies: (window) => store.listTraceGateDenies(window),
         listTraceRawSearchQueries: (window) => store.listTraceRawSearchQueries(window),
         pruneTraceEvents: (cutoffIso, batchSize) => store.pruneTraceEvents(cutoffIso, batchSize),
@@ -766,6 +775,7 @@ describe("OutlineService.resolve", () => {
         listDecisionLog: (subject) => store.listDecisionLog(subject),
         // reason: AC-AU-5 — new required StoreInterface methods (run process record, run lifecycles).
         recordRunProcess: (id, proc) => store.recordRunProcess(id, proc),
+        recordRunAddress: (id, address) => store.recordRunAddress(id, address),
         listRunLifecycles: () => store.listRunLifecycles(),
         // reason: AC-AU-9 — new required StoreInterface methods (governed autonomy threshold record).
         readAutonomyThresholds: () => store.readAutonomyThresholds(),

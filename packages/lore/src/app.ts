@@ -19,9 +19,10 @@
 import { warnSinkOf, type WarnSink } from "./service/warn-sink.js";
 import { Database } from "bun:sqlite";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
-import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
+import { TursoStore, probeTmpdirUsability, type TursoConfig } from "./store/turso-store.js";
 import type { StoreInterface } from "./store/store-interface.js";
 import { CorpusService, type DocWritePort } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
@@ -35,7 +36,6 @@ import {
   resolveSyncCredentials,
   resolveClaimTtlMinutes,
   resolveHandoffTtlMinutes,
-  resolveAuditVerifySince,
   resolveVerifyDefaultTimeoutMs,
   resolveVerifyEnvConfig,
   resolveVerifyRequireCommandApproval,
@@ -74,6 +74,7 @@ import { SyncDocsService } from "./service/sync-docs-service.js";
 import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
+import { BranchOwnershipReader } from "./service/own-diff-judgment.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
@@ -99,7 +100,9 @@ import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js"
 import { createRealProcessTablePort } from "./adapters/process-table-port.js";
 import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
-import { PlanExemptionService } from "./service/plan-exemption-service.js";
+import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
+import { MilestoneReviewService } from "./service/milestone-review-service.js";
+import { RetiredAcService } from "./service/retired-ac-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import type { StateBindingOccupancyPort } from "./service/verify-runner-service.js";
@@ -109,6 +112,7 @@ import { GateEnforcer } from "./service/gate-enforcer.js";
 import { RecordLockService } from "./service/record-lock-service.js";
 import { TraceRecorder } from "./service/trace-recorder.js";
 import { TraceStatsService } from "./service/trace-stats-service.js";
+import { CheckStatsService, hookOutcomesFilePath } from "./service/check-stats-service.js";
 import { pruneTraceEventsOpportunistically } from "./service/trace-retention.js";
 import { VerificationProjectionService } from "./service/verification-projection-service.js";
 import { SessionService } from "./service/session-service.js";
@@ -139,10 +143,11 @@ import { ResolutionProjector } from "./service/resolution-projector.js";
 // this is no longer "optional here, absent in production").
 import { GhResolutionLabelPort } from "./service/resolution-label-port.js";
 import { GhRunner, createNodeGhExecFile } from "./service/gh-runner.js";
+import { GitHubIntakePort } from "./service/github-intake-port.js";
 import { GhIssueCloser } from "./service/issue-closer-port.js";
 import { IssueCloseOnArchive } from "./service/issue-close-on-archive.js";
 import { classifyFeedbackUpstream, isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "./adapters/cli/report-issue-wiring.js";
-import { GitHubIntakePort } from "./service/github-intake-port.js";
+import { BulkLifecycleService } from "./service/bulk-lifecycle-service.js";
 
 export interface App {
   /**
@@ -151,6 +156,10 @@ export interface App {
    */
   warn: WarnSink;
   corpusService: CorpusService;
+  /** `lore bulk` / MCP `lore_bulk`: many documents through one gated lifecycle verb, preview then apply (BR-1366). */
+  // reason: optional like `acService`/`phaseWorkflowService` — hand-built App test stubs stay valid; both composition
+  // roots always wire it, and the CLI/MCP adapters read it through `requireBulkLifecycleService`.
+  bulkLifecycleService?: BulkLifecycleService;
   reviewService: ReviewService;
   versionService: VersionService;
   outlineService: OutlineService;
@@ -196,6 +205,13 @@ export interface App {
    * Source: SPEC-025 §3 D5, §9.1
    */
   taskWorkflowService: TaskWorkflowService;
+  /**
+   * BranchOwnershipReader — which tasks belong to a branch (claimed on it, or of a plan declaring it the integration
+   * branch) and which other tasks hold work that has not landed; read by `lore integrate`'s own-diff judgment (BR-1346..1348).
+   * Optional only so partial `App` stubs in adapter tests still type-check; both composition roots always set it, and
+   * `lore integrate` refuses loudly when it is absent (never lands unjudged).
+   */
+  branchOwnershipReader?: BranchOwnershipReader;
   /**
    * PhaseWorkflowService — the `phase` doc-type generalization of
    * `TaskWorkflowService`'s claim/release/evidence/ready mechanics (SPEC-056 D2,
@@ -264,7 +280,7 @@ export interface App {
    */
   judgmentService: JudgmentService;
   /**
-   * Read-only decision-log view for the dashboard's GET /api/decisions, /api/decisions/:id, /api/audit-items
+   * Read-only decision-log view for the dashboard's GET /api/decisions, /api/decisions/:id
    * (HR-T3). Only its pure `read*` methods may be called from HTTP: `listPending` appends stale-close markers.
    * Optional so test App literals stay valid; the routes answer 503 when absent.
    */
@@ -494,12 +510,24 @@ export interface App {
    */
   recordLockService?: RecordLockService;
   /**
-   * PlanExemptionService — the sole writer of a plan's audited plan-close
-   * exemptions (`lore plan exempt-attestation` / `exempt-assessment-freshness`,
-   * SPEC-069 D1 + SPEC-106 D4). Store-only, same optional-DI shape as
+   * PlanIntegrationBranchService — the sole writer of a plan's `extra.integration_branch`
+   * (`lore plan integration-branch`). Store-only, same optional-DI shape as
    * `acService`/`requirementService`; always wired in production.
    */
-  planExemptionService?: PlanExemptionService;
+  planIntegrationBranchService?: PlanIntegrationBranchService;
+  /**
+   * MilestoneReviewService — the sole writer of a plan's milestone review (`lore assess`, BR-1372). Ports only
+   * (plan bundle, cited-rule state, decision log, judge, guarded doc create, link); optional like the other
+   * DI services so bare test stubs stay valid; always wired in production.
+   */
+  milestoneReviewService?: MilestoneReviewService;
+  /**
+   * RetiredAcService — lists the ACs retired during a plan and settles the owner's one confirmation (`lore assess`,
+   * plan close). Optional like the other DI services; always wired in production.
+   */
+  retiredAcService?: RetiredAcService;
+  /** The store's lease verbs, for the post-landing review batch lease (BR-1379); optional like the other late additions. */
+  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "renewLease" | "releaseLease" | "readLease">;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -585,6 +613,11 @@ export interface App {
    */
   traceStatsService?: TraceStatsService;
   /**
+   * BR-1373 — per-check runs/denials, removal candidates and per-plan escaped defects (`lore checks stats`).
+   * Optional for the same "hand-built App test stubs stay valid" reason as `traceStatsService`; always wired in production.
+   */
+  checkStatsService?: CheckStatsService;
+  /**
    * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
    * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
    * on `App` so the CLI adapter can fire the HOOK-layer deny trace
@@ -656,6 +689,7 @@ export interface App {
    *
    * Source: SPEC-024 §9.3
    */
+  /** @lore-site BR-539 */
   resolveAiDefault(explicit: boolean | undefined): { ai: boolean; source: AiDefaultSource };
   /**
    * Build a sibling App over the same corpus whose store is wrapped for ONE invocation identity
@@ -721,8 +755,6 @@ export function buildStateBindingOccupancyPort(writer: DocWritePort): StateBindi
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  * @param handoffTtlMinutes - Handoff staleness TTL in minutes (SPEC-041 §3 D5; default
  *   10080 = 7 days) — feeds `SessionService.resume`'s `ttl_warning` threshold
- * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
- *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
  *   default 300000)
  * @param verifyEnvConfig - Trusted-runner env-passthrough allowlist config (SPEC-039 §M2;
@@ -792,7 +824,6 @@ function buildAppFromSqlite(
   aiDefaultPerSurface: AiDefaultPerSurface | undefined,
   claimTtlMinutes: number = 120,
   handoffTtlMinutes: number = 10_080,
-  auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
   verifyRequireCommandApproval: boolean = true,
@@ -946,6 +977,10 @@ function buildAppFromSqlite(
   // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
+  // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
+  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
+  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
+  wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
@@ -953,11 +988,11 @@ function buildAppFromSqlite(
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
-  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
+    bulkLifecycleService: new BulkLifecycleService(corpusService, taskWorkflowService),
     ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
@@ -990,6 +1025,7 @@ function buildAppFromSqlite(
     }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store, recordLockService, corpusService),
+    branchOwnershipReader: new BranchOwnershipReader(store),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
@@ -1049,7 +1085,7 @@ function buildAppFromSqlite(
     // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
-    auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    auditService: new AuditService(store),
     auditVerifyRunner,
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
@@ -1062,17 +1098,29 @@ function buildAppFromSqlite(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
     ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
-    // reason: PlanExemptionService is store-only, same shape as RequirementService
-    // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
-    // fields, which were gate-read with no authoring surface before it existed.
-    planExemptionService: new PlanExemptionService(store, corpusService),
+    // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
+    // `extra.integration_branch`.
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
+    // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
+    retiredAcService,
+    reviewLeaseStore: store,
+    milestoneReviewService: new MilestoneReviewService({
+      listRetiredAcs: (bundle) => retiredAcService.collect(bundle),
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+      getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
+      listDecisionLog: () => store.listDecisionLog(),
+      judge: aiProviderService.judgeMilestone.bind(aiProviderService),
+      createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
+      link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+    }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
     // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
@@ -1142,6 +1190,12 @@ function buildAppFromSqlite(
     // shape as AuditService/DriftCheckService — always constructed regardless
     // of trace.enabled (a disabled corpus just reports all-zero counts).
     traceStatsService: new TraceStatsService(store),
+    checkStatsService: new CheckStatsService({
+      store,
+      now: () => new Date().toISOString(),
+      hookOutcomesPath: hookOutcomesFilePath(ambient.env, homedir()),
+      projectRoot: repoRoot,
+    }),
     // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
     // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
     // hook-layer deny trace directly (see this field's App JSDoc).
@@ -1196,8 +1250,6 @@ function buildAppFromSqlite(
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  * @param handoffTtlMinutes - Handoff staleness TTL in minutes (SPEC-041 §3 D5; default
  *   10080 = 7 days) — see `buildAppFromSqlite`'s identical parameter JSDoc.
- * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
- *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
  *   default 300000)
  * @param verifyEnvConfig - Trusted-runner env-passthrough allowlist config (SPEC-039 §M2;
@@ -1234,7 +1286,6 @@ function buildAppFromTurso(
   aiDefaultPerSurface: AiDefaultPerSurface | undefined,
   claimTtlMinutes: number = 120,
   handoffTtlMinutes: number = 10_080,
-  auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
   verifyRequireCommandApproval: boolean = true,
@@ -1363,6 +1414,10 @@ function buildAppFromTurso(
   // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
+  // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
+  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
+  const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
+  wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
@@ -1370,11 +1425,11 @@ function buildAppFromTurso(
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
-  const ruleChangeService = new RuleChangeService(store, recordLockService, corpusService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
+    bulkLifecycleService: new BulkLifecycleService(corpusService, taskWorkflowService),
     ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
@@ -1407,6 +1462,7 @@ function buildAppFromTurso(
     }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store, recordLockService, corpusService),
+    branchOwnershipReader: new BranchOwnershipReader(store),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
@@ -1461,7 +1517,7 @@ function buildAppFromTurso(
     // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
-    auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    auditService: new AuditService(store),
     auditVerifyRunner,
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
@@ -1474,17 +1530,29 @@ function buildAppFromTurso(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
     ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
-    // reason: PlanExemptionService is store-only, same shape as RequirementService
-    // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
-    // fields, which were gate-read with no authoring surface before it existed.
-    planExemptionService: new PlanExemptionService(store, corpusService),
+    // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
+    // `extra.integration_branch`.
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
+    // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
+    retiredAcService,
+    reviewLeaseStore: store,
+    milestoneReviewService: new MilestoneReviewService({
+      listRetiredAcs: (bundle) => retiredAcService.collect(bundle),
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+      getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
+      listDecisionLog: () => store.listDecisionLog(),
+      judge: aiProviderService.judgeMilestone.bind(aiProviderService),
+      createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
+      link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+    }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
     // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
@@ -1541,6 +1609,12 @@ function buildAppFromTurso(
     // just as valid over the replica's local view, and this keeps ONE
     // TraceStatsService construction shape across both branches.
     traceStatsService: new TraceStatsService(store),
+    checkStatsService: new CheckStatsService({
+      store,
+      now: () => new Date().toISOString(),
+      hookOutcomesPath: hookOutcomesFilePath(ambient.env, homedir()),
+      projectRoot: repoRoot,
+    }),
     // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
     // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
     // hook-layer deny trace directly (see this field's App JSDoc).
@@ -1632,6 +1706,65 @@ function buildIssueIntake(config: LoreConfig | undefined, ambient: AppAmbient, c
   return ok(new GitHubIntakePort({ runner, repo: classification.cfg.repo, receiptsPath: join(corpusRoot, ".lore", "issue-receipts-v2.jsonl") }));
 }
 
+/**
+ * Hands plan close the live OPEN-issue reader (Part D, accepted with known defects), only for a GitHub-repo
+ * `feedback.upstream` (never the vendor-consent intake repository).
+ */
+function wirePlanCloseIssues(app: App, config: LoreConfig | undefined, ambient: AppAmbient, dbPath: string): void {
+  const upstream = resolveFeedbackUpstreamCfg(config);
+  if (upstream === undefined || !isGithubUpstreamCfg(upstream)) return;
+  const repo = upstream.repo;
+  app.corpusService.setPlanCloseIssuePort({
+    listOpenIssues: async () => {
+      const runner = new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env });
+      const port = new GitHubIntakePort({ runner, repo, receiptsPath: join(dirname(dbPath), "issue-receipts-v2.jsonl") });
+      const verified = await port.verifyTarget();
+      if (!verified.ok) return verified;
+      // reason: #402 — plan close needs EVERY open issue (all pages), not the newest 100 of any state.
+      const listed = await port.listOpenIssues();
+      if (!listed.ok) return listed;
+      return ok({
+        repoId: verified.value.id,
+        open: listed.value.map((issue) => ({ number: issue.number, title: issue.title })),
+      });
+    },
+  });
+}
+
+/**
+ * Opens the embedded replica for a sync-enabled corpus. The one production implementation is
+ * {@link openTursoReplicaStore}; a test installs a double through {@link installReplicaStoreFactory}.
+ * Throws when the replica cannot open (remote unreachable, bad credentials): `createApp` turns the throw into a
+ * `STORE_ERROR` result naming the remote address — it never falls back to the local file.
+ */
+export type ReplicaStoreFactory = (config: TursoConfig) => TursoStore;
+
+function openTursoReplicaStore(config: TursoConfig): TursoStore {
+  return new TursoStore(config);
+}
+
+// reason: spec-defect-clusters-round-2-part-c-criterion-data-demotion D22 — with `sync.enabled` EVERY route (CLI,
+// `lore serve`, `lore --mcp-server`, dashboard mounts) builds its store through `createApp`'s one replica branch.
+// Those routes reach `createApp` through 198 `loadLoreApp({ inv })` call sites and the mount registry, none of which
+// can carry a per-call port, so the store-selection seam is one process-level slot. Production never installs
+// anything; the default opens the real replica.
+let replicaStoreFactory: ReplicaStoreFactory = openTursoReplicaStore;
+
+/**
+ * Test seam of the store selection: makes every sync-enabled `createApp` in this process open its replica through
+ * `factory`.
+ *
+ * @param factory - the replica-store double
+ * @returns a function that restores the previously installed factory (call it in `afterEach`)
+ */
+export function installReplicaStoreFactory(factory: ReplicaStoreFactory): () => void {
+  const previous = replicaStoreFactory;
+  replicaStoreFactory = factory;
+  return () => {
+    replicaStoreFactory = previous;
+  };
+}
+
 export function createApp(dbPath: string, config: undefined, ambient: AppAmbient, writeContext?: AppWriteContext): App;
 export function createApp(
   dbPath: string,
@@ -1659,21 +1792,21 @@ export function createApp(
 }
 
 /**
- * Builds the App for ONE write context over a config that provably carries no `sync` section.
+ * Builds the App for ONE write context. With `sync.enabled` the store is the embedded replica; otherwise the local
+ * SQLite file.
  *
  * reason: the CLI loader hands the invocation identity to the store chokepoint at construction
- * (spec-run-identity-slice-1 D3). `createApp`'s Turso branch falls back to a synchronous `createRequire`
- * that throws from the compiled binary (libsql-lazy-load AC-LL-10), so a `createApp` call site must stay
- * one- or two-argument with a sync-stripped config. This entry point carries the third argument under a
- * type that forbids `sync`: a sync-bearing config no longer type-checks, so the Turso branch is
- * unreachable by construction rather than by scan.
+ * (spec-run-identity-slice-1 D3). Since D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) the
+ * config carries its `sync` section, so the caller must have primed the libsql module
+ * (`primeReplicaClientWhenSyncEnabled`) before a sync-enabled call.
  *
- * @param config - Config with `sync` forbidden (`sync?: never`); `undefined` for a corpus without config.
- * @returns the App, or the Result error arm `createApp` keeps for an unknown `ai.provider`.
+ * @param config - the full project config; `undefined` for a corpus without config.
+ * @returns the App, or the Result error arm: an unknown `ai.provider`, or a sync-enabled corpus whose address or
+ *   token is missing or whose remote cannot be opened (never a fallback to the local file).
  */
 export function createAppWithWriteContext(
   dbPath: string,
-  config: (LoreConfig & { sync?: never }) | undefined,
+  config: LoreConfig | undefined,
   ambient: AppAmbient,
   writeContext: AppWriteContext,
 ): App | Result<App, LoreError> {
@@ -1735,7 +1868,6 @@ function createAppUnscoped(
 
   // Audit-verify watermark (SPEC-035 §2 D5) — defaults to the SPEC-035 deploy date
   // when config/audit section absent.
-  const auditVerifySince = resolveAuditVerifySince(config);
 
   // Trusted-runner default spawn timeout (SPEC-039 §2 D9) — defaults to 300000ms
   // when config/verify section absent.
@@ -1824,7 +1956,7 @@ function createAppUnscoped(
     // TraceRecorder call site (CorpusService/GateEnforcer) already treats
     // this as "untraced", byte-identical to pre-SPEC-102 behavior.
     const traceRecorder = traceEnabled
-      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
+      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), sqliteStore.incrementReadCount.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
       : undefined;
     // reason: SPEC-102 §Migration Strategy — fire-and-forget from the
     // CALLER's perspective (loader.ts never awaits `pruneTrigger()`, so a
@@ -1864,6 +1996,7 @@ function createAppUnscoped(
       () => resolveWriteActorFor(sqliteStore),
       ambient.env,
       warnSinkOf(ambient.io.stderr),
+      (row) => sqliteStore.appendCheckOutcomes([row]),
     );
     const sqliteApp = buildAppFromSqlite(
       sqliteStore,
@@ -1872,7 +2005,6 @@ function createAppUnscoped(
       aiDefaultPerSurface,
       claimTtlMinutes,
       handoffTtlMinutes,
-      auditVerifySince,
       verifyDefaultTimeoutMs,
       verifyEnvConfig,
       verifyRequireCommandApproval,
@@ -1889,9 +2021,10 @@ function createAppUnscoped(
       citeGateRaw,
       ambient,
       // reason: D2 — a SQLite file is persistent, so verify runs in a worker over this same file (read-only).
-      buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { verifySince: auditVerifySince, anchorRoot: repoRoot }),
+      buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
+    wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
   }
 
@@ -1907,13 +2040,12 @@ function createAppUnscoped(
   // AC-LL-4's pinned ordering — credential validation FIRST (above), TMPDIR
   // usability probe SECOND, native load (TursoStore construction, below)
   // only after both. `probeTmpdirUsability` never rewrites TMPDIR itself (no
-  // silent fallback) — an unusable value is reported, never repaired. This
-  // branch is currently unreachable from any CLI command (`loader.ts` strips
-  // `config.sync` unconditionally before calling `createApp` — see that
-  // file's own comment), but keeping the composition root itself compliant
-  // with the invariant matters for any future direct caller (this is also
-  // where `AC-LL-5`/`AC-LL-7(c)`'s in-process tests exercise `createApp`
-  // directly, bypassing `loader.ts`).
+  // silent fallback) — an unusable value is reported, never repaired. Since
+  // D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) this
+  // branch IS reachable from every route: `loader.ts` passes the full config,
+  // and the entries prime the libsql module first
+  // (`primeReplicaClientWhenSyncEnabled`), so the synchronous construction
+  // below never needs `createRequire` in the compiled binary.
   const tmpdirError = probeTmpdirUsability(ambient.env);
   if (tmpdirError !== null) {
     telemetry.close();
@@ -1928,7 +2060,7 @@ function createAppUnscoped(
   // silently land only-local (D-005 EC item 5).
   const { url: remoteUrl, token: authToken } = credResult.value;
   try {
-    const baseTursoStore = new TursoStore({
+    const baseTursoStore = replicaStoreFactory({
       localPath: dbPath,
       remoteUrl,
       authToken,
@@ -1954,7 +2086,7 @@ function createAppUnscoped(
     const localTraceStore = traceEnabled ? new SQLiteStore(dbPath) : undefined;
     const traceRecorder =
       localTraceStore !== undefined
-        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
+        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), localTraceStore.incrementReadCount.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
         : undefined;
     // reason: SPEC-102 §Migration Strategy — same fire-and-forget-from-the-
     // CALLER's-perspective shape as the SQLite branch, bound to the SEPARATE
@@ -1975,7 +2107,7 @@ function createAppUnscoped(
     // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
     // 3rd arg wires SPEC-102's OPTIONAL TraceRecorder — see the SQLite branch's
     // identical comment.
-    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store), ambient.env, warnSinkOf(ambient.io.stderr));
+    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store), ambient.env, warnSinkOf(ambient.io.stderr), (row) => store.appendCheckOutcomes([row]));
     const tursoApp = buildAppFromTurso(
         store,
         dbPath,
@@ -1984,7 +2116,6 @@ function createAppUnscoped(
         aiDefaultPerSurface,
         claimTtlMinutes,
         handoffTtlMinutes,
-        auditVerifySince,
         verifyDefaultTimeoutMs,
         verifyEnvConfig,
         verifyRequireCommandApproval,
@@ -2003,16 +2134,17 @@ function createAppUnscoped(
         ambient,
         // reason: D2 — a Turso store is persistent, so verify runs in a worker over its local replica file,
         // opened without the remote URL (no second thread syncing the embedded replica).
-        buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { verifySince: auditVerifySince, anchorRoot: repoRoot }),
+        buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
+    wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };
   } catch (e) {
     telemetry.close();
     const message =
       e instanceof Error
-        ? `TursoStore construction failed: ${e.message}`
-        : "TursoStore construction failed: unknown error";
+        ? `TursoStore construction failed: remote ${remoteUrl} could not be opened as a replica: ${e.message}`
+        : `TursoStore construction failed: remote ${remoteUrl} could not be opened as a replica: unknown error`;
     const cause = e instanceof Error ? e : undefined;
     return err({
       code: "STORE_ERROR",
@@ -2048,6 +2180,40 @@ function buildRunReapService(
  */
 function buildOverrideDecisionPort(store: ConstructorParameters<typeof DecisionService>[0]["store"]): OverrideDecisionPort {
   return createOverrideDecisionPort(new DecisionService({ store, executorRun: null }));
+}
+
+/**
+ * Builds the retired-AC confirmation service (adr-an-acceptance-criterion-retires-with-the-feature-it) over `store`.
+ * reason: its restores go through a bare-gate `AcService` (the restore reinstates a state the citation gate already
+ * admitted, so it carries no gate config); its decisions go through a `DecisionService` on the same decision log.
+ */
+function buildRetiredAcService(
+  store: StoreInterface & ConstructorParameters<typeof DecisionService>[0]["store"],
+  recordLockService: RecordLockService,
+  corpusService: CorpusService,
+  ruleChanges: RuleChangeService,
+): RetiredAcService {
+  const acs = new AcService(store, recordLockService, undefined, corpusService);
+  // reason: rejecting a deprecation also revives the proposed rule ids it abandoned; the plan comes from the root's
+  // own rule-change writer (the one corpus uses for the abandonment), passed in so no second one is composed here.
+  return new RetiredAcService({
+    store,
+    decisions: new DecisionService({ store, executorRun: null }),
+    listDecisionLog: () => store.listDecisionLog(),
+    restoreCriterion: (spec, ac, at, reason) => acs.restoreRetiredCriterion(spec, ac, at, reason),
+    restoreSpecStatus: (spec, status, reason) => acs.restoreDeprecatedSpec(spec, status, reason, { planRevival: (slug, by) => ruleChanges.planRevival(slug, { by }) }),
+  });
+}
+
+/** Hands plan close the settle step of the retired-AC confirmation (see {@link buildRetiredAcService}). */
+function wirePlanCloseRetirements(corpusService: CorpusService, retiredAcService: RetiredAcService): void {
+  corpusService.setPlanCloseRetirementPort({
+    settle: async (planId) => {
+      const bundle = await corpusService.getPlanBundle(planId);
+      if (!bundle.ok) return bundle;
+      return retiredAcService.settle(bundle.value);
+    },
+  });
 }
 
 /**

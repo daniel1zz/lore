@@ -10,8 +10,9 @@
  * Public surface:
  *   - `GitHubIntakePort` — `new GitHubIntakePort(options)`, then
  *     `verifyTarget()` / `searchDuplicates(title, limit)` /
- *     `fileIssue(input)` / `listIssues()`. Exactly these four ops — never a
- *     fifth public method (the retry/idempotency-lookup orchestration that
+ *     `fileIssue(input)` / `listIssues()`, plus the plan-close reader
+ *     `listOpenIssues()` (all pages, open only, no PRs; #402). Exactly the
+ *     four spec ops and that one read — never another public method (the retry/idempotency-lookup orchestration that
  *     needs to run BEFORE `fileIssue` is a caller concern, wired in
  *     `adapters/cli/report-issue-wiring.ts::fileGithubIssue`, precisely so
  *     this class's own surface stays the four ops the spec names).
@@ -295,6 +296,7 @@ export class GitHubIntakePort {
         field: "gh_user_response",
         message: `gh returned a user payload this module could not parse: ${userParsed.error.message}`,
         value: userResult.value.stdout,
+        rule: "BR-504",
       });
     }
 
@@ -308,6 +310,7 @@ export class GitHubIntakePort {
         field: "gh_repo_response",
         message: `gh returned a repo payload this module could not parse: ${repoParsed.error.message}`,
         value: repoResult.value.stdout,
+        rule: "BR-504",
       });
     }
 
@@ -402,6 +405,7 @@ export class GitHubIntakePort {
         field: "gh_issue_create_response",
         message: `gh returned an issue-creation payload this module could not parse: ${createdParsed.error.message}`,
         value: createResult.value.stdout,
+        rule: "BR-504",
       });
     }
 
@@ -418,6 +422,7 @@ export class GitHubIntakePort {
         message:
           `issue filed upstream as #${createdParsed.data.number} (${createdParsed.data.html_url}) but the ` +
           `local receipt outcome failed to record (${outcomeMessage}) — the upstream issue itself was NOT lost.`,
+        rule: "BR-496",
       });
     }
 
@@ -429,13 +434,53 @@ export class GitHubIntakePort {
   }
 
   /**
+   * Lists every OPEN issue (never a pull request) across ALL pages — the plan-close coverage reader (BR-1372, #402).
+   * One `gh api --paginate --slurp` call: `--slurp` wraps the pages into one array of arrays, so a page boundary can
+   * never hide an open issue older than the newest 100. `state=open` is part of the query, and `state` and
+   * `pull_request` are checked again on every entry so a closed issue or a PR can never count as coverage.
+   *
+   * @returns `ok(openIssues[])`, or `err(...)` on a failing `gh` call or a payload that is not an array of pages
+   */
+  async listOpenIssues(): Promise<Result<GithubListedIssue[], LoreError>> {
+    const listResult = await this.runner.run(["api", `repos/${this.repo}/issues?state=open&per_page=100`, "--paginate", "--slurp"]);
+    if (!listResult.ok) return listResult;
+
+    const parsed = z.array(z.array(GithubIssueListEntrySchema)).safeParse(parseJsonSafely(listResult.value.stdout));
+    if (!parsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_issues_open_list_response",
+        message: `gh returned an open-issues payload this module could not parse: ${parsed.error.message}`,
+        value: listResult.value.stdout,
+      });
+    }
+
+    return ok(
+      parsed.data
+        .flat()
+        // reason: the issues endpoint lists pull requests too (they carry `pull_request`); a PR never covers a dimension.
+        .filter((entry) => entry.state === "open" && entry.pull_request === undefined)
+        .map((entry) => ({
+          number: entry.number,
+          title: entry.title,
+          state: entry.state,
+          body: entry.body ?? "",
+          labels: entry.labels.map((label) => label.name),
+          state_reason: entry.state_reason ?? null,
+          ...(entry.created_at !== undefined ? { created_at: entry.created_at } : {}),
+        })),
+    );
+  }
+
+  /**
    * Lists every issue in the target repo (open and closed), page by page
    * (`per_page=100`, following `Link: rel="next"`) until no next page, then
    * drops every entry carrying `pull_request` (GitHub's issues endpoint
    * returns PRs too). Requests = number of pages = max(1, ceil(N/100)),
    * never one per issue (AC-GS-1). Each {@link GithubListedIssue}'s
    * `labels`/`state_reason` come from the SAME responses, so no consumer
-   * needs a second `gh api` call.
+   * needs a second `gh api` call. Plan-close coverage uses the open-only
+   * {@link listOpenIssues} (#402).
    *
    * reason: requests pass `-i` so the HTTP headers (the only carrier of
    * `Link`) precede the JSON body in stdout — see {@link splitHttpResponse}.

@@ -104,13 +104,10 @@ import {
   ok,
   resolveGateEnabled,
   resolveAnchorOverlapGateEnabled,
-  resolveActorIdentityGateEnabled,
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
-  resolveCitedRuleCheckGateEnabled,
   resolveVerificationProfile,
-  resolveAttestationMinRatio,
   SCOPE_UNDECLARED_REASON,
   type AuditEntry,
   type LoreConfig,
@@ -119,12 +116,10 @@ import {
   type SpecKind,
   type VerificationProfile,
 } from "@lore/core";
-import type { OsUser, PlanBundle } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import type { PlanBundle } from "@lore/core";
+import { WriteActorUnresolvedError } from "../store/write-context-store.js";
 import {
   checkpointRegistry,
-  describeAssessmentFreshnessNotApplicable,
-  describeCitedRuleUnknowns,
   describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
@@ -138,6 +133,7 @@ import {
   type PredicateNotApplicable,
 } from "./gate-predicates.js";
 import type { TraceRecorder } from "./trace-recorder.js";
+import type { CheckOutcomeInput } from "../store/store-interface.js";
 
 /**
  * Which escape hatch produced a `gate_skipped` audit entry (SPEC-080 G4 D2) —
@@ -164,6 +160,9 @@ export type GateSkipMechanism = "config_disabled" | "env_bypass";
  * identically-narrow shape one field up.
  */
 export type RecordGateSkip = (entry: AuditEntry) => Promise<Result<void, LoreError>>;
+
+/** Narrow port appending one `check_outcomes` row — bound to `store.appendCheckOutcomes([row])` in `app.ts` (BR-1373). */
+export type RecordCheckOutcome = (row: CheckOutcomeInput) => Promise<Result<void, LoreError>>;
 
 /**
  * Fixed `session_id` sentinel for every `gate_skipped` audit row — a gate skip has
@@ -530,12 +529,6 @@ export interface GateDependencies {
 /**
  * Service-layer gate checkpoint runner. See module header for the full rationale.
  */
-/** The OS-user value of the port-less actor fallback: a gate row's actor is never guessed from the machine. */
-const GATE_NO_OS_USER: OsUser = {
-  ok: false,
-  reason: "GateEnforcer has no resolveActorPort and its env names no session — wire `resolveActorPort` (app.ts does) to record gate rows",
-};
-
 export class GateEnforcer {
   /**
    * @param config - The project's resolved `LoreConfig`, or `undefined` when no
@@ -578,12 +571,41 @@ export class GateEnforcer {
     private readonly env: Readonly<Record<string, string | undefined>> = {},
     /** Where the enforcer's advisories (a failed audit write, a vacuous checkpoint) go; absent (bare tests) -> not printed. */
     private readonly warnSink: WarnSink = discardWarnings,
+    /**
+     * OPTIONAL BR-1373 port: every evaluated (not config-disabled) run appends one `pass|deny` outcome row, so
+     * `lore checks stats` can show a gate never caught anything. Absent (bare tests) -> nothing is recorded.
+     */
+    private readonly recordCheckOutcome?: RecordCheckOutcome,
   ) {}
 
+  /**
+   * Fire-and-forget one outcome row for `checkpoint` (id `gate:<checkpoint>`). Never awaited and never able to
+   * change what `enforce()` returns (D1, observability never changes gate outcomes); a failure is one stderr line.
+   */
+  private recordOutcome(checkpoint: GateCheckpoint, outcome: "pass" | "deny"): void {
+    const port = this.recordCheckOutcome;
+    if (port === undefined) return;
+    const row: CheckOutcomeInput = { check_id: `gate:${checkpoint}`, outcome, ts: new Date().toISOString() };
+    const onFailure = (reason: string): void => this.warnAuditWriteFailure(checkpoint, "check-outcome", reason);
+    try {
+      Promise.resolve(port(row))
+        .then((result) => {
+          if (!result.ok) onFailure(describeLoreError(result.error));
+        })
+        .catch((error: unknown) => onFailure(describeThrown(error)));
+    } catch (error) {
+      onFailure(describeThrown(error));
+    }
+  }
+
+  /**
+   * The actor of a gate row: the wired port's name (the invocation's known party). ⛔ A gate row's actor is never
+   * guessed from the environment or the machine: a bare enforcer without the port cannot name one, which is a wiring
+   * defect (`app.ts` always wires it) reported as {@link WriteActorUnresolvedError}.
+   */
   private resolveActor(): string {
-    return this.resolveActorPort !== undefined
-      ? this.resolveActorPort()
-      : resolveActorWithSource(undefined, this.env, GATE_NO_OS_USER).actor;
+    if (this.resolveActorPort === undefined) throw new WriteActorUnresolvedError();
+    return this.resolveActorPort();
   }
 
   /**
@@ -648,13 +670,6 @@ export class GateEnforcer {
     // `lore set --status archived` shows it without altering stdout or the exit
     // code — an observation, never an outcome, exactly like `recordSkip`.
     this.warnVacuousCheckpoint(checkpoint, results);
-    // reason: BL-D4 / BR-225 — the per-conjunct complement of the all-inapplicable notice above:
-    // an unassessed plan whose other conditions measured would otherwise close with no mention
-    // that assessment freshness was never checked. Never blocks (same channel, same contract).
-    const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
-    if (freshnessLine !== null) this.warnSink(freshnessLine);
-    // reason: BR-984 - a cited rule whose state was unknown (reportable reason) closes with a line, never silently.
-    for (const unknownLine of describeCitedRuleUnknowns(checkpoint, ctx)) this.warnSink(unknownLine);
     if (!isCheckpointBlocked(results)) {
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — the ONE thing that, before this task, left NO trace
@@ -667,9 +682,11 @@ export class GateEnforcer {
       // which is exactly how `plan-close` became the only checkpoint with
       // ANY observability before this task.
       this.recordPass(checkpoint, ctx);
+      this.recordOutcome(checkpoint, "pass");
       return ok(undefined);
     }
 
+    this.recordOutcome(checkpoint, "deny");
     const failures = selectFailures(results);
     const reasons = failures.map((f) => f.reason);
     // reason: SPEC-042 §Design Decisions D5 (review U4) — a failure carrying an
@@ -694,6 +711,8 @@ export class GateEnforcer {
     // the identical `ctx` render byte-identical pack text, by construction, not
     // by convention. A trailing newline (spec-promote's `feed` ends with one) is
     // trimmed so the `\n\n`-separated pack block never grows a blank third line.
+    // reason: a predicate that names its business rule (milestone review, BR-1372) puts it on the refusal.
+    const rule = failures.map((f) => f.rule).find((r) => r !== undefined);
     const feedText = checkpointDef.feed(ctx, failures).replace(/\n+$/, "");
     // reason: task-lore-gate-bypass-honored-by-lore-gate-subcommands-but, Design
     // Decision Option B (this module's header) — the boundary note is appended ONLY
@@ -717,6 +736,7 @@ export class GateEnforcer {
       field,
       message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}${bypassBoundaryNote}`,
       value: reasons,
+      ...(rule !== undefined ? { rule } : {}),
     });
   }
 
@@ -917,7 +937,7 @@ export class GateEnforcer {
    */
   private warnAuditWriteFailure(
     checkpoint: GateCheckpoint,
-    auditKind: "gate-skip" | "gate-not-applicable" | "gate-pass",
+    auditKind: "gate-skip" | "gate-not-applicable" | "gate-pass" | "check-outcome",
     reason: string,
   ): void {
     this.warnSink(`${auditKind} audit not recorded for checkpoint "${checkpoint}": ${reason}`);
@@ -946,6 +966,7 @@ export class GateEnforcer {
   ): void {
     const notice = describeCheckpointVacuity(checkpoint, results);
     if (notice === null) return;
+    /** @lore-site BR-227 */
     this.warnSink(notice);
   }
 
@@ -984,23 +1005,6 @@ export class GateEnforcer {
    */
   isTaskClaimAnchorOverlapEnabled(): boolean {
     return resolveAnchorOverlapGateEnabled(this.config);
-  }
-
-  /**
-   * Whether `task-claim`'s claim-time actor-identity-collision guard
-   * specifically is enabled (`workflow.gates."task-claim".actor_identity
-   * .enabled`, spec claim-time-actor-identity-guard-zero-evidence-release-
-   * advis AC-IDENTITY-ESCAPE) — NARROWER than `isEnabled("task-claim")`,
-   * which governs the WHOLE checkpoint. A caller building `GateContext.
-   * actorIdentityEnabled` (`TaskWorkflowService.enforceClaimGate`) consults
-   * this, not `isEnabled`. Mirrors `isTaskClaimAnchorOverlapEnabled`'s shape.
-   *
-   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
-   * @example
-   * enforcer.isTaskClaimActorIdentityEnabled(); // => false when config disables it
-   */
-  isTaskClaimActorIdentityEnabled(): boolean {
-    return resolveActorIdentityGateEnabled(this.config);
   }
 
   /**
@@ -1058,27 +1062,6 @@ export class GateEnforcer {
   }
 
   /**
-   * Whether `plan-close`'s `citedRuleStateClean` (BR-984) sub-predicate specifically is
-   * enabled (`workflow.gates."plan-close".cited_rule_check.enabled`, SPEC-080 §C4) —
-   * NARROWER than `isEnabled("plan-close")`, which governs the WHOLE
-   * checkpoint. A caller building `GateContext.citedRuleCheckEnabled`
-   * (`CorpusService.set`) consults this, not `isEnabled`.
-   *
-   * DELIBERATELY THE OPPOSITE DEFAULT of `isTaskClaimAnchorOverlapEnabled` /
-   * `isAcQuantifiableEnabled` / `isOracleCoverageEnabled` / `isRequiresUatEnabled`
-   * above — those all default ENABLED (an explicit `false` turns them off);
-   * this one defaults DISABLED (an explicit `true` turns it on), per
-   * `resolveCitedRuleCheckGateEnabled`'s own JSDoc.
-   *
-   * @returns `true` iff the sub-key is explicitly enabled; `false` otherwise.
-   * @example
-   * enforcer.isCitedRuleCheckEnabled(); // => false unless config explicitly enables it
-   */
-  isCitedRuleCheckEnabled(): boolean {
-    return resolveCitedRuleCheckGateEnabled(this.config);
-  }
-
-  /**
    * Resolves `specKind`'s configured verification profile (SPEC-058) against
    * this enforcer's own `LoreConfig` — the single config-reading seam a caller
    * building `GateContext.verificationProfile` (`CorpusService.set`,
@@ -1097,23 +1080,5 @@ export class GateEnforcer {
    */
   resolveVerificationProfile(specKind: SpecKind): VerificationProfile | null {
     return resolveVerificationProfile(this.config, specKind);
-  }
-
-  /**
-   * Resolves `plan-close`'s OPT-IN execution-time attestation-ratio conjunct
-   * (`workflow.attestation.min_ratio`, spec-plan-close-predicates-measure-
-   * invariants-an-applicability §D4, superseding SPEC-069 §Design Decisions D1's
-   * always-on default) against this enforcer's own `LoreConfig` — the single
-   * config-reading seam a caller building `GateContext.attestationMinRatio`
-   * (`CorpusService.set`) consults, mirroring `resolveVerificationProfile`'s
-   * "GateEnforcer owns the one config reference" shape.
-   *
-   * @returns The explicitly configured floor, or `null` when unconfigured — the
-   *   ratio conjunct does not run at all in that case.
-   * @example
-   * enforcer.resolveAttestationMinRatio(); // => null by default, 0.3 when configured
-   */
-  resolveAttestationMinRatio(): number | null {
-    return resolveAttestationMinRatio(this.config);
   }
 }

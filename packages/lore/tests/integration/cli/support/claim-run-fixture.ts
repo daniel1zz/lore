@@ -20,14 +20,15 @@
  */
 
 import { Database } from "bun:sqlite";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp } from "../../../../src/app.js";
 import type { App } from "../../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { sessionIdOfActor } from "../../../helpers/session-actor";
-import { liveAmbient, liveWriteContext } from "../../../live-invocation.js";
+import { createLiveApp } from "../../../helpers/live-app";
+import { DEFAULT_TEST_RUN, registerTestRun } from "../../../helpers/test-run-identity";
 
 const PACKAGE_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -68,9 +69,16 @@ function cleanEnv(dir: string, actor?: string): Record<string, string | undefine
   return env;
 }
 
-/** Spawns the real CLI. `run` is passed as the global `--harness-run <id>` flag (D1), placed before the verb. */
+/**
+ * Spawns the real CLI as a KNOWN PARTY (every write needs one, BR-1351). `run` is passed as the global
+ * `--harness-run <id>` flag (D1), placed before the verb; a call naming no run runs as the agent run of the session
+ * `actor` names (`cc:<session>`), else as {@link DEFAULT_TEST_RUN}. The run is registered in the corpus first
+ * (what the installed hooks do), unless the corpus does not exist yet (`lore init`).
+ */
 export function runLore(args: string[], dir: string, run?: string, actor?: string): RunResult {
-  const argv = run === undefined ? args : ["--harness-run", run, ...args];
+  const runId = run ?? (actor !== undefined ? `cc:${sessionIdOfActor(actor)}` : DEFAULT_TEST_RUN);
+  registerTestRun(dir, runId);
+  const argv = ["--harness-run", runId, ...args];
   const proc = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd: dir, env: cleanEnv(dir, actor) });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
@@ -134,8 +142,8 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
   // test: disable the two claim gates so ONLY the claim-conflict decision can refuse a claim.
   // `claimGates: "enabled"` keeps them ON for suites whose subject IS the claim gate (BR-1056 overlap by run).
   if (opts.claimGates !== "enabled") {
-    appendFileSync(
-      join(dir, ".lore", "config.yaml"),
+    patchLoreConfig(
+      dir,
       ["workflow:", "  gates:", "    task-claim:", "      enabled: false", "    phase-claim:", "      enabled: false", ""].join("\n"),
     );
   }
@@ -147,7 +155,7 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
   let counter = 0;
 
   const withApp = async <T>(fn: (app: App) => Promise<T>): Promise<T> => {
-    const app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext()) as App;
+    const app = createLiveApp(join(dir, ".lore", "lore.db"));
     try {
       return await fn(app);
     } finally {

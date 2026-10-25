@@ -3,10 +3,10 @@ id: KN-664
 type: knowledge
 role: knowledge
 title: "Baseline validation raw data A1-A5: TSVs, probes and grading"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: [baseline, validation-raw-data]
 parent: KN-565
 ---

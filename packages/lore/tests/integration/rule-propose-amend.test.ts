@@ -1,3 +1,6 @@
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * AC-DN5-3 oracle — `spec-design-necessity-rule-v5-separate-what-a-design-needs-from` (D3, "Amend a proposed rule").
  *
@@ -15,7 +18,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
@@ -97,8 +101,8 @@ async function approve(spec: string): Promise<void> {
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "rule-propose-amend-"));
   await loreOk(["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  review:",

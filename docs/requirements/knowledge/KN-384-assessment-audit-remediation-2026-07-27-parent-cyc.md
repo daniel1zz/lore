@@ -3,10 +3,10 @@ id: KN-384
 type: knowledge
 role: knowledge
 title: "Assessment: Audit remediation 2026-07-27 — parent-cycle write guard, MDX unknown-component strip, actor-identity guard (2026-07-27)"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: []
 parent: PLAN-115
 links:

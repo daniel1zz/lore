@@ -10,7 +10,8 @@
  *     the very same commit sha. An archive failure aborts the whole apply (nothing further is dropped) and is
  *     returned as err(STORE_ERROR) — never swallowed, never turned into a "kept" row.
  *   - Factors come from facts lore measured in THIS call (INV-2): R = loss-free-by-proof only after the archive
- *     ref was verified; B from run attribution; E = lore-evaluated; C = computed by DecisionService
+ *     ref was verified; B = unprovable-owner-made-recoverable for every stash (the archive ref makes it recoverable
+ *     whoever owns it, so a verified archive is auto with no pending decision, BR-1370); E = lore-evaluated; C = computed by DecisionService
  *     from the class's recorded outcomes (AC-AU-8; no caller can supply a value).
  *   - Attribution (AU-T20): an owner is PROVEN, never inferred from an unrelated open claim. A stash on a
  *     `worktree-agent-<agentId>` branch belongs to that agent's runs (by agent_ref) and to open task claims that
@@ -30,7 +31,7 @@
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D4.
  */
 import { realpathSync } from "node:fs";
-import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
+import { err, ok, storeError, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
 import type { RunId } from "@lore/core";
 import type { DecisionService } from "./decision-service.js";
 import type { DecisionDetail } from "../store/decision-log.js";
@@ -145,15 +146,12 @@ export function parseStashBranch(message: string): string | null {
   return branch;
 }
 
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
-}
-
 export class StashPruneService {
   constructor(private readonly deps: StashPruneDeps) {}
 
   /** Every stash with its facts (read-only; no archive, no decision record). */
   async list(): Promise<Result<readonly StashFacts[], LoreError>> {
+    /** @lore-site BR-1265 */
     const listed = this.deps.git(["stash", "list", "--format=%H%x00%gs"]);
     if (listed.status !== 0) return err(storeError(`git stash list failed: ${listed.stderr.trim()}`));
     const rows = listed.stdout.split("\n").filter((line) => line !== "");
@@ -191,22 +189,21 @@ export class StashPruneService {
   /** Write `refs/lore/archive/stash/<sha>` and prove it resolves to the same commit. */
   private archive(sha: string): Result<string, LoreError> {
     const ref = `${ARCHIVE_REF_PREFIX}${sha}`;
+    /** @lore-site BR-1266 */
     const written = this.deps.git(["update-ref", ref, sha]);
-    if (written.status !== 0) return err(storeError(`archive write failed for stash ${sha} (${ref}): ${written.stderr.trim()}`));
+    if (written.status !== 0) return err(storeError(`archive write failed for stash ${sha} (${ref}): ${written.stderr.trim()}`, undefined, "BR-1266"));
     const resolved = this.deps.git(["rev-parse", "--verify", "-q", `${ref}^{commit}`]);
     if (resolved.status !== 0 || resolved.stdout.trim() !== sha) {
-      return err(storeError(`archive ref ${ref} does not resolve to stash commit ${sha}; nothing dropped`));
+      return err(storeError(`archive ref ${ref} does not resolve to stash commit ${sha}; nothing dropped`, undefined, "BR-1266"));
     }
     return ok(ref);
   }
 
   private async decideAndMaybeDrop(facts: StashFacts, archiveRef: string): Promise<Result<StashOutcome, LoreError>> {
-    const measured = await this.buildDecisionFacts(facts.attribution);
-    if (!measured.ok) return measured;
     const decided = await this.deps.decisions.decide(
       STASH_DROP_CLASS,
       { id: facts.sha, version: stashDecisionVersion(facts.sha, facts.attribution) },
-      measured.value,
+      this.buildDecisionFacts(),
       buildStashDropDetail(facts, archiveRef),
     );
     if (!decided.ok) return decided;
@@ -225,25 +222,18 @@ export class StashPruneService {
     return ok({ kind: "dropped", archive_ref: archiveRef, score: decision.score });
   }
 
-  /** Facts decide() may use: only what lore measured above. C is NOT among them: DecisionService computes it (AC-AU-8). */
-  private async buildDecisionFacts(attribution: StashAttribution): Promise<Result<AutonomyFacts, LoreError>> {
-    const blast =
-      attribution.state === "live"
-        ? ("other-live-actor" as const)
-        : attribution.state === "ended"
-          ? ("own-or-ended-run" as const)
-          : attribution.state === "no-provable-owner"
-            ? ("unprovable-owner-made-recoverable" as const)
-            : undefined;
-    return ok({
-      recoverability: "loss-free-by-proof",
-      evidence: "lore-evaluated",
-      ...(blast !== undefined ? { blast } : {}),
-    });
+  /**
+   * Facts decide() may use: only what lore measured above. C is NOT among them: DecisionService computes it (AC-AU-8).
+   * reason: an archived stash is recoverable by ANY session whoever owns it, so the owner's liveness no longer lowers B
+   * (a live owner used to escalate forever; BR-1370, AC-LG-8). Attribution stays in the report and the decision detail.
+   */
+  private buildDecisionFacts(): AutonomyFacts {
+    return { recoverability: "loss-free-by-proof", evidence: "lore-evaluated", blast: "unprovable-owner-made-recoverable" };
   }
 
   /** Drop exactly the stash commit `sha`, re-resolving its current index first. */
   private dropBySha(sha: string): Result<void, LoreError> {
+    /** @lore-site BR-1269 */
     const shas = this.deps.git(["stash", "list", "--format=%H"]);
     if (shas.status !== 0) return err(storeError(`git stash list failed before drop: ${shas.stderr.trim()}`));
     const index = shas.stdout.split("\n").indexOf(sha);
@@ -251,7 +241,7 @@ export class StashPruneService {
     const ref = `stash@{${index}}`;
     const current = this.deps.git(["rev-parse", "--verify", "-q", ref]);
     if (current.status !== 0 || current.stdout.trim() !== sha) {
-      return err(storeError(`stash stack changed while dropping ${sha}; nothing dropped, re-run lore stash prune --apply`));
+      return err(storeError(`stash stack changed while dropping ${sha}; nothing dropped, re-run lore stash prune --apply`, undefined, "BR-1269"));
     }
     const dropped = this.deps.git(["stash", "drop", "-q", ref]);
     if (dropped.status !== 0) return err(storeError(`git stash drop ${ref} failed: ${dropped.stderr.trim()}`));
@@ -302,6 +292,7 @@ export class StashPruneService {
 
   /** Stash commit creation time (ms since epoch), or null when git cannot say. */
   private stashCreatedAtMs(sha: string): number | null {
+    /** @lore-site BR-1268 */
     const shown = this.deps.git(["show", "-s", "--format=%ct", sha]);
     if (shown.status !== 0) return null;
     const seconds = Number(shown.stdout.trim());
@@ -310,6 +301,7 @@ export class StashPruneService {
 
   /** Path of the working copy that has `branch` checked out now (`git worktree list --porcelain`), null when none does. */
   private checkoutOfBranch(branch: string): { readonly ok: true; readonly value: string | null } | { readonly ok: false; readonly error: string } {
+    /** @lore-site BR-1268 */
     const listed = this.deps.git(["worktree", "list", "--porcelain"]);
     if (listed.status !== 0) return { ok: false, error: `git worktree list failed: ${listed.stderr.trim()}` };
     for (const block of listed.stdout.split("\n\n")) {
@@ -380,6 +372,7 @@ export class StashPruneService {
   /** The tree of blob ids reachable from main, or null when main cannot be resolved. */
   private resolveMainRef(): string | null {
     const ref = this.deps.mainRef ?? "main";
+    /** @lore-site BR-1265 */
     const resolved = this.deps.git(["rev-parse", "--verify", "-q", `${ref}^{commit}`]);
     return resolved.status === 0 ? ref : null;
   }
@@ -398,6 +391,7 @@ export class StashPruneService {
 
   /** (path, blob) of every path the stash changed vs its base; blob is null for a deletion. */
   private trackedEntries(sha: string): { path: string; blob: string | null }[] | null {
+    /** @lore-site BR-1265 */
     const diff = this.deps.git(["diff-tree", "-r", "-z", "--no-renames", `${sha}^1`, sha]);
     if (diff.status !== 0) return null;
     const parts = diff.stdout.split("\0").filter((p) => p !== "");
@@ -412,6 +406,7 @@ export class StashPruneService {
 
   /** (path, blob) of the stash's untracked-files tree (`<sha>^3`); empty when the stash has none. */
   private untrackedEntries(sha: string): { path: string; blob: string | null }[] | null {
+    /** @lore-site BR-1265 */
     const has = this.deps.git(["rev-parse", "--verify", "-q", `${sha}^3`]);
     if (has.status !== 0) return [];
     const tree = this.deps.git(["ls-tree", "-r", "-z", `${sha}^3`]);
@@ -428,6 +423,7 @@ export class StashPruneService {
   /** Blob equality against main: one `cat-file --batch-check` call for all paths. */
   private allInMain(mainRef: string, entries: readonly { path: string; blob: string | null }[]): boolean {
     if (entries.length === 0) return true;
+    /** @lore-site BR-1265 */
     const checked = this.deps.git(["cat-file", "--batch-check"], entries.map((e) => `${mainRef}:${e.path}\n`).join(""));
     if (checked.status !== 0) return false;
     const lines = checked.stdout.split("\n");

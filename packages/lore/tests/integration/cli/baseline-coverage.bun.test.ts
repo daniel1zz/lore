@@ -1,18 +1,18 @@
 // @spawns packages/lore/src/index.ts
 /**
- * End-to-end test of the census CLI verbs `lore baseline sites | map | coverage`
+ * End-to-end test of the census CLI verbs `lore baseline sites | map --command | coverage`
  * (Baseline slice 2a, AC-BLS2-5), driven through the real CLI against a throwaway corpus.
  *
- * Spec: spec-baseline-slice-2-completeness-census-per-branch-citation (C1/C2):
- *   - a leaf that declares no commands is UNMEASURED (coverage exits 1, never 0);
- *   - once every census site of the leaf's command is mapped (rule or non-business),
- *     `coverage` exits 0; removing any one mapping makes it exit 1 and name that site.
+ * Spec: spec-baseline-slice-2-completeness-census-per-branch-citation (C1/C2), as amended by BR-1344 (a site's rule lives in code):
+ *   - a leaf that declares no commands is reported UNMEASURED (coverage is report-only for sites: exit 0);
+ *   - a leaf with a declared command is measured by that command's census over the real tree; the throwaway corpus holds no
+ *     mapping, so what maps to the leaf is only what the tree declares for the leaf's own rules.
  *
  * The census reads CLI sources found upward from cwd, so the throwaway corpus symlinks the
  * repo's `packages/` directory next to its own `.lore/`. The repo's own `.lore/` is never touched.
  *
- * Dimensions: HAPPY (full mapping -> 0), NEGATIVE (no commands -> 1; unmapped site -> 1 names it),
- * STATE (different mapping removed -> different named site), BOUNDARY (sites exist at all).
+ * Dimensions: HAPPY (a declared command is censused), NEGATIVE (no commands -> UNMEASURED line),
+ * BOUNDARY (sites exist at all; each carries a line and a rules array).
  *
  * @spec_ref spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-5
  */
@@ -122,69 +122,24 @@ describe("lore baseline sites (census over the real `ac add` command)", () => {
 });
 
 describe("lore baseline coverage (e2e)", () => {
-  it("a leaf with no declared commands is UNMEASURED: exit 1, never 0", () => {
+  it("a leaf with no declared commands is reported UNMEASURED and exits 0 (report only, never a refusal)", () => {
     const r = runLore(["baseline", "coverage", emptyLeaf], repo);
-    expect(r.exitCode).toBe(1);
+    expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("UNMEASURED");
   });
 
-  it("a leaf with a command but no mapped sites is INCOMPLETE and names a site", () => {
+  it("a leaf with a command is measured by that command's census: every reached site is counted, exit 0 (report only)", () => {
     mustRun(["baseline", "map", leaf, "--command", "ac add"], repo);
-    const r = runLore(["baseline", "coverage", leaf], repo);
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain(sites[0]!.key);
+    const r = runLore(["baseline", "coverage", leaf, "--json"], repo);
+    expect(r.exitCode, r.stdout + r.stderr).toBe(0);
+    const report = (JSON.parse(r.stdout) as { data: { leaves: { slug: string; sites: number; measured_by: string; mapped_sites: unknown[] }[] } }).data.leaves[0]!;
+    expect(report).toMatchObject({ slug: leaf, sites: sites.length, measured_by: "commands" });
+    // the rule BR-1 of this throwaway corpus is declared nowhere in the real tree, so nothing maps to the leaf: declarations come from the code
+    expect(report.mapped_sites).toEqual([]);
   });
 
-  it("mapping every census site (first to the leaf's rule, rest non-business) -> coverage exits 0", async () => {
-    mustRun(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-1"], repo);
-    for (const s of sites.slice(1)) {
-      mustRun(["baseline", "map", leaf, "--site", s.key, "--non-business", "plumbing, not business behaviour"], repo);
-      // reason: each mustRun blocks the worker's event loop; under load this loop exceeds 60 s, and vitest's
-      // worker->main RPC ("onTaskUpdate") times out after 60 s of an unserviced loop (unhandled error, exit 1).
-      // Yielding once per iteration lets the reply be processed (TG-23).
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const r = runLore(["baseline", "coverage", leaf], repo);
-    expect(r.stderr + r.stdout).not.toContain("INCOMPLETE");
-    expect(r.exitCode).toBe(0);
-  });
-
-  it("removing one mapping -> coverage exits 1 and names exactly that site", () => {
-    const victim = sites[sites.length - 1]!.key;
-    mustRun(["baseline", "map", leaf, "--remove-site", victim], repo);
-    const r = runLore(["baseline", "coverage", leaf], repo);
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain(victim);
-  });
-
-  it("removing a different mapping names that other site (different input, different output)", () => {
-    const victim = sites[0]!.key;
-    mustRun(["baseline", "map", leaf, "--remove-site", victim], repo);
-    const r = runLore(["baseline", "coverage", leaf], repo);
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain(victim);
-  });
-
-  it("re-mapping the removed sites restores exit 0", () => {
-    mustRun(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-1"], repo);
-    mustRun(["baseline", "map", leaf, "--site", sites[sites.length - 1]!.key, "--non-business", "plumbing again"], repo);
-    expect(runLore(["baseline", "coverage", leaf], repo).exitCode).toBe(0);
-  });
-});
-
-describe("lore baseline map (refusals)", () => {
-  it("--site with neither --rule nor --non-business is refused", () => {
-    const r = runLore(["baseline", "map", leaf, "--site", sites[0]!.key], repo);
-    expect(r.exitCode).not.toBe(0);
-  });
-
-  it("--site mapped to a rule id the leaf does not carry is refused", () => {
-    const r = runLore(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-9999"], repo);
-    expect(r.exitCode).not.toBe(0);
-  });
-
-  it("--remove-site of a site that was never mapped is refused", () => {
-    const r = runLore(["baseline", "map", leaf, "--remove-site", "nope.ts#nothing#NOPE"], repo);
-    expect(r.exitCode).not.toBe(0);
+  it("the census lists each site with the rules the tree declares at it (a rules array and a line, possibly empty)", () => {
+    const listed = JSON.parse(mustRun(["baseline", "sites", "ac add", "--json"], repo).stdout) as { data: { sites: { line: number; rules: string[] }[] } };
+    expect(listed.data.sites.every((s) => Number.isInteger(s.line) && s.line > 0 && Array.isArray(s.rules))).toBe(true);
   });
 });

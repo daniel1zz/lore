@@ -3,10 +3,10 @@ id: KN-614
 type: knowledge
 role: knowledge
 title: "Baseline fidelity (citations) seed 20261014: 95.0% faithful"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 # Baseline fidelity sample (citations, seed 20261014)

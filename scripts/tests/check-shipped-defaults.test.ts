@@ -13,8 +13,7 @@
  * subprocess `lore init`/`lore setup --project` is exercised, and note it
  * too provisions into its OWN throwaway `mkdtemp` corpus). The pure-function
  * suites above it drive each algorithm directly against literal fixtures —
- * mirrors `scripts/tests/check-test-budgets.test.ts`'s established split
- * between algorithm unit tests and a "real repo tree" `main()` case.
+ * keeps a split between algorithm unit tests and a "real repo tree" `main()` case.
  *
  * Coverage (six dimensions):
  *   HAPPY — a duplicate override is harmless (ABSENCE-only predicate); an
@@ -47,6 +46,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveCaptureTimeoutMs, AiConfigSchema } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
+import { initRepoWithMainCommit } from "../../packages/lore/tests/integration/support/main-guard-repo.js";
 import {
   PROJECT_SPECIFIC_KEYS,
   RATIONALE_MIN_LENGTH,
@@ -300,7 +300,7 @@ describe("isAllowlistedKey: HAPPY / NEGATIVE / BOUNDARY", () => {
   });
 
   it("matches anything nested UNDER a prefix entry", () => {
-    expect(isAllowlistedKey('workflow.gates."plan-close".cited_rule_check.enabled', allowlist)).toBe(true);
+    expect(isAllowlistedKey('workflow.gates."ac-cite".mode', allowlist)).toBe(true);
   });
 
   it("does NOT match an unrelated key", () => {
@@ -557,8 +557,6 @@ context:
     root:
       max_lines: 220
       max_bytes: 24576
-audit:
-  verify_since: "2026-07-06T12:02:00Z"
 verify:
   default_timeout_ms: 900000
 workflow:
@@ -578,9 +576,8 @@ workflow:
     domain-overview:
       min_acs: 0
   gates:
-    plan-close:
-      cited_rule_check:
-        enabled: true
+    ac-cite:
+      mode: enforce
 `;
     const root = buildFixtureRepo(realConfigSnapshot, REAL_TEMPLATE_TEXT);
     expect(main(root)).toBe(0);
@@ -635,8 +632,7 @@ describe("AC-GD-1 fresh-install clause: a genuinely fresh corpus materialises 12
       // git working tree to succeed cleanly — without it the command still scaffolds
       // config.yaml but exits 1 on the unrelated git step, which would make an exit-code
       // assertion here flaky/misleading. A real fresh project IS normally a git repo.
-      const gitInit = spawnSync("git", ["init", "-q"], { cwd: tmpDir, encoding: "utf8", timeout: 10_000 });
-      expect(gitInit.status).toBe(0);
+      initRepoWithMainCommit(tmpDir); // setup refuses a main with no commit (BR-1343)
 
       const initResult = spawnSync("bun", ["run", LORE_ENTRY, "init"], {
         cwd: tmpDir,
@@ -685,7 +681,7 @@ describe("AC-GD-1 fresh-install clause: a genuinely fresh corpus materialises 12
   it("REGRESSION control: reading the pinned (but unrunnable) literal field path workflow.gates.capture_timeout_ms would be undefined on this exact fresh tree — proves the corrected path above is not interchangeable prose", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "check-shipped-defaults-fresh-install-control-"));
     activeTmpDirs.push(tmpDir);
-    spawnSync("git", ["init", "-q"], { cwd: tmpDir, encoding: "utf8", timeout: 10_000 });
+    initRepoWithMainCommit(tmpDir);
     spawnSync("bun", ["run", LORE_ENTRY, "init"], { cwd: tmpDir, encoding: "utf8", timeout: 20_000, env: { ...process.env, CLAUDECODE: "1" } });
     spawnSync("bun", ["run", LORE_ENTRY, "setup", "--project", "--yes"], { cwd: tmpDir, encoding: "utf8", timeout: 20_000, env: { ...process.env, CLAUDECODE: "1" } });
 

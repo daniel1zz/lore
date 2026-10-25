@@ -99,6 +99,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,8 +156,8 @@ function makeCorpus(): string {
  * `tests/e2e/sync-cli.bun.test.ts` already uses.
  */
 function writeSyncEnabledConfig(dir: string, tokenEnvName: string): void {
-  writeFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "project:",
       "  name: libsql-lazy-load-oracle",
@@ -297,8 +298,11 @@ describe("libsql lazy load — compiled binary e2e (spec-eager-libsql-load-makes
   // regardless of which specific failure inside that branch fires first —
   // the point of this AC is standing proof the branch stays unreached from
   // the CLI, not a specific crash signature.
+  // REVERSED by D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion, BR-925): `loader.ts` no longer
+  // strips `config.sync`, so a command on a sync-enabled corpus goes through the replica and a hostile TMPDIR is a
+  // loud failure that leads with TMPDIR (exit 1, no raw dlopen trace) instead of a quiet read of the local file.
   it(
-    "AC-LL-8: lore status on a sync-enabled corpus under TMPDIR=/nonexistent-tmpdir-probe still exits 0 and reports Total documents (createApp Turso-branch unreachability guard)",
+    "AC-LL-8: lore status on a sync-enabled corpus under TMPDIR=/nonexistent-tmpdir-probe fails loud naming TMPDIR (exit 1), never reading the local file alone",
     () => {
       const dir = makeCorpus();
       const tokenEnvName = "LORE_SYNC_TOKEN";
@@ -307,8 +311,29 @@ describe("libsql lazy load — compiled binary e2e (spec-eager-libsql-load-makes
         [tokenEnvName]: "probe-token-not-a-real-credential",
         TMPDIR: "/nonexistent-tmpdir-probe",
       });
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain("Total documents");
+      expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain("Total documents");
+      expect(result.stderr).toContain("TMPDIR");
+      expect(result.stderr).toContain("/nonexistent-tmpdir-probe");
+      expect(result.combined).not.toContain("$bunfs");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
+  // D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion): the compiled binary really opens the replica.
+  // Healthy TMPDIR, token set, unreachable host: the run reaches the network (the client loaded through the primed
+  // dynamic import, not `createRequire`), so the failure names the remote address, never "Cannot find module".
+  it(
+    "D22: lore status on a sync-enabled corpus with an unreachable remote exits 1 naming the remote host, not a missing module",
+    () => {
+      const dir = makeCorpus();
+      const tokenEnvName = "LORE_SYNC_TOKEN";
+      writeSyncEnabledConfig(dir, tokenEnvName);
+      const result = runLore(["status"], dir, { [tokenEnvName]: "probe-token-not-a-real-credential" });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("nonexistent-host-for-tests.invalid");
+      expect(result.combined).not.toContain("Cannot find module");
+      expect(result.combined).not.toContain("$bunfs");
     },
     SPAWN_TIMEOUT_MS,
   );
@@ -390,6 +415,15 @@ const CREATE_APP_DEFINITION_FILE = join(LORE_SRC_ROOT, "app.ts");
 const MIN_EXPECTED_CALL_SITES = 4;
 /** Floor for "the walker actually walked a tree", independent of `createApp` itself. */
 const MIN_EXPECTED_SCANNED_FILES = 50;
+/**
+ * The only files that may pass a sync-bearing config to `createApp` (D22: with `sync.enabled` every route opens the
+ * embedded replica). Each is reached only after the entry primed `@libsql/client` asynchronously
+ * (`adapters/cli/replica-priming.ts`), so the synchronous `createRequire` fallback never runs in the compiled binary.
+ */
+const PRIMED_SYNC_BEARING_FILES: ReadonlySet<string> = new Set([
+  "packages/lore/src/adapters/cli/loader.ts",
+  "packages/lore/src/adapters/cli/commands/dashboard.ts",
+]);
 /** Bound on alias-hop chasing (`X = restName`, `Y = X as T`, …). Today's depth is 1. */
 const MAX_ALIAS_HOP_ROUNDS = 8;
 
@@ -398,6 +432,12 @@ type CreateAppCallClass =
   | "single-arg"
   /** (b) second argument provably carries no `sync` key. */
   | "sync-stripped"
+  /**
+   * (c) a sync-bearing config from one of {@link PRIMED_SYNC_BEARING_FILES}: the files D22
+   * (spec-defect-clusters-round-2-part-c-criterion-data-demotion) lets hand `sync` to `createApp`, because every entry
+   * that reaches them awaits the libsql prime first (the wiring is pinned by the AC-LL-10 priming test below).
+   */
+  | "sync-primed"
   /** Anything else — the failure this AC exists to catch. */
   | "violation";
 
@@ -598,6 +638,9 @@ export function analyzeCreateAppCallSites(content: string, relPath: string): Cre
           reason =
             `class (b): second argument \`${secondArg.text}\` is bound in this file from a ` +
             "rest-destructure discarding `sync` (directly or through an assignment chain)";
+        } else if (PRIMED_SYNC_BEARING_FILES.has(relPath)) {
+          classification = "sync-primed";
+          reason = "class (c): a file whose entries prime the libsql client before createApp (D22)";
         } else {
           classification = "violation";
           reason =
@@ -733,7 +776,7 @@ describe("AC-LL-10 — no createApp call site passes a sync-bearing config (sour
     ).toBeGreaterThanOrEqual(MIN_EXPECTED_CALL_SITES);
   });
 
-  it("AC-LL-10 liveness control 2: loader.ts's two-argument call classifies as PROVABLY sync-stripped, not merely as lacking a second argument", () => {
+  it("AC-LL-10 liveness control 2: init.ts's and init-corpus.ts's calls classify as PROVABLY sync-stripped, and loader.ts's full-config call as primed (D22)", () => {
     const { sites } = scanLoreSrcForCreateAppCallSites();
     const syncStripped = sites.filter((s) => s.classification === "sync-stripped");
     expect(
@@ -742,14 +785,20 @@ describe("AC-LL-10 — no createApp call site passes a sync-bearing config (sour
         `argument never exercises the sync-stripped branch at all. Sites found:\n${formatSites(sites)}`,
     ).toBeGreaterThanOrEqual(1);
 
-    const loaderSite = syncStripped.find((s) => s.file.endsWith("packages/lore/src/adapters/cli/loader.ts"));
+    const loaderSite = sites.find((s) => s.file.endsWith("packages/lore/src/adapters/cli/loader.ts"));
     expect(
-      loaderSite,
-      "AC-LL-10 expected adapters/cli/loader.ts's `createAppWithWriteContext(dbPath, telemetryOnlyConfig, ambient, …)` to be recognised as " +
-        `provably sync-stripped (the loader.ts:240-241 rest-destructure + alias hop). Sites found:\n${formatSites(sites)}`,
-    ).toBeDefined();
+      loaderSite?.classification,
+      `AC-LL-10 expected adapters/cli/loader.ts's \`createAppWithWriteContext(dbPath, rawConfig, ambient, …)\` to classify as sync-primed. Sites found:\n${formatSites(sites)}`,
+    ).toBe("sync-primed");
     expect(loaderSite?.argCount).toBe(4);
-    expect(loaderSite?.secondArgText).toBe("telemetryOnlyConfig");
+    expect(loaderSite?.secondArgText).toBe("rawConfig");
+  });
+
+  it("AC-LL-10 priming wiring: the CLI entry, the MCP entry and the dashboard mount each await the libsql prime before createApp (the premise of class (c))", () => {
+    const read = (rel: string): string => readFileSync(join(LORE_SRC_ROOT, rel), "utf8");
+    expect(read("adapters/cli/run-cli.ts")).toMatch(/await primeReplicaClientWhenSyncEnabled\(/);
+    expect(read("index.ts")).toMatch(/await primeReplicaClientWhenSyncEnabled\(/);
+    expect(read("adapters/cli/commands/dashboard.ts")).toMatch(/await primeReplicaClientForProject\(/);
   });
 
   it("AC-LL-10 liveness control 3: the SAME classifier reports a synthetic MULTI-LINE sync-bearing call as a violation", () => {

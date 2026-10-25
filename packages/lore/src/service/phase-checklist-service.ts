@@ -174,6 +174,7 @@ export class PhaseChecklistService {
         field: "reason",
         message: "dropChecklistItem requires a non-empty reason",
         value: opts.reason,
+        rule: "BR-1193",
       });
     }
 
@@ -189,6 +190,7 @@ export class PhaseChecklistService {
         field: "checklist[].id",
         message: `Checklist item "${itemId}" does not exist on this phase`,
         value: itemId,
+        rule: "BR-1193",
       });
     }
 
@@ -252,6 +254,7 @@ export class PhaseChecklistService {
         field: "checklist[].id",
         message: `Checklist item "${itemId}" does not exist on this phase`,
         value: itemId,
+        rule: "BR-1221",
       });
     }
     const target = existing[idx];
@@ -270,6 +273,7 @@ export class PhaseChecklistService {
         field: "checklist[].checked",
         message: `Checklist item "${itemId}" is script-bound — 'checked' is manual-bind-only`,
         value: target.bind.kind,
+        rule: "BR-1191",
       });
     }
 
@@ -322,6 +326,7 @@ export class PhaseChecklistService {
         field: "checklist[].id",
         message: `Checklist item "${itemId}" does not exist on this phase`,
         value: itemId,
+        rule: "BR-1221",
       });
     }
     const target = existing[idx];
@@ -425,6 +430,7 @@ export class PhaseChecklistService {
         field: "type",
         message: `Expected a phase document; got type '${doc.type}'`,
         value: doc.type,
+        rule: "BR-1195",
       });
     }
     return ok(doc);

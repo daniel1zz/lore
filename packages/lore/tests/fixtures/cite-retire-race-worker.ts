@@ -22,6 +22,7 @@ import { AcService } from "../../src/service/ac-service.js";
 import { RuleService } from "../../src/service/rule-service.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { makeRuleService } from "../helpers/make-rule-service.js";
+import { approveAllPending } from "../helpers/approve-baseline.js";
 import { actedStore } from "../live-invocation.js";
 
 const [dbPath, role, target, readyFile, barrierFile, resultPath, mode, armedBranch, actor] = process.argv.slice(2);
@@ -47,6 +48,8 @@ try {
     outcome = r.ok ? { ok: true } : { ok: false, code: String(r.error.code), message: JSON.stringify(r.error) };
   } else {
     const r = await rules.setRule(target, { lifecycle: "retired", note: "retired by the race test" }, { by: actor });
+    // the retirement is a pending revision: it takes effect (and races the citers) at the approval write
+    if (r.ok) await approveAllPending(store);
     outcome = r.ok ? { ok: true } : { ok: false, code: String(r.error.code), message: JSON.stringify(r.error) };
   }
 } catch (cause) {

@@ -3,10 +3,10 @@ id: KN-225
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — evidence output_tail integrity: self-report non-pass predicate + runner AC-witnessing tail (2026-08-01)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-23
 tags: []
 parent: PLAN-083
 links:

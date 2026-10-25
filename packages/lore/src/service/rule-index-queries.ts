@@ -25,6 +25,7 @@
 
 import { ruleIdPrefix, ruleIdPrefixOfNode, type DocRecord, type RuleLifecycle, type RuleRegistryState } from "@lore/core";
 import type { AcCiteRow, RuleDependsRow } from "../store/store-interface.js";
+import { approvedRulesOf, pendingRevisionsOf } from "./baseline-items.js";
 import { findProposal } from "./rule-changes.js";
 
 export interface CitingCriterion {
@@ -43,6 +44,20 @@ export interface RuleView {
   citingCriteria: CitingCriterion[];
   /** Slug of the spec whose change set proposes this rule; present only when `state` is `proposed`. */
   proposed_by?: string;
+  /**
+   * The rule's pending revision (BR-626), labelled `pending`: for a pending add, the whole rule (`state` is `proposed`);
+   * for an approved rule, the revision beside the approved `statement` above, which keeps governing until approved.
+   */
+  pending?: {
+    revision_id: string;
+    statement: string;
+    confidence: string;
+    lifecycle: string;
+    retired_note?: string;
+    /** Slug of the leaf the rule moves to on approval. */
+    move_to?: string;
+    kind: "add" | "revision";
+  };
 }
 
 export type RuleFindQuery = { spec: string } | { file: string } | { text: string };
@@ -128,9 +143,7 @@ export function collectLeafRules(baselineDocs: readonly DocRecord[]): Map<string
   const byId = new Map<string, LeafRule>();
   for (const doc of baselineDocs) {
     if ((doc.deleted_at ?? null) !== null || ruleIdPrefixOfNode(doc.extra) === undefined) continue;
-    const rules = doc.extra["rules"];
-    if (!Array.isArray(rules)) continue;
-    for (const r of rules as unknown[]) {
+    for (const r of approvedRulesOf(doc)) {
       if (!isRecord(r) || typeof r["id"] !== "string" || byId.has(r["id"])) continue;
       const lifecycle = r["lifecycle"];
       if (lifecycle !== "live" && lifecycle !== "deprecated" && lifecycle !== "retired") continue;
@@ -162,6 +175,33 @@ function citingCriteriaOf(ruleId: string, data: RuleIndexData): CitingCriterion[
  */
 export function buildRuleView(ruleId: string, data: RuleIndexData): RuleView | undefined {
   const rule = collectLeafRules(data.baseline).get(ruleId);
+  // reason: BR-626 — a direct write's pending revision is shown beside the approved version, labelled `pending`; a pending
+  // add (no approved version) is the whole view: `proposed`, listed by no leaf as a rule yet.
+  const pendingHolder = data.baseline.find((d) => (d.deleted_at ?? null) === null && pendingRevisionsOf(d).rules[ruleId] !== undefined);
+  const pendingRevision = pendingHolder === undefined ? undefined : pendingRevisionsOf(pendingHolder).rules[ruleId];
+  const pending: RuleView["pending"] | undefined =
+    pendingRevision === undefined
+      ? undefined
+      : {
+          revision_id: pendingRevision.revision_id,
+          statement: pendingRevision.rule.statement,
+          confidence: pendingRevision.rule.confidence,
+          lifecycle: pendingRevision.rule.lifecycle,
+          ...(pendingRevision.rule.retired_note !== undefined ? { retired_note: pendingRevision.rule.retired_note } : {}),
+          ...(pendingRevision.move_to !== undefined ? { move_to: data.baseline.find((d) => d.id === pendingRevision.move_to)?.slug ?? pendingRevision.move_to } : {}),
+          kind: rule === undefined ? "add" : "revision",
+        };
+  if (rule === undefined && pendingHolder !== undefined && pending !== undefined) {
+    return {
+      id: ruleId,
+      statement: pending.statement,
+      leaf: pendingHolder.slug,
+      confidence: pending.confidence,
+      state: "proposed",
+      citingCriteria: citingCriteriaOf(ruleId, data),
+      pending,
+    };
+  }
   if (rule === undefined) {
     const proposal = findProposal(ruleId, data.specs);
     if (proposal === undefined || proposal.change.op !== "add") return undefined;
@@ -182,6 +222,7 @@ export function buildRuleView(ruleId: string, data: RuleIndexData): RuleView | u
     confidence: rule.confidence,
     state: rule.lifecycle,
     citingCriteria: citingCriteriaOf(ruleId, data),
+    ...(pending !== undefined ? { pending } : {}),
   };
 }
 
@@ -262,6 +303,7 @@ function cyclicComponents(nodes: Set<string>, edges: Edges): string[][] {
       counter += 1;
       stack.push(n);
       onStack.add(n);
+      /** @lore-site BR-681 */
       work.push({ node: n, iter: (edges.get(n) ?? new Set<string>())[Symbol.iterator]() });
     };
     enter(root);

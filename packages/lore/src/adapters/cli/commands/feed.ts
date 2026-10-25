@@ -113,7 +113,7 @@ import { isRegisteredCheckpoint } from "../../../service/checkpoint-registry.js"
 import { buildPhaseFeedFlowDeps } from "../phase-wiring.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wiring.js";
 import { renderTaskStartPack } from "../task-feed-render.js";
-import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../cli-refusal-messages.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
@@ -156,7 +156,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
       ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
       ...(typeof args.by === "string" ? { by: args.by } : {}),
     },
-    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user, io: inv.io },
+    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, identity: inv.identity, io: inv.io },
   );
 
   if (!result.ok) {
@@ -244,7 +244,10 @@ const SPECIAL_CHECKPOINT_HANDLERS: Readonly<Record<string, CheckpointHandler>> =
  */
 function recordFeedTrace(app: App, inv: Invocation, checkpoint: string, docsServed: readonly string[]): void {
   if (app.traceRecorder === undefined) return;
-  app.traceRecorder.recordFeed(resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), checkpoint, docsServed);
+  // reason: `lore feed` is a READ, never refused for identity (BR-1351); a trace row needs an actor, and an
+  // invocation with no known party has none, so its feed is simply not traced (advisory observability, SPEC-102).
+  if (inv.identity.claimed === null) return;
+  app.traceRecorder.recordFeed(inv.identity.claimed, checkpoint, docsServed);
 }
 
 // SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS

@@ -2,7 +2,7 @@
 /**
  * The one write route honours claim-scoped corpus authoring (task-skill-fix-the-one-write-route-honours-claim-scoped-corpus).
  *
- * Regression from DCL-3: rule-service writes (`lore baseline map --sites-file`, rule add/set, rule move) went through
+ * Regression from DCL-3: rule-service writes (`lore baseline map --command`, rule add/set, rule move) went through
  * `CorpusService.writeDoc`, whose foreign-corpus refusal ignored the caller's claim lease, so a worktree implementer who
  * claimed with `--worktree <abs> --corpus-scope <branch>` was refused on a REAL write while the no-change
  * `lore baseline map <leaf>` still reported "authorized". The route now takes ITS decision from
@@ -13,7 +13,7 @@
  * main checkout's (provenance `git_common_dir`).
  *
  * Coverage:
- *   HAPPY:      scoped lease -> `baseline map --sites-file` from the worktree exits 0 and lands exactly ONE version
+ *   HAPPY:      scoped lease -> `baseline map --command` from the worktree exits 0 and lands exactly ONE version
  *   NEGATIVE:   no scoped lease -> the same write exits 4 with gate:corpus-write:foreign-provenance, nothing lands
  *   STATE:      the no-change authorization report and the real write AGREE, in both cases
  *   BOUNDARY:   a scoped lease on ANOTHER branch refuses the write (scope covers only its own subtree)
@@ -26,6 +26,7 @@ import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -68,6 +69,7 @@ interface Fixture {
   readonly branchX: string;
   readonly branchY: string;
   readonly leafX: string;
+  readonly ruleId: string;
   readonly plan: string;
   readonly sitesFile: string;
 }
@@ -89,8 +91,8 @@ function buildFixture(): Fixture {
   git(repo, ["commit", "-q", "-m", "init"]);
 
   mustRun(["init"], repo);
-  appendFileSync(
-    join(repo, ".lore", "config.yaml"),
+  patchLoreConfig(
+    repo,
     ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    task-claim:", "      enabled: false", ""].join("\n"),
   );
 
@@ -99,11 +101,17 @@ function buildFixture(): Fixture {
   const branchX = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "bx", "--title", "WRC Branch X"], repo).stdout);
   const branchY = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "by", "--title", "WRC Branch Y"], repo).stdout);
   const leafX = slugOf(mustRun(["baseline", "add", branchX, "--node", "leaf", "--label", "lx", "--title", "WRC Leaf X"], repo).stdout);
+  const ruleOut = mustRun(
+    ["rule", "add", leafX, "--statement", "A mapped site is accounted for.", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "map writes a version"],
+    repo,
+  );
+  const ruleId = ruleOut.stdout.match(/BR-\d+/)?.[0];
+  if (ruleId === undefined) throw new Error(`no rule id in: ${ruleOut.stdout}`);
   const plan = slugOf(mustRun(["create", "plan", "--title", "WRC Plan", "--parent", prd, "--content", "x", "--no-ai"], repo).stdout);
 
   const sitesFile = join(worktrees, "rows.json");
-  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", nonBusiness: "fixture site, not business behaviour" }]));
-  return { repo, worktrees, branchX, branchY, leafX, plan, sitesFile };
+  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", rules: [ruleId] }]));
+  return { repo, worktrees, branchX, branchY, leafX, ruleId, plan, sitesFile };
 }
 
 let taskCounter = 0;
@@ -138,7 +146,7 @@ afterAll(() => {
 });
 
 describe("the one write route honours claim-scoped corpus authoring", () => {
-  it("HAPPY + STATE: a scoped lease lets `baseline map --sites-file` write from the worktree, and the report agreed", () => {
+  it("HAPPY + STATE: a scoped lease lets `baseline map --command` write from the worktree, and the report agreed", () => {
     const actor = "agent:wrc-scoped";
     const wt = claimFromWorktree("scoped", actor, fx.branchX);
     const before = leafVersion();
@@ -147,7 +155,7 @@ describe("the one write route honours claim-scoped corpus authoring", () => {
     expect(report.exitCode, report.stderr + report.stdout).toBe(0);
     expect(report.stderr + report.stdout).not.toContain(FOREIGN_TOKEN);
 
-    const write = runLore(["baseline", "map", fx.leafX, "--sites-file", fx.sitesFile], wt, actor);
+    const write = runLore(["baseline", "map", fx.leafX, "--command", "sample-write"], wt, actor);
     expect(write.stderr).not.toContain(FOREIGN_TOKEN);
     expect(write.exitCode, write.stderr + write.stdout).toBe(0);
     expect(leafVersion()).toBe(before + 1);
@@ -162,7 +170,7 @@ describe("the one write route honours claim-scoped corpus authoring", () => {
     expect(report.exitCode).toBe(4);
     expect(report.stderr + report.stdout).toContain(FOREIGN_TOKEN);
 
-    const write = runLore(["baseline", "map", fx.leafX, "--sites-file", fx.sitesFile], wt, actor);
+    const write = runLore(["baseline", "map", fx.leafX, "--command", "sample-write"], wt, actor);
     expect(write.exitCode).toBe(4);
     expect(write.stderr + write.stdout).toContain(FOREIGN_TOKEN);
     expect(leafVersion()).toBe(before);
@@ -175,15 +183,15 @@ describe("the one write route honours claim-scoped corpus authoring", () => {
 
     const report = runLore(["baseline", "map", fx.leafX], wt, actor);
     expect(report.exitCode).toBe(4);
-    const write = runLore(["baseline", "map", fx.leafX, "--sites-file", fx.sitesFile], wt, actor);
+    const write = runLore(["baseline", "map", fx.leafX, "--command", "sample-write"], wt, actor);
     expect(write.exitCode).toBe(4);
     expect(write.stderr + write.stdout).toContain(FOREIGN_TOKEN);
     expect(leafVersion()).toBe(before);
   });
 
-  it("REGRESSION: the main checkout's own `baseline map --sites-file` is untouched by the scope logic", () => {
+  it("REGRESSION: the main checkout's own `baseline map --command` is untouched by the scope logic", () => {
     const before = leafVersion();
-    const write = runLore(["baseline", "map", fx.leafX, "--site", "y.ts#fn#CODE", "--non-business", "main checkout site"], fx.repo, "agent:wrc-main");
+    const write = runLore(["baseline", "map", fx.leafX, "--command", "sample-main"], fx.repo, "agent:wrc-main");
     expect(write.exitCode, write.stderr + write.stdout).toBe(0);
     expect(leafVersion()).toBe(before + 1);
   });

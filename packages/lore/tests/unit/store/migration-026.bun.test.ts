@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { applyMigration026, MIGRATION_026_STEPS, MigrationFailedError } from "../../../src/store/migrations/migration-026.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 let dir = "";
 let dbPath = "";
@@ -66,11 +67,11 @@ describe("migration 026 versions.action admits 'undelete'", () => {
     const before = versionRows(old);
     old.close();
 
-    const upgraded = new SQLiteStore(dbPath);
+    const upgraded = new SQLiteStore(dbPath, { migrate: true });
     try {
       expect(versionRows(upgraded)).toEqual(before);
       const user = (upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version;
-      expect(user).toBe(26);
+      expect(user).toBe(LATEST_SCHEMA_VERSION);
       const indexes = (upgraded.getDatabase().query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'versions'").all() as { name: string }[]).map((r) => r.name);
       expect(indexes).toContain("idx_versions_doc");
       expect(indexes).toContain("idx_versions_keys");
@@ -109,10 +110,10 @@ describe("migration 026 versions.action admits 'undelete'", () => {
     expect(() => insertAction(old, 3, "undelete")).toThrow(/CHECK/i);
     old.close();
 
-    const reopened = new SQLiteStore(dbPath);
+    const reopened = new SQLiteStore(dbPath, { migrate: true });
     try {
       expect(versionRows(reopened)).toEqual(before);
-      expect((reopened.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+      expect((reopened.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
     } finally {
       reopened.close();
     }

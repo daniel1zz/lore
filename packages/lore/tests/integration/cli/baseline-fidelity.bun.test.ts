@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * End-to-end test of `lore baseline fidelity` (Baseline slice 2c C7, AC-BLS2-21, AC-BLS2-23) through the
  * real CLI against a throwaway corpus (`lore init` in a temp dir; the repo's own `.lore/` is never touched).
@@ -17,6 +18,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -77,9 +80,8 @@ beforeAll(() => {
   judgeScript = join(corpus, "fake-judge.sh");
   writeFileSync(judgeScript, `#!/bin/sh\ncat > "${capture}"\nn=$(grep -o '### Item [0-9]*' "${capture}" | grep -o '[0-9]*' | head -1)\nsed "s/@N@/$n/g" "${replyFile}"\n`, { mode: 0o755 });
   mustRun(["init"]);
-  mkdirSync(join(corpus, ".lore"), { recursive: true });
-  writeFileSync(
-    join(corpus, ".lore", "config.yaml"),
+  patchLoreConfig(
+    corpus,
     [
       "project:",
       "  name: fid-cli-test",
@@ -101,6 +103,7 @@ beforeAll(() => {
   const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "Fid Branch"]).stdout);
   const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Fid Leaf"]).stdout);
   mustRun(["rule", "add", leaf, "--statement", "an AC id is unique within its spec", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "duplicate id refused"]);
+  approveFixtureNodes(corpus, [leaf]); // a direct add is a pending add: the fidelity pool counts live (approved) rules
   const spec = slugOf(mustRun(["create", "spec", "--title", "Fid Spec", "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx", "--no-ai"]).stdout);
   specSlug = spec;
   mustRun(["ac", "add", spec, "AC-FID-1", "--statement", "a duplicate criterion id is refused", "--mode", "human", "--cite", "BR-1"]);

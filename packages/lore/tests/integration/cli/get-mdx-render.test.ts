@@ -27,7 +27,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync, appendFileSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -102,8 +103,8 @@ function createChildAdr(title: string, parentSlug: string, cwd: string): string 
  * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

@@ -65,6 +65,7 @@ import {
 } from "../../../src/store/migrations/migration-008.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -412,7 +413,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     // the head — a fresh store runs every migration up to it, not just
     // through migration-009. This test's own concern (audit hash-chain
     // columns present) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     const cols = tableColumnNames(db, "audit");
     expect(cols).toContain("prev_hash");
     expect(cols).toContain("entry_hash");
@@ -481,10 +482,10 @@ describe("migration-009 (audit hash chain backfill)", () => {
     // apply migration-009 — never throw, never touch the pre-existing
     // rows' logical content, and produce a fully self-consistent chain over
     // exactly those 3 legacy rows.
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(tableColumnNames(db, "audit")).toContain("prev_hash");
     expect(tableColumnNames(db, "audit")).toContain("entry_hash");
 
@@ -544,7 +545,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     expect(() => {
       const secondOpen = actedStore(new SQLiteStore(dbPath));
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(26);
+      expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       expect(tableColumnNames(db, "audit")).toContain("prev_hash");
       secondOpen.close();
     }).not.toThrow();

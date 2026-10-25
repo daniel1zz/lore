@@ -129,6 +129,7 @@ function makeDoc(
     deleted_at: overrides.deleted_at ?? null,
     tags: overrides.tags ?? [],
     extra: overrides.extra ?? {},
+    ...(overrides.ordinal !== undefined ? { ordinal: overrides.ordinal } : {}),
   };
 }
 
@@ -638,12 +639,14 @@ describe("REGRESSION — clean corpus still exports clean; real body drift still
       type: "spec",
       title: "Clean Spec One",
       slug: "spec-clean-spec-one",
+      ordinal: 1, // BR-1284: a numbered-kind doc carries its number before export
     }));
     await insertDoc(store, makeDoc({
       id: "doc-regress-clean-2",
       type: "spec",
       title: "Clean Spec Two",
       slug: "spec-clean-spec-two",
+      ordinal: 2, // BR-1284: a numbered-kind doc carries its number before export
     }));
 
     const result = await service.exportDocs({ projectDir, dryRun: false });
@@ -667,6 +670,7 @@ describe("REGRESSION — clean corpus still exports clean; real body drift still
       type: "spec",
       title: "Regression Drift Spec",
       slug: "spec-regression-drift-spec",
+      ordinal: 3, // BR-1284: a numbered-kind doc carries its number before export
       content: originalBody,
     }));
 

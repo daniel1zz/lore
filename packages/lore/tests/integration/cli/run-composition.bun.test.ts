@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/context/agent-rules.md
+// @reads assets/context/ask-then-execute.md
 // @reads assets/context/evidence-attestation.md
 /**
  * @spec_ref AC-RID-2
@@ -77,14 +78,14 @@ function makeSandbox(): Sandbox {
 
 const projectCtxDir = (sb: Sandbox): string => join(sb.corpus, ".lore", "context");
 
-function writeFragment(sb: Sandbox, id: string, audience: string[], body: string): void {
+function writeFragment(sb: Sandbox, id: string, inject: string[], body: string, agents?: string[]): void {
   mkdirSync(projectCtxDir(sb), { recursive: true });
   const fm = [
     "---",
     `id: ${id}`,
     `title: fixture ${id}`,
-    `audience: [${audience.map((a) => JSON.stringify(a)).join(", ")}]`,
-    "mode: dynamic",
+    `inject: [${inject.join(", ")}]`,
+    ...(agents === undefined ? [] : [`agents: [${agents.join(", ")}]`]),
     "---",
     "",
   ].join("\n");
@@ -142,9 +143,9 @@ const byId = (r: RunRecord): Record<string, string> =>
 let sb: Sandbox;
 beforeEach(() => {
   sb = makeSandbox();
-  writeFragment(sb, "rid2-shared", ["subagent:lore-implementer", "subagent:lore-reviewer"], "Shared fixture body v1");
-  writeFragment(sb, "rid2-impl-only", ["subagent:lore-implementer"], "Implementer-only fixture body v1");
-  writeFragment(sb, "rid2-reviewer-only", ["subagent:lore-reviewer"], "Reviewer-only fixture body v1");
+  writeFragment(sb, "rid2-shared", ["subagent-start"], "Shared fixture body v1", ["lore-implementer", "lore-reviewer"]);
+  writeFragment(sb, "rid2-impl-only", ["subagent-start"], "Implementer-only fixture body v1", ["lore-implementer"]);
+  writeFragment(sb, "rid2-reviewer-only", ["subagent-start"], "Reviewer-only fixture body v1", ["lore-reviewer"]);
 });
 afterEach(() => {
   try {
@@ -203,7 +204,7 @@ describe("AC-RID-2: the composition record equals the fragment selection, with c
     registerSub(sb, "sess-comp-4", "agent-OLD", "lore-implementer");
     const before = showRun(sb, "cc:sess-comp-4:agent-OLD");
 
-    writeFragment(sb, "rid2-impl-only", ["subagent:lore-implementer"], "Implementer-only fixture body v2 EDITED");
+    writeFragment(sb, "rid2-impl-only", ["subagent-start"], "Implementer-only fixture body v2 EDITED", ["lore-implementer"]);
     registerSub(sb, "sess-comp-4", "agent-NEW", "lore-implementer");
     const after = showRun(sb, "cc:sess-comp-4:agent-NEW");
 
@@ -221,8 +222,28 @@ describe("AC-RID-2: the composition record equals the fragment selection, with c
     registerSub(sb, "sess-comp-5", "agent-OLD", "lore-implementer");
     const before = showRun(sb, "cc:sess-comp-5:agent-OLD");
 
-    writeFragment(sb, "rid2-impl-only", ["subagent:lore-implementer"], "Implementer-only fixture body v3 EDITED");
+    writeFragment(sb, "rid2-impl-only", ["subagent-start"], "Implementer-only fixture body v3 EDITED", ["lore-implementer"]);
     registerSub(sb, "sess-comp-5", "agent-OLD", "lore-implementer"); // idempotent: first wins
     expect(showRun(sb, "cc:sess-comp-5:agent-OLD").composition).toEqual(before.composition);
+  }, 120_000);
+});
+
+describe("AC-IT-11: run composition per run kind", () => {
+  it("AC-IT-11 a main run records rules:user, rules:project and hook:user-prompt selections; a subagent run only hook:subagent-start", () => {
+    writeFragment(sb, "it11-launch", ["launch"], "Launch fixture body");
+    writeFragment(sb, "it11-per-turn", ["user-prompt"], "Per-turn fixture body");
+
+    const main = runLore(sb, ["run", "register", "--harness", "claude-code", "--session", "sess-it11-main", "--harness-pid", String(process.pid)]);
+    expect({ code: main.exitCode, err: main.stderr }).toEqual({ code: 0, err: "" });
+    const mainIds = Object.keys(byId(showRun(sb, "cc:sess-it11-main")));
+    expect(mainIds).toContain("it11-launch");
+    expect(mainIds).toContain("it11-per-turn");
+    expect(mainIds).not.toContain("rid2-impl-only"); // helper-only fragments never reach the main session
+
+    registerSub(sb, "sess-it11-sub", "agent-it11", "lore-implementer");
+    const subIds = Object.keys(byId(showRun(sb, "cc:sess-it11-sub:agent-it11")));
+    expect(subIds).toContain("rid2-impl-only");
+    expect(subIds).not.toContain("it11-launch");
+    expect(subIds).not.toContain("it11-per-turn");
   }, 120_000);
 });

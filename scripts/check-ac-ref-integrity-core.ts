@@ -44,7 +44,7 @@
  *   - extractDeclaredAcIds(spec)               — spec.extra.acceptance_criteria -> Set<id>
  *   - findDanglingRefs(tasks, docsById)        — the corpus-wide scan, deduped by (task, ac_ref)
  *   - AcRefLedgerEntrySchema / AcRefLedgerFileSchema / parseAcRefLedgerFile / loadLedgerFromDisk
- *     — the auditable exemption ledger (modeled on `scripts/check-test-budgets.ts`'s
+ *     — the auditable exemption ledger (a
  *     baseline-ledger shape per `adr-a-newly-armed-structural-oracle-enforces-from-a-baseline`
  *     — same {id/spec/date/reason} row shape, same "ledger is DATA the oracle reads"
  *     discipline, same completeness assertion via `orphanedEntries` below)
@@ -344,8 +344,7 @@ export function findDanglingRefs(
 
 /**
  * Repo-relative path to the exemption ledger — DATA this oracle reads, never a
- * `--exclude` glob buried in a script (same discipline `check-test-budgets.ts`'s
- * `LEDGER_RELATIVE_PATH` documents).
+ * `--exclude` glob buried in a script.
  */
 export const LEDGER_RELATIVE_PATH = "scripts/ac-ref-exemption-ledger.json";
 

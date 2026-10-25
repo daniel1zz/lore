@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * `lore create task --anchor` / `lore anchor add|rm|list` / `lore claim
  * --machine/--worktree` — CLI-adapter exit-code contract tests (SPEC-042

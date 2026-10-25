@@ -26,6 +26,7 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { sessionEnvFor } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ function writeGatesConfig(tmpDir: string, gatesYaml: string): void {
   const config = ["project:", "  name: gate-config-disable-test", "  author: tester", "workflow:", "  gates:", gatesYaml].join(
     "\n",
   );
-  writeFileSync(join(tmpDir, ".lore", "config.yaml"), config + "\n", "utf8");
+  patchLoreConfig(tmpDir, config, { replace: true });
 }
 
 function parseSlug(stdout: string): string {

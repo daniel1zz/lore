@@ -3,10 +3,10 @@ id: KN-612
 type: knowledge
 role: knowledge
 title: "Assessment: Land #106: lore done removes the task's recorded worktree; lore worktree sweep (2026-10-10)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: PLAN-170
 links:

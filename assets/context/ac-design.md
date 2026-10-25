@@ -1,8 +1,7 @@
 ---
 id: ac-design
 title: "Designing acceptance criteria that cannot go falsely green"
-audience: [main]
-mode: static
+inject: [launch]
 ---
 ## AC design
 

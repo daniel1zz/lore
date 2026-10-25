@@ -3,10 +3,10 @@ id: KN-553
 type: knowledge
 role: knowledge
 title: "Assessment: Make the phase-write version-row / audit-entry pairing oracle-enforced (2026-08-25)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-23
 tags: []
 parent: PLAN-144
 links:

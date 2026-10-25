@@ -3,10 +3,10 @@ id: KN-622
 type: knowledge
 role: knowledge
 title: "AC-BLS2-14 re-measurement after #105: fidelity 93.6% of 110 pairs, no catch-all, PASS"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 links:
   - {id: KN-626, type: relates-to}

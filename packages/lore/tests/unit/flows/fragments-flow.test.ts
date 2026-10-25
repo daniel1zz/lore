@@ -28,8 +28,9 @@ const CLAUDE_MD = "/p/CLAUDE.md";
 const USER_SETTINGS = "/h/.claude/settings.json";
 const PROJECT_SETTINGS = "/p/.claude/settings.local.json";
 
-function fragmentFile(id: string, audience: string[], mode: "static" | "dynamic", body: string): string {
-  return `---\nid: ${id}\ntitle: t ${id}\naudience: [${audience.map((a) => JSON.stringify(a)).join(", ")}]\nmode: ${mode}\n---\n${body}\n`;
+function fragmentFile(id: string, inject: string[], body: string, agents?: string[]): string {
+  const agentsLine = agents === undefined ? "" : `agents: [${agents.join(", ")}]\n`;
+  return `---\nid: ${id}\ntitle: t ${id}\ninject: [${inject.join(", ")}]\n${agentsLine}---\n${body}\n`;
 }
 
 function makeDeps(files: Record<string, string>, over: Partial<FragmentsFlowDeps> = {}): FragmentsFlowDeps {
@@ -94,7 +95,7 @@ async function depsWithRules(rendered: Record<string, string>, current: Record<s
 
 describe("AC-CF-4 runFragmentsCheck", () => {
   it("clean shipped-only baseline is ok and enumerates agent files + subagent:*", async () => {
-    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.shipped}/s.md`]: fragmentFile("s", ["subagent:*"], "dynamic", "hi") }));
+    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.shipped}/s.md`]: fragmentFile("s", ["subagent-start"], "hi") }));
     expect(r.findings).toEqual([]);
     expect(r.ok).toBe(true);
     expect(r.agentTypes).toEqual(["lore-a", "lore-b", "lore-c", "subagent:*"]);
@@ -104,7 +105,7 @@ describe("AC-CF-4 runFragmentsCheck", () => {
 
   it("reports BUDGET_EXCEEDED naming the oversized id", async () => {
     const r = await runFragmentsCheck(
-      makeDeps({ [`${ROOTS.project}/big.md`]: fragmentFile("cf4-oversized", ["subagent:*"], "dynamic", "x".repeat(9_401)) }),
+      makeDeps({ [`${ROOTS.project}/big.md`]: fragmentFile("cf4-oversized", ["subagent-start"], "x".repeat(9_401)) }),
     );
     expect(r.ok).toBe(false);
     const cap = r.findings.filter((f) => f.kind === "cap");
@@ -115,17 +116,17 @@ describe("AC-CF-4 runFragmentsCheck", () => {
 
   it("exactly-at-cap fragment is accepted (boundary control)", async () => {
     const r = await runFragmentsCheck(
-      makeDeps({ [`${ROOTS.project}/b.md`]: fragmentFile("cf4-edge", ["subagent:*"], "dynamic", "x".repeat(9_399)) }),
+      makeDeps({ [`${ROOTS.project}/b.md`]: fragmentFile("cf4-edge", ["subagent-start"], "x".repeat(9_399)) }),
     );
     // discoverFragments keeps one leading newline in the body, so 9,399 x's is exactly the 9,400 cap.
     expect(r.findings.filter((f) => f.kind === "cap")).toEqual([]);
     const over = await runFragmentsCheck(
-      makeDeps({ [`${ROOTS.project}/b.md`]: fragmentFile("cf4-edge", ["subagent:*"], "dynamic", "x".repeat(9_400)) }),
+      makeDeps({ [`${ROOTS.project}/b.md`]: fragmentFile("cf4-edge", ["subagent-start"], "x".repeat(9_400)) }),
     );
     expect(over.findings.some((f) => f.kind === "cap")).toBe(true);
   });
 
-  const MAIN = (body: string) => ({ [`${ROOTS.project}/m.md`]: fragmentFile("m", ["main"], "static", body) });
+  const MAIN = (body: string) => ({ [`${ROOTS.project}/m.md`]: fragmentFile("m", ["launch"], body) });
 
   it("rules files equal to a fresh render are clean (control: refresh really wrote one)", async () => {
     const deps = await depsWithRules(MAIN("Body M"));
@@ -171,15 +172,15 @@ describe("AC-CF-4 runFragmentsCheck", () => {
   });
 
   it("no rules files and no static main fragments at all is not drift", async () => {
-    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/d.md`]: fragmentFile("d", ["subagent:*"], "dynamic", "dyn") }));
+    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/d.md`]: fragmentFile("d", ["subagent-start"], "dyn") }));
     expect(r.findings).toEqual([]);
   });
 
   it("refuses a user-layer override of a shipped static main fragment", async () => {
     const r = await runFragmentsCheck(
       makeDeps({
-        [`${ROOTS.shipped}/m.md`]: fragmentFile("m", ["main"], "static", "shipped"),
-        [`${ROOTS.user}/m.md`]: fragmentFile("m", ["main"], "static", "user"),
+        [`${ROOTS.shipped}/m.md`]: fragmentFile("m", ["launch"], "shipped"),
+        [`${ROOTS.user}/m.md`]: fragmentFile("m", ["launch"], "user"),
       }),
     );
     expect(r.findings.map((f) => f.kind)).toContain("override_refusal");
@@ -188,8 +189,8 @@ describe("AC-CF-4 runFragmentsCheck", () => {
   it("reports a discovery failure (duplicate id in one layer) instead of throwing", async () => {
     const r = await runFragmentsCheck(
       makeDeps({
-        [`${ROOTS.project}/a.md`]: fragmentFile("dup", ["main"], "static", "1"),
-        [`${ROOTS.project}/b.md`]: fragmentFile("dup", ["main"], "static", "2"),
+        [`${ROOTS.project}/a.md`]: fragmentFile("dup", ["launch"], "1"),
+        [`${ROOTS.project}/b.md`]: fragmentFile("dup", ["launch"], "2"),
       }),
     );
     expect(r.findings[0]?.kind).toBe("discovery");
@@ -234,8 +235,8 @@ describe("AC-CF-18 language drift in runFragmentsCheck", () => {
 
 describe("runFragmentsRender (helper start only; hook:session-start retired, BR-912)", () => {
   it("helper-start carries no stale-rules notice even when a rules file drifted (BR-909/BR-910 retired)", async () => {
-    const sub = { [`${ROOTS.project}/sub.md`]: fragmentFile("sub", ["subagent:*"], "dynamic", "SUB-BLOCK") };
-    const st = (body: string) => ({ [`${ROOTS.project}/st.md`]: fragmentFile("st", ["main"], "static", body) });
+    const sub = { [`${ROOTS.project}/sub.md`]: fragmentFile("sub", ["subagent-start"], "SUB-BLOCK") };
+    const st = (body: string) => ({ [`${ROOTS.project}/st.md`]: fragmentFile("st", ["launch"], body) });
     const stale = await runFragmentsRender(await depsWithRules({ ...sub, ...st("Original") }, { ...sub, ...st("Changed NONCE-9") }), {
       outlet: "hook:subagent-start",
     });
@@ -249,8 +250,8 @@ describe("runFragmentsRender (helper start only; hook:session-start retired, BR-
   it("render subagent-start selects subagent:<type> and rejects over-cap with BUDGET_EXCEEDED", async () => {
     const ok = await runFragmentsRender(
       makeDeps({
-        [`${ROOTS.shipped}/all.md`]: fragmentFile("all", ["subagent:*"], "dynamic", "ALL"),
-        [`${ROOTS.shipped}/t.md`]: fragmentFile("t", ["subagent:tester"], "dynamic", "ONLY-TESTER"),
+        [`${ROOTS.shipped}/all.md`]: fragmentFile("all", ["subagent-start"], "ALL"),
+        [`${ROOTS.shipped}/t.md`]: fragmentFile("t", ["subagent-start"], "ONLY-TESTER", ["tester"]),
       }),
       { outlet: "hook:subagent-start", agentType: "tester" },
     );
@@ -258,7 +259,7 @@ describe("runFragmentsRender (helper start only; hook:session-start retired, BR-
     expect(ok.ok && ok.value.additionalContext.split(/\s+/).filter(Boolean)).toEqual(["ALL", "ONLY-TESTER"]);
 
     const over = await runFragmentsRender(
-      makeDeps({ [`${ROOTS.project}/big.md`]: fragmentFile("big-one", ["subagent:*"], "dynamic", "x".repeat(9_401)) }),
+      makeDeps({ [`${ROOTS.project}/big.md`]: fragmentFile("big-one", ["subagent-start"], "x".repeat(9_401)) }),
       { outlet: "hook:subagent-start" },
     );
     expect(over.ok).toBe(false);
@@ -290,13 +291,12 @@ describe("D12 buildHookBanner", () => {
 // Spec: spec-rule-store-fragment-selection-on-demand-skill (Scope 6, AC-RS-8 unit half;
 // BR-1062, BR-1064, BR-1066, BR-1067). Each new finding kind has a failing case AND a clean control.
 describe("AC-RS-8 runFragmentsCheck rule-store findings", () => {
-  // A helper-audience (wildcard) dynamic fragment: one reading group, no rules file needed. (A dynamic MAIN
-  // fragment is itself a `dynamic_main` finding now, BR-1066, so it cannot serve as a clean fixture.)
+  // A helper (any agent type) fragment: one reading group, no rules file needed.
   const dyn = (id: string, body: string, layer: keyof typeof ROOTS = "project") => ({
-    [`${ROOTS[layer]}/${id}.md`]: fragmentFile(id, ["subagent:*"], "dynamic", body),
+    [`${ROOTS[layer]}/${id}.md`]: fragmentFile(id, ["subagent-start"], body),
   });
   const skillSource = (id: string, body: string) => ({
-    [`${ROOTS.project}/${id}.md`]: `---\nid: ${id}\ntitle: t ${id}\naudience: [main]\nmode: static\ndelivery: skill\ndescription: d ${id}\n---\n${body}\n`,
+    [`${ROOTS.project}/${id}.md`]: `---\nid: ${id}\ntitle: t ${id}\ninject: [on-demand]\ndescription: d ${id}\n---\n${body}\n`,
   });
   const SKILLS_DIR = "/p/.claude/skills";
   const selectionText = (ids: string[]) => `schemaVersion: 1\ndisable: [${ids.join(", ")}]\n`;
@@ -311,7 +311,7 @@ describe("AC-RS-8 runFragmentsCheck rule-store findings", () => {
     if (!found.ok) throw new Error(`fixture discovery failed: ${found.error.message}`);
     const out: Record<string, string> = {};
     for (const fragment of found.value) {
-      if (fragment.frontmatter.delivery !== "skill") continue;
+      if (!fragment.frontmatter.inject.includes("on-demand")) continue;
       const rendered = renderSkillFile(fragment);
       if (!rendered.ok) throw new Error(rendered.error.message);
       out[`${SKILLS_DIR}/${rendered.value.dirName}/SKILL.md`] = rendered.value.content;
@@ -338,23 +338,21 @@ describe("AC-RS-8 runFragmentsCheck rule-store findings", () => {
     expect(clean.findings).toEqual([]);
   });
 
-  it("dynamic_main: a dynamic fragment with audience main is a finding naming its id; static main and helper-dynamic are not (BR-1066)", async () => {
-    const hit = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/dm.md`]: fragmentFile("dm", ["main"], "dynamic", "x") }));
+  it("shipped_user_prompt: a shipped fragment naming user-prompt is a finding naming its id; a project one is not (spec D7)", async () => {
+    const hit = await runFragmentsCheck(makeDeps({ [`${ROOTS.shipped}/up.md`]: fragmentFile("up", ["user-prompt"], "x") }));
     expect(hit.ok).toBe(false);
-    const finding = hit.findings.find((f) => f.kind === "dynamic_main");
+    const finding = hit.findings.find((f) => f.kind === "shipped_user_prompt");
     expect(finding?.code).toBe("VALIDATION_ERROR");
-    expect(finding?.message).toContain('"dm"');
+    expect(finding?.message).toContain('"up"');
 
-    const helper = await runFragmentsCheck(makeDeps(dyn("dm", "x")));
-    expect(kinds(helper)).not.toContain("dynamic_main");
-    const stat = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/dm.md`]: fragmentFile("dm", ["main"], "static", "x") }));
-    expect(kinds(stat)).not.toContain("dynamic_main");
+    const project = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/up.md`]: fragmentFile("up", ["user-prompt"], "x") }));
+    expect(kinds(project)).not.toContain("shipped_user_prompt");
   });
 
   it("duplicate_line: fragments of different reading groups are not compared (main vs helper control)", async () => {
     const files = {
-      [`${ROOTS.project}/m.md`]: fragmentFile("m", ["main"], "static", "Shared line."),
-      [`${ROOTS.project}/h.md`]: fragmentFile("h", ["subagent:*"], "dynamic", "Shared line."),
+      [`${ROOTS.project}/m.md`]: fragmentFile("m", ["launch"], "Shared line."),
+      [`${ROOTS.project}/h.md`]: fragmentFile("h", ["subagent-start"], "Shared line."),
     };
     expect(kinds(await runFragmentsCheck(makeDeps(files)))).not.toContain("duplicate_line");
   });

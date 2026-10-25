@@ -3,10 +3,10 @@ id: KN-023
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-033 Implementation — dashboard projection + adjudication (2026-07-06)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-06
-updated: 2026-07-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-013
 links:

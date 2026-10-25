@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Task task-root-coverage-reports-a-declared-command-that-no-longer: a leaf-declared command the analysed tree does not
  * have is REPORTED, never a census error and never a coverage defect. A branch that adds a command must declare it in the
@@ -9,8 +11,8 @@
  * sites it owns). Census errors stay for genuinely unanalysable trees (see compiled-root-coverage.bun.test.ts).
  *
  * Fixture: tests/helpers/coverage-mini-corpus.ts (throwaway checkout + corpus; never the repo's .lore/).
- * Dimensions: HAPPY (control; absent declaration -> exit 0 with the line), NEGATIVE (absent declaration PLUS a real gap -> exit 1
- * for the gap), REGRESSION (never exit 4, never `command-unresolved`), BOUNDARY (JSON shape; all-absent leaf measured by owned sites).
+ * Dimensions: HAPPY (control; absent declaration -> exit 0 with the line), NEGATIVE (absent declaration PLUS an unmapped site -> exit 0,
+ * the site listed), REGRESSION (never exit 4, never `command-unresolved`), BOUNDARY (JSON shape; all-absent leaf measured by owned sites).
  *
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -95,16 +97,16 @@ describe("declared command not in this tree is reported, not a defect (task-root
     expect(b?.absent_commands).toEqual([]);
   }, 120_000);
 
-  it("an absent declaration PLUS a real gap still exits 1 for the gap", async () => {
+  it("an absent declaration PLUS an unmapped site still exits 0 and lists the site as a gap (report only)", async () => {
     const c = await buildMiniCorpus();
     corpora.push(c);
     // leaf A declares alpha and gamma; alpha's site is never mapped (a real gap); gamma is absent from the registry.
     expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma"])).exitCode).toBe(0);
     await c.mapAllSites(c.leafB, "beta");
     const r = await c.run(["baseline", "coverage", c.root, "--json"]);
-    expect(r.exitCode, r.stdout + r.stderr).toBe(1);
+    expect(r.exitCode, r.stdout + r.stderr).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { complete: boolean; leaves: { slug: string; ok: boolean; gaps: string[]; absent_commands: { command: string }[] }[] } }).data;
-    expect(data.complete).toBe(false);
+    expect(data.complete).toBe(true);
     const a = data.leaves.find((l) => l.slug === c.leafA);
     expect(a?.ok).toBe(false);
     expect(a?.gaps.length).toBeGreaterThan(0);
@@ -114,15 +116,15 @@ describe("declared command not in this tree is reported, not a defect (task-root
     expect(human.stdout).toContain("gap ");
   }, 120_000);
 
-  it("a leaf whose ONLY declared command is absent is measured as if command-less (by its owned sites), not failed", async () => {
+  it("a leaf whose ONLY declared command is absent is pending, not failed: no live command reaches the site that declares its rule", async () => {
     const c = await withGammaDeclared();
-    // beta leaves the registry: leaf B declares only beta, so it is all-absent; its mapped site is what it owns.
+    // beta leaves the registry: leaf B declares only beta, so it is all-absent; the code site declaring its rule is no longer reached (BR-1344).
     c.writeSource(`${MINI_CLI}/index.ts`, REGISTRY_AB.replace('  beta: () => import("./commands/beta.js"),\n', '  gamma: () => import("./commands/gamma.js"),\n'));
     const r = await c.run(["baseline", "coverage", c.root, "--json"]);
     expect(r.exitCode, r.stdout + r.stderr).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { leaves: { slug: string; ok: boolean; sites: number; measured_by: string; absent_commands: { command: string }[] }[] } }).data;
     const b = data.leaves.find((l) => l.slug === c.leafB);
-    expect(b).toMatchObject({ ok: true, sites: 1, measured_by: "owned_sites" });
+    expect(b).toMatchObject({ ok: true, sites: 0, measured_by: "absent" });
     expect(b?.absent_commands.map((x) => x.command)).toEqual(["beta"]);
   }, 120_000);
 

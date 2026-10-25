@@ -3,10 +3,10 @@ id: KN-238
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — resume-coverage floor satisfaction boundaries: non-empty deferral reason and sidechain non-discharge (2026-08-01)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-23
 tags: []
 parent: PLAN-084
 links:

@@ -39,6 +39,10 @@ import { join } from "node:path";
 import type { AuditEntry, DocRecord, VersionRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { RunSeeder } from "./fixtures/run-seeder.js";
+import { registerTestRun } from "../../helpers/test-run-identity.js";
+
+/** The agent run this suite's `lore` spawns write as. */
+const TEST_RUN = "cc:status-share-test";
 
 setDefaultTimeout(300_000);
 
@@ -60,7 +64,9 @@ interface Run {
 function lore(args: string[], cwd: string, frozen = true): Run {
   const env: Record<string, string | undefined> = { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: "agent:status-share-test" };
   if (frozen) env.LORE_TEST_FROZEN_NOW = FROZEN_NOW;
-  const argv = frozen ? ["bun", "run", "--preload", PRELOAD, ENTRY, ...args] : ["bun", "run", ENTRY, ...args];
+  // reason: every write needs a known party; this suite's writer is a registered agent run (the `init` that creates the corpus has none to register yet).
+  registerTestRun(cwd, TEST_RUN);
+  const argv = frozen ? ["bun", "run", "--preload", PRELOAD, ENTRY, "--harness-run", TEST_RUN, ...args] : ["bun", "run", ENTRY, "--harness-run", TEST_RUN, ...args];
   const p = Bun.spawnSync(argv, { cwd, env: env as Record<string, string> });
   return { stdout: p.stdout.toString(), stderr: p.stderr.toString(), exitCode: p.exitCode ?? 1 };
 }

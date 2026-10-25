@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BCR-4: a runnable subcommand registered in the CLI command registry but declared by no leaf leaves root
  * coverage incomplete: `lore baseline coverage <root>` exits exactly 1, names the command and the fix command

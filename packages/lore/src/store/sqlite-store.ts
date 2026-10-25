@@ -41,6 +41,7 @@ import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migra
 // JSDoc for the bump-together invariant.
 import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 export { LATEST_SCHEMA_VERSION } from "./schema-version.js";
+import { isSchemaBehind, SchemaBehindError } from "./schema-behind.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -77,7 +78,6 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
-  NeverReadDoc,
   SearchHit,
   ProposedRuleWrite,
   RuleLeafPatch,
@@ -88,6 +88,13 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  CheckOutcomeInput,
+  CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
+  LeaseAcquisition,
+  LeaseRecord,
+  ReadDayCount,
   TraceEventInput,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
@@ -102,6 +109,14 @@ import type {
   RunProcessRecord,
   VersionKey,
 } from "./store-interface.js";
+import {
+  PLAN_MEMBERS_SQL,
+  buildPlanProgressWrite,
+  keepStoredPlanProgress,
+  planIdsAffectedBy,
+  refuseArchivedTerminal,
+  withInitialPlanProgress,
+} from "./plan-progress.js";
 import {
   type AuditChainRow,
   type AuditRow,
@@ -153,6 +168,17 @@ import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { applyMigration026 } from "./migrations/migration-026.js";
+import { MIGRATION_027_SQL } from "./migrations/migration-027.js";
+import { applyMigration028 } from "./migrations/migration-028.js";
+import { applyMigration029 } from "./migrations/migration-029.js";
+import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "./migrations/migration-030.js";
+import { MIGRATION_031_SQL } from "./migrations/migration-031.js";
+import { MIGRATION_032_SQL } from "./migrations/migration-032.js";
+import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
+import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
+import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
+import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
+import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -186,6 +212,19 @@ export interface SQLiteStoreOptions {
    * build a corpus that is GENUINELY one schema behind, whatever the newest migration does; production callers never set it.
    */
   readonly schemaCeiling?: number;
+  /**
+   * Permit upgrading an existing corpus that is older than the schema. Without it the constructor throws
+   * {@link SchemaBehindError} and touches nothing: a corpus upgrade runs only through `lore migrate schema` (the one
+   * caller that sets this), never as a side effect of opening. A NEW file (`user_version` 0) is always built at the
+   * latest schema and needs no flag.
+   */
+  readonly migrate?: true;
+  /**
+   * The identity that authors the data-conversion writes of a migration (schema 27 writes a version and an audit row
+   * per converted baseline node). `lore migrate schema` passes the resolved actor; absent, a migration that has a
+   * node to convert fails loudly instead of attributing the write to a guess.
+   */
+  readonly migrationActor?: string;
 }
 
 export class SQLiteStore implements StoreInterface {
@@ -199,6 +238,10 @@ export class SQLiteStore implements StoreInterface {
   readonly writeWaitMs: number;
 
   private readonly schemaCeiling: number;
+  /** True only for the explicit `lore migrate schema` open; see {@link SQLiteStoreOptions.migrate}. */
+  private readonly migrateAllowed: boolean;
+  /** See {@link SQLiteStoreOptions.migrationActor}. */
+  private readonly migrationActor: string | undefined;
   /** The corpus file; named by a failed migration (migration-026 fails loud with it). */
   private readonly corpusPath: string;
 
@@ -220,6 +263,8 @@ export class SQLiteStore implements StoreInterface {
     this.writeWaitMs = declaredWriteWaitMs;
     this.corpusPath = dbPath;
     this.schemaCeiling = options?.schemaCeiling ?? LATEST_SCHEMA_VERSION;
+    this.migrateAllowed = options?.migrate === true;
+    this.migrationActor = options?.migrationActor;
     try {
       if (options?.readonly === true) this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
       else this.init();
@@ -294,7 +339,20 @@ export class SQLiteStore implements StoreInterface {
     // Enable WAL for better concurrent read performance
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("PRAGMA foreign_keys = ON");
+    this.refuseUnrequestedUpgrade();
     this.runMigrations();
+  }
+
+  /**
+   * Throws {@link SchemaBehindError} when the corpus already exists at an older schema and this open was not asked to
+   * `migrate`. Runs before any migration statement, so the refused corpus is byte-for-byte untouched.
+   */
+  private refuseUnrequestedUpgrade(): void {
+    if (this.migrateAllowed) return;
+    const currentVersion = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (isSchemaBehind(currentVersion, this.schemaCeiling)) {
+      throw new SchemaBehindError(this.corpusPath, currentVersion, this.schemaCeiling);
+    }
   }
 
   /**
@@ -783,6 +841,149 @@ export class SQLiteStore implements StoreInterface {
       // step rolls back, leaves schema 25 and throws MigrationFailedError naming the step and this corpus path.
       applyMigration026(this.db, this.corpusPath);
     }
+
+    if (currentVersion < 27 && 27 <= ceiling) {
+      // reason: migration-027 only moves user_version (claims compare runs only; the expiry of run-less leases is
+      // the `lore migrate schema` command's own data step, see migration-027.ts).
+      this.db.exec(MIGRATION_027_SQL);
+    }
+
+    if (currentVersion < 28 && 28 <= ceiling) {
+      // reason: migration-028 converts every baseline node to approved + pending items (BR-1341) in ONE transaction;
+      // a node it cannot convert rolls the whole step back, throws MigrationFailedError naming it, and leaves schema 27.
+      applyMigration028(this.db, this.corpusPath, this.migrationActor);
+    }
+
+    if (currentVersion < 29 && 29 <= ceiling) {
+      // reason: migration-029 promotes pending rule revisions that a landed spec change set accounts for (#323) in ONE
+      // transaction; a failure rolls back, throws MigrationFailedError naming the node, and leaves schema 28.
+      applyMigration029(this.db, this.corpusPath, this.migrationActor);
+    }
+
+    if (currentVersion < 30 && 30 <= ceiling) {
+      // reason: migration-030 is two-phase like 021 (see migration-030.ts's module JSDoc): the nullable
+      // `runs.message_address` column is added only where `PRAGMA table_info` lacks it, then one BEGIN/COMMIT bumps
+      // user_version.
+      try {
+        for (const { table, column, ddl } of MIGRATION_030_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_030_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 31 && 31 <= ceiling) {
+      // reason: migration-031 creates the per-day read counter and deletes every per-read `get` trace row in ONE
+      // BEGIN/COMMIT (BR-1373); a failure rolls back and leaves schema 30.
+      try {
+        this.db.exec(MIGRATION_031_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-030 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 32 && 32 <= ceiling) {
+      // reason: migration-032 rebuilds decision_log with the verdict CHECK widened to 'milestone' in ONE BEGIN/COMMIT
+      // (BR-1370); a failure rolls back and leaves schema 31.
+      try {
+        this.db.exec(MIGRATION_032_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-031 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 33 && 33 <= ceiling) {
+      // reason: migration-033 creates check_outcomes (one row per gate/hook run, BR-1373) in ONE BEGIN/COMMIT;
+      // a failure rolls back and leaves schema 32.
+      try {
+        this.db.exec(MIGRATION_033_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-032 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 34 && 34 <= ceiling) {
+      // reason: migration-034 creates pending_asks (the lore-written question bound to a single-use nonce, BR-1374)
+      // in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 33.
+      try {
+        this.db.exec(MIGRATION_034_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-033 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 35 && 35 <= ceiling) {
+      // reason: migration-035 backfills `extra.progress` on every plan (BR-1379) in ONE BEGIN/COMMIT; a failure
+      // rolls back and leaves schema 34.
+      try {
+        this.db.exec(MIGRATION_035_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-034 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 36 && 36 <= ceiling) {
+      // reason: migration-036 creates review_leases (the review batch's expiring lease, BR-1379) in ONE BEGIN/COMMIT;
+      // a failure rolls back and leaves schema 35.
+      try {
+        this.db.exec(MIGRATION_036_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-035 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 37 && 37 <= ceiling) {
+      // reason: migration-037 widens links.link_type to 'known-defect' and converts the batch's plan -> issue
+      // `resolves` links (#404) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 36.
+      try {
+        this.db.exec(MIGRATION_037_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-036 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
   }
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
@@ -995,7 +1196,7 @@ export class SQLiteStore implements StoreInterface {
 
       if (!existingRow) {
         this.db.run("ROLLBACK");
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(existingRow);
@@ -1028,13 +1229,16 @@ export class SQLiteStore implements StoreInterface {
         current.type,
         async (candidate) => {
           try {
-            const updateResult = this.db
+            // reason: the outcome is decided from RETURNING rows, never from the driver's affected-row
+            // count — bun reports a stale non-zero count for a zero-row UPDATE inside a multi-statement
+            // transaction (task-a-version-guarded-store-update-decides-its-outcome-from).
+            const updatedRows = this.db
               .prepare(
-                "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+                "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL RETURNING id",
               )
-              .run(candidate, newVersion, id, expectedVersion);
+              .all(candidate, newVersion, id, expectedVersion);
 
-            if (updateResult.changes > 0) {
+            if (updatedRows.length > 0) {
               return {
                 kind: "success",
                 value: { ...current, ordinal: candidate, version: newVersion },
@@ -1392,7 +1596,7 @@ export class SQLiteStore implements StoreInterface {
         .get(id) as DocRow | null;
 
       if (!existingRow) {
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(existingRow);
@@ -1410,7 +1614,9 @@ export class SQLiteStore implements StoreInterface {
 
       if (opts?.expected_version !== undefined) {
         // Conditional UPDATE: only affects the row if version still matches
-        const result = this.db
+        // reason: RETURNING rows decide the CAS outcome — the driver's affected-row count is stale
+        // after other writes in the same transaction (bun 1.3.10 measured 4 for a zero-row UPDATE).
+        const updatedRows = this.db
           .prepare(
             `UPDATE docs SET
                slug = ?, type = ?, role = ?, title = ?, status = ?,
@@ -1418,9 +1624,9 @@ export class SQLiteStore implements StoreInterface {
                tags = ?, version = ?, created_at = ?, updated_at = ?,
                created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
                fts_tags = ?
-             WHERE id = ? AND version = ?`,
+             WHERE id = ? AND version = ? RETURNING id`,
           )
-          .run(
+          .all(
             updated.slug,
             updated.type,
             updated.role,
@@ -1443,7 +1649,7 @@ export class SQLiteStore implements StoreInterface {
             opts.expected_version,
           );
 
-        if (result.changes === 0) {
+        if (updatedRows.length === 0) {
           // Row exists (checked above) but version didn't match — re-read actual version
           const actualRow = this.db
             .prepare("SELECT version FROM docs WHERE id = ?")
@@ -1451,7 +1657,7 @@ export class SQLiteStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and the UPDATE (race) — treat as not found
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -1573,6 +1779,7 @@ export class SQLiteStore implements StoreInterface {
           from: link.from_id,
           to: link.to_id,
           type: link.link_type,
+          rule: "BR-949",
         });
       }
       return wrapStoreError(e);
@@ -2125,10 +2332,12 @@ export class SQLiteStore implements StoreInterface {
    * @see StoreInterface.insertWithProvenance
    */
   async insertWithProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — a plan is born with `extra.progress` (no member yet); applied to doc and v1 snapshot together.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     // `BEGIN IMMEDIATE` gets its OWN try/catch, separate from the body below:
     // a synchronous bun:sqlite throw here (e.g. SQLITE_IOERR_VNODE on a
     // corpus file deleted out from under an open handle — observed live via
@@ -2141,6 +2350,11 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatusSync(doc));
+      if (terminal !== null) {
+        this.db.run("ROLLBACK");
+        return err(terminal);
+      }
       const insertResult = this.insertDocSync(doc);
       if (!insertResult.ok) {
         this.db.run("ROLLBACK");
@@ -2157,6 +2371,12 @@ export class SQLiteStore implements StoreInterface {
       if (!auditResult.ok) {
         this.db.run("ROLLBACK");
         return auditResult;
+      }
+
+      const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(null, insertResult.value), version, doc.id);
+      if (!progressResult.ok) {
+        this.db.run("ROLLBACK");
+        return progressResult;
       }
 
       this.db.run("COMMIT");
@@ -2188,10 +2408,12 @@ export class SQLiteStore implements StoreInterface {
    * never raised that type's MAX).
    */
   async insertWithAllocatedOrdinalAndProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — see insertWithProvenance.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
     // `BEGIN IMMEDIATE` gets its OWN try/catch — see insertWithProvenance's
     // identical split for why (a synchronous open-transaction throw means no
     // transaction was ever opened, so the body's ROLLBACK-on-catch must not
@@ -2202,6 +2424,11 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatusSync(doc));
+      if (terminal !== null) {
+        this.db.run("ROLLBACK");
+        return err(terminal);
+      }
       const maxRow = this.db
         .prepare("SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?")
         .get(doc.type) as { maxOrdinal: number | bigint | null };
@@ -2241,6 +2468,12 @@ export class SQLiteStore implements StoreInterface {
         return auditResult;
       }
 
+      const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(null, allocResult.value), version, doc.id);
+      if (!progressResult.ok) {
+        this.db.run("ROLLBACK");
+        return progressResult;
+      }
+
       this.db.run("COMMIT");
       return ok(allocResult.value);
     } catch (e) {
@@ -2260,9 +2493,9 @@ export class SQLiteStore implements StoreInterface {
    */
   async updateWithProvenance(
     id: DocId,
-    patch: Partial<DocRecord>,
+    rawPatch: Partial<DocRecord>,
     opts: UpdateOpts | undefined,
-    version: VersionRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
@@ -2290,7 +2523,22 @@ export class SQLiteStore implements StoreInterface {
         );
         if (refusal !== null) {
           this.db.run("ROLLBACK");
+          /** @lore-site BR-260 */
           return err(refusal);
+        }
+      }
+      // reason: BR-1379 — the stored row is read under the write lock: the archived-terminal refusal and the plan's
+      // progress both judge the write against it, and a plan edit that rebuilds `extra` keeps its stored progress.
+      const stored = this.readDocRecordSync(id);
+      const kept =
+        stored === null ? { patch: rawPatch, version: rawVersion } : keepStoredPlanProgress(stored, rawPatch, rawVersion);
+      const patch = kept.patch;
+      const version = kept.version;
+      if (stored !== null) {
+        const terminal = refuseArchivedTerminal(stored, { ...stored, ...patch }, null);
+        if (terminal !== null) {
+          this.db.run("ROLLBACK");
+          return err(terminal);
         }
       }
       const updateResult = this.updateDocSync(id, patch, opts);
@@ -2322,6 +2570,40 @@ export class SQLiteStore implements StoreInterface {
         }
       }
 
+      // reason: BR-1307 — companion doc writes (a spec's rule retirements on its baseline leaves) share this
+      // transaction; each is version-guarded through `updateDocSync` (RETURNING-decided), and the registry rows
+      // follow the leaf writes through the docs triggers. Any failure rolls back the primary write too.
+      for (const companion of extras?.also_update ?? []) {
+        const companionUpdate = this.updateDocSync(companion.id, companion.patch, companion.opts);
+        if (!companionUpdate.ok) {
+          this.db.run("ROLLBACK");
+          return companionUpdate;
+        }
+        const companionVersion = this.insertVersionSync(companion.version);
+        if (!companionVersion.ok) {
+          this.db.run("ROLLBACK");
+          return companionVersion;
+        }
+        const companionAudit = this.appendAuditEntrySync(companion.audit);
+        if (!companionAudit.ok) {
+          this.db.run("ROLLBACK");
+          return companionAudit;
+        }
+        // reason: the docs triggers only copy a LISTED lifecycle (live|deprecated|retired) onto the registry and keep
+        // the old one otherwise, so a rule taken off its leaf (a rejected abandonment) stays `retired` unless set here.
+        for (const ruleId of companion.propose_rules ?? []) {
+          this.db.prepare("UPDATE rule_registry SET lifecycle = 'proposed' WHERE id = ? AND leaf_doc_id = ?").run(ruleId, companion.id);
+        }
+      }
+
+      if (stored !== null) {
+        const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(stored, updateResult.value), version, id);
+        if (!progressResult.ok) {
+          this.db.run("ROLLBACK");
+          return progressResult;
+        }
+      }
+
       this.db.run("COMMIT");
       return ok(updateResult.value);
     } catch (e) {
@@ -2332,6 +2614,55 @@ export class SQLiteStore implements StoreInterface {
       }
       return wrapStoreError(e);
     }
+  }
+
+  /** The stored doc row (deleted or not) as a record, or `null` when absent. Synchronous: callers hold the write lock. */
+  private readDocRecordSync(id: DocId): DocRecord | null {
+    const row = this.db.prepare("SELECT * FROM docs WHERE id = ?").get(id) as DocRow | null;
+    return row === null ? null : rowToDocRecord(row);
+  }
+
+  /** The status of the live plan a task/phase `doc` is being filed under, or `null` when it has no live plan. */
+  private readPlanStatusSync(doc: DocRecord): DocRecord["status"] | null {
+    const planId = planIdsAffectedBy(null, doc)[0];
+    if (planId === undefined) return null;
+    const row = this.db
+      .prepare("SELECT status FROM docs WHERE id = ? AND type = 'plan' AND deleted_at IS NULL")
+      .get(planId) as { status: DocRecord["status"] } | null;
+    return row === null ? null : row.status;
+  }
+
+  /**
+   * BR-1379 — recompute `extra.progress` of each plan in `planIds` from its member rows and, when it changed, write the
+   * plan (CAS on the version read here, version row, audit row) INSIDE the caller's open `BEGIN IMMEDIATE` transaction.
+   * The rows are read after the primary write, under the write lock, so two concurrent finishes serialise and the
+   * second sees the first's committed row. Attribution (actor, run, time) is the primary write's own version row.
+   * Never opens or closes a transaction.
+   */
+  private reconcilePlanProgressSync(
+    planIds: readonly DocId[],
+    primaryVersion: VersionRecord,
+    causeDocId: DocId,
+  ): Result<void, LoreError> {
+    for (const planId of planIds) {
+      const plan = this.readDocRecordSync(planId);
+      if (plan === null || plan.type !== "plan" || plan.deleted_at !== null) continue;
+      const members = this.db.prepare(PLAN_MEMBERS_SQL).all(planId, planId) as Array<{ status: DocRecord["status"] }>;
+      const write = buildPlanProgressWrite(plan, members, {
+        now: primaryVersion.created_at,
+        actor: primaryVersion.created_by,
+        harnessRun: primaryVersion.harness_run ?? null,
+        causeDocId,
+      });
+      if (write === null) continue;
+      const updated = this.updateDocSync(planId, write.patch, { expected_version: write.expectedVersion });
+      if (!updated.ok) return updated;
+      const versioned = this.insertVersionSync(write.version);
+      if (!versioned.ok) return versioned;
+      const audited = this.appendAuditEntrySync(write.audit);
+      if (!audited.ok) return audited;
+    }
+    return ok(undefined);
   }
 
   /**
@@ -2374,6 +2705,7 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      const stored = this.readDocRecordSync(id);
       const deleteResult = this.softDeleteDocSync(id);
       if (!deleteResult.ok) {
         this.db.run("ROLLBACK");
@@ -2390,6 +2722,14 @@ export class SQLiteStore implements StoreInterface {
       if (!auditResult.ok) {
         this.db.run("ROLLBACK");
         return auditResult;
+      }
+
+      if (stored !== null) {
+        const progressResult = this.reconcilePlanProgressSync(planIdsAffectedBy(stored, null), version, id);
+        if (!progressResult.ok) {
+          this.db.run("ROLLBACK");
+          return progressResult;
+        }
       }
 
       this.db.run("COMMIT");
@@ -2427,8 +2767,8 @@ export class SQLiteStore implements StoreInterface {
     // reason: the CAS is checked HERE against the row read under this
     // transaction's write lock (BEGIN IMMEDIATE — no writer can change it
     // between this read and the UPDATE below) instead of trusting
-    // `updateDocSync`'s `result.changes === 0` miss detection. Measured under
-    // bun 1.3.10: `Statement.run().changes` after a ZERO-row UPDATE reports
+    // `updateDocSync`'s miss detection (now RETURNING-based; this explicit check is kept as the cheap
+    // early refusal). Measured under bun 1.3.10: the statement's affected-row count after a ZERO-row UPDATE reports
     // the FTS-trigger row count of an EARLIER write in the same transaction
     // (4 for a miss that follows a hit), so a second CAS in one transaction —
     // `moveRule`'s target leaf — silently "succeeds" without writing. The
@@ -2618,7 +2958,7 @@ export class SQLiteStore implements StoreInterface {
         .get(ruleId) as { leaf_doc_id: string } | null;
       if (!registryRow) {
         this.db.run("ROLLBACK");
-        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+        return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-640" });
       }
       if (registryRow.leaf_doc_id !== fromLeaf.id) {
         this.db.run("ROLLBACK");
@@ -2627,6 +2967,7 @@ export class SQLiteStore implements StoreInterface {
           field: "fromLeaf.id",
           message: `rule ${ruleId} is registered to leaf ${registryRow.leaf_doc_id}, not ${fromLeaf.id}`,
           value: fromLeaf.id,
+          rule: "BR-640",
         });
       }
       const nowIso = new Date().toISOString();
@@ -2699,6 +3040,7 @@ export class SQLiteStore implements StoreInterface {
         isExemptionActive({ doc_id: row.doc_id, ac_id: row.ac_id, expires_at: existing.expires_at }, cap.now, satisfied)
       ) {
         this.db.run("ROLLBACK");
+        /** @lore-site BR-971 */
         return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
       }
       if (existing !== null) {
@@ -2712,6 +3054,7 @@ export class SQLiteStore implements StoreInterface {
       const activeCount = unexpired.filter((r) => isExemptionActive(r, cap.now, satisfied)).length;
       if (activeCount >= cap.maxActive) {
         this.db.run("ROLLBACK");
+        /** @lore-site BR-971 */
         return err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive));
       }
       this.db
@@ -3228,29 +3571,6 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
-    try {
-      // reason: SPEC-102 §Access Patterns "never-read docs" — non-deleted
-      // docs with no kind='get' trace row since the window start. idx_trace_doc
-      // (partial, doc_id IS NOT NULL) backs the inner subquery. ORDER BY slug
-      // (unique, id-tiebroken) makes the member list diff-stable across runs.
-      const rows = this.db
-        .query(
-          `SELECT id, slug FROM docs
-           WHERE deleted_at IS NULL
-           AND id NOT IN (
-             SELECT DISTINCT doc_id FROM trace_events
-             WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
-           )
-           ORDER BY slug ASC, id ASC`,
-        )
-        .all(window.since) as { id: string; slug: string }[];
-      return ok(rows.map((row) => ({ id: row.id, slug: row.slug })));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
   async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
     // reason: DERIVED from the member list, never a second COUNT(*) — see
     // StoreInterface.countTraceZeroHitSearches's own ⛔ note. The privacy
@@ -3260,11 +3580,182 @@ export class SQLiteStore implements StoreInterface {
     return ok(listResult.value.length);
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
-    // reason: DERIVED from the member list — see listNeverReadDocs above.
-    const listResult = await this.listNeverReadDocs(window);
-    if (!listResult.ok) return listResult;
-    return ok(listResult.value.length);
+  async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
+    try {
+      // reason: ONE atomic upsert (BR-1373) — a read-then-write pair would lose concurrent increments.
+      this.db.run(
+        "INSERT INTO trace_read_counts (day, count) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count = count + 1",
+        [day],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>> {
+    try {
+      const prior = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord | null;
+      // reason: ONE atomic upsert whose WHERE admits only an absent, expired or own row (BR-1379); the outcome is
+      // read from RETURNING rows, never the driver's change count (see store CLAUDE.md).
+      const taken = this.db
+        .query(
+          "INSERT INTO review_leases (name, holder, expires_at) VALUES (?, ?, ?) " +
+            "ON CONFLICT(name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at " +
+            "WHERE review_leases.expires_at <= ? OR review_leases.holder = excluded.holder RETURNING name",
+        )
+        .all(name, holder, expiresAtIso, nowIso);
+      if (taken.length > 0) return ok({ acquired: true, tookOver: prior !== null && prior.holder !== holder });
+      const live = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord;
+      return ok({ acquired: false, holder: live.holder, expires_at: live.expires_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
+    try {
+      const rows = this.db.query("UPDATE review_leases SET expires_at = ? WHERE name = ? AND holder = ? RETURNING name").all(expiresAtIso, name, holder);
+      return ok(rows.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async releaseLease(name: string, holder: string): Promise<Result<void, LoreError>> {
+    try {
+      this.db.query("DELETE FROM review_leases WHERE name = ? AND holder = ? RETURNING name").all(name, holder);
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>> {
+    try {
+      const row = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord | null;
+      return ok(row ?? null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
+    try {
+      const rows = this.db
+        .query("SELECT day, count FROM trace_read_counts WHERE day >= ? ORDER BY day ASC")
+        .all(sinceDay) as { day: string; count: number | bigint }[];
+      return ok(rows.map((row) => ({ day: row.day, count: Number(row.count) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
+    if (rows.length === 0) return ok(undefined);
+    try {
+      // reason: one transaction so a batch (a hook-outcome ingest) lands whole or not at all.
+      this.db.transaction(() => {
+        for (const row of rows) {
+          this.db.run("INSERT INTO check_outcomes (check_id, outcome, ts) VALUES (?, ?, ?)", [row.check_id, row.outcome, row.ts]);
+        }
+      })();
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {
+    try {
+      this.db.run(
+        "INSERT INTO pending_asks (decision_id, subject_version, nonce, question_hash, issued_at) VALUES (?, ?, ?, ?, ?)",
+        [input.decision_id, input.subject_version, input.nonce, input.question_hash, input.issued_at],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>> {
+    try {
+      const row = this.db
+        .query(
+          `SELECT a.id, a.decision_id, a.subject_version, a.nonce, a.question_hash, a.issued_at, a.used_at,
+                  (a.id = (SELECT MAX(b.id) FROM pending_asks b WHERE b.decision_id = a.decision_id)) AS is_latest
+             FROM pending_asks a WHERE a.nonce = ?`,
+        )
+        .get(nonce) as {
+        id: number | bigint;
+        decision_id: number | bigint;
+        subject_version: string;
+        nonce: string;
+        question_hash: string;
+        issued_at: string;
+        used_at: string | null;
+        is_latest: number | bigint;
+      } | null;
+      if (row === null) return ok(null);
+      return ok({
+        id: Number(row.id),
+        decision_id: Number(row.decision_id),
+        subject_version: row.subject_version,
+        nonce: row.nonce,
+        question_hash: row.question_hash,
+        issued_at: row.issued_at,
+        used_at: row.used_at,
+        is_latest: Number(row.is_latest) === 1,
+      });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>> {
+    try {
+      // reason: RETURNING + row count, never the driver's affected-row count (see this module's CLAUDE.md invariant).
+      const rows = this.db.query("UPDATE pending_asks SET used_at = ? WHERE nonce = ? AND used_at IS NULL RETURNING id").all(usedAt, nonce);
+      return ok(rows.length === 1);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {
+    try {
+      const rows = this.db
+        .query(
+          `SELECT check_id, COUNT(*) AS runs,
+                  SUM(CASE WHEN outcome = 'deny' THEN 1 ELSE 0 END) AS denials,
+                  SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+                  MIN(ts) AS first_run, MAX(ts) AS last_run,
+                  MAX(CASE WHEN outcome = 'deny' THEN ts END) AS last_denial
+             FROM check_outcomes GROUP BY check_id ORDER BY check_id ASC`,
+        )
+        .all() as {
+        check_id: string;
+        runs: number | bigint;
+        denials: number | bigint;
+        errors: number | bigint;
+        first_run: string;
+        last_run: string;
+        last_denial: string | null;
+      }[];
+      return ok(
+        rows.map((r) => ({
+          check_id: r.check_id,
+          runs: Number(r.runs),
+          denials: Number(r.denials),
+          errors: Number(r.errors),
+          first_run: r.first_run,
+          last_run: r.last_run,
+          last_denial: r.last_denial,
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
@@ -3305,11 +3796,10 @@ export class SQLiteStore implements StoreInterface {
 
   async pruneTraceEvents(cutoffIso: string, batchSize = 50_000): Promise<Result<number, LoreError>> {
     try {
-      const result = this.db.run(
-        "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?)",
-        [cutoffIso, batchSize],
-      );
-      return ok(result.changes);
+      const deletedRows = this.db
+        .prepare("DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?) RETURNING id")
+        .all(cutoffIso, batchSize);
+      return ok(deletedRows.length);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3351,9 +3841,9 @@ export class SQLiteStore implements StoreInterface {
     try {
       // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.
       const updated = this.db
-        .prepare("UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL")
-        .run(endedAt, reason, id);
-      if (updated.changes > 0) return ok("ended");
+        .prepare("UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL RETURNING id")
+        .all(endedAt, reason, id);
+      if (updated.length > 0) return ok("ended");
       const row = this.db.prepare("SELECT id FROM runs WHERE id = ?").get(id) as { id: string } | null;
       return ok(row === null ? "unknown-run" : "already-ended");
     } catch (e) {
@@ -3364,9 +3854,9 @@ export class SQLiteStore implements StoreInterface {
   async reopenRun(id: RunId): Promise<Result<boolean, LoreError>> {
     try {
       const updated = this.db
-        .prepare("UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL")
-        .run(id);
-      return ok(updated.changes > 0);
+        .prepare("UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL RETURNING id")
+        .all(id);
+      return ok(updated.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3387,9 +3877,19 @@ export class SQLiteStore implements StoreInterface {
     try {
       // reason: the NEWEST registration wins here (unlike the identity columns): a resumed run lives in a new process.
       const updated = this.db
-        .prepare("UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ?")
-        .run(proc.pid, proc.startTime, proc.worktree, id);
-      return ok(updated.changes > 0);
+        .prepare("UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ? RETURNING id")
+        .all(proc.pid, proc.startTime, proc.worktree, id);
+      return ok(updated.length > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>> {
+    try {
+      // reason: BR-1360 — unconditional, newest registration wins, NULL clears; never part of insertRun (first wins).
+      const updated = this.db.prepare("UPDATE runs SET message_address = ? WHERE id = ? RETURNING id").all(address, id);
+      return ok(updated.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }

@@ -6,12 +6,11 @@
  * (D5 thin hook, D12 never block / never empty; AC-CF-7, AC-CF-10).
  *
  * All content now lives in context fragments, rendered by the `lore` binary:
- *   1. `lore fragments render --outlet hook:subagent-start --agent-type <type> --cwd <cwd>`
- *      -> hook JSON; its additionalContext is the fragment block (placed FIRST).
- *      On any render failure the binary itself exits 0 with a short banner
- *      carrying the error code (D12), which passes through unchanged.
- *   2. `lore fragments pointers --cwd <cwd>` -> project pointer lines (plain text).
- * This hook only spawns, concatenates and wraps. It holds NO per-type text.
+ * One call: `lore fragments render --outlet hook:subagent-start --agent-type <type> --cwd <cwd> --with-pointers`
+ *   -> hook JSON; its additionalContext is the fragment block (placed FIRST) followed by the
+ *   project pointer lines. On any render failure the binary itself exits 0 with a short banner
+ *   carrying the error code (D12), which passes through unchanged.
+ * This hook only spawns one lore process and wraps. It holds NO per-type text.
  *
  * The `lore` binary is resolved from PATH, exactly like session-start-resume.mjs.
  *
@@ -25,13 +24,15 @@
 
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { trackOutcome, noteHookCwd } from './lib/check-outcome.mjs';
+trackOutcome('hook:subagent-context');
 
 const SPAWN_TIMEOUT_MS = 8000;
 
 // stdin parse: a bad payload degrades to defaults, never to a crash.
 let payload = {};
 try {
-  const parsed = JSON.parse(readFileSync(0, 'utf8'));
+  const parsed = noteHookCwd(JSON.parse(readFileSync(0, 'utf8')));
   if (parsed !== null && typeof parsed === 'object') payload = parsed;
 } catch {
   // proceed with empty payload; the envelope below is still emitted
@@ -53,7 +54,7 @@ function banner(reason) {
 }
 
 function renderBlock() {
-  const args = ['fragments', 'render', '--outlet', 'hook:subagent-start', '--cwd', cwd];
+  const args = ['fragments', 'render', '--outlet', 'hook:subagent-start', '--cwd', cwd, '--with-pointers'];
   if (agentType !== '') args.push('--agent-type', agentType);
   const r = spawnLore(args);
   if (r.error) return banner(r.error.message);
@@ -67,13 +68,7 @@ function renderBlock() {
   }
 }
 
-function pointerBlock() {
-  const r = spawnLore(['fragments', 'pointers', '--cwd', cwd]);
-  if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return '';
-  return r.stdout.trim();
-}
-
-const context = [renderBlock(), pointerBlock()].filter((s) => s !== '').join('\n\n');
+const context = renderBlock();
 
 process.stdout.write(JSON.stringify({
   hookSpecificOutput: {

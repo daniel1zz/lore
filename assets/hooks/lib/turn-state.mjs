@@ -23,6 +23,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { noteHookCwd } from './check-outcome.mjs';
 
 export function getStateBase() {
   return process.env.CLAUDE_STATE_BASE_OVERRIDE
@@ -35,7 +36,7 @@ export function readHookPayload() {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('hook stdin is not a JSON object');
   }
-  return parsed;
+  return noteHookCwd(parsed);
 }
 
 export function resolveSessionId(payload) {

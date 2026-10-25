@@ -6,7 +6,7 @@ title: "CLAUDE.md governance — content-dimension checks: wire the dead admissi
 status: approved
 priority: medium
 created: 2026-08-23
-updated: 2026-10-17
+updated: 2026-10-19
 tags: [claude-md, memory-files, governance, admission, distribution]
 links:
   - {id: SPEC-095, type: relates-to}
@@ -99,7 +99,7 @@ Typed ACs authored via `lore ac add` (script mode). Coverage contract:
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-WIRE-1: reference_missing is reachable from the CLI as ADVISORY: a tmpdir CLAUDE.md containing a backtick-quoted nonexistent repo-relative path makes 'lore status --check-claude-md --json' emit a finding of kind exactly 'reference_missing' in the advisory array, with exit code exactly 0; and the kind no longer appears in MemoryFileFindingKind (N13 type migration). Deterministic arming is gated on N3's two-repo condition, which this slice cannot discharge. Covered by describe 'claude-md wiring — reference_missing reaches the CLI as advisory'.
+- [⚑] [script] AC-WIRE-1: reference_unresolved is reachable from the CLI as a DETERMINISTIC finding (N3 arming discharged 2026-10-19): a tmpdir CLAUDE.md containing a backtick-quoted nonexistent repo-relative path, or a path#Symbol whose file does not export Symbol, makes 'lore status --check-claude-md --json' report kind 'reference_unresolved' with its line; under adoption enforce it is in findings and the exit code is exactly 3, under the default warn it is a downgraded advisory with exit 0. The kind reference_missing no longer exists.
   script: test — bunx vitest run packages/lore/tests/integration/claude-md-wiring.test.ts 2>&1 && echo 'AC-WIRE-1 PASS: reference_missing emitted in the advisory array by the CLI, exit code exactly 0, kind absent from MemoryFileFindingKind'
   other_command=1
 - [⚑] [script] AC-WIRE-2: iso_date_density is reachable from the CLI as ADVISORY: a tmpdir CLAUDE.md whose paragraph carries ISO dates AT the module's declared density threshold makes 'lore status --check-claude-md --json' emit an advisory finding of kind exactly 'iso_date_density', while one date BELOW the threshold emits none; both runs exit exactly 0. The comparison is >= (claude-md-check.ts:472 pre-split), so the threshold value itself fires — an AC asserting silence AT the threshold would describe a semantics this code does not have and could only be satisfied by an unauthorised behaviour change. Read the threshold from the exported constant; never restate the number. Covered by describe 'claude-md wiring — narrative smells reach the CLI without affecting exit'.

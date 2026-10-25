@@ -4,10 +4,7 @@
     "version": 1,
     "classes": {
       "ac-exempt": {
-        "tier": "normal",
-        "declaredRecoverability": "reversible",
-        "threshold": 0.8,
-        "priorConfidence": 0.5,
+        "tier": "milestone",
         "usesJudge": false
       },
       "archive-ref-prune": {
@@ -19,17 +16,11 @@
         "usesJudge": false
       },
       "override-attestation": {
-        "tier": "normal",
-        "declaredRecoverability": "reversible",
-        "threshold": 0.8,
-        "priorConfidence": 0.5,
+        "tier": "milestone",
         "usesJudge": false
       },
       "override-judgment": {
-        "tier": "normal",
-        "declaredRecoverability": "reversible",
-        "threshold": 0.8,
-        "priorConfidence": 0.5,
+        "tier": "milestone",
         "usesJudge": false
       },
       "process-reap": {
@@ -40,10 +31,6 @@
         "usesJudge": false
       },
       "push-force": {
-        "tier": "human-always",
-        "usesJudge": false
-      },
-      "report-issue": {
         "tier": "human-always",
         "usesJudge": false
       },
@@ -85,14 +72,15 @@
       "*.tsbuildinfo",
       "packages/*/dist/",
       "**/*.gen.ts",
-      "packages/lore/src/generated/**"
+      "packages/lore/src/generated/**",
+      ".scratch/"
     ]
   },
-  "thresholds_hash": "fbfe96b61ef3c26965cf236b8aeaf1fed98555f45e0e4fea581cda75f103c573",
+  "thresholds_hash": "c7d38e3e42ce2e54fecc1b0b1eaed3b5d14ef0f28838a2ff73532a0000f1f9d9",
   "integrity": "intact",
   "decision_chain_head": {
-    "head_id": 43,
-    "head_hash": "8e62e2e25f5d351a1500c26c3142fa017738d3272db51de899e7970a8620fa81",
-    "count": 43
+    "head_id": 501,
+    "head_hash": "879b681e28f96567f82465d90a828cdf680831ca27d6687f91fbb3a05914ca19",
+    "count": 501
   }
 }

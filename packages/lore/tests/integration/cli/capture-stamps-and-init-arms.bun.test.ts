@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 // @layer integration-cli-capture-and-init AC-CT-3 (real CLI in a throwaway repo; owner is the in-process stamp-currency-floor unit test)
 /**
  * AC-CT-3b (SPEC-143) — `lore evidence --capture` stamps state exactly like `lore verify`, and a
@@ -24,6 +25,8 @@ import { join } from "node:path";
 import { STATE_BINDING_ARMED_ACTION } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
+import { installShippedGuard } from "../support/main-guard-repo.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -72,10 +75,13 @@ function makeCommittedCorpus(): string {
   writeFileSync(join(d, "README.md"), "fixture\n");
   mustLore(["init"], d);
   // reason: gates are not under test; disabling them lets the fixture claim a task under a draft spec.
-  appendFileSync(
-    join(d, ".lore", "config.yaml"),
-    ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ""].join("\n"),
+  patchLoreConfig(
+    d,
+    // `lore integrate` (the landing a task needs to archive, BR-1291) reads its floor key from the config
+    ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), "  integrate:", '    floor_command: "true"', ""].join("\n"),
   );
+  // integrate keeps its own worktree and attempt ledger inside the repo; neither may dirty the tree
+  appendFileSync(join(d, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
   git(d, ["add", "."]);
   git(d, ["commit", "-q", "-m", "init"]);
   return d;
@@ -193,8 +199,8 @@ describe("lore init OUTSIDE a git repository does not arm, and says so (AC-CT-3b
   it("a captured pass is accepted by lore done (unarmed corpus refuses nothing)", () => {
     const d = makeNonGitCorpus();
     mustLore(["init"], d);
-    appendFileSync(
-      join(d, ".lore", "config.yaml"),
+    patchLoreConfig(
+      d,
       ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ""].join("\n"),
     );
     const task = makeClaimedTask(d, null);
@@ -216,14 +222,20 @@ describe("lore init OUTSIDE a git repository does not arm, and says so (AC-CT-3b
 describe("lore evidence --capture stamps like verify (AC-CT-3b)", () => {
   it("clean committed tree: captured pass is stamped and accepted by lore done", async () => {
     const d = makeCommittedCorpus();
-    const task = makeClaimedTask(d);
+    // the task's own branch holds nothing past main, so `lore integrate` finds it already integrated and records the
+    // landing `lore done` requires; main does not move, so the stamp below still names HEAD
+    git(d, ["branch", "ct3b-ok", "main"]);
+    const task = makeClaimedTask(d, "ct3b-ok");
+    git(d, ["checkout", "-q", "--detach", "main"]); // the shared checkout is a detached view of main
+    installShippedGuard(d, join(d, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+    mustLore(["integrate", "ct3b-ok", "--session", "ct3b-session"], d);
     mustLore(["evidence", task, "--oracle", "build", "--command", "true", "--result", "pass", "--capture"], d);
     const row = (await evidenceRows(d, task))[0]!;
     expect(row.attestation?.["state_stamp"]).toEqual({ head_sha: git(d, ["rev-parse", "HEAD"]).trim(), worktree_dirty: false });
     expect(row.attestation?.["stamp_unbound_reason"]).toBeUndefined();
     const done = lore(["done", task], d);
     expect(done.exitCode, done.stderr + done.stdout).toBe(0);
-  });
+  }, 120_000);
 
   it("dirty tree: captured pass is unbound/dirty_tree and lore done refuses it", async () => {
     const d = makeCommittedCorpus();

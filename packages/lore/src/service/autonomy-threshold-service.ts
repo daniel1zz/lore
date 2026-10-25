@@ -33,6 +33,7 @@ import {
   ok,
   registryOf,
   seedGovernedThresholds,
+  storeError,
   type GovernedThresholds,
   type LoreError,
   type OperationClassRegistry,
@@ -104,6 +105,29 @@ export function loosenedClassIdsOf(subjectId: string): string[] {
 
 const REGENERABLE_ENTRY = "worktreeRemoveRegenerable";
 
+/** The governed entries (class ids, or the regenerable set) a change's loosened lines touch, de-duplicated in order. */
+function loosenedEntriesOf(change: ThresholdChange): string[] {
+  return [...new Set(change.loosened.map((line) => (line.startsWith(`${REGENERABLE_ENTRY}:`) ? REGENERABLE_ENTRY : (/^([^.:\s]+)[.:]/.exec(line)?.[1] ?? line))))];
+}
+
+/** One entry's value in `record`: the whole class record (null when absent) or the regenerable pattern list. */
+function entryValueOf(record: GovernedThresholds, entry: string): unknown {
+  return entry === REGENERABLE_ENTRY ? record.worktreeRemoveRegenerable : (record.classes[entry] ?? null);
+}
+
+/**
+ * `subject_version` of a governance-loosen decision: sha256 of the BEFORE and AFTER values of only the entries the
+ * change loosens. reason: binding to the whole record version made N approvals in one batch apply only the first,
+ * because the first apply changed the record under the others (like Kubernetes server-side apply, a write conflicts
+ * on the fields it manages, not on the object's resourceVersion). Now an approval stays valid while its own entries
+ * are unchanged and is voided only when one of them changed, which is a different question.
+ */
+export function loosenSubjectVersion(before: GovernedThresholds, after: GovernedThresholds, change: ThresholdChange): string {
+  const entries = loosenedEntriesOf(change);
+  const side = (record: GovernedThresholds) => Object.fromEntries(entries.map((entry) => [entry, entryValueOf(record, entry)]));
+  return contentHashOf(canonicalJson({ before: side(before), after: side(after) }));
+}
+
 /**
  * The human-readable detail of a governance-loosen decision (HR-T1): names every loosened edit, the governed
  * entries it touches with their BEFORE and AFTER values (keyed by entry), and what accepting / rejecting does.
@@ -112,10 +136,8 @@ const REGENERABLE_ENTRY = "worktreeRemoveRegenerable";
  * entry's value is the pattern list.
  */
 export function buildLoosenDetail(before: GovernedThresholds, after: GovernedThresholds, change: ThresholdChange, executorRun: string | null): DecisionDetail {
-  const entries = [...new Set(change.loosened.map((line) => (line.startsWith(`${REGENERABLE_ENTRY}:`) ? REGENERABLE_ENTRY : (/^([^.:\s]+)[.:]/.exec(line)?.[1] ?? line))))];
-  const valueOf = (record: GovernedThresholds, entry: string): unknown =>
-    entry === REGENERABLE_ENTRY ? record.worktreeRemoveRegenerable : (record.classes[entry] ?? null);
-  const side = (record: GovernedThresholds) => Object.fromEntries(entries.map((entry) => [entry, valueOf(record, entry)]));
+  const entries = loosenedEntriesOf(change);
+  const side = (record: GovernedThresholds) => Object.fromEntries(entries.map((entry) => [entry, entryValueOf(record, entry)]));
   return {
     summary: `Loosen the governed autonomy thresholds: ${change.loosened.join("; ")}`,
     requested_by: executorRun === null ? "lore (no attested run)" : `run ${executorRun}`,
@@ -173,10 +195,6 @@ export type ProposeOutcome =
   | { readonly kind: "refused"; readonly integrity: Extract<ThresholdIntegrity, { state: "broken" }> };
 
 const writeFactsSchema = z.object({ content_hash: z.string().regex(/^[0-9a-f]{64}$/) }).passthrough();
-
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
-}
 
 function integrityKey(version: string) {
   return { class: THRESHOLD_INTEGRITY_CLASS, subject_id: THRESHOLD_SUBJECT_ID, subject_version: version };
@@ -249,7 +267,7 @@ export class AutonomyThresholdService {
    */
   async propose(next: GovernedThresholds, decisions: ThresholdDecisionPort): Promise<Result<ProposeOutcome, LoreError>> {
     const checked = governedThresholdsSchema.safeParse(next);
-    if (!checked.success) return err({ code: "VALIDATION_ERROR", field: "record", message: checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
+    if (!checked.success) return err({ code: "VALIDATION_ERROR", field: "record", message: checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), rule: "BR-1260" });
     const seeded = await this.ensureSeeded();
     if (!seeded.ok) return seeded;
     const current = seeded.value;
@@ -264,7 +282,7 @@ export class AutonomyThresholdService {
       return ok({ kind: "applied", change, write_record_id: written.value.id, approved_by_record: null });
     }
 
-    const subject = { id: loosenSubjectId(change.loosened), version: contentHashOf(canonicalJson(checked.data)) };
+    const subject = { id: loosenSubjectId(change.loosened), version: loosenSubjectVersion(current.record, checked.data, change) };
     const effective = await decisions.effectiveVerdict(GOVERNANCE_LOOSEN_CLASS, subject);
     if (!effective.ok) return effective;
     if (effective.value !== null && effective.value.channel === "human-tty" && effective.value.verdict === "auto") {

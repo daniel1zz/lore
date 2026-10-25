@@ -16,6 +16,8 @@
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getTurnDir, readHookPayload } from './lib/turn-state.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:post-edit-mark');
 
 try {
   const payload = readHookPayload();

@@ -64,7 +64,7 @@ describe("LoopPanel", () => {
         { doc_type: "prd", prompt_version: "v2", n: 5, agreement_rate: 0.4, wilson_lower_bound: 0.1, window_limit: 100 },
       ];
       mockedStats.mockResolvedValue(rows);
-      mockedVerify.mockResolvedValue({ clean: true, misses: [], since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: true, misses: [], audited: 0, reconstructed: 0 });
 
       renderWithClient(<LoopPanel />);
 
@@ -80,7 +80,7 @@ describe("LoopPanel", () => {
   describe("boundary: n=0 stats", () => {
     it('renders "No calibration data recorded yet." for an empty stats array', async () => {
       mockedStats.mockResolvedValue([]);
-      mockedVerify.mockResolvedValue({ clean: true, misses: [], since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: true, misses: [], audited: 0, reconstructed: 0 });
 
       renderWithClient(<LoopPanel />);
 
@@ -91,7 +91,7 @@ describe("LoopPanel", () => {
   describe("audit-verify chip", () => {
     it('shows "clean" when clean is true', async () => {
       mockedStats.mockResolvedValue([]);
-      mockedVerify.mockResolvedValue({ clean: true, misses: [], since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: true, misses: [], audited: 0, reconstructed: 0 });
 
       renderWithClient(<LoopPanel />);
 
@@ -105,7 +105,7 @@ describe("LoopPanel", () => {
         { doc_id: "d2", version: 1, action: "update", created_at: "2026-01-01T00:00:00.000Z" },
         { doc_id: "d3", version: 1, action: "update", created_at: "2026-01-01T00:00:00.000Z" },
       ];
-      mockedVerify.mockResolvedValue({ clean: false, misses, since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: false, misses, audited: 0, reconstructed: 0 });
 
       renderWithClient(<LoopPanel />);
 
@@ -117,7 +117,7 @@ describe("LoopPanel", () => {
       const misses: AuditVerifyResponse["misses"] = [
         { doc_id: "d1", version: 1, action: "update", created_at: "2026-01-01T00:00:00.000Z" },
       ];
-      mockedVerify.mockResolvedValue({ clean: false, misses, since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: false, misses, audited: 0, reconstructed: 0 });
 
       renderWithClient(<LoopPanel />);
 
@@ -139,7 +139,7 @@ describe("LoopPanel", () => {
   describe("error: calibration stats fetch failure", () => {
     it("renders a failure message when apiGetCalibrationStats rejects", async () => {
       mockedStats.mockRejectedValue(new Error("network down"));
-      mockedVerify.mockResolvedValue({ clean: true, misses: [], since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: true, misses: [], audited: 0, reconstructed: 0 });
 
       renderWithClient(<LoopPanel />);
 
@@ -156,7 +156,7 @@ describe("LoopPanel", () => {
             resolveStats = resolve;
           }),
       );
-      mockedVerify.mockResolvedValue({ clean: true, misses: [], since: "2026-01-01T00:00:00.000Z" });
+      mockedVerify.mockResolvedValue({ clean: true, misses: [], audited: 0, reconstructed: 0 });
 
       const { container } = renderWithClient(<LoopPanel />);
 
@@ -180,7 +180,7 @@ describe("LoopPanel", () => {
 
       expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
 
-      resolveVerify({ clean: true, misses: [], since: "2026-01-01T00:00:00.000Z" });
+      resolveVerify({ clean: true, misses: [], audited: 0, reconstructed: 0 });
       await screen.findByText("clean");
     });
   });

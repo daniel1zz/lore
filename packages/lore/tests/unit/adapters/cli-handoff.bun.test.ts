@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * `lore handoff` / `lore create knowledge --sub-type handoff` — CLI-adapter exit-code
  * contract tests (SPEC-041 §3 D4, D6; §4 AC-SL-4 CLI half, AC-SL-9).

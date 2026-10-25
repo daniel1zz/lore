@@ -3,10 +3,10 @@ id: KN-604
 type: knowledge
 role: knowledge
 title: "Slice 3a: 28 PRD requirements migrated to baseline rules and 12 outline entries mapped to branches"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 ---
 Slice 3a, AC-BLS3-10 record (2026-10-10). The root PRD prd-lore-internal-first-ai-team-knowledge-platform keeps strategy; its 28 R-## requirements now carry `migrated_to` (written with `lore requirement migrate`), and requirement coverage is computed from live script-mode criteria citing that rule (BR-983).

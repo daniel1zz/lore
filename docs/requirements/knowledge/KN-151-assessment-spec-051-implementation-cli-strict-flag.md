@@ -3,10 +3,10 @@ id: KN-151
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-051 implementation — CLI strict flags (2026-07-17)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-17
-updated: 2026-07-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-037
 links:

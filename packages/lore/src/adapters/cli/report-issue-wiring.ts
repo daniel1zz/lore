@@ -108,7 +108,12 @@
  * task-work-carries D7).
  */
 
-import { basename, dirname, join } from "node:path";
+import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { z } from "zod";
+import { isSameGithubRepository } from "../../service/github-remote.js";
+import { buildReportContext } from "../../service/report-issue-context.js";
 import { exitCli } from "./cli-exit.js";
 import {
   err,
@@ -119,10 +124,10 @@ import {
   type LoreConfig,
   type LoreError,
   type RawReporterIdentity,
-  type ReporterActorSource,
   type Result,
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
+import { checkReproCommand, type ReproCheck } from "../../service/report-issue-repro.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
 import { joinIssueStatuses, type IssueStatusRow } from "../../service/github-issue-listing.js";
@@ -449,6 +454,14 @@ export interface GithubReportInput {
   readonly expected: string;
   readonly actual: string;
   readonly repro_command?: string;
+  /** Free multi-line text: the steps a one-line `repro_command` cannot hold. */
+  readonly repro_steps?: string;
+  /** The reporter's proposed fix, kept out of `expected` (which stays the behaviour). */
+  readonly suggested_fix?: string;
+  /** Specs, criteria, commits or issues the report relates to; one bullet each. */
+  readonly refs?: readonly string[];
+  /** The `**Context:**` section text (attached test-file context); set by {@link fileGithubIssue}, never by an input adapter. */
+  readonly context?: string;
   readonly severity: IssueSeverity;
   readonly category: string;
   readonly tags: readonly string[];
@@ -461,22 +474,46 @@ export interface GithubFilingContext {
   /** The reporter's OWN corpus service — used ONLY to resolve `reporter_root_prd` (this corpus's root PRD), never the upstream's. */
   readonly corpusService: CorpusService;
   /**
-   * The resolved filing actor — every `resolveActorWithSource` tier
-   * (`@lore/core/node`) always resolves SOME string, including the
-   * `"os-fallback"` tier (`os.userInfo().username`). Required, mirroring
-   * `RawReporterIdentity.actor`'s own required-string shape: when
-   * `actorSource === "os-fallback"`, `redactReporterIdentity` DROPS this
-   * value from the published identity regardless of what it is (Risk R1),
-   * so its content is irrelevant for that tier but its PRESENCE is not
-   * optional at this type.
+   * The filing actor: the name of the invocation's known party (an agent run's session name, a registered human's
+   * or a key's own name). Required, mirroring `RawReporterIdentity.actor`'s own required-string shape.
    */
   readonly actor: string;
-  /** Which precedence tier produced `actor` — `"os-fallback"` is DROPPED entirely by `redactReporterIdentity` (Risk R1). */
-  readonly actorSource: ReporterActorSource;
   /** The Invocation's home directory (`inv.paths.home`), for redacting `reporter_corpus`'s path prefix. No ambient default (AS-26). */
   readonly home: string;
   /** The environment `gh` is spawned from (`Invocation.env`; no ambient default, AS-26). */
   readonly env: NodeJS.ProcessEnv;
+  /** Runs `git <args>` in `cwd` for the origin lookup (injected so a test needs no git); default: the real `git` under `env`. */
+  readonly git?: OriginGit;
+}
+
+/** Raw outcome of one git call; `status` is the exit status (non-zero when git is missing or refuses). */
+export type OriginGit = (cwd: string, args: readonly string[], env: NodeJS.ProcessEnv) => { status: number; stdout: string };
+
+/** The real git for the origin lookup: never throws; a missing git reads as a non-zero status. */
+const runRealGit: OriginGit = (cwd, args, env) => {
+  const outcome = spawnSync("git", [...args], { cwd, env, encoding: "utf8" });
+  return { status: outcome.status ?? 1, stdout: outcome.stdout ?? "" };
+};
+
+/**
+ * Builds the `**Context:**` section for a filing: ONE git call for the project's `origin`, then the pure builder.
+ *
+ * @param input - the report (its repro command names the test file)
+ * @param upstreamRepo - the upstream `owner/name` the report is filed to
+ * @param ctx - the caller's root, home, env and optional injected git
+ * @returns the section text, or `undefined` when the command names no test file
+ */
+function buildFilingContext(input: GithubReportInput, upstreamRepo: string, ctx: GithubFilingContext): string | undefined {
+  if (input.repro_command === undefined) return undefined;
+  const git = ctx.git ?? runRealGit;
+  const origin = git(ctx.consumerCorpusRoot, ["remote", "get-url", "origin"], ctx.env);
+  const originUrl = origin.status === 0 ? origin.stdout.trim() : undefined;
+  return buildReportContext({
+    command: input.repro_command,
+    projectRoot: ctx.consumerCorpusRoot,
+    home: ctx.home,
+    sameRepository: isSameGithubRepository(originUrl, upstreamRepo),
+  });
 }
 
 /** Successful outcome of {@link fileGithubIssue}. */
@@ -513,22 +550,61 @@ export interface GithubReportResult {
  * @returns the matched `{number, url}`, or `undefined` when no prior
  *   successful filing shares this exact title
  */
-function findPriorGithubFiling(
+function findPriorGithubFilings(
   entries: readonly ReceiptV2Entry[],
   title: string,
-): { number: number; url: string } | undefined {
+): { number: number; url: string }[] {
   const intentTitleByKey = new Map<string, string>();
   for (const entry of entries) {
     if ("phase" in entry && entry.phase === "intent") {
       intentTitleByKey.set(entry.idempotency_key, entry.title);
     }
   }
+  const priors: { number: number; url: string }[] = [];
   for (const entry of entries) {
     if ("phase" in entry && entry.phase === "outcome" && intentTitleByKey.get(entry.idempotency_key) === title) {
-      return { number: entry.number, url: entry.url };
+      priors.push({ number: entry.number, url: entry.url });
     }
   }
-  return undefined;
+  // reason: newest first, so a title re-filed after its earlier issue was closed recognises the latest issue.
+  return priors.reverse();
+}
+
+const GithubIssueStateSchema = z.object({ state: z.string() }).passthrough();
+
+/**
+ * The prior filing that is still OPEN, or `undefined` when every prior issue for the title is closed.
+ *
+ * reason: the receipt log exists so a retried IN-FLIGHT filing does not duplicate. A closed prior issue is a fixed
+ * defect, not an in-flight filing: recognising it returned a closed issue that covers nothing, and a review batch that
+ * hit the same fingerprint again looped forever (#397). A state read failure is returned, never read as "closed".
+ */
+async function findOpenPriorFiling(
+  runner: GhRunner,
+  repo: string,
+  priors: readonly { number: number; url: string }[],
+): Promise<Result<{ number: number; url: string } | undefined, LoreError>> {
+  for (const prior of priors) {
+    const read = await runner.run(["api", `repos/${repo}/issues/${String(prior.number)}`]);
+    if (!read.ok) return read;
+    let body: unknown;
+    try {
+      body = JSON.parse(read.value.stdout);
+    } catch {
+      body = undefined;
+    }
+    const parsed = GithubIssueStateSchema.safeParse(body);
+    if (!parsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_issue_response",
+        message: `gh returned an issue payload for #${String(prior.number)} that has no state: ${parsed.error.message}`,
+        value: read.value.stdout,
+      });
+    }
+    if (parsed.data.state === "open") return ok(prior);
+  }
+  return ok(undefined);
 }
 
 /**
@@ -552,13 +628,80 @@ async function resolveLocalRootPrd(
   return ok(rootPrd ? { id: rootPrd.id, slug: rootPrd.slug } : null);
 }
 
-/** Joins `description`/`expected`/`actual`/`repro_command` into ONE free-form body block — the consumer-authority content the Per-Field-Authority table assigns to the issue body (never the front-matter block). */
+/**
+ * Fence for a repro command: `max(3, longest backtick run in the command + 1)` backticks, so no command can
+ * close its own block early (D5).
+ */
+function fenceFor(command: string): string {
+  const longestRun = Math.max(0, ...(command.match(/`+/g) ?? []).map((run) => run.length));
+  return "`".repeat(Math.max(3, longestRun + 1));
+}
+
+/**
+ * Joins the report's free-form fields into ONE body block — the consumer-authority content the Per-Field-Authority table assigns to the issue body (never the front-matter block).
+ * Order: description, Expected, Actual, Repro command (fenced), Repro steps, Suggested fix, Refs, [Context], then the caller's `Reported by:`.
+ * A field that is absent contributes no heading; each marker appears once.
+ */
 function buildIssueDescriptionBlock(input: GithubReportInput): string {
   const lines = [input.description, "", `**Expected:** ${input.expected}`, `**Actual:** ${input.actual}`];
   if (input.repro_command !== undefined) {
-    lines.push(`**Repro command:** \`${input.repro_command}\``);
+    const fence = fenceFor(input.repro_command);
+    lines.push("", "**Repro command:**", fence, input.repro_command, fence);
   }
+  if (input.repro_steps !== undefined) lines.push("", "**Repro steps:**", input.repro_steps);
+  if (input.suggested_fix !== undefined) lines.push("", "**Suggested fix:**", input.suggested_fix);
+  if (input.refs !== undefined && input.refs.length > 0) {
+    lines.push("", "**Refs:**", ...input.refs.map((ref) => `- ${ref}`));
+  }
+  // reason: `**Context:**` (attached test-file spec refs / header, AC-RI-3/4) comes last, right before `Reported by:`.
+  if (input.context !== undefined) lines.push("", input.context);
   return lines.join("\n");
+}
+
+/** The slice of an Invocation the repro-command check reads: its PATH (never the process default) and its cwd. */
+export interface ReproCheckEnvironment {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly cwd: string;
+}
+
+/**
+ * Runs {@link checkReproCommand} against the invocation's own PATH and cwd — the ONE composition of the lookups,
+ * shared by the CLI flag and the MCP field so both refuse the same values.
+ *
+ * @param command - the raw `--repro-command` / `repro_command` value
+ * @param environment - the invocation's `env` and `cwd`
+ * @returns the check result (pure data; the caller renders the refusal)
+ */
+export function checkReproCommandForInvocation(command: string, environment: ReproCheckEnvironment): ReproCheck {
+  const pathDirs = (environment.env["PATH"] ?? "").split(delimiter).filter((dir) => dir.length > 0);
+  return checkReproCommand(command, {
+    selfName: "lore",
+    which: (name) =>
+      pathDirs.some((dir) => {
+        const candidate = join(dir, name);
+        try {
+          accessSync(candidate, fsConstants.X_OK);
+          return statSync(candidate).isFile();
+        } catch {
+          // reason: an unreadable or missing PATH entry simply does not hold the program.
+          return false;
+        }
+      }),
+    pathExists: (path) => existsSync(resolve(environment.cwd, path)),
+  });
+}
+
+/**
+ * One-line refusal text for a failed repro check, naming the reason and offending word and pointing at `--repro-steps`.
+ *
+ * @param check - a `{ ok: false }` result
+ * @returns the message both adapters print (CLI: usage error exit 2; MCP: VALIDATION_ERROR)
+ */
+export function formatReproRefusal(check: Extract<ReproCheck, { ok: false }>): string {
+  return (
+    `--repro-command must be one runnable command line, but it is refused (${check.reason}: ${check.detail}). ` +
+    "Put multi-step or prose reproduction text in --repro-steps instead."
+  );
 }
 
 /**
@@ -569,8 +712,10 @@ function buildIssueDescriptionBlock(input: GithubReportInput): string {
  * order:
  *   1. Retry recognition — reads the LOCAL v2 receipt log and returns a
  *      PRIOR filing's outcome verbatim (no network call at all, and no
- *      corpus write) when one exists for the exact same title
- *      ({@link findPriorGithubFiling}).
+ *      corpus write) when one exists for the
+ *      exact same title AND that prior issue is still OPEN
+ *      ({@link findPriorGithubFilings}, {@link findOpenPriorFiling}); a closed
+ *      prior issue files a new one with the same title (#397).
  *   2. `verifyTarget()` — fail loud before any write-shaped call.
  *   3. `searchDuplicates()` — advisory; a failure degrades, never blocks.
  *   4. Resolves the reporter's own identity (`resolveLocalRootPrd`,
@@ -590,15 +735,23 @@ function buildIssueDescriptionBlock(input: GithubReportInput): string {
  *   never block filing")
  */
 export async function fileGithubIssue(
-  input: GithubReportInput,
+  rawInput: GithubReportInput,
   cfg: GithubUpstreamCfg,
   ctx: GithubFilingContext,
 ): Promise<Result<GithubReportResult, LoreError>> {
+  // reason: the context is built once here so the CLI and MCP paths (both call this) and the minted task share one body.
+  const context = buildFilingContext(rawInput, cfg.repo, ctx);
+  const input: GithubReportInput = context === undefined ? rawInput : { ...rawInput, context };
   const receiptsPath = join(ctx.consumerCorpusRoot, ".lore", RECEIPT_LOG_V2_FILENAME);
+
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });
 
   const priorReadResult = new ReceiptLogV2(receiptsPath).read();
   if (priorReadResult.ok) {
-    const prior = findPriorGithubFiling(priorReadResult.value.entries, input.title);
+    const priors = findPriorGithubFilings(priorReadResult.value.entries, input.title);
+    const open = priors.length === 0 ? ok(undefined) : await findOpenPriorFiling(runner, cfg.repo, priors);
+    if (!open.ok) return open;
+    const prior = open.value;
     if (prior !== undefined) {
       // Retry recognition: no network call and no corpus write on this branch.
       return ok({
@@ -611,7 +764,6 @@ export async function fileGithubIssue(
     }
   }
 
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();
@@ -637,6 +789,7 @@ export async function fileGithubIssue(
         "this corpus has no root PRD at all — 'reporter_root_prd' (Risk R1's identity mitigation) has nothing " +
         "to publish. Create one (`lore create prd`) before filing.",
       value: ctx.consumerCorpusRoot,
+      rule: "BR-493",
     });
   }
 
@@ -645,7 +798,6 @@ export async function fileGithubIssue(
     home: ctx.home,
     rootPrdId: rootPrd.slug,
     actor: ctx.actor,
-    actorSource: ctx.actorSource,
   };
 
   const fileResult = await port.fileIssue({

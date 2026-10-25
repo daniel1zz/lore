@@ -24,6 +24,7 @@ import { ConfigService, computeConfigHash } from "../../../src/service/config-se
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { LoreConfig } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ function baseConfig(extra: Partial<LoreConfig> = {}): LoreConfig {
 function seedConfig(config: LoreConfig): void {
   const loreDir = join(corpusDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  writeFileSync(join(loreDir, "config.yaml"), yaml.stringify(config), "utf8");
+  patchLoreConfig(corpusDir, config as unknown as Record<string, unknown>, { replace: true });
 }
 
 function rawConfigBytes(): string {

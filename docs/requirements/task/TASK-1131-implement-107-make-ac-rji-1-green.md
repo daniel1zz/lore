@@ -13,5 +13,6 @@ parent: PLAN-171
 plan: PLAN-171
 links:
   - {id: TASK-1133, type: resolves}
+  - {id: TASK-1271, type: resolves}
 ---
 Implementer makes AC-RJI-1 green without editing test assertions. Estimate: M

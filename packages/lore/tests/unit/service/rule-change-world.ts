@@ -16,11 +16,14 @@ import { ImpactService } from "../../../src/service/impact-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { RuleChangeService } from "../../../src/service/rule-change-service.js";
+import { ReviewService } from "../../../src/service/review-service.js";
 import { actedStore } from "../../live-invocation.js";
 
 export interface World {
   readonly store: InMemoryStore;
   readonly corpus: CorpusService;
+  /** Bare ReviewService (no judgment store): `approve` promotes every pending revision of a baseline node. */
+  readonly review: ReviewService;
   readonly rules: RuleService;
   readonly changes: RuleChangeService;
   readonly read: RuleReadService;
@@ -73,9 +76,15 @@ export async function makeWorld(): Promise<World> {
     { by: "test" },
   );
   if (!seeded.ok || seeded.value.ruleId !== "BR-1") throw new Error(`seed rule failed: ${JSON.stringify(seeded)}`);
+  // reason: a direct `rule add` is a PENDING ADD (BR-626): the seeded rule is live only once the leaf's pending revision is
+  // approved. A bare ReviewService (no judgment store) promotes every pending revision, which is what a fixture wants.
+  const review = new ReviewService(store, lock);
+  const approvedSeed = await review.approve("leaf-a", { reviewer: "test" });
+  if (!approvedSeed.ok) throw new Error(`approving the seed rule failed: ${JSON.stringify(approvedSeed.error)}`);
   return {
     store,
     corpus,
+    review,
     rules,
     changes,
     read: new RuleReadService(store),

@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * E2E for baseline-slice-2 QA-5 / AC-BLS2-11 — ROLLBACK / UPGRADE LEAVES NO TRACE: a corpus upgraded to
  * slice 2a that (a) has NO baseline documents and no gate config, or (b) has baseline documents but
@@ -43,9 +44,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loosenOverrideClasses } from "../integration/fixtures/autonomy-override-helpers.js";
 import { Database } from "bun:sqlite";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../helpers/cli-live-rule.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -157,9 +159,11 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
     );
     ruleId = ruleOut.stdout.match(/\bBR-\d+\b/)?.[0];
     if (ruleId === undefined) throw new Error(`could not parse rule id from: ${ruleOut.stdout}`);
+    // a direct add is a pending add: the rule is live (citable, counted) only once its leaf is approved
+    approveFixtureNodes(dir, [leaf]);
     if (setup.gate !== "absent") {
-      appendFileSync(
-        join(dir, ".lore", "config.yaml"),
+      patchLoreConfig(
+        dir,
         `workflow:\n  gates:\n    ac-cite:\n      mode: ${setup.gate}\n      armed_branches:\n        - ${branchSlug}\n`,
       );
     }
@@ -285,6 +289,7 @@ const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_
  *  RE-BASELINE (spec-run-identity-slice-1, status.ts): `harness_run_attribution` is the one additive key that slice made;
  *  RE-BASELINE (spec-run-only-write-identity-and-run-end-claim-release Scope 8): `identity_sources` + `orphaned_dirty`;
  *  RE-BASELINE (spec-evidence-labels-and-reds-are-honest D2, #48): `capture_source_runner_unattested_count`; the set is still compared exactly.
+ *  RE-BASELINE (commit c2891e3a, always-present in status.ts, `null` = not measured): `absent_declared_commands`, the absent-declaration list per leaf; `ac_cite` must stay absent (asserted separately);
  *  RE-BASELINE (spec-corpus-truthfulness-a-verdict-must-carry-the-state-it AC-CT-9(d)): `stamp_verdicts`, the stamp-verdict distribution beside the capture_source counts; AC-CT-3b: `state_binding`, the always-present arming state. */
 const PRE_SLICE_3A_STATUS_DATA_KEYS: string[] = ["total_docs", "invalid_docs", "by_type", "by_status", "last_updated", "db_size_bytes", "invalidated_feeding_source_warnings", "ai_defaults", "open_stale_candidates", "code_anchor_specs", "verification_profiles", "pass_unfalsified_count", "ac_other_command_count", "ac_oracle_file_missing_count", "ac_oracle_file_missing", "absent_declared_commands", "unclaimed_oracle", "unredeemed_allow_missing_path_count", "capture_source_runner_count", "capture_source_self_report_count", "capture_source_runner_unattested_count", "stamp_verdicts", "state_binding", "issues", "binary_provenance", "harness_run_attribution", "identity_sources", "orphaned_dirty", "integrate_losses"];
 
@@ -405,7 +410,6 @@ async function claimAndResume(c: Corpus, specCitesRule = false): Promise<RunResu
   // live rule, so it goes through the real verb.
   // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(c.dir, ["override-judgment"]);
   if (specCitesRule) {
     mustRun(["approve", c.specSlug, "--override-no-judgment"], c.dir);
   } else {

@@ -107,8 +107,6 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
-import { formatAttestationExemptionNotice } from "../plan-exempt-validation.js";
-import { PLAN_CLOSE_VACUITY_NOTICE_FIELD } from "../../../service/checkpoint-registry.js";
 import type { PlanCloseCascadeResult } from "../../../service/corpus-service.js";
 import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
@@ -200,6 +198,12 @@ export default defineLoreCommand({
         "Reason for a typo-level fix of a LOCKED record (an approved spec/adr/knowledge record, a claimed " +
         "task, a closed plan). Bypasses the record-edit gate, writes exactly one version and keeps the " +
         "status; the reason is stored in the version and the audit trail. Must be non-empty.",
+    },
+    plan: {
+      type: "string",
+      description:
+        "Deprecating a spec: the plan slug that owns the retirement when this run claims tasks in several plans " +
+        "(must be a plan the run claims a task in).",
     },
     json: {
       type: "boolean",
@@ -337,7 +341,7 @@ export default defineLoreCommand({
       }
     }
 
-    const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+    const resolvedActor = resolveActor(inv);
     const { app, defaults } = loadLoreApp({ inv });
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────
@@ -665,6 +669,7 @@ export default defineLoreCommand({
       const result = await app.corpusService.set(args.id, patch, {
         by: resolvedActor,
         ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
+        ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
       });
 
       if (!result.ok) {
@@ -697,13 +702,6 @@ export default defineLoreCommand({
             `  (note: free-text references to the old slug in other docs' bodies are not rewritten)`,
           );
         }
-        // reason: SPEC-069 §Mechanism required item 3 — an exemption that is
-        // what ALLOWED a close must never be invisible; an unannounced
-        // exemption is the same failure as a vacuous predicate (the operator
-        // watches the plan archive cleanly and never learns that a declared
-        // exemption, not attested evidence, is why). Rendered on every
-        // successful plan → archived transition; `formatAttestationExemptionNotice`
-        // returns null unless the exemption is ACTIVE by the gate's own rule.
         if (doc.type === "plan" && doc.status === "archived") {
           // reason: spec-approval-and-plan-closure-go-through-the-same-checks-on D7 — the cascade
           // outcome was --json-only, so a task the done floors refused stayed open with no word on
@@ -716,22 +714,6 @@ export default defineLoreCommand({
               printLine(inv.io.stdout, `Cascade skipped: ${s.slug} (${s.floor ?? "fresh claim"})`);
             }
             for (const f of cascade.failed) printLine(inv.io.stdout, `Cascade failed: ${f.slug} (${f.reason})`);
-          }
-          const exemptionNotice = formatAttestationExemptionNotice(doc.extra);
-          if (exemptionNotice !== null) printLine(inv.io.stdout, exemptionNotice);
-          // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
-          // (spec-governance-visibility-an-armed-gate-that-vacuously-passes
-          // §AC-GV-6) — `CorpusService.set`'s plan-close block writes this key
-          // ONLY when the checkpoint was fully vacuous (see
-          // `PLAN_CLOSE_VACUITY_NOTICE_FIELD`'s own JSDoc); mirrors the
-          // exemption-notice branch immediately above, printing nothing at all
-          // for a genuinely satisfied close. The SAME text also already went to
-          // stderr from inside `GateEnforcer.enforce` (`warnVacuousCheckpoint`)
-          // — this is the stdout/human-summary echo of that fact, read back off
-          // the doc that was just persisted, never re-derived.
-          const vacuityNotice = doc.extra[PLAN_CLOSE_VACUITY_NOTICE_FIELD];
-          if (typeof vacuityNotice === "string") {
-            printLine(inv.io.stdout, `  (${vacuityNotice})`);
           }
         }
       }

@@ -15,6 +15,8 @@
 
 import { readHookPayload, resolveSessionId, getStateBase } from './lib/turn-state.mjs';
 import { recordHelperEnd } from './lib/session-trail.mjs';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:subagent-trail');
 
 try {
   const payload = readHookPayload();

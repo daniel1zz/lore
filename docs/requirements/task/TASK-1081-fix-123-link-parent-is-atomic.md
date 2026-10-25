@@ -7,12 +7,13 @@ status: archived
 priority: medium
 phase: "fixes"
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-18
 tags: []
 parent: PLAN-165
 plan: PLAN-165
 links:
   - {id: TASK-1064, type: blocks}
+  - {id: TASK-1097, type: resolves}
 ---
 Estimate: M
 Source: spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-7

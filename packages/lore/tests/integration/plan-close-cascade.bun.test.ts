@@ -56,6 +56,8 @@ import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
 import type { VerifiedEvidenceInput } from "../../src/service/task-workflow-service.js";
 import type { PlanCloseCascadeResult } from "../../src/service/corpus-service.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { runOfName } from "../helpers/test-run-identity.js";
+import { passMilestoneReview } from "../helpers/plan-review-fixture.js";
 
 let tmpDir: string;
 
@@ -169,6 +171,8 @@ describe("plan-close cascade (R1) — HAPPY", () => {
       if (!handoffResult.ok) throw new Error(`handoff seed failed: ${JSON.stringify(handoffResult.error)}`);
       const handoff = handoffResult.value;
 
+      await passMilestoneReview(app.corpusService, plan.id);
+
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -211,8 +215,10 @@ describe("plan-close cascade (R1) — NEGATIVE", () => {
       const plan = await makeApprovedPlan(app);
       const freshTask = await makeTask(app, plan, "Fresh-claimed task");
 
-      const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder" });
+      const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
       expect(claimResult.ok).toBe(true);
+
+      await passMilestoneReview(app.corpusService, plan.id);
 
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
@@ -246,6 +252,8 @@ describe("plan-close cascade (R1) — BOUNDARY", () => {
       const preArchived = await app.corpusService.set(task.id, { status: "archived" });
       expect(preArchived.ok).toBe(true);
 
+      await passMilestoneReview(app.corpusService, plan.id);
+
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -266,6 +274,7 @@ describe("plan-close cascade (R1) — STATE (never rolls back the plan's own wri
     const app = openApp();
     try {
       const plan = await makeApprovedPlan(app);
+      await passMilestoneReview(app.corpusService, plan.id);
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
       if (!archiveResult.ok) return;
@@ -289,10 +298,12 @@ describe("plan-close cascade (R1) — REGRESSION (audit chain integrity)", () =>
       const straggler = await makeTask(app, plan, "Straggler for chain check");
       await giveAttestedPass(app, straggler); // re-baselined (#47): a floor-clearing task, so the cascade really writes
 
+      await passMilestoneReview(app.corpusService, plan.id);
+
       const archiveResult = await app.corpusService.set(plan.id, { status: "archived" }, { by: "agent:closer" });
       expect(archiveResult.ok).toBe(true);
 
-      const verifyResult = await app.auditService.verify({ since: "2020-01-01T00:00:00.000Z" });
+      const verifyResult = await app.auditService.verify();
       expect(verifyResult.ok).toBe(true);
       if (verifyResult.ok) {
         expect(verifyResult.value.clean).toBe(true);
@@ -324,7 +335,7 @@ async function seedFloorFixture(app: App): Promise<FloorFixture> {
   if (!declared.ok) throw new Error(`declareRedFirst failed: ${JSON.stringify(declared.error)}`);
   await giveAttestedPass(app, t3);
   const t4 = await makeTask(app, plan, "T4 fresh claim");
-  const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder" });
+  const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
   if (!claimed.ok) throw new Error(`claim failed: ${JSON.stringify(claimed.error)}`);
   const handoffResult = await app.sessionService!.writeHandoff({
     by: "tester",
@@ -362,6 +373,7 @@ function floorOf(cascade: PlanCloseCascadeResult, docId: string): string | undef
 /** Runs the plan close on a fresh fixture and asserts AC-AP-4 (a)-(d). */
 async function assertFloorOutcome(app: App): Promise<FloorFixture> {
   const f = await seedFloorFixture(app);
+  await passMilestoneReview(app.corpusService, f.plan.id);
   const archiveResult = await app.corpusService.set(f.plan.id, { status: "archived" }, { by: "agent:closer" });
   expect(archiveResult.ok).toBe(true);
   if (!archiveResult.ok) throw new Error("plan close refused");
@@ -413,6 +425,7 @@ describe("plan-close cascade floors (AC-AP-4, BR-1072)", () => {
     const app = openApp();
     try {
       const f = await seedFloorFixture(app);
+      await passMilestoneReview(app.corpusService, f.plan.id);
       const r = await app.corpusService.set(f.plan.id, { status: "archived" }, { by: "agent:closer" });
       if (!r.ok) throw new Error("plan close refused");
       const cascade = cascadeOf(r.value)!;
@@ -426,7 +439,7 @@ describe("plan-close cascade floors (AC-AP-4, BR-1072)", () => {
         const auditBefore = await app.auditService.query({ doc_id: task.id });
         if (!auditBefore.ok) throw new Error("audit failed");
 
-        const done = await app.taskWorkflowService.done(task.id, { by: "agent:closer" });
+        const done = await app.taskWorkflowService.done(task.id, { by: "agent:closer", harnessRun: runOfName("agent:closer") });
         expect(done.ok, `lore done must refuse ${task.slug}`).toBe(false);
         if (done.ok) continue;
         // `details.floor` is added to the refusal by the paired implement task (spec D5); the union has no `details` member.

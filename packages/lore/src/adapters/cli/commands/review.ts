@@ -81,7 +81,6 @@ import { REVIEW_PROMPT_VERSION } from "../../../ai/review-template.js";
 import {
   formatJudgmentSummary,
   renderSupersededCandidateNudgeBlock,
-  renderAdvisoryBlock,
   renderTruncationBlock,
   renderBatchFailureCounts,
   summarizeBatchFailures,
@@ -288,7 +287,7 @@ export default defineLoreCommand({
     if (args.doc === "backfill-ledger") {
       const { app } = loadLoreApp({ inv });
       try {
-        const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+        const actor = resolveActor(inv);
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -367,7 +366,7 @@ export default defineLoreCommand({
         }
       }
 
-      const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const actor = resolveActor(inv);
 
       // ─── SPEC-044: staleness probing branch ─────────────────────────────────
       if (isStaleness) {
@@ -578,7 +577,7 @@ export default defineLoreCommand({
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
-      printLine(inv.io.stdout, formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
+      printLine(inv.io.stdout, formatJudgmentSummary(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
     } finally {
       app.close();
     }

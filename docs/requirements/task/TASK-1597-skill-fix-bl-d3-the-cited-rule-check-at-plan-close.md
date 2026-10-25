@@ -3,11 +3,11 @@ id: TASK-1597
 type: task
 role: plan
 title: "[Skill:fix] BL-D3 the cited-rule check at plan close gets a setting named for it, retiring BR-226's borrowed switch (baseline-close-a-plan)"
-status: draft
+status: archived
 priority: medium
 phase: "P3-stale-and-draft"
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 tags: []
 parent: PLAN-206
 plan: PLAN-206

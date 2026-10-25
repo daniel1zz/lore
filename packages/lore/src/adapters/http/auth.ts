@@ -30,13 +30,12 @@
  *     `WriteActorOpts` — every route handler that calls `create`/`set`/`delete` MUST go
  *     through it rather than hand-building `{ by: actor.name }`, so the cookie-vs-bearer
  *     attribution policy lives in exactly one place. Cookie sessions (`http_cookie`) omit
- *     `by` entirely and set `attributeCreatedBy: true` — the static "dashboard-local"
- *     bootstrap-key identity (`actor.name`) / its hardcoded "admin" owner field
- *     (`actor.owner`) are NEVER used as the write actor; the human and `lore serve` share
- *     a machine (SPEC-016), so `CorpusService.resolveWriteActor(undefined)` falls through
- *     to the session tier → OS username (of the `lore serve` process) — the
- *     SAME chain the CLI's `resolveActor` applies. Bearer sessions (`http_token`) are
- *     UNCHANGED: explicit `by: actor.name` (the API key name), `attributeCreatedBy` omitted
+ *     `by` entirely and set `attributeCreatedBy: true`: the write actor is then the request's
+ *     own party — the dashboard login registered by `request-identity.ts` (source `dashboard`,
+ *     named by the session's `owner`) — which the store's write context resolves
+ *     (`resolveWriteActorFor`). It is NEVER the `lore serve` process's environment, session or
+ *     computer user name (BR-1055). Bearer sessions (`http_token`) pass explicit
+ *     `by: actor.name` (the API key name, source `api-key`), `attributeCreatedBy` omitted
  *     (doc/version `created_by` stays the historical literal `"system"`).
  * Side-effect class: IO (bun:sqlite reads/writes, crypto)
  * Source: SPEC-010 §3.2, §3.3; SPEC-016 §3.3
@@ -233,7 +232,7 @@ export class ApiKeyStore {
   async create(name: string, owner: string): Promise<Result<{ rawKey: string; record: ApiKeyRecord }, LoreError>> {
     const existing = this.db.prepare("SELECT key_hash FROM api_keys WHERE name = ?").get(name) as { key_hash: string } | null;
     if (existing !== null) {
-      return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists` });
+      return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists`, rule: "BR-952" });
     }
 
     const rawKey = generateApiKey();
@@ -247,7 +246,7 @@ export class ApiKeyStore {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
       if (message.includes("UNIQUE constraint failed: api_keys.name")) {
-        return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists` });
+        return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists`, rule: "BR-952" });
       }
       return err({ code: "STORE_ERROR", message, ...(e instanceof Error ? { cause: e } : {}) });
     }
@@ -280,7 +279,7 @@ export class ApiKeyStore {
   revoke(name: string): Result<void, LoreError> {
     const row = this.db.prepare("SELECT key_hash FROM api_keys WHERE name = ?").get(name) as { key_hash: string } | null;
     if (row === null) {
-      return err({ code: "DOC_NOT_FOUND", id: name });
+      return err({ code: "DOC_NOT_FOUND", id: name, rule: "BR-956" });
     }
 
     try {
@@ -309,7 +308,7 @@ export class ApiKeyStore {
   /** Validate a raw key. Returns ActorContext if valid, UNAUTHORIZED error otherwise. */
   async validate(rawKey: string): Promise<Result<ActorContext, LoreError>> {
     if (!rawKey.startsWith(KEY_PREFIX)) {
-      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid token format" });
+      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid token format", rule: "BR-945" });
     }
 
     const keyHash = await hashApiKey(rawKey);
@@ -319,11 +318,11 @@ export class ApiKeyStore {
     ).get(keyHash) as { name: string; revoked_at: string | null } | null;
 
     if (row === null) {
-      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid API key" });
+      return err({ code: "VALIDATION_ERROR", field: "token", message: "Invalid API key", rule: "BR-945" });
     }
 
     if (row.revoked_at !== null) {
-      return err({ code: "VALIDATION_ERROR", field: "token", message: "API key has been revoked" });
+      return err({ code: "VALIDATION_ERROR", field: "token", message: "API key has been revoked", rule: "BR-945" });
     }
 
     return ok({ name: row.name, session_id: keyHash.slice(0, 16) });
@@ -398,13 +397,13 @@ export async function authenticateRequest(
     if (sid !== null) {
       const session = sessionStore.resolve(sid);
       if (session === null) {
-        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session not found or expired" });
+        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session not found or expired", rule: "BR-944" });
       }
 
       // Inline expiry check — resolve() does not delete; we handle it here.
       if (new Date(session.expires_at) <= new Date()) {
         sessionStore.delete(sid);
-        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session expired" });
+        return err({ code: "VALIDATION_ERROR", field: "Cookie", message: "Session expired", rule: "BR-944" });
       }
 
       // Slide expiry on use (sliding 30-day window). SPEC-016 §3.3.
@@ -424,7 +423,7 @@ export async function authenticateRequest(
   // ── Bearer fallback (existing path, unchanged) ────────────────────────────
   const token = extractBearerToken(req);
   if (token === null) {
-    return err({ code: "VALIDATION_ERROR", field: "Authorization", message: "Missing bearer token" });
+    return err({ code: "VALIDATION_ERROR", field: "Authorization", message: "Missing bearer token", rule: "BR-943" });
   }
   const tokenResult = await keyStore.validate(token);
   if (!tokenResult.ok) return tokenResult;
@@ -444,13 +443,12 @@ export async function authenticateRequest(
  * - `http_cookie` (dashboard UI, human on the SAME machine as `lore serve` —
  *   SPEC-016's local-bootstrap model): omits `by` entirely and sets
  *   `attributeCreatedBy: true`. `CorpusService.resolveWriteActor(undefined)`
- *   then falls through its full chain (session tier → OS username of the
- *   `lore serve` process) — the exact `resolveActor`
- *   precedence the CLI applies. The static `"dashboard-local"` bootstrap-key
- *   name (`actor.name`) and its hardcoded `"admin"` owner field (`actor.owner`)
- *   are deliberately NEVER used here: neither identifies WHICH human is at the
- *   keyboard, so passing either as an "explicit" actor would just replace one
- *   wrong static string ("system") with another ("admin").
+ *   then takes the request's own party from the store's write context: the
+ *   dashboard login registered per request by `request-identity.ts`
+ *   (`dispatchUnderRequestParty`), never the `lore serve` process's
+ *   environment, session or user name. It is deliberately not passed as an
+ *   explicit `by`, so the name the audit row shows and its recorded source
+ *   (`dashboard`) come from the one write-context path.
  * - `http_token` (bearer, agent-issued) and any other/absent surface: explicit
  *   `by: actor.name` (the API key name) — UNCHANGED from the pre-existing
  *   behavior, `attributeCreatedBy` omitted so `doc.created_by`/

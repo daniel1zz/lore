@@ -3,10 +3,10 @@ id: KN-036
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-035 Implementation — audit trail + calibration (2026-07-08)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-014
 links:

@@ -13,7 +13,7 @@
  * hint). Thin pipe over `SessionService.bootstrap` — zero store mutations.
  *
  * Actor resolution: `--by` is a read-only FILTER naming whose claims to report; absent, the
- * invoking identity (utils.ts::resolveActor) is used. Only filters `my_claims`; every other field is
+ * invocation's known-party name (`inv.identity.claimed`) is used. Only filters `my_claims`; every other field is
  * corpus-wide regardless of `by`.
  *
  * **`--injection` (spec-session-start-injection-carries-only-the-session-s-own)** —
@@ -50,12 +50,17 @@ import type { BootstrapReport } from "@lore/core";
 import { warnSinkOf } from "../../../service/warn-sink.js";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatErrorFor, relativeTime, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, relativeTime } from "../utils.js";
+import { formatCompleteLines, summarizeComplete, type CompleteSummary } from "../../../service/plan-acceptance-view.js";
+import { buildCompletePlanLister, buildReviewTriggerService, refuseSpawnForRead } from "../review-batch-wiring.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+
+/** The report's filter name for an invocation with no known party and no `--by`: names nobody, so it matches no claim. */
+const NO_KNOWN_PARTY_FILTER = "(no known party)";
 
 /**
  * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14
@@ -69,6 +74,8 @@ import { printLine } from "../output.js";
  */
 type BootstrapReportWithStaleness = BootstrapReport & {
   corpus: BootstrapReport["corpus"] & { open_stale_candidates: number; code_anchor_specs: number };
+  /** BR-1379: the complete-plans summary (counted once by `run()`), and the slugs kept out of the named plan list. */
+  plan_acceptance: { summary: CompleteSummary; complete_slugs: string[] };
 };
 
 /**
@@ -91,28 +98,38 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
     report.root !== null ? `Root: ${report.root.slug} "${report.root.title}"` : "Root: (none)",
   );
   if (report.strategy !== undefined) lines.push(`Strategy: ${report.strategy.slug} "${report.strategy.title}"`);
+  lines.push(
+    report.architecture !== null
+      ? `Architecture: ${report.architecture.slug} "${report.architecture.title}" (${report.architecture.id})`
+      : "Architecture: (none)",
+  );
   lines.push("");
 
-  lines.push(`Active plans (${report.active_plans.length}):`);
-  if (report.active_plans.length > 0) {
-    for (const plan of report.active_plans) {
+  // reason: BR-1371 — the report is bounded (BOOTSTRAP_MAX_BYTES). Idle plans (nothing ready, nothing claimed) print
+  // as a count and only the first BOOTSTRAP_MAX_PLANS busy plans are named; the rest are one pointer line.
+  // reason: BR-1379 — only in-progress plans are listed; a complete plan is summarised by the one `complete N (...)` line below.
+  const completeSlugs = new Set(report.plan_acceptance.complete_slugs);
+  const inProgressPlans = report.active_plans.filter((p) => !completeSlugs.has(p.slug));
+  const busyPlans = inProgressPlans.filter((p) => p.task_counts.ready > 0 || p.task_counts.claimed > 0);
+  const idleCount = inProgressPlans.length - busyPlans.length;
+  lines.push(`Active plans (${inProgressPlans.length}; ${idleCount} idle):`);
+  if (busyPlans.length > 0) {
+    for (const plan of busyPlans.slice(0, BOOTSTRAP_MAX_PLANS)) {
       lines.push(
-        `  - ${plan.slug} "${plan.title}" — ready ${plan.task_counts.ready}, ` +
-          `claimed ${plan.task_counts.claimed}, done ${plan.task_counts.done}, ` +
-          `last activity ${relativeTime(plan.last_activity_at)}`,
+        `  - ${plan.slug} — ready ${plan.task_counts.ready}, claimed ${plan.task_counts.claimed}, ` +
+          `done ${plan.task_counts.done}, ${relativeTime(plan.last_activity_at)}`,
       );
     }
+    if (busyPlans.length > BOOTSTRAP_MAX_PLANS) {
+      lines.push(`  (+${busyPlans.length - BOOTSTRAP_MAX_PLANS} more busy plans: lore list --type plan)`);
+    }
   } else {
-    lines.push("  (none)");
+    lines.push("  (none busy)");
   }
+  for (const line of formatCompleteLines(report.plan_acceptance.summary)) lines.push(line);
   lines.push("");
 
-  lines.push(
-    `Pending reviews: ${report.pending_reviews.count}` +
-      (report.pending_reviews.slugs.length > 0
-        ? ` (${report.pending_reviews.slugs.join(", ")})`
-        : ""),
-  );
+  lines.push(`Pending reviews: ${report.pending_reviews.count} (lore pending)`);
   lines.push("");
 
   lines.push(`My claims (${by}, ${report.my_claims.length}):`);
@@ -141,9 +158,18 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   }
   lines.push("");
 
-  lines.push(`Latest handoffs (${report.latest_handoffs.length}):`);
-  if (report.latest_handoffs.length > 0) {
-    for (const handoff of report.latest_handoffs) {
+  // reason: BR-1371 — this seat's own handoff (the resume hint's) plus the newest BOOTSTRAP_NEWEST_HANDOFFS, not all.
+  const seatHandoff =
+    report.resume_hint === null
+      ? undefined
+      : report.latest_handoffs.find((h) => h.handoff_slug === report.resume_hint?.handoff_slug);
+  const shownHandoffs = [
+    ...(seatHandoff === undefined ? [] : [seatHandoff]),
+    ...report.latest_handoffs.filter((h) => h !== seatHandoff).slice(0, BOOTSTRAP_NEWEST_HANDOFFS),
+  ];
+  lines.push(`Latest handoffs (${shownHandoffs.length} of ${report.latest_handoffs.length}):`);
+  if (shownHandoffs.length > 0) {
+    for (const handoff of shownHandoffs) {
       lines.push(
         `  - ${handoff.plan_slug ?? "(no plan)"}: ${handoff.handoff_slug} by ${handoff.by} at ${handoff.at}`,
       );
@@ -173,7 +199,34 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   const healthLine = formatMemoryFileHealthLine(report.memory_file_health);
   if (healthLine !== undefined) lines.push(healthLine);
 
-  return lines.join("\n");
+  return capBootstrapText(lines.join("\n"));
+}
+
+/** Plans named in the plain bootstrap report (BR-1371); the rest are a count and a pointer. */
+const BOOTSTRAP_MAX_PLANS = 8;
+/** Newest handoffs named besides the seat's own. */
+const BOOTSTRAP_NEWEST_HANDOFFS = 3;
+/** The plain bootstrap report never exceeds this many bytes (BR-1371). */
+export const BOOTSTRAP_MAX_BYTES = 3072;
+
+/**
+ * Backstop for {@link BOOTSTRAP_MAX_BYTES}: the sections above are bounded by construction except claims and gates,
+ * which belong to the seat; if those alone push the text over, drop whole trailing lines and say so.
+ *
+ * @param text - the rendered report
+ * @returns `text` when it fits, else its leading lines plus a pointer to `--json`, at most the cap
+ */
+function capBootstrapText(text: string): string {
+  if (Buffer.byteLength(text) <= BOOTSTRAP_MAX_BYTES) return text;
+  const note = "\n(output cut at 3 KB: lore bootstrap --json for everything)";
+  const kept: string[] = [];
+  let size = Buffer.byteLength(note);
+  for (const line of text.split("\n")) {
+    size += Buffer.byteLength(line) + 1;
+    if (size > BOOTSTRAP_MAX_BYTES) break;
+    kept.push(line);
+  }
+  return kept.join("\n") + note;
 }
 
 export default defineLoreCommand({
@@ -225,7 +278,10 @@ export default defineLoreCommand({
         return 1;
       }
 
-      const by = resolveActor(inv.io, typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd, inv.user);
+      // reason: `bootstrap` is a READ (never refused for identity, BR-1351) and `--by` is its own filter naming whose
+      // claims to report (never a write identity, BR-1055). Absent a filter it reports the invocation's known-party
+      // name; an invocation with no known party reports under a sentinel that matches no claim.
+      const by = typeof args.by === "string" && args.by.trim() !== "" ? args.by : (inv.identity.claimed ?? NO_KNOWN_PARTY_FILTER);
       const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
       const seatWorktreeArg = typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : undefined;
 
@@ -303,8 +359,21 @@ export default defineLoreCommand({
       // `config` loadLoreApp() already parsed. Absent (not null) when nothing to report.
       const memoryFileHealth = computeMemoryFileHealth(inv.cwd, config);
 
+      // BR-1379 — the complete-plans summary, from the SAME classification the landing's trigger set uses.
+      const trigger = buildReviewTriggerService(app, `${by}:bootstrap:${String(process.pid)}`, refuseSpawnForRead);
+      if (trigger === undefined || app.checkStatsService === undefined) {
+        inv.io.stderr.write("Error: this composition cannot summarise complete plans (no lease store, decision reader or check stats service wired).\n");
+        return 1;
+      }
+      const completeViews = await app.checkStatsService.completePlanViews(buildCompletePlanLister(trigger));
+      if (!completeViews.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, completeViews.error) + "\n");
+        return exitCode(completeViews.error);
+      }
+
       const reportWithStaleness: BootstrapReportWithStaleness = {
         ...result.value,
+        plan_acceptance: { summary: summarizeComplete(completeViews.value, Date.now()), complete_slugs: completeViews.value.map((p) => p.plan) },
         ...(memoryFileHealth === undefined ? {} : { memory_file_health: memoryFileHealth }),
         corpus: {
           ...result.value.corpus,

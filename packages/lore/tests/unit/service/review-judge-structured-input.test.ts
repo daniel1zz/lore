@@ -89,9 +89,9 @@ async function judgeInputFor(store: InMemoryStore, slug: string): Promise<string
     telemetry,
     false,
     8000,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
+    { max_diff_chars: 24000 },
     // production defaults (config.ai.review.*)
-    { max_doc_chars: 12000, max_context_chars: 8000 },
+    { max_context_chars: 8000 },
   );
   const judged = await service.judgeDoc(bundleResult.value, checks, {});
   if (!judged.ok) throw new Error(`judgeDoc failed: ${JSON.stringify(judged.error)}`);

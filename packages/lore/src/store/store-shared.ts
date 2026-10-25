@@ -59,6 +59,7 @@ export interface RunRow {
   branch: string | null;
   composition: string;
   registered_at: string;
+  message_address: string | null;
 }
 
 /** `runs` row → {@link RunRecord}. Throws on malformed `composition` JSON (surfaced by the caller as STORE_ERROR). */
@@ -74,6 +75,7 @@ export function rowToRunRecord(row: RunRow): RunRecord {
     branch: row.branch,
     composition: JSON.parse(row.composition) as RunRecord["composition"],
     registeredAt: row.registered_at,
+    messageAddress: row.message_address,
   };
 }
 
@@ -373,6 +375,68 @@ export interface TraceEventInput {
 /** A persisted `trace_events` row — {@link TraceEventInput} plus its store-assigned `id`. */
 export interface TraceEventRecord extends TraceEventInput {
   id: number;
+}
+
+/** What one run of a gate or hook did (`check_outcomes.outcome`, migration-033, BR-1373). */
+export type CheckOutcomeKind = "pass" | "deny" | "error";
+
+/** One run of one check, as appended to `check_outcomes`. */
+export interface CheckOutcomeInput {
+  /** Stable check id: a gate checkpoint (`gate:task-claim`) or a hook file (`hook:pre-edit-anchor-gate`). */
+  readonly check_id: string;
+  readonly outcome: CheckOutcomeKind;
+  /** ISO 8601 time the check ran. */
+  readonly ts: string;
+}
+
+/** Per-check aggregate over `check_outcomes`. */
+export interface CheckOutcomeStat {
+  readonly check_id: string;
+  readonly runs: number;
+  readonly denials: number;
+  readonly errors: number;
+  /** Earliest recorded run (ISO 8601). */
+  readonly first_run: string;
+  readonly last_run: string;
+  /** Time of the most recent `deny`, or null when the check never denied. */
+  readonly last_denial: string | null;
+}
+
+/** What lore records when it issues the question for a pending decision (`pending_asks`, migration-034, BR-1374). */
+export interface PendingAskInput {
+  readonly decision_id: number;
+  readonly subject_version: string;
+  readonly nonce: string;
+  /** sha256 of the exact question object lore issued. */
+  readonly question_hash: string;
+  readonly issued_at: string;
+}
+
+/** A persisted `pending_asks` row. `is_latest` is false once a newer ask was issued for the same decision. */
+export interface PendingAskRecord extends PendingAskInput {
+  readonly id: number;
+  readonly used_at: string | null;
+  readonly is_latest: boolean;
+}
+
+/** One row of `review_leases` (migration-036, BR-1379). */
+export interface LeaseRecord {
+  readonly name: string;
+  readonly holder: string;
+  /** ISO-8601 instant after which the lease is dead. */
+  readonly expires_at: string;
+}
+
+/** Outcome of `acquireLease`: taken (`tookOver` when an expired lease of another holder was replaced) or held by `holder` until `expires_at`. */
+export type LeaseAcquisition =
+  | { readonly acquired: true; readonly tookOver: boolean }
+  | { readonly acquired: false; readonly holder: string; readonly expires_at: string };
+
+/** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
+export interface ReadDayCount {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+  count: number;
 }
 
 /**
@@ -900,10 +964,11 @@ export async function detectParentCycleViaAncestry(
  */
 export function toStoreError(e: unknown): LoreError {
   const message = e instanceof Error ? e.message : "Unknown store error";
-  return e instanceof Error ? { code: "STORE_ERROR", message, cause: e } : { code: "STORE_ERROR", message };
+  return e instanceof Error ? { code: "STORE_ERROR", message, cause: e, rule: "BR-941" } : { code: "STORE_ERROR", message, rule: "BR-941" };
 }
 
 export function wrapStoreError(e: unknown): Result<never, LoreError> {
+  /** @lore-site BR-941 */
   return err(toStoreError(e));
 }
 
@@ -1491,6 +1556,7 @@ export function buildAcExemptionCapError(activeCount: number, liveCriteria: numb
       `Exemption cap reached: ${activeCount} active exemption(s) already fill the 10% cap ` +
       `(max ${maxActive} = floor(10% x ${liveCriteria} live criteria)). ` +
       "Cite a baseline rule instead, or wait for an existing exemption to expire.",
+    rule: "BR-971",
   } as LoreError;
 }
 
@@ -1501,6 +1567,7 @@ export function buildAcExemptionAlreadyActiveError(docId: string, acId: string):
     field: "ac_id",
     message: `Criterion ${acId} of ${docId} already has an active exemption.`,
     value: acId,
+    rule: "BR-971",
   } as LoreError;
 }
 

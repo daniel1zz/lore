@@ -1,7 +1,7 @@
 /**
  * `LORE_GATE_BYPASS=1` escape-hatch observability (SPEC-080 G4) — the decision
  * logic behind `commands/gate.ts`'s env-bypass audit trace, split into this
- * sibling module for the SAME reason `assess-render.ts`/`review-render.ts` are
+ * sibling module for the SAME reason `status-stamp-verdict.ts`/`review-render.ts` are
  * split out (`../../CLAUDE.md`'s testability-split pattern): `commands/gate.ts`
  * transitively imports `loader.ts` (`bun:sqlite` via `app.ts`), which vitest
  * cannot resolve, but this file imports only `@lore/core`/`@lore/core/node` +
@@ -22,7 +22,7 @@
  *
  * @invariant D1/D3 (SPEC-080 §Design Decisions) — this module never changes the
  *   bypass's outcome, with ONE exception: an invocation with no name for its writer (OS user lookup failed, no
- *   other name) cannot be attributed, so the bypass is refused with `OsUserLookupError` (exit 4). Otherwise
+ *   other name) cannot be attributed, so the bypass is refused with `UnknownPartyError` (exit 4). Otherwise
  *   `runGateEnvBypassAudit` never throws and never rejects:
  *   every failure mode (the injected port itself throwing/rejecting, resolving
  *   `null` for "corpus unreachable", or the write settling with `Result.err`)
@@ -39,7 +39,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { OsUserLookupError } from "@lore/core/node";
+import { UnknownPartyError } from "@lore/core/node";
 import {
   buildGateSkipAuditEntry,
   describeLoreError,
@@ -77,7 +77,7 @@ export interface GateBypassAuditDeps {
  *   this call is auditing.
  * @param inv - the running command's Invocation: its claimed name (resolved once at the entry) is the actor the
  *   audit row is attributed to — never an independent resolution (AS-26)
- * @throws {OsUserLookupError} when `inv.identity` is unresolved: nothing is bypassed
+ * @throws {UnknownPartyError} when `inv.identity` is unresolved: nothing is bypassed
  * @param deps - Injected port (real wiring: `commands/gate.ts` opens a
  *   `SQLiteStore` over the discovered `.lore/lore.db`; tests inject a fake
  *   resolving/rejecting/throwing stand-in).
@@ -93,10 +93,10 @@ export async function runGateEnvBypassAudit(
   inv: Invocation,
   deps: GateBypassAuditDeps,
 ): Promise<void> {
-  // reason: the audit row is attributed to the invocation's claimed name. An invocation with no name (its OS user
-  // lookup failed and no --by/session/working-copy name exists) cannot be audited, so the bypass is REFUSED
-  // (`OsUserLookupError`, exit 4 through `run-cli.ts::dispatch`) instead of proceeding unaudited.
-  if (inv.identity.claimed === null) throw new OsUserLookupError(inv.identity.unresolvedReason);
+  // reason: the audit row is attributed to the invocation's known party. An invocation with none (no attested run, no
+  // open human session) cannot be audited, so the bypass is REFUSED (`UnknownPartyError`, exit 4 through
+  // `run-cli.ts::dispatch`) instead of proceeding unaudited.
+  if (inv.identity.claimed === null) throw new UnknownPartyError(inv.identity.unresolvedReason);
   const actor = inv.identity.claimed;
 
   let recordGateSkip: RecordGateSkip | null;

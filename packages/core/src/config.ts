@@ -177,6 +177,8 @@ export const ContextFragmentsSettingsSchema = z
   .object({
     /** ISO-ish language code (`zh`/`en`/`ja`); absent = no language fragment selected. */
     language: z.string().min(1).optional(),
+    /** Language code of the documents lore writes (`{{lore:artifact_language}}`); absent = unset, never defaulted. */
+    artifact_language: z.string().min(1).optional(),
     fragments: z
       .object({
         /** Fragment ids excluded from selection at the outlets this layer reaches. */
@@ -271,16 +273,6 @@ export const GateCheckpointConfigSchema = z
      */
     anchor_overlap: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
-     * `task-claim`-ONLY sub-predicate override (spec claim-time-actor-identity-
-     * guard-zero-evidence-release-advis, AC-IDENTITY-ESCAPE) — `false` disables
-     * JUST the claim-time actor-identity-collision guard, leaving anchor-overlap
-     * and upstream-approval (and every other checkpoint's own `enabled` key)
-     * untouched. Inert on `spec-create`/`spec-promote`/`plan-promote` (no
-     * checkpoint reads it there) — same narrower-blast-radius shape as
-     * `anchor_overlap` above.
-     */
-    actor_identity: z.object({ enabled: z.boolean().optional() }).strict().optional(),
-    /**
      * `spec-create`/`spec-promote` sub-predicate override (AC-Quantifiability Gate
      * spec §Design) — `false` disables JUST the `acQuantifiable` predicate on the
      * checkpoint it's nested under, leaving that checkpoint's other predicates
@@ -305,18 +297,6 @@ export const GateCheckpointConfigSchema = z
      */
     requires_uat: z.object({ enabled: z.boolean().optional() }).strict().optional(),
     /**
-     * `plan-close`-ONLY switch for the cited-rule check (`citedRuleStateClean`, BR-984; BL-D3 /
-     * baseline-close-a-plan BR-226) — DEFAULT-OFF, the opposite polarity of every other sub-predicate
-     * key on this schema (`anchor_overlap`/`ac_quantifiable`/`oracle_coverage`/`requires_uat` default
-     * ENABLED, an explicit `false` disables them): the check runs only with an EXPLICIT `enabled: true`,
-     * so a corpus opts in once it has criteria citing rules worth checking.
-     *
-     * ⛔ This key was named `prd_sync` while it still switched the retired outline-sync predicate; it now
-     * switches something else, so the old name is no longer in this schema. {@link loadConfigFromString}
-     * refuses it by name, naming `lore migrate config-keys --apply`, which renames it in the file.
-     */
-    cited_rule_check: z.object({ enabled: z.boolean().optional() }).strict().optional(),
-    /**
      * Corpus-write-level sub-predicate override (spec-corpus-resolution-carries-
      * provenance-and-a-foreign-write §D4) — `false` disables JUST the foreign-
      * corpus-write guard: a write reaching a corpus the caller's own working
@@ -337,9 +317,8 @@ export const GateCheckpointConfigSchema = z
      *
      * Absence of the whole config, the `workflow` section, the `gates` map, the
      * `"corpus-write"` entry, or the nested `foreign_corpus_write` key ALL mean
-     * "enabled" (same default polarity as `anchor_overlap`/`actor_identity`/
-     * `ac_quantifiable`/`oracle_coverage`/`requires_uat` — the OPPOSITE of
-     * `prd_sync`'s default-OFF) — AC-CP-4(a): a bare `lore init` project is
+     * "enabled" (same default polarity as `anchor_overlap`/
+     * `ac_quantifiable`/`oracle_coverage`/`requires_uat`) — AC-CP-4(a): a bare `lore init` project is
      * already covered with zero config edits. Only an EXPLICIT
      * `foreign_corpus_write.enabled: false` disables it (AC-CP-4(b) control).
      *
@@ -396,7 +375,7 @@ export const CoChangeRuleSchema = z
   .strict();
 export type CoChangeRule = z.infer<typeof CoChangeRuleSchema>;
 
-/** `workflow.turn_end.co_change`: the rule list. Parsed by trail-review itself, see the `turn_end` comment. */
+/** `workflow.turn_end.co_change`: the rule list. Read through this schema by `co-change-review.ts`, see the `turn_end` comment. */
 export const CoChangeRulesSchema = z.array(CoChangeRuleSchema);
 
 /**
@@ -490,35 +469,19 @@ const WorkflowConfigSchema = z
       .strict()
       .default({}),
     /**
-     * `plan-close`'s OPT-IN execution-time attestation-ratio sub-predicate config
-     * (spec-plan-close-predicates-measure-invariants-an-applicability §D4,
-     * superseding SPEC-069 §Design Decisions D1's always-on `0.5` default) — the
-     * minimum plan-wide fraction of a closing plan's `verification_evidence`
-     * entries (aggregated across every task) that must be runner-issued
-     * (`attestation` present) before the plan may transition to `archived`.
-     * Nested under `workflow` (not `gates.<checkpoint>`) because it is a NUMBER,
-     * not an `enabled` toggle — `GateCheckpointConfigSchema`'s existing
-     * sub-predicate shape only carries boolean switches; whether the WHOLE
-     * checkpoint runs at all is still `workflow.gates."plan-close".enabled`
-     * (unchanged).
+     * DISPLAY-ONLY attestation-ratio floor. `plan-close` no longer reads it (plan close is gated by the milestone
+     * review alone, BR-1372); the dashboard's plan attestation panel (`AttestationSummary.min_ratio`,
+     * `deriveAttestationSummary`) still shows the configured floor next to the measured ratio. Nothing refuses
+     * anything on it.
      *
-     * `min_ratio` deliberately carries NO Zod `.default(...)` — the field is
-     * `undefined` when absent, never a silently-resurrected `0.5`. A Zod default
-     * would make "absent" and "explicitly 0.5" indistinguishable at every read
-     * site, which is the exact migration hazard §D4 closes: this predicate's
-     * per-claimed-AC attested-coverage conjunct (the new default teeth) already
-     * runs unconditionally, so the ratio is now an opt-in ADDITIONAL conjunct, on
-     * only when a team explicitly writes this value. Absence of the whole
-     * `workflow` section, or of `attestation` within it, both resolve to
-     * `undefined` here too (`resolveAttestationMinRatio` is the sole seam that
-     * turns that into the caller-visible `null`).
+     * `min_ratio` carries NO Zod `.default(...)`: absent stays `undefined` (never a silently-resurrected `0.5`);
+     * `resolveAttestationMinRatio` is the sole seam that turns that into the caller-visible `null`.
      */
     attestation: z
       .object({
         /**
-         * Minimum plan-wide attested-evidence ratio required to close. No default
-         * — absent means the ratio conjunct does not run at all (see this field's
-         * parent JSDoc).
+         * Plan-wide attested-evidence ratio shown by the dashboard panel as the floor. Display-only: it
+         * gates nothing. No default — absent means the panel shows no floor (see this field's parent JSDoc).
          */
         min_ratio: z.number().min(0).max(1).optional(),
       })
@@ -657,27 +620,19 @@ const WorkflowConfigSchema = z
      *   _createImpl`/`set` never fast-track a ledger knowledge doc (assessment/retro/
      *   handoff/uat) — it lands (and stays) `draft` exactly like every other type,
      *   pre-SPEC-103 byte-identical.
-     * @invariant `judgment_required_types: []` disables M2 entirely — for every doc
-     *   type AND every review decision, `escalate` included: `ReviewService.approve`
-     *   requires no `review_judgments` row and honours none it finds, pre-SPEC-103
-     *   byte-identical. This is the operator's total off-switch and is checked BEFORE
-     *   the escalate path below.
-     * @invariant A NON-EMPTY `judgment_required_types` is the SET of `DocType` values
-     *   whose approval M2 gates on a `reject`, on a missing judgment, and on a
-     *   self-review provenance collision — that scoping is deliberate: an AI judge
-     *   disagreeing with a record of what happened (a retro, an assessment) must not
-     *   hold event capture hostage. It does NOT scope `escalate`
-     *   (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1): an escalate
-     *   asserts an outstanding HUMAN decision and carries the questions in
-     *   `blocking_questions`, so once this list is non-empty an escalate blocks
-     *   approval for EVERY doc type, listed or not, and the denial renders those
-     *   questions. Typed as `string[]` (not `DocType[]`) for the SAME
+     * @invariant `judgment_required_types` is the SET of `DocType` values whose approval
+     *   consults `review_judgments` (default `["spec","adr"]`, BR-1369): a `reject`, a
+     *   missing judgment, an `escalate` and a self-review provenance collision all block
+     *   approval of a listed type. A type OUTSIDE the list (plan, task, knowledge,
+     *   baseline node) NEVER consults `review_judgments`, an `escalate` included — the
+     *   milestone review (`lore assess`) is where those are judged. `[]` disables the
+     *   gate for every type. Typed as `string[]` (not `DocType[]`) for the SAME
      *   leaf-of-dependency-graph reason `resolveGateEnabled`'s `checkpoint` param is a
      *   plain string — this module must not import `DocType`'s consumer-side
      *   gate-checkpoint machinery.
      * @invariant Absence of the whole `workflow` section, or of `review` within it,
      *   or of an individual field, ALL fall back to that field's own schema default
-     *   (`true` / `["spec","adr","plan"]`) — same "absence = default" shape as `staleness`/
+     *   (`true` / `["spec","adr"]`) — same "absence = default" shape as `staleness`/
      *   `drift`/`attestation` above (SPEC-103's OWN stated default row, AC-TIER-7's
      *   kill-switch test proves the EXPLICIT-override path, not this default path).
      */
@@ -686,21 +641,20 @@ const WorkflowConfigSchema = z
         /** `false` disables M1 ledger fast-track entirely. Default: true. */
         ledger_auto_approve: z.boolean().default(true),
         /**
-         * `DocType` values M2 gates on a `reject` / missing judgment / provenance
-         * collision. An `escalate` gates every type regardless (see the second
-         * `@invariant` above); `[]` disables M2 entirely. Default: ["spec","adr","plan"].
+         * `DocType` values whose approval needs an independent review judgment (reject,
+         * escalate, missing and provenance collision all block); other types never consult
+         * judgments (BR-1369). `[]` disables the gate entirely. Default: ["spec","adr"].
          */
-        judgment_required_types: z.array(z.string()).default(["spec", "adr", "plan"]),
+        judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
       })
       .strict()
       .default({}),
     /**
      * Turn-end review knobs (spec-interception-moves-off-every-tool-call-one-turn-end-review,
      * Scope 4a). Read by `assets/hooks/stop-turn-review.mjs`, which is a standalone script and so
-     * scans `.lore/config.yaml` for exactly two paths — `workflow.turn_end.main_session_source_edits`
-     * (SETTING_KEYS in the hook) and the PRESENCE of `workflow.turn_end.co_change` (CO_CHANGE_KEYS, which only
-     * arms the `lore session trail-review` spawn) — rename a key here and that scan must move with it. The
-     * `co_change` rule list itself is parsed by `lore session trail-review` through {@link CoChangeRulesSchema},
+     * scans `.lore/config.yaml` for exactly one path — `workflow.turn_end.main_session_source_edits`
+     * (SETTING_KEYS in the hook) — rename the key here and that scan must move with it. The
+     * `co_change` rule list is parsed through {@link CoChangeRulesSchema} by `co-change-review.ts`,
      * never by the hook and never by the CLI loader's silent fallback.
      * @invariant `main_session_source_edits` defaults to `"off"`: absence of the whole `workflow`
      *   section, of `turn_end`, or of the field means the hook never reports main-session source
@@ -711,8 +665,8 @@ const WorkflowConfigSchema = z
       .object({
         main_session_source_edits: z.enum(["off", "block"]).default("off"),
         /**
-         * Co-change rules judged at turn end by `lore session trail-review` (spec-session-trail Design >
-         * Consumers, AC-ST-7). Default `[]`: no rule, nothing judged.
+         * Co-change rules (spec-session-trail Design > Consumers, AC-ST-7); the turn-end review no longer
+         * judges them (BR-1349), `lore integrate` reads them. Default `[]`: no rule, nothing judged.
          */
         co_change: CoChangeRulesSchema.default([]),
       })
@@ -734,6 +688,13 @@ const WorkflowConfigSchema = z
          * output says "skipped (... not set)".
          */
         post_refresh_command: z.string().min(1).optional(),
+        /**
+         * `migrate_command` is the full command line of the BRANCH binary's `lore migrate schema` (this repository:
+         * `bun run packages/lore/src/index.ts migrate schema`). `lore integrate` runs it (with `--json` appended) in the
+         * integration worktree on the floor's corpus snapshot before the floor, and once in the shared checkout on the
+         * live corpus after the landing's refresh and rebuild. Absent = neither runs and the output says "skipped".
+         */
+        migrate_command: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
@@ -742,30 +703,6 @@ const WorkflowConfigSchema = z
 
 /** Task execution workflow config section. Source: SPEC-025 §3 D2; `gates` added for gate on/off overrides. */
 export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
-
-// ─── Audit Section Schema ───────────────────────────────────────────────────
-
-/**
- * Audit completeness-oracle configuration (SPEC-035 §2 D5).
- * `verify_since` is the watermark `lore audit --verify` anchors its versions⋈audit
- * reconcile walk to — versions rows older than this are known-historical holes
- * (pre-SPEC-035 TaskWorkflow silence, v1-migration imports) and are never reported
- * as misses, so the oracle is strict going forward without permanently failing on
- * data that predates audit-writer coverage.
- *
- * @invariant Default is the SPEC-035 deploy date (2026-07-06) — every audit writer
- *   upgraded by this spec is live from that point forward, so the default watermark
- *   already makes `--verify` meaningful with zero config.
- */
-const AuditConfigSchema = z
-  .object({
-    /** ISO 8601 — versions rows before this timestamp are excluded from --verify. */
-    verify_since: z.string().default("2026-07-06T00:00:00Z"),
-  })
-  .strict();
-
-/** Audit completeness-oracle config section. Source: SPEC-035 §2 D5. */
-export type AuditConfig = z.infer<typeof AuditConfigSchema>;
 
 // ─── Trace Section Schema ───────────────────────────────────────────────────
 
@@ -1208,6 +1145,8 @@ export const contextConfigSchema = z
   .object({
     /** Context-fragment language code (spec-context-fragments D3). Absent = none. */
     language: z.string().min(1).optional(),
+    /** Language code of the documents lore writes (`{{lore:artifact_language}}`); absent = unset, never defaulted. */
+    artifact_language: ContextFragmentsSettingsSchema.shape.artifact_language,
     /** Context-fragment controls (D11): `disable` lists fragment ids to drop at project-reaching outlets. */
     fragments: ContextFragmentsSettingsSchema.shape.fragments,
     memory_files: z
@@ -1411,12 +1350,9 @@ export const LoreConfigSchema = z
      * When absent, createApp uses WorkflowConfigSchema.parse({}) defaults (120min TTL).
      */
     workflow: WorkflowConfigSchema.optional(),
-    /**
-     * Audit completeness-oracle configuration (SPEC-035).
-     * When absent, createApp uses AuditConfigSchema.parse({}) defaults
-     * (verify_since = SPEC-035 deploy date).
-     */
-    audit: AuditConfigSchema.optional(),
+    // reason: there is NO audit section. Verification checks every version (task-audit-verification-checks-every-
+    // version-pre-writer-history); a config still setting `audit.verify_since` never reaches this schema:
+    // `loadConfigFromString` refuses it first, naming `lore migrate audit-backfill --apply`.
     /**
      * Trusted-runner (`lore verify`) configuration (SPEC-039).
      * When absent, createApp uses VerifyConfigSchema.parse({}) defaults
@@ -1538,14 +1474,14 @@ export function resolveLedgerAutoApprove(config: LoreConfig | undefined): boolea
  * §Mechanisms M2). Mirrors {@link resolveLedgerAutoApprove}'s fully-optional-chained
  * shape (see that function's JSDoc for why the shallower {@link resolveClaimTtlMinutes}
  * shape is unsafe for a NESTED optional-with-default sub-section) — the schema default is
- * `["spec","adr","plan"]` (BR-281), and `[]` is the documented kill-switch (AC-TIER-7).
+ * `["spec","adr"]` (BR-1369), and `[]` is the documented kill-switch (AC-TIER-7).
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
  * @returns Effective `judgment_required_types` array (never mutated in place by callers)
  * @example
- *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr", "plan"]
+ *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr"]
  *   resolveJudgmentRequiredTypes({ ..., workflow: { review: { judgment_required_types: [] } } }) // => []
- *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr","plan"] (no throw)
+ *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr"] (no throw)
  */
 export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): string[] {
   return (
@@ -1619,30 +1555,6 @@ export function resolveAnchorOverlapGateEnabled(config: LoreConfig | undefined):
 }
 
 /**
- * Resolve whether `task-claim`'s claim-time actor-identity-collision guard
- * specifically is enabled, per `workflow.gates."task-claim".actor_identity
- * .enabled` (spec claim-time-actor-identity-guard-zero-evidence-release-advis,
- * AC-IDENTITY-ESCAPE). Narrower than {@link resolveGateEnabled}`(config,
- * "task-claim")`, which governs the WHOLE checkpoint (actor-identity, anchor-
- * overlap, AND upstream-approval together). Absence of the whole config, the
- * `workflow` section, the `gates` map, the `task-claim` entry, or the nested
- * `actor_identity` key ALL mean "enabled" — only an EXPLICIT `actor_identity
- * .enabled: false` disables just this predicate (mirrors {@link
- * resolveAnchorOverlapGateEnabled}'s single-checkpoint shape exactly).
- *
- * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `false` iff `workflow.gates."task-claim".actor_identity.enabled === false`; `true` otherwise
- * @example
- *   resolveActorIdentityGateEnabled(undefined) // => true
- *   resolveActorIdentityGateEnabled({
- *     project, workflow: { gates: { "task-claim": { actor_identity: { enabled: false } } } },
- *   }) // => false
- */
-export function resolveActorIdentityGateEnabled(config: LoreConfig | undefined): boolean {
-  return config?.workflow?.gates?.["task-claim"]?.actor_identity?.enabled !== false;
-}
-
-/**
  * Resolve whether `checkpoint`'s `acQuantifiable` sub-predicate specifically is
  * enabled, per `workflow.gates.<checkpoint>.ac_quantifiable.enabled` (AC-Quantifiability
  * Gate spec §Design). Narrower than {@link resolveGateEnabled}`(config, checkpoint)`,
@@ -1713,26 +1625,6 @@ export function resolveRequiresUatGateEnabled(config: LoreConfig | undefined): b
   return config?.workflow?.gates?.["plan-promote"]?.requires_uat?.enabled !== false;
 }
 
-/**
- * Resolve whether `plan-close`'s cited-rule check (`citedRuleStateClean`, BR-984) is enabled, per
- * `workflow.gates."plan-close".cited_rule_check.enabled` (BL-D3). THE one reader of that setting.
- * Narrower than {@link resolveGateEnabled}`(config, "plan-close")`, which governs the WHOLE checkpoint.
- *
- * DELIBERATELY THE OPPOSITE DEFAULT of every sibling `resolve*GateEnabled` function: absence of the
- * config, the `workflow` section, the `gates` map, the `"plan-close"` entry, OR the `cited_rule_check`
- * key ALL mean "disabled" — only an EXPLICIT `enabled: true` turns the check on.
- *
- * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `true` iff `workflow.gates."plan-close".cited_rule_check.enabled === true`; `false` otherwise
- * @example
- *   resolveCitedRuleCheckGateEnabled(undefined) // => false
- *   resolveCitedRuleCheckGateEnabled({
- *     project, workflow: { gates: { "plan-close": { cited_rule_check: { enabled: true } } } },
- *   }) // => true
- */
-export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined): boolean {
-  return config?.workflow?.gates?.["plan-close"]?.cited_rule_check?.enabled === true;
-}
 
 /**
  * Resolve whether the foreign-corpus-write guard's `foreign_corpus_write`
@@ -1747,7 +1639,7 @@ export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined)
  * refusal token literal, `gate:corpus-write:foreign-provenance`.
  *
  * Same default polarity as {@link resolveAnchorOverlapGateEnabled} /
- * {@link resolveActorIdentityGateEnabled} / {@link resolveAcQuantifiableGateEnabled}
+ * {@link resolveAcQuantifiableGateEnabled}
  * / {@link resolveOracleCoverageGateEnabled} / {@link resolveRequiresUatGateEnabled}
  * (all default ENABLED) — the OPPOSITE of {@link resolvePrdSyncGateEnabled}'s
  * default-OFF polarity immediately above. Absence of the whole config, the
@@ -1767,22 +1659,6 @@ export function resolveCitedRuleCheckGateEnabled(config: LoreConfig | undefined)
  */
 export function resolveForeignCorpusWriteGateEnabled(config: LoreConfig | undefined): boolean {
   return config?.workflow?.gates?.["corpus-write"]?.foreign_corpus_write?.enabled !== false;
-}
-
-/**
- * Resolve the effective audit-verify watermark (ISO 8601 string) from an optional
- * LoreConfig. Mirrors {@link resolveClaimTtlMinutes} — absence of the whole config
- * or the audit section both fall back to the schema default (SPEC-035 deploy date).
- *
- * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns Effective audit.verify_since value
- * @example
- *   resolveAuditVerifySince(undefined) // => "2026-07-06T00:00:00Z"
- *   resolveAuditVerifySince({ ..., audit: { verify_since: "2026-08-01T00:00:00Z" } })
- *   // => "2026-08-01T00:00:00Z"
- */
-export function resolveAuditVerifySince(config: LoreConfig | undefined): string {
-  return (config?.audit ?? AuditConfigSchema.parse({})).verify_since;
 }
 
 /**
@@ -2525,113 +2401,6 @@ export function parseConfig(raw: unknown): Result<LoreConfig, LoreError> {
   } satisfies LoreError);
 }
 
-/** The pre-BL-D3 name of `workflow.gates."plan-close".cited_rule_check` (borrowed from the retired outline-sync predicate). */
-const PRD_SYNC_KEY = "prd_sync";
-const CITED_RULE_CHECK_KEY = "cited_rule_check";
-
-/** The `LoreError.field` of every refusal about the retired `prd_sync` name (old name read, or both names present). */
-export const PRD_SYNC_RENAME_FIELD = `workflow.gates."plan-close".${PRD_SYNC_KEY}`;
-
-/**
- * Whether `error` is the refusal about the retired `prd_sync` config name — the loader fails LOUD on it instead of
- * falling back to default settings (a silent fallback would run every gate unconfigured).
- */
-export function isPrdSyncRenameError(error: LoreError): boolean {
-  return error.code === "VALIDATION_ERROR" && error.field === PRD_SYNC_RENAME_FIELD;
-}
-
-function planCloseGateEntry(raw: unknown): Record<string, unknown> | undefined {
-  const at = (value: unknown, key: string): unknown =>
-    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
-  const entry = at(at(at(raw, "workflow"), "gates"), "plan-close");
-  return typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : undefined;
-}
-
-/**
- * Names the retired `prd_sync` key when a YAML-parsed config still carries it — the refusal
- * {@link loadConfigFromString} returns, and so does every loader built on it (nothing reads the old name and no loader writes).
- *
- * @returns a VALIDATION_ERROR payload naming both keys, or `undefined` when the old key is absent
- */
-function detectPrdSyncConfigKey(raw: unknown): LoreError | undefined {
-  const entry = planCloseGateEntry(raw);
-  if (entry === undefined || !(PRD_SYNC_KEY in entry)) return undefined;
-  return {
-    code: "VALIDATION_ERROR",
-    field: PRD_SYNC_RENAME_FIELD,
-    message:
-      `workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
-      `(it switches the cited-rule check, not outline sync); run \`${CONFIG_KEYS_MIGRATE_COMMAND}\` to rename it in .lore/config.yaml.`,
-    value: entry[PRD_SYNC_KEY],
-  } satisfies LoreError;
-}
-
-/** What {@link renamePrdSyncConfigKey} computed for a config text. */
-export interface PrdSyncConfigRename {
-  /** The config text with the key renamed: every other byte is identical to the input. */
-  readonly text: string;
-  /** The value of the old key's `enabled` (carried unchanged under the new key), `undefined` when it had none. */
-  readonly enabled: unknown;
-}
-
-/** The command that performs the rename, named by every refusal about the old key. */
-export const CONFIG_KEYS_MIGRATE_COMMAND = "lore migrate config-keys --apply";
-
-/**
- * PURE computation of the rename of `workflow.gates."plan-close".prd_sync` to `...cited_rule_check` (BL-D3): a
- * byte-range splice of the key token. Writing the result is `lore migrate config-keys --apply`'s job — no loader
- * ever writes a config file.
- *
- * @param yamlText - the raw config file text
- * @returns `ok(undefined)` when the file does not carry the old key (nothing to migrate, never an error);
- *   `ok({text, enabled})` when it does; `err(VALIDATION_ERROR)` naming both keys when BOTH are present
- *   (which one wins is the operator's decision, never a silent precedence) or when the YAML is malformed.
- * @example
- *   renamePrdSyncConfigKey("workflow:\n  gates:\n    plan-close:\n      prd_sync:\n        enabled: true\n");
- *   // => ok({ text: "...cited_rule_check:...", enabled: true })
- */
-export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRename | undefined, LoreError> {
-  const doc = yaml.parseDocument(yamlText);
-  if (doc.errors.length > 0) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "yaml",
-      message: "Failed to parse YAML: malformed input",
-      value: yamlText,
-    } satisfies LoreError);
-  }
-  const entry = doc.getIn(["workflow", "gates", "plan-close"], true);
-  if (!yaml.isMap(entry)) return ok(undefined);
-  const pair = entry.items.find((item) => yaml.isScalar(item.key) && item.key.value === PRD_SYNC_KEY);
-  if (pair === undefined) return ok(undefined);
-  if (entry.has(CITED_RULE_CHECK_KEY)) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: PRD_SYNC_RENAME_FIELD,
-      message:
-        `workflow.gates."plan-close" carries both ${PRD_SYNC_KEY} and ${CITED_RULE_CHECK_KEY}; ${PRD_SYNC_KEY} was renamed to ` +
-        `${CITED_RULE_CHECK_KEY}. Delete the one you do not want in .lore/config.yaml, then \`${CONFIG_KEYS_MIGRATE_COMMAND}\` has nothing left to do (nothing was rewritten).`,
-      value: yamlText,
-    } satisfies LoreError);
-  }
-  const enabled = entry.getIn([PRD_SYNC_KEY, "enabled"]);
-  // reason: a byte-range splice of the key token, NOT `doc.toString()` — re-stringifying reformats unrelated lines
-  // (flow-sequence spacing) and would turn a one-key rename into whole-file churn in the owner's config.
-  const keyRange = (pair.key as yaml.Scalar).range;
-  if (keyRange === undefined || keyRange === null) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: PRD_SYNC_RENAME_FIELD,
-      message: `${PRD_SYNC_KEY} has no source position, so it cannot be renamed in place; rename it to ${CITED_RULE_CHECK_KEY} by hand.`,
-      value: yamlText,
-    } satisfies LoreError);
-  }
-  return ok({
-    text: `${yamlText.slice(0, keyRange[0])}${CITED_RULE_CHECK_KEY}${yamlText.slice(keyRange[1])}`,
-    enabled,
-  });
-}
-
 /** The `LoreError.field` of the refusal about the retired memory-file adoption setting. */
 export const RETIRED_ADOPTION_FIELD = "context.memory_files.adoption";
 
@@ -2670,6 +2439,7 @@ function detectRetiredAdoptionSetting(raw: unknown): LoreError | undefined {
     field: RETIRED_ADOPTION_FIELD,
     message: RETIRED_ADOPTION_MESSAGE,
     value: (memoryFiles as Record<string, unknown>)["adoption"],
+    rule: "BR-1321",
   } satisfies LoreError;
 }
 
@@ -2695,43 +2465,61 @@ export interface RetiredAdoptionRemoval {
  *   // => ok({ text: "", value: "warn" })
  */
 export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
+  return removeConfigSetting(yamlText, ["context", "memory_files", "adoption"], RETIRED_ADOPTION_FIELD);
+}
+
+/**
+ * PURE removal of one scalar setting (`path`, e.g. `["audit", "verify_since"]`) from a config text: the setting's own
+ * line is cut out, and so is every parent mapping the cut leaves empty. Every other byte is identical. The ONE
+ * implementation behind every retired-setting migration (`removeRetiredAdoptionSetting`, `removeRetiredVerifySinceSetting`).
+ *
+ * @param yamlText - the raw config file text
+ * @param path - key path of the setting, outermost key first
+ * @param field - the dotted name quoted by the hand-edit refusal
+ * @returns `ok(undefined)` when absent; `ok({text, value})` when present; `err(VALIDATION_ERROR)` when the YAML is
+ *   malformed or the setting shares its line with other keys (flow style) and must be deleted by hand.
+ */
+function removeConfigSetting(yamlText: string, path: readonly string[], field: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
   const doc = yaml.parseDocument(yamlText);
   if (doc.errors.length > 0) {
-    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText } satisfies LoreError);
+    return err({ code: "VALIDATION_ERROR", field: "yaml", message: "Failed to parse YAML: malformed input", value: yamlText, rule: "BR-1323" } satisfies LoreError);
   }
-  const memoryFiles = doc.getIn(["context", "memory_files"], true);
-  if (!yaml.isMap(memoryFiles)) return ok(undefined);
-  const pair = memoryFiles.items.find((item) => yaml.isScalar(item.key) && item.key.value === "adoption");
+  const parentPath = path.slice(0, -1);
+  const settingKey = path[path.length - 1];
+  const parent = doc.getIn(parentPath, true);
+  if (!yaml.isMap(parent)) return ok(undefined);
+  const pair = parent.items.find((item) => yaml.isScalar(item.key) && item.key.value === settingKey);
   if (pair === undefined) return ok(undefined);
-  const value = doc.getIn(["context", "memory_files", "adoption"]);
+  const value = doc.getIn(path);
 
-  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty `memory_files:` / `context:`.
+  // The outermost mapping pair whose only content is the setting: cutting it leaves no empty parent mapping behind.
   let cutPair = pair;
-  const context = doc.getIn(["context"], true);
-  if (memoryFiles.items.length === 1 && yaml.isMap(context)) {
-    const memoryFilesPair = context.items.find((item) => item.value === memoryFiles);
-    if (memoryFilesPair !== undefined) cutPair = memoryFilesPair;
-    if (memoryFilesPair !== undefined && context.items.length === 1 && yaml.isMap(doc.contents)) {
-      const contextPair = doc.contents.items.find((item) => item.value === context);
-      if (contextPair !== undefined) cutPair = contextPair;
-    }
+  let cutMap = parent;
+  for (let depth = parentPath.length; depth > 0 && cutMap.items.length === 1; depth--) {
+    const grand = depth === 1 ? doc.contents : doc.getIn(parentPath.slice(0, depth - 1), true);
+    if (!yaml.isMap(grand)) break;
+    const grandPair = grand.items.find((item) => item.value === cutMap);
+    if (grandPair === undefined) break;
+    cutPair = grandPair;
+    cutMap = grand;
   }
 
   const handEdit = (reason: string): Result<never, LoreError> =>
     err({
       code: "VALIDATION_ERROR",
-      field: RETIRED_ADOPTION_FIELD,
-      message: `${RETIRED_ADOPTION_FIELD} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
+      field,
+      message: `${field} ${reason}; delete it by hand in .lore/config.yaml (nothing was rewritten).`,
       value: yamlText,
+      rule: "BR-1323",
     } satisfies LoreError);
   const keyRange = yaml.isNode(cutPair.key) ? cutPair.key.range : undefined;
-  const adoptionKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
-  const adoptionValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
-  if (keyRange === undefined || keyRange === null || adoptionKeyRange === undefined || adoptionKeyRange === null) {
+  const settingKeyRange = yaml.isNode(pair.key) ? pair.key.range : undefined;
+  const settingValueRange = yaml.isNode(pair.value) ? pair.value.range : undefined;
+  if (keyRange === undefined || keyRange === null || settingKeyRange === undefined || settingKeyRange === null) {
     return handEdit("has no source position, so it cannot be removed in place");
   }
   // The cut ends where the setting's own content ends (it is the last content inside any escalated parent).
-  const contentEnd = adoptionValueRange === undefined || adoptionValueRange === null ? adoptionKeyRange[1] : adoptionValueRange[1];
+  const contentEnd = settingValueRange === undefined || settingValueRange === null ? settingKeyRange[1] : settingValueRange[1];
 
   const lineStart = yamlText.lastIndexOf("\n", keyRange[0] - 1) + 1;
   const newline = yamlText.indexOf("\n", contentEnd);
@@ -2743,6 +2531,48 @@ export function removeRetiredAdoptionSetting(yamlText: string): Result<RetiredAd
     return handEdit("shares its line with other settings, so it cannot be removed line-wise");
   }
   return ok({ text: yamlText.slice(0, lineStart) + yamlText.slice(lineEnd), value });
+}
+
+/** The `LoreError.field` of the refusal about the retired audit cut-off setting. */
+export const RETIRED_VERIFY_SINCE_FIELD = "audit.verify_since";
+
+/** The command that removes the retired cut-off and records pre-writer history, named by every refusal about it. */
+export const AUDIT_BACKFILL_MIGRATE_COMMAND = "lore migrate audit-backfill --apply";
+
+/** The refusal text for a config that still sets the retired audit cut-off. One constant: loader and migrate quote the same words. */
+export const RETIRED_VERIFY_SINCE_MESSAGE =
+  `${RETIRED_VERIFY_SINCE_FIELD} was retired: audit verification checks every version. ` +
+  `Run \`${AUDIT_BACKFILL_MIGRATE_COMMAND}\` to remove it from .lore/config.yaml and record the versions that predate the audit writers as reconstructed.`;
+
+/** Whether `error` is the refusal about the retired audit cut-off — the loader fails LOUD on it, never reads around it. */
+export function isRetiredVerifySinceError(error: LoreError): boolean {
+  return error.code === "VALIDATION_ERROR" && error.field === RETIRED_VERIFY_SINCE_FIELD;
+}
+
+/** Names the retired `audit.verify_since` setting when a YAML-parsed config still carries it, whatever its value. */
+function detectRetiredVerifySinceSetting(raw: unknown): LoreError | undefined {
+  const audit = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>)["audit"] : undefined;
+  if (typeof audit !== "object" || audit === null || !("verify_since" in audit)) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: RETIRED_VERIFY_SINCE_FIELD,
+    message: RETIRED_VERIFY_SINCE_MESSAGE,
+    value: (audit as Record<string, unknown>)["verify_since"],
+  } satisfies LoreError;
+}
+
+/**
+ * PURE removal of `audit.verify_since` from a config text (the `audit:` mapping goes too when it held nothing else).
+ * Writing the result is `lore migrate audit-backfill --apply`'s job: no loader ever writes a config file.
+ *
+ * @returns `ok(undefined)` when the setting is absent; `ok({text, value})` when present (`value` is the cut-off the
+ *   corpus declared, which the backfill uses as its own boundary); `err(VALIDATION_ERROR)` when malformed or flow-style.
+ * @example
+ *   removeRetiredVerifySinceSetting('audit:\n  verify_since: "2026-07-06T00:00:00Z"\n');
+ *   // => ok({ text: "", value: "2026-07-06T00:00:00Z" })
+ */
+export function removeRetiredVerifySinceSetting(yamlText: string): Result<RetiredAdoptionRemoval | undefined, LoreError> {
+  return removeConfigSetting(yamlText, ["audit", "verify_since"], RETIRED_VERIFY_SINCE_FIELD);
 }
 
 /**
@@ -2758,11 +2588,14 @@ export function loadConfigFromString(
   let parsed: unknown;
   try {
     parsed = yaml.parse(yamlText);
-  } catch (_e) {
+  } catch (e) {
+    // reason: the parser's own message names the defect (e.g. "Map keys must be unique" plus the offending
+    // key's line) — dropping it left the loader nothing to show when it refuses the file loudly.
+    const detail = e instanceof Error ? e.message.trim() : "malformed input";
     return err({
       code: "VALIDATION_ERROR",
       field: "yaml",
-      message: "Failed to parse YAML: malformed input",
+      message: `Failed to parse YAML: ${detail}`,
       value: yamlText,
     } satisfies LoreError);
   }
@@ -2776,11 +2609,11 @@ export function loadConfigFromString(
     } satisfies LoreError);
   }
 
-  const renamed = detectPrdSyncConfigKey(parsed);
-  if (renamed !== undefined) return err(renamed);
-
   const retiredAdoption = detectRetiredAdoptionSetting(parsed);
   if (retiredAdoption !== undefined) return err(retiredAdoption);
+
+  const retiredVerifySince = detectRetiredVerifySinceSetting(parsed);
+  if (retiredVerifySince !== undefined) return err(retiredVerifySince);
 
   const result = parseConfig(parsed);
   if (result.ok && warn !== undefined) {

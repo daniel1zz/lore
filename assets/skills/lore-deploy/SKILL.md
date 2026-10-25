@@ -251,7 +251,7 @@ A mode is COMPLETE only when ALL exit criteria are met. Report as checklist.
 | `operate` | Deployed service, runbook, observability config, dashboard links | lore runbook doc + `[VERIFY]` output |
 | `diagnose` | Deployment logs, change context, rollback history | Linked deployment record in lore |
 | incident response | Rollback procedures, blast radius, trigger criteria | Rollback plan from Phase 5 |
-| lore corpus | Task completion, deployment evidence | `lore evidence <task> --oracle build --command "<cmd>" --result pass\|fail` |
+| lore corpus | Task completion, deployment evidence | `lore evidence <task> --oracle build --command "<cmd>" --result pass\|fail --capture` |
 
 ---
 
@@ -282,4 +282,4 @@ A mode is COMPLETE only when ALL exit criteria are met. Report as checklist.
 
 - Create/update runbook: `lore create knowledge --sub-type reference --title ... --content ...` or `lore set <runbook> --content ...`
 - Link to upstream specs: `lore link <runbook> <tech-spec> --type=implements`, `lore link <runbook> <adr> --type=relates-to`
-- Update task: `lore evidence <task> --oracle build --command "<cmd>" --result pass --output-tail "<[VERIFY] output>"` then `lore release <task>`
+- Update task: `lore evidence <task> --oracle build --command "<cmd>" --result pass --capture` then `lore release <task>`

@@ -3,11 +3,11 @@ id: TASK-1497
 type: task
 role: plan
 title: "[Skill:docs] TG-16 workflow docs and AS-13/14/24 rule records"
-status: draft
+status: deprecated
 priority: medium
 phase: "Phase 5: cadence"
 created: 2026-10-16
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 parent: PLAN-201
 plan: PLAN-201

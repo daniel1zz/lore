@@ -39,6 +39,15 @@ vi.mock("../../../src/service/github-intake-port.js", () => ({
   })),
 }));
 
+// ─── GhRunner mocked: the prior issue's state is read through it (fake gh) ───
+
+const ghRunMock = vi.fn();
+
+vi.mock("../../../src/service/gh-runner.js", () => ({
+  GhRunner: vi.fn().mockImplementation(() => ({ run: ghRunMock })),
+  createNodeGhExecFile: vi.fn(),
+}));
+
 import { fileGithubIssue, type GithubFilingContext, type GithubReportInput, type GithubUpstreamCfg } from "../../../src/adapters/cli/report-issue-wiring.js";
 
 const CFG: GithubUpstreamCfg = { repo: "acme/widget" };
@@ -74,6 +83,8 @@ beforeEach(() => {
   corpusRoot = mkdtempSync(join(tmpdir(), "lore-github-filing-no-write-"));
   verifyTargetMock.mockReset().mockResolvedValue(ok({ login: "acme", id: 555 }));
   searchDuplicatesMock.mockReset().mockResolvedValue(ok([]));
+  // default fake gh: every prior issue read back is still open
+  ghRunMock.mockReset().mockResolvedValue(ok({ stdout: JSON.stringify({ state: "open" }) }));
   fileIssueMock.mockReset().mockResolvedValue(
     ok({ number: 42, url: "https://github.com/acme/widget/issues/42", idempotencyKey: "01FILEDKEY000000000000A1" }),
   );
@@ -88,7 +99,6 @@ function makeContext(corpusService: CorpusService): GithubFilingContext {
     consumerCorpusRoot: corpusRoot,
     corpusService,
     actor: "agent:test",
-    actorSource: "explicit",
     home: homedir(),
     env: process.env,
   };
@@ -144,6 +154,74 @@ describe("GS-T7: fileGithubIssue never writes the corpus", () => {
     expect(result.value.retried).toBe(true);
     expect(writes).not.toHaveBeenCalled();
     expect(verifyTargetMock).not.toHaveBeenCalled();
+    expect(fileIssueMock).not.toHaveBeenCalled();
+  });
+
+  /** Writes a receipt log holding one filed issue per `[key, number]` for `INPUT.title`, oldest first. */
+  function writePriorReceipts(filed: readonly [string, number][]): void {
+    mkdirSync(join(corpusRoot, ".lore"), { recursive: true });
+    const lines: string[] = [];
+    for (const [key, number] of filed) {
+      lines.push(JSON.stringify({ phase: "intent", idempotency_key: key, title: INPUT.title, at: "2026-08-01T00:00:00.000Z" }));
+      lines.push(JSON.stringify({ phase: "outcome", idempotency_key: key, number, url: `https://github.com/acme/widget/issues/${String(number)}`, at: "2026-08-01T00:00:01.000Z" }));
+    }
+    writeFileSync(join(corpusRoot, ".lore", "issue-receipts-v2.jsonl"), lines.join("\n") + "\n");
+  }
+
+  it("STATE: a prior issue for the exact title that is CLOSED is not recognised: a new issue is filed with the same title (#397)", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
+    ghRunMock.mockResolvedValue(ok({ stdout: JSON.stringify({ state: "closed" }) }));
+    const { service, writes } = makeCorpusService();
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(service));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.number).toBe(42);
+    expect(result.value.retried).toBe(false);
+    expect(ghRunMock).toHaveBeenCalledWith(["api", "repos/acme/widget/issues/99"]);
+    expect(fileIssueMock).toHaveBeenCalledTimes(1);
+    expect(fileIssueMock.mock.calls[0]?.[0]).toMatchObject({ title: INPUT.title });
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it("STATE: a prior issue that is still OPEN dedupes the retry (no new filing)", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
+    const { service, writes } = makeCorpusService();
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(service));
+
+    expect(result.ok && result.value.number).toBe(99);
+    expect(result.ok && result.value.retried).toBe(true);
+    expect(fileIssueMock).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it("BOUNDARY: a title filed twice (the first closed, the re-filing open) recognises the open one, not the closed one", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99], ["01PRIORKEY0000000000000B", 120]]);
+    ghRunMock.mockImplementation(async (args: readonly string[]) =>
+      ok({ stdout: JSON.stringify({ state: args[1]?.endsWith("/99") === true ? "closed" : "open" }) }),
+    );
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+
+    expect(result.ok && result.value.number).toBe(120);
+    expect(result.ok && result.value.retried).toBe(true);
+    expect(fileIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("ERROR: a state read that fails is returned, never read as closed (no duplicate filing)", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
+    ghRunMock.mockResolvedValue(err({ code: "TRANSPORT_UNAVAILABLE", message: "offline", retryable: true }));
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+
+    expect(result.ok).toBe(false);
+    expect(fileIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("ERROR: a state payload without a state is a validation error, never read as closed", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
+    ghRunMock.mockResolvedValue(ok({ stdout: "not json" }));
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+
+    expect(result.ok).toBe(false);
     expect(fileIssueMock).not.toHaveBeenCalled();
   });
 

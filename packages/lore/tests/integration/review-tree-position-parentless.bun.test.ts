@@ -22,6 +22,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
 
@@ -52,7 +54,7 @@ afterAll(() => {
 function makeCorpus(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-review-treepos-")));
   scratch.push(dir);
-  execFileSync("git", ["init", "-q", "."], { cwd: dir, stdio: "ignore" });
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
   const init = runLore(["init"], dir);
   expect(init.exitCode, init.stderr + init.stdout).toBe(0);
   const setup = runLore(["setup", "--project", "--yes"], dir);
@@ -83,7 +85,7 @@ function stubJudge(dir: string): void {
     templates: {},
     telemetry: false,
   };
-  writeFileSync(configPath, yaml.stringify(config));
+  patchLoreConfig(dir, config, { replace: true });
 }
 
 /** The tree_position row from `lore review --json`, wherever the checks array sits in the payload. */

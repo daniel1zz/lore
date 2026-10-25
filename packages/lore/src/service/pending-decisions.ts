@@ -93,7 +93,7 @@ export function parseRowReasons(row: DecisionLogRow): Result<readonly string[], 
 /** facts key that marks a closing record; the value is {@link SupersedeMarkerFacts}. */
 export const SUPERSEDED_FACTS_KEY = "superseded";
 
-export type SupersedeCause = "newer-version" | "subject-gone";
+export type SupersedeCause = "newer-version" | "subject-gone" | "withdrawn";
 
 /** Existence of a decision's subject right now. `unknown` (the probe could not measure) NEVER closes a decision. */
 export type SubjectExistence = "present" | "absent" | "unknown";

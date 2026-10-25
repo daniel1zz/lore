@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-5 —
  *   task task-skill-test-t7-compiled-binary-e2e-migrate-ordinals-dry-run.
@@ -95,7 +97,8 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createHash } from "node:crypto";
@@ -163,8 +166,8 @@ async function initCorpus(dir: string): Promise<void> {
  * heading in the first place.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -178,7 +181,6 @@ function disableAllGates(dir: string): void {
       "      enabled: false",
       "",
     ].join("\n"),
-    "utf8",
   );
 }
 
@@ -194,11 +196,7 @@ function disableAllGates(dir: string): void {
  * (ordinal migration idempotency), not an unrelated observability side effect.
  */
 function disableTraceRecording(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    ["trace:", "  enabled: false", ""].join("\n"),
-    "utf8",
-  );
+  patchLoreConfig(dir, ["trace:", "  enabled: false", ""].join("\n"));
 }
 
 function dbPathFor(dir: string): string {
@@ -588,11 +586,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
   });
 
   // ── RESOLUTION SURFACE: SPEC-<n> vs SPEC-00n must never resolve to DIFFERENT docs ──
-  // A standalone case (not folded into the STATE test above) so its 2 spawn-helper calls
-  // stay under scripts/check-test-budgets.mjs's SPAWN_THRESHOLD of 3 — folding it into the
-  // already-5-spawn STATE test would silently orphan that test's entry in
-  // scripts/test-budget-ledger.json (spawnCount 5 -> 6), a change outside this task's own
-  // file anchor (task-main-carries-two-red-e2e-cases-migrate-ordinals-compiled).
+  // A standalone case (not folded into the STATE test above) so each case keeps its own failure report.
   it("RESOLUTION SURFACE: dist/lore get resolves SPEC-1 and SPEC-001 to the SAME document, never silently different ones", async () => {
     // This task's own load-bearing extra assertion: `SPEC-1` vs `SPEC-001` is a RESOLUTION
     // surface, not merely a rendering choice. `parseOrdinalRef` (ordinal.ts:244,

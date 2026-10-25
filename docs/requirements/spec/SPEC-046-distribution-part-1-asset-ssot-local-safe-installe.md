@@ -89,7 +89,7 @@ Thin glue over existing conventions: services return `Result`, ports injected (F
 - [○] [script] AC-046-SG2: bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts reports 'Test Files 2 passed (2)' with 0 failures after subagent-stop-commit-guard.mjs is added to both manifests
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
 - [·] [script] AC-046-SG3: sha256 of assets/hooks/subagent-stop-commit-guard.mjs equals sha256 of ~/.claude/hooks/subagent-stop-commit-guard.mjs, 0 byte diff
-  script: other — diff <(shasum -a 256 assets/hooks/subagent-stop-commit-guard.mjs | cut -d' ' -f1) <(shasum -a 256 ~/.claude/hooks/subagent-stop-commit-guard.mjs | cut -d' ' -f1)
+  script: other — cmp assets/hooks/subagent-stop-commit-guard.mjs ~/.claude/hooks/subagent-stop-commit-guard.mjs && echo 'AC-046-SG3 PASS: installed subagent-stop-commit-guard.mjs is byte-identical to the asset'
   other_command=1
 
 ## Code anchors

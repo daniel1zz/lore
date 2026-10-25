@@ -39,33 +39,23 @@
  *   single incoming criterion at `lore ac add` time. This predicate re-lints the
  *   WHOLE declared set as the gate-layer backstop; the two enforcement points never
  *   maintain independent wordlists or measurable-token heuristics.
- * @invariant `attestationExemptKindValid`'s notion of "valid exemption kind" is
- *   sourced exclusively from `attestationExemptKindSchema` (`@lore/core`,
- *   schemas.ts) — never a locally hardcoded literal union, same precedent as
- *   `specKindValid`/`SPEC_KINDS` above.
- * @invariant `noAnchorOverlap`'s notion of "same writer" is the CAPTURED session
- *   instance (`TaskClaim.session_id`) compared via `compareClaimSessions`, never
- *   the `by` string alone: `by` is a proxy that two concurrently-live sessions
- *   legitimately share, and this project's own discipline instructs operators to
- *   produce exactly that collision
- *   (task-two-concurrent-orchestrators-both-resolve-to-agent-main). `findAnchorOverlapConflict`
- *   is the SOLE scan implementing those skip rules — `checkpoint-registry.ts`'s
- *   feeding-pack renderer consumes it rather than re-deriving the offending
- *   sibling, so the verdict and the message can never disagree about who
- *   conflicts or why.
+ * @invariant `noAnchorOverlap`'s notion of "same writer" is the attested RUN (BR-1056), never the `by` string
+ *   and never a captured session id: two runs can derive one display name, and a claim with no run belongs to no
+ *   writer. `findAnchorOverlapConflict` is the SOLE scan implementing the skip rules — `checkpoint-registry.ts`'s
+ *   feeding-pack renderer consumes it rather than re-deriving the offending sibling, so the verdict and the message
+ *   can never disagree about who conflicts or why.
  */
 
-import type { RuleOffence, UnknownReason } from "./rule-state-service.js";
+import type { MilestoneReviewCurrency } from "./milestone-review.js";
 import {
   parentlessRefusalMessage,
   SPEC_KINDS,
   specAcceptanceCriteriaSchema,
   UPSTREAM_APPROVED_STATUSES,
   anchorsOverlap,
+  fileAnchorPath,
   lintAcQuantifiability,
   checkOracleCoverage,
-  declaredScopeCoverageVerdict,
-  deriveAttestationSummary,
   extractTestFileTokens,
   classifyStampAxis,
   classifyEvidenceRadii,
@@ -84,13 +74,8 @@ import {
   type UnboundReason,
   type LoreError,
   type Result,
-  attestationExemptKindSchema,
   SCOPE_UNDECLARED_REASON,
-  type AcCoverageFact,
   type AcceptanceCriterion,
-  type DeclaredScopeCoverage,
-  type DocType,
-  type TaskAttestationInfo,
   type VerificationProfile,
 } from "@lore/core";
 
@@ -105,7 +90,7 @@ import {
  * prose. Absent on every pre-SPEC-042 predicate — additive, not a breaking
  * change to this type's existing consumers.
  */
-export type PredicateResult = { ok: true } | { ok: false; reason: string; field?: string };
+export type PredicateResult = { ok: true } | { ok: false; reason: string; field?: string; rule?: `BR-${number}` };
 
 /**
  * Why a predicate declared itself not-applicable (spec-plan-close-predicates-
@@ -524,18 +509,6 @@ export function acCiteLive(candidates: readonly AcCiteCandidate[], ruleStates: A
  * `claimTtlMinutes` `_claimImpl` uses for the target claim's own conflict check,
  * so this predicate itself never reads a wall clock (module invariant: no store,
  * no IO, no wall-clock reads).
- *
- * `worktree`/`machine` (claim-time-actor-identity-guard-zero-evidence-release-advis,
- * AC-IDENTITY-REJECT) mirror the SAME optional `TaskClaim.worktree`/`.machine`
- * fields (`@lore/core`, SPEC-042 D2) — `undefined` when the sibling's own claim
- * never declared one (legacy claim, or an MCP caller that omitted it). Consumed
- * ONLY by `actorIdentityGuard` below; `noAnchorOverlap` never reads them.
- *
- * `session_id` mirrors `TaskClaim.session_id` (task-two-concurrent-orchestrators-
- * both-resolve-to-agent-main) and is read ONLY by `noAnchorOverlap`/
- * `findAnchorOverlapConflict` below — it is what makes the anchor mutex
- * CROSS-SESSION rather than merely cross-actor. `undefined` when the sibling's
- * claim predates the field or its holder had no session env.
  */
 export interface SiblingClaimInfo {
   slug: string;
@@ -544,37 +517,23 @@ export interface SiblingClaimInfo {
   at: string;
   stale: boolean;
   anchors: string[];
+  /** The working copy the sibling's claim declared (`TaskClaim.worktree`); absent when it declared none. Read by the edit scope, never by the overlap predicate. */
   worktree?: string;
-  machine?: string;
-  session_id?: string;
   /**
-   * The holding RUN (BR-1056): a string = attested run, `null` = unattested, absent = the claim predates run
-   * capture. Absent and `null` both mean "no run" for {@link findAnchorOverlapConflict}.
+   * The holding RUN (BR-1056): a string = the run that took the lease; `null` or absent = the lease carries no run
+   * (written before runs existed and not yet expired by `lore migrate schema`), which belongs to no writer and so
+   * conflicts with every claimant.
    */
   harness_run?: string | null;
 }
 
-/** `noAnchorOverlap`'s machine-readable failure reason for a MEASURED conflict (foreign actor, or a proven different session). */
+/** `noAnchorOverlap`'s machine-readable failure reason for a conflicting sibling claim. */
 export const ANCHOR_OVERLAP_REASON = "ANCHOR_OVERLAP";
 
 /**
- * `noAnchorOverlap`'s explicit NOT-MEASURED marker
- * (task-two-concurrent-orchestrators-both-resolve-to-agent-main §Required fix 4,
- * §Silence): the anchors DO overlap a fresh same-actor sibling claim, and the
- * session dimension could not be measured on at least one side, so the gate can
- * neither prove a conflict nor prove same-session. It REFUSES and says which of
- * the two it is — an unmeasurable precondition must never render as a permit,
- * because a permit is indistinguishable from a truthful "no conflict"
- * (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
- */
-export const ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON = "ANCHOR_OVERLAP_SESSION_UNMEASURED";
-
-/**
- * The `PredicateResult.field` value BOTH `noAnchorOverlap` failure reasons carry
- * (SPEC-042 D5, review U4) — deliberately ONE field for two reasons, so every
- * existing `field === ANCHOR_OVERLAP_FIELD` consumer (the `GateEnforcer` error
- * discriminator `gate:task-claim:anchor-overlap`, `feedTaskOrPhaseClaim`'s
- * message dispatch) keeps routing the new refusal without modification.
+ * The `PredicateResult.field` value `noAnchorOverlap`'s failure carries
+ * (SPEC-042 D5, review U4) — the `GateEnforcer` error discriminator
+ * `gate:task-claim:anchor-overlap` and `feedTaskOrPhaseClaim`'s message dispatch key on it.
  */
 export const ANCHOR_OVERLAP_FIELD = "anchor-overlap";
 
@@ -583,13 +542,11 @@ export type SessionComparison = "same-session" | "different-session" | "not-meas
 
 /**
  * Compares two claims' captured session instances
- * (`TaskClaim.session_id`) — the pure three-valued core of the anchor mutex's
- * "is this the same run?" question.
+ * (`TaskClaim.session_id`) — the pure three-valued core of the territory
+ * partition's "is this the same session?" question (the anchor mutex no longer uses it: it compares runs).
  *
  * A boolean would be a lie: "not equal" and "not known" are different facts with
- * OPPOSITE safe defaults, and collapsing them is exactly how the pre-fix gate
- * treated two live orchestrators as one session
- * (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+ * OPPOSITE safe defaults.
  *
  * @param candidateSessionId - The claiming session's captured id, if any.
  * @param siblingSessionId - The sibling claim's recorded id, if any.
@@ -615,16 +572,10 @@ export function compareClaimSessions(
 
 /**
  * Why an anchor overlap is a conflict — the discriminated outcome
- * {@link findAnchorOverlapConflict} reports.
- *
- * - `"foreign-actor"`: the sibling's `by` differs (SPEC-042 D5's original case).
- * - `"foreign-session"`: same `by`, PROVEN different session instance — foreign
- *   for mutex purposes, since cross-session exclusion is the whole point and
- *   same-actor is not evidence of same-session (§Required fix 3).
- * - `"session-not-measured"`: same `by`, session instance unmeasurable on at
- *   least one side (§Required fix 4).
+ * {@link findAnchorOverlapConflict} reports. There is one reason: the sibling's lease is held by a different run
+ * (BR-1056), or by no run at all.
  */
-export type AnchorOverlapConflictKind = "foreign-actor" | "foreign-session" | "session-not-measured" | "foreign-run";
+export type AnchorOverlapConflictKind = "foreign-run";
 
 /** One offending sibling claim, with the overlapping path pairs and WHY it conflicts. */
 export interface AnchorOverlapConflict {
@@ -639,39 +590,29 @@ export interface AnchorOverlapConflict {
  * (the verdict) and `checkpoint-registry.ts::feedAnchorOverlap` (the message).
  *
  * It exists as one function because the renderer previously re-implemented the
- * skip rules and drifted the instant the predicate's rules changed: its
- * `sibling.by === candidateBy → skip` copy would have printed "no specific
- * conflicting sibling could be identified" for every refusal this task adds —
- * a refusal that names nothing is a refusal nobody can repair.
+ * skip rules and drifted the instant the predicate's rules changed: a refusal
+ * that names nothing is a refusal nobody can repair.
  *
- * Skips (no conflict) exactly as before, plus the same-session case:
- * a stale sibling, a sibling declaring no anchors, non-overlapping anchors, or a
- * sibling whose claim is PROVEN to belong to the candidate's own session.
+ * Skips (no conflict): a stale sibling, a sibling declaring no anchors, non-overlapping anchors, or a sibling
+ * whose lease is held by the candidate's OWN run. Everything else conflicts: another run (even one deriving the
+ * same display name), or a lease or claimant with no run.
  *
- * @param candidateBy - The actor attempting the claim.
  * @param candidateAnchors - The target's own declared (normalized) anchors.
  * @param siblingClaims - Every OTHER task in scope holding a claim (fresh or
  *   stale — staleness is filtered HERE, not by the caller).
- * @param candidateSessionId - The claiming session's captured
- *   `TaskClaim.session_id`, when the caller measured one.
- * @param candidateRun - The claimant's attested run (BR-1056), `null`/absent = unattested. When EITHER side
- *   carries a run the RUN decides: equal runs are one holder (skipped), anything else is a `foreign-run`
- *   conflict — two runs sharing a derived name, or exactly one side attested, are two holders. When NEITHER
- *   carries a run the name-plus-session comparison below applies unchanged.
+ * @param candidateRun - The claimant's run (BR-1056); `null`/absent = no run, which equals no holder.
  * @returns The FIRST conflicting sibling in `siblingClaims` order, or
  *   `undefined` when none conflicts.
  * @example
- * findAnchorOverlapConflict("agent:main", ["src/a"], [
- *   { slug: "task-1", title: "T1", by: "agent:main", at: "T0", stale: false,
- *     anchors: ["src/a"], session_id: "7ab19c04" },
- * ], "3de02220");
- * // => { sibling: …, pairs: [["src/a","src/a"]], kind: "foreign-session" }
+ * findAnchorOverlapConflict(["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:session-7ab19c04", at: "T0", stale: false,
+ *     anchors: ["src/a"], harness_run: "cc:7ab19c04" },
+ * ], "cc:3de02220");
+ * // => { sibling: …, pairs: [["src/a","src/a"]], kind: "foreign-run" }
  */
 export function findAnchorOverlapConflict(
-  candidateBy: string | undefined,
   candidateAnchors: string[] | undefined,
   siblingClaims: readonly SiblingClaimInfo[] | undefined,
-  candidateSessionId?: string,
   candidateRun?: string | null,
 ): AnchorOverlapConflict | undefined {
   const anchors = candidateAnchors ?? [];
@@ -682,230 +623,47 @@ export function findAnchorOverlapConflict(
     if (sibling.anchors.length === 0) continue;
     const overlap = anchorsOverlap(anchors, sibling.anchors);
     if (!overlap.overlaps) continue;
-    // reason: BR-1056 — the holder is a RUN. Two runs deriving one name must not pass for one writer, and
-    // exactly one attested side is a different holder. Only when neither side carries a run does the legacy
-    // name-plus-session comparison below decide.
+    // reason: BR-1056 — the holder is a RUN. Two runs deriving one name must not pass for one writer, and a
+    // lease or claimant with no run is nobody's: `null === null` is NOT "the same holder".
     const holderRun = sibling.harness_run ?? null;
-    if (claimantRun !== null || holderRun !== null) {
-      if (claimantRun === holderRun) continue;
-      return { sibling, pairs: overlap.pairs, kind: "foreign-run" };
-    }
-    if (sibling.by !== candidateBy) {
-      return { sibling, pairs: overlap.pairs, kind: "foreign-actor" };
-    }
-    // reason: same `by` is NOT evidence of same session — the project's own
-    // dispatch discipline gave every main-checkout run the IDENTICAL name
-    // `agent:main-orchestrator`, so the pre-fix
-    // same-actor exemption exempted precisely the population it needed to
-    // serialize (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
-    // The exemption now requires the captured fact, not the proxy.
-    switch (compareClaimSessions(candidateSessionId, sibling.session_id)) {
-      case "same-session":
-        continue;
-      case "different-session":
-        return { sibling, pairs: overlap.pairs, kind: "foreign-session" };
-      case "not-measured":
-        return { sibling, pairs: overlap.pairs, kind: "session-not-measured" };
-    }
+    if (claimantRun !== null && holderRun === claimantRun) continue;
+    return { sibling, pairs: overlap.pairs, kind: "foreign-run" };
   }
   return undefined;
 }
 
 /**
- * `task-claim`'s worktree-mutex predicate (SPEC-042 §Design Decisions D5,
- * extended by task-two-concurrent-orchestrators-both-resolve-to-agent-main): the
- * candidate claim's declared `file_anchors` must not overlap a FRESH sibling
- * claim belonging to a DIFFERENT SESSION, within the same plan.
+ * `task-claim`'s worktree-mutex predicate (SPEC-042 §Design Decisions D5, run-keyed by BR-1056): the candidate
+ * claim's declared `file_anchors` must not overlap a FRESH sibling claim held by a DIFFERENT RUN, within the same
+ * plan.
  *
- * "Different session" — not "different actor". The mutex serializes concurrent
- * WRITERS on source files, and two writers can share an actor string: this repo's
- * main-checkout runs all carried the name `agent:main-orchestrator`, so the original same-actor exemption silently disabled the
- * gate for exactly the concurrent-orchestrator case it was built for (measured
- * 2026-08-02; consequence chain realised twice, incl. an orchestrator removing a
- * live agent's worktree).
+ * Vacuous pass (no ERROR path — `anchorsOverlap`'s precondition-only contract extends to this predicate) when: the
+ * candidate declares no anchors, a sibling is stale, a sibling declares no anchors itself, no sibling's anchors
+ * overlap the candidate's, or the overlapping sibling is held by the candidate's own run.
  *
- * Vacuous pass (no ERROR path — `anchorsOverlap`'s precondition-only contract
- * extends to this predicate) when: the candidate declares no anchors, a sibling
- * is stale, a sibling declares no anchors itself, no sibling's anchors overlap
- * the candidate's, or a sibling's claim is PROVEN to belong to the candidate's
- * own session (equal `session_id`).
- *
- * ⛔ Three-questions record (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the):
- *   1. **Proxy** — `(by, session_id)` is still a proxy for "one writer". Concrete
- *      input satisfying the proxy while violating the property: TWO worktrees
- *      driven from ONE Claude Code session under one actor name — identical
- *      `by`, identical `session_id`, different `worktree` — still permits the
- *      overlap. ACCEPTED here and named, not silently ignored: `worktree` is
- *      `actorIdentityGuard`'s dimension (it fires on the os-fallback tier), and
- *      widening this predicate to refuse on differing worktrees would refuse the
- *      legitimate single-session sequential-claim case this gate deliberately
- *      permits. Escalate only with a measured instance.
- *   2. **Silence** — an unmeasurable session dimension REFUSES with its own
- *      {@link ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON}, never a `{ok:true}`.
- *      A permit and a truthful no-conflict were previously the same value.
- *   3. **Opt-in** — nothing here is opt-in: `session_id` is captured for every
- *      claim by `TaskWorkflowService.claim` with no flag, and this predicate
- *      runs unconditionally (subject only to the pre-existing
- *      `workflow.gates."task-claim".anchor_overlap.enabled` kill switch).
- *
- * @param candidateBy - The actor attempting the claim.
  * @param candidateAnchors - The target task's own declared (normalized) anchors.
  * @param siblingClaims - Every OTHER task in the same plan holding a claim
  *   (fresh or stale — staleness is filtered HERE, not by the caller).
- * @param candidateSessionId - The claiming session's captured
- *   `TaskClaim.session_id`. Omitted ⇒ this side was never measured, which makes
- *   every same-actor overlap `not-measured` (a refusal), never a permit.
- * @param candidateRun - The claimant's attested run; see {@link findAnchorOverlapConflict}.
+ * @param candidateRun - The claimant's run; see {@link findAnchorOverlapConflict}.
  * @returns `{ok: true}` when no conflicting sibling exists;
- *   `{ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap"}` for a
- *   MEASURED conflict (foreign actor, or proven foreign session);
- *   `{ok: false, reason: "ANCHOR_OVERLAP_SESSION_UNMEASURED", field: "anchor-overlap"}`
- *   when the overlap is real but the session dimension is unmeasurable.
+ *   `{ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap"}` otherwise.
  * @example
- * noAnchorOverlap("agent:t2", ["src/a"], [
- *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a/"] },
- * ]); // => { ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap" }
+ * noAnchorOverlap(["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a/"], harness_run: "cc:a" },
+ * ], "cc:b"); // => { ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap" }
  * @example
- * noAnchorOverlap("agent:t1", ["src/a"], [
- *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false,
- *     anchors: ["src/a"], session_id: "3de02220" },
- * ], "3de02220"); // => { ok: true } — same actor AND proven same session
- * @example
- * noAnchorOverlap("agent:t1", ["src/a"], [
- *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a"] },
- * ], "3de02220");
- * // => { ok: false, reason: "ANCHOR_OVERLAP_SESSION_UNMEASURED", … } — sibling
- * //    predates the captured field; "same actor" is not evidence of one session
+ * noAnchorOverlap(["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a"], harness_run: "cc:a" },
+ * ], "cc:a"); // => { ok: true } — the same run
  */
 export function noAnchorOverlap(
-  candidateBy: string | undefined,
   candidateAnchors: string[] | undefined,
   siblingClaims: readonly SiblingClaimInfo[] | undefined,
-  candidateSessionId?: string,
   candidateRun?: string | null,
 ): PredicateResult {
-  const conflict = findAnchorOverlapConflict(
-    candidateBy,
-    candidateAnchors,
-    siblingClaims,
-    candidateSessionId,
-    candidateRun,
-  );
+  const conflict = findAnchorOverlapConflict(candidateAnchors, siblingClaims, candidateRun);
   if (conflict === undefined) return { ok: true };
-  return {
-    ok: false,
-    reason:
-      conflict.kind === "session-not-measured"
-        ? ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON
-        : ANCHOR_OVERLAP_REASON,
-    field: ANCHOR_OVERLAP_FIELD,
-  };
-}
-
-/** `actorIdentityGuard`'s single machine-readable failure reason. */
-export const ACTOR_IDENTITY_COLLISION_REASON = "ACTOR_IDENTITY_COLLISION";
-
-/** The `PredicateResult.field` value `actorIdentityGuard`'s failure carries
- *  (spec claim-time-actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT). */
-export const ACTOR_IDENTITY_FIELD = "actor-identity";
-
-/**
- * The identity-resolution tier `actorIdentityGuard` treats as an "untraceable
- * default" — the governing spec's own `os_default` vocabulary, spelled here as
- * the literal `ActorSource` value (`@lore/core/node`, `actor-resolution-node.ts`)
- * `resolveActorWithSource` returns when resolution falls through the explicit
- * and SPEC-071 session tiers all the way to `os.userInfo()
- * .username`. Declared as a plain string literal (not an imported type) so this
- * module keeps its module-header invariant of zero `@lore/core/node` dependency
- * — the Node-only resolution chain lives one layer up, in the CALLER that
- * resolves `candidateIdentitySource` before building a `GateContext`.
- */
-export const OS_DEFAULT_IDENTITY_SOURCE = "os-fallback";
-
-/**
- * `task-claim`'s claim-time actor-identity collision guard (spec claim-time-
- * actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) —
- * SPEC-042's `noAnchorOverlap` and its session registry both key on the
- * resolved `by` string alone; when every concurrent agent silently falls
- * through to the SAME OS-username default, distinct sessions collapse onto one
- * identity and `noAnchorOverlap` can never tell them apart (SPEC-042 D10, the
- * documented failure mode this predicate closes). This predicate detects that
- * SPECIFIC collision signature at claim time, conservatively (spec §Scope:
- * "REJECT only on a collision signature"):
- *
- *   1. The CANDIDATE's own actor must have resolved via the untraceable
- *      OS-username fallback tier ({@link OS_DEFAULT_IDENTITY_SOURCE}) — an
- *      an explicit-name or SPEC-071 session tier NEVER
- *      trips this predicate, regardless of what any sibling holds (AC-
- *      IDENTITY-REJECT's "distinct explicit identities never trip it").
- *   2. AND a FRESH sibling claim in the same plan must hold the byte-IDENTICAL
- *      `by` string. Since the candidate's own `by` in that case IS
- *      `os.userInfo().username`, an identical sibling `by` means the sibling
- *      landed on that same OS username too — the shared literal string IS the
- *      collision signature, so the sibling's own resolution tier never needs
- *      to be independently stored (the governing spec's "OUT: storing
- *      identity source on the doc" scope note — identity source stays
- *      gate-context-only, for the CANDIDATE claim of THIS call only).
- *   3. AND that sibling's `worktree` or `machine` — whichever dimension has
- *      data on BOTH sides — must provably DIFFER from the candidate's own:
- *      two DIFFERENT execution contexts holding the identical untraceable
- *      identity. When neither dimension is comparable (missing on either
- *      side), this predicate does NOT trip — conservative by construction,
- *      mirroring `noAnchorOverlap`'s own "no ERROR path" vacuous-pass shape.
- *
- * A solo human/agent holding multiple tasks from ONE worktree (same `by`, same
- * `worktree`) never trips it — `worktreeDiffers`/`machineDiffers` are both
- * `false` in that case (spec §Scope: "A solo human holding multiple tasks in
- * one worktree never trips it").
- *
- * @param candidateBy - The actor attempting the claim.
- * @param candidateIdentitySource - How `candidateBy` was resolved, compared
- *   against {@link OS_DEFAULT_IDENTITY_SOURCE}; any other value (including
- *   `undefined` — the caller never resolved/threaded one) is an automatic pass.
- * @param candidateWorktree - The candidate claim's own `worktree` (SPEC-042 D2), if declared.
- * @param candidateMachine - The candidate claim's own `machine` (SPEC-042 D2), if declared.
- * @param siblingClaims - Every OTHER task in the same plan holding a claim
- *   (fresh or stale — staleness filtered HERE, mirrors `noAnchorOverlap`).
- * @returns `{ok: true}` when no fresh, `by`-identical, provably-different-context
- *   sibling exists (or the candidate wasn't OS-default-resolved at all);
- *   `{ok: false, reason: "ACTOR_IDENTITY_COLLISION", field: "actor-identity"}` otherwise.
- * @example
- * actorIdentityGuard("daniel", "os-fallback", "/repo/.worktrees/t2", undefined, [
- *   { slug: "task-1", title: "T1", by: "daniel", at: "T0", stale: false, anchors: [],
- *     worktree: "/repo/.worktrees/t1" },
- * ]); // => { ok: false, reason: "ACTOR_IDENTITY_COLLISION", field: "actor-identity" }
- * @example
- * actorIdentityGuard("agent:t2", "explicit", "/repo/.worktrees/t2", undefined, [
- *   { slug: "task-1", title: "T1", by: "daniel", at: "T0", stale: false, anchors: [],
- *     worktree: "/repo/.worktrees/t1" },
- * ]); // => { ok: true } — candidate used an explicit identity, never trips
- */
-export function actorIdentityGuard(
-  candidateBy: string | undefined,
-  candidateIdentitySource: string | undefined,
-  candidateWorktree: string | undefined,
-  candidateMachine: string | undefined,
-  siblingClaims: readonly SiblingClaimInfo[] | undefined,
-): PredicateResult {
-  if (candidateIdentitySource !== OS_DEFAULT_IDENTITY_SOURCE) {
-    return { ok: true };
-  }
-  for (const sibling of siblingClaims ?? []) {
-    if (sibling.stale) continue;
-    if (sibling.by !== candidateBy) continue;
-    const worktreeDiffers =
-      sibling.worktree !== undefined &&
-      candidateWorktree !== undefined &&
-      sibling.worktree !== candidateWorktree;
-    const machineDiffers =
-      sibling.machine !== undefined &&
-      candidateMachine !== undefined &&
-      sibling.machine !== candidateMachine;
-    if (worktreeDiffers || machineDiffers) {
-      return { ok: false, reason: ACTOR_IDENTITY_COLLISION_REASON, field: ACTOR_IDENTITY_FIELD };
-    }
-  }
-  return { ok: true };
+  return { ok: false, reason: ANCHOR_OVERLAP_REASON, field: ANCHOR_OVERLAP_FIELD };
 }
 
 /** `acQuantifiable`'s single machine-readable failure reason. */
@@ -1197,260 +955,12 @@ export function requiresUatDeclared(
 }
 
 /**
- * One task's (or, since `getPlanBundle` also returns SPEC-056 phase docs, one
- * phase's) evidence-attestation facts, precomputed by the CALLER (SPEC-069
- * §Design Decisions D1, mirrors `SiblingClaimInfo`'s "caller does the IO,
- * predicate stays pure" seam) — `evidenceCount`/`attestedCount` are derived
- * from `extractEvidence(task)` (`@lore/core`, task-workflow.ts), never
- * re-parsed here (module invariant: no store, no IO).
- *
- * MOVED to `@lore/core` (`evidence-panel.ts`, SPEC-075 §Design Decisions D6) —
- * this module now imports the type rather than declaring it, since the
- * dashboard adjudication workbench's `EvidencePanelProjection.plan` branch
- * needs the SAME shape and `@lore/dashboard` cannot import from
- * `packages/lore/src/**` (browser-safety boundary, SPEC-014 AC-MR-B1). Every
- * importer of this type now reads it directly from `@lore/core` (see
- * `checkpoint-registry.ts`) rather than through this file — this comment
- * documents WHERE the type went for anyone still grepping this module for it.
- */
-
-/** `attestationFloor`'s single machine-readable failure reason. */
-export const ATTESTATION_FLOOR_REASON = "ATTESTATION_FLOOR_NOT_MET";
-
-/** The `PredicateResult.field` value `attestationFloor`'s failure carries (SPEC-069). */
-export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
-
-/**
- * `attestationFloor`'s SECOND machine-readable failure reason (task-plan-close-
- * must-block-when-the-coverage-conjunct-is-scope) — the declared-scope coverage
- * conjunct had no CLAIM to audit while the plan DID carry verification evidence.
- *
- * Deliberately NOT folded into {@link ATTESTATION_FLOOR_REASON}: the two denials
- * need different recovery actions ("attest the criteria you declared" vs.
- * "declare which criteria this work owns"), and a scripted caller reading
- * `gate:plan-close:<field>` must be able to tell them apart without parsing
- * prose — the same one-key-per-failure-class rule `GateAdvisoryKind` follows one
- * module over.
- */
-export const ATTESTATION_SCOPE_UNDECLARED_REASON = "ATTESTATION_SCOPE_UNDECLARED";
-
-/** The `PredicateResult.field` value {@link ATTESTATION_SCOPE_UNDECLARED_REASON} carries. */
-export const ATTESTATION_SCOPE_UNDECLARED_FIELD = "attestation-scope-undeclared";
-
-/**
- * `plan-close`'s execution-time attestation-floor predicate (SPEC-069 §Design
- * Decisions D1, extended by spec-plan-close-predicates-measure-invariants-an-
- * applicability §D3, re-scoped by spec-declared-scope-attestation-contract-task-
- * owned-ac-scope §Facts D4/D5) — opt-OUT, not opt-in (unlike `uatP0Accepted`,
- * this predicate runs for every closing plan unless exempted; see
- * `checkPlanClose` in `checkpoint-registry.ts`). Two blocking conditions plus one
- * REPORTED fact:
- *
- *   1. (REPORTED, no longer blocking — §Facts D5) every task carrying
- *      `verification_evidence` with ZERO attested entries is named in
- *      `deriveAttestationSummary`'s `zero_attested_tasks` and in this
- *      predicate's feeding pack, but does NOT deny the close on its own: a task
- *      may legitimately hold self-reported-only evidence (the canonical case is
- *      a RED/TDD run) while every criterion the plan DECLARED is attested. The
- *      computation is kept — only its blocking power was demoted;
- *   2. every DECLARED-scope acceptance criterion — the union over
- *      evidence-bearing tasks of (`task.extra.ac_scope` ∩ the spec's declared
- *      script-mode criteria), i.e. `declaredScope`, NOT `acCoverage`'s
- *      evidence-derived exercised set — must carry >= 1 runner-attested entry.
- *      This is the DEFAULT conjunct. When NO evidence-bearing task declares a
- *      scope there is no claim to audit — and because this branch is reachable
- *      only AFTER the zero-evidence guard below, "no claim" there always means
- *      "evidence exists but nothing was declared", so it DENIES with
- *      {@link ATTESTATION_SCOPE_UNDECLARED_REASON} (task-plan-close-must-block-
- *      when-the-coverage-conjunct-is-scope) instead of advising — PROVIDED the
- *      governing spec declares at least one script-mode criterion, i.e. there
- *      was something the task could have declared. The advisory shape §Facts D4
- *      introduced survives for the two cases that genuinely have nothing to
- *      audit: zero evidence anywhere (condition below), and nothing declarable;
- *   3. the plan-wide attested-evidence ratio (total attested entries / total
- *      evidence entries, across every task) must be ≥ `minRatio` — OPT-IN:
- *      only evaluated when `minRatio` is non-`null` (§D4's default-off
- *      migration). AND-ed with condition 2 when configured, never a substitute.
- *
- * Precedence: a measured FAILURE (2 or 3) outranks the undeclared-scope denial,
- * which outranks a pass — so an undeclared scope can never MASK a real ratio or
- * declared-coverage violation behind its own less specific reason. Both are
- * denials now; the ordering decides which `field` (and therefore which recovery
- * text) the operator is handed first.
- *
- * A plan with NO evidence at all on any task (`totalEvidence === 0`) is
- * NOT-APPLICABLE (spec-plan-close-predicates-measure-invariants-an-
- * applicability §Design Decisions D1/D3) rather than the silent vacuous PASS
- * this predicate used to return for that case — this is still the "pure-
- * planning plan" carve-out (SPEC-069 §Scope: the floor only constrains a plan
- * that claims to have been verified, never one that never ran any oracle at
- * all), but the FACT "this plan has zero evidence to attest" is now a value
- * `GateEnforcer.enforce` can surface as an advisory + audit row instead of
- * disappearing into an indistinguishable-from-"everything attested" pass.
- *
- * SPEC-075 §Design Decisions D6/AC-075-11: this predicate computes NO condition
- * itself — every fact comes from `@lore/core` (`deriveAttestationSummary` for the
- * ratio + reported facts, `declaredScopeCoverageVerdict` for the coverage
- * conjunct), the same SSOT the dashboard adjudication workbench's Evidence tab
- * renders from. This function's only own logic is the PRECEDENCE above and the
- * mapping onto gate vocabulary (`ATTESTATION_FLOOR_REASON`/`_FIELD`).
- *
- * §Facts D5 changed OUTCOMES, not just shapes: a plan whose only fault is a
- * zero-attested task now CLOSES (condition 1 demoted), and a plan whose
- * evidence-bearing tasks declare no `ac_scope` is DENIED (task-plan-close-must-
- * block-when-the-coverage-conjunct-is-scope, superseding D4's advisory-only
- * treatment of that case — an advisory there exited 0). Every suite that pinned the old outcomes
- * (`attestation-floor.test.ts`, `gate-predicates.test.ts`,
- * `predicate-applicability.test.ts`, the two `feed-attestation-*` suites) is
- * updated in the SAME slice — a stale assertion there would silently re-legalize
- * the evidence-defines-its-own-scope defect.
- *
- * @param tasks - Every task (or phase) in the closing plan, with its own
- *   evidence/attested counts — `undefined` is treated identically to `[]`
- *   (no tasks resolved, vacuous pass, mirrors `noAnchorOverlap`'s `?? []`
- *   shape).
- * @param minRatio - The configured floor (`workflow.attestation.min_ratio`,
- *   resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio` —
- *   this predicate never reads config itself), or `null` when unconfigured
- *   (condition 3 does not run at all — §D4).
- * @param referent - The closing plan's slug (or id) — carried on the
- *   `PredicateNotApplicable` result when there is zero evidence to attest,
- *   ignored otherwise.
- * @param acCoverage - `computeAcCoverage`'s own output (the plan's governing
- *   spec's declared criteria aggregated over the plan's tasks). Feeds the
- *   REPORTED exercised-coverage facts and the feeding pack's diagnostics — it is
- *   NO LONGER the coverage conjunct's input (§Facts D4 moved that to
- *   `declaredScope`). REQUIRED — no default (Amendment A, spec-plan-close-
- *   predicates-measure-invariants-an-applicability §D3): a `= []` default would
- *   let a caller silently drop the diagnostics that name which criteria this
- *   plan's evidence actually touched. Every caller, production or test, passes
- *   its OWN true fact: `[]` for a fixture that genuinely declares no acceptance
- *   criteria (name that intent with a constant, e.g. `NO_DECLARED_ACS`, never a
- *   bare `[]` sprinkled ad-hoc), or the real `AcCoverageFact[]` otherwise.
- * @param declaredScope - The DECLARED-scope coverage fact
- *   (`deriveDeclaredScopeCoverage`, `@lore/core`), resolved by the CALLER from
- *   the plan's task documents — this module sees no documents (its purity
- *   invariant), and `TaskAttestationInfo` deliberately carries no
- *   `extra.ac_scope`. REQUIRED, and a caller that never resolved it MUST pass
- *   `UNRESOLVED_DECLARED_SCOPE` (which reports UNDECLARED) rather than an
- *   inline `{scope_undeclared: false, …}`: that literal would be a fabricated
- *   compliant declaration, i.e. the vacuous pass §Facts D4 exists to remove.
- * @returns `{notApplicable: true, reason: "no-evidence", referent}` when
- *   `deriveAttestationSummary`'s `total_evidence === 0`; `{ok: false, reason:
- *   "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor"}` when a declared
- *   AC has zero attested evidence OR the configured ratio is not met;
- *   `{ok: false, reason: "ATTESTATION_SCOPE_UNDECLARED", field:
- *   "attestation-scope-undeclared"}` when nothing else blocks, an
- *   evidence-bearing task declared no scope, AND `acCoverage` contains a
- *   script-mode criterion that COULD have been declared;
- *   `{notApplicable: true, reason: "scope-undeclared", referent}` when that last
- *   condition fails (nothing was declarable, so the demand would have no
- *   recovery); `{ok: true}` otherwise.
- * @example
- * const declaredAndAttested = { declared_acs: ["AC-1"], unattested_acs: [], scope_undeclared: false, meets_coverage: true };
- * attestationFloor([
- *   { slug: "task-1", title: "T1", evidenceCount: 3, attestedCount: 0 },
- * ], 0.5, "plan-x", [], declaredAndAttested);
- *   // => { ok: false, ... } — via the RATIO (0 < 0.5), no longer via task-1's zero attestations
- * @example
- * attestationFloor([
- *   { slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 },
- * ], 0.5, "plan-x", [], declaredAndAttested); // => { ok: true }
- * @example
- * attestationFloor(undefined, 0.5, "plan-x", [], declaredAndAttested);
- *   // => { notApplicable: true, reason: "no-evidence", referent: "plan-x" } — no evidence anywhere
- * @example
- * attestationFloor(
- *   [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
- *   null,
- *   "plan-x",
- *   [],
- *   UNRESOLVED_DECLARED_SCOPE,
- * ); // => { ok: false, reason: "ATTESTATION_SCOPE_UNDECLARED", ... } — evidence, nothing declared
- * @example
- * attestationFloor(
- *   [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
- *   null,
- *   "plan-x",
- *   [],
- *   { declared_acs: ["AC-1"], unattested_acs: ["AC-1"], scope_undeclared: false, meets_coverage: false },
- * ); // => { ok: false, ... } — AC-1 was DECLARED but never runner-attested
- */
-export function attestationFloor(
-  tasks: readonly TaskAttestationInfo[] | undefined,
-  minRatio: number | null,
-  referent: string,
-  acCoverage: readonly AcCoverageFact[],
-  declaredScope: DeclaredScopeCoverage,
-): ApplicablePredicateResult {
-  const summary = deriveAttestationSummary(tasks ?? [], minRatio, acCoverage);
-  if (summary.total_evidence === 0) {
-    return { notApplicable: true, reason: "no-evidence", referent };
-  }
-  const coverage = declaredScopeCoverageVerdict(declaredScope, referent);
-  // reason: precedence is FAIL > NOT-APPLICABLE > PASS, so BOTH blocking
-  // conjuncts are evaluated before the applicability verdict can be returned.
-  // Returning `notApplicable` first would let an undeclared scope suppress a
-  // genuinely measured ratio violation — a NEW vacuous pass, in a function whose
-  // whole purpose is removing one.
-  if ("ok" in coverage && !coverage.ok) {
-    return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
-  }
-  if (!summary.meets_floor) {
-    return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
-  }
-  // reason: task-plan-close-must-block-when-the-coverage-conjunct-is-scope — an
-  // undeclared scope reaching HERE has already passed the `total_evidence === 0`
-  // guard above, so the plan provably CARRIES verification evidence. Work was
-  // verified against nothing declared, which is precisely the state this conjunct
-  // exists to catch, so it DENIES rather than advising.
-  //
-  // The applicability verdict is still the right shape for the OTHER half of the
-  // fact: `scope-undeclared` with ZERO evidence never reaches this line (it
-  // returns `notApplicable("no-evidence")` above), which keeps the pure-planning
-  // plan advisory. That split is the whole predicate — do not "simplify" it by
-  // folding this branch back into a bare `return coverage`.
-  //
-  // Measured 2026-07-31: four plans archived at exit 0 through this exact line,
-  // one `gate_not_applicable {"kind":"attestation-not-applicable"}` row each, 53
-  // evidence rows across 10 tasks, `attested_evidence_ratio 0.00` on all four —
-  // every blocking conjunct inapplicable, so an operator reading exit 0 could not
-  // tell a measured pass from a completely dark gate.
-  if (!("ok" in coverage)) {
-    // reason: the deny is withheld when the governing spec declares NO script-mode
-    // criterion, because then there was nothing the task COULD have declared and
-    // `lore scope add <task> <AC-ID>` has no id to name — a gate demanding a field
-    // no surface can author is a recorded silent-failure class in this repo, and a
-    // permanent false block is the same defect §D3 avoids for dangling/ai-mode
-    // refs. That case is already flagged UPSTREAM by plan-promote's
-    // verify-reachability advisory and recorded as `attestation-floor`'s first
-    // `known_false_pass`; it stays the audited advisory here.
-    //
-    // `acCoverage` is the honest source for "was anything declarable": it is
-    // `computeAcCoverage`'s output, which emits one fact per DECLARED criterion
-    // (refs or not), so its script-mode subset IS the declarable id set
-    // `deriveDeclaredScopeCoverage` intersects against. This reads it for
-    // APPLICABILITY only — the coverage VERDICT still comes solely from
-    // `declaredScope` (§Facts D4), which this branch never second-guesses.
-    const declarable = acCoverage.some((fact) => fact.mode === "script");
-    if (!declarable) return coverage;
-    return {
-      ok: false,
-      reason: ATTESTATION_SCOPE_UNDECLARED_REASON,
-      field: ATTESTATION_SCOPE_UNDECLARED_FIELD,
-    };
-  }
-  return { ok: true };
-}
-
-/**
  * The structural reasons `lore verify` cannot run against a plan
  * (spec-verify-reachability-plan-promote-early-warning §Scope M1; `"unknown"`
  * added by spec-plan-closure-must-be-loud-terminality-divergence-silent
  * §Design Decisions DD-4(b)) — `null` when reachable. A discriminated
  * companion to `ReachabilityResult.reachable` rather than a bare boolean:
- * callers (the `plan-promote` advisory, `plan-close`'s `feedAttestationFloor`
- * branch) render DIFFERENT prose per reason, so collapsing this to `boolean`
+ * callers (the `plan-promote` advisory) render DIFFERENT prose per reason, so collapsing this to `boolean`
  * would force them to re-derive it themselves — the exact "two parallel
  * reachability computations" shape §Design Decisions D2 forbids.
  *
@@ -1479,11 +989,9 @@ export interface ReachabilityResult {
  * `spec === undefined` ⇒ `"plan has no parent spec — nothing to verify"`; zero
  * script-mode criteria ⇒ nothing for the runner to execute), reflected here as
  * a pure, store-free PREDICTION of that outcome rather than a duplicate
- * enforcement path. Two independent callers consume this ONE derivation
- * (spec-verify-reachability-plan-promote-early-warning §Design Decisions D2):
- * `plan-promote`'s early-warning advisory (`checkpoint-registry.ts`'s
- * `planPromoteReachabilityAdvisory`) and `plan-close`'s `feedAttestationFloor`
- * branch — they can never disagree about whether a given plan is reachable.
+ * enforcement path. It is the ONE derivation behind `plan-promote`'s early-warning advisory
+ * (`checkpoint-registry.ts`'s `planPromoteReachabilityAdvisory`; spec-verify-reachability-plan-promote-early-warning
+ * §Design Decisions D2).
  *
  * @param planParentType - The plan's resolved ancestor-spec doc type. THREE
  *   distinct inputs, not two (DD-4(b)): `"spec"` when `hasSpecParent` is
@@ -1542,168 +1050,45 @@ export function verifyReachability(
   return { reachable: true, why: null };
 }
 
-/** `attestationExemptKindValid`'s single machine-readable failure reason. */
-export const ATTESTATION_EXEMPT_KIND_INVALID_REASON = "ATTESTATION_EXEMPT_KIND_INVALID";
+/** `milestoneReviewCurrent`'s failure reasons (BR-1372): no review, a review of an older state, a failing review. */
+export const MILESTONE_REVIEW_MISSING_REASON = "MILESTONE_REVIEW_MISSING";
+export const MILESTONE_REVIEW_STALE_REASON = "MILESTONE_REVIEW_STALE";
+export const MILESTONE_REVIEW_FAILED_REASON = "MILESTONE_REVIEW_FAILED";
 
-/** The `PredicateResult.field` value `attestationExemptKindValid`'s failure carries. */
-export const ATTESTATION_EXEMPT_KIND_FIELD = "attestation-exempt-kind";
+/** The business rule a refused close names. */
+export const MILESTONE_REVIEW_RULE = "BR-1372";
+
+/** The `PredicateResult.field` value `milestoneReviewCurrent`'s failure carries. */
+export const MILESTONE_REVIEW_FIELD = "milestone-review";
 
 /**
- * `plan-close`'s exemption-kind-taxonomy predicate (spec-verify-reachability-
- * plan-promote-early-warning §Scope M3 / §Design Decisions D3) — a bare
- * `extra.attestation_exempt: true` with no typed `extra.attestation_exempt_kind`
- * is exactly the silent-fallback shape this repo bans (see the project-level
- * "no silent fallback" discipline); this predicate refuses it rather than
- * letting the exemption quietly satisfy the floor. Vacuous PASS when `exempt`
- * is not `true` at all — this predicate has nothing to say about a plan that
- * never claimed an exemption (mirrors `attestationFloor`'s own opt-out shape
- * one level up, `checkPlanClose` in `checkpoint-registry.ts`).
+ * `plan-close`'s ONLY plan-state predicate (BR-1372): the plan's latest milestone review (`lore assess`) must be of
+ * the plan's current state and have no failing dimension.
  *
- * @invariant Validity is sourced exclusively from `attestationExemptKindSchema`
- *   (`@lore/core`, schemas.ts) via `.safeParse` — never a locally hardcoded
- *   literal union, mirroring `specKindValid`'s `SPEC_KINDS` precedent (this
- *   module's own JSDoc header, first invariant).
- * @param exempt - `ctx.attestationExempt === true` from the caller (the SAME
- *   pre-resolved boolean `checkPlanClose` already reads to decide whether to
- *   run `attestationFloor` at all).
- * @param kind - The plan's raw, UNVALIDATED `extra.attestation_exempt_kind`
- *   value, or `undefined` when absent.
- * @returns `{ok: true}` when `exempt` is not `true`, OR `kind` is a valid
- *   `attestationExemptKindSchema` member; `{ok: false, reason:
- *   "ATTESTATION_EXEMPT_KIND_INVALID", field: "attestation-exempt-kind"}`
- *   when `exempt === true` and `kind` is missing or not a valid member.
+ * @param currency - what `assessMilestoneCurrency` measured from the stored reviews
+ * @returns `{ok: true}` for a current passing review; otherwise `{ok: false, reason, field: "milestone-review"}`
+ *   with one of the three MILESTONE_REVIEW_*_REASON values
  * @example
- * attestationExemptKindValid(true, "red-tdd");  // => { ok: true }
+ * milestoneReviewCurrent({ state: "pass", reviewSlug: "r" }); // => { ok: true }
  * @example
- * attestationExemptKindValid(true, undefined);  // => { ok: false, reason: "ATTESTATION_EXEMPT_KIND_INVALID", field: "attestation-exempt-kind" }
- * @example
- * attestationExemptKindValid(true, "bogus");    // => { ok: false, reason: "ATTESTATION_EXEMPT_KIND_INVALID", field: "attestation-exempt-kind" }
- * @example
- * attestationExemptKindValid(false, undefined); // => { ok: true } — not exempt, not applicable
+ * milestoneReviewCurrent({ state: "absent" }); // => { ok: false, reason: "MILESTONE_REVIEW_MISSING", field: "milestone-review" }
  */
-export function attestationExemptKindValid(
-  exempt: boolean,
-  kind: string | undefined,
-): PredicateResult {
-  if (exempt !== true) {
-    return { ok: true };
+export function milestoneReviewCurrent(currency: Exclude<MilestoneReviewCurrency, { state: "no-tasks" }>): PredicateResult {
+  switch (currency.state) {
+    case "pass":
+    case "accepted":
+      return { ok: true };
+    case "absent":
+      return { ok: false, reason: MILESTONE_REVIEW_MISSING_REASON, field: MILESTONE_REVIEW_FIELD, rule: MILESTONE_REVIEW_RULE };
+    case "stale":
+      return { ok: false, reason: MILESTONE_REVIEW_STALE_REASON, field: MILESTONE_REVIEW_FIELD, rule: MILESTONE_REVIEW_RULE };
+    case "failed":
+      return { ok: false, reason: MILESTONE_REVIEW_FAILED_REASON, field: MILESTONE_REVIEW_FIELD, rule: MILESTONE_REVIEW_RULE };
+    default: {
+      const unreachable: never = currency;
+      return unreachable;
+    }
   }
-  if (!attestationExemptKindSchema.safeParse(kind).success) {
-    return { ok: false, reason: ATTESTATION_EXEMPT_KIND_INVALID_REASON, field: ATTESTATION_EXEMPT_KIND_FIELD };
-  }
-  return { ok: true };
-}
-
-/** `citedRuleStateClean`'s single machine-readable failure reason. */
-export const CITED_RULE_STATE_REASON = "CITED_RULE_REFUTED";
-
-/**
- * The `PredicateResult.field` value `citedRuleStateClean`'s failure carries (BR-984) — the SHORT
- * suffix (mirrors `ATTESTATION_FLOOR_FIELD`): `GateEnforcer.enforce` composes the caller-facing
- * `LoreError.field` as `gate:plan-close:cited-rule-state`.
- */
-export const CITED_RULE_STATE_FIELD = "cited-rule-state";
-
-/** The two rule states BR-984 refuses a plan close on (`verified`/`unverified`/`unknown` never refuse). */
-export type RefusingRuleState = "contradicted" | "stale";
-
-/** One cited rule that makes the closing plan refuse — id plus the state word the message names. */
-export interface CitedRuleViolation {
-  readonly rule_id: string;
-  readonly state: RefusingRuleState;
-  /** The citing inputs behind `state`, exactly as `RuleStateService.full()` reported them (never re-derived here). */
-  readonly offences: readonly RuleOffence[];
-}
-
-/**
- * One cited rule whose state is `unknown` and whose reason does NOT refuse the close (BR-984): reported, never
- * silent. `git-unavailable` is never carried here, it refuses the close instead.
- */
-export interface CitedRuleUnknown {
-  readonly rule_id: string;
-  readonly reason: Exclude<UnknownReason, "git-unavailable">;
-}
-
-/**
- * `plan-close`'s rule-state predicate (BR-984; replaces the retired domain-document-edit proxy
- * `prdOutlineSynced`). Default-OFF behind `workflow.gates."plan-close".cited_rule_check.enabled` (resolved
- * by the CALLER). Pure: no store, no IO, no config. The CALLER (`CorpusService.set`) resolves the
- * rules the closing plan's spec criteria cite, reads their state through `RuleStateService.full()`,
- * and passes ONLY the offending ones here.
- *
- * @param violations - Cited rules whose state is `contradicted` (a citing criterion's latest attested
- *   run failed) or `stale` (BR-984: a citing spec's code changed after the latest attested pass, by ANY
- *   plan - not only the closing plan's specs). A later attested pass of the stale criterion makes the
- *   rule `verified`; a pass recorded by the closing plan clears only the criteria it covers.
- *   Empty = nothing to refuse.
- * @returns `{ok: true}` when `violations` is empty; otherwise `{ok: false, reason:
- *   "CITED_RULE_REFUTED", field: "cited-rule-state"}`.
- * @example
- * citedRuleStateClean([]);                                   // => { ok: true }
- * @example
- * citedRuleStateClean([{ rule_id: "BR-5", state: "stale", offences: [] }]); // => { ok: false, reason: "CITED_RULE_REFUTED", field: "cited-rule-state" }
- */
-export function citedRuleStateClean(violations: readonly CitedRuleViolation[]): PredicateResult {
-  if (violations.length === 0) return { ok: true };
-  return { ok: false, reason: CITED_RULE_STATE_REASON, field: CITED_RULE_STATE_FIELD };
-}
-
-/** `assessmentFreshness`'s single machine-readable failure reason. */
-export const ASSESSMENT_STALE_REASON = "ASSESSMENT_STALE";
-
-/** The `PredicateResult.field` value `assessmentFreshness`'s failure carries (SPEC-106). */
-export const ASSESSMENT_FRESHNESS_FIELD = "assessment-freshness";
-
-/**
- * `plan-close`'s assessment-freshness predicate (SPEC-106 §Design Decisions D1/D2/D5) —
- * a plan's stored `lore assess` judgment must not predate task activity that landed
- * AFTER it: an assessment that surfaced defects and triggered hardening work, where
- * that hardening then merges, leaves the corpus's permanent quality record describing
- * an intermediate state (the motivating incident, `knowledge-session-process-review-
- * 2026-07-28-grill-to-shipped` §V1). Opt-OUT, not opt-in (mirrors `attestationFloor`'s
- * shape one level up, `checkPlanClose` in `checkpoint-registry.ts`) — runs for every
- * closing plan unless `ctx.assessmentFreshnessExempt === true` (D4, flag + non-empty
- * reason — a bare flag alone is NOT exempt, same shape `attestation_exempt` uses).
- *
- * D2: staleness is measured against AUDIT rows (`evidence`/`done` actions on the
- * plan's tasks), never a doc's `updated_at` — the latter moves on cosmetic edits
- * (anchor adds, link writes, a bare status change) that carry no new outcome
- * information the assessment would need to re-judge (AC-FRESH-3). Both timestamps
- * are pre-resolved by the CALLER (`CorpusService.getAssessmentFreshness` — module
- * invariant: no store, no IO here) as ISO-8601 strings, compared lexicographically —
- * the SAME convention `getLatestUatVerdict`/`resolvePrdSyncWindowOpen` already use
- * for ISO-8601 ordering in this codebase.
- *
- * @param newestAssessmentAt - The plan's newest linked assessment doc's `created_at`,
- *   or `undefined` when NO assessment is linked at all.
- * @param newestTaskActivityAt - The newest `evidence`/`done` audit-row timestamp
- *   among the plan's tasks, or `undefined` when none of them carry any such row.
- * @returns `{ok: true}` when either input is `undefined` (D5 — a vacuous pass from
- *   missing data is never invented into a denial, AC-FRESH-2) OR
- *   `newestTaskActivityAt <= newestAssessmentAt`; `{ok: false, reason:
- *   "ASSESSMENT_STALE", field: "assessment-freshness"}` when task activity landed
- *   strictly AFTER the newest assessment.
- * @example
- * assessmentFreshness(undefined, "2026-07-28T12:00:00.000Z"); // => { ok: true } — no assessment yet
- * @example
- * assessmentFreshness("2026-07-28T11:52:00.000Z", undefined); // => { ok: true } — no task activity
- * @example
- * assessmentFreshness("2026-07-28T11:52:00.000Z", "2026-07-28T12:23:00.000Z");
- *   // => { ok: false, reason: "ASSESSMENT_STALE", field: "assessment-freshness" }
- * @example
- * assessmentFreshness("2026-07-28T12:23:00.000Z", "2026-07-28T11:52:00.000Z"); // => { ok: true }
- */
-export function assessmentFreshness(
-  newestAssessmentAt: string | undefined,
-  newestTaskActivityAt: string | undefined,
-): PredicateResult {
-  if (newestAssessmentAt === undefined || newestTaskActivityAt === undefined) {
-    return { ok: true };
-  }
-  if (newestTaskActivityAt > newestAssessmentAt) {
-    return { ok: false, reason: ASSESSMENT_STALE_REASON, field: ASSESSMENT_FRESHNESS_FIELD };
-  }
-  return { ok: true };
 }
 
 // ─── SPEC-143 C2 (R9) — the two-axis stamp currency types and `readStampVerdict` live in ───
@@ -1738,7 +1123,7 @@ export type { RadiusMeasurement };
  */
 export function resolveBlastRadiusPaths(command: string, fileAnchors: readonly string[]): string[] {
   const radius = new Set<string>();
-  for (const candidate of [...extractTestFileTokens(command), ...fileAnchors]) {
+  for (const candidate of [...extractTestFileTokens(command), ...fileAnchors.map(fileAnchorPath)]) {
     const path = candidate.trim();
     if (isValidRepoRelativePathspec(path)) radius.add(path);
   }

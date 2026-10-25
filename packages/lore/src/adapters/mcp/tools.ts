@@ -204,10 +204,10 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
 import { runWithAuditSurface } from "../../store/audit-surface.js";
 import { assertRegisteredToolsMatchNames, type LoreMcpToolName } from "./tool-names.js";
-import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
+import { McpCallScope, requireCallIdentity } from "./call-scope.js";
 import type { Invocation, LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
-import { renderAssessmentContent, CAPTURE_TAIL_CHARS } from "@lore/core";
+import { failedDimensions, CAPTURE_TAIL_CHARS } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import type { SetRulePatch } from "../../service/rule-service.js";
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
@@ -225,6 +225,7 @@ import {
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
+import { retirementAssessFields } from "../../service/retired-ac-service.js";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -248,7 +249,7 @@ import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/
 // `process.cwd()` — see `resolveMcpCorpusProvenance`'s own header below.
 import { checkForeignCorpusWrite, foreignCorpusWriteRefusalError } from "../../service/foreign-corpus-write-guard.js";
 import { resolveCorpus } from "../cli/corpus-resolution.js";
-import { OsUserLookupError } from "@lore/core/node";
+import { UnknownPartyError } from "@lore/core/node";
 // reason: SPEC-102 — resolveActorWithSource lives in @lore/core/node (node:os
 // only, no bun:sqlite) — safe to import here without breaking this file's
 // vitest-reachability (mirrors this module's own precedent of lazy-importing
@@ -264,9 +265,9 @@ import {
 import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from "../../flows/drift-flow.js";
 import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildFileAnchorProbeContext, buildRealFsProbe } from "../real-fs-probe.js";
-import { collectFileAnchorResolution } from "../../service/anchor-resolution.js";import { buildAssessSummaryText } from "./assess-render.js";
+import { collectFileAnchorResolution } from "../../service/anchor-resolution.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
-import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
+import { deriveCommitSetForPlan, describeCommitCount, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
 import { collectRecordedRanges } from "../../service/task-commit-range.js";
 import {
   findMissingOracleFilesForEvidence,
@@ -280,6 +281,7 @@ import {
 } from "../cli/evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../evidence-capture.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
+import { resolveBulkSelector } from "../../service/bulk-lifecycle-service.js";
 import { existsSync } from "node:fs";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -574,6 +576,8 @@ export const LoreApproveSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
   calibration_note: z.string().optional(),
+  /** Baseline node only (BR-1338): approve this one item (`BR-n`, `AS-n`, `AD-n`, or `node`); items not named are untouched. */
+  item: z.string().optional(),
 });
 
 /** Input schema for lore_reopen (spec-documents-are-living-or-records D5). `reason` is required and non-blank (service-enforced). */
@@ -581,6 +585,35 @@ export const LoreReopenSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
   reason: z.string(),
+});
+
+/**
+ * Input schema for lore_bulk: the MCP peer of `lore bulk` (BR-1366). `ids` XOR `where` selects (`where` is the CLI's
+ * `key=value,key=value` text; an id may be `slug@version` to pin the version a preview showed); `apply: false`
+ * (default) previews, `apply: true` writes one audited row each. `reason` is required to apply archive/deprecate/close.
+ */
+export const LoreBulkSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  verb: z.enum(["archive", "deprecate", "close", "done"]),
+  ids: z.array(z.string().min(1)).optional(),
+  where: z.string().optional(),
+  apply: z.boolean().default(false),
+  reason: z.string().optional(),
+});
+
+/** Input schema for lore_done: the MCP peer of `lore done` for a task, with the same two audited escape hatches. */
+export const LoreDoneSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  id_or_slug: z.string(),
+  override_attestation: z.string().optional().describe("Audited reason for archiving without a runner-attested pass"),
+  declare_no_new_tests: z.string().optional().describe("Audited reason for archiving a declared-scope task with no red evidence"),
+});
+
+/** Input schema for lore_reject: the MCP peer of `lore reject <id> [--reason]` (a draft or in-review document). */
+export const LoreRejectSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  id_or_slug: z.string(),
+  reason: z.string().optional(),
 });
 
 /**
@@ -595,6 +628,8 @@ export const LoreAcSupersedeSchema = z.object({
   by_spec: z.string(),
   by_ac: z.string(),
   reason: z.string(),
+  /** Plan slug that owns the retirement when the run claims tasks in several plans. */
+  plan: z.string().optional(),
 });
 
 /** Input schema for lore_context_bundle. */
@@ -805,20 +840,14 @@ export const LoreAnchorSetSchema = z.object({
 });
 
 /**
- * Input schema for lore_assess (SPEC-026).
- * `diff_text` — optional pre-acquired diff content, an explicit override (mirrors the
- * CLI's `--diff`/`--diff-file`). When OMITTED, `lore_assess` now auto-derives the plan's
- * own commit set from git history itself (`../cli/assess-commit-derivation.js`, same
- * mechanism the CLI uses via its own `process.cwd()`) instead of requiring the caller to
- * assemble a diff — task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be.
- * `ai` — explicit AI opt-in/out. Unlike lore_create's `ai` (default false — MCP callers are
- * always agents), assess has no non-AI mode (SPEC-026 §3 D5: the tool name IS the AI intent).
- * Passing `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
+ * Input schema for lore_assess (BR-1372): the milestone review of one plan.
+ * The plan's landed diff is derived from the commit range its tasks recorded (`../cli/assess-commit-derivation.js`),
+ * never supplied by the caller. `ai` — explicit AI opt-in/out: assess has no non-AI mode (SPEC-026 §3 D5), so
+ * `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
  */
 export const LoreAssessSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   plan_id_or_slug: z.string(),
-  diff_text: z.string().optional(),
   ai: z.boolean().optional(),
 });
 
@@ -826,9 +855,8 @@ export const LoreAssessSchema = z.object({
  * Input schema for lore_audit (SPEC-035 §2).
  * Query mode (default): `id_or_slug`/`actor`/`action`/`since`/`limit` map to
  * `AuditFilters` — all optional, combinable. Verify mode (`verify: true`): runs
- * the versions⋈audit completeness oracle instead; `since` overrides the
- * configured `audit.verify_since` watermark for this call only; the other query
- * filters are ignored in this mode.
+ * the versions⋈audit completeness oracle instead, over every version; `since` is
+ * refused in this mode (the cut-off is retired); the other query filters are ignored.
  */
 export const LoreAuditSchema = z.object({
   id_or_slug: z.string().optional(),
@@ -957,7 +985,7 @@ export const LoreInvalidateSchema = z.object({
 export const LoreHandoffSchema = handoffExtraSchema
   // reason: the trail-derived fields are computed by `SessionService.writeHandoff` from the call's session
   // trail (D16); a caller cannot name them, so they are not part of the tool's input.
-  .omit({ by: true, changed_files: true, changed_files_measured: true, trail_gaps: true })
+  .omit({ by: true, changed_files: true, changed_files_measured: true, changed_files_overflow: true, trail_gaps: true })
   .extend({
   harness_run: HARNESS_RUN_FIELD,
 });
@@ -1110,9 +1138,30 @@ export const LoreReportIssueSchema = z.object({
   description: z.string().min(1),
   expected: z.string().min(1),
   actual: z.string().min(1),
-  repro_command: z.string().optional(),
-  severity: z.enum(ISSUE_SEVERITIES).optional(),
-  category: z.string().min(1).max(ISSUE_CATEGORY_MAX_LENGTH).optional(),
+  repro_command: z
+    .string()
+    .optional()
+    .describe(
+      "One-line command that reproduces the issue — checked: one line, shell-lexable, program on PATH, a builtin, " +
+        "lore or an existing path. Use repro_steps for prose or several steps.",
+    ),
+  repro_steps: z.string().optional().describe("Multi-line reproduction steps, for what a one-line repro_command cannot hold."),
+  suggested_fix: z.string().optional().describe("Your proposed fix; keep `expected` to the behaviour."),
+  refs: z.array(z.string().min(1)).optional().describe("Specs, criteria, commits or issues this report relates to; one bullet each."),
+  // reason: kept `.optional()` in the shape although REQUIRED — a zod-required field would answer before BR-489's
+  // unconfigured-upstream remedy; the handler's refusal below is the enforcement (spec ...-a-checked-repro D7).
+  severity: z
+    .enum(ISSUE_SEVERITIES)
+    .optional()
+    .describe(`Required. Ordering-only severity label (${ISSUE_SEVERITIES.join(" | ")}); never changes whether a report is accepted.`),
+  category: z
+    .string()
+    .min(1)
+    .max(ISSUE_CATEGORY_MAX_LENGTH)
+    .optional()
+    .describe(
+      `Required. Ordering-only free-text category label, max ${ISSUE_CATEGORY_MAX_LENGTH} chars; never changes whether a report is accepted.`,
+    ),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1497,13 +1546,13 @@ function registerToolImpl<T>(
         if ("by" in shape && typeof rest["by"] === "string") resolved["by"] = rest["by"];
         else if (context.identity.claimed !== null) resolved["by"] = context.identity.claimed;
         else {
-          // reason: an unnamed call (OS user lookup failed, no other name) has no `by` to give. A tool that never reads
-          // `by` (a read) proceeds; one that needs an actor reads it and `McpCallScope.run` ends the call with the error.
+          // reason: a call with no `harness_run` has no known party and so no `by` to give. A tool that never reads
+          // `by` (a read) proceeds; one that needs an actor reads it and `McpCallScope.run` ends the call with the refusal.
           const { unresolvedReason } = context.identity;
           Object.defineProperty(resolved, "by", {
             enumerable: true,
             get: (): string => {
-              throw new OsUserLookupError(unresolvedReason);
+              throw new UnknownPartyError(unresolvedReason);
             },
           });
         }
@@ -2046,11 +2095,11 @@ export function registerTools(
   });
 
   // lore_approve
-  registerToolWithArgs(server, "lore_approve", "Approve a document, transitioning it from draft to approved", LoreApproveSchema, async (args) => {
+  registerToolWithArgs(server, "lore_approve", "Approve a document, transitioning it from draft to approved; on a baseline node it promotes the pending revisions a review saw (or the one `item`) to their approved version", LoreApproveSchema, async (args) => {
     // reason: the approver is the call's own identity (the attested run's name) — there is no `reviewer`
     // argument, so an approve is never recorded under the literal "system".
     const reviewer = args.by;
-    const result = await reviewService.approve(args.id_or_slug, { reviewer });
+    const result = await reviewService.approve(args.id_or_slug, { reviewer, ...(args.item !== undefined ? { item: args.item } : {}) });
     if (!result.ok) return errorContent(result.error);
 
     // reason: SPEC-033 F1 — MCP's lore_approve is an adjudication tool, same as CLI
@@ -2087,6 +2136,60 @@ export function registerTools(
     },
   );
 
+  // lore_bulk — the same BulkLifecycleService as `lore bulk`; same selector, preview/apply and per-row result (BR-1366).
+  registerToolWithArgs(
+    server,
+    "lore_bulk",
+    "Move many documents through one lifecycle verb (archive|deprecate|close|done): preview by default, apply:true writes one audited row each; a row that fails (stale version, gate refusal) fails alone",
+    LoreBulkSchema,
+    async (args) => {
+      const selector = resolveBulkSelector(args.ids, args.where);
+      if (!selector.ok) return errorContent(selector.error);
+      // reason: through the call scope like every other write tool, so the writes carry THIS call's attested identity.
+      const service = scope.service("bulkLifecycleService");
+      if (!args.apply) {
+        const preview = await service.preview(selector.value, args.verb);
+        if (!preview.ok) return errorContent(preview.error);
+        return textContent({ mode: "preview", verb: args.verb, rows: preview.value });
+      }
+      const applied = await service.apply(selector.value, args.verb, {
+        by: args.by,
+        ...(args.reason !== undefined ? { reason: args.reason } : {}),
+        source: "mcp",
+      });
+      if (!applied.ok) return errorContent(applied.error);
+      return textContent({ mode: "apply", verb: args.verb, rows: applied.value });
+    },
+  );
+
+  // lore_done — the same TaskWorkflowService.done as `lore done`; every floor applies, the two escapes are audited.
+  registerToolWithArgs(
+    server,
+    "lore_done",
+    "Archive a task through the evidence floors (runner-attested pass required unless override_attestation gives an audited reason)",
+    LoreDoneSchema,
+    async (args) => {
+      const result = await taskWorkflowService.done(args.id_or_slug, {
+        by: args.by,
+        source: "mcp",
+        ...(args.override_attestation !== undefined ? { overrideReason: args.override_attestation } : {}),
+        ...(args.declare_no_new_tests !== undefined ? { noNewTestsReason: args.declare_no_new_tests } : {}),
+      });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ doc: result.value.task, already_done: result.value.already_done, transitions: result.value.transitions });
+    },
+  );
+
+  // lore_reject — the same ReviewService.reject as `lore reject`.
+  registerToolWithArgs(server, "lore_reject", "Reject a draft or in-review document, recording the reason in the audit log", LoreRejectSchema, async (args) => {
+    const result = await reviewService.reject(args.id_or_slug, {
+      reviewer: args.by,
+      ...(args.reason !== undefined ? { reason: args.reason } : {}),
+    });
+    if (!result.ok) return errorContent(result.error);
+    return textContent({ doc: result.value });
+  });
+
   // lore_ac_supersede — the same service method as `lore ac supersede` (retires a criterion; never declares one).
   registerToolWithArgs(
     server,
@@ -2096,7 +2199,7 @@ export function registerTools(
     async (args) => {
       const result = await scope
         .service("acService")
-        .supersedeCriterion(args.spec, args.ac_id, { spec: args.by_spec, ac: args.by_ac }, args.reason, { by: args.by });
+        .supersedeCriterion(args.spec, args.ac_id, { spec: args.by_spec, ac: args.by_ac }, args.reason, { by: args.by, ...(args.plan !== undefined ? { plan: args.plan } : {}) });
       if (!result.ok) return errorContent(result.error);
       return textContent({ criteria: result.value });
     },
@@ -2128,11 +2231,11 @@ export function registerTools(
     // from the kind="get" row `corpusService.get` above already fired
     // (a different consumption pattern — the whole navigation bundle, not a
     // single doc read). A no-op when trace.enabled resolves false.
-    // reason: a trace row needs an actor; the server's identity has none when its OS user lookup failed. The trace is
+    // reason: a trace row needs an actor; the server's identity has none unless a known party started it. The trace is
     // advisory observability (fire-and-forget, SPEC-102), not a write the tool depends on, so the read proceeds and the
     // response says the trace was not recorded and why (never silent, never a guessed actor).
     const traceNotRecorded =
-      inv.identity.claimed === null ? `trace not recorded: OS user lookup failed: ${inv.identity.unresolvedReason}` : undefined;
+      inv.identity.claimed === null ? `trace not recorded: no known party: ${inv.identity.unresolvedReason}` : undefined;
     if (inv.identity.claimed !== null) app.traceRecorder?.recordContextBundle(inv.identity.claimed);
 
     return textContent({
@@ -2210,11 +2313,6 @@ export function registerTools(
       ...(args.machine !== undefined ? { machine: args.machine } : {}),
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
       ...(args.corpus_scope !== undefined ? { corpusScope: args.corpus_scope } : {}),
-      // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-      // AC-IDENTITY-REJECT — the real source of the name: the tier the server's own name
-      // chain resolved it from — so an OS-user fallback name is still the
-      // "os-fallback" tier `actorIdentityGuard` reacts to.
-      identitySource: actorSourceOfName(callIdentity.claimedSource),
       steal: args.steal === true,
       // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
       // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
@@ -2627,138 +2725,72 @@ export function registerTools(
     },
   );
 
-  // ── SPEC-026: AI plan-outcome assessment ──────────────────────────────────
+  // ── BR-1372: milestone review ─────────────────────────────────────────────
 
   // lore_assess
   registerToolWithArgs(
     server,
     "lore_assess",
-    "AI plan-outcome assessment (LLM-as-judge) — judges a plan's completion against its spec's ACs and its tasks' evidence trails, persisting an auditable knowledge doc linked to the plan",
+    "Milestone review of a plan: judges its landed diff, documents and attested evidence on seven dimensions (correctness_vs_acs, spec_conformance, regression, design_necessity, snapshot_accuracy, concurrency_safety, security), stores the review linked to the plan; plan close requires a passing review of the plan's current state",
     LoreAssessSchema,
     async (args) => {
-      const bundleResult = await corpusService.getPlanBundle(args.plan_id_or_slug);
-      if (!bundleResult.ok) return errorContent(bundleResult.error);
-      const bundle = bundleResult.value;
-
-      // AC-ASSESS-8: zero child tasks → VALIDATION_ERROR before any AI call.
-      if (bundle.tasks.length === 0) {
-        return errorContent({
-          code: "VALIDATION_ERROR",
-          field: "tasks",
-          message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
-        });
-      }
-
-      // reason: args.ai === false is a contradiction — assess has no non-AI mode
-      // (SPEC-026 §3 D5), mirroring the CLI's `--no-ai` → exit 2.
+      // reason: args.ai === false is a contradiction — assess has no non-AI mode (SPEC-026 §3 D5), mirroring the
+      // CLI's `--no-ai` → exit 2.
       if (args.ai === false) {
         return errorContent({
           code: "AI_PROVIDER_ERROR",
           message: "lore_assess requires AI; ai: false is a contradiction. Omit the field or pass ai: true.",
         });
       }
-
-      // SPEC-026 §3 D5: only an EXPLICIT config override braked (not the mcp surface's
-      // built-in AI-off default) requires the caller to pass ai: true.
+      // SPEC-026 §3 D5: only an EXPLICIT config override braked (not the mcp surface's built-in AI-off default)
+      // requires the caller to pass ai: true.
       const explicitAi = args.ai === true ? true : undefined;
-      const resolved = app.resolveAiDefault(explicitAi);
-      if (explicitAi === undefined && isAssessAiBraked(resolved)) {
+      if (explicitAi === undefined && isAssessAiBraked(app.resolveAiDefault(explicitAi))) {
         return errorContent({
           code: "AI_PROVIDER_ERROR",
           message: "AI is disabled for the mcp surface by config.ai.default_per_surface.mcp. Pass ai: true to override.",
         });
       }
-
-      // ─── Diff acquisition: explicit diff_text override, else auto-derive ──────
-      // reason: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be —
-      // mirrors the CLI's assess.ts: an explicit `diff_text` always wins (this MCP
-      // surface has no subprocess/file-read seam of its own, so an override still
-      // comes in as pre-acquired text); when omitted, derive the plan's own commit
-      // set from git history via the SAME shared mechanism the CLI uses, instead of
-      // requiring the caller to assemble a diff themselves.
-      let diffText: string | undefined = args.diff_text;
-      let diffSource: DiffSourceRecord;
-      // reason: the MCP server has no Invocation; its cwd is the one `assessPlan` verifies finding paths
-      // against (formerly `assessPlan`'s own `opts.repoRoot ?? process.cwd()` default). Read once here,
-      // reused by the derivation below, so this handler's cwd read count does not rise (AS-26 ratchet).
-      const assessRepoRoot = inv.cwd;
-      // reason: task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan —
-      // mirrors `commands/assess.ts`'s own `commitDerivationUnverifiable` local exactly:
-      // set ONLY by the auto-derived branch below when the derivation reports
-      // `"unverifiable_convention_mismatch"`; forwarded to `assessPlan` so the SERVICE
-      // layer (never this adapter) forbids `scope_fidelity` from publishing an
-      // absence-based score in that state. `false` on every OTHER path (explicit
-      // `diff_text` override, or a genuinely commit-less plan) is a deliberate value,
-      // never an omission — `assessPlan`'s `opts.commitDerivationUnverifiable` is a
-      // REQUIRED field precisely so this adapter cannot silently skip computing it the
-      // way it previously did.
-      let commitDerivationUnverifiable = false;
-      if (args.diff_text !== undefined) {
-        diffSource = { mode: "explicit_diff_text" };
-      } else {
-        // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task — every task
-        // already `archived` means merged work exists BY DEFINITION (VALID_TRANSITIONS,
-        // @lore/core); a zero-match derivation in that state is a commit-message
-        // CONVENTION MISMATCH, not genuine absence, so it must be told apart from a plan
-        // that plausibly has no merged work yet. Mirrors `commands/assess.ts` exactly —
-        // `deriveCommitSetForPlan`'s `allTasksArchived` parameter is REQUIRED (no default),
-        // so this computation cannot be omitted and still compile.
-        const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
-        const derivation = deriveCommitSetForPlan(
-          assessRepoRoot,
-          bundle.tasks.map((t) => t.slug),
-          allTasksArchived,
-          collectRecordedRanges(bundle.tasks),
-        );
-        diffSource = { mode: "auto_derived", ...derivation };
-        if (derivation.status === "derived") {
-          diffText = derivation.diff_text;
-        } else if (derivation.status === "unverifiable_convention_mismatch") {
-          commitDerivationUnverifiable = true;
-        }
+      const reviewService = app.milestoneReviewService;
+      if (reviewService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "milestoneReviewService is not wired on this App instance" });
       }
+      const bundleResult = await corpusService.getPlanBundle(args.plan_id_or_slug);
+      if (!bundleResult.ok) return errorContent(bundleResult.error);
+      const bundle = bundleResult.value;
+      // reason: same as the CLI: the owner's earlier answer is carried out and the one pending decision is raised
+      // BEFORE the review, so the review lists what is still retired.
+      const retirement = app.retiredAcService !== undefined ? await app.retiredAcService.settle(bundle) : undefined;
+      if (retirement !== undefined && !retirement.ok) return errorContent(retirement.error);
+      const { summary: _summary, ...retiredFields } = retirementAssessFields(retirement?.value);
 
-      // reason: D6 (spec-judgment-surfaces-must-verify-before-they-certify-machine,
-      // task-thread-diff-source-through-the-cli-and-mcp-assess-adapters) — `diffSource`
-      // (this handler's own already-computed `DiffSourceRecord` local, assigned on every
-      // branch above) is now threaded into `opts.diffSource` so `resolveAssessedCommit`/
-      // `verifyFindingPaths` (AC-JV-1, D2, D3) have a referent to check finding paths
-      // against — mirrors the CLI's `commands/assess.ts` fix exactly; the two adapters
-      // drift independently, so wiring one alone proves nothing about the other (AC-JV-5).
-      const assessResult = await app.aiProviderService.assessPlan(bundle, {
-        ...(diffText !== undefined ? { diffText } : {}),
-        source: app.callerSurface,
-        commitDerivationUnverifiable,
-        diffSource,
-        repoRoot: assessRepoRoot,
+      // reason: the MCP server has no Invocation; its cwd is the one the commit derivation runs git in. Read once.
+      const repoRoot = inv.cwd;
+      const derivation = deriveCommitSetForPlan(
+        repoRoot,
+        bundle.tasks.map((t) => t.slug),
+        bundle.tasks.length > 0 && bundle.tasks.every((t) => t.status === "archived"),
+        collectRecordedRanges(bundle.tasks),
+      );
+      const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
+      const reviewed = await reviewService.review(args.plan_id_or_slug, {
+        ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
+        diffSource:
+          derivation.status === "derived"
+            ? `derived from ${describeCommitCount(derivation.commits.length, derivation.excluded_merged_commit_count)} across the plan's tasks`
+            : `unavailable (${derivation.status})`,
+        maxDiffChars: app.aiProviderService.assessMaxDiffChars,
       });
-      if (!assessResult.ok) return errorContent(assessResult.error);
-
-      const createResult = await corpusService.create({
-        type: "knowledge",
-        title: `Assessment: ${bundle.plan.title} (${new Date().toISOString().slice(0, 10)})`,
-        parent_id: bundle.plan.id,
-        // reason: `diff_source` is additive on the passthrough `extra` object (never a
-        // core `assessmentResultSchema` change) — records HOW this run's diff (if any)
-        // was obtained, so `diff_available` alone is never the only auditable signal
-        // (AC #3, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be).
-        extra: { sub_type: "assessment", assessment: assessResult.value, diff_source: diffSource },
-        content: renderAssessmentContent(assessResult.value),
-      });
-      if (!createResult.ok) return errorContent(createResult.error);
-
-      const linkResult = await corpusService.link(createResult.value.id, bundle.plan.id, "informs");
-      if (!linkResult.ok) return errorContent(linkResult.error);
-
-      // reason: SPEC-040 §T3 D3 — `summary` is additive to the pre-existing
-      // `assessment`/`result` envelope fields (which already carry the full typed
-      // AssessmentResult verbatim); it gives an agent reading MCP text content a
-      // scannable digest without re-deriving one from the nested JSON.
+      if (!reviewed.ok) return errorContent(reviewed.error);
+      const { doc, review } = reviewed.value;
       return textContent({
-        assessment: createResult.value,
-        result: assessResult.value,
-        summary: buildAssessSummaryText(assessResult.value),
+        review: doc,
+        overall: review.overall,
+        failed_dimensions: failedDimensions(review.dimensions),
+        dimensions: review.dimensions,
+        decisions: review.decisions,
         diff_source: diffSource,
+        ...retiredFields,
       });
     },
   );
@@ -2775,7 +2807,14 @@ export function registerTools(
       if (args.verify === true) {
         // reason: the MCP server is long-lived, so the full-chain verdict runs off its loop (worker per persistent
         // store) and reads the anchor file — the same verdict `lore audit --verify` reports.
-        const result = await app.auditVerifyRunner.verify(args.since !== undefined ? { since: args.since } : undefined);
+        if (args.since !== undefined) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: "since",
+            message: "since is not accepted with verify: verification checks every version. History that predates the audit writers is recorded by `lore migrate audit-backfill --apply`.",
+          });
+        }
+        const result = await app.auditVerifyRunner.verify();
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }
@@ -3004,7 +3043,7 @@ export function registerTools(
             ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
             ...(args.by !== undefined ? { by: args.by } : {}),
           },
-          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user, io: inv.io },
+          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, identity: inv.identity, io: inv.io },
         );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
@@ -3403,9 +3442,13 @@ export function registerTools(
       // also normalizes vendor -> `{repo: VENDOR_INTAKE_REPO}`, so everything
       // below this line is unchanged and cannot drift from the CLI's own
       // policy (`commands/report-issue.ts` / `commands/issues.ts`).
-      const { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } = await import(
-        "../cli/report-issue-wiring.js"
-      );
+      const {
+        checkReproCommandForInvocation,
+        classifyFeedbackUpstream,
+        fileGithubIssue,
+        formatReproRefusal,
+        resolveConsumerCorpusRoot,
+      } = await import("../cli/report-issue-wiring.js");
       const classification = classifyFeedbackUpstream(getConfig?.());
 
       if (classification.kind === "unconfigured") {
@@ -3441,15 +3484,26 @@ export function registerTools(
           });
         }
 
+        // The repro command is checked here, in the input adapter, before the duplicate search, any GitHub call or
+        // receipt intent (spec-defect-reports-carry-their-own-context-a-checked-repro D4); PATH is the invocation's own.
+        if (args.repro_command !== undefined) {
+          const reproCheck = checkReproCommandForInvocation(args.repro_command, inv);
+          if (!reproCheck.ok) {
+            return errorContent({
+              code: "VALIDATION_ERROR",
+              field: "repro_command",
+              message: formatReproRefusal(reproCheck).replaceAll("--repro-command", "repro_command").replaceAll("--repro-steps", "repro_steps"),
+              value: args.repro_command,
+            });
+          }
+        }
+
         // The actor is the call identity's resolved name (no MCP caller names itself —
-        // BR-1055) and
-        // its source is that name's REAL source, mirroring how the CLI resolves its own
-        // `actorSource` before threading it through `GithubFilingContext.actor`.
+        // BR-1055), threaded through `GithubFilingContext.actor`.
         // This module does NO actor resolution of its own (report-issue-
         // wiring.ts's own header) — never build the actor from anything else here.
-        const callIdentity = requireCallIdentity(scope);
+        requireCallIdentity(scope);
         const actor = args.by;
-        const actorSource = actorSourceOfName(callIdentity.claimedSource);
 
         const fileResult = await fileGithubIssue(
           {
@@ -3458,6 +3512,9 @@ export function registerTools(
             expected: args.expected,
             actual: args.actual,
             ...(args.repro_command !== undefined ? { repro_command: args.repro_command } : {}),
+            ...(args.repro_steps !== undefined && args.repro_steps.trim().length > 0 ? { repro_steps: args.repro_steps } : {}),
+            ...(args.suggested_fix !== undefined && args.suggested_fix.trim().length > 0 ? { suggested_fix: args.suggested_fix } : {}),
+            ...(args.refs !== undefined && args.refs.length > 0 ? { refs: args.refs } : {}),
             severity: args.severity,
             category: args.category,
             // No `tags` field on THIS surface (LoreReportIssueSchema's own
@@ -3470,7 +3527,6 @@ export function registerTools(
             consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
             corpusService: app.corpusService,
             actor,
-            actorSource,
             home: inv.paths.home,
             env: inv.env,
           },

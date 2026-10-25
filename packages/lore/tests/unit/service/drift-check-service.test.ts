@@ -41,6 +41,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { DriftCheckService, type FsProbe } from "../../../src/service/drift-check-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { withExportReader } from "../../with-export-reader.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -120,11 +121,11 @@ describe("HAPPY — checkDrift over a consistent armed corpus", () => {
       extra: { code_anchors: ["src/a.ts#Foo", "src/dir/"] },
     });
 
-    const probe: FsProbe = {
+    const probe: FsProbe = withExportReader({
       stat: (path) => (path === "src/a.ts" ? "file" : path === "src/dir" ? "dir" : "missing"),
       readFile: (path) => (path === "src/a.ts" ? "export const Foo = 1;\n" : null),
       listDir: (path) => (path === "src/dir" ? ["x.ts"] : null),
-    };
+    });
 
     const result = await driftCheckService.checkDrift(probe);
     expect(result.ok).toBe(true);
@@ -292,32 +293,41 @@ describe("NEGATIVE — malformed grammar rejected, doc unchanged", () => {
   });
 });
 
-describe("NEGATIVE — task target rejects '#' entries, naming the spec grammar", () => {
-  it("TaskWorkflowService.addAnchors rejects an entry containing '#'", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+describe("task target accepts symbol-scoped anchors, refuses folder-symbol and malformed ones", () => {
+  async function makeTask() {
+    const { store, corpusService, taskWorkflowService } = makeServices();
     const prdId = await createPrd(corpusService);
     const specId = await createSpec(corpusService, prdId);
     const planId = await createPlan(corpusService, specId);
     const taskId = await createTask(corpusService, planId);
+    return { store, taskWorkflowService, taskId };
+  }
+
+  it("TaskWorkflowService.addAnchors accepts path#Symbol and stores the entry", async () => {
+    const { store, taskWorkflowService, taskId } = await makeTask();
 
     const result = await taskWorkflowService.addAnchors(taskId, ["src/a.ts#Foo"], { by: "tester" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code === "VALIDATION_ERROR") {
-      expect(result.error.message).toMatch(/SPEC-045/);
-    }
+    expect(result.ok).toBe(true);
+    const after = await store.find(taskId);
+    if (!after.ok || after.value === null) throw new Error("task re-fetch failed");
+    expect(after.value.extra["file_anchors"]).toContain("src/a.ts#Foo");
   });
 
-  it("TaskWorkflowService.setAnchors rejects an entry containing '#'", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const prdId = await createPrd(corpusService);
-    const specId = await createSpec(corpusService, prdId);
-    const planId = await createPlan(corpusService, specId);
-    const taskId = await createTask(corpusService, planId);
+  it("TaskWorkflowService.setAnchors refuses a folder anchor naming a symbol", async () => {
+    const { taskWorkflowService, taskId } = await makeTask();
 
     const result = await taskWorkflowService.setAnchors(taskId, ["src/dir/#Foo"], { by: "tester" });
     expect(result.ok).toBe(false);
+  });
+
+  it("TaskWorkflowService.addAnchors refuses a malformed symbol name, naming the anchor", async () => {
+    const { taskWorkflowService, taskId } = await makeTask();
+
+    const result = await taskWorkflowService.addAnchors(taskId, ["src/a.ts#9bad"], { by: "tester" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code === "VALIDATION_ERROR") expect(result.error.message).toContain("src/a.ts#9bad");
   });
 });
 
@@ -594,11 +604,11 @@ describe("AC-DR-8 — checkDrift is read-only over an armed, DRIFTING corpus", (
     });
     const countingDriftCheckService = new DriftCheckService(countingStore);
 
-    const probe: FsProbe = {
+    const probe: FsProbe = withExportReader({
       stat: (path) => (path === "src/dir" ? "dir" : path === "src/a.ts" ? "file" : "missing"),
       readFile: (path) => (path === "src/a.ts" ? "export const Present = 1;\n" : null),
       listDir: (path) => (path === "src/dir" ? [] : null),
-    };
+    });
 
     const result = await countingDriftCheckService.checkDrift(probe);
     expect(result.ok).toBe(true);

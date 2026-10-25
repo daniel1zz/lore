@@ -2,6 +2,10 @@
  * lore migrate <action> — corpus migration commands.
  *
  * Actions:
+ *   schema [--dry-run] The ONLY command that upgrades the corpus to the binary's schema (every other command refuses an
+ *                      older corpus, exit 4). Per-migration transactions; one `migrate_schema` audit row (actor, working
+ *                      copy, from, to, duration). `--dry-run` lists the pending migrations; a second run writes nothing.
+ *                      Logic in `../migrate-schema.ts`.
  *   v1 --from <path>   Import a DocMan v1 corpus.
  *   phases [--dry-run] Promote legacy singular plan.extra.phase → extra.legacy_phase
  *                      across all plan rows in a single sweep. Idempotent. (SPEC-023 §4 AC-PHASE-10)
@@ -34,6 +38,18 @@
  *                      (memory-file limits are always enforced) and list the memory-file findings a person must fix.
  *                      Preview is the DEFAULT; `--apply` removes only that setting's line (every other byte identical);
  *                      a second run changes nothing. Never loads the config through the app (it repairs that file).
+ *   audit-backfill [--apply] Retire the audit completeness cut-off (`audit.verify_since`): record every version
+ *                      that predates the audit writers and has no audit entry as ONE hash-chained `audit-backfill`
+ *                      entry marked reconstructed (naming the version, the reason and this run), then remove the
+ *                      setting from .lore/config.yaml. Preview is the DEFAULT; a second `--apply` writes nothing.
+ *                      Never loads the config through the app (it repairs that file).
+ *   fragments --scope user|project [--apply] Rewrite old-format context-fragment frontmatter (audience / mode /
+ *                      delivery) to `inject` (+ `agents`). `--scope` is required (exit 2 without it); `user` needs no
+ *                      corpus, `project` needs a lore project root. Preview is the DEFAULT and prints one line per file
+ *                      (`<path>: <old> -> <new>`, `unchanged`, `refused: <reason>`); `--apply` rewrites only frontmatter
+ *                      lines with a per-file hash precondition. Exit 5 if any file changed concurrently, else 4 if any
+ *                      was refused, else 0. Bypasses `loadLoreApp` (no corpus DB). Logic in
+ *                      `../../../flows/migrate-fragments-flow.ts`. (spec-fragment-injection-timing, BR-1376)
  *   plan-outline-exempt [--apply] Remove the legacy outline-sync exemption (`extra.prd_sync_exempt`) from
  *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
@@ -52,21 +68,26 @@ import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.
 import { resolveCorpus } from "../corpus-resolution.js";
 import { migrateConfigKeys, migrateMemoryLimits } from "@lore/core/node";
 import { listMemoryFileFindings } from "../memory-limits-migration.js";
+import { runAuditBackfillMigration } from "../audit-backfill-migration.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { runMigrateSchema } from "../migrate-schema.js";
+import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 
 export default defineLoreCommand({
   meta: {
     name: "migrate",
-    description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), or `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes)",
+    description: "Corpus migration: schema (upgrade the corpus), v1 import and one-off sweeps; see `lore migrate --help`",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits",
+      description:
+        "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill | fragments" + "\n" +
+        "Fragments: `fragments --scope user|project [--apply]` (rewrite old audience/mode/delivery fragment frontmatter to `inject`; preview by default, `--apply` writes; exit 5 concurrent change, 4 refused file). " +
+        "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes), or `audit-backfill` (record pre-writer versions as reconstructed audit entries and remove the retired audit cut-off; preview by default, `--apply` writes)",
       required: true,
     },
     from: {
@@ -79,7 +100,11 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits, audit-backfill, fragments] Execute the migration (default is dry-run/preview-only)",
+    },
+    scope: {
+      type: "string",
+      description: "[fragments only] Layer to migrate: user | project (required)",
     },
     revert: {
       type: "boolean",
@@ -102,6 +127,24 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    if (args.version === "schema") {
+      // reason: the ONE command that upgrades a corpus schema; it bypasses `loadLoreApp` (which refuses the older corpus).
+      return runMigrateSchema(inv, { dryRun: args["dry-run"] === true, json: args.json === true });
+    }
+    if (args.version === "fragments") {
+      // reason: bypasses `loadLoreApp` — fragments are plain files; the user layer needs no corpus at all.
+      const scope = args.scope;
+      if (scope !== "user" && scope !== "project") {
+        inv.io.stderr.write("Error: `migrate fragments` requires --scope user|project.\n");
+        return 2;
+      }
+      const projectRoot = findLoreProjectRoot(inv.cwd);
+      if (scope === "project" && projectRoot === null) {
+        inv.io.stderr.write("Error: `migrate fragments --scope project` needs a lore project root (no .lore/ found above the current directory).\n");
+        return 4;
+      }
+      return (await runFragmentsMigration(inv, { scopes: [scope], projectRoot, apply: args.apply === true })).code;
+    }
     if (
       args.version !== "v1" &&
       args.version !== "phases" &&
@@ -112,12 +155,75 @@ export default defineLoreCommand({
       args.version !== "spec-parents" &&
       args.version !== "plan-outline-exempt" &&
       args.version !== "config-keys" &&
-      args.version !== "memory-limits"
+      args.version !== "memory-limits" &&
+      args.version !== "audit-backfill"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys, memory-limits.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys, memory-limits, audit-backfill.\n`,
       );
       exitCli(2);
+    }
+
+    // ── audit-backfill action ─────────────────────────────────────────────
+    // reason: like config-keys, deliberately does NOT go through `loadLoreApp`: every other command refuses the config
+    // this action repairs (the retired `audit.verify_since`), so it resolves the corpus location only and opens the
+    // store itself (`runAuditBackfillMigration`).
+    if (args.version === "audit-backfill") {
+      const dbPath = findLoreDbPath(inv.io, inv);
+      const apply = args.apply === true;
+      if (apply && resolveCorpus(inv.io, inv.cwd, inv.env)?.provenance !== "own") {
+        const refusal = {
+          code: "VALIDATION_ERROR" as const,
+          field: "gate:corpus-write:foreign-provenance",
+          message: "`migrate audit-backfill --apply` writes the audit trail and config of the checkout that owns the corpus; this checkout reaches it through another one. Run it there.",
+        };
+        inv.io.stderr.write(formatErrorFor(inv, refusal) + "\n");
+        return exitCode(refusal);
+      }
+      const result = await runAuditBackfillMigration({ inv, dbPath, apply });
+      if (!result.ok) {
+        if (args.json) {
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+        } else {
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        }
+        return exitCode(result.error);
+      }
+      const { file, found, configWritten, backfill } = result.value;
+      const count = backfill.reconstructed.length;
+      if (args.json) {
+        printLine(
+          inv.io.stdout,
+          JSON.stringify(
+            { ok: true, data: { applied: apply, file, found, config_written: configWritten, boundary: backfill.boundary, boundary_source: backfill.boundarySource, run: backfill.run, reconstructed: backfill.reconstructed } },
+            null,
+            2,
+          ),
+        );
+        return 0;
+      }
+      printLine(inv.io.stdout, apply ? "Audit backfill complete" : "Audit backfill (preview)");
+      printLine(inv.io.stdout, "─".repeat(40));
+      printLine(
+        inv.io.stdout,
+        found
+          ? `${file}: audit.verify_since (retired; its value is not read) ${configWritten ? "removed" : "would be removed"}`
+          : `${file}: no audit.verify_since setting`,
+      );
+      printLine(
+        inv.io.stdout,
+        backfill.boundary === null
+          ? `Boundary: none (${backfill.boundarySource}: the audit trail is empty, so no version can be shown to predate the audit writers).`
+          : `Boundary: ${backfill.boundary} (${backfill.boundarySource}). The first entry that names a version: earlier entries cannot be joined to one. Versions recorded before it without an audit entry predate the audit writers.`,
+      );
+      printLine(
+        inv.io.stdout,
+        apply
+          ? `${count} version(s) recorded as reconstructed (run ${backfill.run}).`
+          : `${count} version(s) would be recorded as reconstructed.`,
+      );
+      if (!apply && (found || count > 0)) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+      return 0;
     }
 
     // ── config-keys action ────────────────────────────────────────────────

@@ -73,10 +73,6 @@
           {
             "type": "command",
             "command": "node <CLAUDE_DIR>/hooks/stop-turn-review.mjs"
-          },
-          {
-            "type": "command",
-            "command": "node <CLAUDE_DIR>/hooks/stop-handoff-coverage.mjs"
           }
         ]
       }

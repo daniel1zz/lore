@@ -3,10 +3,10 @@ id: KN-047
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-042 Implementation — session registry + file-anchor claim safety (2026-07-11)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-11
-updated: 2026-07-14
+updated: 2026-10-23
 tags: []
 parent: PLAN-026
 links:

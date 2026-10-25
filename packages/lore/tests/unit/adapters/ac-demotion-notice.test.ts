@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * AC-GV-4 (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2) —
  * `lore ac add`/`lore ac set` PRINT the approved->draft demotion `commands/ac.ts:50`
@@ -26,7 +27,8 @@
  * `demotion-blast-radius` token this task's oracle command filters on):
  *   HAPPY:      `ac set` on an approved spec with 2 non-terminal descendant tasks
  *               (under a child plan) prints BOTH the demotion AND "2" on stderr,
- *               keeps exit 0, and the demotion text is absent from stdout.
+ *               keeps exit 0; stdout carries only the one-line demotion
+ *               announcement (D18), never the blast-radius count.
  *   BOUNDARY:   the SAME set-demotion with ZERO child plans/tasks prints the
  *               demotion line with an explicit "0" — the count is never omitted
  *               just because it's zero (project convention: an omitted count is
@@ -225,9 +227,11 @@ describe("demotion-blast-radius — ac add/set print the approved-to-draft demot
       expect(result.stderr).toMatch(/approved/i);
       expect(result.stderr).toMatch(/draft/i);
       expect(result.stderr).toMatch(/\b2\b/);
-      // CHANNEL assertion, not just "the text appears somewhere" — stdout must
-      // stay clean of the advisory (mirrors approve-advisory-render.test.ts).
-      expect(result.stdout).not.toMatch(/draft/i);
+      // D18 (spec-defect-clusters-round-2-part-c-criterion-data-demotion): the demotion is ALSO announced on
+      // stdout as one line, so a caller reading only stdout learns the spec left `approved`. The blast-radius
+      // advisory stays on stderr only.
+      expect(result.stdout).toContain(`${specSlug} was approved and is now draft (v`);
+      expect(result.stdout).not.toMatch(/descendant task claim/i);
       expect(getStatus(tmpDir, specSlug)).toBe("draft");
     },
   );

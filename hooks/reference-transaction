@@ -1,27 +1,44 @@
 #!/bin/sh
-# Main-ref guard (spec-main-advances-only-through-lore-integrate-per-session, BR-1246/BR-1247).
-# refs/heads/main moves ONLY through `lore integrate`, whose compare-and-swap runs with LORE_INTEGRATE=1 in its
-# environment. Every other move of main -- `git update-ref refs/heads/main ...`, a commit made while branch main is
-# checked out, `git pull`/`git merge` on main, `git branch -f main` -- is refused here, in the `prepared` state, which
-# aborts the whole ref transaction ("fatal: ref updates aborted by hook").
-# Needs git >= 2.28 (the reference-transaction hook); `lore setup --project` refuses older git and names its version.
-# Named limit: the marker is recognised, not authenticated. Any same-user process that sets LORE_INTEGRATE=1 passes
-# this hook, so it stops accidents, not deliberate forgery.
+# Main-ref guard (spec-no-working-copy-can-check-out-main-the-main-ref-guard, BR-1342/BR-1343/BR-1273/BR-1247;
+# parent design spec-main-advances-only-through-lore-integrate-per-session).
+# Two refusals, both in the `prepared` state, which aborts the whole ref transaction ("fatal: ref updates aborted by hook"):
+#   1. refs/heads/main moves ONLY through `lore integrate`, whose compare-and-swap runs with LORE_INTEGRATE=1 in its
+#      environment. Every other move of main -- `git update-ref refs/heads/main ...`, a commit made while branch main is
+#      checked out, `git pull`/`git merge` on main, `git branch -f main` -- is refused.
+#   2. No working copy may point HEAD at branch main: `git checkout main`, `git switch main`, `git checkout -B main`,
+#      `git symbolic-ref HEAD refs/heads/main` and `git worktree add <path> main` each reach this hook as a symref update
+#      whose new value is `ref:refs/heads/main`. Work on your own branch, or read main detached.
+# Needs git >= 2.46 (the first git that passes symref updates to this hook); `lore setup --project` refuses older git and
+# names its version, and `lore integrate` refuses to run without this exact hook installed.
+# Named limits: the marker is recognised, not authenticated (any same-user process that sets LORE_INTEGRATE=1 passes this
+# hook, so it stops accidents, not deliberate forgery); `git worktree add <path> main` runs this hook from the main
+# working tree, so it cannot tell which working copy is targeted and the shared checkout gets no exception.
 # Not refused: creating main where it did not exist (an empty repository's first commit), rows where old == new
-# (git emits them for `git reset`), every ref other than refs/heads/main.
+# (git emits them for `git reset`), every ref other than refs/heads/main, detached checkouts of main.
 # Bypass (a human, deliberately): LORE_INTEGRATE=1 git <command>.
 state="$1"
 refused=""
+attached=""
 # stdin must always be drained: git writes one "<old> <new> <ref>" row per ref in the transaction.
 while read -r old new ref; do
-  [ "$ref" = "refs/heads/main" ] || continue
   [ "$old" = "$new" ] && continue
+  if [ "$new" = "ref:refs/heads/main" ]; then
+    attached="$ref"
+    continue
+  fi
+  [ "$ref" = "refs/heads/main" ] || continue
   case "$old" in *[!0]*) ;; *) continue ;; esac # all zeros: main is being created, not moved
   refused="$old -> $new"
 done
 [ "$state" = "prepared" ] || exit 0
-[ -n "$refused" ] || exit 0
+[ -n "$refused" ] || [ -n "$attached" ] || exit 0
 [ "${LORE_INTEGRATE:-}" = "1" ] && exit 0
-echo "lore: refs/heads/main may only move through 'lore integrate <branch>' (refused: $refused)." >&2
-echo "lore: work on your own branch in your own worktree, then run 'lore integrate <branch>'." >&2
+if [ -n "$attached" ]; then
+  echo "lore: no working copy may check out branch main (refused: $attached -> refs/heads/main)." >&2
+  echo "lore: read main detached: 'git checkout --detach main' or 'git worktree add --detach <path> main'; work on your own branch." >&2
+fi
+if [ -n "$refused" ]; then
+  echo "lore: refs/heads/main may only move through 'lore integrate <branch>' (refused: $refused)." >&2
+  echo "lore: work on your own branch in your own worktree, then run 'lore integrate <branch>'." >&2
+fi
 exit 1

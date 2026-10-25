@@ -8,9 +8,17 @@
  * Landing record: after the CAS moved main, `deps.landings.record` writes `extra.landing` ({branch, branch_head,
  *   main_before, main_after, landing_commit}) on every task whose claim recorded the branch, so a task's commit range
  *   is a fact of its landing and a later re-claim cannot replace it (task-commit-range.ts). Never fails the landing.
- * Public surface: IntegrateService.integrate, LandingRecorder, IntegrateOutcome, integrateExitCode, IntegrateRequest,
+ * Own-diff judgment (spec-a-branch-s-own-diff-is-judged-at-integrate-the-turn-end): before the integration worktree exists,
+ *   `deps.ownDiff.judge(branch, tip)` judges the branch's own change (`git diff <merge-base(main, tip)> <tip>`) against its
+ *   tasks and the other live claims; a refusal is `err(VALIDATION_ERROR, field "own-diff")`, exit 4, naming BR-1346/1347/1348,
+ *   with nothing touched. A pass hands `outside_anchors` (own-change paths no task of the branch anchors) to the landing record.
+ * Landing bookkeeping (spec-landing-does-the-bookkeeping-claims-start-from-main-parked), after main moved and the landing
+ *   is recorded, never un-landing main and never failing the call: `deps.anchors.follow` rewrites the spec and knowledge
+ *   anchors of the files the branch renamed (BR-1355), then `deps.completion.complete` runs the done walk for every task
+ *   of the branch (BR-1356); each refusal is printed with its floor id and the command that satisfies it.
+ * Public surface: IntegrateService.integrate, LandingRecorder, AnchorFollower, LandingCompleter, TaskCompletion, OwnDiffJudge, IntegrateOutcome, integrateExitCode, IntegrateRequest,
  *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
- *   integrationWorktreePath.
+ *   integrationWorktreePath, SchemaMigration, runSchemaMigration, describeSchemaMigration.
  * Invariants:
  *   - Main moves ONLY by the CAS of an attempt whose merge passed the floor; every other outcome leaves main
  *     untouched and the integration worktree reset to the main it saw (nothing half-done: a conflict aborts the merge
@@ -32,21 +40,38 @@
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
  *   ledger's files, creation of one worktree directory, the lease).
  *
- * Before anything moves (after the request is validated, before the integration worktree exists):
- *   - a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched first and is
- *     merged with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged;
- *   - ANY worktree other than the shared checkout that has `refs/heads/main` checked out is refused (E3: a ref moving
- *     under a checked-out branch stages the inverse diff in that tree);
- *   - a shared checkout still on branch main is detached at main (`git checkout --detach main`: same commit, so edits
- *     and untracked files stay byte-identical); one that cannot be (merge/rebase/cherry-pick/revert in progress) is
- *     refused naming it. Both refusals are `err(VALIDATION_ERROR, field "worktree")`, exit 4.
- * The reference-transaction hook that refuses every other move of main ships as assets/project/reference-transaction
- * and is installed by `lore setup --project`; it recognises INTEGRATE_MARKER_ENV on the CAS.
+ * Before anything moves (after the request's own fields are validated, before the first git side effect: the
+ * remote-tracking fetch, the integration worktree and every merge):
+ *   - the main-ref guard must be in force (spec-no-working-copy-can-check-out-main-the-main-ref-guard, BR-1343): the
+ *     `reference-transaction` hook in the ACTIVE hooks directory (`git rev-parse --git-path hooks`, so `core.hooksPath`
+ *     is honoured) is byte-identical to the shipped asset (sha256 against EMBEDDED_ASSETS_MANIFEST) and executable, and
+ *     git is >= 2.46 (read through `deps.readGitVersion`, default `git --version`). Otherwise
+ *     `err(VALIDATION_ERROR, field "main-ref-guard")`, exit 4, naming `lore setup --project` or the version. This
+ *     replaces the old per-run scan for worktrees on main and the shared-checkout detach: the hook makes a checkout of
+ *     main impossible, so there is nothing left to scan or detach;
+ * Then a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched and is merged
+ * with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged.
+ * The reference-transaction hook ships as assets/project/reference-transaction and is installed by `lore setup
+ * --project` (which also detaches every working copy that has main checked out); it recognises INTEGRATE_MARKER_ENV on
+ * the CAS, and the marker is set ONLY on that CAS `update-ref`.
  *
  * The floor's corpus (INT-T12): just before the floor runs, `deps.corpus.take` writes a consistent snapshot (VACUUM INTO)
- * of the shared corpus into `<integration worktree>/.lore/`, so a branch whose binary needs a newer schema migrates the
- * snapshot instead of tripping the foreign-schema guard on the live corpus; `remove` deletes it right after the floor.
- * One line `integrate: floor runs against a corpus snapshot taken <iso ts>` is logged per attempt.
+ * of the shared corpus into `<integration worktree>/.lore/`; `remove` deletes it right after the floor. One line
+ * `integrate: floor runs against a corpus snapshot taken <iso ts>` is logged per attempt. Since 5f0259a1 NO command
+ * upgrades a corpus implicitly (an older corpus is refused, exit 4; only `lore migrate schema` upgrades), so the snapshot
+ * is never migrated by merely opening it. Two explicit steps run the project's `workflow.integrate.migrate_command` (the
+ * BRANCH binary's `lore migrate schema`, `--json` appended; see `runSchemaMigration`):
+ *   - `IntegrateService.landOn`, right after `corpus.take` and before the floor, runs it in the integration worktree, so it
+ *     migrates the SNAPSHOT (cwd owns `.lore/lore.db`) and never the live corpus. A failure ends the attempt as outcome
+ *     `snapshot_migrate_failed` (exit 1): the snapshot is removed, the worktree reset, main untouched, the output names the
+ *     snapshot directory and carries the migrate output;
+ *   - `IntegrateService.migrateLiveCorpus`, after the CAS, the landing record, the shared-view refresh and the
+ *     post-refresh rebuild (so the binary it runs is main's), runs the same command once in the shared checkout under the
+ *     integration lease and reports `schema: <from> -> <to>` or `schema: already current`. Only when the view was
+ *     `refreshed` and the rebuild did not fail (otherwise the binary is not main's: `skipped`, naming the command to rerun).
+ *     A failure is outcome field `schema.state = failed` (exit 1): it names the corpus and the exact command to rerun,
+ *     and never un-lands main. `already_integrated` runs it too (idempotent), so a re-run after a failed migrate repairs.
+ * Unset `migrate_command` = both steps are skipped and reported as such, never silently.
  *
  * After the shared view is `refreshed` (INT-T11), `workflow.integrate.post_refresh_command` (this repo: `bun run
  * build`) runs in the shared checkout so its build artifacts (dist/lore, which ~/.local/bin/lore links to) match main.
@@ -60,12 +85,17 @@
  *
  * Source: spec-main-advances-only-through-lore-integrate-per-session AC-INT-1, AC-INT-2, BR-1245, BR-1246.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
+import { z } from "zod";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
-import type { LandingFact } from "./task-commit-range.js";
+import type { BoundProseRow, OwnDiffRename, OwnDiffVerdict } from "./own-diff-judgment.js";
+import type { LandingFact, LandingRequest } from "./task-commit-range.js";
+import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
+import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
 export const INTEGRATE_MAX_ATTEMPTS = 3;
@@ -79,6 +109,9 @@ export const INTEGRATE_MARKER_ENV = "LORE_INTEGRATE";
 /** The branch integrations land on. */
 const TARGET_REF = "refs/heads/main";
 const TARGET_NAME = "main";
+/** The guard hook: its filename in the hooks directory, and its path in the embedded asset manifest. */
+const MAIN_REF_HOOK_NAME = "reference-transaction";
+const MAIN_REF_HOOK_ASSET_PATH = "project/reference-transaction";
 
 /** How much of a failing floor's output the outcome carries: sized so the failed steps' re-printed blocks (run-chain prints them last, up to 2500 chars each) always fit. */
 export const FLOOR_TAIL_CHARS = 12000;
@@ -145,7 +178,57 @@ export interface IntegrationLease {
  * written. Wired by the CLI to `TaskWorkflowService.recordLanding` (the corpus write route); a failure never un-lands main.
  */
 export interface LandingRecorder {
-  readonly record: (landing: LandingFact) => Promise<Result<readonly string[], LoreError>>;
+  readonly record: (landing: LandingRequest) => Promise<Result<readonly string[], LoreError>>;
+}
+
+/**
+ * Rewrites the code anchors of spec and knowledge docs that name a file the landed branch renamed (BR-1355). Resolves
+ * to the slugs of the documents rewritten. Wired by the CLI to `DriftCheckService.followMovedFiles`; a failure never
+ * un-lands main.
+ */
+export interface AnchorFollower {
+  readonly follow: (moves: readonly OwnDiffRename[], landing: { readonly branch: string; readonly landing_commit: string }) => Promise<Result<readonly string[], LoreError>>;
+}
+
+/** What the done walk did for one task of a landed branch: archived, or refused (with the floor that refused, when it was one). */
+export type TaskCompletion =
+  | { readonly task: string; readonly outcome: "archived" }
+  | { readonly task: string; readonly outcome: "refused"; readonly floor?: string; readonly message: string };
+
+/**
+ * Runs the done walk for each of `tasks` (BR-1356). Wired by the CLI to `TaskWorkflowService.done`; one completion per
+ * task, in order; a refusal is a value, never a throw, and never touches main.
+ */
+export interface LandingCompleter {
+  readonly complete: (tasks: readonly string[]) => Promise<readonly TaskCompletion[]>;
+}
+
+/**
+ * Starts the post-landing review batch (BR-1379, AC-PCR-3). Wired by the CLI to `ReviewTriggerService.start`: it computes
+ * the trigger set from stored plan progress and, when non-empty and no review batch holds the lease, spawns ONE detached
+ * batch and returns at once. A failure is a WARNING line, never a failed landing; the landing carries no review time.
+ */
+export interface ReviewBatchStarter {
+  readonly start: () => Promise<Result<{ readonly state: "empty" | "lease-live" | "started"; readonly triggered?: number; readonly pid?: number | undefined }, LoreError>>;
+}
+
+/** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348, BR-1355); `OwnDiffJudgment` implements it. Reads, never writes. */
+export interface OwnDiffJudge {
+  readonly judge: (branch: string, tip: string) => Promise<Result<OwnDiffVerdict, LoreError>>;
+}
+
+/** What the own-diff judgment hands the landing: the footprint to record and the renames anchors must follow. */
+interface JudgedChange {
+  readonly footprint: Pick<LandingFact, "outside_anchors">;
+  readonly renames: readonly OwnDiffRename[];
+}
+
+/** One output line per changed file with bound prose: `integrate: prose bound to <path>: <document[:line]> (<reference>), ...`. */
+function renderBoundProseLines(rows: readonly BoundProseRow[]): string[] {
+  return rows.map((row) => {
+    const bindings = row.bindings.map((b) => `${b.line === undefined ? b.document : `${b.document}:${b.line}`} (${b.reference})`);
+    return `integrate: prose bound to ${row.path}: ${bindings.join(", ")}`;
+  });
 }
 
 export interface IntegrateDeps {
@@ -156,12 +239,25 @@ export interface IntegrateDeps {
   readonly pid?: number;
   /** Landing records (`extra.landing` on the branch's tasks). Absent in a bare construction: nothing is recorded. */
   readonly landings?: LandingRecorder;
+  /** Anchors follow renamed files after the landing (BR-1355). Absent in a bare construction: none are rewritten. */
+  readonly anchors?: AnchorFollower;
+  /** The done walk after the landing (BR-1356). Absent in a bare construction: no task is archived by the landing. */
+  readonly completion?: LandingCompleter;
+  /** Starts the detached review batch after a landing (BR-1379). Absent in a bare construction: no batch is started. */
+  readonly reviewBatch?: ReviewBatchStarter;
+  /** The own-diff judgment run before the floor. Absent in a bare construction: the branch is not judged. */
+  readonly ownDiff?: OwnDiffJudge;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
   readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
   readonly ledger: IntegrateLossLedger;
   /** Per-attempt phase durations, kept per branch and NOT cleared on landing (see integrate-attempt-ledger.ts). */
   readonly attempts: IntegrateAttemptLedger;
+  /**
+   * The installed git's `git --version` line (default: `git --version` run through `deps.git` in `projectRoot`);
+   * injected so a test can report an old git without a second git on the machine.
+   */
+  readonly readGitVersion?: () => string;
   /** Wall clock in epoch milliseconds (default `Date.now`); injected so tests assert exact durations. */
   readonly clock?: () => number;
   /** The main checkout's root: the repo whose refs main lives in (git commands run here). */
@@ -181,9 +277,32 @@ export interface IntegrateRequest {
   readonly floorCommand: string | undefined;
   /** `workflow.integrate.post_refresh_command`; `undefined` = not configured (the rebuild is reported skipped). */
   readonly postRefreshCommand?: string | undefined;
+  /** `workflow.integrate.migrate_command`: the branch binary's `lore migrate schema` (see the file header); `undefined` = not configured (both migrate steps are reported skipped). */
+  readonly migrateCommand?: string | undefined;
+  /**
+   * The CALLER's attested run: the party the migrate child of both migrate steps runs as (`--harness-run <run>` is appended
+   * to `migrate_command`), so its `migrate_schema` audit row names the caller and the child is not refused as a run-less
+   * write. Required whenever `migrateCommand` is set; absent (or not a plain run id) then = integrate is refused before
+   * anything moves.
+   */
+  readonly harnessRun?: string | undefined;
   /** Merge commit message; default `merge(<branch>): <tip subject>`. */
   readonly message?: string;
 }
+
+/**
+ * Result of one `lore migrate schema` run (the integrate steps of the file header): `migrated` (from -> to), `current`
+ * (already at `version`), `failed` (exit status + output tail, the `corpus` it was run against and the exact `command`
+ * to rerun), `skipped` (`reason`).
+ */
+export type SchemaMigration =
+  | { readonly state: "migrated"; readonly from: number; readonly to: number }
+  | { readonly state: "current"; readonly version: number }
+  | { readonly state: "failed"; readonly exit_status: number; readonly output_tail: string; readonly corpus: string; readonly command: string }
+  | { readonly state: "skipped"; readonly reason: string };
+
+/** The `--json` report of `lore migrate schema` (src/adapters/cli/migrate-schema.ts): the only fields read. */
+const MigrateSchemaReportSchema = z.object({ ok: z.literal(true), data: z.object({ upgraded: z.boolean(), from: z.number().int(), to: z.number().int() }) });
 
 /**
  * What happened to the shared checkout's read-only view of main after main moved (INT-T6): `refreshed` = it now sits at
@@ -205,8 +324,9 @@ export type SharedViewRebuild =
   | { readonly state: "skipped"; readonly reason: string };
 
 export type IntegrateOutcome =
-  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
-  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
+  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
+  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
+  | { readonly kind: "snapshot_migrate_failed"; readonly branch: string; readonly attempts: number; readonly snapshot: string; readonly exit_status: number; readonly output_tail: string; readonly command: string }
   | { readonly kind: "floor_failed"; readonly branch: string; readonly attempts: number; readonly exit_status: number; readonly output_tail: string }
   | { readonly kind: "conflict"; readonly branch: string; readonly paths: readonly string[] }
   | { readonly kind: "busy"; readonly branch: string; readonly worktree: string; readonly holder: LeaseHolder | undefined }
@@ -225,8 +345,10 @@ export function integrateExitCode(outcome: IntegrateOutcome): number {
   switch (outcome.kind) {
     case "landed":
     case "already_integrated":
-      return 0;
+      // a failed live migrate leaves main landed but the corpus behind: loud (exit 1), and the re-run is an idempotent repair
+      return outcome.schema.state === "failed" ? 1 : 0;
     case "floor_failed":
+    case "snapshot_migrate_failed":
       return 1;
     case "conflict":
       return 4;
@@ -282,7 +404,7 @@ export class IntegrateService {
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
     if (request.sessionId.trim() === "") {
-      return err({ code: "VALIDATION_ERROR", field: "session", message: "lore integrate needs the caller's session id: pass --session <id> or set CLAUDE_CODE_SESSION_ID" });
+      return err({ code: "VALIDATION_ERROR", field: "session", message: "lore integrate needs the caller's session id: pass --session <id> or set CLAUDE_CODE_SESSION_ID", rule: "BR-1272" });
     }
     if (request.floorCommand === undefined || request.floorCommand.trim() === "") {
       return err({
@@ -290,16 +412,35 @@ export class IntegrateService {
         field: "workflow.integrate.floor_command",
         message:
           "workflow.integrate.floor_command is not set in .lore/config.yaml (or the file failed to parse): lore integrate will not advance main on a tree whose floor was never named",
+        rule: "BR-1272",
       });
     }
+    const migrating = request.migrateCommand !== undefined && request.migrateCommand.trim() !== "";
+    if (migrating && !isChildRunId(request.harnessRun)) {
+      // reason: the migrate child is a write made by the caller's party; with no attested run to hand it, it would be refused
+      // mid-integration (after the snapshot). Refused here instead, before any git side effect, with nothing changed.
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "identity",
+        message:
+          "lore integrate runs workflow.integrate.migrate_command as the caller's party, and this invocation has no attested agent run " +
+          "(or its run id is not a plain run id) to hand it: nothing was integrated. Run it from an agent run the integration registered (`lore setup`).",
+      });
+    }
+    // reason: first of every git side effect. BR-1273 refuses "before anything moves, with nothing changed", and a fetch
+    // moves refs/remotes/*; the guard check only reads, so a refused run leaves every ref as it found it.
+    const guarded = this.requireMainRefGuard();
+    if (!guarded.ok) return guarded;
     const fetched = this.fetchRemoteTracking(request.branch);
     if (!fetched.ok) return fetched;
     const tipResult = this.resolveCommit(request.branch);
     if (!tipResult.ok) return tipResult;
     const tip = tipResult.value;
 
-    const prepared = this.prepareSharedCheckout();
-    if (!prepared.ok) return prepared;
+    // reason: BR-1346/BR-1347/BR-1348 — judged once, before anything is touched (no worktree, no lease): a refusal leaves
+    // main and every working tree byte-unchanged. An already-integrated branch has no own change to judge.
+    const footprint = await this.judgeOwnDiff(request.branch, tip);
+    if (!footprint.ok) return footprint;
 
     const worktree = this.ensureWorktree(request.sessionId);
     if (!worktree.ok) return worktree;
@@ -312,14 +453,22 @@ export class IntegrateService {
     if (!granted.ok) return granted;
     if (granted.value.kind === "busy") return ok({ kind: "busy", branch: request.branch, worktree: wt, holder: granted.value.holder });
     try {
-      return await this.landOn(request, request.floorCommand, tip, wt);
+      return await this.landOn(request, request.floorCommand, tip, wt, footprint.value);
     } finally {
+      /** @lore-site BR-1312 */
       granted.value.release();
     }
   }
 
   /** The attempt loop, run while this process holds the integration worktree's lease. */
-  private async landOn(request: IntegrateRequest, floorCommand: string, tip: string, wt: string): Promise<Result<IntegrateOutcome, LoreError>> {
+  private async landOn(
+    request: IntegrateRequest,
+    floorCommand: string,
+    tip: string,
+    wt: string,
+    judged: JudgedChange,
+  ): Promise<Result<IntegrateOutcome, LoreError>> {
+    const footprint = judged.footprint;
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
     const remoteOfBranch = this.remoteOf(request.branch);
@@ -333,10 +482,18 @@ export class IntegrateService {
       const base = this.resolveCommit(TARGET_REF);
       if (!base.ok) return base;
       if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
+        // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
+        // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
+        // and the branch head itself is the landed commit: it is an ancestor of main.
+        // reason: BR-1336 — nothing reconstructs a landing from main's history: the branch head is the landed commit and
+        // the recorder takes the range start from each task's own claim base (`base_from_claim`).
+        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip, base_from_claim: true });
+        await this.completeLanding(claimants, [], { branch: request.branch, landing_commit: tip });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
-        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
+        const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
+        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
       }
       log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
       const attemptStart = clock();
@@ -361,7 +518,25 @@ export class IntegrateService {
       const snapshotMs = clock() - snapshotStart;
       if (!snapshot.ok) return snapshot;
       log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
+      if (request.migrateCommand !== undefined && request.migrateCommand.trim() !== "") {
+        // reason: since 5f0259a1 opening an older corpus refuses; the branch binary must upgrade the SNAPSHOT explicitly (cwd = the
+        // integration worktree, whose own .lore/lore.db is the snapshot) before the floor opens it. Never run against the live corpus.
+        const snapshotDir = join(wt, ".lore");
+        const migrated = runSchemaMigration(this.deps.runFloor, request.migrateCommand, wt, snapshotDir, request.harnessRun);
+        if (migrated.state === "failed") {
+          const dropped = this.deps.corpus.remove(wt);
+          if (!dropped.ok) return dropped;
+          const back = this.resetWorktree(wt, base.value);
+          if (!back.ok) return back;
+          finish({ outcome: "snapshot_migrate_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: null, cas_ms: null });
+          return ok({ kind: "snapshot_migrate_failed", branch: request.branch, attempts: attempt, snapshot: snapshotDir, exit_status: migrated.exit_status, output_tail: migrated.output_tail, command: migrated.command });
+        }
+        log(`integrate: snapshot ${describeSchemaMigration(migrated)}`);
+      } else {
+        log("integrate: snapshot migrate skipped (workflow.integrate.migrate_command is not set)");
+      }
       const floorStart = clock();
+      /** @lore-site BR-1275 */
       const floor = this.deps.runFloor(floorCommand, wt);
       const floorTotalMs = clock() - floorStart;
       const floorTimings = {
@@ -386,11 +561,17 @@ export class IntegrateService {
       const casMs = clock() - casStart;
       if (swapped.status === 0) {
         finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge });
+        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint });
+        await this.completeLanding(claimants, judged.renames, { branch: request.branch, landing_commit: merge });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
+        const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
+        const schema = this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun);
+        // reason: BR-1379 — last step, after the rebuild and the schema migration, so the detached batch runs main's binary
+        // against the migrated corpus. It only reads progress and spawns; the landing never waits for a review.
+        await this.startReviewBatch();
+        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema });
       }
 
       const now = this.resolveCommit(TARGET_REF);
@@ -413,19 +594,89 @@ export class IntegrateService {
   }
 
   /**
-   * Records the landing on the branch's tasks. Never fails the integration (main has already moved): a task that
-   * could not be written is logged loudly, so the missing record is visible and `lore done` backfills it from the
-   * `merge(<branch>)` commit.
+   * Judges the branch's own change (BR-1346, BR-1347, BR-1348) before anything is touched. Skipped, with an empty
+   * footprint, when no judgment is wired (a bare construction, like `landings`) or the tip is already on main (nothing
+   * to land: the re-run only records landings).
+   *
+   * @returns the landed footprint to record, or the refusal (VALIDATION_ERROR on field `own-diff`, exit 4).
    */
-  private async recordLanding(landing: LandingFact): Promise<void> {
+  private async judgeOwnDiff(branch: string, tip: string): Promise<Result<JudgedChange, LoreError>> {
+    const judgment = this.deps.ownDiff;
+    if (judgment === undefined) return ok({ footprint: {}, renames: [] });
+    const main = this.resolveCommit(TARGET_REF);
+    if (!main.ok) return main;
+    const onMain = this.deps.git(this.deps.projectRoot, ["merge-base", "--is-ancestor", tip, main.value]);
+    if (onMain.status === 0) return ok({ footprint: {}, renames: [] });
+    if (onMain.status !== 1) return err(gitFailure(`is ${short(tip)} on ${TARGET_NAME}`, onMain));
+    const verdict = await judgment.judge(branch, tip);
+    if (!verdict.ok) return verdict;
+    for (const line of renderBoundProseLines(verdict.value.bound_prose)) this.deps.log(line);
+    return ok({ footprint: { outside_anchors: [...verdict.value.outside_anchors] }, renames: verdict.value.renames });
+  }
+
+  /**
+   * Records the landing on the branch's tasks. Never fails the integration (main has already moved): a task that
+   * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
+   * `not-landed` until `lore integrate` is run again on the branch (BR-1336).
+   */
+  private async recordLanding(landing: LandingRequest): Promise<readonly string[]> {
     const recorder = this.deps.landings;
-    if (recorder === undefined) return;
+    if (recorder === undefined) return [];
     const written = await recorder.record(landing);
     if (!written.ok) {
       this.deps.log(`integrate: WARNING: the landing of ${landing.branch} was not recorded on its tasks: ${written.error.code}${"message" in written.error ? ` ${written.error.message}` : ""}`);
-      return;
+      return [];
     }
     this.deps.log(`integrate: landing of ${landing.branch} recorded on ${written.value.length === 0 ? "no task (none claimed this branch)" : written.value.join(", ")}`);
+    return written.value;
+  }
+
+  /**
+   * The bookkeeping that follows a recorded landing, in this order, never un-landing main and never failing the call
+   * (main has already moved): (1) BR-1355 anchors follow the renamed files; (2) BR-1356 the done walk for every task of
+   * the branch. A refused task is printed with the floor that refused and the command its refusal names; a failure to
+   * run a step is a loud WARNING line.
+   */
+  private async completeLanding(
+    tasks: readonly string[],
+    moves: readonly OwnDiffRename[],
+    landing: { readonly branch: string; readonly landing_commit: string },
+  ): Promise<void> {
+    const { anchors, completion, log } = this.deps;
+    if (anchors !== undefined && moves.length > 0) {
+      const followed = await anchors.follow(moves, landing);
+      if (!followed.ok) {
+        log(`integrate: WARNING: anchors did not follow the files ${landing.branch} moved: ${followed.error.code}${"message" in followed.error ? ` ${followed.error.message}` : ""}`);
+      } else {
+        log(`integrate: anchors followed ${moves.map((m) => `${m.from} -> ${m.to}`).join(", ")} on ${followed.value.length === 0 ? "no document" : followed.value.join(", ")}`);
+      }
+    }
+    if (completion === undefined || tasks.length === 0) return;
+    for (const done of await completion.complete(tasks)) {
+      if (done.outcome === "archived") {
+        log(`integrate: ${done.task} archived by the landing (every done floor is met)`);
+        continue;
+      }
+      log(`integrate: ${done.task} stays unarchived${done.floor !== undefined ? ` [floor: ${done.floor}]` : ""}; main stays landed. ${done.message}`);
+    }
+  }
+
+  /**
+   * After a landing: computes the review trigger set and starts one detached batch when it is non-empty and no lease is
+   * live (BR-1379). Never fails the integration and never waits: the outcome is one line.
+   */
+  private async startReviewBatch(): Promise<void> {
+    const starter = this.deps.reviewBatch;
+    if (starter === undefined) return;
+    const started = await starter.start();
+    if (!started.ok) {
+      this.deps.log(`integrate: WARNING: the review batch was not started: ${started.error.code}${"message" in started.error ? ` ${started.error.message}` : ""}`);
+      return;
+    }
+    const outcome = started.value;
+    if (outcome.state === "empty") this.deps.log("integrate: review batch: no plan needs review");
+    else if (outcome.state === "lease-live") this.deps.log(`integrate: review batch: ${String(outcome.triggered)} plan(s) need review; a batch already holds the lease`);
+    else this.deps.log(`integrate: review batch started for ${String(outcome.triggered)} plan(s)${outcome.pid !== undefined ? ` (pid ${String(outcome.pid)})` : ""}; the landing does not wait for it`);
   }
 
   /**
@@ -446,7 +697,9 @@ export class IntegrateService {
     const slash = rev.indexOf("/");
     if (slash <= 0) return ok(undefined);
     const candidate = rev.slice(0, slash);
+    /** @lore-site BR-1277 */
     const remotes = this.deps.git(this.deps.projectRoot, ["remote"]);
+    /** @lore-site BR-1290 */
     if (remotes.status !== 0) return err(gitFailure("git remote", remotes));
     return ok(remotes.stdout.split("\n").map((r) => r.trim()).includes(candidate) ? candidate : undefined);
   }
@@ -458,56 +711,39 @@ export class IntegrateService {
     const remote = found.value;
     if (remote === undefined) return ok(undefined);
     this.deps.log(`integrate: fetching ${remote}`);
+    /** @lore-site BR-1277 */
     const out = this.deps.git(this.deps.projectRoot, ["fetch", "-q", remote]);
     return out.status === 0 ? ok(undefined) : err(gitFailure(`git fetch ${remote}`, out));
   }
 
   /**
-   * Refuses a repository where a ref move would stage a reverse diff in a checked-out tree, and detaches the shared
-   * checkout when it is still on branch main (E3, E5; the ADR's Installation and migration).
+   * Refuses to run unless the main-ref guard is in force: git >= 2.46 and the shipped `reference-transaction` hook,
+   * byte for byte and executable, in the active hooks directory. Reads only; nothing is changed on refusal.
    */
-  private prepareSharedCheckout(): Result<void, LoreError> {
+  private requireMainRefGuard(): Result<void, LoreError> {
     const { git, projectRoot } = this.deps;
-    const listed = git(projectRoot, ["worktree", "list", "--porcelain"]);
-    if (listed.status !== 0) return err(gitFailure("git worktree list", listed));
-    const shared = realpathSync(projectRoot);
-    const isShared = (p: string): boolean => p === shared || (existsSync(p) && realpathSync(p) === shared);
-    const onMain: string[] = [];
-    for (const block of listed.stdout.split("\n\n")) {
-      const lines = block.split("\n");
-      const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
-      if (path !== undefined && lines.includes(`branch ${TARGET_REF}`)) onMain.push(path);
+    const refuse = (message: string, value?: string): Result<void, LoreError> =>
+      err({ code: "VALIDATION_ERROR", field: "main-ref-guard", message: `integrate: ${message} Nothing was changed`, ...(value === undefined ? {} : { value }) });
+    const { major, minor } = MIN_GIT_FOR_MAIN_REF_HOOK;
+    const versionLine = this.deps.readGitVersion !== undefined ? this.deps.readGitVersion() : git(projectRoot, ["--version"]).stdout;
+    const version = parseGitVersion(versionLine);
+    if (version === undefined) {
+      return refuse(`cannot read the git version (got ${JSON.stringify(versionLine.trim())}), so the main-ref guard cannot be proven to work; it needs git >= ${major}.${minor}. ${GIT_UPGRADE_HINT}`);
     }
-    const others = onMain.filter((p) => !isShared(p));
-    if (others.length > 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "worktree",
-        message: `integrate: ${others.join(", ")} has ${TARGET_NAME} checked out; moving ${TARGET_NAME} under a checked-out branch stages a reverse diff there. Detach it (git -C <path> checkout --detach ${TARGET_NAME}) or switch it to another branch, then re-run. Nothing was changed`,
-        value: others.join(", "),
-      });
+    if (version.major < major || (version.major === major && version.minor < minor)) {
+      return refuse(`${version.raw} is older than git ${major}.${minor}, the first git that reports 'git checkout main' to the reference-transaction hook. ${GIT_UPGRADE_HINT} Then run 'lore setup --project'.`, version.raw);
     }
-    if (!onMain.some(isShared)) return ok(undefined);
-
-    const inProgress = this.operationInProgress(shared);
-    if (inProgress !== undefined) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "worktree",
-        message: `integrate: the shared checkout ${shared} is on branch ${TARGET_NAME} with a ${inProgress} in progress and cannot be detached; finish or abort it (git -C ${shared} ${inProgress} --abort), then re-run. Nothing was changed`,
-        value: shared,
-      });
+    const located = git(projectRoot, ["rev-parse", "--path-format=absolute", "--git-path", "hooks"]);
+    if (located.status !== 0) return err(gitFailure("locating the hooks directory", located));
+    const installed = join(located.stdout.trim(), MAIN_REF_HOOK_NAME);
+    if (!existsSync(installed)) return refuse(`the main-ref guard is not installed: ${installed} does not exist. Run 'lore setup --project' to install it.`, installed);
+    const expected = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === MAIN_REF_HOOK_ASSET_PATH);
+    if (expected === undefined) return err({ code: "STORE_ERROR", message: `integrate: the embedded asset manifest has no ${MAIN_REF_HOOK_ASSET_PATH} (a build defect)` });
+    const actual = createHash("sha256").update(readFileSync(installed)).digest("hex");
+    if (actual !== expected.sha256) {
+      return refuse(`the main-ref guard at ${installed} differs from the one this lore ships (sha256 ${actual.slice(0, 12)} vs ${expected.sha256.slice(0, 12)}). Run 'lore setup --project' to refresh it.`, installed);
     }
-    const detached = git(shared, ["checkout", "-q", "--detach", TARGET_NAME]);
-    if (detached.status !== 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "worktree",
-        message: `integrate: the shared checkout ${shared} is on branch ${TARGET_NAME} and could not be detached (git exit ${detached.status}): ${(detached.stderr || detached.stdout).trim()}. Nothing was changed`,
-        value: shared,
-      });
-    }
-    this.deps.log(`integrate: detached the shared checkout ${shared} at ${TARGET_NAME} (its edits are untouched)`);
+    if ((statSync(installed).mode & 0o111) === 0) return refuse(`the main-ref guard at ${installed} is not executable, so git skips it. Run 'lore setup --project' to repair it.`, installed);
     return ok(undefined);
   }
 
@@ -544,6 +780,21 @@ export class IntegrateService {
   }
 
   /**
+   * Upgrades the LIVE corpus once, after the landing's refresh and rebuild, by running `migrate_command` in the shared
+   * checkout (which owns the corpus). Never fails the integration and never un-lands main: every non-migration is
+   * reported (`skipped` with its reason, `failed` with the corpus and the exact command to rerun). Runs only when the
+   * binary the command resolves is main's: the view was `refreshed` and the rebuild did not fail.
+   */
+  private migrateLiveCorpus(view: SharedViewRefresh, rebuild: SharedViewRebuild, command: string | undefined, harnessRun: string | undefined): SchemaMigration {
+    if (command === undefined || command.trim() === "") return { state: "skipped", reason: "workflow.integrate.migrate_command is not set" };
+    const { projectRoot, runFloor, log } = this.deps;
+    if (view.state !== "refreshed") return { state: "skipped", reason: `the shared checkout view is ${view.state}, so its binary is not main's; run \`${command}\` in ${projectRoot} once it is` };
+    if (rebuild.state === "rebuild_failed") return { state: "skipped", reason: `the shared checkout rebuild failed, so its binary is not main's; rebuild, then run \`${command}\` in ${projectRoot}` };
+    log(`integrate: migrating the live corpus in ${projectRoot}: ${command}`);
+    return runSchemaMigration(runFloor, command, projectRoot, join(projectRoot, ".lore"), harnessRun);
+  }
+
+  /**
    * Runs the project's post-refresh command in the shared checkout when its view is `refreshed`. Never fails the
    * integration: every non-rebuild is reported. A build that leaves tracked changes is reported with the paths.
    */
@@ -569,6 +820,7 @@ export class IntegrateService {
       ["REVERT_HEAD", "revert"],
     ];
     for (const [name, label] of states) {
+      /** @lore-site BR-1273 */
       const located = this.deps.git(checkout, ["rev-parse", "--path-format=absolute", "--git-path", name]);
       if (located.status === 0 && existsSync(located.stdout.trim())) return label;
     }
@@ -577,9 +829,10 @@ export class IntegrateService {
 
   /** `rev` as a full commit sha, or a refusal naming the rev. */
   private resolveCommit(rev: string): Result<string, LoreError> {
+    /** @lore-site BR-1272 */
     const out = this.deps.git(this.deps.projectRoot, ["rev-parse", "--verify", "-q", `${rev}^{commit}`]);
     if (out.status !== 0 || out.stdout.trim() === "") {
-      return err({ code: "VALIDATION_ERROR", field: "branch", message: `integrate: ${rev} does not name a commit in this repository`, value: rev });
+      return err({ code: "VALIDATION_ERROR", field: "branch", message: `integrate: ${rev} does not name a commit in this repository`, value: rev, rule: "BR-1272" });
     }
     return ok(out.stdout.trim());
   }
@@ -600,7 +853,7 @@ export class IntegrateService {
     const canonical = onDisk ? realpathSync(path) : path;
     if (onDisk) {
       if (known.some((k) => k === path || k === canonical)) return ok(path);
-      return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id` });
+      return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id`, rule: "BR-1278" });
     }
     // registered-but-deleted (a cleaned-up directory): drop the stale registration before adding again
     if (known.includes(path)) git(projectRoot, ["worktree", "prune"]);
@@ -620,6 +873,7 @@ export class IntegrateService {
 
   /** A merge that exited non-zero: unmerged paths mean a conflict (abort + reset, exit 4); anything else is an error. */
   private afterFailedMerge(branch: string, wt: string, base: string, merged: GitOutcome): Result<IntegrateOutcome, LoreError> {
+    /** @lore-site BR-1246 */
     const unmerged = this.deps.git(wt, ["diff", "--name-only", "--diff-filter=U"]);
     const paths = unmerged.stdout.split("\n").map((p) => p.trim()).filter((p) => p !== "");
     const reset = this.resetWorktree(wt, base);
@@ -630,9 +884,62 @@ export class IntegrateService {
 
   /** `<sha12> <subject>` of each first-parent commit that took main from `base` to `now`. */
   private describeMoves(base: string, now: string): string[] {
+    /** @lore-site BR-1245 */
     const out = this.deps.git(this.deps.projectRoot, ["log", "--first-parent", "--format=%H %s", `${base}..${now}`]);
     const lines = out.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
     if (out.status !== 0 || lines.length === 0) return [`${short(now)} (main is not a descendant of ${short(base)})`];
     return lines.reverse().map((l) => `${short(l.slice(0, 40))}${l.slice(40)}`);
+  }
+}
+
+/**
+ * Runs `<command> --json --harness-run <run>` in `cwd` through the injected runner and reads the report. The child is a write
+ * made by the caller's party, so it carries the caller's attested run (see {@link IntegrateRequest.harnessRun}); a run that is
+ * not a plain run id is `failed` without spawning anything. A non-zero exit, or an exit 0
+ * whose output carries no readable `--json` report (a migrate whose result cannot be named must not read as success),
+ * is `failed`.
+ *
+ * @param runner - the injected shell runner (the floor runner)
+ * @param command - `workflow.integrate.migrate_command`, the full `lore migrate schema` command line
+ * @param cwd - the directory whose corpus is migrated (the integration worktree for the snapshot, the shared checkout for the live corpus)
+ * @param corpus - the `.lore/` directory the run is expected to touch, named in a failure
+ * @param harnessRun - the caller's attested run, appended as `--harness-run <run>`
+ */
+export function runSchemaMigration(runner: FloorRunner, command: string, cwd: string, corpus: string, harnessRun: string | undefined): SchemaMigration {
+  if (!isChildRunId(harnessRun)) {
+    return { state: "failed", exit_status: 0, output_tail: "the migrate child has no attested caller run to run as; nothing was spawned", corpus, command: `${command} --json` };
+  }
+  const full = `${command} --json --harness-run ${harnessRun}`;
+  const ran = runner(full, cwd);
+  const tail = ran.output.slice(-FLOOR_TAIL_CHARS);
+  if (ran.status !== 0) return { state: "failed", exit_status: ran.status, output_tail: tail, corpus, command: full };
+  const block = /\{\s*"ok"[\s\S]*\}\s*$/.exec(ran.output);
+  let report: z.infer<typeof MigrateSchemaReportSchema> | undefined;
+  try {
+    const parsed = block === null ? undefined : MigrateSchemaReportSchema.safeParse(JSON.parse(block[0]));
+    report = parsed?.success === true ? parsed.data : undefined;
+  } catch {
+    report = undefined; // reason: unreadable output is returned as a failed migration below, never swallowed
+  }
+  if (report === undefined) return { state: "failed", exit_status: 0, output_tail: `exited 0 but printed no readable --json report:\n${tail}`, corpus, command: full };
+  return report.data.upgraded ? { state: "migrated", from: report.data.from, to: report.data.to } : { state: "current", version: report.data.to };
+}
+
+/** A run id safe to put on a shell command line: the registry's `cc:<session>[:<agent>]` / `human:<hash>` shapes, never a free string. */
+function isChildRunId(run: string | undefined): run is string {
+  return run !== undefined && /^[A-Za-z0-9][A-Za-z0-9:._-]*$/.test(run);
+}
+
+/** One line for a migration result: `schema: <from> -> <to>`, `schema: already current`, or the skip/failure in words. */
+export function describeSchemaMigration(migration: SchemaMigration): string {
+  switch (migration.state) {
+    case "migrated":
+      return `schema: ${migration.from} -> ${migration.to}`;
+    case "current":
+      return "schema: already current";
+    case "skipped":
+      return `schema: skipped (${migration.reason})`;
+    case "failed":
+      return `schema: migrate failed (exit ${migration.exit_status}) on ${migration.corpus}`;
   }
 }

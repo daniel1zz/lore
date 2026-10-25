@@ -74,6 +74,9 @@ async function addLeafB(world: World): Promise<DocRecord> {
   if (!node.ok) throw new Error(`leaf-b failed: ${JSON.stringify(node.error)}`);
   const rule = await world.rules.addRule(node.value.slug, { statement: "A live rule on leaf B", confidence: "established", enforced_by: "both", examples: ["x"] }, { by: "test" });
   if (!rule.ok || rule.value.ruleId !== "BR-2") throw new Error(`seed BR-2 failed: ${JSON.stringify(rule)}`);
+  // a direct add is a pending add: BR-2 is live (retirable, citable) only once its leaf's revision is approved
+  const approved = await world.review.approve(node.value.slug, { reviewer: "test" });
+  if (!approved.ok) throw new Error(`approving BR-2 failed: ${JSON.stringify(approved.error)}`);
   return reload(world, node.value.id);
 }
 

@@ -24,6 +24,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // tests/integration/ -> tests/ -> packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");

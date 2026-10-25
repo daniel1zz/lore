@@ -331,6 +331,7 @@ function makeDoc(overrides: Partial<DocRecord> & { id: string; type: DocRecord["
     deleted_at: overrides.deleted_at ?? null,
     tags: overrides.tags ?? [],
     extra: overrides.extra ?? {},
+    ...(overrides.ordinal !== undefined ? { ordinal: overrides.ordinal } : {}),
   };
 }
 
@@ -375,6 +376,7 @@ describe("BOUNDARY — a per-type exportDocs({type}) call must not retire a SOFT
     await insertDoc(store, makeDoc({
       id: "doc-real-spec-1",
       slug: "spec-boundary-probe",
+      ordinal: 1, // BR-1284: a numbered-kind doc carries its number before export
       type: "spec",
       title: "Boundary Probe",
       content: "# Boundary Probe\n\nBody.",

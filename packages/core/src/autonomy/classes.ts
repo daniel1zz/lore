@@ -83,33 +83,44 @@ export type NormalClass = {
   readonly usesJudge: boolean;
 };
 
-export type OperationClass = HumanAlwaysClass | NormalClass;
+/**
+ * A class whose every instance is recorded with verdict `milestone`: never auto-applied, never escalated, so no
+ * pending human decision exists for it. The milestone review resolves it (BR-1370). Carries no score parameters.
+ */
+export type MilestoneClass = {
+  readonly tier: "milestone";
+  readonly usesJudge: boolean;
+};
+
+export type OperationClass = HumanAlwaysClass | MilestoneClass | NormalClass;
 
 /** Registry shape: class id -> class. Injected into decide() so tests and later phases can substitute. */
 export type OperationClassRegistry = Readonly<Record<string, OperationClass>>;
 
 const human: HumanAlwaysClass = { tier: "human-always", usesJudge: false };
+const milestone: MilestoneClass = { tier: "milestone", usesJudge: false };
 
 function normal(declaredRecoverability: Recoverability, threshold: number, priorConfidence: number): NormalClass {
   return { tier: "normal", declaredRecoverability, threshold, priorConfidence, usesJudge: false };
 }
 
 /**
- * Seeded class table from the spec's "Initial class table". Order follows the spec.
- * reason: override-* and ac-exempt prior C is 0.5 so they escalate until outcomes
- * accumulate (spec row) — do not "fix" it upward.
+ * Seeded class table. The human-always set is EXACTLY {governance-loosen, push-force, archive-ref-prune} (BR-1370):
+ * a force push, a pruned archive ref and a loosened governance value cannot be taken back (one-way doors).
+ * reason: override-judgment, override-attestation and ac-exempt are `milestone` classes: a Wilson bound over their 0.5
+ * prior never reached the auto threshold, so they escalated forever; they now record a `milestone` decision that the
+ * milestone review resolves, with no pending human decision. `report-issue` is not a class: it never asked decide().
  */
 export const OPERATION_CLASS_REGISTRY: OperationClassRegistry = {
   "stash-drop": normal("loss-free-by-proof", 0.8, 0.95),
   "worktree-remove": normal("loss-free-by-proof", 0.8, 0.97),
   "process-reap": normal("loss-free-by-proof", 0.85, 0.97),
-  "override-judgment": normal("reversible", 0.8, 0.5),
-  "override-attestation": normal("reversible", 0.8, 0.5),
-  "ac-exempt": normal("reversible", 0.8, 0.5),
+  "override-judgment": milestone,
+  "override-attestation": milestone,
+  "ac-exempt": milestone,
   "verify-new-command": normal("reversible", 0.8, 0.95),
   "run-end-stale": normal("reversible", 0.8, 0.97),
   "governance-loosen": human,
-  "report-issue": human,
   "push-force": human,
   "archive-ref-prune": human,
 };

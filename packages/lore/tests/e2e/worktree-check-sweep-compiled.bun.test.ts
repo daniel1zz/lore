@@ -23,9 +23,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -79,6 +81,11 @@ async function lore(args: string[], session = "caller-0", cwd = repo): Promise<R
   return { status: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 const git = (cwd: string, ...args: string[]): Run => exec(["git", ...args], cwd);
+/** git carrying the integrate marker: a deliberate human bypass of the main-ref guard. */
+const markedGit = (cwd: string, ...args: string[]): Run => {
+  const proc = Bun.spawnSync(["git", ...args], { cwd, env: { ...envFor("caller-0"), LORE_INTEGRATE: "1" } });
+  return { status: proc.exitCode ?? -1, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+};
 
 function mustOk(run: Run, what: string): Run {
   if (run.status !== 0) throw new Error(`fixture step failed (${what}): exit ${run.status}\n${run.stdout}\n${run.stderr}`);
@@ -105,7 +112,11 @@ function addMergedWorktree(name: string): string {
   writeFileSync(join(path, `${name}.txt`), `${name}\n`);
   mustOk(git(path, "add", "-A"), `add ${name}`);
   mustOk(git(path, "commit", "-q", "-m", `own commit ${name}`), `commit ${name}`);
-  mustOk(git(repo, "merge", "-q", "--no-edit", name), `merge ${name}`);
+  // the main-ref guard refuses a hand checkout of main and a hand merge on it, so this fixture takes the marker bypass on
+  // purpose to move main, then leaves the shared checkout detached at main as it found it
+  mustOk(markedGit(repo, "checkout", "-q", "main"), `checkout main for ${name}`);
+  mustOk(markedGit(repo, "merge", "-q", "--no-edit", name), `merge ${name}`);
+  mustOk(git(repo, "checkout", "-q", "--detach", "main"), `detach shared checkout after ${name}`);
   return path;
 }
 
@@ -133,6 +144,9 @@ beforeAll(async () => {
   mustOk(git(repo, "add", "-A"), "git add");
   mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit");
   mustOk(await lore(["init"]), "lore init");
+  // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
+  appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
+  patchLoreConfig(repo, 'workflow:\n  integrate:\n    floor_command: "true"\n');
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
@@ -154,6 +168,10 @@ beforeAll(async () => {
   const created = mustOk(await lore(["create", "task", "--adhoc", "--title", "CCC claimed work", "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"], "S3"), "create task");
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
   mustOk(await lore(["claim", slug, "--worktree", ccc], "S3"), "claim");
+  // the branch is on main already (merged above); integrate finds it already integrated and records the landing
+  // `lore done` requires (BR-1291)
+  installShippedGuard(repo, join(repo, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+  mustOk(await lore(["integrate", "agent-CCC", "--session", "S3"], "S3"), "integrate CCC");
   mustOk(await lore(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], "S3"), "evidence");
   mustOk(await lore(["done", slug, "--declare-no-new-tests", "fixture: throwaway task"], "S3"), "done");
 }, 300_000);

@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { extractHeldClaim } from "@lore/core";
 import { SCOPE_FILE_NAME, refreshScopeFiles, type EditScopeDeps } from "../../service/edit-scope.js";
-import { spawnGitCheckIgnore } from "../../service/helper-scope-review.js";
+import { spawnGitCheckIgnore } from "../../service/git-ignore-probe.js";
 import type { App } from "../../app.js";
 
 /** git's answer for `args` run in `cwd`, or `undefined` when git cannot answer (not a repo, git missing). */
@@ -43,6 +43,52 @@ function ensureScopeFileIgnored(workingCopy: string): void {
   appendFileSync(file, `${existing === "" || existing.endsWith("\n") ? "" : "\n"}${SCOPE_FILE_NAME}\n`);
 }
 
+/** The default-branch names a claim's commits are compared against, first that resolves wins. */
+const DEFAULT_BRANCH_CANDIDATES = ["main", "master", "trunk"] as const;
+
+/** The working-copy directory a claim's recorded `worktree` names: an absolute path, or a branch name of `fromWorkingCopy`'s repository. */
+function resolveClaimWorkingCopy(worktree: string | undefined, fromWorkingCopy: string): string | undefined {
+  if (worktree === undefined || worktree === "") return undefined;
+  if (isAbsolute(worktree)) return existsSync(worktree) ? worktree : undefined;
+  const listing = gitOut(fromWorkingCopy, ["worktree", "list", "--porcelain"]);
+  if (listing === undefined) return undefined;
+  for (const block of listing.split("\n\n")) {
+    const lines = block.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    const branch = lines.find((l) => l.startsWith("branch "))?.slice("branch refs/heads/".length);
+    if (path !== undefined && branch === worktree) return path;
+  }
+  return undefined;
+}
+
+/** git's UNTRIMMED stdout (a `-z` status line starts with a space that `gitOut`'s trim would eat), or `undefined` on failure. */
+function gitRaw(cwd: string, args: readonly string[]): string | undefined {
+  const run = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return run.status === 0 ? run.stdout : undefined;
+}
+
+/** NUL-separated git output as a list of non-empty entries. */
+function nulList(out: string): string[] {
+  return out.split("\0").filter((entry) => entry !== "");
+}
+
+/** See {@link EditScopeDeps.touchedFiles}: uncommitted changes (incl. untracked) plus commits since the default branch. */
+function touchedFilesOf(worktree: string | undefined, fromWorkingCopy: string): readonly string[] | undefined {
+  const dir = resolveClaimWorkingCopy(worktree, fromWorkingCopy);
+  if (dir === undefined) return undefined;
+  const status = gitRaw(dir, ["status", "--porcelain", "-z", "--no-renames", "--untracked-files=all"]);
+  if (status === undefined) return undefined;
+  // `-z` entries are `XY path`; the porcelain status prefix is three characters.
+  const touched = new Set(nulList(status).map((entry) => entry.slice(3)));
+  const base = DEFAULT_BRANCH_CANDIDATES.find((name) => gitOut(dir, ["rev-parse", "--verify", "--quiet", name]) !== undefined);
+  if (base !== undefined) {
+    const committed = gitRaw(dir, ["diff", "--name-only", "-z", `${base}...HEAD`]);
+    if (committed === undefined) return undefined;
+    for (const file of nulList(committed)) touched.add(file);
+  }
+  return [...touched];
+}
+
 /** Wires {@link EditScopeDeps} from the App's services. Throws when the App lacks `runService` (mis-composed). */
 export function buildEditScopeDeps(app: App): EditScopeDeps {
   if (app.runService === undefined) throw new Error("App was built without a runService");
@@ -57,10 +103,11 @@ export function buildEditScopeDeps(app: App): EditScopeDeps {
       const listed = await app.corpusService.listFull({ type: "task" });
       return listed.ok ? { ok: true, value: listed.value.docs } : listed;
     },
-    buildSiblingContext: (by, candidate, siblings, nowIso, sessionId) =>
-      app.taskWorkflowService.buildAnchorGateContext(by, candidate, siblings, nowIso, sessionId),
+    buildSiblingContext: (by, candidate, siblings, nowIso) =>
+      app.taskWorkflowService.buildAnchorGateContext(by, candidate, siblings, nowIso),
     addAnchors: (slug, anchors, opts) => app.taskWorkflowService.addAnchors(slug, anchors, opts),
     ignoreProbe: spawnGitCheckIgnore,
+    touchedFiles: touchedFilesOf,
     realpath: (path) => realpathSync(path),
     now: () => new Date().toISOString(),
     hasScopeFile: (workingCopy) => existsSync(join(workingCopy, SCOPE_FILE_NAME)),

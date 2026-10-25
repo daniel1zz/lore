@@ -39,6 +39,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } from "../helpers/payload-gh-stub";
 import { actedStore, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
@@ -106,8 +107,8 @@ function makeThrowawayCorpus(prefix: string): { app: App; corpusRoot: string } {
   mkdirSync(loreDir, { recursive: true });
   // reason: LoreConfigSchema requires a top-level `project:` (no defaults); omitting it makes the config parse fail and
   // `feedback.upstream` read back as UNCONFIGURED with no error surfaced — a false red this block avoids.
-  writeFileSync(
-    join(loreDir, "config.yaml"),
+  patchLoreConfig(
+    corpusRoot,
     ["project:", "  name: lore-gs-read-surface-fixture", "  author: lore-gs-read-surface-fixture", "feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"),
   );
   const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());

@@ -3,11 +3,11 @@ id: TASK-1543
 type: task
 role: plan
 title: "[Skill:test] AU-T11 apply the new verbs to existing debris on main and verify AC-AU-1..11"
-status: draft
+status: deprecated
 priority: high
 phase: "Phase 1d: apply on main"
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-204
 plan: PLAN-204

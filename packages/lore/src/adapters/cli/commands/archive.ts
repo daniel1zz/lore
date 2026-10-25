@@ -17,16 +17,15 @@
  * (`action: "archive-sweep"`). A per-candidate write failure is printed and
  * does not abort the loop (spec-lifecycle-archival-plan-close-cascade-deterministic
  * §Design Decisions D2's "loud, never silent, never rolls back" ethos applied
- * here too) — exit 0 regardless, since the operation is fundamentally
- * best-effort over an already-computed candidate list (an individual
- * INVALID_TRANSITION/STALE_VERSION on one doc is itemized in the printed
- * output, not swallowed).
+ * here too) — the loop always finishes and itemizes every row, then exits 1 when
+ * any candidate FAILED (an INVALID_TRANSITION/STALE_VERSION on one doc; a
+ * floor-refused straggler is SKIPPED, not FAILED) and 0 otherwise (BR-1366).
  *
  * Neither flag, or BOTH flags together, is a usage error (exit 2) — the two
  * modes are mutually exclusive by design (report vs mutate), same discipline
  * `lore set`'s `--regenerate`/`--refine` mutex uses.
  *
- * Exit codes: 0 = sweep found nothing / apply completed; 2 = usage error
+ * Exit codes: 0 = sweep found nothing / apply completed with no FAILED row; 1 = apply and a row FAILED; 2 = usage error
  * (no flag, or both flags); 3 = sweep found candidates.
  *
  * Source: spec-lifecycle-archival-plan-close-cascade-deterministic §Design
@@ -147,7 +146,7 @@ export default defineLoreCommand({
     }
 
     // --apply
-    const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+    const by = resolveActor(inv);
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.
@@ -184,6 +183,8 @@ export default defineLoreCommand({
       }
     }
     emitIssueCloseItems(inv.io, issueCloseItems, { json: args.json === true });
-    return 0;
+    // BR-1366: a FAILED candidate is a failed command. A floor-refused task is SKIPPED (it stays open and `--sweep`
+    // still lists it), not FAILED.
+    return outcomes.some((o) => !o.ok && o.skipped !== true) ? 1 : 0;
   },
 });

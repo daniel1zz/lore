@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version.js";
 import { MIGRATION_020_SQL } from "../../src/store/migrations/migration-020.js";
 import { MIGRATION_023_SQL } from "../../src/store/migrations/migration-023.js";
 import {
@@ -59,7 +60,11 @@ function legacyDb(path: string): void {
   // reason: this fixture models only the decision_log tables; migration-025 indexes `versions` and migration-026
   // rebuilds it, so the upgrade chain needs that table with every column 026 copies, plus the `docs` table its
   // doc_id references.
-  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY)");
+  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT, version INTEGER, parent_id TEXT, deleted_at TEXT)"); // 027 reads the baseline columns (no row here)
+  // reason: migration-030 adds `runs.message_address`, so the table it alters must exist (one column is enough).
+  db.exec("CREATE TABLE runs (id TEXT PRIMARY KEY)");
+  // reason: migration-031 deletes the per-read `get` trace rows, so `trace_events` (with its `kind`) must exist.
+  db.exec("CREATE TABLE trace_events (id INTEGER PRIMARY KEY, kind TEXT)");
   db.exec(
     "CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', extra TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', change_summary TEXT, slug TEXT, harness_run TEXT)",
   );
@@ -123,7 +128,7 @@ describe("decision detail chain", () => {
     const path = join(dir, "lore.db");
     try {
       legacyDb(path);
-      const store = actedStore(new SQLiteStore(path));
+      const store = actedStore(new SQLiteStore(path, { migrate: true }));
       try {
         const rows = await store.listDecisionLog();
         expect(rows.ok).toBe(true);
@@ -136,7 +141,7 @@ describe("decision detail chain", () => {
         expect(appended.ok && renderDecisionDetailSummary(appended.value)).toBe("Loosen the governed autonomy thresholds: stash-drop.threshold: 0.8 -> 0.5");
         const after = await store.listDecisionLog();
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 3 });
-        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       } finally {
         store.close();
       }

@@ -83,8 +83,10 @@ import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
-import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
+import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
+import { primeReplicaClientForProject } from "../replica-priming.js";
+import { formatError } from "../utils.js";
 import { ambientOfInvocation, createApp } from "../../../app.js";
 import type { App } from "../../../app.js";
 import { startHttpServer } from "../../http/index.js";
@@ -98,6 +100,8 @@ import { createMountRegistry } from "../../../mount/mount-registry.js";
 import type { MountRegistry } from "../../../mount/types.js";
 import { createDashboardTeardown, registerDashboardShutdownSignals, type KillableChild } from "../dashboard-lifecycle.js";
 import type { Invocation } from "@lore/core";
+import type { HumanWritesConfig } from "../../http/index.js";
+import { resolveHumanSessionBinding } from "../human-session-file.js";
 import { invocationOf } from "../command-invocation.js";
 import { registerServerForInvocation } from "../live-server-registry.js";
 import type { CliIo } from "../output.js";
@@ -107,6 +111,19 @@ export { ensureLocalApiKey } from "../local-key.js";
 export type { LocalApiKeyCreator } from "../local-key.js";
 
 // ─── Shared helpers (both topologies) ───────────────────────────────────────────
+
+/**
+ * The server's write-party policy for the local dashboard (GitHub #324): a cookie write is made by the person whose
+ * human session (`lore session start --human <name>`) is open in the checkout it lands in, read per write.
+ *
+ * @param checkoutRoot - the launch project's root (the directory holding `.lore/lore.db`)
+ */
+function humanWritesOf(inv: Invocation, checkoutRoot: string): HumanWritesConfig {
+  return {
+    checkoutRoot,
+    humanSessionOf: (checkout) => resolveHumanSessionBinding(inv.env, inv.paths.home, checkout),
+  };
+}
 
 /** No Vite child exists in packaged mode — this satisfies `DashboardShutdownDeps.vite`
  * (a required field, shared by both topologies' teardown) without forking a second
@@ -131,6 +148,7 @@ function withLiveServerRemoval(
 ): (signal: string) => Promise<void> {
   return async (signal) => {
     unregisterLiveServer();
+    /** @lore-site BR-869 */
     await teardown(signal);
   };
 }
@@ -142,6 +160,31 @@ function parsePort(io: CliIo, rawValue: string | undefined, flagName: string, fa
     exitCli(1);
   }
   return port;
+}
+
+/**
+ * Builds the App of one registered dashboard project, through the same store selection as every other route
+ * (spec-defect-clusters-round-2-part-c-criterion-data-demotion D22): a project whose `.lore/config.yaml` has
+ * `sync.enabled: true` is opened through the embedded replica; any other project stays a plain local corpus, built
+ * with no config exactly as before.
+ *
+ * @param inv - the dashboard run's Invocation
+ * @param registryDbPath - the project's `.lore/lore.db`
+ * @returns the project's App
+ * @throws Error naming the setting or remote address when the sync-enabled project cannot open its replica (the mount
+ *   registry records it as that entry's `error` diagnosis; the project is never served from its local file)
+ */
+export async function mountRegisteredProject(inv: Invocation, registryDbPath: string): Promise<App> {
+  await primeReplicaClientForProject(registryDbPath, inv.io, inv.env);
+  const projectConfig = loadConfig(dirname(dirname(registryDbPath)), () => {});
+  // reason: a project without sync keeps the no-config construction it always had; only a sync-enabled project
+  // needs its config to select the replica. A config that does not parse is reported by `loadLoreApp` for the
+  // run's own corpus; here it is read only for the sync switch.
+  const syncConfig = projectConfig.ok && projectConfig.value.sync?.enabled === true ? projectConfig.value : undefined;
+  const built = createApp(registryDbPath, syncConfig, ambientOfInvocation(inv), { identity: inv.identity });
+  if ("corpusService" in built) return built;
+  if (!built.ok) throw new Error(formatError(built.error));
+  return built.value;
 }
 
 /**
@@ -169,10 +212,7 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
   const mountRegistry = createMountRegistry<App>();
   await mountRegistry.init(
     { projects: registeredProjects },
-    // reason: registered projects are always plain local SQLite corpora (no `sync`
-    // config passed) — `createApp(dbPath)`'s single-arg overload always returns a
-    // bare `App`, never `Result<App>` (see `app.ts`'s overload pair).
-    { createApp: async (registryDbPath: string) => createApp(registryDbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity }) },
+    { createApp: (registryDbPath: string) => mountRegisteredProject(inv, registryDbPath) },
   );
 
   inv.io.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);
@@ -346,7 +386,7 @@ async function runPackagedMode(
   // `startHttpServer` boot `lore serve` does, so it inherits §D5's HTTP
   // exemption for the foreign-corpus-write guard verbatim. See serve.ts's own
   // call site for the lockout this prevents.
-  const { app } = loadLoreApp({ surface: "http", inv });
+  const { app, dbPath } = loadLoreApp({ surface: "http", inv });
   const machineAuth = createMachineAuthStores({ baseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
   // GAP-1 fix (see this file's header): ensure the machine-scope "dashboard-local"
@@ -368,6 +408,7 @@ async function runPackagedMode(
     io: inv.io,
     machineAuth,
     allowedOrigins,
+    humanWrites: humanWritesOf(inv, dirname(dirname(dbPath))),
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
     dashboard: {
       assets: () => resolveAssets(inv),
@@ -574,6 +615,7 @@ async function runDevMode(
     io: inv.io,
     machineAuth,
     allowedOrigins,
+    humanWrites: humanWritesOf(inv, projectRoot),
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
   });
 

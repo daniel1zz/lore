@@ -21,7 +21,8 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -72,7 +73,7 @@ function refs(dir: string, path: string): { exitCode: number; bindings: BindingJ
 
 const dir = mkdtempSync(join(tmpdir(), "lore-refs-"));
 runOrThrow(["init"], dir, "lore init");
-appendFileSync(join(dir, ".lore", "config.yaml"), ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"));
+patchLoreConfig(dir, ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"));
 
 mkdirSync(join(dir, "src", "widgets"), { recursive: true });
 mkdirSync(join(dir, ".lore", "context"), { recursive: true });
@@ -86,7 +87,7 @@ writeFileSync(
 );
 writeFileSync(
   join(dir, ".lore", "context", "widget-rules.md"),
-  ["---", "id: project-widget-rules", "title: Widget rules", 'audience: ["subagent:*"]', "mode: static", "---", "Never edit `src/widget.ts#renderWidget` by hand.", ""].join("\n"),
+  ["---", "id: project-widget-rules", "title: Widget rules", "inject: [subagent-start]", "---", "Never edit `src/widget.ts#renderWidget` by hand.", ""].join("\n"),
 );
 
 const specSlug = slugOf(
@@ -114,7 +115,7 @@ describe("AC-BIND-3: lore refs <path>", () => {
         document_kind: "fragment",
         reference: "src/widget.ts#renderWidget",
         path: "src/widget.ts",
-        line: 7,
+        line: 6,
         symbol: "renderWidget",
       },
     ]);
@@ -159,7 +160,7 @@ describe("AC-BIND-3: lore refs <path>", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("CLAUDE.md:3");
-    expect(result.stdout).toContain(".lore/context/widget-rules.md:7");
+    expect(result.stdout).toContain(".lore/context/widget-rules.md:6");
     expect(result.stdout).toContain(specSlug);
   });
 

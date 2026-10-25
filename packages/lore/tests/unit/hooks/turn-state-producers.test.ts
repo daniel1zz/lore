@@ -141,7 +141,8 @@ describe("AC5: missing state is reported as not measured", () => {
     const r = edit(base);
     expect(r.code).toBe(0);
     expect(r.stderr).toContain("not measured");
-    expect(readdirSync(base)).toEqual([]);
+    // reason: every hook appends its own outcome row (check-outcomes.jsonl, BR-1373); that is the one allowed file.
+    expect(readdirSync(base).filter((name) => name !== "check-outcomes.jsonl")).toEqual([]);
   });
 });
 

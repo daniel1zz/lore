@@ -1,7 +1,7 @@
 /**
  * Terminal rendering for `lore feed task-start`'s human-readable pack (SPEC-070
  * §Design Decisions D7). Extracted into its own module so it can be unit-tested
- * directly under vitest — mirrors `assess-render.ts`'s split rationale exactly:
+ * directly under vitest — mirrors `status-stamp-verdict.ts`'s split rationale exactly:
  * `commands/feed.ts` transitively imports `loader.ts` (`bun:sqlite`), which vitest
  * cannot resolve, but this module imports only `../../flows/task-feed-flow.js`
  * (types only, browser-safe) — reusable by a future claim-time print or dashboard
@@ -18,6 +18,7 @@
  */
 
 import type { TaskStartPack } from "../../flows/task-feed-flow.js";
+import { renderDefinitionOfDone } from "./definition-of-done-render.js";
 
 /**
  * Renders a `TaskStartPack`'s eight sections to a single string, plus a
@@ -49,6 +50,9 @@ export function renderTaskStartPack(pack: TaskStartPack): string {
   lines.push(pack.sections.knowledge_pointers);
   lines.push("\n## Latest handoff");
   lines.push(pack.sections.handoff);
+  if (pack.definition_of_done !== undefined) {
+    lines.push(`\n## ${renderDefinitionOfDone(pack.definition_of_done).join("\n")}`);
+  }
   if (pack.governing_rules !== undefined) {
     lines.push("\n## Governing rules");
     for (const rule of pack.governing_rules.rules) lines.push(`- ${rule.id}: ${rule.statement}`);

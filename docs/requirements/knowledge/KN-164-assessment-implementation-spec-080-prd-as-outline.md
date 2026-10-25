@@ -3,10 +3,10 @@ id: KN-164
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-080 PRD-as-outline contract (2026-07-26)"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-10-23
 tags: []
 parent: PLAN-031
 links:

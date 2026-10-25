@@ -3,10 +3,10 @@ id: KN-459
 type: knowledge
 role: knowledge
 title: "Assessment: Land oracle exclusivity: a mirror check that can fail, a guard that sees mirror content, a gitignored probe namespace, and a serialized suite (2026-08-17)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-10-23
 tags: []
 parent: PLAN-124
 links:

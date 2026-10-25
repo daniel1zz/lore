@@ -9,7 +9,7 @@ created: 2026-07-27
 updated: 2026-10-17
 tags: []
 links:
-  - {id: SPEC-207, type: implements}
+  - {id: SPEC-237, type: implements}
 ---
 # Session-start handoff neutrality — injection drops resume_hint, neutral open-thread directory
 

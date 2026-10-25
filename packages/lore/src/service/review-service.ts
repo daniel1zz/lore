@@ -43,13 +43,26 @@ import { ownProposedRules } from "./rule-changes.js";
 import {
   buildUpstreamSpecContext,
   countScriptModeAcceptanceCriteria,
-  isJudgmentEscalatedDenial,
   type GateContext,
 } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
 import { REOPEN_AUDIT_ACTION, REOPEN_OPERATION, type RecordLockService } from "./record-lock-service.js";
 import { countEvidenceEntries, findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
+import { ANY_RULE_ID_PATTERN } from "@lore/core";
+import {
+  appendApprovedRule,
+  discardNodeRevision,
+  discardRuleRevision,
+  listPendingItems,
+  NODE_ITEM,
+  pendingCountOf,
+  promoteItems,
+  promoteRuleRevision,
+  statusFor,
+  type PendingItem,
+} from "./baseline-pending.js";
+import { pendingRevisionsOf } from "./baseline-items.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -160,6 +173,12 @@ export interface ApproveOpts {
    * direct write had. Absent = no caller-side version claim (the CAS still guards the write itself).
    */
   expectedVersion?: number;
+  /**
+   * Baseline node only (BR-1338): approve this ONE item (`BR-n` / `AS-n` / `AD-n`, or `node` for the node's own part)
+   * instead of every pending revision a review saw. Items not named are untouched. Refused (VALIDATION_ERROR) when the
+   * item holds no pending revision, or no review saw its current revision.
+   */
+  item?: string;
 }
 
 /** Measures declared leaf commands against the tree the corpus lives in (the adapter owns the source analysis). */
@@ -186,6 +205,27 @@ export interface BaselineDeclarationPort {
  */
 export interface ApproveResult extends DocRecord {
   reachability_advisories?: string[];
+  /**
+   * Baseline node only: the items this approval promoted to their approved version, and the items still pending after it
+   * (so a caller never reads a partial approval as a whole one). Absent for every other doc type.
+   */
+  promoted_items?: string[];
+  still_pending?: string[];
+}
+
+/** What {@link ReviewService.approve} decided to promote for a baseline node (see `planBaselinePromotion`). */
+interface BaselinePromotionPlan {
+  /** The pending revisions promoted: all pending revisions (or the one `--item` named). */
+  readonly selected: readonly PendingItem[];
+  /** The node as it reads once the selection is promoted: what the approval gates measure. */
+  readonly gateDoc: DocRecord;
+}
+
+/** Result of {@link ReviewService.rejectItem}. */
+export interface RejectItemOutcome {
+  readonly doc: DocRecord;
+  /** The pending revision that was discarded. */
+  readonly discarded: PendingItem;
 }
 
 export interface RejectOpts {
@@ -237,15 +277,12 @@ export class ReviewService {
    *   (see `enforceJudgmentRequiredGate`'s own guard), byte-identical to pre-SPEC-103
    *   behavior. Only `app.ts`'s composition root wires the real instance.
    * @param judgmentRequiredTypes - OPTIONAL SPEC-103 M2 resolved config value
-   *   (`resolveJudgmentRequiredTypes`, `@lore/core`, default `["spec","adr"]`) — which
-   *   `DocType`s the `review-judgment` checkpoint's `reject`/`NO_JUDGMENT`/provenance-
-   *   collision outcomes apply to. A `JUDGMENT_ESCALATED` outcome is NOT type-scoped:
-   *   it blocks approval for every doc type whenever this list is non-empty
-   *   (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1, see
-   *   `enforceJudgmentRequiredGate`). Absent/`undefined` (every bare unit-test
-   *   construction) → treated as `[]`, which is M2's TOTAL kill switch (escalate
-   *   included, D3) — same "absent in bare tests, present in production" DI shape as
-   *   every other optional constructor dependency on this class.
+   *   (`resolveJudgmentRequiredTypes`, `@lore/core`, default `["spec","adr"]`) — the
+   *   ONLY `DocType`s whose approval consults `review_judgments` (BR-1369); every other
+   *   type approves without reading them. Absent/`undefined` (every bare unit-test
+   *   construction) → treated as `[]`, the total kill switch — same "absent in bare
+   *   tests, present in production" DI shape as every other optional constructor
+   *   dependency on this class.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -348,6 +385,7 @@ export class ReviewService {
             field: "baseline-commands",
             message: absentDeclarationRefusal(doc.slug, absent.value),
             value: absent.value,
+            rule: "BR-1308",
           });
         }
       }
@@ -474,34 +512,14 @@ export class ReviewService {
    * entirely in `checkReviewJudgment` (`checkpoint-registry.ts`).
    *
    * A no-op (`ok(undefined)`) when: this service has no `gate`/`judgmentService`
-   * wired (bare test construction, byte-identical to pre-SPEC-103 behavior), OR
-   * `judgmentRequiredTypes` is EMPTY (M2's total kill switch, AC-TIER-7/AC-ESC-3 —
-   * checked FIRST, ahead of the escalate path below, so an operator who turned M2
-   * off gets it off for every decision including `escalate`).
+   * wired (bare test construction), OR `doc.type` is not in `judgmentRequiredTypes`
+   * (default `["spec","adr"]`, BR-1369). An empty list is the total kill switch.
    *
-   * @invariant spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1 — for a
-   *   `doc.type` OUTSIDE `judgmentRequiredTypes` (and a non-empty list), exactly ONE
-   *   denial propagates: `JUDGMENT_ESCALATED`. An escalate asserts an outstanding
-   *   HUMAN decision and carries the questions, so filing it away silently is the
-   *   measured harm this gate exists to prevent. The other three outcomes stay
-   *   SUPPRESSED for such types — `JUDGMENT_REJECTED` (a judge disagreeing with a
-   *   record of what happened must not hold event capture hostage), `NO_JUDGMENT`
-   *   (propagating it would require a judgment before ANY knowledge doc could be
-   *   approved — far beyond what the governing ADR authorises), and
-   *   `JUDGMENT_PROVENANCE_COLLISION` (the same precondition, one step in).
-   *   The verdict itself is never re-derived here: the type filter is applied to the
-   *   PREDICATE's outcome via `isJudgmentEscalatedDenial`, keeping
-   *   `checkReviewJudgment` the single decision authority (D2).
-   * @invariant same spec, D5 — for an ungated type the question is "is ANY independent
-   *   current-version decision an `escalate`?", NOT "is the WORST one?". An escalate
-   *   PRESENT blocks even when a `reject` accompanies it on the same version
-   *   (reachable: `lore review` does not bump the version, so two runs against one
-   *   version can disagree). Enforced by narrowing the decision VECTOR handed to the
-   *   predicate for such types, not by reinterpreting its verdict — adding a weaker,
-   *   deliberately-suppressible signal must never destroy a stronger one, and a
-   *   control defeatable by adding noise is not a control. Unchanged by this: gated
-   *   types (the same pair still blocks on the REJECT — the anti-lottery rule) and the
-   *   `[]` kill switch, which still short-circuits above (D3).
+   * @invariant BR-1369 — a type OUTSIDE `judgmentRequiredTypes` (plan, task, knowledge,
+   *   baseline node) never consults `review_judgments`: no `reject`, no `escalate`, no
+   *   missing judgment blocks it. Milestone review (`lore assess`) is where those
+   *   documents are judged. For a listed type the worst independent current-version
+   *   decision wins (D3) and `checkReviewJudgment` stays the single decision authority.
    *
    * @param doc - The doc `approve()` is about to transition to "approved" — read at
    *   its CURRENT (pre-write) version, the version judgments are matched against.
@@ -510,17 +528,12 @@ export class ReviewService {
     if (this.gate === undefined || this.judgmentService === undefined) {
       return ok(undefined);
     }
-    const requiredTypes = this.judgmentRequiredTypes ?? [];
-    // reason: D3 — the documented `judgment_required_types: []` kill switch
-    // short-circuits BEFORE the escalate path, so an empty list stays byte-identical
-    // to pre-SPEC-103 behavior for EVERY decision. The pre-existing AC-TIER-7 test
-    // covers only "[] + no judgment at all" and would NOT catch an escalate leaking
-    // past an empty list — `review-judgment-escalate-scope.test.ts`'s AC-ESC-3 is
-    // that guard, and it fails if this early return is moved below the enforce call.
-    if (requiredTypes.length === 0) {
+    // reason: BR-1369 — a type outside `judgment_required_types` NEVER consults `review_judgments`: it returns here,
+    // before the judgments are read, so no reject, no escalate and no missing judgment can block it. An empty list is
+    // the same rule for every type (the documented kill switch). Do NOT move this below the `listFor` read.
+    if (!(this.judgmentRequiredTypes ?? []).includes(doc.type)) {
       return ok(undefined);
     }
-    const typeIsGated = requiredTypes.includes(doc.type);
 
     const judgmentsResult = await this.judgmentService.listFor(doc.id, "review");
     if (!judgmentsResult.ok) return judgmentsResult;
@@ -534,6 +547,7 @@ export class ReviewService {
     const aiProvenance: JudgeIdentity | undefined = provenanceParsed.success ? provenanceParsed.data : undefined;
 
     let provenanceCollision = false;
+    let truncatedApproval = false;
     const independentDecisions: ReviewDecision[] = [];
     // reason: D4 — the escalate denial renders these verbatim, so they are collected
     // from the SAME independent-judgment walk the decisions come from (never a second
@@ -545,46 +559,29 @@ export class ReviewService {
         provenanceCollision = true;
         continue;
       }
+      // reason: BR-269 — an approve made on cut input never counts. A truncated reject/escalate still does: a
+      // refusal on partial input is the safe direction, and dropping it would let noise out-roll a block.
+      if (judgment.decision === "approve" && judgment.truncated === true) {
+        truncatedApproval = true;
+        continue;
+      }
       independentDecisions.push(judgment.decision);
       if (judgment.decision === "escalate") {
         blockingQuestions.push(...judgment.blocking_questions);
       }
     }
 
-    // reason: D5 — for an UNGATED type the question is "is ANY independent
-    // current-version decision an `escalate`?", never "is the WORST one?". Narrowing
-    // the vector to the only verdict that is policy-relevant for such types is what
-    // makes those two questions coincide: worst-decision-wins over an escalate-only
-    // vector yields `escalate` whenever one is present, so a co-recorded `reject`
-    // (suppressible opinion for these types, D1) can no longer out-rank and thereby
-    // DESTROY the escalate. The gated path keeps the FULL vector — there,
-    // worst-decision-wins is the anti-lottery rule and a reject must never be
-    // out-rolled. `checkReviewJudgment` stays the single decision authority either
-    // way (D2): the service selects which decisions are in policy scope for the
-    // type, the predicate alone decides what they mean.
-    const policyScopedDecisions = typeIsGated
-      ? independentDecisions
-      : independentDecisions.filter((decision) => decision === "escalate");
-
     const ctx: GateContext = {
       targetIdOrSlug: doc.slug,
-      reviewJudgmentDecisions: policyScopedDecisions,
+      reviewJudgmentDecisions: independentDecisions,
       reviewJudgmentProvenanceCollision: provenanceCollision,
+      reviewJudgmentTruncatedApproval: truncatedApproval,
       reviewJudgmentBlockingQuestions: blockingQuestions,
       // reason: AC-FR-8/D7 — see this file's spec-promote gate block's identical
       // note; `doc.id` is the RESOLVED doc's real id, never its slug.
       targetDocId: doc.id,
     };
-    const enforceResult = this.gate.enforcer.enforce("review-judgment", ctx);
-    if (enforceResult.ok || typeIsGated) return enforceResult;
-    // D1 — an ungated type: only the escalate verdict escapes the type list. With the
-    // vector narrowed above, the remaining reachable denials are `NO_JUDGMENT` (no
-    // escalate present) and `JUDGMENT_PROVENANCE_COLLISION` (a colliding judgment and
-    // no independent escalate) — both suppressed here, which is exactly D1's
-    // precondition half (AC-ESC-7). Kept as an explicit filter rather than an
-    // `includes("escalate")` branch so the PREDICATE's outcome, not a service-side
-    // re-derivation, remains what decides.
-    return isJudgmentEscalatedDenial(enforceResult.error) ? enforceResult : ok(undefined);
+    return this.gate.enforcer.enforce("review-judgment", ctx);
   }
 
   /**
@@ -751,15 +748,32 @@ export class ReviewService {
         id: doc.id,
         expected: opts.expectedVersion,
         actual: doc.version,
+        rule: "BR-1015",
       });
     }
 
-    if (!isValidTransition(doc.status, "approved")) {
+    // reason: BR-1338 — a baseline node holding pending revisions is approved item by item, not by a status move: its
+    // status is derived (approved iff nothing is pending), so there is no draft->approved transition to validate.
+    const baselinePending = doc.type === "baseline" && pendingCountOf(doc.extra) > 0;
+    if (!baselinePending && !isValidTransition(doc.status, "approved")) {
       return err({
         code: "INVALID_TRANSITION",
         from: doc.status,
         to: "approved",
         allowed: getAllowedTransitions(doc.status),
+        rule: "BR-275",
+      });
+    }
+    if (opts?.item !== undefined && !baselinePending) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message:
+          doc.type === "baseline"
+            ? `${doc.slug} has nothing pending: --item ${opts.item} names no revision to approve`
+            : `--item applies to a baseline node (BR-1338); ${doc.slug} is a ${doc.type}`,
+        value: opts.item,
+        rule: "BR-1338",
       });
     }
 
@@ -773,6 +787,7 @@ export class ReviewService {
         field: "override-judgment",
         message: "specify at most one of --override-judgment / --override-no-judgment, not both",
         value: { overrideJudgmentId: opts.overrideJudgmentId, overrideNoJudgment: opts.overrideNoJudgment },
+        rule: "BR-284",
       });
     }
 
@@ -801,6 +816,7 @@ export class ReviewService {
           field: "override-judgment",
           message: `judgment "${opts.overrideJudgmentId}" was not found for doc "${doc.slug}"`,
           value: opts.overrideJudgmentId,
+          rule: "BR-284",
         });
       }
       overriddenJudgmentId = targetJudgment.id;
@@ -833,6 +849,7 @@ export class ReviewService {
             `doc "${doc.slug}" already has ${allJudgmentsResult.value.length} judgment(s) recorded — ` +
             `name one of them via --override-judgment instead of --override-no-judgment`,
           value: allJudgmentsResult.value.length,
+          rule: "BR-285",
         });
       }
       overrodeNoJudgment = true;
@@ -854,7 +871,16 @@ export class ReviewService {
       if (!decided.ok) return decided;
     }
 
-    const gateResult = await this.enforceApprovalGate(doc, {
+    // reason: BR-1338 — which pending revisions this approval promotes is decided BEFORE the gates, so they measure the
+    // node as it will read (its declared commands, its judgment) and a refusal writes nothing.
+    let baselinePlan: BaselinePromotionPlan | undefined;
+    if (baselinePending) {
+      const planned = await this.planBaselinePromotion(doc, opts?.item);
+      if (!planned.ok) return planned;
+      baselinePlan = planned.value;
+    }
+
+    const gateResult = await this.enforceApprovalGate(baselinePlan?.gateDoc ?? doc, {
       skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment,
     });
     if (!gateResult.ok) return gateResult;
@@ -868,6 +894,14 @@ export class ReviewService {
     const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
     if (!resolvedReviewer.ok) return resolvedReviewer;
     const reviewer = resolvedReviewer.value;
+
+    if (baselinePlan !== undefined) {
+      return this.writeBaselinePromotion(doc, baselinePlan, {
+        reviewer,
+        ...(overriddenJudgmentId !== undefined ? { overrideJudgmentId: overriddenJudgmentId } : {}),
+        ...(overrodeNoJudgment ? { overrideNoJudgment: true } : {}),
+      });
+    }
 
     // reason: SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was used) rides on this SAME
     // audit row rather than a second entry — one audited event, "approved, and here's the escape hatch that let it
@@ -917,6 +951,7 @@ export class ReviewService {
               `failed (${rollbackResult.error.code}) — it was left APPROVED despite the ` +
               `invalidated prerequisite. Manually inspect/re-set its status.`,
             value: { conflict: postGateResult.error, rollback_error: rollbackResult.error },
+            rule: "BR-287",
           });
         }
         return postGateResult;
@@ -933,6 +968,203 @@ export class ReviewService {
       ...updatedDoc,
       ...(reachabilityAdvisories.length > 0 ? { reachability_advisories: reachabilityAdvisories } : {}),
     });
+  }
+
+  // ─── Per-item approval of a baseline node (BR-1338) ─────────────────────────
+
+  /**
+   * The id `--item` names, as the pending list keys it: `node` (or the node's own slug / id) for the node's own part,
+   * else a rule id.
+   *
+   * @returns the item key, or a VALIDATION_ERROR naming the accepted forms.
+   */
+  private normaliseItem(doc: DocRecord, item: string): Result<string, LoreError> {
+    if (item === NODE_ITEM || item === doc.slug || item === doc.id) return ok(NODE_ITEM);
+    if (ANY_RULE_ID_PATTERN.test(item)) return ok(item);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "item",
+      message: `--item must be a rule id (BR-<n>, AS-<n>, AD-<n>) or \`node\` for ${doc.slug}'s own part (got '${item}')`,
+      value: item,
+      rule: "BR-1338",
+    });
+  }
+
+  /**
+   * Decide which pending revisions of `doc` an approval promotes (BR-1338, BR-1369): every pending revision, or the one
+   * `--item` names. A baseline node is never bound to a review judgment (BR-1369), so nothing is held back for "not seen".
+   */
+  private async planBaselinePromotion(
+    doc: DocRecord,
+    item: string | undefined,
+  ): Promise<Result<BaselinePromotionPlan, LoreError>> {
+    const pending = listPendingItems(doc.extra);
+    let candidates: readonly PendingItem[] = pending;
+    if (item !== undefined) {
+      const wanted = this.normaliseItem(doc, item);
+      if (!wanted.ok) return wanted;
+      candidates = pending.filter((p) => p.item === wanted.value);
+      if (candidates.length === 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "item",
+          message: `${wanted.value} holds no pending revision on ${doc.slug} (pending: ${pending.map((p) => p.item).join(", ")})`,
+          value: item,
+          rule: "BR-1338",
+        });
+      }
+    }
+
+    const selected: PendingItem[] = candidates.slice();
+    if (selected.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message: `${doc.slug} holds no pending revision to approve`,
+        value: pending.map((p) => p.item),
+        rule: "BR-1338",
+      });
+    }
+    const promotion = promoteItems(doc, selected.map((s) => s.item));
+    const gateDoc: DocRecord = {
+      ...doc,
+      extra: promotion.extra,
+      ...(promotion.title !== undefined ? { title: promotion.title } : {}),
+      ...(promotion.content !== undefined ? { content: promotion.content } : {}),
+    };
+    return ok({ selected, gateDoc });
+  }
+
+  /**
+   * Write the promotion of `plan.selected`: the non-moving revisions in ONE approve write of the node, then each moved
+   * rule through the store's move transaction (source leaf + destination leaf + registry together).
+   */
+  private async writeBaselinePromotion(
+    doc: DocRecord,
+    plan: BaselinePromotionPlan,
+    ctx: { reviewer: string; overrideJudgmentId?: string; overrideNoJudgment?: true },
+  ): Promise<Result<ApproveResult, LoreError>> {
+    const moving = new Set(
+      plan.selected.filter((s) => pendingRevisionsOf(doc).rules[s.item]?.move_to !== undefined).map((s) => s.item),
+    );
+    const staying = plan.selected.filter((s) => !moving.has(s.item));
+    let current: DocRecord = doc;
+    if (staying.length > 0) {
+      const promotion = promoteItems(doc, staying.map((s) => s.item));
+      const toStatus = statusFor(doc.status, promotion.extra);
+      const written = await this.writer.writeDoc({
+        doc,
+        patch: {
+          extra: promotion.extra,
+          status: toStatus,
+          ...(promotion.title !== undefined ? { title: promotion.title } : {}),
+          ...(promotion.content !== undefined ? { content: promotion.content } : {}),
+        },
+        action: "approve",
+        auditAction: "approve",
+        changeSummary: `Approved ${staying.map((s) => s.item).join(", ")}`,
+        auditDetails: {
+          reviewer: ctx.reviewer,
+          from_status: doc.status,
+          to_status: toStatus,
+          items: staying.map((s) => s.item),
+          revisions: Object.fromEntries(staying.map((s) => [s.item, s.revisionId])),
+          ...(ctx.overrideJudgmentId !== undefined ? { override_judgment_id: ctx.overrideJudgmentId } : {}),
+          ...(ctx.overrideNoJudgment === true ? { override_no_judgment: true } : {}),
+        },
+        auditSessionId: `review-${doc.id}`,
+        lock: "none",
+        by: ctx.reviewer,
+      });
+      if (!written.ok) return written;
+      current = written.value.doc;
+    }
+    for (const ruleId of moving) {
+      const source = await this.store.find(doc.id);
+      if (!source.ok) return source;
+      if (source.value === null) return err({ code: "DOC_NOT_FOUND", id: doc.id });
+      const revision = pendingRevisionsOf(source.value).rules[ruleId];
+      if (revision?.move_to === undefined) continue;
+      const dest = await this.store.find(revision.move_to as DocId);
+      if (!dest.ok) return dest;
+      if (dest.value === null) return err({ code: "DOC_NOT_FOUND", id: revision.move_to });
+      const fromExtra = promoteRuleRevision(source.value.extra, ruleId);
+      if (fromExtra === undefined) continue;
+      const moved = await this.writer.moveRule({
+        ruleId,
+        from: { id: source.value.id, expectedVersion: source.value.version, extra: fromExtra, status: statusFor(source.value.status, fromExtra), change_summary: `Approved move of ${ruleId} to ${dest.value.slug}` },
+        to: { id: dest.value.id, expectedVersion: dest.value.version, extra: appendApprovedRule(dest.value.extra, revision.rule), change_summary: `Approved move of ${ruleId} from ${source.value.slug}` },
+        auditDetails: { rule_id: ruleId, from: source.value.id, to: dest.value.id, approved_by: ctx.reviewer, revision_id: revision.revision_id },
+        by: ctx.reviewer,
+      });
+      if (!moved.ok) return moved;
+      current = moved.value.from;
+    }
+    return ok({
+      ...current,
+      promoted_items: plan.selected.map((s) => s.item),
+      still_pending: listPendingItems(current.extra).map((p) => p.item),
+    });
+  }
+
+  /**
+   * Discard one pending revision of a baseline node (`lore reject <node> --item <id>`): the item reads as its approved
+   * version again (a pending add disappears). Items not named are untouched; the node's status is re-derived.
+   *
+   * @param item - `BR-n` / `AS-n` / `AD-n`, or `node` for the node's own part
+   * @returns the node as written and the discarded revision; VALIDATION_ERROR when the item holds no pending revision
+   *   or is a never-approved node's own part (there is nothing to fall back to).
+   */
+  async rejectItem(
+    id: string,
+    item: string,
+    opts?: RejectOpts,
+  ): Promise<Result<RejectItemOutcome, LoreError>> {
+    const found = await this.resolveDoc(id);
+    if (!found.ok) return found;
+    const doc = found.value;
+    if (doc.type !== "baseline") {
+      return err({ code: "VALIDATION_ERROR", field: "item", message: `--item applies to a baseline node (BR-1338); ${doc.slug} is a ${doc.type}`, value: item, rule: "BR-1338" });
+    }
+    const wanted = this.normaliseItem(doc, item);
+    if (!wanted.ok) return wanted;
+    const target = listPendingItems(doc.extra).find((p) => p.item === wanted.value);
+    if (target === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "item", message: `${wanted.value} holds no pending revision on ${doc.slug}`, value: item, rule: "BR-1338" });
+    }
+    if (target.item === NODE_ITEM && pendingRevisionsOf(doc).node?.initial === true) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "item",
+        message: `${doc.slug} was never approved: its own part has no approved version to return to. Approve it, or delete the node`,
+        value: item,
+        rule: "BR-1338",
+      });
+    }
+    const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
+    if (!resolvedReviewer.ok) return resolvedReviewer;
+    const extra = target.item === NODE_ITEM ? discardNodeRevision(doc.extra) : discardRuleRevision(doc.extra, target.item);
+    const status = statusFor(doc.status, extra);
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra, status },
+      action: "reject",
+      auditAction: "reject",
+      changeSummary: `Discarded the pending revision of ${target.item}`,
+      auditDetails: {
+        reviewer: resolvedReviewer.value,
+        item: target.item,
+        revision_id: target.revisionId,
+        from_status: doc.status,
+        to_status: status,
+        ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
+      },
+      auditSessionId: `review-${doc.id}`,
+      lock: "none",
+      by: resolvedReviewer.value,
+    });
+    if (!written.ok) return written;
+    return ok({ doc: written.value.doc, discarded: target });
   }
 
   /**
@@ -1014,6 +1246,7 @@ export class ReviewService {
         from: doc.status,
         to: "draft",
         allowed: getAllowedTransitions(doc.status),
+        rule: "BR-292",
       });
     }
 
@@ -1095,6 +1328,7 @@ export class ReviewService {
         field: "type",
         message: `Only a spec can be reopened; ${doc.slug} is a ${doc.type}`,
         value: doc.type,
+        rule: "BR-1184",
       });
     }
     const trimmedReason = reason.trim();
@@ -1104,6 +1338,7 @@ export class ReviewService {
         field: "reason",
         message: `Reopening ${doc.slug} requires a non-empty --reason`,
         value: reason,
+        rule: "BR-1185",
       });
     }
     if (!isReopenTransition(doc.type, doc.status, "draft")) {
@@ -1112,6 +1347,7 @@ export class ReviewService {
         from: doc.status,
         to: "draft",
         allowed: getAllowedTransitions(doc.status),
+        rule: "BR-1186",
       });
     }
 
@@ -1123,11 +1359,13 @@ export class ReviewService {
         field: "status",
         message: `${doc.slug} is not a locked record, so there is nothing to reopen - edit it directly`,
         value: doc.status,
+        rule: "BR-1187",
       });
     }
 
     const before = await this.countSpecEvidence(doc);
     if (!before.ok) return before;
+    /** @lore-site BR-1050 */
     if (before.value > 0) return err(this.reopenRefusal(doc, before.value, false));
 
     const resolvedReviewer = this.resolveReviewer(opts?.reviewer);
@@ -1160,6 +1398,7 @@ export class ReviewService {
     const after = await this.countSpecEvidence(doc);
     if (!after.ok) return after;
     // BR-1054: the spec stays draft - approved is never written back.
+    /** @lore-site BR-1054 */
     if (after.value > 0) return err(this.reopenRefusal(doc, after.value, true));
 
     return ok(reopened);

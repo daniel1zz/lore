@@ -14,7 +14,7 @@
  *     ended the run with (`exitCli(code)` throws `CliExit`), else what the command RETURNED (a required number,
  *     reported through `buildMain`'s `reportExit`), with ONE mapping (`exitCode(error)` in utils.ts). citty's own exits
  *     (`--help`, an unknown command, a thrown error) are decided by `dispatch` below with the codes `runMain` used
- *     (0, 1, 1), not by citty. A write that finds the invocation unnamed (`OsUserLookupError`) ends with 4. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
+ *     (0, 1, 1), not by citty. A write that finds the invocation without a known party (`UnknownPartyError`) ends with 4. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
  *   - Nothing here reads or assigns a process global (`process.argv`, `process.exit`, `process.exitCode`,
  *     `process.env`, `process.chdir`, `console`, `process.stdout`); a run writes through `inv.io` and reports its
  *     code by return value, so two runs in one process share nothing.
@@ -27,16 +27,16 @@
 
 import type { CommandDef } from "citty";
 import type { Invocation } from "@lore/core";
-import { OsUserLookupError } from "@lore/core/node";
+import { UnknownPartyError } from "@lore/core/node";
 import type { InvocationResolvers } from "@lore/core/node";
 import { CliExit } from "./cli-exit.js";
+import { resolveHumanSessionBinding } from "./human-session-file.js";
+import { primeReplicaClientWhenSyncEnabled } from "./replica-priming.js";
 import type { ExitReport } from "./cli-exit.js";
 import { printLine } from "./output.js";
 import { resolveTargetDir } from "./setup-args.js";
-import { detectWorktreeDerivedActor } from "./utils.js";
 import { resolveUserConfigDir } from "../../service/context-fragments/user-config-dir.js";
 import { existsSync } from "node:fs";
-import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
 /** Options for {@link runCli}. */
@@ -78,9 +78,9 @@ export const invocationResolvers: InvocationResolvers = {
     return resolveTargetDir({ ...(claudeDirFlag === undefined ? {} : { claudeDirFlag }), env, homeDir: home, cwd });
   },
   userConfigDir: (env, home) => resolveUserConfigDir(env, home),
-  worktreeActor: (cwd) => detectWorktreeDerivedActor(cwd),
-  osUsername: () => userInfo().username,
   projectRoot: findProjectRoot,
+  // reason: a damaged token file must not crash a READ (BR-1351); see resolveHumanSessionBinding.
+  humanSession: ({ env, home, projectRoot }) => resolveHumanSessionBinding(env, home, projectRoot),
 };
 
 /**
@@ -118,6 +118,23 @@ async function resolveUsageTarget(
 }
 
 /**
+ * The command words of `rawArgs` that resolve to a (sub)command, outermost first: `["phase"]` for `lore phase bogus`.
+ *
+ * @param cmd - the root command
+ * @param rawArgs - the invocation's arguments
+ * @returns the resolved command names, `[]` when the first word is not a subcommand
+ */
+async function resolveCommandPath(cmd: CommandDef<any>, rawArgs: readonly string[]): Promise<string[]> {
+  const subCommands = await resolveMaybe(cmd.subCommands);
+  if (subCommands === undefined) return [];
+  const nameIndex = rawArgs.findIndex((arg) => !arg.startsWith("-"));
+  const name = rawArgs[nameIndex];
+  const subCommand = name === undefined ? undefined : await resolveMaybe(subCommands[name]);
+  if (name === undefined || subCommand === undefined) return [];
+  return [name, ...(await resolveCommandPath(subCommand, rawArgs.slice(nameIndex + 1)))];
+}
+
+/**
  * What citty's `runMain` does, with its three `process.exit` calls turned into return values: `--help` prints usage
  * (0), `--version` prints the version (0), a thrown error prints itself and ends the run with 1 (a `CLIError` also
  * prints usage first). A `CliExit` a command threw is NOT an error: it is passed on to `runCli`, which returns its code.
@@ -145,16 +162,24 @@ async function dispatch(inv: Invocation, main: CommandDef<any>, reported: { code
     return reported.code;
   } catch (error) {
     if (error instanceof CliExit) throw error;
-    if (error instanceof OsUserLookupError) {
-      // reason: a write needed an actor and the entry had recorded no name (OS user lookup failed): a validation
-      // refusal (exit 4), the same code the rest of the validation family ends with.
+    if (error instanceof UnknownPartyError) {
+      // reason: a write needed an actor and the invocation has no known party (BR-1351): a validation refusal
+      // (exit 4, before anything is written), the same code the rest of the validation family ends with.
       printLine(inv.io.stderr, `Error: ${error.loreError.message}`);
       return 4;
     }
     const isUsageError = error instanceof Error && error.name === "CLIError";
     if (!isUsageError) printLine(inv.io.stderr, error, "\n");
+    const message = error instanceof Error ? error.message : String(error);
+    if (isUsageError && (error as { code?: unknown }).code === "E_UNKNOWN_COMMAND") {
+      // reason: BR-1371 — an unknown subcommand prints that command's usage line and a pointer to --help, not the
+      // whole help (84 KB at the root).
+      const { formatUnknownCommandUsage } = await import("./usage-render.js");
+      printLine(inv.io.stderr, formatUnknownCommandUsage(await resolveCommandPath(main, rawArgs), message));
+      return 1;
+    }
     if (isUsageError) await renderUsageDoubleDash(inv.io, ...(await resolveUsageTarget(main, rawArgs)));
-    printLine(inv.io.stderr, error instanceof Error ? error.message : String(error));
+    printLine(inv.io.stderr, message);
     return 1;
   }
 }
@@ -180,6 +205,9 @@ export async function runCli(inv: Invocation, options: RunCliOptions = {}): Prom
     },
   });
   try {
+    // reason: D22 — a corpus with `sync.enabled` opens through the embedded replica, whose client the compiled binary
+    // can only load asynchronously. Loaded here, once, before any command builds its App; a no-op without sync.
+    await primeReplicaClientWhenSyncEnabled(inv.io, inv);
     return await dispatch(inv, main, reported);
   } catch (error) {
     if (error instanceof CliExit) return error.code;

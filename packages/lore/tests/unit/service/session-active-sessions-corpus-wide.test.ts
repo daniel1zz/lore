@@ -58,6 +58,7 @@ import { deriveSessions } from "@lore/core";
 import type { CreateDocInput, DocRecord, ReadySession } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -142,7 +143,7 @@ describe("bootstrap active_sessions — NEGATIVE: zero-plan corpus, adhoc claim 
     const { corpusService, taskWorkflowService, sessionService, store } = makeServices();
     await createPrd(corpusService);
     const adhoc = await createAdhocTask(corpusService, "Investigate the flaky timeout");
-    await taskWorkflowService.claim(adhoc.id, { by: "agent:incident-repro", worktree: "/repo/.worktrees/t1" });
+    await taskWorkflowService.claim(adhoc.id, { by: "agent:incident-repro", harnessRun: runOfName("agent:incident-repro"), worktree: "/repo/.worktrees/t1" });
 
     // This is the exact incident shape today: no plan exists anywhere in the
     // corpus, so `activePlanIds` (pre-fix) is empty and `activeTasks` is empty.
@@ -171,7 +172,7 @@ describe("bootstrap active_sessions — NEGATIVE: fresh claim under an ARCHIVED 
     const prd = await createPrd(corpusService);
     const plan = await createPlan(corpusService, prd.id, "Retired Plan");
     const task = await createPlanTask(corpusService, plan.id, "Member");
-    await taskWorkflowService.claim(task.id, { by: "agent:t1" });
+    await taskWorkflowService.claim(task.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
 
     const approveResult = await corpusService.set(plan.id, { status: "approved" });
     expect(approveResult.ok).toBe(true);
@@ -195,7 +196,7 @@ describe("bootstrap active_sessions — HAPPY/REGRESSION: active plan, byte-iden
     const prd = await createPrd(corpusService);
     const plan = await createPlan(corpusService, prd.id, "Active Plan");
     const task = await createPlanTask(corpusService, plan.id, "Solo Member");
-    await taskWorkflowService.claim(task.id, { by: "agent:t1", machine: "hostA", worktree: "/w1", branch: "feat/x" });
+    await taskWorkflowService.claim(task.id, { by: "agent:t1", harnessRun: runOfName("agent:t1"), machine: "hostA", worktree: "/w1", branch: "feat/x" });
 
     const result = await sessionService.bootstrap("alice");
     expect(result.ok).toBe(true);
@@ -210,6 +211,8 @@ describe("bootstrap active_sessions — HAPPY/REGRESSION: active plan, byte-iden
       branches: ["feat/x"],
       task_slugs: [task.slug],
       newest_at: expect.any(String),
+      // BR-1363: always present; null = no address recorded for the holder's main run
+      message_address: null,
     });
     expect(session).not.toHaveProperty("stale");
   });
@@ -223,7 +226,7 @@ describe("bootstrap active_sessions — BOUNDARY: broken parent_id (hard delete 
     const prd = await createPrd(corpusService);
     const plan = await createPlan(corpusService, prd.id, "Plan");
     const task = await createPlanTask(corpusService, plan.id, "Orphaned-to-be");
-    const claimResult = await taskWorkflowService.claim(task.id, { by: "agent:t1" });
+    const claimResult = await taskWorkflowService.claim(task.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(claimResult.ok).toBe(true);
 
     // reason: `claim()` bumped the version — re-fetch rather than reuse the
@@ -266,7 +269,7 @@ describe("bootstrap active_sessions — ERROR: absent worktree/machine fields", 
     // No machine, no worktree — the exact shape ClaimOpts's own JSDoc
     // documents for an MCP caller (`machine`/`worktree` both caller-supplied
     // and optional; unlike the CLI, MCP does not auto-capture `os.hostname()`).
-    await taskWorkflowService.claim(task.id, { by: "agent:mcp-caller" });
+    await taskWorkflowService.claim(task.id, { by: "agent:mcp-caller", harnessRun: runOfName("agent:mcp-caller") });
 
     const result = await sessionService.bootstrap("alice");
     expect(result.ok).toBe(true);
@@ -287,7 +290,7 @@ describe("bootstrap active_sessions — STATE: released and archived tasks disap
     const prd = await createPrd(corpusService);
     const plan = await createPlan(corpusService, prd.id, "Plan");
     const task = await createPlanTask(corpusService, plan.id, "Released");
-    await taskWorkflowService.claim(task.id, { by: "agent:t1" });
+    await taskWorkflowService.claim(task.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
 
     const preRelease = await sessionService.bootstrap("alice");
     expect(preRelease.ok).toBe(true);
@@ -295,7 +298,7 @@ describe("bootstrap active_sessions — STATE: released and archived tasks disap
       expect(preRelease.value.active_sessions.some((s) => s.by === "agent:t1")).toBe(true);
     }
 
-    const releaseResult = await taskWorkflowService.release(task.id, { by: "agent:t1" });
+    const releaseResult = await taskWorkflowService.release(task.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(releaseResult.ok).toBe(true);
 
     const result = await sessionService.bootstrap("alice");
@@ -309,10 +312,10 @@ describe("bootstrap active_sessions — STATE: released and archived tasks disap
     const prd = await createPrd(corpusService);
     const plan = await createPlan(corpusService, prd.id, "Plan");
     const task = await createPlanTask(corpusService, plan.id, "To Be Archived");
-    await taskWorkflowService.claim(task.id, { by: "agent:t1" });
+    await taskWorkflowService.claim(task.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
 
     const doneResult = await taskWorkflowService.done(task.id, {
-      by: "agent:t1",
+      by: "agent:t1", harnessRun: runOfName("agent:t1"),
       overrideReason: "STATE-dimension test: no runner-attested evidence needed for this assertion",
     });
     expect(doneResult.ok).toBe(true);
@@ -346,8 +349,8 @@ describe("TaskWorkflowService.ready — REGRESSION: plan-scoped sessions[] still
     const planTask = await createPlanTask(corpusService, plan.id, "Plan A Member");
     const adhoc = await createAdhocTask(corpusService, "Unrelated Adhoc");
 
-    await taskWorkflowService.claim(planTask.id, { by: "agent:plan-a" });
-    await taskWorkflowService.claim(adhoc.id, { by: "agent:adhoc" });
+    await taskWorkflowService.claim(planTask.id, { by: "agent:plan-a", harnessRun: runOfName("agent:plan-a") });
+    await taskWorkflowService.claim(adhoc.id, { by: "agent:adhoc", harnessRun: runOfName("agent:adhoc") });
 
     const report = await taskWorkflowService.ready(plan.id);
     expect(report.ok).toBe(true);
@@ -368,7 +371,7 @@ describe("bootstrap active_sessions — Required #2: a stale claim is reported, 
     const task = await createPlanTask(corpusService, plan.id, "Long-running");
 
     // Claimed at T0; TTL is 120 minutes.
-    await taskWorkflowService.claim(task.id, { by: "agent:long-runner" }, () => "2026-08-01T00:00:00.000Z");
+    await taskWorkflowService.claim(task.id, { by: "agent:long-runner", harnessRun: runOfName("agent:long-runner") }, () => "2026-08-01T00:00:00.000Z");
 
     // Read 20 hours later (1200 min > 120 min ttl) — the exact incident shape:
     // `stale: true`, ten times over, while a real process could still be alive.
@@ -387,7 +390,7 @@ describe("bootstrap active_sessions — Required #2: a stale claim is reported, 
     const prd = await createPrd(corpusService);
     const plan = await createPlan(corpusService, prd.id, "Plan");
     const task = await createPlanTask(corpusService, plan.id, "Just Claimed");
-    await taskWorkflowService.claim(task.id, { by: "agent:fresh" }, () => "2026-08-01T00:00:00.000Z");
+    await taskWorkflowService.claim(task.id, { by: "agent:fresh", harnessRun: runOfName("agent:fresh") }, () => "2026-08-01T00:00:00.000Z");
 
     const result = await sessionService.bootstrap("alice", () => "2026-08-01T00:05:00.000Z");
     expect(result.ok).toBe(true);
@@ -405,7 +408,7 @@ describe("bootstrap active_sessions — CONTROL: the NEGATIVE assertions are not
     const { corpusService, taskWorkflowService, sessionService, store } = makeServices();
     await createPrd(corpusService);
     const adhoc = await createAdhocTask(corpusService, "Control Fixture Task");
-    await taskWorkflowService.claim(adhoc.id, { by: "agent:control" });
+    await taskWorkflowService.claim(adhoc.id, { by: "agent:control", harnessRun: runOfName("agent:control") });
 
     const nowIso = "2026-08-01T00:01:00.000Z";
     const allDocsResult = await store.findMany({});

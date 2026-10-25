@@ -187,7 +187,12 @@
  *         ("gate plan-close --explain")
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
+import { resolveAssetsRoot } from "../setup-args.js";
+import { err, ok } from "@lore/core";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
@@ -201,7 +206,6 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "../../../service/checkpoint-registry.js";
-import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import {
   runDeterministicChecks,
   resolveGateEnabled,
@@ -214,7 +218,7 @@ import {
 } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
-import type { LoreConfig, LoreError, NewReviewJudgment, SpecKind } from "@lore/core";
+import type { LoreConfig, LoreError, NewReviewJudgment, Result, SpecKind } from "@lore/core";
 import type { RecordGateSkip } from "../../../service/gate-enforcer.js";
 import {
   renderDocMarkdown,
@@ -319,11 +323,51 @@ function requireCheckpointProducedType(checkpoint: string): string {
  */
 const SPEC_CREATE_PRODUCED_TYPE = requireCheckpointProducedType("spec-create");
 
-/** Fallback rule slice used when no approved `knowledge/skill` doc declares `applies_to: "spec"` yet. */
-const RULE_DOC_MISSING_PLACEHOLDER =
-  `(No approved rule doc found — run \`bun scripts/seed-write-spec-rule.ts\` to seed it. ` +
-  `Expected: type=knowledge, status=approved, extra.sub_type="skill", ` +
-  `extra.skill.applies_to="${SPEC_CREATE_PRODUCED_TYPE}".)`;
+/**
+ * The write-spec rule that ships with the binary (BR-1359): the feeding source when no approved
+ * `knowledge/skill` doc declares `applies_to: "spec"`. Path relative to the resolved `assets/` root.
+ */
+const SHIPPED_RULE_ASSET = join("governance", "write-spec-rule.md");
+
+/** Source label of the shipped rule on the feeding pack's `[source: ...]` line — the fallback is named, never silent. */
+const SHIPPED_RULE_SOURCE = "shipped asset assets/governance/write-spec-rule.md";
+
+// packages/lore/src/adapters/cli/commands/gate.ts -> repo root is 6 levels up (same derivation as governance.ts / init.ts).
+const GATE_MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
+const GATE_REPO_ROOT = join(GATE_MODULE_DIR, "..", "..", "..", "..", "..", "..");
+
+/**
+ * Reads the write-spec rule shipped with the binary.
+ *
+ * @param inv - The invocation (compiled-vs-dev mode and exec path decide where `assets/` lives).
+ * @returns The rule markdown, or `VALIDATION_ERROR` naming the missing asset (never an empty or placeholder rule).
+ */
+function readShippedWriteSpecRule(inv: Invocation): Result<string, LoreError> {
+  const assetsRoot = resolveAssetsRoot({
+    repoRoot: GATE_REPO_ROOT,
+    isCompiled: inv.isCompiled,
+    execPath: inv.execPath,
+  });
+  const assetPath = join(assetsRoot, SHIPPED_RULE_ASSET);
+  try {
+    return ok(readFileSync(assetPath, "utf8"));
+  } catch (cause) {
+    // reason: STORE_ERROR (exit 1), not VALIDATION_ERROR (exit 4): exit 4 is the gate's "candidate refused" verdict,
+    // and a broken install must not read as one.
+    return err({
+      code: "STORE_ERROR",
+      message:
+        `lore gate spec-create: no approved project rule doc, and the write-spec rule shipped with the binary ` +
+        `(assets/governance/write-spec-rule.md) is missing from this install: cannot read "${assetPath}": ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+    });
+  }
+}
+
+/** Rule slice shown when the rule lookup itself FAILED — never dressed up as "no rule doc" (BR-587). */
+function ruleLookupFailedPlaceholder(reason: string): string {
+  return `(Rule document lookup failed: ${reason}. The rule text could not be read, which is different from no rule existing.)`;
+}
 
 /**
  * Candidate spec-creation payload, shaped after MCP `lore_create`'s input schema
@@ -515,7 +559,7 @@ export default defineLoreCommand({
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "task-claim", config)) return 0;
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           return await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
           app.close();
@@ -554,7 +598,7 @@ export default defineLoreCommand({
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "phase-claim", config)) return 0;
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           return await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
           app.close();
@@ -701,7 +745,12 @@ async function runSpecCreateGate(
     return 0;
   }
 
-  const rule = await findFeedingSkill(app, SPEC_CREATE_PRODUCED_TYPE);
+  const ruleLookup = await findFeedingSkill(app, SPEC_CREATE_PRODUCED_TYPE, inv);
+  if (!ruleLookup.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, ruleLookup.error) + "\n");
+    return exitCode(ruleLookup.error);
+  }
+  const rule = ruleLookup.value;
   const parentMarkdown =
     parentDoc !== null ? await renderDocMarkdown(app, parentDoc) : undefined;
 
@@ -771,7 +820,7 @@ function recordHookGateDeny(
   actor?: string,
 ): void {
   if (app.traceRecorder === undefined) return;
-  const resolvedActor = actor ?? resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+  const resolvedActor = actor ?? resolveActor(inv);
   app.traceRecorder.recordGateDeny(
     resolvedActor,
     checkpoint,
@@ -936,21 +985,6 @@ async function runTaskClaimGate(
   const checkpoint = requireCheckpoint("task-claim");
   const nowIso = new Date().toISOString();
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
-  // reason: anchor-overlap PARITY with the real claim (this function's own header
-  // invariant) — `TaskWorkflowService.claim` captures the session instance from
-  // `process.env` and feeds it to `noAnchorOverlap`
-  // (task-two-concurrent-orchestrators-both-resolve-to-agent-main). Without this
-  // read, the dry-run would evaluate the SAME pair as "session not measured" and
-  // print a refusal the real claim does not produce — a pre-flight that
-  // contradicts the command it previews is worse than no pre-flight. An unusable
-  // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
-  const sessionIdResult = resolveClaimSessionId(inv.env);
-  if (!sessionIdResult.ok) {
-    inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
-    return exitCode(sessionIdResult.error);
-  }
-  const candidateSessionId = sessionIdResult.value;
-
   // reason: BR-1056 — parity with the real claim: its overlap test compares holders by the claimant's VERIFIED
   // run, so the dry-run reads the same invocation identity (unregistered -> null + one warning).
   const verifiedIdentity = await app.verifiedInvocationIdentity?.();
@@ -975,7 +1009,7 @@ async function runTaskClaimGate(
   // early-return path.
   let ctx: GateContext;
   if (task.parent_id === null) {
-    const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, [], nowIso, candidateSessionId);
+    const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, [], nowIso);
     if (!anchorCtx.ok) {
       inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
       return exitCode(anchorCtx.error);
@@ -1013,7 +1047,7 @@ async function runTaskClaimGate(
         inv.io.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
         return exitCode(siblingsResult.error);
       }
-      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateSessionId);
+      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, siblingsResult.value, nowIso);
       if (!anchorCtx.ok) {
         inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
         return exitCode(anchorCtx.error);
@@ -1026,7 +1060,7 @@ async function runTaskClaimGate(
         anchorOverlapEnabled,
       };
     } else {
-      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateSessionId);
+      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso);
       if (!anchorCtx.ok) {
         inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
         return exitCode(anchorCtx.error);
@@ -1115,17 +1149,14 @@ async function runPhaseClaimGate(
   const checkpoint = requireCheckpoint("phase-claim");
   const nowIso = new Date().toISOString();
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
-  // reason: anchor-overlap PARITY with the real phase claim (this function's own header
-  // paragraph) — `PhaseWorkflowService.claim` captures the session instance from
-  // `process.env` and feeds it to `noAnchorOverlap`
-  // (task-phaseworkflowservice-claim-captures-no-session-id-so-every). Identical read,
-  // identical surfacing of an unusable id, as `runTaskClaimGate` above.
-  const sessionIdResult = resolveClaimSessionId(inv.env);
-  if (!sessionIdResult.ok) {
-    inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
-    return exitCode(sessionIdResult.error);
+  // reason: BR-1056 — parity with the real phase claim: its overlap test compares holders by the claimant's
+  // VERIFIED run, so the dry-run reads the same invocation identity as `runTaskClaimGate` above.
+  const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+  if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
+    return exitCode(verifiedIdentity.error);
   }
-  const candidateSessionId = sessionIdResult.value;
+  const candidateRun = verifiedIdentity?.value?.harnessRun ?? null;
 
   // reason: mirrors runTaskClaimGate's identical null-parent_id edge case (a phase's
   // parent_id is schema-required to be its plan — a null here can only happen on a
@@ -1133,7 +1164,7 @@ async function runPhaseClaimGate(
   // rationale of the synthetic "no spec parent, no siblings" context.
   let ctx: GateContext;
   if (phase.parent_id === null) {
-    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, [], nowIso, candidateSessionId);
+    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, [], nowIso);
     if (!anchorCtx.ok) {
       inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
       return exitCode(anchorCtx.error);
@@ -1142,6 +1173,7 @@ async function runPhaseClaimGate(
       ...buildUpstreamSpecContext(undefined),
       ...anchorCtx.value,
       targetIdOrSlug: phaseIdOrSlug,
+      candidateRun,
       anchorOverlapEnabled,
     };
   } else {
@@ -1150,7 +1182,7 @@ async function runPhaseClaimGate(
       inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
       return exitCode(bundleResult.error);
     }
-    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, candidateSessionId);
+    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso);
     if (!anchorCtx.ok) {
       inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
       return exitCode(anchorCtx.error);
@@ -1159,6 +1191,7 @@ async function runPhaseClaimGate(
       ...buildUpstreamSpecContext(bundleResult.value.spec),
       ...anchorCtx.value,
       targetIdOrSlug: phaseIdOrSlug,
+      candidateRun,
       anchorOverlapEnabled,
     };
   }
@@ -1331,9 +1364,9 @@ function formatJudgeAdvisory(judgment: NewReviewJudgment): string {
 
 /** One rule-doc lookup outcome: where the slice came from, and the slice itself. */
 interface RuleDocLookup {
-  /** Slug of the discovered skill doc, or a descriptive placeholder label when none was found. */
+  /** Slug of the discovered skill doc, or {@link SHIPPED_RULE_SOURCE} when the shipped rule was used. */
   source: string;
-  /** Markdown slice fed to `buildFeedingPack`; `RULE_DOC_MISSING_PLACEHOLDER` when absent. */
+  /** Markdown slice fed to `buildFeedingPack`. */
   markdown: string;
 }
 
@@ -1341,27 +1374,39 @@ interface RuleDocLookup {
  * Discovers the approved `knowledge/skill` doc scoped to `appliesTo` via
  * `CorpusService.findFeedingSkill` and returns its markdown (MDX-resolved, mirroring
  * `renderDocMarkdown`) — the "active feeding" rule source for a gate's violation
- * output. Supersedes the former hardcoded-title lookup (`findApprovedRuleDoc` /
- * `WRITE_SPEC_RULE_TITLE`): any gate can now be fed by any approved skill doc that
- * declares a matching `extra.skill.applies_to`, not only the one specific seeded title.
+ * output. A project's own approved doc always wins (BR-1359); with none, the rule shipped
+ * with the binary (`assets/governance/write-spec-rule.md`) is read and its source label
+ * says so.
  *
  * @param appliesTo - Scope to discover by, e.g. `SPEC_CREATE_PRODUCED_TYPE`.
- * @returns A `RuleDocLookup` with `markdown = RULE_DOC_MISSING_PLACEHOLDER` when no
- *   matching approved skill doc exists, or the discovery/get calls fail — the gate
- *   still surfaces `missing` reasons even when the rule doc itself is unavailable
- *   (backward-compat with the pre-discovery placeholder behaviour).
+ * @param inv - The invocation, locating the binary's shipped assets.
+ * @returns The lookup; `markdown` carries a lookup-failed note when the discovery or get
+ *   call fails (never dressed up as "no rule", BR-587), and an `err` naming the missing asset
+ *   when no project doc exists and the shipped rule cannot be read.
  */
-async function findFeedingSkill(app: App, appliesTo: string): Promise<RuleDocLookup> {
+async function findFeedingSkill(
+  app: App,
+  appliesTo: string,
+  inv: Invocation,
+): Promise<Result<RuleDocLookup, LoreError>> {
   const discoveryResult = await app.corpusService.findFeedingSkill(appliesTo);
-  if (!discoveryResult.ok || discoveryResult.value === null) {
-    return { source: `applies_to:${appliesTo}`, markdown: RULE_DOC_MISSING_PLACEHOLDER };
+  if (!discoveryResult.ok) {
+    return ok({
+      source: `applies_to:${appliesTo}`,
+      markdown: ruleLookupFailedPlaceholder(JSON.stringify(discoveryResult.error)),
+    });
+  }
+  if (discoveryResult.value === null) {
+    const shipped = readShippedWriteSpecRule(inv);
+    if (!shipped.ok) return shipped;
+    return ok({ source: SHIPPED_RULE_SOURCE, markdown: shipped.value });
   }
 
   const match = discoveryResult.value;
   const getResult = await app.corpusService.get(match.id);
   if (!getResult.ok) {
-    return { source: match.slug, markdown: RULE_DOC_MISSING_PLACEHOLDER };
+    return ok({ source: match.slug, markdown: ruleLookupFailedPlaceholder(JSON.stringify(getResult.error)) });
   }
 
-  return { source: match.slug, markdown: await renderDocMarkdown(app, getResult.value.doc) };
+  return ok({ source: match.slug, markdown: await renderDocMarkdown(app, getResult.value.doc) });
 }

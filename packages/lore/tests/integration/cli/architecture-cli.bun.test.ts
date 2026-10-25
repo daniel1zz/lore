@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * Architecture tree on the CLI + MCP surfaces (Baseline slice 3a, AC-BLS3-1 / BR-979), over a throwaway corpus.
  *
@@ -25,7 +26,8 @@
  * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, LIVE_TEST_RUN } from "../../live-invocation.js";
+import { registerTestRun } from "../../helpers/test-run-identity.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
@@ -35,6 +37,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { LoreBaselineAddSchema, LoreRuleAddSchema, LoreRuleSetSchema, registerTools } from "../../../src/adapters/mcp/tools.js";
 
 setDefaultTimeout(300_000);
@@ -151,6 +154,8 @@ describe("lore rule add on architecture nodes", () => {
     const r = runLore(["rule", "add", debtRegistry, "--statement", "Legacy throw in X", ...RULE], dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("Added AD-1");
+    // a direct add is a pending add; a standard's exception must name an APPROVED live debt entry, so approve the registry
+    approveFixtureNodes(dir, "all");
   });
 
   it("allocates AS-1 on a standard with the four parts stored", () => {
@@ -251,15 +256,17 @@ describe("MCP tools accept the architecture fields", () => {
       registerTools(server, app, undefined, liveInvocation());
       type Handler = (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult>;
       const tools = (server as unknown as { _registeredTools: Record<string, { handler: Handler }> })._registeredTools;
-      const std2 = await tools["lore_baseline_add"]!.handler({ parent: archSection, tree: "architecture", node: "standard", label: "std2", title: "MCP Standard", by: ACTOR }, {});
+      // reason: an MCP write naming a run is verified at its first write (BR-1351); the run must be known to this corpus
+      registerTestRun(dir, LIVE_TEST_RUN);
+      const std2 = await tools["lore_baseline_add"]!.handler({ harness_run: LIVE_TEST_RUN, parent: archSection, tree: "architecture", node: "standard", label: "std2", title: "MCP Standard", by: ACTOR }, {});
       expect(std2.isError).toBeFalsy();
       const slug = (JSON.parse((std2.content[0] as { text: string }).text) as { slug: string }).slug;
       const added = await tools["lore_rule_add"]!.handler(
-        { leaf: slug, statement: "MCP standard", confidence: "established", enforced_by: "guaranteed", examples: ["e"], by: ACTOR,
+        { harness_run: LIVE_TEST_RUN, leaf: slug, statement: "MCP standard", confidence: "established", enforced_by: "guaranteed", examples: ["e"], by: ACTOR,
           current_reality: "r", target_rule: "t", current_exceptions: ["AD-1"], migration: "m" }, {});
       expect(added.isError).toBeFalsy();
       expect((added.content[0] as { text: string }).text).toContain("AS-");
-      const set = await tools["lore_rule_set"]!.handler({ rule: "AS-1", by: ACTOR, migration: "mcp migration" }, {});
+      const set = await tools["lore_rule_set"]!.handler({ harness_run: LIVE_TEST_RUN, rule: "AS-1", by: ACTOR, migration: "mcp migration" }, {});
       expect(set.isError).toBeFalsy();
     } finally {
       app.close();

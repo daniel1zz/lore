@@ -8,9 +8,9 @@
  * command is a thin arg-parse + render layer, same shape as `commands/audit.ts`.
  *
  * `--since` defaults to the Unix epoch (effectively "all time") when omitted
- * — SPEC-102 names no pinned default watermark the way `audit.verify_since`
- * has one, so an unbounded-by-default window is the least-surprising choice
- * for a first-run `lore trace stats` with no flags.
+ * — SPEC-102 names no pinned default watermark, so an unbounded-by-default
+ * window is the least-surprising choice for a first-run `lore trace stats`
+ * with no flags.
  *
  * `--raw-queries` includes literal `details.query` search text — LOCAL-ONLY,
  * OFF by default (SPEC-102 §Security & Privacy: aggregates only unless
@@ -79,7 +79,6 @@ const TRACE_COUNT_FIELD_ENUMERATORS: Record<
   TraceStatsCountField,
   (service: TraceStatsService, opts: TraceStatsOpts) => Promise<Result<TraceStatsEnumeration, LoreError>>
 > = {
-  never_read_docs_count: (service, opts) => service.enumerateNeverReadDocs(opts),
   zero_hit_search_count: (service, opts) => service.enumerateZeroHitSearches(opts),
 };
 
@@ -113,9 +112,10 @@ function findCountFieldEnumerator(
  * @returns One display line per member, in the store's declared order.
  */
 function formatEnumerationMembers(enumeration: TraceStatsEnumeration): string[] {
-  switch (enumeration.field) {
-    case "never_read_docs_count":
-      return enumeration.members.map((doc) => `${doc.slug} (${doc.id})`);
+  // reason: with ONE variant left `TraceStatsEnumeration` is no longer a union, so only the discriminant's own type
+  // narrows to `never` in the default branch — switch on it, not on the object.
+  const field = enumeration.field;
+  switch (field) {
     case "zero_hit_search_count":
       // reason: `query` is ABSENT (not empty) unless --raw-queries was passed —
       // rendering it conditionally is what keeps the privacy boundary intact on
@@ -128,7 +128,7 @@ function formatEnumerationMembers(enumeration: TraceStatsEnumeration): string[] 
       // makes a newly registered count field a COMPILE error right here, and the
       // runtime fallback NAMES the gap rather than returning `[]`, which would
       // render as "this count legitimately has no members".
-      const _exhaustive: never = enumeration;
+      const _exhaustive: never = field;
       void _exhaustive;
       return ["(no member renderer registered for this count field — members withheld)"];
     }
@@ -145,7 +145,7 @@ export default defineLoreCommand({
       meta: {
         name: "stats",
         description:
-          "Aggregate counts-by-kind, deny-by-checkpoint, zero-hit searches, and never-read docs",
+          "Aggregate counts-by-kind, deny-by-checkpoint, zero-hit searches, and per-day read counts",
       },
       args: {
         since: {
@@ -163,7 +163,7 @@ export default defineLoreCommand({
         enumerate: {
           type: "string",
           description:
-            "Enumerate the MEMBERS behind a *_count field the plain run reports (never_read_docs_count, zero_hit_search_count). Composes with --since/--raw-queries. Unknown field → exit 4, naming it and the known set.",
+            "Enumerate the MEMBERS behind a *_count field the plain run reports (zero_hit_search_count). Composes with --since/--raw-queries. Unknown field → exit 4, naming it and the known set.",
         },
       },
       async run(context) {
@@ -208,6 +208,7 @@ export default defineLoreCommand({
                 field: "enumerate",
                 message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
                 value: args.enumerate,
+                rule: "BR-485",
               };
               inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
               return exitCode(error);
@@ -269,7 +270,7 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, denyRows.length > 0 ? formatTable(["Checkpoint", "Layer", "Count"], denyRows) : "  (none)");
 
           printLine(inv.io.stdout, `\nZero-hit searches: ${report.zero_hit_search_count}`);
-          printLine(inv.io.stdout, `Never-read docs: ${report.never_read_docs_count}`);
+          printLine(inv.io.stdout, `Reads (counted per day, not logged per row): ${report.reads.total}`);
 
           if (report.deny_retry_gap.length > 0) {
             printLine(inv.io.stdout, "\nDeny -> retry-success gap (best-effort, computed read-side vs audit):");

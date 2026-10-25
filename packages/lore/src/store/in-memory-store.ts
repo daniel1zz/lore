@@ -39,7 +39,6 @@ import type {
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   AcCiteRow,
-  NeverReadDoc,
   RuleDependsRow,
   ProposedRuleWrite,
   RuleLeafPatch,
@@ -50,6 +49,13 @@ import type {
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
+  CheckOutcomeInput,
+  CheckOutcomeStat,
+  PendingAskInput,
+  PendingAskRecord,
+  LeaseAcquisition,
+  LeaseRecord,
+  ReadDayCount,
   TraceEventInput,
   TraceEventRecord,
   TraceGateDenyEvent,
@@ -77,6 +83,13 @@ import {
   emptyKindsError,
   withoutNullHarnessRun,
 } from "./store-shared.js";
+import {
+  buildPlanProgressWrite,
+  keepStoredPlanProgress,
+  planIdsAffectedBy,
+  refuseArchivedTerminal,
+  withInitialPlanProgress,
+} from "./plan-progress.js";
 import { stampAuditSurface } from "./audit-surface.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
@@ -127,6 +140,12 @@ export class InMemoryStore implements StoreInterface {
   private readonly calibrationRecords: CalibrationRecord[] = [];
   /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
   private readonly traceEvents: TraceEventRecord[] = [];
+  /** BR-1373 — mirrors `trace_read_counts`: UTC day -> reads that day. */
+  private readonly readCounts = new Map<string, number>();
+  /** BR-1373 — mirrors `check_outcomes`: one entry per gate/hook run, append-only. */
+  private readonly checkOutcomes: CheckOutcomeInput[] = [];
+  /** BR-1374 — mirrors `pending_asks`: lore-issued questions with their single-use nonces, in issue order. */
+  private readonly pendingAsks: Array<PendingAskInput & { used_at: string | null }> = [];
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
   private readonly runs = new Map<string, RunRecord>();
   /** Mirrors `runs.ended_at` / `runs.end_reason` (migration-017); absent key = open run. */
@@ -510,10 +529,15 @@ export class InMemoryStore implements StoreInterface {
    * @see StoreInterface.insertWithProvenance
    */
   async insertWithProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — a plan is born with `extra.progress`; the archived-terminal rule refuses a member of an archived plan.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
+    const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatus(doc));
+    if (terminal !== null) return err(terminal);
+    const chainLength = this.auditChain.length;
     const insertResult = await this.insert(doc);
     if (!insertResult.ok) return insertResult;
 
@@ -530,7 +554,73 @@ export class InMemoryStore implements StoreInterface {
       return auditResult;
     }
 
+    const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(null, insertResult.value), version, doc.id);
+    if (!progressResult.ok) {
+      this.docs.delete(doc.id);
+      this.removeVersionEntry(version);
+      this.auditChain.length = chainLength;
+      return progressResult;
+    }
+
     return ok(insertResult.value);
+  }
+
+  /** The status of the live plan a task/phase `doc` is filed under, or `null` when it has no live plan. */
+  private readPlanStatus(doc: DocRecord): DocRecord["status"] | null {
+    const planId = planIdsAffectedBy(null, doc)[0];
+    if (planId === undefined) return null;
+    const plan = this.docs.get(planId);
+    return plan === undefined || plan.type !== "plan" || (plan.deleted_at ?? null) !== null ? null : plan.status;
+  }
+
+  /**
+   * BR-1379 — recompute `extra.progress` of each plan in `planIds` from its current member rows and write the plan
+   * (CAS, version row, audit row) when it changed. On failure every plan write this call applied is undone (its
+   * snapshot restored, its version row removed); the caller undoes its primary write and the audit chain.
+   */
+  private async reconcilePlanProgress(
+    planIds: readonly DocId[],
+    primaryVersion: VersionRecord,
+    causeDocId: DocId,
+  ): Promise<Result<void, LoreError>> {
+    const applied: Array<{ id: DocId; before: DocRecord; version: VersionRecord }> = [];
+    const undo = (): void => {
+      for (const done of applied) {
+        this.restoreDocSnapshot(done.id, done.before);
+        this.removeVersionEntry(done.version);
+      }
+    };
+    for (const planId of planIds) {
+      const plan = this.docs.get(planId);
+      if (plan === undefined || plan.type !== "plan" || (plan.deleted_at ?? null) !== null) continue;
+      const members = [...this.docs.values()].filter(
+        (doc) => (doc.deleted_at ?? null) === null && planIdsAffectedBy(null, doc).includes(planId),
+      );
+      const write = buildPlanProgressWrite(plan, members, {
+        now: primaryVersion.created_at,
+        actor: primaryVersion.created_by,
+        harnessRun: primaryVersion.harness_run ?? null,
+        causeDocId,
+      });
+      if (write === null) continue;
+      const updated = await this.update(planId, write.patch, { expected_version: write.expectedVersion });
+      if (!updated.ok) {
+        undo();
+        return updated;
+      }
+      applied.push({ id: planId, before: plan, version: write.version });
+      const versioned = await this.insertVersion(write.version);
+      if (!versioned.ok) {
+        undo();
+        return versioned;
+      }
+      const audited = await this.appendAuditEntry(write.audit);
+      if (!audited.ok) {
+        undo();
+        return audited;
+      }
+    }
+    return ok(undefined);
   }
 
   /**
@@ -551,10 +641,15 @@ export class InMemoryStore implements StoreInterface {
    * the SAME candidate on a subsequent call — the ordinal is not burned.
    */
   async insertWithAllocatedOrdinalAndProvenance(
-    doc: DocRecord,
-    version: VersionRecord,
+    rawDoc: DocRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1379 — see insertWithProvenance.
+    const { doc, version } = withInitialPlanProgress(rawDoc, rawVersion);
+    const terminal = refuseArchivedTerminal(null, doc, this.readPlanStatus(doc));
+    if (terminal !== null) return err(terminal);
+    const chainLength = this.auditChain.length;
     const allocResult = await this.insertWithAllocatedOrdinal(doc);
     if (!allocResult.ok) return allocResult;
 
@@ -571,6 +666,14 @@ export class InMemoryStore implements StoreInterface {
       return auditResult;
     }
 
+    const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(null, allocResult.value), version, doc.id);
+    if (!progressResult.ok) {
+      this.docs.delete(allocResult.value.id);
+      this.removeVersionEntry(version);
+      this.auditChain.length = chainLength;
+      return progressResult;
+    }
+
     return ok(allocResult.value);
   }
 
@@ -579,13 +682,22 @@ export class InMemoryStore implements StoreInterface {
    */
   async updateWithProvenance(
     id: DocId,
-    patch: Partial<DocRecord>,
+    rawPatch: Partial<DocRecord>,
     opts: UpdateOpts | undefined,
-    version: VersionRecord,
+    rawVersion: VersionRecord,
     audit: AuditEntry,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     const before = this.docs.get(id);
+    // reason: BR-1379 — the stored row judges the write: archived-terminal refusal, progress kept across a plan edit,
+    // and the plans whose progress this write changes.
+    const kept = before === undefined ? { patch: rawPatch, version: rawVersion } : keepStoredPlanProgress(before, rawPatch, rawVersion);
+    const patch = kept.patch;
+    const version = kept.version;
+    if (before !== undefined) {
+      const terminal = refuseArchivedTerminal(before, { ...before, ...patch }, null);
+      if (terminal !== null) return err(terminal);
+    }
 
     // reason: the in-memory store has no registry rows for leaves a test inserted directly, so the
     // liveness read is the baseline leaf docs themselves (the doc map is the single source here —
@@ -625,6 +737,52 @@ export class InMemoryStore implements StoreInterface {
       }
     }
 
+    // reason: BR-1307 — companion doc writes share this write; on any failure every one already applied, the
+    // primary write, its version rows and the audit chain are restored, so nothing of the outcome survives.
+    const appliedCompanions: Array<{ id: DocId; before: DocRecord | undefined; version: VersionRecord }> = [];
+    for (const companion of extras?.also_update ?? []) {
+      const companionBefore = this.docs.get(companion.id);
+      const rollback = (): void => {
+        for (const done of appliedCompanions) {
+          this.restoreDocSnapshot(done.id, done.before);
+          this.removeVersionEntry(done.version);
+        }
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        this.auditChain.length = chainLength;
+      };
+      const companionUpdate = await this.update(companion.id, companion.patch, companion.opts);
+      if (!companionUpdate.ok) {
+        rollback();
+        return companionUpdate;
+      }
+      appliedCompanions.push({ id: companion.id, before: companionBefore, version: companion.version });
+      const companionVersion = await this.insertVersion(companion.version);
+      if (!companionVersion.ok) {
+        rollback();
+        return companionVersion;
+      }
+      const companionAudit = await this.appendAuditEntry(companion.audit);
+      if (!companionAudit.ok) {
+        rollback();
+        return companionAudit;
+      }
+    }
+
+    if (before !== undefined) {
+      const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(before, updateResult.value), version, id);
+      if (!progressResult.ok) {
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        for (const done of appliedCompanions) {
+          this.restoreDocSnapshot(done.id, done.before);
+          this.removeVersionEntry(done.version);
+        }
+        this.auditChain.length = chainLength;
+        return progressResult;
+      }
+    }
+
     return ok(updateResult.value);
   }
 
@@ -647,6 +805,7 @@ export class InMemoryStore implements StoreInterface {
     audit: AuditEntry,
   ): Promise<Result<void, LoreError>> {
     const before = this.docs.get(id);
+    const chainLength = this.auditChain.length;
 
     const deleteResult = await this.softDelete(id);
     if (!deleteResult.ok) return deleteResult;
@@ -662,6 +821,16 @@ export class InMemoryStore implements StoreInterface {
       this.restoreDocSnapshot(id, before);
       this.removeVersionEntry(version);
       return auditResult;
+    }
+
+    if (before !== undefined) {
+      const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(before, null), version, id);
+      if (!progressResult.ok) {
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        this.auditChain.length = chainLength;
+        return progressResult;
+      }
     }
 
     return ok(undefined);
@@ -1547,23 +1716,6 @@ export class InMemoryStore implements StoreInterface {
     return ok(rows);
   }
 
-  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
-    const readDocIds = new Set(
-      this.traceEvents
-        .filter((e) => e.kind === "get" && e.doc_id !== undefined && e.ts >= window.since)
-        .map((e) => e.doc_id as string),
-    );
-    const rows: NeverReadDoc[] = [];
-    for (const doc of this.docs.values()) {
-      if (doc.deleted_at !== null) continue;
-      if (readDocIds.has(doc.id)) continue;
-      rows.push({ id: doc.id, slug: doc.slug });
-    }
-    // Matches SQLiteStore/TursoStore's `ORDER BY slug ASC, id ASC`.
-    rows.sort((a, b) => a.slug.localeCompare(b.slug) || a.id.localeCompare(b.id));
-    return ok(rows);
-  }
-
   async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
     // reason: DERIVED from the member list, never a second tally — see
     // StoreInterface.countTraceZeroHitSearches's own ⛔ note.
@@ -1572,11 +1724,91 @@ export class InMemoryStore implements StoreInterface {
     return ok(listResult.value.length);
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
-    // reason: DERIVED from the member list — see listNeverReadDocs above.
-    const listResult = await this.listNeverReadDocs(window);
-    if (!listResult.ok) return listResult;
-    return ok(listResult.value.length);
+  async incrementReadCount(day: string): Promise<Result<void, LoreError>> {
+    this.readCounts.set(day, (this.readCounts.get(day) ?? 0) + 1);
+    return ok(undefined);
+  }
+
+  private readonly leases = new Map<string, LeaseRecord>();
+
+  async acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>> {
+    const prior = this.leases.get(name);
+    if (prior !== undefined && prior.expires_at > nowIso && prior.holder !== holder) {
+      return ok({ acquired: false, holder: prior.holder, expires_at: prior.expires_at });
+    }
+    this.leases.set(name, { name, holder, expires_at: expiresAtIso });
+    return ok({ acquired: true, tookOver: prior !== undefined && prior.holder !== holder });
+  }
+
+  async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
+    const prior = this.leases.get(name);
+    if (prior === undefined || prior.holder !== holder) return ok(false);
+    this.leases.set(name, { name, holder, expires_at: expiresAtIso });
+    return ok(true);
+  }
+
+  async releaseLease(name: string, holder: string): Promise<Result<void, LoreError>> {
+    if (this.leases.get(name)?.holder === holder) this.leases.delete(name);
+    return ok(undefined);
+  }
+
+  async readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>> {
+    return ok(this.leases.get(name) ?? null);
+  }
+
+  async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
+    const rows = [...this.readCounts.entries()]
+      .filter(([day]) => day >= sinceDay)
+      .map(([day, count]) => ({ day, count }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+    return ok(rows);
+  }
+
+  async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
+    for (const row of rows) this.checkOutcomes.push({ ...row });
+    return ok(undefined);
+  }
+
+  async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {
+    if (this.pendingAsks.some((a) => a.nonce === input.nonce)) return err({ code: "STORE_ERROR", message: "pending_asks: duplicate nonce" });
+    this.pendingAsks.push({ ...input, used_at: null });
+    return ok(undefined);
+  }
+
+  async readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>> {
+    const index = this.pendingAsks.findIndex((a) => a.nonce === nonce);
+    if (index < 0) return ok(null);
+    const row = this.pendingAsks[index] as PendingAskInput & { used_at: string | null };
+    const newer = this.pendingAsks.some((a, i) => i > index && a.decision_id === row.decision_id);
+    return ok({ ...row, id: index + 1, is_latest: !newer });
+  }
+
+  async consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>> {
+    const row = this.pendingAsks.find((a) => a.nonce === nonce);
+    if (row === undefined || row.used_at !== null) return ok(false);
+    row.used_at = usedAt;
+    return ok(true);
+  }
+
+  async listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>> {
+    const byCheck = new Map<string, CheckOutcomeInput[]>();
+    for (const row of this.checkOutcomes) byCheck.set(row.check_id, [...(byCheck.get(row.check_id) ?? []), row]);
+    const stats = [...byCheck.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([check_id, runs]): CheckOutcomeStat => {
+        const times = runs.map((r) => r.ts).sort();
+        const denials = runs.filter((r) => r.outcome === "deny").map((r) => r.ts).sort();
+        return {
+          check_id,
+          runs: runs.length,
+          denials: denials.length,
+          errors: runs.filter((r) => r.outcome === "error").length,
+          first_run: times[0] as string,
+          last_run: times[times.length - 1] as string,
+          last_denial: denials.length === 0 ? null : (denials[denials.length - 1] as string),
+        };
+      });
+    return ok(stats);
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
@@ -1620,7 +1852,8 @@ export class InMemoryStore implements StoreInterface {
 
   async insertRun(run: RunRecord): Promise<Result<void, LoreError>> {
     // reason: first registration wins — mirrors SQLite's INSERT OR IGNORE on the PK.
-    if (!this.runs.has(run.id)) this.runs.set(run.id, structuredClone(run));
+    // reason: the address is never part of the first-wins insert (BR-1360); `recordRunAddress` owns it.
+    if (!this.runs.has(run.id)) this.runs.set(run.id, { ...structuredClone(run), messageAddress: null });
     return ok(undefined);
   }
 
@@ -1657,6 +1890,14 @@ export class InMemoryStore implements StoreInterface {
     if (!this.runs.has(id)) return ok(false);
     // reason: newest registration wins — mirrors SQLite's unconditional UPDATE (a resumed run lives in a new process).
     this.runProcesses.set(id, { ...proc });
+    return ok(true);
+  }
+
+  async recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>> {
+    const run = this.runs.get(id);
+    if (run === undefined) return ok(false);
+    // reason: BR-1360 — unconditional, newest registration wins, NULL clears (mirrors SQLite's UPDATE).
+    this.runs.set(id, { ...run, messageAddress: address });
     return ok(true);
   }
 

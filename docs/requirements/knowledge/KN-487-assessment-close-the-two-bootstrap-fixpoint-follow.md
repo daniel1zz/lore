@@ -3,10 +3,10 @@ id: KN-487
 type: knowledge
 role: knowledge
 title: "Assessment: Close the two bootstrap-fixpoint follow-ups: one anchored predicate in production, and a fixture-forced red for the anchor-value assertion (2026-08-21)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-23
 tags: []
 parent: PLAN-133
 links:

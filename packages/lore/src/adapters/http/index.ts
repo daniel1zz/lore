@@ -5,13 +5,15 @@
  */
 
 import type { Invocation } from "@lore/core";
+import type { HumanSessionBinding } from "@lore/core/node";
 import { warnSinkOf } from "../../service/warn-sink.js";
 import { randomUUID } from "node:crypto";
 
 import type { App } from "../../app.js";
-import { authenticateRequest, extractSessionCookie, ALLOWED_ORIGINS } from "./auth.js";
+import { authenticateRequest, extractSessionCookie, ALLOWED_ORIGINS, type ActorContext } from "./auth.js";
+import { dispatchUnderRequestParty } from "./request-identity.js";
 import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
-import { jsonError, corsPreflightResponse, applyCorsOrigin } from "./middleware.js";
+import { jsonError, corsPreflightResponse, applyCorsOrigin, loreErrorToStatus } from "./middleware.js";
 import { createMachineAuthStores, type MachineAuthStores } from "./machine-auth.js";
 import { handleGetProjects } from "./projects-route.js";
 import { createDashboardHandler, type DashboardServingConfig } from "./static-serving.js";
@@ -38,7 +40,51 @@ function dispatchWithAuditSurface(
   return runWithAuditSurface(actor.callerSurface, dispatch);
 }
 
+/**
+ * Dispatch an authenticated request's route handling as its party (BR-1055, spec-every-write-is-made-by-a-known-party-
+ * an-attested-agent-run): a write is made by the bearer key's name or the dashboard login under a run registered for
+ * it, never by the serve process's own identity. A write whose party cannot be registered is answered with that error
+ * and nothing is written.
+ */
+async function dispatchAsRequestParty(
+  app: App,
+  actor: ActorContext,
+  req: Request,
+  checkout: string,
+  humanWrites: HumanWritesConfig | undefined,
+  dispatch: (actorForRoutes: ActorContext) => Promise<Response | null>,
+): Promise<Response | null> {
+  // reason: the human session is looked up per write (not captured at start-up) so `lore session start|end` takes
+  // effect on the running dashboard without a restart.
+  const humanSessionOf = humanWrites === undefined ? undefined : () => humanWrites.humanSessionOf(checkout);
+  const outcome = await dispatchUnderRequestParty(
+    app,
+    actor,
+    req.method,
+    (actorForRoutes) => dispatchWithAuditSurface(actorForRoutes, () => dispatch(actorForRoutes)),
+    humanSessionOf,
+  );
+  if (!outcome.ok) return jsonError(outcome.error, loreErrorToStatus(outcome.error));
+  return outcome.value;
+}
+
+/**
+ * How the LOCAL dashboard names the person behind a cookie write (GitHub #324, BR-1350/BR-1351): the human session
+ * open in the checkout the write lands in, never the cookie key's owner.
+ */
+export interface HumanWritesConfig {
+  /** The checkout the launch project's (unprefixed) requests write into; a mounted project uses its own entry path. */
+  readonly checkoutRoot: string;
+  /** The open human session of a checkout (`resolveHumanSessionBinding`), or `null`; called once per cookie write. */
+  readonly humanSessionOf: (checkout: string) => HumanSessionBinding | null;
+}
+
 export interface HttpConfig {
+  /**
+   * Set by `lore dashboard`: cookie writes are made by the checkout's open human session (refused with none).
+   * Omitted (`lore serve`): a cookie write is made by the login's owner under a `dashboard` run.
+   */
+  humanWrites?: HumanWritesConfig;
   port?: number;
   host?: string;
   /**
@@ -194,6 +240,7 @@ async function dispatchProjectRequest(
   primaryApp: App,
   getMachineAuth: () => MachineAuthStores,
   allowedOrigins: readonly string[],
+  humanWrites: HumanWritesConfig | undefined,
 ): Promise<Response> {
   const { name, rest } = match;
   const entry = mountRegistry.resolve(name);
@@ -244,8 +291,8 @@ async function dispatchProjectRequest(
     strippedUrl.pathname = rest;
 
     const mountedApp = entry.app;
-    const response = await dispatchWithAuditSurface(actor, () =>
-      handleApiRoute(req, strippedUrl, mountedApp, actor, getMachineAuth, allowedOrigins),
+    const response = await dispatchAsRequestParty(mountedApp, actor, req, entry.path, humanWrites, (actorForRoutes) =>
+      handleApiRoute(req, strippedUrl, mountedApp, actorForRoutes, getMachineAuth, allowedOrigins),
     );
     if (response === null) {
       return jsonError(
@@ -391,7 +438,7 @@ export function startHttpServer(app: App, config: HttpConfig): ReturnType<typeof
         if (mountRegistry !== undefined) {
           const projectMatch = matchProjectPrefix(url.pathname);
           if (projectMatch !== null) {
-            const response = await dispatchProjectRequest(req, url, projectMatch, mountRegistry, app, getMachineAuth, allowedOrigins);
+            const response = await dispatchProjectRequest(req, url, projectMatch, mountRegistry, app, getMachineAuth, allowedOrigins, config.humanWrites);
             return applyCorsOrigin(response, origin, allowedOrigins);
           }
         }
@@ -421,8 +468,9 @@ export function startHttpServer(app: App, config: HttpConfig): ReturnType<typeof
           );
         }
 
-        const response = await dispatchWithAuditSurface(actor, () =>
-          handleApiRoute(req, url, app, actor, getMachineAuth, allowedOrigins),
+        const launchCheckout = config.humanWrites?.checkoutRoot ?? "";
+        const response = await dispatchAsRequestParty(app, actor, req, launchCheckout, config.humanWrites, (actorForRoutes) =>
+          handleApiRoute(req, url, app, actorForRoutes, getMachineAuth, allowedOrigins),
         );
 
         if (response === null) {

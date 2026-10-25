@@ -3,10 +3,10 @@ id: KN-642
 type: knowledge
 role: knowledge
 title: "Pilot assessment v3: specification + execution branches, method v2 (AC-BLS1-13)"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-174
 ---

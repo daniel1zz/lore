@@ -17,7 +17,7 @@ import { runContextRefresh } from "../../../src/flows/context-flow.js";
 import { parseSkillFile } from "../../../src/service/context-fragments/section.js";
 
 const skillFragment = (id: string, description: string, body: string): string =>
-  `---\nid: ${id}\ntitle: ${id}\naudience: [main]\nmode: static\ndelivery: skill\ndescription: ${description}\n---\n${body}\n`;
+  `---\nid: ${id}\ntitle: ${id}\ninject: [on-demand]\ndescription: ${description}\n---\n${body}\n`;
 
 const PROJECT_DIR = ".claude/skills";
 const FOO_PATH = `${PROJECT_DIR}/lore-foo/SKILL.md`;
@@ -133,7 +133,7 @@ describe("AC-RS-5 refresh writes and prunes skill folders", () => {
     const { fs, deps } = setup(
       {
         ".lore/context/plan.md": skillFragment("plan", "Use when planning", "Plan body."),
-        ".lore/context/aaa-rule.md": "---\nid: aaa-rule\ntitle: A\naudience: [main]\nmode: static\n---\nRule body.\n",
+        ".lore/context/aaa-rule.md": "---\nid: aaa-rule\ntitle: A\ninject: [launch]\n---\nRule body.\n",
       },
       { shippedSkillNames: ["lore-plan"] },
     );

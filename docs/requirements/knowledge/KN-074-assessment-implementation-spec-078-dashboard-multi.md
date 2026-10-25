@@ -3,10 +3,10 @@ id: KN-074
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-078 dashboard multi-project (dual-wave) (2026-07-25)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-25
-updated: 2026-07-26
+updated: 2026-10-23
 tags: []
 parent: PLAN-038
 links:

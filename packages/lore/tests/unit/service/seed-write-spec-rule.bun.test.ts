@@ -1,3 +1,4 @@
+// @reads assets/governance/write-spec-rule.md
 /**
  * Tests for scripts/seed-write-spec-rule.ts — bun test (not vitest) because seeding
  * writes through a real SQLiteStore-backed App (`createApp`), which pulls in

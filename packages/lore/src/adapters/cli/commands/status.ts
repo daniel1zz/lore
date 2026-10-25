@@ -232,7 +232,7 @@ import { classifyFeedbackUpstream, resolveGithubStatusRows } from "../report-iss
 import { loadConfig } from "@lore/core/node";
 import { resolveCiteGateRaw, classifyCaptureSource, type DocRecord } from "@lore/core";
 import type { StampVerdictDistribution } from "../../../service/gate-predicates.js";
-import { formatStampVerdictLine } from "../assess-render.js";
+import { formatStampVerdictLine } from "../status-stamp-verdict.js";
 import type { EvidenceEntry } from "@lore/core";
 import {
   findUnresolvedStateBindingSkips,
@@ -787,6 +787,7 @@ async function collectCodeAnchorSpecMembers(
         `code_anchor_specs: this command's anchored-spec member list holds ${members.length} spec(s) but the shared ` +
         `flows/drift-flow.ts::countArmedSpecs counted ${sharedCountResult.value} over the SAME ${specs.length} live ` +
         `spec(s) — one of the two call sites has bypassed the shared isSpecAnchored predicate; reconcile before trusting either number.`,
+      rule: "BR-444",
     });
   }
 
@@ -1017,6 +1018,10 @@ export default defineLoreCommand({
       type: "boolean",
       description: "Check tree against lore.tree.yaml blueprint",
     },
+    detail: {
+      type: "boolean",
+      description: "Print the rows of list-shaped findings (e.g. each criterion with a missing oracle file); without it they print as counts",
+    },
     fix: {
       type: "boolean",
       description: "Apply --check-tree fixes for orphan/misplaced drift",
@@ -1144,6 +1149,7 @@ export default defineLoreCommand({
             field: "enumerate",
             message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
             value: args.enumerate,
+            rule: "BR-443",
           };
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           return exitCode(error);
@@ -2067,7 +2073,13 @@ export default defineLoreCommand({
         `Criteria with a missing oracle file: ${acOracleFileMissingCount} (not measured once any pass is on record — ` +
           "see spec-evidence-identity-an-attested-row-counts-only-for-the)",
       );
-      for (const member of oracleFileMissingMembers) printLine(inv.io.stdout, `  ${member}`);
+      // reason: BR-1371 — a list-shaped finding prints its count; the rows are opt-in (`--detail`), since 108 of them
+      // made the default `lore status` 22 KB.
+      if (args.detail === true) {
+        for (const member of oracleFileMissingMembers) printLine(inv.io.stdout, `  ${member}`);
+      } else if (oracleFileMissingMembers.length > 0) {
+        printLine(inv.io.stdout, `  (${oracleFileMissingMembers.length} rows: lore status --detail)`);
+      }
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
       // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —
@@ -2118,8 +2130,8 @@ export default defineLoreCommand({
           `claims/evidence/handoffs carry an attested run (share ${attributionShare.share})`,
       );
       printLine(inv.io.stdout, 
-        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, session ${identitySources.session}, ` +
-          `worktree ${identitySources.worktree}, os ${identitySources.os}, other ${identitySources.other}`,
+        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, human ${identitySources.human}, ` +
+          `api-key ${identitySources.api_key}, dashboard ${identitySources.dashboard}, other ${identitySources.other}`,
       );
       printLine(inv.io.stdout, 
         `Orphaned-dirty claims: ${orphanedDirty.count}` +

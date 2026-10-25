@@ -14,6 +14,7 @@
  */
 
 import type { DocRecord } from "@lore/core";
+import { approvedRuleIdsOf } from "./baseline-items.js";
 import type { RuleRegistryRow } from "../store/store-interface.js";
 
 /** A rule id carried by a leaf that the registry never allocated. */
@@ -22,16 +23,9 @@ export interface UnregisteredRule {
   readonly leafId: string;
 }
 
-/** Rule ids stored on a baseline doc's `extra.rules` (ids only; shape is validated elsewhere). */
-function ruleIdsOf(doc: DocRecord): string[] {
-  const raw = doc.extra["rules"];
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((r) => (typeof r === "object" && r !== null && typeof (r as { id?: unknown }).id === "string" ? [(r as { id: string }).id] : []));
-}
-
 /** Every rule id that exists anywhere: allocated in the registry OR carried by a leaf. */
 export function collectKnownRuleIds(leaves: readonly DocRecord[], registry: readonly RuleRegistryRow[]): Set<string> {
-  return new Set([...registry.map((row) => row.id), ...leaves.flatMap(ruleIdsOf)]);
+  return new Set([...registry.map((row) => row.id), ...leaves.flatMap(approvedRuleIdsOf)]);
 }
 
 /**
@@ -48,6 +42,6 @@ export function findUnregisteredRuleIds(
 ): UnregisteredRule[] {
   const registered = new Set(registry.map((row) => row.id));
   return leaves.flatMap((leaf) =>
-    ruleIdsOf(leaf).filter((ruleId) => !registered.has(ruleId)).map((ruleId) => ({ ruleId, leafId: leaf.id })),
+    approvedRuleIdsOf(leaf).filter((ruleId) => !registered.has(ruleId)).map((ruleId) => ({ ruleId, leafId: leaf.id })),
   );
 }

@@ -3,10 +3,10 @@ id: KN-282
 type: knowledge
 role: knowledge
 title: "Assessment: Symlink-removal D8 — boundary required on the removal ports (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-099
 links:

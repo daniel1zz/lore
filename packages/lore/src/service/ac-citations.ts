@@ -12,6 +12,7 @@
  * Spec: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C4 (AC-BLS1-6).
  */
 import type { DocRecord, RuleLifecycle } from "@lore/core";
+import { approvedRulesOf } from "./baseline-items.js";
 
 export interface CiteWarning {
   id: string;
@@ -30,13 +31,11 @@ export interface CitationCounts {
 
 const LIFECYCLES: ReadonlySet<string> = new Set(["live", "deprecated", "retired"]);
 
-/** Build id -> lifecycle from baseline leaf docs (`extra.rules[]`). First occurrence of an id wins. */
+/** Build id -> lifecycle from baseline leaf docs (their APPROVED rules: a pending add is not citable). First occurrence of an id wins. */
 export function buildRuleIndex(leaves: readonly DocRecord[]): Map<string, { lifecycle: RuleLifecycle }> {
   const index = new Map<string, { lifecycle: RuleLifecycle }>();
   for (const leaf of leaves) {
-    const rules = leaf.extra["rules"];
-    if (!Array.isArray(rules)) continue;
-    for (const r of rules as unknown[]) {
+    for (const r of approvedRulesOf(leaf)) {
       if (typeof r !== "object" || r === null) continue;
       const { id, lifecycle } = r as { id?: unknown; lifecycle?: unknown };
       if (typeof id !== "string" || typeof lifecycle !== "string" || !LIFECYCLES.has(lifecycle)) continue;

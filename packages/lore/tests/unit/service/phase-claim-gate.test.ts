@@ -177,44 +177,35 @@ describe("checkpointRegistry['phase-claim'] — noAnchorOverlap on phase docs (S
     expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP");
   });
 
-  // NEGATIVE — AC-P-3 explicit requirement: same-actor overlap must NOT be
-  // rejected, mirroring claim-anchor-gate.test.ts's identical task-doc case.
-  // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main narrowed
-  // the exemption from "same `by`" (a proxy two live sessions share) to "same `by`
-  // AND the same CAPTURED session instance". AC-P-3's intent — a solo actor holding
-  // two overlapping phases does not block itself — is unchanged and still holds at
-  // this PURE layer, which is where AC-P-3 is stated; it now requires the fact
-  // rather than the proxy. ⚠ `PhaseWorkflowService.claim` does not yet CAPTURE a
-  // session id (that file is outside this task's declared anchors), so at the
-  // SERVICE layer a same-actor phase overlap currently lands in the not-measured
-  // refusal below — see claim-anchor-toctou.test.ts's phase case.
-  it("NEGATIVE: a sibling claim held by the SAME actor in the SAME measured session is never rejected", () => {
+  // NEGATIVE — AC-P-3 explicit requirement: a solo actor holding two overlapping phases must NOT block itself,
+  // mirroring claim-anchor-gate.test.ts's identical task-doc case. reason: BR-1056 — the exemption is "the same RUN"
+  // (the holder is a run, never a name: two sessions can share one derived name).
+  it("NEGATIVE: a sibling claim held by the SAME run is never rejected", () => {
     const def = checkpointRegistry[PHASE_CLAIM]!;
     const ctx: GateContext = {
       candidateBy: "agent:p1",
-      candidateSessionId: "3de02220",
+      candidateRun: "cc:3de02220",
       candidateAnchors: ["src/a"],
-      siblingClaims: [{ ...overlappingSibling, session_id: "3de02220" }], // also by agent:p1
+      siblingClaims: [{ ...overlappingSibling, harness_run: "cc:3de02220" }], // also by agent:p1
       hasSpecParent: false,
     };
     expect(isCheckpointBlocked(def.check(ctx))).toBe(false);
   });
 
-  // NEGATIVE — the same pair with the session instance unmeasured on one side is
-  // REFUSED with its own reason (the control proving the case above is not a
-  // blanket permit for every same-actor phase overlap).
-  it("NEGATIVE: a SAME-actor phase overlap with no recorded session is refused as not-measured", () => {
+  // NEGATIVE — the same name under ANOTHER run is REFUSED (the control proving the case above is not a blanket
+  // permit for every same-actor phase overlap).
+  it("NEGATIVE: a SAME-name phase overlap held by ANOTHER run is refused", () => {
     const def = checkpointRegistry[PHASE_CLAIM]!;
     const ctx: GateContext = {
       candidateBy: "agent:p1",
-      candidateSessionId: "3de02220",
+      candidateRun: "cc:3de02220",
       candidateAnchors: ["src/a"],
-      siblingClaims: [overlappingSibling], // same actor, no session_id recorded
+      siblingClaims: [{ ...overlappingSibling, harness_run: "cc:7ab19c04" }],
       hasSpecParent: false,
     };
     const failures = selectFailures(def.check(ctx));
     expect(isCheckpointBlocked(def.check(ctx))).toBe(true);
-    expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP_SESSION_UNMEASURED");
+    expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP");
   });
 
   // BOUNDARY — either side anchor-less → vacuous pass (mirrors fixture)

@@ -47,7 +47,7 @@ export function renderAutonomyThresholdLine(integrity: ThresholdIntegrity): stri
     case "confirmed":
       return `Autonomy thresholds: edited outside lore, CONFIRMED by the human (decision record ${integrity.record_id})`;
     case "broken":
-      return `Autonomy thresholds: INTEGRITY BREAK (threshold-integrity: ${integrity.reason}) — ${integrity.detail}. Every class escalates until the human accepts the threshold-integrity decision (lore pending, then lore decide <id> --accept).`;
+      return `Autonomy thresholds: INTEGRITY BREAK (threshold-integrity: ${integrity.reason}) — ${integrity.detail}. Every class escalates until the human accepts the threshold-integrity decision (ask the human in the session: lore pending --ask).`;
   }
 }
 

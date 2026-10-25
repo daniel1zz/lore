@@ -1,48 +1,31 @@
 /**
- * Unit tests for the SPEC-026 lore_assess MCP tool.
+ * Unit tests for the `lore_assess` MCP tool, the milestone review (BR-1372).
  *
- * Scope: translation-only (args → getPlanBundle/assessPlan/create/link → MCP envelope
- * shape). The corrective-retry protocol and telemetry-exactly-once are exhaustively
- * covered at the service layer (ai-provider-service-assess.test.ts) — this file verifies
- * the MCP adapter wiring, envelope shape, and the AI-brake/contradiction gates that live
- * in the tool handler itself, per the mcp-tools-task-workflow.test.ts precedent of "do not
- * re-test business rules at three layers".
+ * Scope: translation-only (args -> MilestoneReviewService -> MCP envelope), plus the AI-brake and contradiction gates
+ * that live in the tool handler. The review's own rules (seven dimensions, retry, fingerprint, deterministic
+ * design_necessity floor) are covered at the service layer and by `tests/integration/milestone-review.test.ts`.
  *
- * Strategy mirrors mcp-tools-task-workflow.test.ts: register real tools against a
- * McpServer, extract handlers from the internal _registeredTools map, invoke directly.
- * AIProviderService is real, wired with InMemoryAIProvider (SPEC-026 D9 sequence mode
- * available when a test needs it).
+ * Strategy mirrors mcp-tools-task-workflow.test.ts: register real tools against a McpServer, extract handlers from the
+ * internal _registeredTools map, invoke directly. AIProviderService is real, wired with the in-memory provider test
+ * double — never a real model.
  *
  * Coverage:
- *   HAPPY:      lore_assess round-trip creates a knowledge doc (sub_type="assessment"),
- *               links it to the plan via "informs", and returns { assessment, result }
- *   NEGATIVE:   zero-task plan → isError, VALIDATION_ERROR, before any AI call;
- *               ai: false → isError, contradiction message (AC-ASSESS-9 mirror)
- *   BOUNDARY:   mcp surface braked by an EXPLICIT config override → isError, requires ai:true;
- *               the built-in mcp AI-off default does NOT brake assess (D5)
- *   ERROR:      provider error passes through as isError with the AI_PROVIDER_ERROR code
- *   STATE:      the informs link is queryable after a successful assess (doc graph updated)
- *   REGRESSION: sub_type/knowledge doc shape matches what CLI assess.ts produces (parity)
+ *   HAPPY:      a review creates a `milestone-review` knowledge doc under the plan, informs-linked, and returns the
+ *               seven dimensions with the overall verdict
+ *   NEGATIVE:   a plan with no tasks -> isError VALIDATION_ERROR before any AI call; ai: false -> contradiction error;
+ *               a nonexistent plan -> DOC_NOT_FOUND
+ *   BOUNDARY:   the built-in mcp AI-off default does NOT brake assess (D5); an EXPLICIT config brake requires ai: true
+ *   ERROR:      a provider error passes through as AI_PROVIDER_ERROR and stores nothing
+ *   STATE:      the informs link is queryable afterwards; a referenceless design_necessity pass stores a failing review
+ *   REGRESSION: a plan with no recorded commit range tells the judge no diff is available
  *
- * Also covers (task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be):
- * when `diff_text` is OMITTED, `lore_assess` now auto-derives the plan's own commit set
- * from real git history (mirrors the CLI's assess.ts) instead of running with no diff at
- * all — a dedicated describe block below chdir's into a throwaway `git init` fixture
- * (real subprocess git, same idiom as `assess-ai.bun.test.ts`) for PRIMARY ORACLE
- * (interleaved foreign history excluded) and BOUNDARY (no discoverable commits → named
- * outcome) coverage.
- *
- * @spec_ref AC-ASSESS-1, AC-ASSESS-8, AC-ASSESS-9, AC-ASSESS-10, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
+ * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, BR-1372)
  */
 
 import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -53,8 +36,9 @@ import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
+import { MilestoneReviewService } from "../../../src/service/milestone-review-service.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
-import { NoOpTelemetry } from "@lore/core";
+import { MILESTONE_DIMENSIONS, NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
@@ -62,39 +46,28 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AiDefaultSource, CreateDocInput, DocRecord, LoreError } from "@lore/core";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
-// ─── Test Infrastructure (mirrors mcp-tools-task-workflow.test.ts) ────────────
-
 const stubApiKeyStore = {} as ApiKeyStore;
 
 let store: InMemoryStore;
 let corpusService: CorpusService;
 let aiProvider: InMemoryAIProvider;
 
-const VALID_JSON = JSON.stringify({
-  verdict: "met",
-  overall_score: 88,
-  ac_scores: [{ ac_id: "AC-ASSESS-1", score: 88, reasoning: "Solid evidence trail.", evidence_refs: [] }],
-  gaps: [],
-  recommendations: [],
-});
+function judgeAnswer(overrides: Record<string, { verdict: string; reason: string; reference: string }> = {}): string {
+  return JSON.stringify({
+    dimensions: Object.fromEntries(
+      MILESTONE_DIMENSIONS.map((d) => [d, overrides[d] ?? { verdict: "pass", reason: `${d} holds`, reference: "Google code review guide" }]),
+    ),
+  });
+}
 
-function makeApp(opts: {
-  resolveAiDefault?: (explicit?: boolean) => { ai: boolean; source: AiDefaultSource };
-} = {}): App {
+function makeApp(opts: { resolveAiDefault?: (explicit?: boolean) => { ai: boolean; source: AiDefaultSource } } = {}): App {
   store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+  aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeAnswer() });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<string, import("@lore/core").AIProvider>;
-  const aiProviderService = new AIProviderService(
-    providers,
-    "in-memory",
-    {},
-    new NoOpTelemetry(),
-    false,
-    8000,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
-  );
-
+  const aiProviderService = new AIProviderService(providers, "in-memory", {}, new NoOpTelemetry(), false, 8000, {
+    max_diff_chars: 24000,
+  });
   return {
     warn: () => undefined,
     corpusService,
@@ -105,12 +78,18 @@ function makeApp(opts: {
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: stubApiKeyStore,
     aiProviderService,
+    milestoneReviewService: new MilestoneReviewService({
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+      getCitedRuleStates: corpusService.getCitedRuleStates.bind(corpusService),
+      listDecisionLog: () => store.listDecisionLog(),
+      judge: aiProviderService.judgeMilestone.bind(aiProviderService),
+      createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
+      link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+    }),
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
     taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
-    // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
-    // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
@@ -123,18 +102,11 @@ function makeApp(opts: {
 }
 
 type McpServerInternal = {
-  _registeredTools: Record<
-    string,
-    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
-  >;
+  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
 };
 
-function getToolHandler(
-  server: McpServer,
-  name: string,
-): (args: Record<string, unknown>) => Promise<CallToolResult> {
-  const internal = server as unknown as McpServerInternal;
-  const tool = internal._registeredTools[name];
+function getToolHandler(server: McpServer, name: string): (args: Record<string, unknown>) => Promise<CallToolResult> {
+  const tool = (server as unknown as McpServerInternal)._registeredTools[name];
   if (!tool) throw new Error(`Tool not registered: ${name}`);
   return (args) => tool.handler(args, {} as unknown);
 }
@@ -146,66 +118,27 @@ function parseResult(result: CallToolResult): unknown {
 }
 
 function parseError(result: CallToolResult): LoreError {
-  const text = result.content[0];
-  if (!text || text.type !== "text") throw new Error("Expected text content");
-  return JSON.parse(text.text) as LoreError;
+  return parseResult(result) as LoreError;
 }
 
-// ─── Fixture helpers ──────────────────────────────────────────────────────────
-
-async function createPlanWithTask(): Promise<{ planId: string; taskId: string }> {
-  const planResult = await corpusService.create({ type: "plan", title: "Assess Plan", content: "goals" } as CreateDocInput);
-  if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
-  const taskResult = await corpusService.create({
+async function createPlanWithTask(): Promise<{ planId: string }> {
+  const plan = await corpusService.create({ type: "plan", title: "Review Plan", content: "goals" } as CreateDocInput);
+  if (!plan.ok) throw new Error(`Failed to create plan: ${JSON.stringify(plan.error)}`);
+  const task = await corpusService.create({
     type: "task",
-    title: "Assess Task",
-    parent_id: planResult.value.id,
+    title: "Review Task",
+    parent_id: plan.value.id,
     content: "body",
-    extra: { plan_id: planResult.value.id },
+    extra: { plan_id: plan.value.id },
   } as CreateDocInput);
-  if (!taskResult.ok) throw new Error(`Failed to create task: ${JSON.stringify(taskResult.error)}`);
-  return { planId: planResult.value.id, taskId: taskResult.value.id };
+  if (!task.ok) throw new Error(`Failed to create task: ${JSON.stringify(task.error)}`);
+  return { planId: plan.value.id };
 }
-
-async function createEmptyPlan(): Promise<string> {
-  const planResult = await corpusService.create({ type: "plan", title: "Empty Assess Plan", content: "goals" } as CreateDocInput);
-  if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
-  return planResult.value.id;
-}
-
-/**
- * Creates a plan with N tasks named `taskTitles`, returning each task's REAL slug — the
- * git-fixture-driven derivation tests below must reference the actual generated slug,
- * never a guessed one (`deriveCommitSetForPlan` matches on the corpus's own `task.slug`).
- */
-async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId: string; taskSlugs: string[] }> {
-  const planResult = await corpusService.create({
-    type: "plan",
-    title: "MCP Assess Derivation Plan",
-    content: "goals",
-  } as CreateDocInput);
-  if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
-  const taskSlugs: string[] = [];
-  for (const title of taskTitles) {
-    const taskResult = await corpusService.create({
-      type: "task",
-      title,
-      parent_id: planResult.value.id,
-      content: "body",
-      extra: { plan_id: planResult.value.id },
-    } as CreateDocInput);
-    if (!taskResult.ok) throw new Error(`Failed to create task: ${JSON.stringify(taskResult.error)}`);
-    taskSlugs.push(taskResult.value.slug);
-  }
-  return { planId: planResult.value.id, taskSlugs };
-}
-
-// ─── Test Setup ────────────────────────────────────────────────────────────────
 
 let app: App;
 let server: McpServer;
 
-function setup(opts: Parameters<typeof makeApp>[0] = {}) {
+function setup(opts: Parameters<typeof makeApp>[0] = {}): void {
   app = makeApp(opts);
   server = new McpServer({ name: "test", version: "0.0.0" });
   registerTools(server, app, undefined, liveInvocation());
@@ -215,354 +148,138 @@ beforeEach(() => {
   setup();
 });
 
-// ─── lore_assess — HAPPY ───────────────────────────────────────────────────────
+const call = () => getToolHandler(server, "lore_assess");
 
-describe("lore_assess — HAPPY (AC-ASSESS-1, AC-ASSESS-10)", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  it("creates a knowledge doc with sub_type='assessment' and links it to the plan via informs", async () => {
+describe("lore_assess — milestone review HAPPY (BR-1372)", () => {
+  it("creates a milestone-review knowledge doc under the plan, informs-linked, with the seven dimensions", async () => {
     const { planId } = await createPlanWithTask();
     const result = await call()({ plan_id_or_slug: planId, ai: true });
     expect(result.isError).toBeFalsy();
-
-    const data = parseResult(result) as { assessment: DocRecord; result: { verdict: string; overall_score: number } };
-    expect(data.assessment.type).toBe("knowledge");
-    expect(data.assessment.extra["sub_type"]).toBe("assessment");
-    expect(data.assessment.parent_id).toBe(planId);
-    expect(data.result.verdict).toBe("met");
-    expect(data.result.overall_score).toBe(88);
+    const data = parseResult(result) as {
+      review: DocRecord;
+      overall: string;
+      failed_dimensions: string[];
+      dimensions: Record<string, { verdict: string }>;
+    };
+    expect(data.review.type).toBe("knowledge");
+    expect(data.review.extra["sub_type"]).toBe("milestone-review");
+    expect(data.review.parent_id).toBe(planId);
+    expect(data.overall).toBe("pass");
+    expect(data.failed_dimensions).toEqual([]);
+    expect(Object.keys(data.dimensions)).toEqual([...MILESTONE_DIMENSIONS]);
   });
 
-  it("the returned result envelope's judgment.provider matches the active provider name", async () => {
+  it("the stored review carries the plan-state fingerprint it judged and is linked by informs", async () => {
     const { planId } = await createPlanWithTask();
-    const result = await call()({ plan_id_or_slug: planId, ai: true });
-    const data = parseResult(result) as { result: { judgment: { provider: string } } };
-    expect(data.result.judgment.provider).toBe("in-memory");
+    const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as { review: DocRecord };
+    const stored = data.review.extra["milestone_review"] as { fingerprint: string; plan_id: string };
+    expect(stored.plan_id).toBe(planId);
+    expect(stored.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    const docs = await corpusService.listMilestoneReviewDocs(planId);
+    expect(docs.ok && docs.value.map((d) => d.id)).toEqual([data.review.id]);
   });
 
   it("mcp's built-in AI-off default does NOT brake assess when no explicit config override is set (D5)", async () => {
-    // Default makeApp() resolveAiDefault returns { ai: false, source: "env" } — this is
-    // the BUILT-IN per-surface default, not an explicit config override. D5 says this
-    // must NOT brake assess even though ai is omitted (no explicit ai:true needed).
     const { planId } = await createPlanWithTask();
-    const result = await call()({ plan_id_or_slug: planId }); // no `ai` field at all
+    const result = await call()({ plan_id_or_slug: planId });
     expect(result.isError).toBeFalsy();
   });
 });
 
-// ─── lore_assess — STATE ────────────────────────────────────────────────────
+describe("lore_assess — retired ACs (same fields as the CLI)", () => {
+  const retired = [{ kind: "superseded" as const, spec: "old-spec", ac: "AC-OLD-1", reason: "feature removed", at: "2026-10-23T00:00:00.000Z", superseded_by: "new-spec:AC-NEW-1" }];
 
-describe("lore_assess — STATE (informs link persisted, AC-ASSESS-1)", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  it("after a successful assess, the plan's incoming 'informs' link resolves to the new assessment doc", async () => {
+  it("a pending retirement adds retired_acs and pending_decision to the payload", async () => {
     const { planId } = await createPlanWithTask();
-    const result = await call()({ plan_id_or_slug: planId, ai: true });
-    const data = parseResult(result) as { assessment: DocRecord };
+    app = { ...app, retiredAcService: { settle: async () => ({ ok: true, value: { state: "pending", retired, pendingId: 7 } }) } as unknown as NonNullable<App["retiredAcService"]> };
+    server = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(server, app, undefined, liveInvocation());
+    const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as { retired_acs?: unknown; pending_decision?: unknown };
+    expect(data.retired_acs).toEqual(retired);
+    expect(data.pending_decision).toBe(7);
+  });
 
-    const linksResult = await store.findLinks(planId, "in");
-    expect(linksResult.ok).toBe(true);
-    if (!linksResult.ok) return;
-    const informsLink = linksResult.value.find((l) => l.link_type === "informs" && l.from_id === data.assessment.id);
-    expect(informsLink).toBeDefined();
+  it("a plan with nothing retired carries neither field", async () => {
+    const { planId } = await createPlanWithTask();
+    app = { ...app, retiredAcService: { settle: async () => ({ ok: true, value: { state: "none" } }) } as unknown as NonNullable<App["retiredAcService"]> };
+    server = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(server, app, undefined, liveInvocation());
+    const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as Record<string, unknown>;
+    expect(data["retired_acs"]).toBeUndefined();
+    expect(data["pending_decision"]).toBeUndefined();
+  });
+
+  it("a settle failure is an isError result, never a silent skip", async () => {
+    const { planId } = await createPlanWithTask();
+    app = { ...app, retiredAcService: { settle: async () => ({ ok: false, error: { code: "STORE_ERROR", message: "boom" } }) } as unknown as NonNullable<App["retiredAcService"]> };
+    server = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(server, app, undefined, liveInvocation());
+    const result = await call()({ plan_id_or_slug: planId, ai: true });
+    expect(result.isError).toBe(true);
   });
 });
 
-// ─── lore_assess — NEGATIVE ─────────────────────────────────────────────────
-
-describe("lore_assess — NEGATIVE (AC-ASSESS-8, AC-ASSESS-9 mirror)", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  it("a plan with zero child tasks → isError, VALIDATION_ERROR, and no AI call is made", async () => {
-    const planId = await createEmptyPlan();
-    const result = await call()({ plan_id_or_slug: planId, ai: true });
+describe("lore_assess — NEGATIVE / BOUNDARY / ERROR", () => {
+  it("a plan with zero child tasks -> isError VALIDATION_ERROR and no AI call is made", async () => {
+    const plan = await corpusService.create({ type: "plan", title: "Empty Plan", content: "goals" } as CreateDocInput);
+    if (!plan.ok) throw new Error("fixture");
+    const result = await call()({ plan_id_or_slug: plan.value.id, ai: true });
     expect(result.isError).toBe(true);
-    const error = parseError(result);
-    expect(error.code).toBe("VALIDATION_ERROR");
-    // The provider must never have been invoked — the zero-task gate runs BEFORE AI.
+    expect(parseError(result).code).toBe("VALIDATION_ERROR");
     expect(aiProvider.calls).toHaveLength(0);
   });
 
-  it("ai: false is always a contradiction (assess has no non-AI mode) → isError, AI_PROVIDER_ERROR", async () => {
+  it("ai: false is a contradiction -> isError, no AI call", async () => {
     const { planId } = await createPlanWithTask();
     const result = await call()({ plan_id_or_slug: planId, ai: false });
     expect(result.isError).toBe(true);
-    const error = parseError(result);
-    expect(error.code).toBe("AI_PROVIDER_ERROR");
+    expect(parseError(result).code).toBe("AI_PROVIDER_ERROR");
     expect(aiProvider.calls).toHaveLength(0);
   });
 
-  it("a nonexistent plan id → isError, DOC_NOT_FOUND (via getPlanBundle → resolve)", async () => {
-    const result = await call()({ plan_id_or_slug: "plan-does-not-exist-xyz", ai: true });
+  it("a nonexistent plan id -> isError DOC_NOT_FOUND", async () => {
+    const result = await call()({ plan_id_or_slug: "01ARZ3NDEKTSV4RRFFQ69G5FAV", ai: true });
     expect(result.isError).toBe(true);
-    const error = parseError(result);
-    expect(error.code).toBe("DOC_NOT_FOUND");
-  });
-});
-
-// ─── lore_assess — BOUNDARY (explicit config brake) ─────────────────────────
-
-describe("lore_assess — BOUNDARY (explicit mcp config brake, SPEC-026 D5)", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  it("an EXPLICIT config override (source='config', ai=false) DOES brake assess, requiring ai:true", async () => {
-    setup({ resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "config" as const }) });
-    const { planId } = await createPlanWithTask();
-
-    const result = await call()({ plan_id_or_slug: planId }); // no explicit ai override
-    expect(result.isError).toBe(true);
-    const error = parseError(result);
-    expect(error.code).toBe("AI_PROVIDER_ERROR");
-    expect(aiProvider.calls).toHaveLength(0);
+    expect(parseError(result).code).toBe("DOC_NOT_FOUND");
   });
 
-  it("passing ai: true overrides the explicit config brake", async () => {
-    setup({ resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "config" as const }) });
-    const { planId } = await createPlanWithTask();
-
-    const result = await call()({ plan_id_or_slug: planId, ai: true });
-    expect(result.isError).toBeFalsy();
-  });
-});
-
-// ─── lore_assess — ERROR (provider failure passthrough) ─────────────────────
-
-describe("lore_assess — ERROR (provider failure passthrough)", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  it("a provider error propagates as isError with code AI_PROVIDER_ERROR, and no doc is created", async () => {
-    const { planId } = await createPlanWithTask();
-    aiProvider.setMode({ kind: "err", error: { code: "AI_PROVIDER_ERROR", provider: "in-memory", message: "simulated failure" } });
-
-    const beforeResult = await store.findMany({});
-    if (!beforeResult.ok) throw new Error("findMany failed");
-    const beforeCount = beforeResult.value.length;
-
-    const result = await call()({ plan_id_or_slug: planId, ai: true });
-    expect(result.isError).toBe(true);
-    const error = parseError(result);
-    expect(error.code).toBe("AI_PROVIDER_ERROR");
-
-    const afterResult = await store.findMany({});
-    if (!afterResult.ok) throw new Error("findMany failed");
-    expect(afterResult.value.length).toBe(beforeCount);
-  });
-});
-
-// ─── lore_assess — auto-derived commit set (task-lore-assess-asks-the-caller-for-a-
-// git-range-that-cannot-be) ──────────────────────────────────────────────────────
-//
-// When `diff_text` is omitted, lore_assess now derives the plan's own commit set from
-// REAL git history (mirrors the CLI's assess.ts) instead of running with no diff. These
-// tests chdir into a throwaway `git init` fixture so `process.cwd()`-based derivation
-// has real, controlled history to work against — restored in afterEach so it never
-// leaks into sibling tests in this file (which run against the real project repo's cwd
-// and rely on derivation harmlessly finding nothing there).
-
-describe("lore_assess — auto-derived commit set: PRIMARY ORACLE + BOUNDARY", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  let gitTmpDir: string;
-  let originalCwd: string;
-  const gitEnv = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "Tester",
-    GIT_AUTHOR_EMAIL: "t@example.com",
-    GIT_COMMITTER_NAME: "Tester",
-    GIT_COMMITTER_EMAIL: "t@example.com",
-  };
-
-  beforeEach(() => {
-    gitTmpDir = mkdtempSync(join(tmpdir(), "lore-mcp-assess-derivation-test-"));
-    spawnSync("git", ["init", "-q"], { cwd: gitTmpDir, env: gitEnv });
-    originalCwd = process.cwd();
-    process.chdir(gitTmpDir);
-  });
-
-  afterEach(() => {
-    process.chdir(originalCwd);
-    try {
-      rmSync(gitTmpDir, { recursive: true, force: true });
-    } catch {
-      /* best-effort cleanup */
-    }
-  });
-
-  function gitCommit(filename: string, content: string, message: string) {
-    writeFileSync(join(gitTmpDir, filename), content);
-    spawnSync("git", ["add", filename], { cwd: gitTmpDir, env: gitEnv });
-    spawnSync("git", ["commit", "-q", "-m", message], { cwd: gitTmpDir, env: gitEnv });
-  }
-
-  it("PRIMARY ORACLE: excludes every interleaved foreign commit from the prompt sent to the judge", async () => {
-    const { planId, taskSlugs } = await createPlanWithNamedTasks(["MCP Own Task Alpha", "MCP Own Task Beta"]);
-    gitCommit("seed.txt", "seed\n", "seed commit");
-    gitCommit("foreign1.txt", "MCP_FOREIGN_ALPHA\n", "unrelated foreign change alpha");
-    gitCommit("own-a.txt", "MCP_OWN_A\n", `implements ${taskSlugs[0]}`);
-    gitCommit("foreign2.txt", "MCP_FOREIGN_BETA\n", "unrelated foreign change beta");
-    gitCommit("own-b.txt", "MCP_OWN_B\n", `implements ${taskSlugs[1]}`);
-    gitCommit("foreign3.txt", "MCP_FOREIGN_GAMMA\n", "unrelated foreign change gamma");
-
-    const result = await call()({ plan_id_or_slug: planId, ai: true }); // NOTE: no diff_text
-    expect(result.isError).toBeFalsy();
-
-    expect(aiProvider.calls).toHaveLength(1);
-    const prompt = aiProvider.calls[0]?.prompt ?? "";
-    expect(prompt).toContain("MCP_OWN_A");
-    expect(prompt).toContain("MCP_OWN_B");
-    expect(prompt).not.toContain("MCP_FOREIGN_ALPHA");
-    expect(prompt).not.toContain("MCP_FOREIGN_BETA");
-    expect(prompt).not.toContain("MCP_FOREIGN_GAMMA");
-
-    const data = parseResult(result) as { assessment: DocRecord; diff_source: { mode: string; status?: string; commits?: unknown[] } };
-    expect(data.diff_source.mode).toBe("auto_derived");
-    expect(data.diff_source.status).toBe("derived");
-    expect(data.diff_source.commits).toHaveLength(2);
-    expect(data.assessment.extra["diff_source"]).toEqual(data.diff_source);
-  }, 15000);
-  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
-  // D1/check-test-budgets): 6 direct `spawnSync`/`gitCommit` calls in this body
-  // (`gitCommit` is itself a spawn helper — its own body directly calls
-  // `spawnSync` twice — so calling it 6 times counts as 6 spawn-helper
-  // invocations for this oracle). Measured 380-708ms in isolation across 2
-  // runs; 15000ms gives >=21x headroom for a concurrent-worktree load spike.
-
-  it("BOUNDARY: no commit anywhere references either task slug — a loud named outcome, never a silent empty diff", async () => {
-    const { planId } = await createPlanWithNamedTasks(["MCP Unreferenced Task One", "MCP Unreferenced Task Two"]);
-    gitCommit("unrelated.txt", "unrelated\n", "a commit naming neither task");
-
-    const result = await call()({ plan_id_or_slug: planId, ai: true });
-    expect(result.isError).toBeFalsy();
-
-    expect(aiProvider.calls).toHaveLength(1);
-    expect(aiProvider.calls[0]?.prompt ?? "").not.toContain("diff --git");
-
-    const data = parseResult(result) as { diff_source: { mode: string; status?: string; tasks_without_commits?: string[] } };
-    expect(data.diff_source.mode).toBe("auto_derived");
-    expect(data.diff_source.status).toBe("no_commits_found");
-    expect(data.diff_source.tasks_without_commits).toHaveLength(2);
-  });
-});
-
-// ─── lore_assess — commit-derivation convention-mismatch suppression
-// (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan) ───────────────
-//
-// The CLI path (commands/assess.ts) computes `allTasksArchived` from the already-loaded
-// bundle, passes it to `deriveCommitSetForPlan`, and threads the resulting
-// `commitDerivationUnverifiable` flag into `assessPlan` so the SERVICE layer forbids an
-// absence-scored `scope_fidelity` from ever publishing when every task in the plan is
-// already archived (merged work by definition) yet zero commits reference any task
-// slug — a commit-message CONVENTION MISMATCH, not genuine absence
-// (task-lore-assess-derives-a-plan-s-commits-by-grepping-task). `tools.ts` previously
-// called `deriveCommitSetForPlan` with the OLD 2-arg shape, so this suppression never
-// reached the MCP surface: the SAME fixture below used to report `"no_commits_found"`
-// and publish an absence-scored `scope_fidelity` — the false-major-finding route this
-// describe block proves is now closed. Real `git init` fixture (same idiom as the block
-// above), CONVENTIONALLY-worded commits deliberately referencing NEITHER task's slug
-// (mirrors assess-commit-derivation.test.ts's own RED-FIRST fixture), and a scripted
-// judge response that scores `scope_fidelity` absence-based — exactly the shape that
-// manufactures a false major finding pre-fix.
-describe("lore_assess — commit-derivation convention-mismatch suppression (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan)", () => {
-  const call = () => getToolHandler(server, "lore_assess");
-
-  let gitTmpDir: string;
-  let originalCwd: string;
-  const gitEnv = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "Tester",
-    GIT_AUTHOR_EMAIL: "t@example.com",
-    GIT_COMMITTER_NAME: "Tester",
-    GIT_COMMITTER_EMAIL: "t@example.com",
-  };
-
-  beforeEach(() => {
-    gitTmpDir = mkdtempSync(join(tmpdir(), "lore-mcp-assess-convention-mismatch-test-"));
-    spawnSync("git", ["init", "-q"], { cwd: gitTmpDir, env: gitEnv });
-    originalCwd = process.cwd();
-    process.chdir(gitTmpDir);
-  });
-
-  afterEach(() => {
-    process.chdir(originalCwd);
-    try {
-      rmSync(gitTmpDir, { recursive: true, force: true });
-    } catch {
-      /* best-effort cleanup */
-    }
-  });
-
-  function gitCommit(filename: string, content: string, message: string) {
-    writeFileSync(join(gitTmpDir, filename), content);
-    spawnSync("git", ["add", filename], { cwd: gitTmpDir, env: gitEnv });
-    spawnSync("git", ["commit", "-q", "-m", message], { cwd: gitTmpDir, env: gitEnv });
-  }
-
-  it("an all-archived plan whose commits carry conventional (slug-less) messages reports 'unverifiable_convention_mismatch' (never 'no_commits_found'), and scope_fidelity is absent from dimension_scores with a NOT SCORED unverifiable[] entry", async () => {
-    const { planId } = await createPlanWithNamedTasks(["MCP Archived Task Alpha"]);
-    // Conventional Commits messages — deliberately reference NEITHER task's slug,
-    // mirroring the measured defect (fix(evidence): ... never mentions the task slug it
-    // closes).
-    gitCommit("a.txt", "content-a\n", "fix(evidence): self-reported fail must carry a non-empty output_tail");
-    gitCommit("b.txt", "content-b\n", "feat(assess): add scope mismatch warning");
-
-    // Every task in this plan is already archived — merged work exists BY DEFINITION
-    // (VALID_TRANSITIONS, @lore/core) — so a zero-match derivation against the fixture
-    // above is a CONTRADICTION, not a legitimate absence.
-    const tasksResult = await store.findMany({ parent_id: planId, type: "task" });
-    if (!tasksResult.ok) throw new Error("findMany failed");
-    for (const task of tasksResult.value) {
-      const setResult = await corpusService.set(task.id, { status: "archived" });
-      if (!setResult.ok) throw new Error(`Failed to archive task: ${JSON.stringify(setResult.error)}`);
-    }
-
-    // Scripted judge response scores scope_fidelity absence-based — exactly the shape
-    // that (pre-fix) manufactures a false major finding once diff_available=false.
-    aiProvider.setMode({
-      kind: "ok",
-      content: JSON.stringify({
-        verdict: "partially_met",
-        overall_score: 50,
-        ac_scores: [],
-        gaps: [],
-        recommendations: [],
-        dimension_scores: {
-          scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" },
-        },
-      }),
+  it("an EXPLICIT config brake on the mcp surface requires ai: true, which overrides it", async () => {
+    setup({
+      resolveAiDefault: (explicit?: boolean) =>
+        explicit === true ? { ai: true, source: "explicit_arg" as const } : { ai: false, source: "config" as const },
     });
+    const { planId } = await createPlanWithTask();
+    const braked = await call()({ plan_id_or_slug: planId });
+    expect(braked.isError).toBe(true);
+    expect(JSON.stringify(parseError(braked))).toContain("ai: true");
+    const overridden = await call()({ plan_id_or_slug: planId, ai: true });
+    expect(overridden.isError).toBeFalsy();
+  });
 
-    const result = await call()({ plan_id_or_slug: planId, ai: true }); // NOTE: no diff_text
-    expect(result.isError).toBeFalsy();
+  it("a provider error propagates as AI_PROVIDER_ERROR and no review doc is created", async () => {
+    const { planId } = await createPlanWithTask();
+    aiProvider.setMode({ kind: "err", error: { code: "AI_PROVIDER_ERROR", message: "binary missing", provider: "in-memory" } });
+    const result = await call()({ plan_id_or_slug: planId, ai: true });
+    expect(result.isError).toBe(true);
+    expect(parseError(result).code).toBe("AI_PROVIDER_ERROR");
+    const docs = await corpusService.listMilestoneReviewDocs(planId);
+    expect(docs.ok && docs.value).toEqual([]);
+  });
+});
 
-    const data = parseResult(result) as {
-      result: {
-        dimension_scores?: Record<string, unknown>;
-        unverifiable?: { material: string; reason: string }[];
-      };
-      diff_source: { mode: string; status?: string };
-    };
+describe("lore_assess — STATE / REGRESSION", () => {
+  it("a design_necessity pass with no reference is stored as a failing review", async () => {
+    const { planId } = await createPlanWithTask();
+    aiProvider.setMode({ kind: "ok", content: judgeAnswer({ design_necessity: { verdict: "pass", reason: "needed", reference: "" } }) });
+    const data = parseResult(await call()({ plan_id_or_slug: planId, ai: true })) as { overall: string; failed_dimensions: string[] };
+    expect(data.overall).toBe("fail");
+    expect(data.failed_dimensions).toEqual(["design_necessity"]);
+  });
 
-    // The distinct, named contradiction status — never the shared "no_commits_found" a
-    // genuinely commit-less plan gets (ADR three-question review Q2: an empty result and
-    // a clean result must not be the same value).
-    expect(data.diff_source.mode).toBe("auto_derived");
-    expect(data.diff_source.status).toBe("unverifiable_convention_mismatch");
-    expect(data.diff_source.status).not.toBe("no_commits_found");
-
-    // scope_fidelity forcibly removed from the persisted dimension_scores, regardless of
-    // what the judge itself reported, with an explicit "not scored" unverifiable[] entry.
-    expect(data.result.dimension_scores?.["scope_fidelity"]).toBeUndefined();
-    const scopeEntry = (data.result.unverifiable ?? []).find((u) =>
-      u.material.toLowerCase().includes("scope_fidelity"),
-    );
-    expect(scopeEntry).toBeDefined();
-    expect(scopeEntry?.reason.toLowerCase()).toContain("not scored");
-  }, 15000);
-  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
-  // D1/check-test-budgets): 4 direct `spawnSync`/`gitCommit` calls in this body
-  // (`gitCommit` is itself a spawn helper — its own body directly calls `spawnSync`
-  // twice — so calling it twice counts as 2 spawn-helper invocations, plus the fixture's
-  // own `git init` in beforeEach). Comparable to this file's other git-fixture describe
-  // block (380-708ms measured); 15000ms gives ample headroom for a concurrent-worktree
-  // load spike.
+  it("a plan with no recorded commit range tells the judge that no diff is available", async () => {
+    const { planId } = await createPlanWithTask();
+    await call()({ plan_id_or_slug: planId, ai: true });
+    expect(aiProvider.calls).toHaveLength(1);
+    expect(aiProvider.calls[0]?.prompt).toContain("No diff is available");
+  });
 });

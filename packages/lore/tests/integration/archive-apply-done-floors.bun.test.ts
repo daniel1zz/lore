@@ -35,6 +35,8 @@ import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -80,8 +82,8 @@ function parseSlug(stdout: string): string {
  * fixture approves a plan only to reach the archive floors it tests, not to exercise review-judgment.
  */
 function disablePlanCloseGate(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -91,7 +93,6 @@ function disablePlanCloseGate(dir: string): void {
       "    judgment_required_types: []",
       "",
     ].join("\n"),
-    "utf8",
   );
 }
 
@@ -131,7 +132,6 @@ function buildFixture(dir: string): Fixture {
     mustRun(["create", "plan", "--title", "Apply Floors Plan", "--parent", prd, "--content", "x", "--no-ai"], dir),
   );
   mustRun(["set", planSlug, "--status", "approved"], dir);
-  mustRun(["set", planSlug, "--status", "archived"], dir);
 
   const createTask = (title: string): string =>
     parseSlug(
@@ -150,6 +150,11 @@ function buildFixture(dir: string): Fixture {
   const handoffOut = mustRun(["handoff", "--next", "resume the floor work", "--plan", planSlug], dir);
   const r3 = parseSlug(handoffOut);
   backdate(r3, dir);
+
+  // reason: BR-1379 — archived is terminal, so a task can no longer be created under an archived plan and a plan close
+  // cascades its tasks. The straggler state (archived plan, open attested/bare tasks) is the LEGACY shape this suite
+  // exercises; write it directly after the members exist.
+  archivePlanWithoutCascade(dir, planSlug);
 
   return { planSlug, t1, t2, r3 };
 }

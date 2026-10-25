@@ -3,10 +3,10 @@ id: KN-379
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — trace layer (SPEC-102) (2026-07-28)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: PLAN-108
 links:

@@ -3,10 +3,10 @@ id: KN-452
 type: knowledge
 role: knowledge
 title: "Assessment: Land multi-session concurrency P1: queryable ownership of worktrees, branches and sessions (2026-08-13)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-10-23
 tags: []
 parent: PLAN-129
 links:

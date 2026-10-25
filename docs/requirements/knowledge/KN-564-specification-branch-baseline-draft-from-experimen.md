@@ -3,14 +3,14 @@ id: KN-564
 type: knowledge
 role: knowledge
 title: "Specification branch baseline draft from experiment A2 (pilot input, not authoritative)"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-23
 tags: [baseline, pilot-input, specification-branch]
-parent: SPEC-205
+parent: SPEC-235
 links:
-  - {id: SPEC-205, type: relates-to}
+  - {id: SPEC-235, type: relates-to}
 ---
 # Specification branch — experiment draft (input to slice-1 pilot, NOT authoritative)
 

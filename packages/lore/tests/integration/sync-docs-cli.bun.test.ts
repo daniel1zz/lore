@@ -12,7 +12,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, rmSync, writeFileSync, appendFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -81,8 +82,8 @@ function writeSpecFile(
  * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

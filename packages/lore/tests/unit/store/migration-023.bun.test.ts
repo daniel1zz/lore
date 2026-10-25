@@ -11,6 +11,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.js";
 import { computeDecisionEntryHash, DECISION_GENESIS_HASH, verifyDecisionChain, type DecisionRecordInput } from "../../../src/store/decision-log.js";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function input(n: number, verdict: DecisionRecordInput["verdict"]): DecisionRecordInput {
   return {
@@ -35,7 +36,12 @@ function legacyDb(path: string, version: 21 | 22 = 21): void {
   db.exec(MIGRATION_020_SQL);
   // reason: this fixture models only the tables migration 023 touches; migration-025 indexes `versions` and
   // migration-026 rebuilds it, so the upgrade chain needs that table to exist with every column 026 copies.
-  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY)"); // `versions.doc_id` references it; the RENAME in 026 resolves that reference
+  // `versions.doc_id` references it; the RENAME in 026 resolves that reference. 027 reads the baseline columns (no row here).
+  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT, version INTEGER, parent_id TEXT, deleted_at TEXT)");
+  // reason: migration-030 adds `runs.message_address`, so the table it alters must exist (one column is enough).
+  db.exec("CREATE TABLE runs (id TEXT PRIMARY KEY)");
+  // reason: migration-031 deletes the per-read `get` trace rows, so `trace_events` (with its `kind`) must exist.
+  db.exec("CREATE TABLE trace_events (id INTEGER PRIMARY KEY, kind TEXT)");
   db.exec(
     "CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', extra TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', change_summary TEXT, slug TEXT, harness_run TEXT)",
   );
@@ -78,7 +84,7 @@ describe("migration 023 decision_log superseded verdict", () => {
     const path = join(dir, "lore.db");
     try {
       legacyDb(path, from);
-      const store = actedStore(new SQLiteStore(path));
+      const store = actedStore(new SQLiteStore(path, { migrate: true }));
       try {
         const before = await store.listDecisionLog();
         expect(before.ok && before.value.map((r) => [r.id, r.verdict])).toEqual([[1, "auto"], [2, "escalate"], [3, "refuse"]]);
@@ -89,7 +95,7 @@ describe("migration 023 decision_log superseded verdict", () => {
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 4 });
         expect(after.ok && after.value[3]?.verdict).toBe("superseded");
         const db = store.getDatabase();
-        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
         expect(() => db.run("UPDATE decision_log SET score = 1 WHERE id = 1")).toThrow(/append-only/);
         expect(() => db.run("DELETE FROM decision_log WHERE id = 1")).toThrow(/append-only/);
         const bad = await store.appendDecisionRecord({ ...input(5, "auto"), verdict: "bogus" as DecisionRecordInput["verdict"] });

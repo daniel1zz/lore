@@ -1,497 +1,471 @@
 /**
- * lore assess <plan> [--diff <git-range> | --diff-file <path>] [--json] [--ai|--no-ai]
+ * lore assess (<plan>... | --where "<filters>") [--json] [--ai|--no-ai]
  *
- * AI plan-outcome assessment (LLM-as-judge). Sends the plan, its spec's ACs (when the
- * plan is parented under a spec), every child task's evidence trail, and an optional
- * code diff to the configured AI provider; persists the structured judgment as a
- * `knowledge` doc (sub_type="assessment") linked to the plan via an `informs` link.
+ * The binding milestone review (BR-1372, spec-lean-governance-batch-verbs-judgment-only-at-milestones Part D).
+ * For each plan it sends the plan's landed diff, its documents, its tasks' attested evidence, the state of the rules
+ * its spec cites and the `milestone` decisions that belong to it to the configured AI judge, and stores the seven-
+ * dimension review (correctness_vs_acs, spec_conformance, regression, design_necessity, snapshot_accuracy,
+ * concurrency_safety, security; each pass | fail | na with a reason and a reference) as a knowledge doc
+ * (sub_type `milestone-review`) informs-linked to the plan. The review carries the plan-state fingerprint it judged:
+ * plan close (`CorpusService.set`, gate `plan-close`) requires a review of the plan's CURRENT state with no failing
+ * dimension, and nothing else.
  *
- * Flow (SPEC-026 §8.3, SPEC-028 AC-AE-1, SPEC-106): resolve → corpusService.getPlanBundle →
- * (zero tasks → exit 4, before any AI call) → staleness advisory (corpusService
- * .getAssessmentFreshness + gate-predicates.assessmentFreshness, stderr-only, NEVER
- * blocking — SPEC-106 D3) → diff acquisition (--diff shells `git diff <range>`;
- * --diff-file reads a file; both → exit 2) → pre-flight diff-budget warning
- * (stderr-only, fires when diffText exceeds ai.assess.max_diff_chars, BEFORE the provider
- * call) → AI surface-brake check → aiProviderService.assessPlan → corpusService.create
- * (knowledge, sub_type=assessment) → corpusService.link (informs) → human render
- * (verdict + score table) or --json envelope.
+ * Batch contract (Part A): plans are given as ids/slugs or selected with `--where` (the `lore bulk` filter grammar,
+ * parsed and resolved by `resolveBulkSelector` / `BulkLifecycleService.preview`; plans only). One row per plan, each
+ * with its own verdict; a row fails alone. Exit 0 = every plan passed; 1 = any plan failed its review or could not
+ * be reviewed; 2 = usage (no selector, ids and --where together, --no-ai, a bad --where).
  *
- * AI default (SPEC-026 §3 D5): unlike `set --regenerate`/`--refine`, assess has no
- * non-AI mode — the command name IS the AI intent. It runs with AI on every surface by
- * default; only an EXPLICIT `ai.default_per_surface.<surface> = false` config override
- * requires `--ai` to proceed. `--no-ai` is always a contradiction → exit 2.
+ * The diff is derived per plan from the commit range each task recorded at landing
+ * (`assess-commit-derivation.ts::deriveCommitSetForPlan`); a plan with no recorded range is reviewed from its
+ * documents and evidence, and the stored review says so (`diff_source`).
  *
- * Diff-range scope-mismatch warning (hotfix task-assess-diff-range-scope-mismatch-warning):
- * `result.scope_warning` (computed by `aiProviderService.assessPlan`, never this adapter)
- * is a non-blocking advisory printed after the summary in text mode, and surfaced under a
- * stable `data.scope_warning` key in `--json` output — never affects verdict/exit code.
+ * AI default (SPEC-026 §3 D5): assess has no non-AI mode. It runs with AI on every surface by default; only an
+ * EXPLICIT `ai.default_per_surface.<surface> = false` config override requires `--ai`. `--no-ai` is always exit 2.
  *
- * Staleness advisory (SPEC-106 §Design Decisions D2/D3/D5, AC-FRESH-4): this run's OWN
- * write always proceeds regardless of what the advisory found — `lore assess` is the
- * remedy for a stale assessment (an assessment whose own follow-up hardening merged
- * after it ran), so gating it on that condition would be a deadlock. The SAME
- * freshness facts feed `plan-close`'s (checkpoint-registry.ts) BLOCKING
- * `assessmentFreshness` predicate — one shared computation (`CorpusService
- * .getAssessmentFreshness`), never two.
+ * Inputs measured once per batch (Part D): before the first review `assess` runs `bun run check:plan-close` and
+ * `bun run test` ONCE on main's HEAD in a throwaway worktree (`assess-suite-runner.ts`) and hands that one result to
+ * every plan's regression dimension. `--file-issues` then files the failed findings BY ROOT CAUSE (BR-1379): one GitHub
+ * issue per fingerprint (title `<dimension>: <cause> [fp:<12 hex>]`, full fingerprint in the body), an open issue with
+ * the fingerprint is linked instead of duplicated, and each issue is linked to every plan sharing it
+ * (`IssueFilingService` over `assess-file-issues.ts`); plan close accepts a failing review when every failed dimension
+ * has such an OPEN linked issue ("accepted with known defects").
  *
- * Commit-set auto-derivation (task-lore-assess-asks-the-caller-for-a-git-range-that-
- * cannot-be): when NEITHER `--diff` NOR `--diff-file` is passed, this command no longer
- * defaults to "no diff" — it derives the plan's own commit set from git history itself
- * (`../assess-commit-derivation.js::deriveCommitSetForPlan`), immune to the interleaving
- * that makes a caller-supplied contiguous range wrong under concurrency. `--diff`/
- * `--diff-file` remain explicit overrides, unchanged. Every run — explicit override,
- * auto-derived, or "no commits found" — records its `diff_source` on the persisted
- * `extra` (additive `knowledgeExtraSchema.passthrough()` key, no core schema change) and
- * in the `--json` envelope, so `diff_available` alone is never the only signal an
- * auditor has for telling a complete diff from a partial one.
+ * `--where needs-review` selects the post-landing trigger set; `--close` runs the review batch under the store lease
+ * (judge only when no valid review matches the plan's fingerprint, file by root cause, archive). `lore integrate` starts
+ * `lore assess --where needs-review --file-issues --close` detached after a landing.
  *
- * `--diff`'s git-diff maxBuffer (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-
- * over-1): the `spawnSync("git", ["diff", ...])` call sizes its `maxBuffer` against the
- * EFFECTIVE `ai.assess.max_diff_chars` (`../assess-render.js::computeGitDiffMaxBuffer`,
- * 4 bytes/char worst-case UTF-8) instead of Node's arbitrary 1 MiB default — an ordinary
- * multi-task-plan diff can exceed 1 MiB. A confirmed `error.code === "ENOBUFS"` renders a
- * dedicated message naming the buffer size and the `ai.assess.max_diff_chars` knob
- * (`../assess-render.js::formatGitDiffEnobufsMessage`) instead of the generic "git diff
- * ... failed: spawnSync ENOBUFS", which sent an operator to look at git for a failure
- * that was entirely this call site's own buffer ceiling. Every OTHER spawn failure
- * (non-zero exit, ENOENT, ...) still renders the pre-existing generic message, unchanged.
- *
- * Convention-mismatch vs genuine absence (task-lore-assess-derives-a-plan-s-commits-by-
- * grepping-task): auto-derivation now tells apart TWO zero-commit causes instead of
- * folding them into one. This command computes `allTasksArchived` (every task's
- * `status === "archived"`) from the ALREADY-LOADED bundle and passes it to
- * `deriveCommitSetForPlan` — a zero-match result on an all-archived plan is a
- * CONTRADICTION (archived tasks have merged work by definition) and comes back as the
- * distinct `"unverifiable_convention_mismatch"` status, never silently folded into
- * `"no_commits_found"` (which stays reserved for a plan that plausibly has no merged work
- * yet). The distinct status is threaded to `aiProviderService.assessPlan` as
- * `commitDerivationUnverifiable`, which forbids the judge's `scope_fidelity` dimension
- * score from ever publishing in that state (SPEC-lore's own three-question ADR review;
- * enforced at the SERVICE layer, `ai-provider-service.ts::forceScopeFidelityUnverifiable`
- * — never by editing the prompt template).
- *
- * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
- * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning; SPEC-106 AC-FRESH-4;
- * task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be;
- * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1;
- * task-lore-assess-derives-a-plan-s-commits-by-grepping-task
+ * The logic lives in `MilestoneReviewService`; this file resolves flags, derives each plan's diff, renders rows.
  */
 
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatErrorFor } from "../utils.js";
-import { ASSESS_NEWER_TASK_ACTIVITY, ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
+import { exitCode, formatErrorFor, formatTable, resolveActor } from "../utils.js";
+import { classifyFeedbackUpstream, resolveConsumerCorpusRoot, type GithubUpstreamCfg } from "../report-issue-wiring.js";
+import { createGithubIssuePort } from "../assess-file-issues.js";
+import { IssueFilingService } from "../../../service/issue-filing-service.js";
+import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
+import { retirementAssessFields } from "../../../service/retired-ac-service.js";
+import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow } from "../../../service/review-batch-service.js";
+import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { err, ok, type DocId } from "@lore/core";
+import type { App } from "../../../app.js";
+import { createGitSuiteRunner } from "../assess-suite-runner.js";
+import { createAppStaleRefresher } from "../assess-stale-refresh.js";
+import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
+import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
-import { renderAssessmentContent } from "@lore/core";
-import {
-  formatAssessmentSummary,
-  computeGitDiffMaxBuffer,
-  formatGitDiffEnobufsMessage,
-  computeCaptureSourceDistribution,
-  formatCaptureSourceLine,
-  formatStampVerdictLine,
-} from "../assess-render.js";
-import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, describeCommitCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
 import { collectRecordedRanges } from "../../../service/task-commit-range.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { requireBulkLifecycleService } from "../../bulk-wiring.js";
+import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
+import { failedDimensions, type MilestoneReview, type RetiredAcRef } from "@lore/core";
+import type { LoreError } from "@lore/core";
 
-/** One-line stderr/text summary of how this run's diff (if any) was obtained. */
-function formatDiffSourceLine(source: DiffSourceRecord): string {
+/** One plan's row of the batch result. */
+interface AssessRow {
+  readonly plan: string;
+  readonly outcome: "PASS" | "FAIL" | "ERROR";
+  readonly review: string | null;
+  readonly failed: readonly string[];
+  readonly diff_source: string | null;
+  readonly reason: string;
+  /** ACs retired during the plan (adr-an-acceptance-criterion-retires-with-the-feature-it); absent when none. */
+  readonly retired_acs?: readonly RetiredAcRef[];
+  /** The one pending owner decision that confirms them (`lore pending --ask`); absent when none is open. */
+  readonly pending_decision?: number;
+}
+
+/** One-line account of how a plan's diff was obtained (stored on the review as `diff_source`). */
+function describeDiffSource(source: DiffSourceRecord): string {
   switch (source.mode) {
     case "explicit_diff":
-      return `Diff source: --diff ${source.range} (explicit override)`;
+      return `--diff ${source.range} (explicit override)`;
     case "explicit_diff_file":
-      return `Diff source: --diff-file ${source.path} (explicit override)`;
+      return `--diff-file ${source.path} (explicit override)`;
     case "explicit_diff_text":
-      // reason: unreachable from the CLI (only MCP's diff_text override produces this
-      // variant) — kept so the switch stays exhaustively typed against the shared union.
-      return "Diff source: diff_text (explicit override)";
+      // reason: unreachable from the CLI (only MCP's diff_text override produces it) — kept so the switch stays
+      // exhaustively typed against the shared union.
+      return "diff_text (explicit override)";
     case "auto_derived":
       if (source.status === "derived") {
-        const measuredZero = source.tasks_without_commits.length - source.tasks_not_measured.length;
-        const gapNote =
-          (source.tasks_not_measured.length > 0
-            ? ` (${String(source.tasks_not_measured.length)} task(s) NOT MEASURED: no recorded commit range and no slug match)`
-            : "") + (measuredZero > 0 ? ` (${String(measuredZero)} task(s) recorded an empty commit range)` : "");
-        return `Diff source: derived from ${describeCommitCount(source.commits.length, source.excluded_merged_commit_count)} across this plan's tasks${gapNote}`;
-      }
-      if (source.status === "unverifiable_convention_mismatch") {
+        const missing = source.tasks_not_measured.length;
         return (
-          "Diff source: unverifiable — every task in this plan is archived (merged work by " +
-          "definition) but no commit mentions any task slug; a commit-message CONVENTION " +
-          "MISMATCH, not evidence of missing work"
+          `derived from ${describeCommitCount(source.commits.length, source.excluded_merged_commit_count)} across the plan's tasks` +
+          (missing > 0 ? ` (${String(missing)} task(s) NOT MEASURED: no recorded commit range)` : "")
         );
       }
-      return `Diff source: none — ${ASSESS_NO_COMMITS_DERIVED} for this plan's tasks`;
+      if (source.status === "unverifiable_convention_mismatch") {
+        return "unavailable: every task is archived but none recorded a commit range";
+      }
+      return `none: ${ASSESS_NO_COMMITS_DERIVED}`;
   }
+}
+
+function errorRow(plan: string, error: LoreError): AssessRow {
+  const message = "message" in error && typeof error.message === "string" ? error.message : error.code;
+  return { plan, outcome: "ERROR", review: null, failed: [], diff_source: null, reason: `${error.code}: ${message}` };
+}
+
+function passFailRow(plan: string, reviewSlug: string, review: MilestoneReview): AssessRow {
+  const failed = failedDimensions(review.dimensions);
+  return {
+    plan,
+    outcome: review.overall === "pass" ? "PASS" : "FAIL",
+    review: reviewSlug,
+    failed,
+    diff_source: review.diff_source,
+    reason: failed.length === 0 ? "no dimension failed" : `failed: ${failed.join(", ")}`,
+  };
 }
 
 export default defineLoreCommand({
   meta: {
     name: "assess",
-    description: "AI plan-outcome assessment (LLM-as-judge) — judge a plan against its spec's ACs and its tasks' evidence",
+    description: "Milestone review: judge plan(s) on seven dimensions; plan close requires a passing review of the current state",
   },
   args: {
     plan: {
       type: "positional",
-      description: "Plan document ID or slug to assess",
-      required: true,
+      description: "Plan id or slug (more may follow); or use --where",
+      required: false,
     },
-    diff: {
+    where: {
       type: "string",
-      description: "Git diff range (e.g. HEAD~3..HEAD) — shells `git diff <range>`. Mutually exclusive with --diff-file.",
+      description:
+        'Select plans by filters instead of ids: "status=approved,tag=...,older-than=30d,open-tasks=0" (plans only); or "needs-review": the complete plans the post-landing batch would process',
     },
-    "diff-file": {
-      type: "string",
-      description: "Path to a file containing pre-generated diff text. Mutually exclusive with --diff.",
-    },
-    json: {
+    "file-issues": {
       type: "boolean",
-      description: "Output the full assessment result envelope as JSON",
+      description:
+        "File the failed findings by root cause: ONE issue per fingerprint (searched among open issues first, never duplicated), linked to every plan that shares it",
     },
+    close: {
+      type: "boolean",
+      description:
+        "Run as the review batch under the store lease: judge a plan only when no valid review matches its current fingerprint, file by root cause, then archive it (accepted, or accepted with known defects)",
+    },
+    json: { type: "boolean", description: "Output the rows as JSON" },
     ai: {
       type: "boolean",
-      // reason: SPEC-024/026 tri-state AI flag — same argv-scan pattern as create.ts/set.ts
-      // (mri collapses --ai/no-flag; the real detection happens via process.argv below).
-      description: "Explicitly confirm AI use (rarely needed — assess defaults to AI on every surface). Pass --no-ai to abort (always exit 2 — assess has no non-AI mode).",
+      // reason: SPEC-024/026 tri-state AI flag — mri collapses --ai/no-flag, so the real detection is the argv scan below.
+      description: "Explicitly confirm AI use (rarely needed). Pass --no-ai to abort (always exit 2 — assess has no non-AI mode).",
     },
   },
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
-    // ─── Step 1: argument mutex checks (synchronous, before any IO) ────────────
-    const rawArgv = inv.argv;
-    const hasExplicitAi = rawArgv.includes("--ai");
-    const hasExplicitNoAi = rawArgv.includes("--no-ai");
-
+    const hasExplicitAi = inv.argv.includes("--ai");
+    const hasExplicitNoAi = inv.argv.includes("--no-ai");
     if (hasExplicitAi && hasExplicitNoAi) {
       inv.io.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
       exitCli(2);
     }
     if (hasExplicitNoAi) {
-      // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the command name IS the AI
-      // intent, so --no-ai is always a contradiction, unlike `set --regenerate`'s optional
-      // AI path.
+      // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the command name IS the AI intent.
       inv.io.stderr.write("Error: lore assess requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
       exitCli(2);
     }
-    if (args.diff !== undefined && args["diff-file"] !== undefined) {
-      inv.io.stderr.write("Error: --diff and --diff-file are mutually exclusive.\n");
-      exitCli(2);
+
+    const positionals = ((args._ as string[] | undefined) ?? (args.plan !== undefined ? [String(args.plan)] : [])).map(String);
+    // reason: `needs-review` is not a key=value filter; it names the batch's trigger set (BR-1379), resolved below.
+    const needsReview = args.where === "needs-review";
+    if (needsReview && positionals.length > 0) {
+      inv.io.stderr.write("Error: --where needs-review cannot be combined with plan ids.\n");
+      return 2;
+    }
+    const selector = needsReview ? { ok: true as const, value: { kind: "ids" as const, ids: [] } } : resolveBulkSelector(positionals, typeof args.where === "string" ? args.where : undefined);
+    if (!selector.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, selector.error) + "\n");
+      return 2;
     }
 
-    const { app } = loadLoreApp({ inv });
+    const { app, config } = loadLoreApp({ inv });
     try {
-      // ─── Step 2: resolve plan + assemble bundle ───────────────────────────────
-      const bundleResult = await app.corpusService.getPlanBundle(args.plan);
-      if (!bundleResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-        return exitCode(bundleResult.error);
+      const fileIssues = args["file-issues"] === true;
+      let issueUpstream: GithubUpstreamCfg | undefined;
+      if (fileIssues) {
+        // reason: refused BEFORE any judge call — a batch that cannot file its issues must not spend the reviews first.
+        const classification = classifyFeedbackUpstream(config);
+        if (classification.kind === "retired") {
+          inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+          return exitCode(classification.error);
+        }
+        if (classification.kind === "unconfigured") {
+          inv.io.stderr.write("Error: --file-issues needs a GitHub `feedback.upstream.repo` in .lore/config.yaml; none is configured.\n");
+          return 4;
+        }
+        issueUpstream = classification.cfg;
       }
-      const bundle = bundleResult.value;
-
-      // AC-ASSESS-8: zero child tasks → VALIDATION_ERROR before any AI call.
-      if (bundle.tasks.length === 0) {
-        const noTasksError = {
-          code: "VALIDATION_ERROR" as const,
-          field: "tasks",
-          message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
-        };
-        inv.io.stderr.write(formatErrorFor(inv, noTasksError) + "\n");
-        return exitCode(noTasksError);
-      }
-
-      // ─── Step 2.5: staleness advisory (SPEC-106 §Design Decisions D3) ─────────
-      // reason: `lore assess` is the REMEDY for a stale assessment (D2's motivating
-      // incident: an assessment whose own follow-up hardening merged after it ran) —
-      // gating this command on the condition it cures would be a deadlock, so this is
-      // a loud, non-blocking stderr advisory only. Runs BEFORE the (possibly slow/
-      // costly) AI call so the operator sees it as early as possible; a genuine
-      // resolve/store failure here still propagates as a real error (this is IO
-      // failure handling, not a staleness gate) — it never silently swallows.
-      const freshnessResult = await app.corpusService.getAssessmentFreshness(bundle.plan.id);
-      if (!freshnessResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, freshnessResult.error) + "\n");
-        return exitCode(freshnessResult.error);
-      }
-      const freshness = freshnessResult.value;
-      const freshnessCheck = assessmentFreshness(freshness.newestAssessmentAt, freshness.newestTaskActivityAt);
-      if (!freshnessCheck.ok) {
+      if (!hasExplicitAi && isAssessAiBraked(app.resolveAiDefault(undefined))) {
         inv.io.stderr.write(
-          `Warning: the stored assessment for '${bundle.plan.slug}' (recorded ${freshness.newestAssessmentAt}) ` +
-            `is already stale — ${ASSESS_NEWER_TASK_ACTIVITY} ${freshness.newestTaskActivityAt}. This run ` +
-            `will still produce and save a fresh assessment (\`lore assess\` never refuses; it is the remedy).\n`,
+          "Error: AI is required for `lore assess` but is disabled for this surface by " +
+            "config.ai.default_per_surface. Pass --ai to override.\n",
         );
+        return 2;
       }
+      const reviewService = app.milestoneReviewService;
+      if (reviewService === undefined) throw new Error("milestoneReviewService is not wired on this App instance");
 
-      // ─── Step 3: diff acquisition (CLI layer only — SPEC-026 §3 D3) ───────────
-      // reason: read ONCE, before diff acquisition, so the maxBuffer sizing below (AC-1,
-      // task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1) and the
-      // pre-flight budget warning in Step 3.5 share the SAME effective value — never two
-      // reads that could observe a config edit landing between them.
-      const maxDiffChars = app.aiProviderService.assessMaxDiffChars;
-      let diffText: string | undefined;
-      let diffSource: DiffSourceRecord;
-      // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 — set ONLY
-      // by the auto-derived branch below when the derivation reports
-      // "unverifiable_convention_mismatch"; forwarded to assessPlan so the SERVICE layer
-      // (never this adapter, never the prompt template) forbids scope_fidelity from
-      // publishing an absence-based score in that state.
-      let commitDerivationUnverifiable = false;
-      if (args.diff !== undefined) {
-        // reason: Node's default maxBuffer (1 MiB) is an arbitrary constant unrelated to
-        // this command's own diff-size budget — an ordinary multi-task-plan diff can
-        // exceed it. computeGitDiffMaxBuffer sizes the buffer against the EFFECTIVE
-        // ai.assess.max_diff_chars instead (task-lore-assess-diff-spawnsync-sets-no-
-        // maxbuffer-a-diff-over-1, AC-1).
-        const maxBuffer = computeGitDiffMaxBuffer(maxDiffChars);
-        const gitResult = spawnSync("git", ["diff", args.diff], { cwd: inv.cwd, encoding: "utf8", maxBuffer });
-        if (gitResult.error || gitResult.status !== 0) {
-          // reason: ENOBUFS is THIS call site's own buffer ceiling, not a git failure —
-          // name the buffer + the ai.assess.max_diff_chars knob instead of rendering the
-          // generic "git diff ... failed: spawnSync ENOBUFS" message, which sends an
-          // operator to look at git (AC-2, same task).
-          if (gitResult.error && (gitResult.error as NodeJS.ErrnoException).code === "ENOBUFS") {
-            inv.io.stderr.write(formatGitDiffEnobufsMessage(args.diff, maxBuffer, maxDiffChars) + "\n");
-            return 2;
-          }
-          const reason = gitResult.error?.message ?? gitResult.stderr?.trim() ?? `git exited ${gitResult.status}`;
-          inv.io.stderr.write(`Error: git diff ${args.diff} failed: ${reason}\n`);
-          return 2;
+      const actor = resolveActor(inv);
+      const holder = `${actor}:assess:${String(process.pid)}`;
+      let planRefs: string[];
+      if (needsReview) {
+        // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
+        const trigger = buildReviewTriggerService(app, holder, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+        if (trigger === undefined) {
+          inv.io.stderr.write("Error: this composition cannot compute the needs-review set (no lease store or decision reader wired).\n");
+          return 1;
         }
-        diffText = gitResult.stdout;
-        diffSource = { mode: "explicit_diff", range: args.diff };
-      } else if (args["diff-file"] !== undefined) {
-        try {
-          diffText = readFileSync(args["diff-file"], "utf8");
-        } catch (e) {
-          const message = e instanceof Error ? e.message : "unknown error";
-          inv.io.stderr.write(`Error: could not read --diff-file: ${message}\n`);
-          return 2;
+        const set = await trigger.computeTriggerSet();
+        if (!set.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, set.error) + "\n");
+          return exitCode(set.error);
         }
-        diffSource = { mode: "explicit_diff_file", path: args["diff-file"] };
+        planRefs = set.value.map((entry) => entry.plan);
       } else {
-        // reason: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be —
-        // replaces "no diff by default" with "derive it from the plan's own tasks by
-        // default". A plan's commits are not contiguous in main under concurrency, so
-        // there is no correct contiguous range to ask the caller for; this finds the
-        // plan's own commits by CONTENT (exact task-slug match) instead of position.
-        //
-        // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task — every task
-        // already `archived` means merged work exists BY DEFINITION (VALID_TRANSITIONS,
-        // @lore/core); a zero-match derivation in that state is a commit-message CONVENTION
-        // MISMATCH, not genuine absence, so it must be told apart from a plan that plausibly
-        // has no merged work yet.
-        const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
+        const refs = await resolvePlanRefs(selector.value, requireBulkLifecycleService(app));
+        if (!refs.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, refs.error) + "\n");
+          return refs.error.code === "VALIDATION_ERROR" ? 2 : exitCode(refs.error);
+        }
+        planRefs = refs.value;
+      }
+      const refs = { ok: true as const, value: planRefs };
+
+      // reason: Part D — the plan-close chain and the full suite run ONCE for the whole batch on main's HEAD (in a
+      // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
+      const measureSuite = async (suiteRefs: readonly string[]): Promise<SuiteRun | undefined> => {
+        if (suiteRefs.length === 0) return undefined;
+        // reason: stale cited evidence is re-verified in this SAME throwaway main worktree, once per batch, before any
+        // plan is judged (Part D); a failed refresh leaves its rules stale, which the snapshot rule reads as n/a.
+        const verifyRunner = app.verifyRunnerService;
+        const refreshStale =
+          verifyRunner === undefined
+            ? undefined
+            : async (root: string): Promise<void> => {
+                const refresher = createAppStaleRefresher(app, verifyRunner, {
+                  executionRoot: root,
+                  by: actor,
+                  nowIso: () => new Date().toISOString(),
+                });
+                const refreshed = await reviewService.refreshStaleCitedRules(suiteRefs, refresher);
+                if (!refreshed.ok) {
+                  inv.io.stderr.write(`Warning: stale cited-rule refresh failed: ${formatErrorFor(inv, refreshed.error)}\n`);
+                  return;
+                }
+                for (const failure of refreshed.value.failures) {
+                  inv.io.stderr.write(`Warning: could not re-verify ${failure.acIds.join(", ")} for ${failure.plan}: ${failure.message}\n`);
+                }
+              };
+        const measured = await createGitSuiteRunner(inv.cwd, inv.env, refreshStale).run();
+        return measured.ok ? measured.value : { status: "not_measured", reason: formatErrorFor(inv, measured.error) };
+      };
+
+      const filingCtx = {
+        consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
+        corpusService: app.corpusService,
+        actor,
+        home: inv.paths.home,
+        env: inv.env,
+      };
+      const filing =
+        issueUpstream === undefined
+          ? undefined
+          : new IssueFilingService(createGithubIssuePort(issueUpstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()));
+
+      /** Judges one plan from its landed diff: the one review step both the hand run and the batch use. */
+      const reviewOne = async (ref: string, suiteForPlan: SuiteRun | undefined) => {
+        const bundle = await app.corpusService.getPlanBundle(ref);
+        if (!bundle.ok) return bundle;
+        const tasks = bundle.value.tasks;
         const derivation = deriveCommitSetForPlan(
           inv.cwd,
-          bundle.tasks.map((t) => t.slug),
-          allTasksArchived,
-          collectRecordedRanges(bundle.tasks),
+          tasks.map((t) => t.slug),
+          tasks.length > 0 && tasks.every((t) => t.status === "archived"),
+          collectRecordedRanges(tasks),
         );
-        diffSource = { mode: "auto_derived", ...derivation };
-        if (derivation.status === "derived") {
-          diffText = derivation.diff_text;
-          const gapNote =
-            (derivation.tasks_not_measured.length > 0
-              ? ` (${String(derivation.tasks_not_measured.length)} task(s) NOT MEASURED — no recorded commit range and ` +
-                `no slug match, which is not the same as zero commits: ${derivation.tasks_not_measured.join(", ")})`
-              : "") +
-            (derivation.tasks_without_commits.length > derivation.tasks_not_measured.length
-              ? ` (${String(derivation.tasks_without_commits.length - derivation.tasks_not_measured.length)} task(s) recorded an empty commit range)`
-              : "");
-          inv.io.stderr.write(
-            `Derived diff from ${describeCommitCount(derivation.commits.length, derivation.excluded_merged_commit_count)} across this plan's tasks${gapNote}.\n`,
-          );
-        } else if (derivation.status === "unverifiable_convention_mismatch") {
-          commitDerivationUnverifiable = true;
-          inv.io.stderr.write(
-            `Warning: every one of this plan's ${String(bundle.tasks.length)} task(s) is already archived ` +
-              "(merged work exists by definition) but no commit mentions any of their slugs — this is a " +
-              "commit-message CONVENTION MISMATCH, not evidence of missing work. The scope_fidelity dimension " +
-              "will be reported unverifiable, never absence-scored, for this run. Pass --diff/--diff-file to " +
-              "supply a diff explicitly.\n",
-          );
+        const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
+        return reviewService.review(ref, {
+          ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
+          diffSource: describeDiffSource(diffSource),
+          maxDiffChars: app.aiProviderService.assessMaxDiffChars,
+          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
+        });
+      };
+
+      if (args.close === true) {
+        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, filing, json: args.json === true });
+      }
+
+      const suite = await measureSuite(refs.value);
+
+      const rows: AssessRow[] = [];
+      const findings: FailedFinding[] = [];
+      for (const ref of refs.value) {
+        const bundle = await app.corpusService.getPlanBundle(ref);
+        if (!bundle.ok) {
+          rows.push(errorRow(ref, bundle.error));
+          continue;
+        }
+        // reason: the owner's answer to an earlier retired-AC question is carried out, and the one pending decision for
+        // this plan is raised, BEFORE the review so the review lists what is still retired.
+        const retirement = app.retiredAcService !== undefined ? await app.retiredAcService.settle(bundle.value) : undefined;
+        if (retirement !== undefined && !retirement.ok) {
+          rows.push(errorRow(ref, retirement.error));
+          continue;
+        }
+        const reviewed = await reviewOne(ref, suite);
+        const baseRow = reviewed.ok ? passFailRow(ref, reviewed.value.doc.slug, reviewed.value.review) : errorRow(ref, reviewed.error);
+        // reason: one serializer for CLI and MCP (retirementAssessFields), so the row shape cannot drift between them.
+        const { summary, ...retiredFields } = retirementAssessFields(retirement?.value);
+        rows.push(summary === undefined ? baseRow : { ...baseRow, ...retiredFields, reason: `${baseRow.reason}; ${summary}` });
+        if (reviewed.ok) {
+          for (const dimension of failedDimensions(reviewed.value.review.dimensions)) {
+            const judgment = reviewed.value.review.dimensions[dimension];
+            findings.push({
+              plan: ref,
+              dimension,
+              reason: judgment.reason,
+              reference: judgment.reference,
+              cites: judgment.cites,
+              reviewSlug: reviewed.value.doc.slug,
+              causes: reviewed.value.review.causes,
+            });
+          }
+        }
+      }
+
+      let fileError: LoreError | undefined;
+      const filedByPlan = new Map<string, number[]>();
+      if (filing !== undefined && findings.length > 0) {
+        const filed = await filing.fileFindings(findings);
+        if (filed.ok) {
+          for (const group of filed.value) {
+            if (group.error !== undefined) fileError ??= group.error;
+            if (group.issue === undefined) continue;
+            for (const plan of group.linked) filedByPlan.set(plan, [...(filedByPlan.get(plan) ?? []), group.issue.number]);
+          }
         } else {
-          inv.io.stderr.write(
-            `Warning: ${ASSESS_NO_COMMITS_DERIVED} for this plan's ${String(bundle.tasks.length)} task(s) — ` +
-              "proceeding without a diff. This can mean the plan has no merged code changes yet, or its commit " +
-              "history was squashed/rewritten and no longer references the task slugs. Pass --diff/--diff-file " +
-              "to supply one explicitly.\n",
-          );
+          fileError = filed.error;
         }
       }
+      const outRows = rows.map((r) => (filedByPlan.has(r.plan) ? { ...r, filed_issues: filedByPlan.get(r.plan) } : r));
 
-      // ─── Step 3.5: pre-flight diff-budget warning (SPEC-028 AC-AE-1) ──────────
-      // reason: printed BEFORE the provider call, stderr-only so --json stdout stays a
-      // clean envelope. Actual truncation (file-boundary, not blind tail cut) happens
-      // later inside buildAssessPrompt via truncateDiffByFile — this is advance notice.
-      if (diffText !== undefined) {
-        if (diffText.length > maxDiffChars) {
-          inv.io.stderr.write(
-            `Warning: diff is ${diffText.length} chars, exceeding the configured ai.assess.max_diff_chars ` +
-              `budget of ${maxDiffChars}. It will be truncated by file (production source kept first, then ` +
-              `tests, then everything else — no file is cut in half). To include the full diff, curate a ` +
-              `smaller diff with --diff-file, or raise ai.assess.max_diff_chars in .lore/config.yaml.\n`,
-          );
-        }
-      }
-
-      // ─── Step 4: AI surface-brake check (SPEC-026 §3 D5) ──────────────────────
-      // reason: unlike set.ts, assess has no non-AI mode, so the built-in per-surface
-      // false default (agent/mcp/http_token) does NOT block it — only an explicit config
-      // override does (isAssessAiBraked checks resolveAiDefault's "config" source tier).
-      if (!hasExplicitAi) {
-        const resolved = app.resolveAiDefault(undefined);
-        if (isAssessAiBraked(resolved)) {
-          inv.io.stderr.write(
-            "Error: AI is required for `lore assess` but is disabled for this surface by " +
-              "config.ai.default_per_surface. Pass --ai to override.\n",
-          );
-          return 2;
-        }
-      }
-
-      const showSpinner = inv.io.stderr.isTTY === true && !args.json;
-      if (showSpinner) {
-        inv.io.stderr.write(`⏳ Assessing via ${app.aiProviderService.activeProviderName}...\n`);
-      }
-
-      // ─── Step 5: invoke the judge ──────────────────────────────────────────────
-      // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 —
-      // `commitDerivationUnverifiable` is forwarded so the SERVICE layer forbids
-      // scope_fidelity from publishing an absence-based score in that state; `false`
-      // (the initialized default) on every OTHER path (explicit --diff/--diff-file, or a
-      // genuinely commit-less plan) is a true, deliberate value, not an omission.
-      //
-      // reason: D6 (spec-judgment-surfaces-must-verify-before-they-certify-machine,
-      // task-thread-diff-source-through-the-cli-and-mcp-assess-adapters) — `diffSource`
-      // (this command's own already-computed `DiffSourceRecord` local, assigned on every
-      // branch of Step 3 above) is now threaded into `opts.diffSource` so
-      // `resolveAssessedCommit`/`verifyFindingPaths` (AC-JV-1, D2, D3) have a referent to
-      // check finding paths against. Every field name/shape on `DiffSourceRecord` matches
-      // `AssessDiffSource` exactly (see that type's own JSDoc), so this needs zero cast —
-      // before this line, `opts.diffSource` was never supplied at all, and every live run
-      // resolved to `paths_verified.unchecked` regardless of how much diff provenance this
-      // command had already gathered (measured 2026-08-11, immediately after AC-JV-1
-      // earned an attested pass at the service layer — see AC-JV-5).
-      const assessResult = await app.aiProviderService.assessPlan(bundle, {
-        ...(diffText !== undefined ? { diffText } : {}),
-        source: app.callerSurface,
-        commitDerivationUnverifiable,
-        diffSource,
-        repoRoot: inv.cwd,
-      });
-      if (!assessResult.ok) {
-        // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR
-        // hint's default "Retry with --no-ai" is actively misleading here (SPEC-029 AC-AR-5,
-        // AC-AR-4 preserves the underlying error shape/exit code unchanged).
-        inv.io.stderr.write(formatErrorFor(inv, assessResult.error, { aiHasNoFallback: true }) + "\n");
-        return exitCode(assessResult.error);
-      }
-      const result = assessResult.value;
-
-      if (showSpinner) {
-        // SPEC-067 D4: overall_score is omitted at 100% task-truncation coverage.
-        const scoreLabel = result.overall_score !== undefined ? `${result.overall_score}/100` : "N/A (fully truncated)";
-        inv.io.stderr.write(`✓ Assessment complete: ${result.verdict} (${scoreLabel})\n`);
-      }
-
-      // ─── Step 5.5: capture_source distribution (AC-FR-5, G4) ──────────────────
-      // reason: computed BEFORE persistence — deterministic, from the
-      // already-loaded bundle, never touching the AI judge's own `result`.
-      const captureSourceDistribution = computeCaptureSourceDistribution(bundle);
-      // reason: SPEC-143 AC-CT-9(d) — the SECOND axis over the same rows (stamp verdict), through the ONE
-      // exported predicate `lore status` also renders; reported alongside, never merged into capture_source.
-      const stampVerdictResult = await app.corpusService.stampVerdictDistribution(bundle.tasks);
-      if (!stampVerdictResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
-        return exitCode(stampVerdictResult.error);
-      }
-      const stampVerdictDistribution = stampVerdictResult.value;
-
-      // ─── Step 6: persist as a knowledge doc, linked to the plan ────────────────
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const createResult = await app.corpusService.create({
-        type: "knowledge",
-        title: `Assessment: ${bundle.plan.title} (${dateStr})`,
-        parent_id: bundle.plan.id,
-        // reason: `diff_source` is additive on the passthrough `extra` object (never a
-        // core `assessmentResultSchema` change) — records HOW this run's diff (if any)
-        // was obtained, so `diff_available` alone is never the only auditable signal
-        // (task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be, AC #3).
-        extra: { sub_type: "assessment", assessment: result, diff_source: diffSource },
-        content: renderAssessmentContent(result),
-      });
-      if (!createResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
-        return exitCode(createResult.error);
-      }
-      const assessmentDoc = createResult.value;
-
-      const linkResult = await app.corpusService.link(assessmentDoc.id, bundle.plan.id, "informs");
-      if (!linkResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
-        return exitCode(linkResult.error);
-      }
-
-      // ─── Step 7: render ─────────────────────────────────────────────────────────
-      // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a non-blocking
-      // advisory, computed by assessPlan and persisted on `result.scope_warning`. Surfaced
-      // under the stable top-level `data.scope_warning` key (in addition to its copy
-      // inside `data.result`) so a caller doesn't need to know it lives nested — `undefined`
-      // is dropped by JSON.stringify, so the key is simply absent when no warning fired.
-      if (args.json) {
-        printLine(inv.io.stdout, 
-          JSON.stringify(
-            {
-              ok: true,
-              data: {
-                assessment: assessmentDoc,
-                result,
-                scope_warning: result.scope_warning,
-                diff_source: diffSource,
-                // reason: AC-FR-5/G4 — printed ALONGSIDE result.facts.regression
-                // .attested_evidence_ratio (the pre-existing attested ratio this
-                // envelope already carries), a top-level sibling key so a
-                // consumer never needs to know the attested one lives nested.
-                capture_source: {
-                  runner_count: captureSourceDistribution.runnerCount,
-                  self_report_count: captureSourceDistribution.selfReportCount,
-                  runner_unattested_count: captureSourceDistribution.runnerUnattestedCount,
-                  ratio: captureSourceDistribution.ratio,
-                },
-                stamp_verdicts: stampVerdictDistribution,
-              },
-            },
-            null,
-            2,
+      if (args.json === true) {
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows: outRows } }, null, 2));
+      } else if (rows.length === 0) {
+        printLine(inv.io.stdout, "No plans selected.");
+      } else {
+        printLine(
+          inv.io.stdout,
+          formatTable(
+            ["RESULT", "PLAN", "REVIEW", "REASON"],
+            outRows.map((r) => [
+              r.outcome,
+              r.plan,
+              r.review ?? "-",
+              "filed_issues" in r && r.filed_issues !== undefined ? `${r.reason}; issues ${r.filed_issues.map((n) => `#${String(n)}`).join(", ")}` : r.reason,
+            ]),
           ),
         );
-        return 0;
       }
-
-      printLine(inv.io.stdout, formatAssessmentSummary(result));
-      if (result.scope_warning) {
-        printLine(inv.io.stdout, "");
-        printLine(inv.io.stdout, result.scope_warning.message);
+      if (fileError !== undefined) {
+        inv.io.stderr.write(formatErrorFor(inv, fileError) + "\n");
+        return 1;
       }
-      printLine(inv.io.stdout, "");
-      // reason: AC-FR-5/G4 — printed alongside result.facts.regression
-      // .attested_evidence_ratio, when present (a legacy pre-SPEC-040 result
-      // would carry no `facts` at all — additive, never a thrown error).
-      const attestedRatio = result.facts?.regression.attested_evidence_ratio;
-      printLine(inv.io.stdout, formatCaptureSourceLine(captureSourceDistribution, attestedRatio));
-      printLine(inv.io.stdout, formatStampVerdictLine(stampVerdictDistribution));
-      printLine(inv.io.stdout, formatDiffSourceLine(diffSource));
-      printLine(inv.io.stdout, `Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
+      return rows.some((r) => r.outcome !== "PASS") ? 1 : 0;
     } finally {
       app.close();
     }
-    return 0;
   },
 });
+
+/** The inputs of the `--close` batch, built by `run`. */
+interface BatchCloseInput {
+  readonly app: App;
+  readonly inv: ReturnType<typeof invocationOf>;
+  readonly actor: string;
+  readonly holder: string;
+  readonly planRefs: readonly string[];
+  readonly measureSuite: (refs: readonly string[]) => Promise<SuiteRun | undefined>;
+  readonly reviewOne: (ref: string, suite: SuiteRun | undefined) => ReturnType<NonNullable<App["milestoneReviewService"]>["review"]>;
+  readonly filing: IssueFilingService | undefined;
+  readonly json: boolean;
+}
+
+/**
+ * `lore assess ... --close`: the review batch (BR-1379). Takes the store lease (a live lease of another batch makes this
+ * a no-op, exit 0), then runs `ReviewBatchRunner.runBatch` and prints one row per plan.
+ */
+async function runBatchClose(input: BatchCloseInput): Promise<number> {
+  const { app, inv, actor } = input;
+  const lease = buildReviewLease(app, input.holder);
+  if (lease === undefined) {
+    inv.io.stderr.write("Error: this composition has no lease store, so the review batch cannot run.\n");
+    return 1;
+  }
+  const service = new ReviewBatchRunner({
+    getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
+    listReviewDocs: (planId) => app.corpusService.listMilestoneReviewDocs(planId),
+    issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
+  });
+  const run = await service.runBatch(input.planRefs, {
+    acquireLease: () => lease.acquire(),
+    settleRetirement: async (bundle) => {
+      if (app.retiredAcService === undefined) return ok(undefined);
+      return app.retiredAcService.settle(bundle);
+    },
+    measureSuite: input.measureSuite,
+    reviewPlan: input.reviewOne,
+    closePlan: async (ref, filedIssues) => {
+      const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor, trustedOpenIssues: filedIssues });
+      return closed.ok ? ok(undefined) : closed;
+    },
+    recordError: (error) =>
+      app.corpusService.appendAudit({
+        action: BATCH_ERROR_AUDIT_ACTION,
+        sessionId: error.planId,
+        docId: error.planId as DocId,
+        details: { plan: error.planSlug, fingerprint: error.fingerprint, stage: error.stage, message: error.message, at: error.at, rule: "BR-1379" },
+        by: actor,
+      }),
+    filing: input.filing,
+    now: () => new Date().toISOString(),
+  });
+  if (!run.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");
+    return exitCode(run.error);
+  }
+  if (run.value.state === "busy") {
+    printLine(inv.io.stdout, `Another review batch holds the lease (${run.value.holder}, until ${run.value.expires_at}); nothing ran.`);
+    return 0;
+  }
+  const rows: readonly BatchPlanRow[] = run.value.rows;
+  if (input.json) {
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns, took_over: run.value.tookOver } }, null, 2));
+  } else if (rows.length === 0) {
+    printLine(inv.io.stdout, "No plans selected.");
+  } else {
+    printLine(
+      inv.io.stdout,
+      formatTable(
+        ["RESULT", "PLAN", "REVIEW", "REASON"],
+        rows.map((r) => [r.outcome.toUpperCase(), r.plan, r.review ?? "-", r.issues.length > 0 ? `${r.detail}; issues ${r.issues.map((n) => `#${String(n)}`).join(", ")}` : r.detail]),
+      ),
+    );
+  }
+  return rows.some((r) => r.outcome === "error") ? 1 : 0;
+}
+
+/** Plans to review: the given ids as they are, or the plans the `--where` selection yields (never a non-plan). */
+async function resolvePlanRefs(
+  selector: BulkSelector,
+  bulk: ReturnType<typeof requireBulkLifecycleService>,
+): Promise<{ ok: true; value: string[] } | { ok: false; error: LoreError }> {
+  if (selector.kind === "ids") return { ok: true, value: selector.ids.map((i) => i.ref) };
+  const preview = await bulk.preview(selector, "close");
+  if (!preview.ok) return { ok: false, error: preview.error };
+  return { ok: true, value: preview.value.filter((row) => row.type === "plan").map((row) => row.slug) };
+}

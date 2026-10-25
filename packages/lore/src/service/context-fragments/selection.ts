@@ -65,11 +65,13 @@ export function parseSelection(text: string, source: string): Result<Selection, 
   try {
     raw = parseYaml(text);
   } catch (cause) {
+    /** @lore-site BR-1062 */
     return err(selectionError("selection", `${source}: invalid YAML: ${cause instanceof Error ? cause.message : String(cause)}`));
   }
   const parsed = SelectionSchema.safeParse(raw);
   if (!parsed.success) {
     const detail = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+    /** @lore-site BR-1062 */
     return err(selectionError("selection", `${source}: invalid selection file (${detail})`, raw));
   }
   return ok({ schemaVersion: 1, disable: normalizeDisable(parsed.data.disable) });
@@ -96,7 +98,7 @@ function refuseUnknown(id: string, fragments: readonly Fragment[]): SelectionErr
  * @param id Fragment id.
  * @param scope Scope owning `selection`.
  * @param fragments ALL discovered fragments, un-merged (the flow supplies them): defines the known ids and
- *   lets a static main fragment the scope does not own be refused (reuses `checkOverrides`).
+ *   lets a main-session fragment the scope does not own be refused (reuses `checkOverrides`).
  * @returns ok(new Selection), or VALIDATION_ERROR (unknown id / not owned).
  */
 export function addToDisable(
@@ -106,6 +108,7 @@ export function addToDisable(
   fragments: readonly Fragment[],
 ): Result<Selection, SelectionError> {
   const unknown = refuseUnknown(id, fragments);
+  /** @lore-site BR-1063 */
   if (unknown) return err(unknown);
   const next: Selection = { schemaVersion: 1, disable: normalizeDisable([...selection.disable, id]) };
   const own = layerOf(next);
@@ -126,6 +129,7 @@ export function addToDisable(
  */
 export function removeFromDisable(selection: Selection, id: string, fragments: readonly Fragment[]): Result<Selection, SelectionError> {
   const unknown = refuseUnknown(id, fragments);
+  /** @lore-site BR-1063 */
   if (unknown) return err(unknown);
   return ok({ schemaVersion: 1, disable: normalizeDisable(selection.disable.filter((d) => d !== id)) });
 }
@@ -146,6 +150,7 @@ export function selectionToLayer(
 ): Result<ContextConfigLayer, SelectionError> {
   const stray = configLayer.context?.fragments?.disable ?? [];
   if (stray.length > 0) {
+    /** @lore-site BR-1062 */
     return err(
       selectionError(
         "context.fragments.disable",
@@ -155,9 +160,11 @@ export function selectionToLayer(
     );
   }
   const language = configLayer.context?.language;
+  const artifactLanguage = configLayer.context?.artifact_language;
   return ok({
     context: {
       ...(language === undefined ? {} : { language }),
+      ...(artifactLanguage === undefined ? {} : { artifact_language: artifactLanguage }),
       fragments: { disable: selection.disable },
     },
     ...(configLayer.workflow === undefined ? {} : { workflow: configLayer.workflow }),

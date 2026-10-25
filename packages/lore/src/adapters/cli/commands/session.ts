@@ -1,4 +1,9 @@
 /**
+ * lore session start --human <name> | end | show — the human session (spec-every-write-is-made-by-a-known-party-an-attested-agent-run,
+ * BR-1350): `start` registers a run with harness `human` for this checkout (a token file in the user's lore state
+ * directory; only the token's hash enters the registry), `end` closes it, `show` (no id) names the open one. A write
+ * from this checkout with no harness run is recorded as that person, unless the process carries an agent harness marker.
+ *
  * lore session list|show <id> [--json] — AC-OWN-5 read surface (spec-multi-
  * session-concurrency-queryable-ownership-checkout §Scope L0): joins corpus
  * claims (`SessionService.getActiveSessions`, the SAME corpus-wide
@@ -24,7 +29,6 @@
  * honestly reported `"unmeasured"`, never fabricated.
  *
  * `lore session trail [--turn] [--run] [--json]`   — the caller's own session trail (AC-ST-6).
- * `lore session trail-review [--turn] [--json]`    — judge the caller's session's unjudged helper ends (AC-ST-8).
  *
  * Exit codes: 0 = success; 1 = SessionService not wired; 2 = missing/invalid
  *   `<id>` for `show`, or an unrecognized subcommand (CLI usage error); 3 =
@@ -34,14 +38,19 @@
  * Source: spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0, AC-OWN-5.
  */
 
-import { readFileSync, realpathSync } from "node:fs";
-
-import { dirname } from "node:path";
 import { defineLoreCommand } from "../cli-exit.js";
-import type { Invocation } from "@lore/core";
+import { hasAgentHarnessMarker, type Invocation } from "@lore/core";
+import {
+  bindingOfHumanSessionFile,
+  deleteHumanSessionFile,
+  hashSessionToken,
+  HumanSessionFileError,
+  newSessionToken,
+  readHumanSessionFile,
+  writeHumanSessionFile,
+  type HumanSessionFile,
+} from "../human-session-file.js";
 import { invocationOf } from "../command-invocation.js";
-import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeRulesLoad, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
-import { reviewHelperScope, spawnGitCheckIgnore, spawnGitCheckIgnoreAtRoot, spawnGitLanding } from "../../../service/helper-scope-review.js";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import {
@@ -53,61 +62,139 @@ import {
   TrailRunIdInvalidError,
   type SessionTrail,
 } from "@lore/core/node";
-import { findLoreDbPathQuiet } from "../corpus-resolution.js";
 import { loadLoreApp } from "../loader.js";
 import { formatTrail, narrowTrail } from "../session-trail-render.js";
-import { exitCode, formatError, formatErrorFor } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
 
-const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail", "trail-review"]);
+const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail", "start", "end"]);
+
+/** A person's name as typed: 1-64 printable characters (it appears verbatim in audit rows and claims). */
+const HUMAN_NAME_PATTERN = /^[^\u0000-\u001f\u007f]{1,64}$/;
+
+/** Refuses a human-session verb with the exit-4 validation family code. */
+function refuseHumanSession(io: CliIo, reason: string): number {
+  io.stderr.write(`Error: ${reason}\n`);
+  return 4;
+}
+
+/** The open human session file of this invocation's checkout, or the exit code of the refusal it already wrote. */
+function readOwnHumanSession(inv: Invocation): { readonly ok: true; readonly file: HumanSessionFile | null; readonly checkout: string } | { readonly ok: false; readonly code: number } {
+  const checkout = inv.paths.projectRoot;
+  if (checkout === null) return { ok: false, code: refuseHumanSession(inv.io, "no lore corpus found from this directory, so there is no checkout to bind a human session to") };
+  try {
+    return { ok: true, file: readHumanSessionFile(inv.env, inv.paths.home, checkout), checkout };
+  } catch (error) {
+    if (error instanceof HumanSessionFileError) return { ok: false, code: refuseHumanSession(inv.io, error.message) };
+    throw error;
+  }
+}
+
+/**
+ * `lore session start --human <name>` (BR-1350): registers a run with harness `human` for this checkout and binds it
+ * with a token file in the user's lore state directory (only the token's hash enters the registry). A second start
+ * while one is open is refused naming the open one; a process inside an agent harness never starts one.
+ * Exit 0 started; 2 missing `--human`; 4 refused (agent harness, bad name, no checkout, already open, unusable file).
+ */
+async function runSessionStart(
+  app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
+  args: { human?: unknown; json?: unknown },
+  inv: Invocation,
+): Promise<ExitReport> {
+  if (hasAgentHarnessMarker(inv.env)) {
+    return refuseHumanSession(inv.io, "a human session is for a person; this process runs inside an agent harness, whose writes carry an attested run (install the integration with `lore setup`)");
+  }
+  const name = typeof args.human === "string" ? args.human.trim() : "";
+  if (name === "") {
+    inv.io.stderr.write("Error: `lore session start` requires --human <name>: lore session start --human <name>\n");
+    return 2;
+  }
+  if (!HUMAN_NAME_PATTERN.test(name)) return refuseHumanSession(inv.io, `--human ${JSON.stringify(name)}: expected 1-64 printable characters`);
+  const open = readOwnHumanSession(inv);
+  if (!open.ok) return open.code;
+  if (open.file !== null) {
+    const run = bindingOfHumanSessionFile(open.file).run;
+    return refuseHumanSession(inv.io, `a human session is already open in this checkout: ${open.file.name} (run ${run}); \`lore session end\` closes it`);
+  }
+  if (app.runService === undefined) {
+    inv.io.stderr.write("Error: RunService not wired on this App instance.\n");
+    return 1;
+  }
+  const token = newSessionToken();
+  const registered = await app.runService.registerParty({ harness: "human", name, tokenHash: hashSessionToken(token) });
+  if (!registered.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, registered.error) + "\n");
+    return exitCode(registered.error);
+  }
+  try {
+    writeHumanSessionFile(inv.env, inv.paths.home, { version: 1, checkout: open.checkout, name, token, started_at: new Date().toISOString() });
+  } catch (error) {
+    if (error instanceof HumanSessionFileError) return refuseHumanSession(inv.io, error.message);
+    throw error;
+  }
+  if (args.json) {
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name, run: registered.value.id, checkout: open.checkout } }, null, 2));
+  } else {
+    printLine(inv.io.stdout, `Started human session ${name} (run ${registered.value.id}). Writes from this checkout are recorded as ${name} until \`lore session end\`.`);
+  }
+  return 0;
+}
+
+/**
+ * `lore session end`: ends the open human session's run (releasing its claims, BR-1057) and deletes its token file.
+ * Exit 0 ended; 3 no open session; 4 unusable file.
+ */
+async function runSessionEnd(app: Awaited<ReturnType<typeof loadLoreApp>>["app"], inv: Invocation): Promise<ExitReport> {
+  const open = readOwnHumanSession(inv);
+  if (!open.ok) return open.code;
+  if (open.file === null) {
+    inv.io.stderr.write("Error: no open human session in this checkout.\n");
+    return 3;
+  }
+  if (app.runService === undefined) {
+    inv.io.stderr.write("Error: RunService not wired on this App instance.\n");
+    return 1;
+  }
+  const run = bindingOfHumanSessionFile(open.file).run;
+  // reason: the run ends BEFORE the file is deleted, so a failed end leaves the session open and retryable.
+  const ended = await app.runService.end(run, "human session ended (lore session end)");
+  if (!ended.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, ended.error) + "\n");
+    return exitCode(ended.error);
+  }
+  deleteHumanSessionFile(inv.env, inv.paths.home, open.checkout);
+  printLine(inv.io.stdout, `Ended human session ${open.file.name} (run ${run}).`);
+  return 0;
+}
+
+/**
+ * `lore session show` with no id: names the open human session of this checkout (the person writes are recorded as).
+ * Exit 0 shown; 3 no open session; 4 unusable file.
+ */
+function runSessionShowHuman(args: { json?: unknown }, inv: Invocation): ExitReport {
+  const open = readOwnHumanSession(inv);
+  if (!open.ok) return open.code;
+  if (open.file === null) {
+    inv.io.stderr.write("Error: no open human session in this checkout (`lore session start --human <name>` opens one).\n");
+    return 3;
+  }
+  const run = bindingOfHumanSessionFile(open.file).run;
+  if (args.json) {
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: open.file.name, run, started_at: open.file.started_at, checkout: open.checkout } }, null, 2));
+  } else {
+    printLine(inv.io.stdout, `Human session: ${open.file.name} (run ${run}, started ${open.file.started_at}, checkout ${open.checkout})`);
+  }
+  return 0;
+}
 
 /** The trail-access rule id (AC-ST-6) every refusal of `lore session trail` names. */
 const TRAIL_ACCESS_RULE = "BR-1143";
 
-/** The `trail-review` payload as `emit` receives it (text rendering only; `--json` prints it as is). */
-interface TrailReviewView {
-  readonly helpers: readonly { readonly agent_id: string; readonly end_count: number }[];
-  readonly findings: readonly { readonly message: string }[];
-  readonly not_measured: readonly string[];
-  readonly reason?: string;
-}
-
-/** `Bun.Glob` matcher, one compiled glob per pattern (the CLI runs under bun; no second glob grammar). */
-function createGlobMatcher(): GlobMatchFn {
-  const compiled = new Map<string, Bun.Glob>();
-  return (pattern, path) => {
-    let glob = compiled.get(pattern);
-    if (glob === undefined) {
-      glob = new Bun.Glob(pattern);
-      compiled.set(pattern, glob);
-    }
-    return glob.match(path);
-  };
-}
-
-/** File text, or null when the file does not exist; any other fault throws (loadCoChangeRules reports it). */
-function readFileOrNull(path: string): string | null {
-  try {
-    return readFileSync(path, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
-}
-
-function formatTrailReview(view: TrailReviewView): string {
-  const lines = [`── lore session trail-review (${view.helpers.length} helper end${view.helpers.length === 1 ? "" : "s"} judged) ──`];
-  if (view.reason !== undefined) lines.push(`  nothing to judge: ${view.reason}`);
-  lines.push(...(view.findings.length === 0 ? ["  no finding"] : view.findings.map((f) => `  - ${f.message}`)));
-  lines.push(...view.not_measured.map((reason) => `  not measured: ${reason}`));
-  return lines.join("\n");
-}
-
-/** Refuses a trail verb (`trail` | `trail-review`): exit 4 naming the trail-access rule. */
-function refuseTrailAccess(io: CliIo, verb: "trail" | "trail-review", reason: string): number {
-  io.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session ${verb}\` reads only the calling run's own session trail)\n`);
+/** Refuses `lore session trail`: exit 4 naming the trail-access rule. */
+function refuseTrailAccess(io: CliIo, reason: string): number {
+  io.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session trail\` reads only the calling run's own session trail)\n`);
   return 4;
 }
 
@@ -119,7 +206,6 @@ function refuseTrailAccess(io: CliIo, verb: "trail" | "trail-review", reason: st
 async function resolveCallerSession(
   inv: Invocation,
   app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
-  verb: "trail" | "trail-review",
 ): Promise<{ readonly ok: true; readonly session: string } | { readonly ok: false; readonly code: number }> {
   const verified = await app.verifiedInvocationIdentity?.();
   if (verified !== undefined && !verified.ok) {
@@ -128,137 +214,16 @@ async function resolveCallerSession(
   }
   const callerRun = verified?.value?.harnessRun ?? null;
   if (callerRun === null) {
-    return { ok: false, code: refuseTrailAccess(inv.io, verb, "no attested run: pass --harness-run or call from an attested harness") };
+    return { ok: false, code: refuseTrailAccess(inv.io, "no attested run: pass --harness-run or call from an attested harness") };
   }
   try {
     return { ok: true, session: sessionOfRun(callerRun) };
   } catch (err) {
     if (err instanceof TrailRunIdInvalidError) {
-      return { ok: false, code: refuseTrailAccess(inv.io, verb, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`) };
+      return { ok: false, code: refuseTrailAccess(inv.io, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`) };
     }
     throw err;
   }
-}
-
-/** What the co-change judgment adds to the `trail-review` payload. */
-interface CoChangeJudgment {
-  readonly view: { readonly measured: true; readonly findings: readonly CoChangeFinding[] } | { readonly measured: false; readonly reason: string };
-  readonly findings: readonly CoChangeFinding[];
-  readonly notMeasured: readonly string[];
-}
-
-/**
- * Judges the co-change rules: the main run (from the narrowed turns' `changes.json`), every helper end this review
- * judged, and the turn's unknown-source changes as ONE group. Invalid settings never throw and never stop the other
- * judgments of this run: they come back as `{measured:false, reason}` plus a `not_measured` line (the hook prints it).
- */
-function judgeCoChange(input: {
-  readonly rules: CoChangeRulesLoad;
-  readonly trail: SessionTrail;
-  readonly turn: string | undefined;
-  readonly session: string;
-  readonly helperReview: { readonly helpers: readonly { readonly run: string; readonly files: readonly string[] }[] };
-}): CoChangeJudgment {
-  const rules = input.rules;
-  if (!rules.measured) return { view: { measured: false, reason: rules.reason }, findings: [], notMeasured: [`co_change not measured: ${rules.reason}`] };
-  const notMeasured: string[] = [];
-  const mainRun = `cc:${input.session}`;
-  const mainFiles = new Set<string>();
-  const unknownFiles = new Set<string>();
-  for (const turn of input.trail.turns.filter((t) => input.turn === undefined || t.turn === input.turn)) {
-    if (!turn.changes.measured) {
-      if (rules.rules.length > 0) notMeasured.push(`co_change: turn ${turn.turn} changes not measured (${turn.changes.reason}); main run and unknown-source group not judged for it`);
-      continue;
-    }
-    for (const change of turn.changes.value) {
-      if (change.source.kind === "run" && change.source.run === mainRun) mainFiles.add(change.path);
-      else if (change.source.kind === "unknown") unknownFiles.add(change.path);
-    }
-  }
-  const groups: CoChangeGroup[] = [
-    { subject: { kind: "run", run: mainRun }, files: [...mainFiles].sort() },
-    ...input.helperReview.helpers.map((h): CoChangeGroup => ({ subject: { kind: "run", run: h.run }, files: h.files })),
-    { subject: { kind: "unknown" }, files: [...unknownFiles].sort() },
-  ];
-  const findings = reviewCoChange(rules.rules, groups, createGlobMatcher());
-  return { view: { measured: true, findings }, findings, notMeasured };
-}
-
-/**
- * `lore session trail-review [--turn <id>] [--json]` — judges the caller's session's helper ends not yet judged
- * (`end_count > judged_end_count`) against the tasks each helper claimed (spec session-trail, Helper scope; AC-ST-8).
- * It NEVER marks a helper judged: that single write belongs to the turn-end hook, after this verb succeeded.
- * Output `{ok, data: {turn?, helpers, findings, not_measured, co_change}}` (`co_change` = `{measured:true, findings}` or `{measured:false, reason}`; its findings are also in `findings`). Exit 0 ok (also with no `.lore/` directory: nothing to
- * judge against, checked BEFORE the corpus is opened); 3 unknown `--turn`; 4 no attested run / no trail; otherwise the
- * service error's code (the hook turns any non-zero exit into a not-measured line).
- */
-async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, inv: Invocation): Promise<ExitReport> {
-  const emit = (data: Record<string, unknown>): void => {
-    if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
-    else printLine(inv.io.stdout, formatTrailReview(data as unknown as TrailReviewView));
-  };
-  const dbPath = findLoreDbPathQuiet(inv.io, inv);
-  if (dbPath === undefined) {
-    emit({ helpers: [], findings: [], not_measured: [], reason: "no .lore directory" });
-    return 0;
-  }
-  const { app } = loadLoreApp({ inv });
-  try {
-    const caller = await resolveCallerSession(inv, app, "trail-review");
-    if (!caller.ok) return caller.code;
-    const session = caller.session;
-    let trail: SessionTrail | null;
-    try {
-      trail = readSessionTrail(session, stateBase(inv.env, inv.paths.home));
-    } catch (err) {
-      if (err instanceof TrailFileInvalidError) {
-        inv.io.stderr.write(`Error: ${err.message}\n`);
-        return 1;
-      }
-      throw err;
-    }
-    if (trail === null) {
-      return refuseTrailAccess(inv.io, "trail-review", `no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
-    }
-    const turn = typeof args.turn === "string" ? args.turn : undefined;
-    if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
-      inv.io.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
-      return 3;
-    }
-    const runService = app.runService;
-    if (runService === undefined) {
-      inv.io.stderr.write("Error: RunService not wired on this App instance.\n");
-      return 1;
-    }
-    const projectRoot = dirname(dirname(dbPath));
-    const coChangeRules = loadCoChangeRules(projectRoot, readFileOrNull);
-    const review = await reviewHelperScope({
-      trail,
-      claimedTasks: (run) => runService.claimedTasks(run),
-      openClaimsOfWorkingCopy: (workingCopy) => runService.openClaimsOfWorkingCopy(workingCopy),
-      projectRoot,
-      realpath: realpathSync,
-      ignoreProbe: spawnGitCheckIgnore,
-      ignoreProbeAtRoot: spawnGitCheckIgnoreAtRoot(projectRoot),
-      landing: spawnGitLanding(projectRoot),
-      ...(coChangeRules.measured ? { coChange: { rules: coChangeRules.rules, matches: createGlobMatcher() } } : {}),
-    });
-    if (!review.ok) {
-      inv.io.stderr.write(formatErrorFor(inv, review.error) + "\n");
-      return exitCode(review.error);
-    }
-    const coChange = judgeCoChange({ rules: coChangeRules, trail, turn, session, helperReview: review.value });
-    emit({
-      ...(turn !== undefined ? { turn } : {}),
-      ...review.value,
-      findings: [...review.value.findings, ...coChange.findings],
-      not_measured: [...review.value.not_measured, ...coChange.notMeasured],
-      co_change: coChange.view,
-    });
-  } finally {
-    app.close();
-  }
-  return 0;
 }
 
 /**
@@ -271,8 +236,8 @@ async function runSessionTrail(
   args: { turn?: unknown; run?: unknown; json?: unknown },
   inv: Invocation,
 ): Promise<ExitReport> {
-  const refuse = (reason: string): number => refuseTrailAccess(inv.io, "trail", reason);
-  const caller = await resolveCallerSession(inv, app, "trail");
+  const refuse = (reason: string): number => refuseTrailAccess(inv.io, reason);
+  const caller = await resolveCallerSession(inv, app);
   if (!caller.ok) return caller.code;
   const session = caller.session;
   let runFilter: string | undefined;
@@ -385,25 +350,37 @@ export default defineLoreCommand({
     },
     turn: {
       type: "string",
-      description: "`trail` | `trail-review`: narrow to / name this turn id",
+      description: "`trail` only: narrow to this turn id",
     },
     run: {
       type: "string",
       description: "`trail` only: narrow to the files this run (cc:<session>[:<agent>]) changed",
     },
+    human: {
+      type: "string",
+      description: "`start` only: the name you write under in this checkout until `lore session end` (BR-1350)",
+    },
   },
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
-    // reason: trail-review decides whether a corpus exists itself (no `.lore/` is a clean "nothing to judge", not the
-    // loader's exit 1), so it must run before `loadLoreApp`.
-    if (String(args.target) === "trail-review") {
-      return await runSessionTrailReview(args, inv);
+    // reason: a usage error is decided before the corpus is opened, so an unknown verb (e.g. the removed
+    // `trail-review`, BR-1349) exits 2 even where no `.lore/` exists.
+    if (!RESERVED_SUBCOMMANDS.has(String(args.target))) {
+      inv.io.stderr.write(`Error: unknown \`lore session\` subcommand "${String(args.target)}" — expected "start", "end", "list", "show" or "trail".\n`);
+      return 2;
     }
     const { app } = loadLoreApp({ inv });
     try {
       if (String(args.target) === "trail") {
         return await runSessionTrail(app, args, inv);
+      }
+      if (String(args.target) === "start") return await runSessionStart(app, args, inv);
+      if (String(args.target) === "end") return await runSessionEnd(app, inv);
+      // reason: `show` with no id names the open HUMAN session (BR-1350); with an id it keeps its older meaning, one
+      // derived claim session of the corpus (AC-OWN-5).
+      if (String(args.target) === "show" && (typeof args.id !== "string" || args.id.length === 0)) {
+        return runSessionShowHuman(args, inv);
       }
       if (app.sessionService === undefined) {
         inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
@@ -412,10 +389,6 @@ export default defineLoreCommand({
       const sessionService = app.sessionService;
 
       const target = String(args.target);
-      if (!RESERVED_SUBCOMMANDS.has(target)) {
-        inv.io.stderr.write(`Error: unknown \`lore session\` subcommand "${target}" — expected "list" or "show".\n`);
-        return 2;
-      }
 
       const currentMachine = inv.host;
 
@@ -457,11 +430,8 @@ export default defineLoreCommand({
       }
 
       // target === "show"
-      const id = typeof args.id === "string" ? args.id : undefined;
-      if (id === undefined || id.length === 0) {
-        inv.io.stderr.write("Error: `lore session show` requires a session id: lore session show <id>\n");
-        return 2;
-      }
+      // reason: an absent id was answered above (`runSessionShowHuman`), so `args.id` is a non-empty string here.
+      const id = args.id as string;
       const match = records.find((r) => r.session_id === id) ?? records.find((r) => r.by === id);
       if (match === undefined) {
         inv.io.stderr.write(`Error: no session matching "${id}" found.\n`);

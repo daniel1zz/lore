@@ -192,12 +192,15 @@ import {
   type SetupPathContext,
 } from "../setup-args.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
+import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 import { computeSetupCheckReport, finishProjectSetupCheck, runSetupCheck } from "../setup-check.js";
 import type { SetupCheckFiles } from "../setup-check.js";
 import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
 import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import { findLoreDbPathQuiet } from "../corpus-resolution.js";
+import { findForeignBehindSchema } from "../../../store/foreign-schema-guard.js";
 import type { ExitReport } from "../cli-exit.js";
 
 // ─── Repo-root resolution (dev mode only — see setup-args.ts's module doc) ──
@@ -313,6 +316,7 @@ function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
     report.gitignore.status === "failed" ||
     report.claude_md.status === "failed" ||
     report.git_hooks_path.status === "failed" ||
+    report.main_detached.status === "failed" ||
     report.memory_files?.status === "failed" ||
     report.skills?.status === "failed" ||
     report.ac_cite?.status === "failed" ||
@@ -419,6 +423,7 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
             cause instanceof Error ? cause.message : String(cause)
           }`,
           value: name,
+          rule: "BR-830",
         });
       }
     },
@@ -452,10 +457,11 @@ function makeRealProjectSkillSource(assetsRoot: string): ProjectSkillAssetSource
           field: "skills",
           message: `cannot read the ${rel} assets under ${assetsRoot}: ${cause instanceof Error ? cause.message : String(cause)}`,
           value: rel,
+          rule: "BR-986",
         });
       }
       if (collected.length === 0) {
-        return err({ code: "VALIDATION_ERROR", field: "skills", message: `no files under ${join(assetsRoot, rel)}`, value: rel });
+        return err({ code: "VALIDATION_ERROR", field: "skills", message: `no files under ${join(assetsRoot, rel)}`, value: rel, rule: "BR-986" });
       }
       return ok(collected);
     },
@@ -601,12 +607,22 @@ async function runProjectContextProjection(opts: {
   assetsRoot: string;
   claudeDir: string;
   inv: Invocation;
+  /** Fragment files the automatic migration refused or could not migrate; hidden from the refresh so the rest still render. */
+  heldBackFragments: readonly string[];
 }): Promise<Result<void, LoreError>> {
   const refreshDeps = buildProjectRefreshDeps(opts);
   if (!refreshDeps.ok) return refreshDeps;
+  const realFs = makeRealContextFsPort(opts.repoDir, [opts.repoDir]);
+  const held = new Set(opts.heldBackFragments);
+  // reason: a refused old-format file would make discovery fail loud and block every other rules file; setup reports it
+  // (exit code + stderr) instead, so the refresh must not see it. The file is never rewritten or deleted.
+  const fs: typeof realFs = {
+    ...realFs,
+    listDir: async (path: string) => (await realFs.listDir(path)).filter((name) => !held.has(resolve(opts.repoDir, path, name))),
+  };
   const refreshed = await runContextRefresh(
     {
-      fs: makeRealContextFsPort(opts.repoDir, [opts.repoDir]),
+      fs,
       ...refreshDeps.value,
     },
     "",
@@ -713,6 +729,7 @@ function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Resul
         field: "settings",
         message: `${item.settingsPath} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
         value: item.settingsPath,
+        rule: "BR-1181",
       });
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -721,6 +738,7 @@ function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Resul
         field: "settings",
         message: `${item.settingsPath} must hold a JSON object at its root`,
         value: item.settingsPath,
+        rule: "BR-1181",
       });
     }
     const current = (parsed as Record<string, unknown>)["language"];
@@ -766,6 +784,29 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: I
   });
 }
 
+/**
+ * Automatic fragment migration (spec-fragment-injection-timing-one-inject-enum-a-per-turn, D9): apply for the user layer and,
+ * when `projectRoot` is a lore project, the project layer. Prints the per-file lines (stderr when stdout carries JSON).
+ * Returns the migrate exit code (5 conflict, 4 refused, 0 clean); the caller never stops the rest of setup for it.
+ */
+async function migrateFragmentsForSetup(
+  inv: Invocation,
+  json: boolean,
+  projectRoot: string | null,
+): Promise<{ readonly code: number; readonly heldBack: readonly string[] }> {
+  return runFragmentsMigration(inv, {
+    scopes: projectRoot !== null ? ["user", "project"] : ["user"],
+    projectRoot,
+    apply: true,
+    sink: json ? inv.io.stderr : inv.io.stdout,
+  });
+}
+
+/** A failure of setup itself wins; otherwise a refused/conflicting fragment surfaces as setup's exit code (never silent). */
+function combineSetupExit(setupExit: ExitReport, migrateExit: number): ExitReport {
+  return setupExit === 0 ? migrateExit : setupExit;
+}
+
 async function runProjectScaffold(opts: {
   json: boolean;
   yes: boolean;
@@ -773,6 +814,31 @@ async function runProjectScaffold(opts: {
   binPath: string;
   claudeDir: string;
   inv: Invocation;
+}): Promise<ExitReport> {
+  const resolvedRoot = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
+  if (!resolvedRoot.ok) return failWith(opts.inv, resolvedRoot.error);
+  let migrateExit = 0;
+  const setupExit = await runProjectScaffoldConfirmed({
+    ...opts,
+    // reason: after the confirmation, before the scaffold — it reads the project's fragments (reference context) and
+    // the new schema refuses the old format; the rules files are refreshed later in this run.
+    onConfirmed: async () => {
+      const migrated = await migrateFragmentsForSetup(opts.inv, opts.json, resolvedRoot.value);
+      migrateExit = migrated.code;
+      return migrated.heldBack;
+    },
+  });
+  return combineSetupExit(setupExit, migrateExit);
+}
+
+async function runProjectScaffoldConfirmed(opts: {
+  json: boolean;
+  yes: boolean;
+  assetsRoot: string;
+  binPath: string;
+  claudeDir: string;
+  inv: Invocation;
+  onConfirmed: () => Promise<readonly string[]>;
 }): Promise<ExitReport> {
   const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
@@ -787,8 +853,9 @@ async function runProjectScaffold(opts: {
       `(.lore/ init, hooks/, lore.tree.yaml, .gitignore, CLAUDE.md, git core.hooksPath).`,
   });
   if (!confirmation.proceed) return confirmation.code;
+  const heldBackFragments = await opts.onConfirmed();
 
-  const projectAssets = makeRealProjectAssetSource(join(opts.assetsRoot, "project"));
+  const projectAssets =makeRealProjectAssetSource(join(opts.assetsRoot, "project"));
 
   const service = new ProjectSetupService({
     fs: makeRealProjectFs(),
@@ -844,7 +911,7 @@ async function runProjectScaffold(opts: {
   // reason: runs only after a scaffold that did not itself fail — a failed scaffold may lack the
   // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
   if (scaffoldReportFailed(result.value)) return 1;
-  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv });
+  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv, heldBackFragments });
   if (!projected.ok) return failWith(opts.inv, projected.error);
   return 0;
 }
@@ -918,7 +985,24 @@ function renderDivergedSkipSection(io: CliIo, skippedDiverged: string[]): void {
   }
 }
 
-async function runInstall(inv: Invocation, 
+/**
+ * When the corpus this working copy resolves to is older than the just-installed binary's schema, names the one
+ * command that upgrades it (every other command now refuses that corpus). Silent when there is no corpus, or it is
+ * current. Read-only: the version comes from a readonly probe.
+ */
+function renderCorpusUpgradeNote(inv: Invocation): void {
+  const corpusPath = findLoreDbPathQuiet(inv.io, inv);
+  if (corpusPath === undefined) return;
+  const behind = findForeignBehindSchema(corpusPath, inv.cwd);
+  if (behind === null) return;
+  printLine(inv.io.stdout, "");
+  printLine(
+    inv.io.stdout,
+    `This project's corpus is at schema ${behind.userVersion}; the installed binary needs ${behind.latestVersion}. Run \`lore migrate schema\` (add --dry-run to preview) before other lore commands.`,
+  );
+}
+
+async function runInstall(inv: Invocation,
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean; inv: Invocation },
@@ -945,6 +1029,10 @@ async function runInstall(inv: Invocation,
   });
   if (!confirmation.proceed) return confirmation.code;
 
+  // reason: old-format fragments are refused by the schema (D9), so every setup run migrates them first; a refused or
+  // conflicting file never stops the install but becomes the exit code at the end.
+  const migrateExit = (await migrateFragmentsForSetup(opts.inv, opts.json, findLoreProjectRoot(opts.inv.cwd))).code;
+
   // reason: the global-layer language lands in `<targetDir>/settings.json`, the very file the install
   // merges hooks into. Handing it to `install` makes the manifest sha the sha of the FINAL bytes (report
   // #233); the post-install projection below then finds the value already equal and writes nothing.
@@ -970,12 +1058,13 @@ async function runInstall(inv: Invocation,
   } else {
     printLine(inv.io.stdout, renderInstallReceipt(result.value, ctx));
     renderDivergedSkipSection(inv.io, result.value.skippedDiverged);
+    renderCorpusUpgradeNote(inv);
   }
   const mcpExit = mcpOutcomeExitCode(result.value);
 
   const projected = applyLanguageProjections(languagePlan.value);
   if (!projected.ok) return failWith(opts.inv, projected.error);
-  return mcpExit;
+  return combineSetupExit(mcpExit, migrateExit);
 }
 
 async function runUninstall(inv: Invocation, 

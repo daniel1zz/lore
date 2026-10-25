@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * End-to-end test of the spec approval citation requirement (Baseline slice 3b, AC-BLS3B-2),
  * driven through the real CLI against a throwaway corpus.
@@ -15,10 +16,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dropLoreConfigKey } from "../../helpers/patch-lore-config.js";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -90,6 +92,7 @@ function addRule(statement: string): string {
   );
   const id = out.stdout.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${out.stdout}`);
+  approveFixtureNodes(dir, "all"); // a direct add is a pending add: live (citable) only once approved
   return id;
 }
 
@@ -99,9 +102,11 @@ beforeAll(async () => {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"], dir);
+  // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
+  // suite's subject is the citation requirement, so the profiles are removed (an absent profile is a vacuous pass).
+  dropLoreConfigKey(dir, ["workflow", "verification_profiles"]);
   // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(dir, ["override-judgment"]);
   prd = slugOf(mustRun(["create", "prd", "--title", "SAC PRD", "--content", "root", "--no-ai"], dir).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "SAC Root"], dir).stdout);
   const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "SAC Branch"], dir).stdout);
@@ -137,6 +142,7 @@ describe("AC-BLS3B-2: a spec needs a citing criterion to be approved", () => {
     const spec = newSpec("SAC Retired Cite Spec");
     mustRun(["ac", "cite", spec, AC_ID, retiredRule], dir);
     mustRun(["rule", "set", retiredRule, "--lifecycle", "retired", "--note", "superseded for the test"], dir);
+    approveFixtureNodes(dir, "all"); // the retirement is a pending revision until approved
     const before = docOf(spec, dir);
     const r = approve(spec);
     expect(r.exitCode).toBe(4);

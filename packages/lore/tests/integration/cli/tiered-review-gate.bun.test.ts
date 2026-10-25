@@ -1,3 +1,6 @@
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * SPEC-103 §Mechanisms M2/M3 — judgment-required promote (anti-lottery worst-
  * decision-wins, `--override-judgment`/`--override-no-judgment` audited escapes) +
@@ -49,7 +52,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -322,7 +325,6 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
     await initCorpus(tmpDir);
     // AU-T7: the override is decided; this test's subject is the audited escape, so the class is loosened the
     // documented way (human-tty governance decision), never by a bypass in product code.
-    await loosenOverrideClasses(tmpDir, ["override-judgment"]);
     const prd = await createPrd(tmpDir);
     const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Overridden");
 
@@ -355,7 +357,6 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
     await initCorpus(tmpDir);
     // AU-T7: the override is decided; this test's subject is the audited escape, so the class is loosened the
     // documented way (human-tty governance decision), never by a bypass in product code.
-    await loosenOverrideClasses(tmpDir, ["override-judgment"]);
     const prd = await createPrd(tmpDir);
     const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Never Judged");
 
@@ -404,11 +405,7 @@ describe("AC-TIER-8 backfill-ledger", () => {
     // Simulate pre-SPEC-103 legacy drafts: disable the live fast-track toggle BEFORE
     // creating the ledger docs, so they land (and stay) draft — backfill-ledger's job
     // is exactly this one-shot migration sweep, independent of the LIVE toggle's value.
-    writeFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
-      `project:\n  name: test\n  author: test\nworkflow:\n  review:\n    ledger_auto_approve: false\n`,
-      "utf8",
-    );
+    patchLoreConfig(tmpDir, `project:\n  name: test\n  author: test\nworkflow:\n  review:\n    ledger_auto_approve: false\n`);
 
     const retroA = await runLore(
       ["create", "knowledge", "--sub-type", "retro", "--title", "Retro A", "--parent", prd.slug, "--content", "x", "--json"],

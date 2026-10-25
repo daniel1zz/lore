@@ -18,6 +18,7 @@
  * backticks, or inside a quoted string passed to `bash -c` is not rewritten.
  */
 import { z } from "zod";
+import { sessionActorFromId } from "./session-actor.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,39 +27,57 @@ import { z } from "zod";
 /** Run identifier derived from harness ids, e.g. `cc:<session>` / `cc:<session>:<agent>`. */
 export type RunId = string & { readonly __brand: "RunId" };
 
-/** Where the claimed (self-reported) name came from; never attestation. */
-export type NameSource = "flag" | "env" | "mcp" | "session" | "worktree" | "os";
+/**
+ * The four known parties a write can be made by (BR-1055): the agent run the integration vouched for (`run`), a
+ * registered human session (`human`), an HTTP bearer key's name (`api-key`) or a dashboard login (`dashboard`).
+ */
+export type NameSource = "run" | "human" | "api-key" | "dashboard";
 
-/** An invocation whose writer is named: the claimed name and where it came from. */
+/** The run harnesses that are not agent integrations: every party that makes a write owns a run (spec end state 4). */
+export type PartyHarness = "human" | "api-key" | "dashboard";
+
+/** An invocation whose writer is a known party: the run it writes under, the name it is shown by, and which party kind it is. */
 export interface ResolvedInvocationIdentity {
-  /** The run the agent integration vouched for; null = unattested. */
-  harnessRun: RunId | null;
+  /** The run this write is made under: an agent run, a human session run, or an api-key / dashboard run. */
+  harnessRun: RunId;
   claimed: string;
   claimedSource: NameSource;
 }
 
 /**
- * An invocation that has no name for its writer: no `--by`, session or working-copy name, and the OS user lookup
- * failed. Reads proceed; a write that needs an actor fails loud with `unresolvedReason` (`OsUserLookupError`).
- * There is no substitute name.
+ * An invocation with no known party: no attested agent run and no applicable human session. Reads proceed; a write
+ * is refused with `unresolvedReason` (`UnknownPartyError`, exit 4). There is no substitute name.
  */
 export interface UnresolvedInvocationIdentity {
-  harnessRun: RunId | null;
+  harnessRun: null;
   claimed: null;
   claimedSource: null;
-  /** Why no name could be resolved (the OS user lookup's failure). */
+  /** The refusal text: why no known party exists and how to become one. */
   unresolvedReason: string;
 }
 
-/** Who this invocation is: a run vouched for plus either a claimed name or the reason there is none. */
+/** Who this invocation is: a known party's run and name, or the reason there is none. */
 export type InvocationIdentity = ResolvedInvocationIdentity | UnresolvedInvocationIdentity;
 
 export interface WriteContext {
   readonly identity: InvocationIdentity;
 }
 
+/** The environment variable an agent harness sets in every process it runs; `value` is what it sets it to. */
+export interface HarnessMarker {
+  readonly env: string;
+  readonly value: string;
+}
+
 export interface HarnessAdapter {
   readonly harness: string;
+  /** Prefix of every run id this adapter derives (`cc:` for Claude Code). */
+  readonly runIdPrefix: string;
+  /**
+   * The harness's own environment marker. ⛔ Every agent integration lore ships MUST declare one: a process carrying
+   * it is an agent and never writes under a person's human session (BR-1350).
+   */
+  readonly marker: HarnessMarker;
   derive(ids: { sessionId: string; agentId?: string }): RunId;
 }
 
@@ -78,6 +97,8 @@ export interface RunRecord {
   branch: string | null;
   composition: CompositionRecord;
   registeredAt: string;
+  /** Where another session can message this run (`uds:<absolute path>`), or null: none recorded (BR-1360). */
+  messageAddress: string | null;
 }
 
 const runIdSchema = z.string().min(1).transform((s) => s as RunId);
@@ -96,6 +117,7 @@ export const runRecordSchema = z.object({
     fragments: z.array(z.object({ id: z.string().min(1), sha256: z.string().regex(/^[0-9a-f]{64}$/) })),
   }),
   registeredAt: z.string().min(1),
+  messageAddress: z.string().min(1).nullable(),
 });
 
 // ---------------------------------------------------------------------------
@@ -113,6 +135,8 @@ function assertHarnessId(label: string, value: string): void {
 
 const claudeCodeAdapter: HarnessAdapter = {
   harness: "claude-code",
+  runIdPrefix: "cc:",
+  marker: { env: "CLAUDECODE", value: "1" },
   derive({ sessionId, agentId }) {
     assertHarnessId("session id", sessionId);
     if (agentId === undefined) return `cc:${sessionId}` as RunId;
@@ -121,7 +145,7 @@ const claudeCodeAdapter: HarnessAdapter = {
   },
 };
 
-/** Slice 1 ships one adapter; adding a harness is adding a key here. */
+/** The shipped agent integrations; adding one is adding a key here, and it must declare its {@link HarnessMarker}. */
 export const HARNESS_ADAPTERS: Readonly<Record<string, HarnessAdapter>> = {
   "claude-code": claudeCodeAdapter,
 };
@@ -136,18 +160,60 @@ export function deriveRunId(harness: string, ids: { sessionId: string; agentId?:
   return HARNESS_ADAPTERS[harness]!.derive(ids);
 }
 
+/**
+ * Whether `env` carries the marker of any shipped agent harness: the process runs inside an agent, so no human
+ * session applies to it (BR-1350). Pure; `env` is the invocation's environment.
+ */
+export function hasAgentHarnessMarker(env: Readonly<Record<string, string | undefined>>): boolean {
+  return Object.values(HARNESS_ADAPTERS).some((adapter) => env[adapter.marker.env] === adapter.marker.value);
+}
+
+/** Whether `run` was derived by a shipped agent integration (`cc:...`), as opposed to a party run. */
+export function isAgentRunId(run: string): boolean {
+  return Object.values(HARNESS_ADAPTERS).some((adapter) => run.startsWith(adapter.runIdPrefix));
+}
+
+/**
+ * The name an attested agent run is shown by: `agent:session-<8>` of the run's session (the same name the session
+ * tier always gave), so every run of one session reads alike and the RUN, not the name, tells them apart.
+ *
+ * @throws {Error} when `run` is not an agent run id or its session sanitizes to nothing.
+ */
+export function nameOfAgentRun(run: RunId): string {
+  const adapter = Object.values(HARNESS_ADAPTERS).find((a) => run.startsWith(a.runIdPrefix));
+  if (adapter === undefined) throw new Error(`Run ${JSON.stringify(run)} was not derived by a shipped agent integration`);
+  const session = run.slice(adapter.runIdPrefix.length).split(":")[0] ?? "";
+  return sessionActorFromId(session);
+}
+
+/** Run id of a human session: derived from the hash of its token, so the registry never holds the token (BR-1350). */
+export function deriveHumanRunId(tokenHash: string): RunId {
+  if (!/^[0-9a-f]{64}$/.test(tokenHash)) throw new Error("A human run id derives from the 64-hex SHA-256 of the session token");
+  return `human:${tokenHash.slice(0, 16)}` as RunId;
+}
+
+/** Run id of an HTTP bearer key (`api-key`) or a dashboard login (`dashboard`), reused by every write of the same name. */
+export function derivePartyRunId(harness: "api-key" | "dashboard", name: string): RunId {
+  if (name.trim() === "") throw new Error(`A ${harness} run needs a non-empty name`);
+  return `${harness}:${encodeURIComponent(name)}` as RunId;
+}
+
 // ---------------------------------------------------------------------------
-// Claim conflict predicate (D6, BR-1040 / BR-1042)
+// Claim conflict predicate (D6, BR-1040 / BR-1043 / BR-1056)
 // ---------------------------------------------------------------------------
 
+/** The acting party of a claim or release: its display name and the RUN it acts as (null = no run was resolved). */
 export interface ClaimParty {
   by: string;
   harnessRun: RunId | null;
 }
 
-/** `legacy` = the stored claim has no `harness_run` key at all (written before migration 016). */
+/**
+ * The stored lease as the predicate sees it. `harnessRun` is `null` only for a claim written before runs existed
+ * (the schema upgrade expires those once, so a store at the current schema holds none); such a lease belongs to no
+ * run and therefore conflicts with everyone.
+ */
 export interface ClaimHolder extends ClaimParty {
-  legacy: boolean;
   stale: boolean;
 }
 
@@ -162,16 +228,14 @@ export type ClaimDecision =
   | { kind: "conflict"; holder: string; holderRun: RunId | null };
 
 /**
- * Decide a claim against an existing holder.
- * Stale holder -> takeover. Legacy holder, or both sides unattested -> compare
- * by name (same name refreshes). Otherwise compare by run: same run refreshes;
- * different runs, or exactly one side unattested, conflict.
+ * Decide a claim against an existing holder, by RUN ONLY (BR-1040). A stale holder is taken over. Otherwise the same
+ * run refreshes; every other case conflicts, including two parties that carry the same display name, and a claimant
+ * or holder with no run at all (a missing run is never "equal" to another missing run: name equality is not identity).
  */
 export function hasClaimConflict(holder: ClaimHolder, claimant: ClaimParty): ClaimDecision {
   if (holder.stale) return { kind: "takeover" };
-  const compareByName = holder.legacy || (holder.harnessRun === null && claimant.harnessRun === null);
-  const same = compareByName ? holder.by === claimant.by : holder.harnessRun === claimant.harnessRun;
-  if (same) return { kind: "refresh" };
+  const sameRun = holder.harnessRun !== null && claimant.harnessRun !== null && holder.harnessRun === claimant.harnessRun;
+  if (sameRun) return { kind: "refresh" };
   return { kind: "conflict", holder: holder.by, holderRun: holder.harnessRun };
 }
 

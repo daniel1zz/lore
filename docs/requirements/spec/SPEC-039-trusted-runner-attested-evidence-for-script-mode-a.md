@@ -6,7 +6,7 @@ title: "Trusted runner: attested evidence for script-mode ACs"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [verify, attestation, evidence, runner, spec-039]
 links:
   - {id: ADR-001, type: relates-to}
@@ -154,7 +154,7 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
   script: test — bunx vitest run packages/core/src/task-workflow.test.ts
 - [⚑] [script] AC-VRF-8: computeAcCoverage carries attested counts as the single derivation point; ac list renders attested-pass prefix
   script: test — bunx vitest run packages/core/src/acceptance.test.ts packages/lore/tests/unit/service/ac-service.test.ts
-- [⚑] [script] AC-VRF-9: assess prompt bumps to version 5 with attested annotation in the AC table; the three version-4 assertions migrate in the same change
+- [⊖] [script] AC-VRF-9: assess prompt bumps to version 5 with attested annotation in the AC table; the three version-4 assertions migrate in the same change
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
 - [⚑] [script] AC-VRF-10: lore verify CLI and lore_verify MCP happy and negative paths (ambiguous task, no script ACs, draft-spec warning)
   script: test — bunx vitest run packages/lore/tests/integration/cli/verify.test.ts

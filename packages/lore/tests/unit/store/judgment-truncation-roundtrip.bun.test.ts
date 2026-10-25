@@ -41,8 +41,8 @@ function makeReviewService(provider: InMemoryAIProvider) {
     telemetry,
     false,
     8000,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
-    { max_doc_chars: 12000, max_context_chars: 8000 },
+    { max_diff_chars: 24000 },
+    { max_context_chars: 8000 },
   );
 }
 
@@ -93,17 +93,14 @@ async function recordAndReadBack(parentContent: string, planContent: string) {
 }
 
 describe("review judgment truncation survives a SQLite round-trip (spec-close-the-eight-verified-critical-defects-no-judge-listing#AC-CRIT-2)", () => {
-  it("spec-close-the-eight-verified-critical-defects-no-judge-listing#AC-CRIT-2: body and parent both cut -> read-back has truncated=true and two entries with the exact lengths", async () => {
+  it("spec-close-the-eight-verified-critical-defects-no-judge-listing#AC-CRIT-2: long body and cut parent -> read-back has no truncated key and one parent entry with the exact lengths", async () => {
     const parent = "## P1\n" + "p".repeat(9500) + "\n## D8\nlate\n";
     const body = "## B1\n" + "b".repeat(13000);
     const { bundle, stored } = await recordAndReadBack(parent, body);
 
-    expect(stored.truncated).toBe(true);
-    expect(stored.truncation).toHaveLength(2);
-    const doc = stored.truncation!.find((t) => t.section === "doc")!;
-    const par = stored.truncation!.find((t) => t.section === "parent")!;
-    expect(doc).toEqual({ section: "doc", shown_chars: 12000, total_chars: bundle.doc.content.length });
-    expect(par).toEqual({ section: "parent", shown_chars: 8000, total_chars: bundle.parent!.content.length });
+    expect("truncated" in stored).toBe(false);
+    expect(stored.truncation).toHaveLength(1);
+    expect(stored.truncation![0]).toEqual({ section: "parent", shown_chars: 8000, total_chars: bundle.parent!.content.length });
   });
 
   it("only the parent cut -> read-back has no truncated key and one parent entry", async () => {

@@ -3,10 +3,10 @@ id: KN-381
 type: knowledge
 role: knowledge
 title: "Cross-corpus generalization retro 2026-07-28 — guyin qualified-with-caveats, babyai reclassified, three repeating asymmetries"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-23
 tags: []
 parent: KN-297
 ---

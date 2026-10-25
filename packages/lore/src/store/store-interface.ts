@@ -126,7 +126,35 @@ export interface AttributedWriteCount {
  * The citation gate's liveness read must share the citing write's transaction, or a concurrent retire
  * can commit between the check and the write (spec-baseline-slice-2 §C4/D6, QA-2).
  */
+/**
+ * One more doc update committed in the SAME transaction as the primary {@link StoreInterface.updateWithProvenance}
+ * write, with its own version row and audit row. All of them land or none do (BR-1307: deprecating a spec and
+ * retiring its proposed rule ids on the baseline leaves are one outcome).
+ */
+export interface CompanionDocWrite {
+  /** The doc to update (a baseline leaf for a rule retirement). */
+  readonly id: DocId;
+  /** The patch, applied exactly as the primary one is. */
+  readonly patch: Partial<DocRecord>;
+  /** CAS base: a version miss fails the whole transaction with `STALE_VERSION`. */
+  readonly opts: UpdateOpts;
+  /** The version row of this doc's write. */
+  readonly version: VersionRecord;
+  /** The audit row of this doc's write. */
+  readonly audit: AuditEntry;
+  /**
+   * Rule ids whose registry row goes back to `proposed` in the same transaction (owned by this doc, which no longer
+   * lists them: the reverse of a "never landed" retirement, BR-1307). Absent: the registry follows the leaf.
+   */
+  readonly propose_rules?: readonly string[];
+}
+
 export interface ProvenanceWriteExtras {
+  /**
+   * Further doc updates (each with its version and audit row) committed in the SAME transaction, after the primary
+   * write. Any failure rolls back the primary write and every companion. InMemoryStore restores its snapshots.
+   */
+  also_update?: readonly CompanionDocWrite[];
   /**
    * Rule ids that MUST be `live` when the write commits. Read from `rule_registry.lifecycle`
    * (migration-014) in the SAME transaction as the doc write (InMemoryStore: the baseline leaf docs).
@@ -251,40 +279,35 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
 // is store-shared.ts; this module re-exports so a consumer of
 // StoreInterface's trace methods has ONE import surface for both).
 export type {
+  CheckOutcomeInput,
+  CheckOutcomeKind,
+  CheckOutcomeStat,
+  LeaseAcquisition,
+  LeaseRecord,
+  PendingAskInput,
+  PendingAskRecord,
   TraceDenyByCheckpoint,
   TraceEventInput,
   TraceEventRecord,
+  ReadDayCount,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
   TraceStatsWindow,
 } from "./store-shared.js";
 import type {
+  CheckOutcomeInput,
+  CheckOutcomeStat,
+  LeaseAcquisition,
+  LeaseRecord,
+  PendingAskInput,
+  PendingAskRecord,
+  ReadDayCount,
   TraceDenyByCheckpoint,
   TraceEventInput,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
   TraceStatsWindow,
 } from "./store-shared.js";
-
-/**
- * One never-read doc, as returned by {@link StoreInterface.listNeverReadDocs}.
- *
- * A store-layer READ PROJECTION (not a persisted row shape — those live in
- * `store-shared.ts`), so it is declared beside the interface method that
- * produces it, mirroring {@link CalibrationRecordWithPromptVersion}'s
- * precedent in this module.
- *
- * @invariant `slug` ships in the SAME payload as `id`, never as a follow-up
- *   lookup: "168 docs were never read" is an unactionable number, and a bare
- *   list of ULIDs is very nearly as unactionable — deciding to archive,
- *   rewrite, or investigate "this one was SUPPOSED to be read" all need the
- *   human-readable identity in hand.
- * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
- */
-export interface NeverReadDoc {
-  id: DocId;
-  slug: Slug;
-}
 
 /**
  * One zero-hit search row, as returned by
@@ -880,6 +903,7 @@ export interface StoreInterface {
    * failure (either CAS, a version-row insert, unknown `ruleId` →
    * `DOC_NOT_FOUND`) leaves both leaves and the registry row exactly as before.
    */
+  /** @lore-site BR-647 */
   moveRule(
     ruleId: string,
     fromLeaf: RuleLeafPatch,
@@ -972,6 +996,7 @@ export interface StoreInterface {
    * @param audit - The single audit entry to append (e.g. `migrate_spec_parent`)
    * @returns `ok(updatedDoc)`; `DOC_NOT_FOUND` when `id` is absent (nothing written); `STORE_ERROR` otherwise
    */
+  /** @lore-site BR-1009 */
   setDocParentWithProvenance(
     id: DocId,
     parentId: DocId | null,
@@ -979,6 +1004,7 @@ export interface StoreInterface {
   ): Promise<Result<DocRecord, LoreError>>;
 
   /** Remove a specific directed link by composite key. */
+  /** @lore-site BR-763 */
   removeLink(
     fromId: DocId,
     toId: DocId,
@@ -1058,6 +1084,7 @@ export interface StoreInterface {
    * Returns ranked results with BM25 score and content snippets.
    * Filters applied as post-FTS WHERE clauses on joined docs table.
    */
+  /** @lore-site BR-749 */
   search(query: string, filters?: StoreFilters): Promise<Result<SearchHit[], LoreError>>;
 
   // ── Versions ───────────────────────────────────────────────────────────
@@ -1078,8 +1105,7 @@ export interface StoreInterface {
    * `findVersions` is per-doc only, and the completeness oracle needs every version
    * row corpus-wide since the watermark, not one doc at a time.
    *
-   * @param since - ISO 8601; omit for no lower bound (all versions ever, used only
-   *   by tests — production callers always pass the resolved `audit.verify_since`)
+   * @param since - ISO 8601; omit for no lower bound (all versions ever)
    * @see PLAN task D (SPEC-035) — audit surface
    */
   listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
@@ -1191,6 +1217,7 @@ export interface StoreInterface {
    *   `JudgmentService.listFor` is what defaults this to `'review'` for every existing
    *   caller (D3); the store layer itself applies no default.
    */
+  /** @lore-site BR-277 */
   findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>>;
 
   /**
@@ -1239,6 +1266,7 @@ export interface StoreInterface {
    * can group by the actual (doc_type, prompt_version) pair instead of an
    * unpinned `"*"` sentinel.
    */
+  /** @lore-site BR-556 */
   queryCalibrationWindow(
     filter: CalibrationWindowFilter,
   ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>>;
@@ -1275,15 +1303,6 @@ export interface StoreInterface {
   ): Promise<Result<TraceZeroHitSearch[], LoreError>>;
 
   /**
-   * Every non-deleted doc with NO `kind='get'` trace row since `window.since`
-   * (idx_trace_doc), ordered by slug for a deterministic, diff-stable list —
-   * the MEMBER LIST behind `lore trace stats`'s `never_read_docs_count`.
-   *
-   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
-   */
-  listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>>;
-
-  /**
    * Count of `kind='search'` rows with `hit_count = 0`, since `window.since`.
    *
    * ⛔ DERIVED from {@link listTraceZeroHitSearches}'s length in EVERY
@@ -1294,12 +1313,54 @@ export interface StoreInterface {
   countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
 
   /**
-   * Count of non-deleted docs with NO `kind='get'` trace row since `window.since`.
-   *
-   * ⛔ DERIVED from {@link listNeverReadDocs}'s length in EVERY implementation —
-   * see {@link countTraceZeroHitSearches} for why a second tally is forbidden.
+   * Add one read to the per-day counter for `day` (`YYYY-MM-DD`, UTC) with ONE atomic upsert
+   * (`INSERT ... ON CONFLICT(day) DO UPDATE SET count = count + 1`), so concurrent readers lose nothing.
+   * A read writes no `trace_events` row (BR-1373).
    */
-  countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
+  incrementReadCount(day: string): Promise<Result<void, LoreError>>;
+
+  /** Per-day read counts for days at/after `sinceDay` (`YYYY-MM-DD`), oldest day first. Days with no reads are absent. */
+  listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>>;
+
+  /**
+   * Takes the named lease for `holder` with ONE atomic upsert that succeeds only when no row exists, the row has
+   * expired (`expires_at <= nowIso`) or the row is already `holder`'s (BR-1379 review batch lease). `tookOver` is
+   * true when an expired row of another holder was replaced. A live lease of another holder is `acquired: false`.
+   */
+  acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>>;
+
+  /** Moves `holder`'s lease expiry forward; `ok(false)` when the row is no longer `holder`'s (it expired and was taken over). */
+  renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;
+
+  /** Deletes `holder`'s lease row (a no-op when it is not the holder's). */
+  releaseLease(name: string, holder: string): Promise<Result<void, LoreError>>;
+
+  /** The lease row as stored, expired or not; `null` when absent. */
+  readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>>;
+
+  /**
+   * Append one `check_outcomes` row per element of `rows` in ONE write (migration-033, BR-1373). Append-only:
+   * there is no update or delete. An empty array writes nothing.
+   */
+  appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>>;
+
+  /** One aggregate per check id (runs, denials, errors, first/last run, last denial), ordered by check id. */
+  listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>>;
+
+  /**
+   * Record the question lore issued for a pending decision with its single-use nonce (migration-034, BR-1374).
+   * Append-only; a duplicate nonce is a STORE_ERROR (the nonce column is UNIQUE).
+   */
+  issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>>;
+
+  /** The ask issued under `nonce`, or null when none exists. `is_latest` is computed against the decision's newest ask. */
+  readPendingAsk(nonce: string): Promise<Result<PendingAskRecord | null, LoreError>>;
+
+  /**
+   * Marks the ask under `nonce` used at `usedAt` iff it was not used yet. Resolves true when THIS call consumed it,
+   * false when it was already used or does not exist (single use, safe against a concurrent second hook run).
+   */
+  consumePendingAsk(nonce: string, usedAt: string): Promise<Result<boolean, LoreError>>;
 
   /** Every `gate_deny` row since `window.since`, for the deny→retry-success gap's read-side audit join (idx_trace_kind_actor). Computed by the caller — never stored. */
   listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>>;
@@ -1328,6 +1389,7 @@ export interface StoreInterface {
    * `ok` and changes nothing — every column keeps the first call's value (a re-registration with a
    * different parent or branch must never rewrite history).
    */
+  /** @lore-site BR-1029 */
   insertRun(run: RunRecord): Promise<Result<void, LoreError>>;
 
   /** The registered run, or `ok(null)` for an unknown id (same shape as `find`; never a fabricated record). */
@@ -1345,9 +1407,11 @@ export interface StoreInterface {
    * (`already-ended`); an unregistered id writes nothing (`unknown-run`, normal for SubagentStop of an
    * internal agent).
    */
+  /** @lore-site BR-1215 */
   endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>>;
 
   /** Clear `ended_at` / `end_reason` (a resumed helper registered again). `ok(true)` iff the run WAS ended. */
+  /** @lore-site BR-1029 */
   reopenRun(id: RunId): Promise<Result<boolean, LoreError>>;
 
   /** The run's end state, or `ok(null)` for an unregistered id. */
@@ -1358,6 +1422,13 @@ export interface StoreInterface {
    * lives in a NEW process, so a re-registration overwrites the previous pid. `ok(false)` for an unregistered id.
    */
   recordRunProcess(id: RunId, process: RunProcessRecord): Promise<Result<boolean, LoreError>>;
+
+  /**
+   * Record the address another session can message a run at (migration-030, BR-1360). UNCONDITIONAL and NEWEST WINS:
+   * called on EVERY register, so a resume replaces the address and an absent one (`null`) clears it. Never part of
+   * {@link StoreInterface.insertRun} (first wins). `ok(false)` for an unregistered id.
+   */
+  recordRunAddress(id: RunId, address: string | null): Promise<Result<boolean, LoreError>>;
 
   /** Every registered run, oldest `registered_at` first (ties by id), with its end state and recorded process. */
   listRunLifecycles(): Promise<Result<RunLifecycle[], LoreError>>;
@@ -1395,5 +1466,6 @@ export interface StoreInterface {
    * document. `RuleStateService` uses it for `computed_from.corpus_version` so its
    * snapshot can skip fetching knowledge docs without changing that field's meaning.
    */
+  /** @lore-site BR-669 */
   maxDocVersion(): Promise<Result<number, LoreError>>;
 }

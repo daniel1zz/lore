@@ -1,4 +1,6 @@
 // @reads scripts/check-unclaimed-oracle.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore status --check-tree` / `--check-drift` composition, `lore anchor` spec-target
  * dispatch (exercised indirectly via `lore create spec --code-anchor`), and the
@@ -31,7 +33,7 @@
  *               `armed=false`; `workflow.drift.enabled=false` → exit 0, `disabled`
  *   ERROR:      the five drift kinds (file_missing, symbol_missing, dir_empty,
  *               permanently-missing file_missing, node_type_mismatch) each correctly
- *               classified, repair hint + SYMBOL_MISSING_FOOTNOTE text rendered
+ *               classified, repair hint rendered
  *   STATE:      a fixed spec stops appearing in `drifts[]` once its file is restored,
  *               while a permanently-broken spec's row survives across multiple runs;
  *               `--check-drift --check-tree` composition — drift wins the exit-code
@@ -53,10 +55,12 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, appendFileSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, readFileSync } from "fs";
+import { parseDocument } from "yaml";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -127,30 +131,35 @@ async function initCorpus(tmpDir: string): Promise<void> {
  * key silently breaking YAML parsing.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    [
-      "workflow:",
-      "  gates:",
-      "    spec-create:",
-      "      enabled: false",
-      "    spec-promote:",
-      "      enabled: false",
-      "    plan-promote:",
-      "      enabled: false",
-      "    task-claim:",
-      "      enabled: false",
-      "",
-    ].join("\n"),
-  );
+  setConfigPaths(dir, [
+    [["workflow", "gates", "spec-create", "enabled"], false],
+    [["workflow", "gates", "spec-promote", "enabled"], false],
+    [["workflow", "gates", "plan-promote", "enabled"], false],
+    [["workflow", "gates", "task-claim", "enabled"], false],
+  ]);
 }
 
 /** Disables ONLY the doc-code drift oracle (workflow.drift.enabled: false, D8). */
 function disableDrift(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    ["workflow:", "  drift:", "    enabled: false", ""].join("\n"),
-  );
+  setConfigPaths(dir, [[["workflow", "drift", "enabled"], false]]);
+}
+
+/**
+ * Sets nested keys in the corpus's `config.yaml` by MERGING into the parsed document. `lore init` now seeds a
+ * top-level `workflow:` block (the verification-profile template, BR-807), so appending a second `workflow:`
+ * block would be a duplicate-key YAML error and the whole config would be ignored.
+ */
+function setConfigPaths(dir: string, entries: ReadonlyArray<readonly [readonly string[], boolean]>): void {
+  const patch: Record<string, unknown> = {};
+  for (const [keyPath, value] of entries) {
+    let node = patch;
+    keyPath.slice(0, -1).forEach((key) => {
+      node[key] = (node[key] as Record<string, unknown> | undefined) ?? {};
+      node = node[key] as Record<string, unknown>;
+    });
+    node[keyPath[keyPath.length - 1]!] = value;
+  }
+  patchLoreConfig(dir, patch);
 }
 
 async function createPrd(tmpDir: string): Promise<string> {
@@ -263,13 +272,13 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
     );
   });
 
-  it("2) renaming the exported symbol → symbol_missing, with the SYMBOL_MISSING_FOOTNOTE note", async () => {
+  it("2) renaming the exported symbol → symbol_missing, with no false-positive disclaimer (exports are parsed)", async () => {
     writeFileSync(join(tmpDir, "src", "b.ts"), "export const Renamed = 1;\n");
 
     const result = await runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
     expect(result.stdout).toContain(`[spec] ${specBSlug} → src/b.ts#Exported (symbol_missing)`);
-    expect(result.stdout).toContain("does not recognize `export * from`");
+    expect(result.stdout).not.toContain("lexical export scanner");
   });
 
   it("3) emptying the anchored directory → dir_empty", async () => {

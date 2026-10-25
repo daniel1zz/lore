@@ -60,6 +60,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
@@ -148,6 +149,7 @@ async function addRules(leaf: DocRecord, prefix: string, count: number): Promise
     if (!r.ok) throw new Error(`addRule failed: ${JSON.stringify(r.error)}`);
     out.push({ id: r.value.ruleId, statement });
   }
+  await approvePending(store, leaf.id); // a direct add is a pending add: it governs only once approved
   return out;
 }
 
@@ -339,7 +341,7 @@ describe("NEGATIVE — only governing rules appear", () => {
 });
 
 describe("REGRESSION — no baseline docs: section absent, rest of the render byte-identical", () => {
-  it("renders none of the section and exactly today's eight-section text", async () => {
+  it("renders none of the section and exactly today's eight-section text plus the definition of done", async () => {
     const { task } = await makeTask({ fileAnchors: [FILE_F] });
 
     const deps = buildTaskFeedFlowDeps(app);
@@ -365,6 +367,11 @@ describe("REGRESSION — no baseline docs: section absent, rest of the render by
       "\n## Plan state", s.plan_state,
       "\n## Linked knowledge", s.knowledge_pointers,
       "\n## Latest handoff", s.handoff,
+      // the done floors' demand (BR-1357) follows the handoff; a task with no anchored test file owes nothing
+      "\n## Definition of done (lore done will require):\n" +
+        "  unfiltered passing run of each anchored test file: none\n" +
+        "  a runner-produced red run on record (red-first / no-new-tests): no\n" +
+        "  script ACs to attest with lore verify: none",
       ...(pack.value.truncated.length > 0 ? [`\n(truncated sections: ${pack.value.truncated.join(", ")})`] : []),
     ].join("\n");
     expect(text).toBe(expectedToday);

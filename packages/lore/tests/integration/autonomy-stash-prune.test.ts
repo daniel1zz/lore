@@ -7,7 +7,7 @@
  * stack. Runs are inserted straight into the corpus store so "live" / "ended" are exact facts, not timing.
  *
  * Halves (spec AC-AU-4): (1) content in main -> archived + dropped, stash list shorter by one, archive ref
- * resolves to the same commit; (2) stash of a live run -> kept + escalated, reason named; (3) archive write failure
+ * resolves to the same commit; (2) stash of a live run -> archived and dropped, no escalation (BR-1370); (3) archive write failure
  * (read-only refs dir) -> nothing dropped, exit 1; (4) restore: `git stash store` from the archive ref brings the
  * stash back byte-identical (tracked and untracked trees); (5) the git-safety hook still refuses an agent-typed
  * `git stash drop` (exit 2). Plus: dry run changes nothing; an ended run's stash is dropped.
@@ -82,22 +82,13 @@ async function registerRun(agentId: string, ended: boolean): Promise<void> {
       branch: null,
       composition: { schemaVersion: 1, fragments: [] },
       registeredAt: "2026-10-01T00:00:00.000Z",
+      messageAddress: null,
     });
     if (!inserted.ok) throw new Error(`insertRun failed: ${JSON.stringify(inserted.error)}`);
     if (ended) {
       const endedRun = await store.endRun(id, "2026-10-01T01:00:00.000Z", "test");
       if (!endedRun.ok) throw new Error(`endRun failed: ${JSON.stringify(endedRun.error)}`);
     }
-  } finally {
-    store.close();
-  }
-}
-
-async function endRegisteredRun(agentId: string): Promise<void> {
-  const store = actedStore(new SQLiteStore(dbPath));
-  try {
-    const ended = await store.endRun(`cc:sess-${agentId}:${agentId}` as RunId, "2026-10-01T02:00:00.000Z", "test");
-    if (!ended.ok) throw new Error(`endRun failed: ${JSON.stringify(ended.error)}`);
   } finally {
     store.close();
   }
@@ -165,7 +156,7 @@ describe("AC-AU-4 lore stash prune", () => {
     expect(applied.stdout).toMatch(/dropped 1, kept 0, escalated 0/);
   }, { timeout: 60_000 });
 
-  it("(2) a stash created by a LIVE run is kept and escalated with the reason named; an ENDED run's is dropped", async () => {
+  it("(2) an archived stash is dropped whether its owner run is LIVE or ENDED (BR-1370: the archive makes it recoverable); nothing escalates", async () => {
     await registerRun("liveagent", false);
     await registerRun("doneagent", true);
     const liveSha = makeStash("worktree-agent-liveagent", "live work\n");
@@ -173,32 +164,11 @@ describe("AC-AU-4 lore stash prune", () => {
 
     const result = runLore(["stash", "prune", "--apply"]);
     expect(result.exitCode).toBe(0);
-    expect(stashShas()).toEqual([liveSha]); // only the live run's stash remains
-    expect(result.stdout).toMatch(/escalated.*live run/s);
-    expect(result.stdout).toMatch(/dropped 1, kept 0, escalated 1/);
-    expect(archiveResolves(liveSha)).toBe(true); // archived first even when not dropped
+    expect(stashShas()).toEqual([]);
+    expect(result.stdout).toMatch(/dropped 2, kept 0, escalated 0/);
+    expect(archiveResolves(liveSha)).toBe(true); // archived first, so still recoverable
     expect(archiveResolves(endedSha)).toBe(true);
   }, { timeout: 60_000 });
-
-  it("AU-T12: a stash escalated while its owner was live is re-decided (auto, dropped) once the run ends; unchanged facts keep the version", async () => {
-    await registerRun("flipagent", false);
-    const sha = makeStash("worktree-agent-flipagent", "flip work\n");
-
-    const first = runLore(["stash", "prune", "--apply"]);
-    expect(first.exitCode).toBe(0);
-    expect(first.stdout).toMatch(/escalated.*live run/s);
-    // control: facts unchanged -> same version -> still escalated, nothing dropped
-    const again = runLore(["stash", "prune", "--apply"]);
-    expect(again.stdout).toMatch(/dropped 0, kept 0, escalated 1/);
-    expect(stashShas()).toEqual([sha]);
-
-    await endRegisteredRun("flipagent");
-    const after = runLore(["stash", "prune", "--apply"]);
-    expect(after.exitCode).toBe(0);
-    expect(after.stdout).toMatch(/dropped 1, kept 0, escalated 0/);
-    expect(stashShas()).toEqual([]);
-    expect(archiveResolves(sha)).toBe(true);
-  }, { timeout: 90_000 });
 
   it("(3) an archive write failure drops nothing and exits 1", () => {
     const sha = makeStash("main", "unarchivable\n");

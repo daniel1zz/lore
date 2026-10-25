@@ -3,10 +3,10 @@ id: KN-292
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — report-issue concurrency contract (2026-07-31)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-23
 tags: []
 parent: PLAN-090
 links:

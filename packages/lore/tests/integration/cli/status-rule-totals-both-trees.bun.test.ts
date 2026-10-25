@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * `lore status --json` baseline rule totals count BOTH trees (BR-670, AC-FIP-4, issue #136), over a
  * throwaway corpus (mkdtemp + `lore init`; the repo's own `.lore/` is never touched).
@@ -20,9 +21,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
 setDefaultTimeout(300_000);
 
@@ -105,9 +108,10 @@ beforeAll(() => {
   const debt = slugOf(mustRun(["baseline", "add", section, "--tree", "architecture", "--node", "debt-registry", "--label", "debt", "--title", "Debt Registry"], both).stdout);
   mustRun(["rule", "add", debt, "--statement", "Legacy throw in X", ...RULE], both);
   mustRun(["rule", "add", standard, "--statement", "Services return Result", ...RULE], both);
+  approveFixtureNodes(both, "all"); // direct adds are pending adds and new nodes are born draft: approve the fixture tree
 
   // A spec whose script AC cites AS-1, verified through lore verify (attested evidence).
-  appendFileSync(join(both, ".lore", "config.yaml"), ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"));
+  patchLoreConfig(both, ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"));
   mustRun(["create", "spec", "--title", "Cites Standard", "--no-ai", "--content", "## Overview\nbody"], both);
   mustRun(
     ["ac", "add", "spec-cites-standard", "AC-TOT-1", "--statement", "The standard holds.", "--mode", "script", "--oracle", "other", "--command", "true", "--cite", "AS-1"],
@@ -126,6 +130,7 @@ beforeAll(() => {
   const rootB = slugOf(mustRun(["baseline", "add", prdB, "--node", "root", "--label", "biz", "--title", "Biz Root"], businessOnly).stdout);
   const leafB = slugOf(mustRun(["baseline", "add", rootB, "--node", "leaf", "--label", "leaf", "--title", "Biz Leaf"], businessOnly).stdout);
   mustRun(["rule", "add", leafB, "--statement", "Only business rule", ...RULE], businessOnly);
+  approveFixtureNodes(businessOnly, "all");
 });
 
 afterAll(() => {

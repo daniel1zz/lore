@@ -8,7 +8,8 @@
  * Spawned CLI = the SOURCE entry with HOME=<mkdtemp>; the repo's own `.lore/` is never written.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,10 +59,7 @@ function makeSandbox(floorCommand: string | null): Sandbox {
   if (init.status !== 0) throw new Error(`lore init failed (${String(init.status)}): ${init.stderr}`);
   writeFileSync(join(sb.repo, "CLAUDE.md"), ROOT_CLAUDE_MD);
   if (floorCommand !== null) {
-    appendFileSync(
-      join(sb.repo, ".lore", "config.yaml"),
-      `\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(floorCommand)}\n`,
-    );
+    patchLoreConfig(sb.repo, { workflow: { integrate: { floor_command: floorCommand } } });
   }
   const refresh = run(sb, "context", "refresh");
   if (refresh.status !== 0) throw new Error(`context refresh failed (${String(refresh.status)}): ${refresh.stderr}`);
@@ -117,8 +115,10 @@ describe("config-derived placeholder values", () => {
   });
 
   it("HAPPY: the unset text names no script and the set text carries the command verbatim", () => {
-    expect(configVariableValues({}, {}, "rules:project")["integrate_floor"]).toBe(integrateFloorText(null));
+    const unset = configVariableValues({}, {}, "rules:project");
+    expect(unset.ok && unset.value["integrate_floor"]).toBe(integrateFloorText(null));
     expect(integrateFloorText(null)).toContain(NOT_CONFIGURED);
-    expect(configVariableValues({}, layer("a && b"), "rules:project")["integrate_floor"]).toBe("set to `a && b`");
+    const set = configVariableValues({}, layer("a && b"), "rules:project");
+    expect(set.ok && set.value["integrate_floor"]).toBe("set to `a && b`");
   });
 });

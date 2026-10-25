@@ -4,7 +4,7 @@
  * (mechanism `env_bypass`) before `commands/gate.ts` unconditionally exits 0.
  * `gate-bypass-audit.ts` holds the decision logic (`runGateEnvBypassAudit`) split out
  * for vitest testability — it imports only `@lore/core`/`@lore/core/node` +
- * `node:fs`/`node:path`, never `bun:sqlite` (mirrors `assess-render.ts`'s split,
+ * `node:fs`/`node:path`, never `bun:sqlite` (mirrors `status-stamp-verdict.ts`'s split,
  * `adapters/cli/CLAUDE.md`). This suite exercises that decision logic via injected
  * fakes and `findLoreDbPathQuiet`'s real filesystem walk — no `bun:sqlite`, no store.
  *

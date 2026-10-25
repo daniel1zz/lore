@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-15 (D15, BR-163)
  *
@@ -11,12 +13,12 @@
  * Coverage: HAPPY (a, b), NEGATIVE (c, d), STATE (a: status/version/audit; d: nothing written on a bad target),
  * BOUNDARY (self-supersede, unknown target AC, missing reason), REGRESSION (b: the live AC-2 still verifies).
  */
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 
 const ID = "spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-15";
 
@@ -95,9 +97,8 @@ async function addScriptAc(spec: string, acId: string): Promise<void> {
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-dc2-15-"));
   await must(["init"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:", "  gates:",
       "    spec-create:", "      enabled: false",
@@ -116,7 +117,9 @@ beforeAll(async () => {
   const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
-  specS = slugOf(await must(["create", "spec", "--title", "DC2-15 Spec S", "--content", "body", "--no-ai"]));
+  // a direct add is a pending add: citable only once its leaf is approved (the override class is loosened above)
+  await must(["approve", leaf, "--override-no-judgment"]);
+  specS =slugOf(await must(["create", "spec", "--title", "DC2-15 Spec S", "--content", "body", "--no-ai"]));
   specS2 = slugOf(await must(["create", "spec", "--title", "DC2-15 Spec S2", "--content", "body", "--no-ai"]));
   await addScriptAc(specS, "AC-1");
   await addScriptAc(specS, "AC-2");

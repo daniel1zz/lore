@@ -267,7 +267,7 @@ export default defineLoreCommand({
 
           if (decision.kind === "already_adopted") return await reportAlreadyAdopted(decision.id);
 
-          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv);
           const createResult = await app.corpusService.create(
             buildCarrierTaskInput({ issue, repo: cfg.repo, repoId, slug: decision.slug, ...(planId !== undefined ? { planId } : {}) }),
             { by },

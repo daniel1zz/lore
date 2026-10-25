@@ -10,7 +10,7 @@
  * Coverage: HAPPY (both in sync -> silent; project behind -> one directive line), STATE (binary
  * version vs settings reason; both sides behind -> still one line), NEGATIVE (diverged files named,
  * never advised to be replaced; no rule text), ERROR/BOUNDARY (corrupt or expired project cache ->
- * detached project refresh, no advisory; reminder disabled / kill-switch -> silent).
+ * no advisory and no detached refresh spawned; reminder disabled / kill-switch -> silent).
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -103,13 +103,11 @@ function loreCalls(fx: Fixture): string[] {
   return existsSync(fx.logPath) ? readFileSync(fx.logPath, "utf8").split("\n").filter(Boolean) : [];
 }
 
-function waitForCall(fx: Fixture, prefix: string): boolean {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (loreCalls(fx).some((l) => l.startsWith(prefix))) return true;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-  }
-  return false;
+// The detached `setup --check` refresh was removed: the hook must never spawn it. A detached child would log
+// within milliseconds, so wait a bounded settle window before asserting absence.
+function expectNoDetachedRefresh(fx: Fixture): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 750);
+  expect(loreCalls(fx).filter((l) => l.startsWith("setup"))).toHaveLength(0);
 }
 
 function expectNoRuleText(stdout: string): void {
@@ -182,20 +180,20 @@ describe("AC-UR-2 session-start upgrade advisory", () => {
     expectNoRuleText(r.stdout);
   });
 
-  it("corrupt project cache is not read as in sync -> detached project refresh, no advisory", () => {
+  it("corrupt project cache is not read as in sync -> no advisory and no detached refresh spawned", () => {
     const fx = fixture();
     writeCaches(fx, syncCache("global"), "{not json");
     const r = runHook(fx);
     expect(advisoryLines(r.context)).toHaveLength(0);
-    expect(waitForCall(fx, "setup --project --check --json")).toBe(true);
+    expectNoDetachedRefresh(fx);
   });
 
-  it("expired project cache -> detached project refresh, no advisory from it", () => {
+  it("expired project cache -> no advisory and no detached refresh spawned from it", () => {
     const fx = fixture();
     writeCaches(fx, syncCache("global"), staleCache("project", { outdated: ["a"] }, ["binary_version_changed"], { checked_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString() }));
     const r = runHook(fx);
     expect(advisoryLines(r.context)).toHaveLength(0);
-    expect(waitForCall(fx, "setup --project --check --json")).toBe(true);
+    expectNoDetachedRefresh(fx);
   });
 
   it("reminder disabled on a side, or LORE_SETUP_NO_CHECK=1 -> silent and no refresh", () => {

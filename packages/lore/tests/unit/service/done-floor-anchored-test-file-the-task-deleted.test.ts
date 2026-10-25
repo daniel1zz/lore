@@ -26,6 +26,7 @@ import { createRealWorktreeProbe, type WorktreeGitProbe } from "../../../src/ser
 import { formatDoneMessage } from "../../../src/adapters/cli/done-render.js";
 import type { CreateDocInput, LoreError } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { runOfName } from "../../helpers/test-run-identity.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -105,7 +106,7 @@ async function claimedTask(
     "2026-10-19T09:00:00.000Z",
   );
   if (!ev.ok) throw new Error("evidence");
-  const claim = await svc.claim(task.value.id, { by: "alice", worktree: "agent-x" });
+  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "agent-x" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   return { svc, taskId: task.value.id };
 }
@@ -117,13 +118,27 @@ function branchDeletesTestFileAndLands(repo: string): void {
   run(repo, "merge", "--no-ff", "-q", "-m", "land", "agent-x");
 }
 
+/** What `lore integrate` records on the claimant when it lands `agent-x` (BR-1336); the `not-landed` floor reads only this. */
+async function recordLandingOfAgentX(repo: string, svc: TaskWorkflowService): Promise<void> {
+  const mergeSha = run(repo, "rev-parse", "main");
+  const recorded = await svc.recordLanding({
+    branch: "agent-x",
+    branch_head: run(repo, "rev-parse", "agent-x"),
+    main_before: run(repo, "rev-parse", `${mergeSha}^1`),
+    main_after: mergeSha,
+    landing_commit: mergeSha,
+  });
+  if (!recorded.ok) throw new Error(`recordLanding ${JSON.stringify(recorded.error)}`);
+}
+
 describe("done floor: an anchored test file the task deleted", () => {
   it("HAPPY: archives when the claimed branch deleted the anchored test file and landed, and the done message names it", async () => {
     const repo = seedRepo();
     const { svc, taskId } = await claimedTask(repo, [DELETED_TEST]);
     branchDeletesTestFileAndLands(repo);
+    await recordLandingOfAgentX(repo, svc);
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok, JSON.stringify(done.ok ? null : done.error)).toBe(true);
     if (!done.ok) return;
     expect(done.value.task.status).toBe("archived");
@@ -140,7 +155,7 @@ describe("done floor: an anchored test file the task deleted", () => {
     run(repo, "checkout", "-q", "main");
     run(repo, "merge", "--no-ff", "-q", "-m", "land", "agent-x");
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(refusalText(done.error)).toContain(typo);
@@ -157,7 +172,7 @@ describe("done floor: an anchored test file the task deleted", () => {
     commitAll(repo, "someone else deletes it on main");
     run(repo, "merge", "--no-ff", "-q", "-m", "land", "agent-x");
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(refusalText(done.error)).toContain(DELETED_TEST);
@@ -170,7 +185,7 @@ describe("done floor: an anchored test file the task deleted", () => {
     run(repo, "rm", "-q", DELETED_TEST);
     commitAll(repo, "delete the test file");
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(refusalText(done.error)).toContain(DELETED_TEST);
@@ -186,7 +201,7 @@ describe("done floor: an anchored test file the task deleted", () => {
     const { svc, taskId } = await claimedTask(repo, [DELETED_TEST], blind);
     branchDeletesTestFileAndLands(repo);
 
-    const done = await svc.done(taskId, { by: "alice" });
+    const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(refusalText(done.error)).toContain(DELETED_TEST);

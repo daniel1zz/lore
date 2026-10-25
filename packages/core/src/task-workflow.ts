@@ -244,6 +244,7 @@ export function rejectSelfLabelledRunnerUnattested(captureSource: string): Resul
       `capture_source "${RUNNER_UNATTESTED_CAPTURE_SOURCE}" is runner-issued; ` +
       "not a valid value for a caller-supplied evidence row.",
     value: captureSource,
+    rule: "BR-1180",
   });
 }
 
@@ -536,6 +537,13 @@ export const evidenceEntrySchema = z.object({
    * this field existed carry none and are dated by the (doc_id, details.version) audit join.
    */
   recorded_corpus_rev: z.number().int().min(0).optional(),
+  /**
+   * Marks a row the milestone review's stale refresh wrote (BR-1372, spec-lean-governance Part D). A refresh row is
+   * REPLACED by the next refresh of the same `ac_ref` + runner on the same task instead of appended, so repeated
+   * batches never grow the log (Bazel action cache: one entry per action key). Present-iff-true; written only by the
+   * trusted runner path (`VerifiedEvidenceInput`), never by a self-report.
+   */
+  milestone_refresh: z.literal(true).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({
@@ -805,10 +813,11 @@ export const taskClaimSchema = z.object({
    */
   corpus_scope: z.string().min(1).optional(),
   /**
-   * The harness run that took this lease (spec-run-identity-slice-1 D6, BR-1040/BR-1042). THREE states, all
-   * load-bearing: a run id = attested claim; `null` = a claim written after runs existed by an unattested
-   * caller; KEY ABSENT = a LEGACY claim written before runs existed, compared by `by` alone (BR-1042).
-   * Never carried forward on a refresh — the refreshing claimant's own run is recorded.
+   * The harness run that took this lease (spec-run-identity-slice-1 D6, BR-1040/BR-1352). Every claim written now
+   * carries one (the store refuses a claim without a run); the schema still ACCEPTS an absent or null value only so a
+   * claim written before runs existed can be read, shown and expired by the schema upgrade (`lore migrate schema`).
+   * Compared by run only, never by `by`. Never carried forward on a refresh — the refreshing claimant's own run is
+   * recorded.
    */
   harness_run: z.string().nullable().optional(),
   /**
@@ -839,7 +848,7 @@ export interface ClaimCaptureInput {
   session_id?: string;
   /** See {@link taskClaimSchema}'s `corpus_scope` — explicit-only, NEVER carried forward. */
   corpus_scope?: string;
-  /** See {@link taskClaimSchema}'s `harness_run` — `null` = unattested claimant; `undefined` = key not written. NEVER carried forward. */
+  /** See {@link taskClaimSchema}'s `harness_run` — the claimant's own run; NEVER carried forward. */
   harness_run?: string | null;
 }
 
@@ -931,8 +940,8 @@ export function buildTaskClaim(
     ...(worktree !== undefined ? { worktree } : {}),
     ...(sessionId !== undefined ? { session_id: sessionId } : {}),
     ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
-    // reason: BR-1042 — `undefined` writes NO key (a caller that never resolved a run); `null` writes the
-    // key as null (unattested). Never `?? base?.harness_run`: a refresh records the REFRESHING run.
+    // reason: BR-1040 — a refresh records the REFRESHING run, never `?? base?.harness_run`; the store refuses a claim
+    // that carries none (BR-1352).
     ...(input.harness_run !== undefined ? { harness_run: input.harness_run } : {}),
   };
 }
@@ -1277,6 +1286,7 @@ export function resolveTargetTask(
         field: "task",
         message: `no task matching "${explicitTaskIdOrSlug}" among this plan's tasks`,
         value: explicitTaskIdOrSlug,
+        rule: "BR-162",
       });
     }
     return ok(match);
@@ -1300,7 +1310,7 @@ export function resolveTargetTask(
       ? "no task in this plan has a fresh claim — pass --task to select one explicitly"
       : `ambiguous target task — ${freshlyClaimed.length} tasks have a fresh claim (${candidateSlugs.join(", ")}); pass --task to disambiguate`;
 
-  return err({ code: "VALIDATION_ERROR", field: "task", message, value: candidateSlugs });
+  return err({ code: "VALIDATION_ERROR", field: "task", message, value: candidateSlugs, rule: "BR-162" });
 }
 
 /**

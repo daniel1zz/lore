@@ -7,8 +7,8 @@
  * such fact existed anywhere before this task — a "session" in this
  * codebase is DERIVED, never stored (SPEC-042 D1), and the one genuine
  * session boundary that DOES exist (the Claude Code transcript's own
- * per-entry timestamps) is reachable only from the Stop-hook's own process
- * (`lore handoff coverage-check`), not from `lore feed session-resume`
+ * per-entry timestamps) is reachable only from a Stop-hook's own process
+ * (the removed `lore handoff coverage-check`), not from `lore feed session-resume`
  * (a separate, earlier-in-the-session process). This hook closes that gap
  * with the smallest possible new fact: a tiny, session-scoped marker file.
  *
@@ -65,6 +65,8 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { trackOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:session-start-marker');
 
 // reason: DELIBERATE literal duplicate of `@lore/core`'s
 // `sessionStartMarkerFilename` (packages/core/src/session.ts) — see this

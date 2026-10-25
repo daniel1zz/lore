@@ -29,6 +29,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { HOOK_ASSET_NAMES } from "../../../src/flows/setup-project-flow.js";
+import { initRepoWithMainCommit } from "../support/main-guard-repo.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 /** A project hook the current binary ships — derived from the SSOT so a hook retirement cannot break this suite again. */
 const SHIPPED_HOOK: string = HOOK_ASSET_NAMES[0];
@@ -78,7 +80,13 @@ function envFor(repoDir: string): NodeJS.ProcessEnv {
 
 function runSetup(args: string[], cwd: string): RunResult {
   // reason: spawn bun by absolute path — PATH is emptied above so the child can never reach a real `claude` CLI.
-  const result = spawnSync(BUN_BIN, ["run", INDEX_TS, "setup", ...args], { cwd, env: envFor(cwd), encoding: "utf8" });
+  // reason: a read-only `--check` makes no write, so it needs no known party. The test spawn shim registers a run in the
+  // corpus under `cwd` before every `lore` start that names no `--harness-run` (a SQLite open that checkpoints
+  // lore.db-wal), and this suite asserts the tree is byte-identical. A start that already names the flag is left
+  // untouched (test-known-party-spawn.ts invariants), so the check names one and the shim writes nothing. (The
+  // LORE_TEST_IDENTITY=none opt-out does not hold here: the shim runs twice under Bun, and the second pass no longer sees it.)
+  const harnessRun = args.includes("--check") ? ["--harness-run", "cc:setup-check-readonly"] : [];
+  const result = spawnSync(BUN_BIN, ["run", INDEX_TS, ...harnessRun, "setup", ...args], { cwd, env: envFor(cwd), encoding: "utf8" });
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
@@ -117,16 +125,11 @@ beforeAll(() => {
   mkdirSync(join(sandbox, "home"), { recursive: true });
   templateRepo = join(sandbox, "template");
   mkdirSync(templateRepo, { recursive: true });
-  execFileSync("git", ["init", "-q"], { cwd: templateRepo });
+  initRepoWithMainCommit(templateRepo); // setup refuses a main with no commit (BR-1343)
   // `lore init` first so context.language can be set BEFORE the scaffold projects it into the settings file.
   const init = spawnSync(BUN_BIN, ["run", INDEX_TS, "init"], { cwd: templateRepo, env: envFor(templateRepo), encoding: "utf8" });
   if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
-  const configPath = join(templateRepo, ".lore", "config.yaml");
-  const config = readFileSync(configPath, "utf8");
-  const withLanguage = /^context:\s*$/m.test(config)
-    ? config.replace(/^context:\s*$/m, "context:\n  language: zh")
-    : `${config}\ncontext:\n  language: zh\n`;
-  writeFileSync(configPath, withLanguage, "utf8");
+  patchLoreConfig(templateRepo, "context:\n  language: zh\n");
   const scaffold = runSetup(["--project", "--yes"], templateRepo);
   if (scaffold.exitCode !== 0) throw new Error(`scaffold failed (${scaffold.exitCode}): ${scaffold.stderr}\n${scaffold.stdout}`);
 }, 120_000);

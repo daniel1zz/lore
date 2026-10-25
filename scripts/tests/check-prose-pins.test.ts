@@ -251,9 +251,9 @@ describe("real tree and wiring", () => {
     expect(DEFAULT_STEPS.indexOf("bun run check:prose-pins")).toBe(a + 1);
   });
 
-  it("HAPPY: hooks/pre-push and assets/project/pre-push both run it, byte-identical", () => {
+  it("HAPPY: hooks/pre-push and assets/project/pre-push are byte-identical (the prose-pins step runs in the test chain, not the hook)", () => {
     const hook = readFileSync(join(repo, "hooks/pre-push"), "utf8");
-    expect(hook).toContain("check-prose-pins.ts");
+    expect(hook).not.toContain("check-prose-pins.ts");
     expect(readFileSync(join(repo, "assets/project/pre-push"), "utf8")).toBe(hook);
   });
 });

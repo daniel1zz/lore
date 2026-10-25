@@ -124,15 +124,19 @@ import {
   type FileExistsPort,
 } from "@lore/core";
 import type { AuditEntry, DocId, DocRecord } from "@lore/core";
-import type { StoreInterface } from "../store/store-interface.js";
+import type { CompanionDocWrite, StoreInterface } from "../store/store-interface.js";
+import { leafPlansToCompanionWrites } from "./rule-leaf-companion-writes.js";
+import type { AbandonmentPlan } from "./rule-landing-port.js";
 import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "./spec-evidence-tasks.js";
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
+import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { ownProposedRules } from "./rule-changes.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, pipeAdvisories, resolveCiteGateFor } from "./ac-write-chokepoint.js";
 import type { CiteGateConfig } from "./ac-cite-gate.js";
+import { approvedRuleIdsOf } from "./baseline-items.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -224,8 +228,8 @@ export interface SetCriterionPatch {
   covers?: string[];
   /**
    * Baseline rule ids this criterion cites — REPLACES the whole list (`[]` clears it).
-   * Report-only: dangling / inactive ids are stored and surfaced as audit-recorded warnings
-   * (baseline slice 1 §C4). Grammar/uniqueness/cap are the schema's (`cites`).
+   * Dangling / inactive ids are refused under gate mode `enforce` on an armed branch, and stored with an
+   * audit-recorded warning under `report`/`off` (baseline slice 1 §C4). Grammar/uniqueness/cap are the schema's (`cites`).
    */
   cites?: string[];
   /**
@@ -404,10 +408,8 @@ export class AcService {
     if (!leaves.ok) return leaves;
     const carrying = new Map<string, DocRecord>();
     for (const leaf of leaves.value) {
-      const rules = leaf.extra["rules"];
-      if (!Array.isArray(rules)) continue;
-      for (const rule of rules as Array<{ id?: unknown }>) {
-        if (typeof rule.id === "string" && ruleIds.includes(rule.id)) carrying.set(rule.id, leaf);
+      for (const id of approvedRuleIdsOf(leaf)) {
+        if (ruleIds.includes(id)) carrying.set(id, leaf);
       }
     }
     const known = ruleIds.map((id) => carrying.get(id));
@@ -508,7 +510,8 @@ export class AcService {
       if (pathCheck.value.declaration !== null) declaration = pathCheck.value.declaration;
     }
 
-    // §C4 — report-only citation warnings, recorded in the audit entry (never rejected, never dropped).
+    // §C4 — citation warnings, recorded in the audit entry; under gate mode `enforce` on an armed branch
+    // `writeCriteria` refuses a dangling/inactive id before any write, under `report`/`off` it is stored.
     const addedCites = newCriterion?.cites;
     const citeAudit = addedCites !== undefined ? await this.citeAuditDetails(addedCites, spec.id) : undefined;
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
@@ -527,8 +530,9 @@ export class AcService {
 
   /**
    * Add (or, with `remove`, drop) baseline rule citations on ONE declared criterion
-   * (baseline slice 1 §C4, AC-BLS1-6). REPORT-ONLY: a dangling / deprecated / retired id is
-   * WRITTEN and returned as a {@link CiteWarning}; it never rejects and never drops the id.
+   * (baseline slice 1 §C4, AC-BLS1-6). A dangling / deprecated / retired id is refused
+   * under gate mode `enforce` on an armed branch; under `report`/`off` it is WRITTEN and returned as a
+   * {@link CiteWarning}, never dropped.
    * Ids are set-deduplicated. Citing is NOT a contract edit: like `addCriterion` it never
    * demotes an approved spec (the no-demote branch of `writeCriteria`); it writes exactly one
    * version row and one audit entry with `details.operation === "cite"`.
@@ -550,6 +554,7 @@ export class AcService {
         field: "cites",
         message: "lore ac cite requires at least one rule id (BR-<n>)",
         value: ruleIds,
+        rule: "BR-242",
       });
     }
     const specResult = await this.resolveSpec(specIdOrSlug);
@@ -568,6 +573,7 @@ export class AcService {
             ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
             : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
         value: acId,
+        rule: "BR-91",
       });
     }
     const target = existing[index] as AcceptanceCriterion;
@@ -594,6 +600,7 @@ export class AcService {
         field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
         message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
         value: ruleIds,
+        rule: "BR-85",
       });
     }
 
@@ -743,6 +750,7 @@ export class AcService {
         field: "acceptance_criteria[].id",
         message: `Acceptance criterion "${acId}" does not exist on this spec`,
         value: acId,
+        rule: "BR-45",
       });
     }
 
@@ -763,6 +771,7 @@ export class AcService {
             `Cannot remove "${acId}" — task "${referencingTask.slug}" has evidence referencing it. ` +
             "Pass --force to remove anyway (existing evidence keeps its ac_ref and becomes dangling).",
           value: acId,
+          rule: "BR-46",
         });
       }
     }
@@ -828,6 +837,7 @@ export class AcService {
           "lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, " +
           "--note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code",
         value: patch,
+        rule: "BR-29",
       });
     }
 
@@ -838,6 +848,7 @@ export class AcService {
     // D15 — a superseded criterion is immutable, correction or not; decided before the record lock so the
     // refusal names "superseded".
     const supersededSet = supersededRefusal(extractCriteria(spec).find((c) => c.id === acId));
+    /** @lore-site BR-1330 */
     if (supersededSet !== undefined) return err(supersededSet);
 
     // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write. For a locked spec the
@@ -854,6 +865,7 @@ export class AcService {
           field: "correction.reason",
           message: "a correction needs a non-empty reason (--correction \"<why this is a fix, not a change>\")",
           value: correction.reason,
+          rule: "BR-1069",
         });
       }
       const lock = await this.recordLock.resolve(spec);
@@ -877,6 +889,7 @@ export class AcService {
             ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
             : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
         value: acId,
+        rule: "BR-30",
       });
     }
     const target = existing[index] as AcceptanceCriterion;
@@ -1005,7 +1018,7 @@ export class AcService {
     acId: string,
     by: { spec: string; ac: string },
     reason: string,
-    opts: { by?: string } = {},
+    opts: { by?: string; plan?: string } = {},
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const trimmedReason = reason.trim();
     if (trimmedReason.length === 0) {
@@ -1014,6 +1027,7 @@ export class AcService {
         field: "reason",
         message: "lore ac supersede needs a non-empty --reason",
         value: reason,
+        rule: "BR-1330",
       });
     }
     const specResult = await this.resolveSpec(specIdOrSlug);
@@ -1021,9 +1035,11 @@ export class AcService {
     const spec = specResult.value;
     const existing = extractCriteria(spec);
     const index = existing.findIndex((c) => c.id === acId);
+    /** @lore-site BR-1330 */
     if (index === -1) return err(unknownCriterionError(existing, acId));
     const target = existing[index] as AcceptanceCriterion;
     const already = supersededRefusal(target);
+    /** @lore-site BR-1330 */
     if (already !== undefined) return err(already);
 
     const superseding = await this.resolveSpec(by.spec);
@@ -1034,6 +1050,7 @@ export class AcService {
         field: "by",
         message: `Acceptance criterion "${acId}" cannot supersede itself`,
         value: `${by.spec}:${by.ac}`,
+        rule: "BR-1330",
       });
     }
     const replacement = extractCriteria(superseding.value).find((c) => c.id === by.ac);
@@ -1043,13 +1060,19 @@ export class AcService {
         field: "by",
         message: `Superseding criterion "${by.ac}" is not declared on spec "${superseding.value.slug}"`,
         value: by.ac,
+        rule: "BR-1330",
       });
     }
 
     const actor = resolveWriteActorFor(this.store, opts.by);
+    // reason: the retirement belongs to the plan whose work made it (the plan of the task this run holds a claim on),
+    // recorded in this same write; none when the run claims no (single) plan task.
+    const retiredInPlan = await findPlanClaimedByWriter(this.store, opts.plan);
+    if (!retiredInPlan.ok) return retiredInPlan;
     const marked: AcceptanceCriterion = {
       ...target,
       superseded_by: {
+        ...(retiredInPlan.value !== undefined ? { retired_in_plan: retiredInPlan.value } : {}),
         spec: superseding.value.id as string,
         ac: by.ac,
         reason: trimmedReason,
@@ -1066,6 +1089,7 @@ export class AcService {
         field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
         message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
         value: marked,
+        rule: "BR-1330",
       });
     }
     const written = await this.writeCriteria(spec, parsed.data, "supersede", {
@@ -1075,6 +1099,95 @@ export class AcService {
     });
     if (!written.ok) return written;
     return ok(parsed.data);
+  }
+
+  // ── restoreRetiredCriterion / restoreDeprecatedSpec ───────────────────────
+
+  /**
+   * Undoes ONE supersession the owner rejected at the plan's milestone review (adr-an-acceptance-criterion-retires-
+   * with-the-feature-it): clears the criterion's `superseded_by` marker and records the restore. The ONLY writer
+   * that removes a D15 marker. It acts on the marker whose `at` is `expectedAt` and nothing else, so a criterion
+   * superseded again later (a different `at`) is never touched by an older rejection.
+   *
+   * @param specIdOrSlug - the spec that declares the criterion
+   * @param acId - the superseded criterion
+   * @param expectedAt - `superseded_by.at` of the retirement the owner rejected
+   * @param reason - why (written to the audit row)
+   * @returns `ok(true)` restored, `ok(false)` nothing to do (marker absent or a different retirement instance)
+   */
+  async restoreRetiredCriterion(
+    specIdOrSlug: string,
+    acId: string,
+    expectedAt: string,
+    reason: string,
+    opts: { by?: string } = {},
+  ): Promise<Result<boolean, LoreError>> {
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const existing = extractCriteria(spec);
+    const target = existing.find((c) => c.id === acId);
+    if (target === undefined || target.superseded_by === undefined || target.superseded_by.at !== expectedAt) return ok(false);
+    const { superseded_by: _cleared, ...restored } = target;
+    const parsed = specAcceptanceCriteriaSchema.safeParse(existing.map((c) => (c.id === acId ? restored : c)));
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acceptance_criteria",
+        message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
+        value: acId,
+        rule: "BR-1330",
+      });
+    }
+    const written = await this.writeCriteria(spec, parsed.data, "restore", {
+      by: resolveWriteActorFor(this.store, opts.by),
+      acId,
+      auditDetails: { restored_retirement: { ac: acId, superseded_at: expectedAt, reason } },
+    });
+    return written.ok ? ok(true) : written;
+  }
+
+  /**
+   * Puts a spec whose deprecation the owner rejected at the milestone review back to its previous status.
+   * `deprecated` is terminal in the lifecycle graph, so this is a dedicated audited restore (version action
+   * `restore`), never a `lore set`. It acts only while the spec is still `deprecated`.
+   *
+   * @returns `ok(true)` restored, `ok(false)` the spec is no longer deprecated
+   */
+  async restoreDeprecatedSpec(
+    specIdOrSlug: string,
+    previousStatus: DocRecord["status"],
+    reason: string,
+    opts: { by?: string; planRevival?: (specSlug: string, by: string) => Promise<Result<AbandonmentPlan, LoreError>> } = {},
+  ): Promise<Result<boolean, LoreError>> {
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    if (spec.status !== "deprecated" || previousStatus === "deprecated") return ok(false);
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    // reason: the deprecation abandoned the spec's still-proposed rule ids (BR-1307); rejecting it puts them back in
+    // the SAME write as the status, so the spec and its rules are restored together or not at all.
+    let revivalWrites: CompanionDocWrite[] = [];
+    const now = new Date().toISOString();
+    if (opts.planRevival !== undefined) {
+      const revival = await opts.planRevival(spec.slug, actor);
+      if (!revival.ok) return revival;
+      revivalWrites = leafPlansToCompanionWrites(revival.value.leaves, actor, now, true);
+    }
+    const written = await this.writer.writeDoc({
+      now,
+      ...(revivalWrites.length > 0 ? { extras: { also_update: revivalWrites } } : {}),
+      doc: spec,
+      patch: { status: previousStatus },
+      action: "restore",
+      changeSummary: `Deprecation rejected at the milestone review; restored to ${previousStatus}`,
+      auditAction: "update",
+      auditDetails: { operation: "retirement-restore", restored_status: previousStatus, reason },
+      lock: "none",
+      by: actor,
+    });
+    return written.ok ? ok(true) : written;
   }
 
   // ── countUnredeemedAllowMissingPath ───────────────────────────────────────
@@ -1196,7 +1309,7 @@ export class AcService {
   private async writeCriteria(
     spec: DocRecord,
     criteria: AcceptanceCriterion[],
-    operation: "add" | "remove" | "set" | "cite" | "supersede",
+    operation: "add" | "remove" | "set" | "cite" | "supersede" | "restore",
     opts: {
       status?: DocRecord["status"];
       acId?: string;
@@ -1235,7 +1348,7 @@ export class AcService {
     const target = { id: spec.id as string, slug: spec.slug, anchors: codeAnchorsOf(spec) };
     let requireLiveRules: string[] = [];
     let wouldRefuseAudit: AuditEntry[] = [];
-    if (this.citeGate !== undefined && operation !== "remove" && operation !== "supersede") {
+    if (this.citeGate !== undefined && operation !== "remove" && operation !== "supersede" && operation !== "restore") {
       const admission = await admitAcWrite(this.store, {
         rawGateConfig: this.citeGate.raw,
         target,
@@ -1265,6 +1378,8 @@ export class AcService {
           ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
           : operation === "supersede"
             ? `Acceptance criterion ${opts.acId ?? ""} superseded — ${criteria.length} entries`
+          : operation === "restore"
+            ? `Acceptance criterion ${opts.acId ?? ""} restored (retirement rejected at the milestone review) — ${criteria.length} entries`
           : operation === "cite"
             ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
             : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
@@ -1318,6 +1433,7 @@ function supersededRefusal(criterion: AcceptanceCriterion | undefined): LoreErro
       `Acceptance criterion "${criterion.id}" is superseded by ${marker.spec}:${marker.ac} (${marker.reason}) ` +
       "and is immutable — it cannot be edited, removed, cited or superseded again",
     value: criterion.id,
+    rule: "BR-1330",
   };
 }
 
@@ -1332,6 +1448,7 @@ function unknownCriterionError(existing: readonly AcceptanceCriterion[], acId: s
         ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
         : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
     value: acId,
+    rule: "BR-1330",
   };
 }
 

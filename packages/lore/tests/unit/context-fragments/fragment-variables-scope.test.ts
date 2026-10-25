@@ -61,7 +61,7 @@ const INJECTED: readonly ContextVariable[] = [
 
 function fragment(id: string, body: string): Fragment {
   return {
-    frontmatter: { id, title: `T ${id}`, audience: ["main"], mode: "static" },
+    frontmatter: { id, title: `T ${id}`, inject: ["launch"] },
     body,
     layer: "project",
     path: `.lore/context/${id}.md`,
@@ -148,7 +148,7 @@ const ROOT_CLAUDE_MD =
     .join("\n");
 
 function fragmentFile(id: string, body: string): string {
-  return `---\nid: ${id}\ntitle: T ${id}\naudience: [main]\nmode: static\n---\n${body}`;
+  return `---\nid: ${id}\ntitle: T ${id}\ninject: [launch]\n---\n${body}`;
 }
 
 function lore(repo: string, home: string, ...args: string[]) {

@@ -3,10 +3,10 @@ id: KN-578
 type: knowledge
 role: knowledge
 title: "A gate that refuses a spec overturning an accepted ADR decision while the ADR stays unchanged"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-23
 tags: [adr, gate, baseline]
 links:
   - {id: ADR-045, type: relates-to}

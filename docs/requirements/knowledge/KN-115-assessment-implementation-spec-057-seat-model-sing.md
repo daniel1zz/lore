@@ -3,10 +3,10 @@ id: KN-115
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-057 seat model (single slice) (2026-07-19)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-19
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-069
 links:

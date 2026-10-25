@@ -10,6 +10,7 @@
  * Public surface:
  *   buildRealFsProbe(repoRoot?) — constructs an `FsProbe` rooted at `repoRoot`
  *     (default `process.cwd()`).
+ *     It also carries `readExportedNames` (the TypeScript-parsing export reader, BR-417).
  *   buildFileAnchorProbeContext(repoRoot?) — the SAME probe paired with its root,
  *     for the task `file_anchors` resolution advisory
  *     (task-a-mistyped-task-file-anchor-is-stored-and-consulted).
@@ -57,6 +58,7 @@
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { FsProbe } from "../service/drift-check-service.js";
+import { createExportReader } from "../service/export-reader.js";
 import type { FileAnchorProbeContext } from "../service/anchor-resolution.js";
 
 /**
@@ -108,7 +110,7 @@ export function buildRealFsProbe(repoRoot: string): FsProbe {
     }
   })();
 
-  return {
+  const probe: FsProbe = {
     stat(path: string): "file" | "dir" | "missing" {
       const resolved = tryResolveReal(repoRoot, path);
       if (resolved === undefined) return "missing";
@@ -153,6 +155,11 @@ export function buildRealFsProbe(repoRoot: string): FsProbe {
       }
     },
   };
+  // reason: BR-417 — exported names are decided by parsing (TypeScript compiler API), and a followed `export *`
+  // target is read back through THIS probe's `readFile`, so the symlink-escape guard above covers it too.
+  const readExportedNamesOf = createExportReader((path) => probe.readFile(path));
+  probe.readExportedNames = (path, content) => readExportedNamesOf(path, content);
+  return probe;
 }
 
 /**

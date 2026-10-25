@@ -3,10 +3,10 @@ id: KN-386
 type: knowledge
 role: knowledge
 title: "Session process review — 2026-07-27 context-refresh incident → CTX Phase 4 hardening"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-23
 tags: [session-review, dogfood, context-verb]
 parent: PRD-001
 links:

@@ -118,7 +118,7 @@ export const HelperRecordSchema = z
   .strict();
 export type HelperRecord = z.infer<typeof HelperRecordSchema>;
 
-/** `helpers/<agent_id>.judged.json`, written only by the turn-end review. */
+/** `helpers/<agent_id>.judged.json`: a legacy file no hook writes any more (the turn-end helper review was removed, BR-1349); still read so an older trail stays valid. */
 export const JudgedFileSchema = z
   .object({
     judged_end_count: z.number().int().nonnegative(),

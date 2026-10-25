@@ -28,11 +28,11 @@ const EXPECTED_FILES = [
   // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
   "session-start-marker.mjs",
   "user-prompt-turn-start.mjs", // turn-state producers of stop-turn-review (issue #156)
+  "user-prompt-fragments.mjs",
   "post-edit-mark.mjs",
+  "post-ask-decide.mjs",
   // Turn-end review of the main session; replaced stop-doc-sync.mjs and claude-md-guard.sh (spec-interception-moves-off-every-tool-call-one-turn-end-review, AC-TE-5).
   "stop-turn-review.mjs",
-  // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
-  "stop-handoff-coverage.mjs",
   "subagent-context.mjs",
   "subagent-stop-commit-guard.mjs",
   // Run identity slice 1 (BR-1044): attribute a fresh install's first write to a run.
@@ -47,8 +47,6 @@ const EXPECTED_FILES = [
   "pre-helper-foreign-working-copy-gate.mjs",
   // Edit-time anchor gate: a helper's edit outside its claim's anchors is declared through `lore anchor declare` or denied.
   "pre-edit-anchor-gate.mjs",
-  // Edit-time notice of prose bound to the edited file; additional context only, never a block (spec-prose-about-code-is-bound-to-what-it-describes-one D3).
-  "post-edit-bindings.mjs",
 ];
 
 describe("HAPPY: buildHookSettingsEntries", () => {
@@ -74,7 +72,7 @@ describe("HAPPY: buildHookSettingsEntries", () => {
     expect(entries.filter((e) => e.command.includes("lore-gate")).map((e) => e.command)).toEqual([]);
   });
 
-  it("registers BOTH Stop hooks as distinct matcher-less entries — the coverage-floor hook joins stop-turn-review rather than replacing it", () => {
+  it("registers exactly one Stop hook (stop-turn-review); the coverage-floor Stop hook is removed", () => {
     const entries = buildHookSettingsEntries("/home/user/.claude");
     const stopEntries = entries.filter((e) => e.event === "Stop");
 
@@ -83,19 +81,18 @@ describe("HAPPY: buildHookSettingsEntries", () => {
     // `find` for the new hook while silently unwiring the turn-end review.
     expect(stopEntries).toEqual([
       { event: "Stop", command: "node /home/user/.claude/hooks/stop-turn-review.mjs" },
-      { event: "Stop", command: "node /home/user/.claude/hooks/stop-handoff-coverage.mjs" },
     ]);
   });
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 15 core-governance-and-security hook files", () => {
+  it("declares exactly the 16 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
   it("expands to exactly 21 entries (17 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, post-edit-bindings: 1, pre-edit-anchor-gate: 1 = 21
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, pre-edit-anchor-gate: 1, post-ask-decide: 1, user-prompt-fragments: 1 = 21
     expect(HOOK_REGISTRATIONS).toHaveLength(21);
   });
 

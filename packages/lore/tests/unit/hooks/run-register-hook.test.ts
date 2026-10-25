@@ -109,7 +109,7 @@ interface HookRun {
   stderr: string;
 }
 
-function runHook(stdin: string, pathDir: string): HookRun {
+function runHook(stdin: string, pathDir: string, extraEnv: Record<string, string> = {}): HookRun {
   // RED guard: a missing script must fail every test, including "was not spawned" ones.
   expect(existsSync(HOOK_PATH), `hook script missing: ${HOOK_PATH}`).toBe(true);
   const cwd = scratch("rr-cwd-");
@@ -119,7 +119,7 @@ function runHook(stdin: string, pathDir: string): HookRun {
     cwd,
     timeout: 20000,
     // PATH carries the stub dir plus system dirs the stub itself needs (mktemp, cat).
-    env: { PATH: `${pathDir}:/usr/bin:/bin`, HOME: cwd },
+    env: { PATH: `${pathDir}:/usr/bin:/bin`, HOME: cwd, ...extraEnv },
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -272,5 +272,49 @@ describe("run-register.mjs — fail-open and loud (D7, BR-1030)", () => {
   it("malformed stdin with lore absent: still exactly one line, names the payload problem", () => {
     const text = expectOneContextLine(runHookWithoutLore("{not json"));
     expect(text).toContain("malformed");
+  });
+});
+
+describe("run-register.mjs — messaging socket forwarding (AC-MA-1, BR-1360)", () => {
+  const MAIN_FLAGS = ["run", "register", "--harness", "claude-code", "--session", "sess-ms", "--harness-pid", String(process.pid)];
+
+  it("messaging socket: SessionStart forwards the raw path as --messaging-socket, no uds: grammar", () => {
+    const stub = makeStub();
+    const run = runHook(sessionStart("sess-ms"), stub.dir, { CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/x/1.sock" });
+    expect(run.status).toBe(0);
+    expect(stub.calls().map((c) => c.argv)).toEqual([[...MAIN_FLAGS, "--messaging-socket", "/tmp/x/1.sock"]]);
+  });
+
+  it("messaging socket: a different path is forwarded verbatim (not hardcoded)", () => {
+    const stub = makeStub();
+    runHook(sessionStart("sess-ms"), stub.dir, { CLAUDE_CODE_MESSAGING_SOCKET: "/var/run/other.sock" });
+    expect(stub.first().argv.slice(-2)).toEqual(["--messaging-socket", "/var/run/other.sock"]);
+  });
+
+  it("messaging socket: unset variable passes no --messaging-socket flag", () => {
+    const stub = makeStub();
+    const run = runHook(sessionStart("sess-ms"), stub.dir);
+    expect(run.status).toBe(0);
+    expect(stub.first().argv).toEqual(MAIN_FLAGS);
+  });
+
+  it("messaging socket: empty variable passes no --messaging-socket flag", () => {
+    const stub = makeStub();
+    const run = runHook(sessionStart("sess-ms"), stub.dir, { CLAUDE_CODE_MESSAGING_SOCKET: "" });
+    expect(run.status).toBe(0);
+    expect(stub.first().argv).not.toContain("--messaging-socket");
+  });
+
+  it("messaging socket: SubagentStart passes no flag even when the variable is set", () => {
+    const stub = makeStub();
+    const run = runHook(subagentStart("sess-ms", "a-1", "explore"), stub.dir, { CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/x/1.sock" });
+    expect(run.status).toBe(0);
+    expect(stub.first().argv).not.toContain("--messaging-socket");
+  });
+
+  it("messaging socket: exits 0 and fail-open when lore fails with the variable set", () => {
+    const stub = makeStub({ exit: 2 });
+    const run = runHook(sessionStart("sess-ms"), stub.dir, { CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/x/1.sock" });
+    expect(expectOneContextLine(run)).toContain("exit 2");
   });
 });

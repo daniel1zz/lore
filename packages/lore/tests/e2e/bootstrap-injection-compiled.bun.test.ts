@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref SPEC-080 §Projection Contract, §Public Interface — task
  *   task-skill-test-t6-compiled-binary-e2e-injection-knobs-json-pin,
@@ -77,11 +79,13 @@
  * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
+import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -225,7 +229,8 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
 
 /**
  * Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport`
- * shape, REGRESSION-pinned as an exact 10-key set. `archive_candidates` (SPEC
+ * shape, REGRESSION-pinned as an exact 12-key set (`architecture`, the architecture tree root or an
+ * explicit null, sits right after `root`; session-service.ts::bootstrap). `archive_candidates` (SPEC
  * spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions
  * D4) is the newest, LAST-inserted key (`session-service.ts::bootstrap`'s own
  * `report` object literal appends it after `active_sessions`) — unlike the
@@ -234,6 +239,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
  */
 const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "root",
+  "architecture",
   "active_plans",
   "pending_reviews",
   "my_claims",
@@ -243,6 +249,8 @@ const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "corpus",
   "active_sessions",
   "archive_candidates",
+  // BR-1379: the complete-plans summary, appended last by commands/bootstrap.ts (always present, even with no complete plan).
+  "plan_acceptance",
 ] as const;
 
 describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-budget contract", () => {
@@ -266,7 +274,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     }
   });
 
-  it("REGRESSION: plain --json on the same corpus has exactly the literal 10-key BootstrapReport set", async () => {
+  it("REGRESSION: plain --json on the same corpus has exactly the literal 12-key BootstrapReport set", async () => {
     const result = await runLore(["bootstrap", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
@@ -274,7 +282,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(envelope.ok).toBe(true);
 
     const keys = Object.keys(envelope.data);
-    expect(keys).toHaveLength(10);
+    expect(keys).toHaveLength(12);
     expect(keys).toEqual([...PLAIN_BOOTSTRAP_REPORT_KEYS]);
     // Never touched by the injection projection: no condensed armed_gates
     // string[], no omitted ledger.
@@ -325,9 +333,7 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     // inert-a-wholesale named. Appending is safe here because this is the
     // FIRST workflow override on this fixture's config. The `review` key empties judgment_required_types:
     // plans are judged by default (BR-281 / BR-1237) and this plan is approved only to be archived.
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    const existing = readFileSync(cfgPath, "utf8");
-    writeFileSync(cfgPath, `${existing}\nworkflow:\n  gates:\n    "plan-close":\n      enabled: false\n  review:\n    judgment_required_types: []\n`, "utf8");
+    patchLoreConfig(dir, `workflow:\n  gates:\n    "plan-close":\n      enabled: false\n  review:\n    judgment_required_types: []\n`);
 
     const prdResult = await runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
     expect(prdResult.exitCode).toBe(0);
@@ -341,10 +347,11 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     planSlug = parseSlug(planResult.stdout);
 
     expect((await runLore(["set", planSlug, "--status", "approved"], dir)).exitCode).toBe(0);
-    expect((await runLore(["set", planSlug, "--status", "archived"], dir)).exitCode).toBe(0);
 
-    // Created AFTER the plan archived — a genuine R4 done_plan_straggler
-    // candidate, never touched by the R1 cascade.
+    // BR-1379: archived is terminal — creating a task under an archived plan exits 4, and
+    // `set --status archived` cascades the plan's tasks. A genuine R4 done_plan_straggler
+    // (open task, archived plan) is therefore built in the only order the write path
+    // allows: the task first, then the plan archived WITHOUT the cascade (legacy-shape helper).
     const taskResult = await runLore(
       [
         "create",
@@ -362,6 +369,7 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
       dir,
     );
     expect(taskResult.exitCode).toBe(0);
+    archivePlanWithoutCascade(dir, planSlug);
     // reason: the created slug is only used implicitly (it's what makes
     // archive_candidates positive) — no per-doc identity assertion needed
     // for this suite, which is scoped to the INJECTION SHAPE, not R4's own

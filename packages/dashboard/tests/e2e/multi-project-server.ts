@@ -42,6 +42,7 @@ import { resolveEntryInvocation } from "../../../lore/src/adapters/cli/run-cli.j
 import type { App } from "../../../lore/src/app.js";
 import { startHttpServer } from "../../../lore/src/adapters/http/index.js";
 import { createMachineAuthStores } from "../../../lore/src/adapters/http/machine-auth.js";
+import { resolveHumanSessionBinding } from "../../../lore/src/adapters/cli/human-session-file.js";
 import { ensureLocalApiKey } from "../../../lore/src/adapters/cli/local-key.js";
 import { createMountRegistry } from "../../../lore/src/mount/mount-registry.js";
 import type { MountRegistry } from "../../../lore/src/mount/types.js";
@@ -95,6 +96,11 @@ async function main(): Promise<void> {
     host,
     io: inv.io,
     machineAuth,
+    // reason: the server `lore dashboard` runs: a cookie write is made by the checkout's open human session.
+    humanWrites: {
+      checkoutRoot: primaryProjectRoot,
+      humanSessionOf: (checkout) => resolveHumanSessionBinding(inv.env, inv.paths.home, checkout),
+    },
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
   });
 

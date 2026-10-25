@@ -42,14 +42,14 @@ function render(version: string, kind: (typeof KINDS)[number]): string {
 }
 
 describe("review prompt v5", () => {
-  it("STATE: the current version is v5 and the registry holds exactly v1..v5", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v5");
-    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v2", "v3", "v4", "v5"]);
+  it("STATE: v5 stays registered (frozen) and the registry holds exactly v1 and v3..v7", () => {
+    expect(REVIEW_PROMPT_VERSION).not.toBe("v5");
+    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v3", "v4", "v5", "v6", "v7"]);
     expect(typeof REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]).toBe("function");
   });
 
   it("ERROR: an unknown version key is not registered", () => {
-    expect(REVIEW_TEMPLATES["v6"]).toBeUndefined();
+    expect(REVIEW_TEMPLATES["v8"]).toBeUndefined();
   });
 
   it.each(KINDS)("HAPPY: the v5 prompt for a %s lists the four non-findings", (kind) => {
@@ -83,7 +83,7 @@ describe("review prompt v5", () => {
     expect(prompt).toContain('MUST contain NO entry with dimension "design_necessity"');
   });
 
-  it.each(["v1", "v2", "v3", "v4"])("NEGATIVE: the %s prompt has no v5 classification wording", (version) => {
+  it.each(["v1", "v3", "v4"])("NEGATIVE: the %s prompt has no v5 classification wording", (version) => {
     for (const kind of KINDS) {
       expect(render(version, kind)).not.toContain("FIRST list every candidate item");
       expect(render(version, kind)).not.toContain("NOT findings");
@@ -101,7 +101,7 @@ describe("review prompt v5", () => {
     expect(v5.indexOf("- DESIGN NECESSITY", start + 1)).toBe(-1);
   });
 
-  it.each(["v1", "v2", "v3", "v4"])("REGRESSION: %s output is byte-identical to the frozen snapshot", (version) => {
+  it.each(["v1", "v3", "v4"])("REGRESSION: %s output is byte-identical to the frozen snapshot", (version) => {
     for (const kind of KINDS) {
       expect(render(version, kind)).toBe(FROZEN[`${version}:${kind}`]);
     }

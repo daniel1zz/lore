@@ -3,10 +3,10 @@ id: KN-137
 type: knowledge
 role: knowledge
 title: "Assessment: Plan — SPEC-067 AI-surface robustness (2026-07-23)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-23
-updated: 2026-07-24
+updated: 2026-10-23
 tags: []
 parent: PLAN-053
 links:

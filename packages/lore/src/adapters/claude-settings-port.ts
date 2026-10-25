@@ -18,13 +18,15 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { err, LANGUAGE_NAMES, ok } from "@lore/core";
+import { err, languageName, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 
 /** Minimal file port. `read` returns null ONLY for a missing file; other failures throw. */
 export interface ClaudeSettingsFs {
+  /** @lore-site BR-827 */
   read(path: string): string | null;
   /** Creates parent directories as needed. May throw on a genuine IO failure. */
+  /** @lore-site BR-827 */
   write(path: string, content: string): void;
 }
 
@@ -36,16 +38,7 @@ export type LanguageLayer = "global" | "project";
  * @returns err(VALIDATION_ERROR) naming the code and layer when the code is unknown.
  */
 export function resolveLanguageName(code: string, layer: LanguageLayer): Result<string, LoreError> {
-  // reason: Object.hasOwn — "constructor"/"toString" must not resolve through the prototype.
-  if (!Object.hasOwn(LANGUAGE_NAMES, code)) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "context.language",
-      message: `${layer} context.language "${code}" is not a known code (known: ${Object.keys(LANGUAGE_NAMES).join(", ")})`,
-      value: code,
-    });
-  }
-  return ok((LANGUAGE_NAMES as Readonly<Record<string, string>>)[code] as string);
+  return languageName(code, "context.language", layer);
 }
 
 function detectIndent(raw: string): number | string {
@@ -79,6 +72,7 @@ export class ClaudeSettingsPort {
         field: "settings",
         message: `${path} is not valid JSON, refusing to overwrite it: ${cause instanceof Error ? cause.message : String(cause)}`,
         value: path,
+        rule: "BR-827",
       });
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -87,6 +81,7 @@ export class ClaudeSettingsPort {
         field: "settings",
         message: `${path} must hold a JSON object at its root, refusing to overwrite it`,
         value: path,
+        rule: "BR-827",
       });
     }
 

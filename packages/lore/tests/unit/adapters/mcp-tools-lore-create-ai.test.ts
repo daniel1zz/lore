@@ -71,7 +71,7 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     new NoOpTelemetry(),
     false,
     8000, // refineMaxInputChars — SPEC-019 default (tests don't exercise truncation)
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 }, // assessBudgets — SPEC-026 default
+    { max_diff_chars: 24000 }, // assessBudgets — SPEC-026 default
   );
 
   const app: App = {

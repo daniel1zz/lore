@@ -9,7 +9,7 @@ created: 2026-07-26
 updated: 2026-10-17
 tags: []
 links:
-  - {id: SPEC-211, type: implements}
+  - {id: SPEC-241, type: implements}
 ---
 # SPEC-083 — Governance prose runtime injection: retire the installed corpus-workflow.md
 

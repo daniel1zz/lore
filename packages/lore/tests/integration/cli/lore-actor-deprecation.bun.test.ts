@@ -26,7 +26,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
 import { actedStore } from "../../live-invocation.js";
 
@@ -101,7 +100,6 @@ beforeAll(async () => {
   mustLore(["create", "prd", "--title", "Deprecation Root", "--content", "root", "--no-ai"], dir, SETUP);
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(dir, ["override-attestation"]);
 });
 
 afterAll(() => {
@@ -121,8 +119,15 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
     mustLore(["evidence", task, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row"], dir, null, ACTOR_Y);
     const since = new Date().toISOString();
     // the session names the holder; the decoy env value (Z) must not take part in resolution.
-    const r = lore(["done", task, "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"], dir, ACTOR_Z, ACTOR_Y);
-    expect(r.exitCode).toBe(0);
+    // the no-new-tests floor wants a runner-produced red run; a hand-typed row never counts, so the audited declaration
+    // clears it, and `--override-attestation` clears the attested-pass floor (the two floors are independent).
+    const r = lore(
+      ["done", task, "--declare-no-new-tests", "retired-variable fixture: a throwaway task adds no test", "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"],
+      dir,
+      ACTOR_Z,
+      ACTOR_Y,
+    );
+    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     const rows = await auditSince(since);
     // the process really did several writes, so "no mention" is not just "one write -> no mention"
     expect(rows.filter((row) => row.actor === ACTOR_Y_SESSION).length).toBeGreaterThanOrEqual(3);

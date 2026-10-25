@@ -3,10 +3,10 @@ id: KN-021
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-032 Implementation — output-contract mechanization (2026-07-06)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-06
-updated: 2026-07-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-012
 links:

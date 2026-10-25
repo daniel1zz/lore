@@ -3,10 +3,10 @@ id: KN-699
 type: knowledge
 role: knowledge
 title: "Proposals moved out of the defect channel (2026-10-16 audit, BR-1153)"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PRD-001
 ---

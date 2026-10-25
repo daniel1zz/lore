@@ -80,7 +80,7 @@ async function makeSandbox(): Promise<Sandbox> {
 
 function writeRulesFragment(dir: string, id: string, body: string): void {
   mkdirSync(dir, { recursive: true });
-  const front = ["---", `id: ${id}`, `title: fixture ${id}`, 'audience: ["main"]', "mode: static", "---", ""].join("\n");
+  const front = ["---", `id: ${id}`, `title: fixture ${id}`, "inject: [launch]", "---", ""].join("\n");
   writeFileSync(join(dir, `${id}.md`), `${front}${body}\n`, "utf8");
 }
 

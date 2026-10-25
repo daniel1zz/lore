@@ -585,8 +585,8 @@ export function loadFileMap(repoRoot: string): FileMap {
     }
   }
 
-  // reason: scripts/ hosts this repo's OWN deterministic gates (test-budget
-  // ledger, AC-ref integrity, this selector) plus its vitest suite
+  // reason: scripts/ hosts this repo's OWN deterministic gates (AC-ref
+  // integrity, this selector) plus its vitest suite
   // (scripts/tests/*.test.ts) — omitted from the original packages/*-only
   // universe, which left a changed scripts/tests/*.test.ts unselected even
   // under rule (a) ("changed test files") and left every scripts/*.ts source

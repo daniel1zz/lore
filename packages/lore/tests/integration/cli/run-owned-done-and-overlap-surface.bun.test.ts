@@ -19,7 +19,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { sessionActorFor } from "../../helpers/session-actor";
-import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import {
   R1,
   R2,
@@ -44,8 +43,6 @@ beforeAll(async () => {
   gated = await createCorpus({ claimGates: "enabled" });
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(plain.dir, ["override-attestation"]);
-  await loosenOverrideClasses(gated.dir, ["override-attestation"]);
 });
 
 afterAll(() => {

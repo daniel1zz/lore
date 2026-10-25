@@ -3,10 +3,10 @@ id: KN-559
 type: knowledge
 role: knowledge
 title: "Assessment: Land the two mirror command surfaces: one row contract for list --json, a real argv parser for export-spec-mirror (2026-08-25)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-23
 tags: []
 parent: PLAN-148
 links:

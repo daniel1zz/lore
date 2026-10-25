@@ -23,6 +23,7 @@
  * @spec_ref spec-p0-requirement-coverage-falsifying-criteria-for-the-8 AC-P0C-8
  */
 import { test, expect, type Page } from "@playwright/test";
+import { E2E_HUMAN_NAME } from "./known-party";
 import { loadMultiProjectFixture, type MultiProjectFixture } from "./multi-project-fixture-data";
 
 const API_ORIGIN = "http://localhost:8787";
@@ -118,6 +119,9 @@ test.describe("BR-996 write parity: registered project vs launch project", () =>
     expect(bUpdate, "project-b has an update audit row for the accepted write").toBeDefined();
     expect(aUpdate, "launch project has an update audit row for the accepted write").toBeDefined();
     expect(bUpdate!.actor).toBe(aUpdate!.actor);
+    // The recorded person is the one whose human session the fixture opened in each checkout
+    // (known-party.ts, multi-project-global-setup.ts step 1b), read at write time (GitHub #324).
+    expect(bUpdate!.actor).toBe(E2E_HUMAN_NAME);
     // The static bootstrap-key identity must never be the recorded person.
     expect(bUpdate!.actor).not.toBe("dashboard-local");
     expect(bUpdate!.actor).not.toBe("admin");

@@ -29,9 +29,13 @@
  * holds an OS lock on the worktree for its whole duration, so a killed run frees it with nothing to clean up).
  *
  * The floor runs against a snapshot of the shared corpus (INT-T12): a consistent `VACUUM INTO` copy written to
- * `<integration worktree>/.lore/lore.db` just before the floor and removed right after, so a branch that adds a DB
- * migration can pass the floor without migrating the live corpus. The line `integrate: floor runs against a corpus
- * snapshot taken <iso ts>` is printed per attempt.
+ * `<integration worktree>/.lore/lore.db` just before the floor and removed right after. The line `integrate: floor runs
+ * against a corpus snapshot taken <iso ts>` is printed per attempt. Corpus upgrades are explicit (an older corpus is
+ * refused), so with `workflow.integrate.migrate_command` set (the branch binary's `lore migrate schema`) the snapshot is
+ * migrated before the floor (a failure = `snapshot_migrate_failed`, exit 1, main unchanged), and after landing, refresh and
+ * rebuild the live corpus is migrated once; the outcome carries `schema` and a line `schema: <from> -> <to>` or
+ * `schema: already current` (a failure there is exit 1 with the corpus and the exact command to rerun; main stays landed).
+ * See `IntegrateService.landOn` and `IntegrateService.migrateLiveCorpus`.
  *
  * After landing (and on an already-integrated no-op) the shared checkout's detached view is moved to main with a plain
  * `git checkout --detach main`; the outcome carries `shared_view` = refreshed | kept_dirty <paths> | not_measured <reason>.
@@ -49,17 +53,27 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
+import { GOVERNING_PACKAGE_JSON, err, isTerminalStatus, ok, resolveMemoryFileBudgets, scanPackageScripts, type DocStatus } from "@lore/core";
+import { buildRealFsProbe } from "../../real-fs-probe.js";
+import { discoverFragmentDocuments, discoverMemoryFiles } from "../../real-memory-file-probe.js";
+import { buildReferenceIndex, findBindings } from "../../../service/code-reference-index.js";
 import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-snapshot.js";
 import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
+import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
+import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
+import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
   IntegrateService,
+  describeSchemaMigration,
   integrateExitCode,
   type FloorRunner,
   type IntegrateGit,
   type IntegrateOutcome,
+  type TaskCompletion,
+  type SchemaMigration,
   type SharedViewRebuild,
   type SharedViewRefresh,
 } from "../../../service/integrate-service.js";
@@ -110,6 +124,16 @@ function floorRunnerFor(ambient: AmbientEnv): FloorRunner {
   };
 }
 
+/** UTF-8 content of `path`, or null when it does not exist; any other fault throws (the co-change loader reports it). */
+function readFileOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 /** The main checkout's root, from the git common dir of `cwd` (so a linked session worktree still names the one main checkout). */
 function mainCheckoutRoot(runGit: IntegrateGit, cwd: string): string | undefined {
   const out = runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
@@ -142,12 +166,34 @@ function renderRebuild(rebuild: SharedViewRebuild): string {
   }
 }
 
+/** The live-corpus migrate line; a failure goes to stderr (the landing stands) with the corpus and the exact command to rerun. */
+function renderSchema(schema: SchemaMigration): { out?: string; err?: string } {
+  if (schema.state !== "failed") return { out: `integrate: ${describeSchemaMigration(schema)}` };
+  return {
+    err:
+      `integrate: ${describeSchemaMigration(schema)}; main stays landed, the live corpus was NOT upgraded\n${schema.output_tail.trimEnd()}\n` +
+      `integrate: rerun in the shared checkout: ${schema.command}`,
+  };
+}
+
+/** Joins the landed/already-integrated stdout lines with the schema line, and carries a schema failure to stderr. */
+function withSchema(head: string, schema: SchemaMigration): { out?: string; err?: string } {
+  const rendered = renderSchema(schema);
+  return { out: rendered.out === undefined ? head : `${head}\n${rendered.out}`, ...(rendered.err !== undefined ? { err: rendered.err } : {}) };
+}
+
 function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string } {
   switch (outcome.kind) {
     case "landed":
-      return { out: `integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}` };
+      return withSchema(`integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}`, outcome.schema);
     case "already_integrated":
-      return { out: `integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}` };
+      return withSchema(`integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}`, outcome.schema);
+    case "snapshot_migrate_failed":
+      return {
+        err:
+          `integrate: migrating the floor's corpus snapshot ${outcome.snapshot} failed (exit ${outcome.exit_status}, \`${outcome.command}\`); the floor did not run and main is unchanged\n` +
+          `${outcome.output_tail.trimEnd()}\nintegrate: fix the migration in ${outcome.branch} and re-run`,
+      };
     case "floor_failed":
       return {
         err:
@@ -196,6 +242,13 @@ export default defineLoreCommand({
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
+      // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
+      // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
+      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+        inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
+        return exitCode(verifiedIdentity.error);
+      }
       const corpusDir = dirname(resolvePath(dbPath));
       const projectRoot = dirname(corpusDir);
       const mainRoot = mainCheckoutRoot(runGit, projectRoot);
@@ -203,6 +256,26 @@ export default defineLoreCommand({
         inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
         return 1;
       }
+      const ownership = app.branchOwnershipReader;
+      if (ownership === undefined) {
+        inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
+        return 1;
+      }
+      const drift = app.driftCheckService;
+      if (drift === undefined) {
+        inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
+        return 1;
+      }
+      const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
+        spawnDetachedReviewBatch({
+          cwd: projectRoot,
+          corpusDir,
+          execPath: inv.execPath,
+          isCompiled: inv.isCompiled,
+          env: inv.env,
+          harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
+        }),
+      );
       const service = new IntegrateService({
         git: runGit,
         lease: sqliteIntegrationLease,
@@ -215,6 +288,81 @@ export default defineLoreCommand({
         attempts: new IntegrateAttemptLedger(corpusDir),
         // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
         landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
+        // BR-1355: spec and knowledge anchors follow the files the branch renamed, through the corpus write route
+        anchors: { follow: (moves, landing) => drift.followMovedFiles(moves, landing) },
+        // BR-1356: the done walk for every task of the landed branch; a refusal prints and never un-lands main
+        completion: {
+          complete: async (tasks) => {
+            const identity = await app.verifiedInvocationIdentity?.();
+            if (identity !== undefined && !identity.ok) {
+              return tasks.map((task) => ({ task, outcome: "refused" as const, message: formatErrorFor(inv, identity.error) }));
+            }
+            const by = resolveActor(inv);
+            const callerSession = resolveCallerSession(undefined, inv.env);
+            const doneOpts = {
+              by,
+              harnessRun: identity?.value?.harnessRun ?? null,
+              source: app.callerSurface,
+              ...(callerSession !== undefined ? { callerSession } : {}),
+            };
+            const completions: TaskCompletion[] = [];
+            for (const task of tasks) {
+              const done = await app.taskWorkflowService.done(task, doneOpts);
+              if (done.ok) {
+                completions.push({ task, outcome: "archived" });
+                continue;
+              }
+              const floor = (done.error as { details?: { floor?: unknown } }).details?.floor;
+              completions.push({ task, outcome: "refused", ...(typeof floor === "string" ? { floor } : {}), message: formatErrorFor(inv, done.error) });
+            }
+            return completions;
+          },
+        },
+        // BR-1379: after a landing, one detached review batch when plans need review and no lease is live; never waited for
+        ...(reviewBatch !== undefined ? { reviewBatch: { start: () => reviewBatch.start() } } : {}),
+        // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
+        ownDiff: new OwnDiffJudgment({
+          git: runGit,
+          projectRoot,
+          ownership,
+          codeAnchors: {
+            read: async () => {
+              const declared = await drift.listDeclaredAnchors();
+              if (!declared.ok) return declared;
+              return ok(
+                declared.value
+                  .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
+                  .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
+              );
+            },
+          },
+          // AC-LG-7: the prose bound to each changed file (what `lore refs <path>` lists), replacing the post-edit hook
+          boundProse: {
+            read: async (paths) => {
+              const declared = await drift.listDeclaredAnchors();
+              if (!declared.ok) return declared;
+              const probe = buildRealFsProbe(projectRoot);
+              let knownScripts: ReadonlySet<string> = new Set();
+              if (probe.stat(GOVERNING_PACKAGE_JSON) === "file") {
+                const scripts = scanPackageScripts(probe.readFile(GOVERNING_PACKAGE_JSON) ?? "");
+                if (scripts === undefined) {
+                  return err({ code: "VALIDATION_ERROR", field: GOVERNING_PACKAGE_JSON, message: `${GOVERNING_PACKAGE_JSON} has no usable scripts object` });
+                }
+                knownScripts = scripts;
+              }
+              const index = buildReferenceIndex({
+                declaredAnchors: declared.value,
+                memoryFiles: discoverMemoryFiles(projectRoot, resolveMemoryFileBudgets(config).filenames),
+                fragments: discoverFragmentDocuments(projectRoot),
+                knownScripts,
+                probe,
+              });
+              return ok(paths.map((path) => ({ path, bindings: findBindings(index, path) })));
+            },
+          },
+          loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
+          matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
+        }),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
         log: (line) => inv.io.stdout.write(`${line}\n`),
@@ -224,6 +372,8 @@ export default defineLoreCommand({
         sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
         floorCommand: config?.workflow?.integrate?.floor_command,
         postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
+        migrateCommand: config?.workflow?.integrate?.migrate_command,
+        harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
       if (!result.ok) {

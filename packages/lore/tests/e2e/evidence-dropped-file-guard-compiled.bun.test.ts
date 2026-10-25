@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Compiled-binary e2e for the `lore evidence` dropped-file guard — closes
  * task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a (re-derived by

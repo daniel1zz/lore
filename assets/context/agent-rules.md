@@ -1,8 +1,8 @@
 ---
 id: agent-rules
 title: "Subagent discipline carried in place of CLAUDE.md"
-audience: ["subagent:lore-implementer", "subagent:lore-reader"]
-mode: static
+inject: [subagent-start]
+agents: [lore-implementer, lore-reader]
 ---
 ## Subagent discipline (CLAUDE.md is not loaded for you)
 

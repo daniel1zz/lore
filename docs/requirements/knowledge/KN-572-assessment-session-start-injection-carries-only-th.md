@@ -3,10 +3,10 @@ id: KN-572
 type: knowledge
 role: knowledge
 title: "Assessment: Session-start injection carries only the seat's own items (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-157
 links:

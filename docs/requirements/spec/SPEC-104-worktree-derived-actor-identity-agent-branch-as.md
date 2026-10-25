@@ -6,7 +6,7 @@ title: "Worktree-derived actor identity — agent:<branch> as deterministic defa
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-17
+updated: 2026-10-20
 tags: []
 links:
   - {id: SPEC-090, type: relates-to}
@@ -58,19 +58,19 @@ Structured ACs via `lore ac add` (script:test):
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-ACTOR-1: In a linked worktree on branch B with no --by or LORE_ACTOR, resolveActorWithSource returns actor agent:B with source worktree-derived and prints no os-fallback warning
+- [⊖] [script] AC-ACTOR-1: In a linked worktree on branch B with no --by or LORE_ACTOR, resolveActorWithSource returns actor agent:B with source worktree-derived and prints no os-fallback warning
   script: test — bunx --bun vitest run packages/lore/tests/unit/cli/actor-worktree-derivation.bun.test.ts -t AC-ACTOR-1
   other_command=3
-- [⚑] [script] AC-ACTOR-3: In the main checkout with no identity, resolution is OS username with source os-fallback and the warning, byte-identical to today
+- [⊖] [script] AC-ACTOR-3: In the main checkout with no identity, resolution is OS username with source os-fallback and the warning, byte-identical to today
   script: test — bunx --bun vitest run packages/lore/tests/unit/cli/actor-worktree-derivation.bun.test.ts -t AC-ACTOR-3
   other_command=3
-- [⚑] [script] AC-ACTOR-4: Detached HEAD and unreadable or missing gitdir each fall back to os-fallback without throwing
+- [⊖] [script] AC-ACTOR-4: Detached HEAD and unreadable or missing gitdir each fall back to os-fallback without throwing
   script: test — bunx --bun vitest run packages/lore/tests/unit/cli/actor-worktree-derivation.bun.test.ts -t AC-ACTOR-4
   other_command=3
-- [⚑] [script] AC-ACTOR-5: lore claim from a linked worktree with no identity records the claim under agent:<branch> with identitySource worktree-derived
+- [⊖] [script] AC-ACTOR-5: lore claim from a linked worktree with no identity records the claim under agent:<branch> with identitySource worktree-derived
   script: test — bunx --bun vitest run packages/lore/tests/unit/cli/actor-worktree-derivation.bun.test.ts -t AC-ACTOR-5
   other_command=3
-- [⚑] [script] AC-ACTOR-2: Explicit flag --by and env LORE_ACTOR each take precedence over worktree derivation inside a linked worktree
+- [⊖] [script] AC-ACTOR-2: Explicit flag --by and env LORE_ACTOR each take precedence over worktree derivation inside a linked worktree
   script: test — bunx --bun vitest run packages/lore/tests/unit/cli/actor-worktree-derivation.bun.test.ts -t AC-ACTOR-2
   other_command=3
 

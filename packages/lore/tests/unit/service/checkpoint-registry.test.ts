@@ -411,17 +411,14 @@ describe("checkpointRegistry", () => {
     });
 
     // BOUNDARY — no spec-tier ancestor ⇒ upstreamApproved is skipped, but
-    // noAnchorOverlap AND actorIdentityGuard (spec claim-time-actor-identity-
-    // guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) STILL run
-    // (SPEC-042 D5 — this checkpoint no longer short-circuits any of the
-    // three predicates on hasSpecParent:false, only the upstream one; with no
-    // candidateAnchors/siblingClaims/candidateIdentitySource supplied here,
-    // both vacuously pass, so the overall result is still an unblocked pass —
-    // just no longer a literal empty array).
-    it("check() runs noAnchorOverlap and actorIdentityGuard unconditionally even when hasSpecParent is false (SPEC-042 D5)", () => {
+    // noAnchorOverlap STILL runs (SPEC-042 D5 — this checkpoint no longer
+    // short-circuits it on hasSpecParent:false, only the upstream one; with no
+    // candidateAnchors/siblingClaims supplied here it vacuously passes, so the
+    // overall result is still an unblocked pass — just no longer a literal empty array).
+    it("check() runs noAnchorOverlap unconditionally even when hasSpecParent is false (SPEC-042 D5)", () => {
       const results = checkpoint.check({ hasSpecParent: false });
       expect(isCheckpointBlocked(results)).toBe(false);
-      expect(results).toEqual([{ ok: true }, { ok: true }]);
+      expect(results).toEqual([{ ok: true }]);
     });
 
     // REGRESSION (SPEC-042 D5, AC-S3-3) — the hole two adversarial-review lenses
@@ -664,30 +661,5 @@ describe("reachability unknown vs known-false (verifyReachability / describeReac
   // unchanged by this fix.
   it("BOUNDARY: verifyReachability('spec', 0) still reports no-script-acs unchanged", () => {
     expect(verifyReachability("spec", 0)).toEqual({ reachable: false, why: "no-script-acs" });
-  });
-
-  // STATE — the live incident shape: a plan-close ctx that never populated
-  // `hasSpecParent`/`parentSpecScriptAcCount` at all (exactly what
-  // `CorpusService.set`'s real plan-close call site does today, pre-fix) must
-  // render NEITHER definite reachability claim in the feeding pack.
-  it("STATE: plan-close feed for an unknown-reachability ctx renders neither definite reachability claim", () => {
-    const planClose = checkpointRegistry["plan-close"];
-    if (planClose === undefined) {
-      throw new Error("plan-close checkpoint not registered — test fixture assumption broken");
-    }
-    const ctx: GateContext = {
-      targetIdOrSlug: "plan-example",
-      attestationMinRatio: 0.5,
-      planTasksAttestation: [{ slug: "task-1", title: "Task One", evidenceCount: 3, attestedCount: 0 }],
-      // hasSpecParent / parentSpecScriptAcCount deliberately OMITTED — mirrors
-      // the live bug: plan-close's real caller never populates these today.
-    };
-    // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
-    // `checkPlanClose`'s check() can now also return a `PredicateNotApplicable`
-    // member; `selectFailures` (already imported above) narrows those out.
-    const failures = selectFailures(planClose.check(ctx));
-    const text = planClose.feed(ctx, failures);
-    expect(text).not.toContain("no spec-tier ancestor");
-    expect(text).not.toContain("zero script-mode");
   });
 });

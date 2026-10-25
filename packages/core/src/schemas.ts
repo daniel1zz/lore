@@ -12,8 +12,8 @@ import { VALID_TRANSITIONS } from "./lifecycle.js";
 // terminal?" without an import cycle (schemas.ts imports task-workflow.ts values at load time). Re-exported here
 // verbatim so every existing importer of these names is unchanged.
 export { isValidTransition, getAllowedTransitions, isTerminalStatus } from "./lifecycle.js";
-import { assessmentResultSchema } from "./assessment.js";
 import { uatVerdictSchema } from "./uat.js";
+import { milestoneReviewSchema } from "./milestone-review.js";
 import { prdRequirementsSchema } from "./requirement.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
@@ -85,6 +85,10 @@ export const linkTypeSchema = z.enum([
   // "resolves" is RETIRED (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1):
   // the carrier is `extra.issues` on a task or plan. Stored legacy rows are read by
   // `lore issues migrate`; CorpusService.link refuses to create a new one.
+  // "known-defect": from = a plan accepted with known defects, to = the issue task (carrying extra.issue_report)
+  // that files one of its defects. NOT a fix: archiving the plan never closes the issue (#404), and plan-close
+  // coverage reads this link type only. Written by the review batch and `lore assess --file-issues`.
+  "known-defect",
 ]);
 
 /**
@@ -132,12 +136,10 @@ export const adrExtraSchema = z
 /**
  * Extra fields for knowledge documents.
  *
- * @invariant sub_type "assessment" is written exclusively by `lore assess` (SPEC-026) —
- *   it requires a Zod-valid `extra.assessment` (superRefine below). Manually creating a
- *   knowledge doc with sub_type="assessment" via `lore create` without a matching
- *   `extra.assessment` payload fails loud rather than silently accepting a half-formed
- *   assessment doc.
- * Source: SPEC-002 §2 (base sub_types), SPEC-026 §3 D4, D6 (assessment sub_type)
+ * @invariant sub_type "assessment" is the RETIRED plan-outcome assessment (BR-1372). Existing docs are archived and
+ *   read as plain documents: `extra.assessment` rides the passthrough raw and no schema parses it. Creating a new one
+ *   is refused by `CorpusService` (the value stays in `KNOWLEDGE_SUB_TYPES` only so the archived docs still validate).
+ * Source: SPEC-002 §2 (base sub_types); spec-lean-governance-batch-verbs-judgment-only-at-milestones Part D
  */
 /**
  * Zod schema for a knowledge document's `extra.sub_type` — SSOT is
@@ -150,7 +152,7 @@ export const knowledgeSubTypeSchema = z.enum(KNOWLEDGE_SUB_TYPES);
  * artifact riding knowledge's existing review/version/calibration machinery (upstream
  * asset consolidation; no new top-level doc type). Both fields are OPTIONAL — a
  * `sub_type: "prompt"` doc with no nested `extra.prompt` at all is still valid (unlike
- * `sub_type: "assessment"`, which hard-requires `extra.assessment` — prompts have no
+ * `sub_type: "handoff"`, which hard-requires `extra.handoff` — prompts have no
  * analogous cross-field requirement).
  */
 export const promptExtraSchema = z.object({
@@ -181,8 +183,8 @@ export type SkillExtra = z.infer<typeof skillExtraSchema>;
 export const knowledgeExtraSchema = z
   .object({
     sub_type: knowledgeSubTypeSchema,
-    /** Present iff sub_type === "assessment" — the Zod-typed SSOT judge result. */
-    assessment: assessmentResultSchema.optional(),
+    /** Present iff sub_type === "milestone-review" — the stored seven-dimension review (BR-1372). */
+    milestone_review: milestoneReviewSchema.optional(),
     /** Present only for sub_type === "prompt"; optional even then (see schema JSDoc). */
     prompt: promptExtraSchema.optional(),
     /** Present only for sub_type === "skill"; optional even then (see schema JSDoc). */
@@ -208,14 +210,13 @@ export const knowledgeExtraSchema = z
   })
   .passthrough()
   .superRefine((data, ctx) => {
-    // reason: cross-field requirement (sub_type "assessment" implies extra.assessment)
-    // cannot be expressed as a plain Zod object shape — same pattern as planExtraSchema's
-    // phases[].name uniqueness check above. Source: SPEC-026 §3 D4.
-    if (data.sub_type === "assessment" && data.assessment === undefined) {
+    // reason: sub_type "assessment" is the retired plan-outcome assessment. Its docs are archived and read as plain
+    // documents: the passthrough keeps `extra.assessment` raw and nothing parses it (BR-1372).
+    if (data.sub_type === "milestone-review" && data.milestone_review === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "knowledge sub_type 'assessment' requires a Zod-valid extra.assessment",
-        path: ["assessment"],
+        message: "knowledge sub_type 'milestone-review' requires a Zod-valid extra.milestone_review",
+        path: ["milestone_review"],
       });
     }
     // reason: same cross-field pattern as "assessment" above — sub_type "handoff"
@@ -714,10 +715,10 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       }
     }
 
-    // knowledge requires extra.sub_type (and, for sub_type="assessment", extra.assessment —
-    // SPEC-026 §3 D4). reason: forward knowledgeExtraSchema's own issues (e.g. the specific
-    // "requires extra.assessment" superRefine message) instead of a single generic string,
-    // so a valid sub_type with a missing/invalid extra.assessment reports the real cause.
+    // knowledge requires extra.sub_type (and the payload its sub_type needs, e.g. milestone-review's).
+    // reason: forward knowledgeExtraSchema's own issues (the specific "requires extra.<payload>"
+    // superRefine message) instead of a single generic string, so a valid sub_type with a
+    // missing/invalid payload reports the real cause.
     if (type === "knowledge") {
       const knowledgeResult = knowledgeExtraSchema.safeParse(extra ?? {});
       if (!knowledgeResult.success) {
@@ -726,7 +727,7 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
             code: z.ZodIssueCode.custom,
             message:
               issue.path[0] === "sub_type"
-                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|prompt|skill|handoff)"
+                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|milestone-review|prompt|skill|handoff)"
                 : issue.message,
             path: ["extra", ...issue.path],
           });

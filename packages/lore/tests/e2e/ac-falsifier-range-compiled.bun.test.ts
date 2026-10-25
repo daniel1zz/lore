@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * ac-falsifier-range-compiled.bun.test.ts — AC-EH-4: the falsifier exit-code range (1..255) on the REAL compiled
  * binary's `lore ac add` / `lore ac set`, on a throwaway corpus.

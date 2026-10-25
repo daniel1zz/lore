@@ -120,6 +120,8 @@ export interface TerritoryHolder {
   readonly session_id: string;
   readonly by: string;
   readonly worktree?: string;
+  /** Where the holder's main run can be messaged (`uds:<path>`), or `null` when none is recorded (BR-1363). */
+  readonly message_address: string | null;
 }
 
 /** One partitioned worktree or orphan-branch entry. */
@@ -189,6 +191,7 @@ function classify(
         session_id: session.session_id,
         by: session.by,
         ...(session.worktree !== undefined ? { worktree: session.worktree } : {}),
+        message_address: session.message_address,
       };
     }
   }
@@ -358,7 +361,8 @@ export function formatTerritoryHuman(partition: TerritoryPartition): string {
       const holderNote =
         entry.holder !== undefined
           ? ` — held by ${entry.holder.by} (session ${entry.holder.session_id}` +
-            `${entry.holder.worktree !== undefined ? `, worktree ${entry.holder.worktree}` : ""})`
+            `${entry.holder.worktree !== undefined ? `, worktree ${entry.holder.worktree}` : ""}` +
+            `, address ${entry.holder.message_address ?? "none recorded"})`
           : "";
       // reason: the human view must not silently hide a fact `--json` carries
       // (CLAUDE.md's "human renders are lossy projections" lesson) — an

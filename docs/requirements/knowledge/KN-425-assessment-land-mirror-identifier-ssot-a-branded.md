@@ -3,10 +3,10 @@ id: KN-425
 type: knowledge
 role: knowledge
 title: "Assessment: Land mirror identifier SSOT: a branded human_id, an idempotent migrate-export seam, and a drift check that writes nothing (2026-08-11)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-23
 tags: []
 parent: PLAN-125
 links:

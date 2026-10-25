@@ -94,6 +94,7 @@ export class GhIssueCloser implements IssueCloser {
 
   async readIssue(ref: GithubIssueRef): Promise<Result<GithubIssueSnapshot, LoreError>> {
     const response = await this.runner.run(["api", issuePath(ref)]);
+    /** @lore-site BR-1082 */
     if (!response.ok) return err(response.error);
     let body: unknown;
     try {
@@ -108,6 +109,7 @@ export class GhIssueCloser implements IssueCloser {
         field: "gh_issue_response",
         message: `GitHub returned an issue payload this module could not parse: ${parsed.error.message}`,
         value: response.value.stdout,
+        rule: "BR-1082",
       });
     }
     return ok({
@@ -119,6 +121,7 @@ export class GhIssueCloser implements IssueCloser {
 
   async closeIssue(ref: GithubIssueRef): Promise<Result<{ readonly alreadyClosed: boolean }, LoreError>> {
     const snapshot = await this.readIssue(ref);
+    /** @lore-site BR-1082 */
     if (!snapshot.ok) return err(snapshot.error);
     if (snapshot.value.state === "closed") return ok({ alreadyClosed: true });
     const closed = await this.runner.run([
@@ -131,12 +134,14 @@ export class GhIssueCloser implements IssueCloser {
       "-f",
       "state_reason=completed",
     ]);
+    /** @lore-site BR-1082 */
     if (!closed.ok) return err(closed.error);
     return ok({ alreadyClosed: false });
   }
 
   async commentIssue(ref: GithubIssueRef, body: string): Promise<Result<void, LoreError>> {
     const posted = await this.runner.run(["api", `${issuePath(ref)}/comments`, "-X", "POST", "-f", `body=${body}`]);
+    /** @lore-site BR-1082 */
     if (!posted.ok) return err(posted.error);
     return ok(undefined);
   }

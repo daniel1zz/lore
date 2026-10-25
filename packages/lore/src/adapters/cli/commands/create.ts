@@ -106,9 +106,8 @@ type AdrDecisionStatus = (typeof ADR_DECISION_STATUSES)[number];
 // "prompt"/"skill"). Now imported directly so CLI validation can never diverge again.
 // "assessment"/"handoff" are listed for --help discoverability but are NOT manually
 // completable via this command:
-//   - "assessment" — knowledgeExtraSchema's superRefine requires a Zod-valid
-//     extra.assessment payload that `lore create` has no flag to supply; only
-//     `lore assess` writes sub_type="assessment" docs.
+//   - "assessment" — the retired plan-outcome assessment: CorpusService refuses to create
+//     a new one (BR-1372); archived docs of that sub_type stay readable.
 //   - "handoff" — CorpusService._createImpl's writer-identity guard (SPEC-041 §3 D4)
 //     rejects `type: "knowledge"` + `extra.sub_type: "handoff"` on this command's
 //     write path with a VALIDATION_ERROR naming `lore handoff` as the sole legitimate
@@ -578,7 +577,7 @@ export default defineLoreCommand({
       // SPEC-079 G2 — resolved once, reused as the create's own audit actor
       // (both branches below) and, when --supersedes is set, the invalidate
       // step's actor too.
-      const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+      const resolvedActor = resolveActor(inv);
 
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {

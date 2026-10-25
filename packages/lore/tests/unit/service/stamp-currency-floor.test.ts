@@ -53,12 +53,8 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import { StateBindingService } from "../../../src/service/state-binding-service.js";
 import { loadStampBindingContext } from "../../../src/service/stamp-binding-reader.js";
-import {
-  ATTESTATION_FLOOR_FIELD,
-  ATTESTATION_FLOOR_REASON,
-  attestationFloor,
-  stampCurrency,
-} from "../../../src/service/gate-predicates.js";
+import { stampCurrency } from "../../../src/service/gate-predicates.js";
+import { ATTESTATION_FLOOR_FIELD, ATTESTATION_FLOOR_REASON, attestationFloor } from "../../helpers/attestation-floor-stand-in.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { actedStore } from "../../live-invocation.js";
 
@@ -531,7 +527,7 @@ describe("AC-CT-3 R13: the arming step reports the legacy rows that would become
     expect(rows.value[0]?.doc_id ?? null).toBeNull();
     expect(rows.value[0]?.details).toMatchObject({ would_become_unbound_rows: 3, would_become_unbound_docs: 2 });
 
-    const verified = await new AuditService(c.store, { verifySince: "1970-01-01T00:00:00.000Z" }).verify({});
+    const verified = await new AuditService(c.store).verify({});
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
     expect(verified.value.chain.clean).toBe(true);

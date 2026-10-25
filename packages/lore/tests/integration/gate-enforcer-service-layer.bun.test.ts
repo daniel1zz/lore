@@ -56,6 +56,7 @@ import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
 import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { runOfName } from "../helpers/test-run-identity.js";
 
 // ─── Project setup ────────────────────────────────────────────────────────────
 
@@ -487,7 +488,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
     const app = openApp();
     try {
       const { taskId } = await createSpecParentedTask(app);
-      const result = await app.taskWorkflowService.claim(taskId, { by: "alice" });
+      const result = await app.taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -514,7 +515,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
       const specApprove = await app.reviewService.approve(specId);
       if (!specApprove.ok) throw new Error(`spec approve failed: ${JSON.stringify(specApprove.error)}`);
 
-      const result = await app.taskWorkflowService.claim(taskId, { by: "alice" });
+      const result = await app.taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
       expect(result.ok).toBe(true);
     } finally {
       app.close();
@@ -525,7 +526,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
     const app = openApp(ALL_GATES_DISABLED_CONFIG);
     try {
       const { taskId } = await createSpecParentedTask(app);
-      const result = await app.taskWorkflowService.claim(taskId, { by: "alice" });
+      const result = await app.taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
       expect(result.ok).toBe(true);
     } finally {
       app.close();
@@ -550,7 +551,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
       const deleteResult = await app.corpusService.delete(planId, true);
       expect(deleteResult.ok).toBe(true);
 
-      const result = await app.taskWorkflowService.claim(taskId, { by: "tester" });
+      const result = await app.taskWorkflowService.claim(taskId, { by: "tester", harnessRun: runOfName("tester") });
       expect(result.ok).toBe(true);
     } finally {
       app.close();
@@ -565,7 +566,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
       const deleteResult = await app.corpusService.delete(planId, true);
       expect(deleteResult.ok).toBe(true);
 
-      const result = await app.taskWorkflowService.claim(taskId, { by: "tester" });
+      const result = await app.taskWorkflowService.claim(taskId, { by: "tester", harnessRun: runOfName("tester") });
       expect(result.ok).toBe(false);
     } finally {
       app.close();

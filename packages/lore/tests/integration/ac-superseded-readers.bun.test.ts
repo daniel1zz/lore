@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-15 (D15, BR-163)
  * @task task-skill-fix-a-superseded-criterion-is-still-counted-by
@@ -10,7 +12,8 @@
  * refuses a scope that holds a LIVE id; a live criterion is never `superseded`), STATE (c: MCP mark == CLI mark
  * shape, spec not demoted), REGRESSION (b control: before supersession the same task is refused by the floor).
  */
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -25,8 +28,9 @@ import {
   projectAcCoverageGlyph,
 } from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
-import { liveAmbient, liveInvocation, liveWriteContext } from "../live-invocation.js";
+import { actedStore, liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
+import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { approvePending } from "../helpers/approve-baseline.js";
 import { createApp } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 
@@ -100,9 +104,8 @@ async function createTask(title: string, scope: readonly string[]): Promise<stri
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-ac-superseded-readers-"));
   await must(["init"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:", "  gates:",
       "    spec-create:", "      enabled: false",
@@ -120,7 +123,14 @@ beforeAll(async () => {
   const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
-  specS = slugOf(await must(["create", "spec", "--title", "SR Spec S", "--content", "body", "--no-ai"]));
+  // a direct add is a pending add: the rule is citable (live) only once its leaf is approved
+  const side = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
+  try {
+    await approvePending(side, leaf);
+  } finally {
+    side.close();
+  }
+  specS =slugOf(await must(["create", "spec", "--title", "SR Spec S", "--content", "body", "--no-ai"]));
   specS2 = slugOf(await must(["create", "spec", "--title", "SR Spec S2", "--content", "body", "--no-ai"]));
   await addScriptAc(specS, "AC-1");
   await addScriptAc(specS, "AC-2");
@@ -222,7 +232,7 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     try {
       const result = (await client.callTool({
         name: "lore_ac_supersede",
-        arguments: { spec: specS, ac_id: "AC-2", by_spec: specS2, by_ac: "AC-9", reason: "replaced via MCP" },
+        arguments: { harness_run: LIVE_TEST_RUN, spec: specS, ac_id: "AC-2", by_spec: specS2, by_ac: "AC-9", reason: "replaced via MCP" },
       })) as unknown as { isError?: boolean; content: { text: string }[] };
       expect(result.isError ?? false, result.content.map((c) => c.text).join("\n")).toBe(false);
     } finally {

@@ -1,5 +1,8 @@
 // @reads .claude/**
 // @reads .lore-bootstrap/**
+// @reads service/baseline-items.ts
+// @reads adapters/cli/replica-priming.ts
+// @reads adapters/cli/migrate-schema.ts
 // @reads .lore/**
 // @reads .serena/**
 // @reads CLAUDE.md
@@ -7,7 +10,6 @@
 // @reads adapters/cli/commands/feed.ts
 // @reads adapters/cli/commands/sync.ts
 // @reads adapters/read-side-by-filters.ts
-// @reads ai/assess-template.ts
 // @reads assets/**
 // @reads commands
 // @reads commands/feed.ts

@@ -41,11 +41,20 @@ import type { Result, LoreError } from "./errors.js";
 import {
   GlobalLoreConfigSchema,
   loadConfigFromString,
-  renamePrdSyncConfigKey,
   removeRetiredAdoptionSetting,
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
+import {
+  removeRetiredActorIdentityGate,
+  removeRetiredPlanCloseKey,
+  retiredPlanCloseField,
+  RETIRED_ACTOR_IDENTITY_FIELD,
+  RETIRED_PLAN_CLOSE_KEYS,
+  RETIRED_ASSESS_BUDGET_KEYS,
+  removeRetiredAssessBudgetKey,
+  retiredAssessBudgetField,
+} from "./retired-actor-identity-migration.js";
 
 /** The invocation environment the global-config path resolvers read (`Invocation.env`). */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
@@ -59,9 +68,8 @@ const CONFIG_FILE = ".lore/config.yaml";
  * Missing file or invalid content → {ok:false, error}. Never throws.
  * `warn`, when given, receives one line per retired key the file still carries (see `retiredConfigKeyNotices`).
  *
- * NEVER WRITES. A file still carrying the retired `workflow.gates."plan-close".prd_sync` fails by name
- * (`loadConfigFromString`'s refusal, which names the fix `lore migrate config-keys --apply`); renaming it is
- * {@link migrateConfigKeys}'s job, run on purpose.
+ * NEVER WRITES. A file still carrying a retired key (`workflow.gates."plan-close".cited_rule_check`) fails as an
+ * unknown key of the strict schema; removing it is {@link migrateConfigKeys}'s job, run on purpose.
  */
 export function loadConfig(dir: string, warn?: (line: string) => void): Result<LoreConfig, LoreError> {
   try {
@@ -93,14 +101,15 @@ export interface ConfigKeysMigration {
 }
 
 /**
- * The explicit, one-time rename of retired config keys in `<dir>/.lore/config.yaml` (`lore migrate config-keys`):
- * currently `workflow.gates."plan-close".prd_sync` -> `cited_rule_check` (BL-D3). Only the key text changes; every
- * other byte of the file is identical. The write is atomic (temp file in the same directory, then rename). A second
- * run finds no old key and changes nothing.
+ * The explicit, one-time removal of retired config keys in `<dir>/.lore/config.yaml` (`lore migrate config-keys`):
+ * `workflow.gates."plan-close".cited_rule_check` and `.prd_sync` (plan close is gated by the milestone review only,
+ * BR-1372), and the retired claim-time identity setting of the `task-claim` gate (claims compare runs only), plus the unread `ai.assess.max_plan_chars`/`max_spec_chars`/`max_task_chars` budgets. Only those
+ * keys change; every other byte of the file is identical. The write is atomic (temp file in the same directory, then
+ * rename). A second run finds no old key and changes nothing.
  *
  * @param dir - project directory holding `.lore/config.yaml`
  * @param apply - `false` (dry run) reports without writing; `true` writes
- * @returns `ok(report)`; `err(VALIDATION_ERROR)` when the YAML is malformed or both names are present (nothing
+ * @returns `ok(report)`; `err(VALIDATION_ERROR)` when the YAML is malformed or a key cannot be cut line-wise (nothing
  *   written); `err(STORE_ERROR)` when the file cannot be read or written. Never throws.
  * @example
  *   migrateConfigKeys("/repo", true); // => ok({ file: "/repo/.lore/config.yaml", renamed: true, written: true, notice: "..." })
@@ -109,15 +118,33 @@ export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKey
   const file = join(dir, CONFIG_FILE);
   try {
     const raw = readFileSync(file, "utf8");
-    const renamed = renamePrdSyncConfigKey(raw);
-    if (!renamed.ok) return renamed;
-    if (renamed.value === undefined) return ok({ file, renamed: false, written: false, notice: undefined });
-    const notice =
-      `${file}: workflow.gates."plan-close".prd_sync renamed to workflow.gates."plan-close".cited_rule_check ` +
-      `(enabled: ${String(renamed.value.enabled)} kept)`;
+    let text = raw;
+    const notices: string[] = [];
+    for (const key of RETIRED_PLAN_CLOSE_KEYS) {
+      const cut = removeRetiredPlanCloseKey(text, key);
+      if (!cut.ok) return cut;
+      if (cut.value === undefined) continue;
+      text = cut.value.text;
+      notices.push(`${file}: ${retiredPlanCloseField(key)} removed (plan close is gated by the milestone review only; the setting no longer exists)`);
+    }
+    for (const key of RETIRED_ASSESS_BUDGET_KEYS) {
+      const cut = removeRetiredAssessBudgetKey(text, key);
+      if (!cut.ok) return cut;
+      if (cut.value === undefined) continue;
+      text = cut.value.text;
+      notices.push(`${file}: ${retiredAssessBudgetField(key)} removed (the plan-outcome prompt it sized no longer exists)`);
+    }
+    const removed = removeRetiredActorIdentityGate(text);
+    if (!removed.ok) return removed;
+    if (removed.value !== undefined) {
+      text = removed.value.text;
+      notices.push(`${file}: ${RETIRED_ACTOR_IDENTITY_FIELD} removed (claims compare runs only; the setting no longer exists)`);
+    }
+    if (notices.length === 0) return ok({ file, renamed: false, written: false, notice: undefined });
+    const notice = notices.join("\n");
     if (!apply) return ok({ file, renamed: true, written: false, notice });
     const tempPath = `${file}.migrating-${process.pid}`;
-    writeFileSync(tempPath, renamed.value.text, "utf8");
+    writeFileSync(tempPath, text, "utf8");
     renameSync(tempPath, file);
     return ok({ file, renamed: true, written: true, notice });
   } catch (e) {
@@ -125,6 +152,7 @@ export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKey
       code: "STORE_ERROR",
       message: e instanceof Error ? e.message : "Failed to migrate config file",
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-1306",
     } satisfies LoreError);
   }
 }
@@ -174,6 +202,7 @@ export function migrateMemoryLimits(dir: string, apply: boolean): Result<MemoryL
       code: "STORE_ERROR",
       message: e instanceof Error ? e.message : "Failed to migrate config file",
       ...(e instanceof Error ? { cause: e } : {}),
+      rule: "BR-1323",
     } satisfies LoreError);
   }
 }

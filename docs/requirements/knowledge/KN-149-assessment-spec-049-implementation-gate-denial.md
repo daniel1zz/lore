@@ -3,10 +3,10 @@ id: KN-149
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-049 implementation — gate denial feeding pack (2026-07-17)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-17
-updated: 2026-07-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-035
 links:

@@ -38,14 +38,11 @@ import {
   prdRequirementsSchema,
   computeRequirementCoverage,
   SPEC_KINDS,
-  buildTaskAttestationInfos,
-  deriveDeclaredScopeCoverage,
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
   SELF_DECLARED_ORDINAL_TITLE_REFUSAL,
   computePlanCloseCascadeTargets,
   isLedgerKnowledgeSubType,
-  computeAcCoverage,
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
   resolveStatusAfterContractEdit,
@@ -81,9 +78,11 @@ import {
 } from "@lore/core";
 import { requireSpecCitesLiveRule, specCitesLiveRuleInCorpus } from "./spec-approval-citation.js";
 import { ownProposedRules } from "./rule-changes.js";
+import { leafPlansToCompanionWrites } from "./rule-leaf-companion-writes.js";
 import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
+  CompanionDocWrite,
   ProposedRuleWrite,
   ProvenanceWriteExtras,
   RuleLeafPatch,
@@ -94,27 +93,32 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
-import { resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
+import { findTraceActorFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import {
   computeArmedGates,
   buildUpstreamSpecContext,
-  checkpointRegistry,
   countScriptModeAcceptanceCriteria,
-  describeCheckpointVacuity,
   isNonPlanParentError,
-  PLAN_CLOSE_VACUITY_NOTICE_FIELD,
-  PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD,
 } from "./checkpoint-registry.js";
-import { attestationExemptKindValid, type CitedRuleUnknown, type CitedRuleViolation } from "./gate-predicates.js";
+import {
+  assessMilestoneCurrency,
+  MILESTONE_REVIEW_SUB_TYPE,
+  type CitedRuleStateRow,
+  type MilestoneReviewCurrency,
+} from "./milestone-review.js";
+import { coverFailedDimensions, readMilestoneFindings, type DimensionCoverage, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
+import { readGithubIssueRef } from "./resolution-projector.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
 import { computeRecoverableUntil } from "./soft-delete-window.js";
 import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
 import { computeStampVerdictDistribution, type StampVerdictDistribution } from "./gate-predicates.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+import { initialPending, proposeNodePart, statusFor } from "./baseline-pending.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
@@ -122,6 +126,7 @@ import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-arc
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
+import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
 // the STORE-FREE pure read-surface projection helpers that module also exports, and they
@@ -239,6 +244,14 @@ function isUlid(input: string): boolean {
 }
 
 /**
+ * One line naming why the rule-change landing port refused, for the deprecation refusal: its own message when it
+ * carries one, else its error code.
+ */
+function describeLandingFailure(error: LoreError): string {
+  return "message" in error && typeof error.message === "string" ? error.message : error.code;
+}
+
+/**
  * Doc types eligible for the create-time orphan advisory
  * (task-create-time-orphan-advisory-warn-or-default-parent-to-root, dogfood finding
  * 2026-07-25) — `spec`/`task` are excluded because `createDocInputSchema`'s superRefine
@@ -299,6 +312,22 @@ export interface WriteActorOpts {
 export interface SetOptions extends WriteActorOpts {
   readonly expectedVersion?: number;
   readonly correction?: { readonly reason: string };
+  /**
+   * Free-text justification of this write (`lore bulk --reason`, BR-1366): written verbatim to the update audit row as
+   * `details.reason`. A note only — it relaxes no gate. Unlike `correction.reason` it needs no locked record.
+   */
+  readonly reason?: string;
+  /**
+   * Plan slug (or id) a spec DEPRECATION is made for (`--plan`): names which of several claimed plans owns the
+   * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
+   */
+  readonly plan?: string;
+  /**
+   * Plan close only: GitHub issue numbers the CALLER filed or linked in this very run. They count as open for this
+   * close (open by construction), so the close does not depend on the issue listing having caught up (#402). Coverage
+   * still requires the plan's own `milestone_findings` record on the linked issue; a number without one covers nothing.
+   */
+  readonly trustedOpenIssues?: readonly number[];
 }
 
 /**
@@ -308,6 +337,7 @@ export interface SetOptions extends WriteActorOpts {
  * The result is read as a `DocRecord` — `ApproveResult` is one, plus an optional advisory field.
  */
 export interface ApprovalPort {
+  /** @lore-site BR-77 */
   approve(
     idOrSlug: string,
     opts: { readonly reviewer: string; readonly expectedVersion?: number },
@@ -322,6 +352,7 @@ export interface ApprovalPort {
  * the first failing floor with the exact error `done()` would return (`error.details.floor === floor`).
  */
 export interface DoneFloorPort {
+  /** @lore-site BR-1072 */
   checkDoneFloors(
     taskIdOrSlug: string,
   ): Promise<Result<{ readonly floor: string; readonly error: LoreError } | null, LoreError>>;
@@ -837,12 +868,6 @@ export interface DocWriteRequest {
    */
   readonly foreignIntent?: boolean;
   /**
-   * Owner leaves of an owned-by-only site-map write (`RuleService.setSiteMap`): when `doc` itself is outside the
-   * caller's lease scope, a lease covering every one of these authorizes the write instead
-   * ({@link CorpusWriteAuthority.decide}). Absent = the target's own scope decides.
-   */
-  readonly scopeProof?: readonly DocRecord[];
-  /**
    * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
    * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
    * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
@@ -918,6 +943,11 @@ export interface ProposedRuleReserveRequest {
   readonly by?: string;
   /** See {@link DocWriteRequest.foreignIntent}. */
   readonly foreignIntent?: boolean;
+  /**
+   * The docs this write lands in, when they are baseline-scoped authoring targets (a direct pending rule add writes the
+   * leaf itself): a claim lease covering them lets the write cross into a foreign corpus, as for {@link CorpusService.allocateRule}.
+   */
+  readonly targets?: readonly DocRecord[];
 }
 
 /** A store-owned rule move, as {@link CorpusService.moveRule} takes it. */
@@ -1159,7 +1189,9 @@ export class CorpusService {
   }
 
   /** Present iff {@link setRuleStateService} was called. */
-  private ruleStateService: { full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
+  private ruleStateService: { 
+/** @lore-site BR-984 */
+full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
   /**
    * Hands the corpus service the one writer from a spec's rule change set to the baseline tree (D3 of
@@ -1219,6 +1251,90 @@ export class CorpusService {
     this.archiveIssueClosePort = port;
   }
 
+  /**
+   * Hands plan close the reader of the live OPEN GitHub issues (Part D, "accepted with known defects"). Called once by
+   * `app.ts` when `feedback.upstream` is a GitHub repository; absent ⇒ a failing review always refuses the close.
+   *
+   * @param port - anything that lists the open issues of the configured repository
+   */
+  setPlanCloseIssuePort(port: PlanCloseIssuePort): void {
+    this.planCloseIssuePort = port;
+  }
+
+  /** Present iff {@link setPlanCloseIssuePort} was called. */
+  private planCloseIssuePort: PlanCloseIssuePort | undefined;
+
+  /**
+   * Hands plan close the settle step of the retired-AC confirmation (adr-an-acceptance-criterion-retires-with-the-
+   * feature-it). Called once by `app.ts`; absent ⇒ plan close does not consult retired ACs (bare test constructions).
+   *
+   * @param port - carries out an answered rejection and reports where the plan stands
+   */
+  setPlanCloseRetirementPort(port: PlanCloseRetirementPort): void {
+    this.planCloseRetirementPort = port;
+  }
+
+  private planCloseRetirementPort: PlanCloseRetirementPort | undefined;
+
+  /**
+   * Upgrades a `failed` review currency to `accepted` when every failed dimension has an OPEN GitHub issue linked to
+   * the plan (BR-1372). Anything else (no port, no links, an unreachable GitHub) leaves it `failed`: the close is
+   * refused, never waved through on a read that did not happen.
+   */
+  private async acceptKnownDefects(
+    planId: string,
+    currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
+    trustedOpenIssues: readonly number[] = [],
+  ): Promise<MilestoneReviewCurrency> {
+    const coverage = await this.coverageOfFailedDimensions(planId, currency.failed, trustedOpenIssues);
+    if (!coverage.ok || !coverage.value.accepted) return currency;
+    return { state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues };
+  }
+
+  /**
+   * The ONE coverage predicate (BR-1372, BR-1379): which failed dimensions an OPEN issue linked to the plan covers,
+   * read from the `milestone_findings` record on the linked issue carriers, never from a title. Plan close and the
+   * review batch's "is filing complete" both decide from this.
+   *
+   * @param planId - the plan's document id
+   * @param failed - the failed dimension ids of the current review
+   * @param trustedOpenIssues - issue numbers the caller filed or linked in this run: counted as open without waiting for the listing (#402)
+   * @returns the coverage; `err` when no open-issue reader is wired or a store/GitHub read failed (never read as "covered")
+   */
+  async coverageOfFailedDimensions(
+    planId: string,
+    failed: readonly string[],
+    trustedOpenIssues: readonly number[] = [],
+  ): Promise<Result<DimensionCoverage, LoreError>> {
+    const port = this.planCloseIssuePort;
+    if (port === undefined) {
+      return err({ code: "VALIDATION_ERROR", message: "issue coverage cannot be read: no open-issue reader is wired (no GitHub upstream configured)", field: "planCloseIssuePort", rule: "BR-1379" });
+    }
+    const links = await this.store.findLinks(planId, "out");
+    if (!links.ok) return links;
+    const linked: { number: number; repoId?: number; dimensions: string[] }[] = [];
+    for (const link of links.value) {
+      // reason: #404 — only a `known-defect` link is coverage; `resolves` means "fixed" and is closed on archive.
+      if (link.link_type !== "known-defect" || link.from_id !== planId) continue;
+      const target = await this.store.find(link.to_id);
+      if (!target.ok) return target;
+      if (target.value === null || target.value.deleted_at !== null) continue;
+      const ref = readGithubIssueRef(target.value.extra);
+      if (ref !== undefined) {
+        linked.push({
+          number: ref.issueNumber,
+          ...(ref.repo_id !== undefined ? { repoId: ref.repo_id } : {}),
+          dimensions: readMilestoneFindings(target.value.extra).map((f) => f.dimension),
+        });
+      }
+    }
+    const listing = await port.listOpenIssues();
+    if (!listing.ok) return listing;
+    const listedNumbers = new Set(listing.value.open.map((issue) => issue.number));
+    const trusted = trustedOpenIssues.filter((n) => !listedNumbers.has(n)).map((number) => ({ number, title: "" }));
+    return ok(coverFailedDimensions(failed, linked, { ...listing.value, open: [...listing.value.open, ...trusted] }));
+  }
+
   /** Present iff {@link setArchiveIssueClosePort} was called. */
   private archiveIssueClosePort: ArchiveIssueClosePort | undefined;
 
@@ -1260,7 +1376,6 @@ export class CorpusService {
   private async refuseIfForeignCorpusWrite<T>(
     intentDeclared = false,
     targets: readonly DocRecord[] = [],
-    scopeProof?: readonly DocRecord[],
   ): Promise<Result<T, LoreError> | undefined> {
     const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
     if (verdict.allowed) return undefined;
@@ -1269,7 +1384,8 @@ export class CorpusService {
     // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
     // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
     if (this.corpusWriteAuthority !== undefined) {
-      const decided = await this.corpusWriteAuthority.decide(targets, scopeProof);
+      const decided = await this.corpusWriteAuthority.decide(targets);
+      /** @lore-site BR-802 */
       return decided.ok ? undefined : err(decided.error);
     }
     return err(foreignCorpusWriteRefusalError(verdict));
@@ -1326,7 +1442,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc], request.scopeProof);
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
@@ -1426,7 +1542,10 @@ export class CorpusService {
   async reserveProposedRule(
     request: ProposedRuleReserveRequest,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(request.foreignIntent === true);
+    const refusal = await this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>(
+      request.foreignIntent === true,
+      request.targets !== undefined ? [...request.targets] : undefined,
+    );
     if (refusal !== undefined) return refusal;
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
@@ -1873,9 +1992,22 @@ export class CorpusService {
     return result;
   }
 
+  /**
+   * Internal creation seam for milestone-review docs (BR-1372) — the SOLE way a `knowledge` doc with
+   * `extra.sub_type: "milestone-review"` may be created, so a close-gating review can never be hand-forged through
+   * `lore create`. `MilestoneReviewService.review` is its production caller (bound in `app.ts`). Unlike {@link createUatDoc}
+   * it keeps the foreign-corpus-write guard: a review is written by `lore assess` in the caller's own corpus.
+   */
+  async createMilestoneReviewDoc(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._createImpl(input, { allowMilestoneReview: true });
+    this.recordTelemetryEvent("create", startMs, result, { type: input.type });
+    return result;
+  }
+
   private async _createImpl(
     input: CreateDocInput,
-    opts?: WriteActorOpts & { allowHandoff?: boolean; allowUat?: boolean },
+    opts?: WriteActorOpts & { allowHandoff?: boolean; allowUat?: boolean; allowMilestoneReview?: boolean },
   ): Promise<Result<CreateDocResult, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write
     // §D5/AC-CP-3 cell 3 — `lore create <type>` (and every OTHER non-lifecycle
@@ -2006,6 +2138,7 @@ export class CorpusService {
           'knowledge sub_type "handoff" may only be created via `lore handoff` — ' +
           "direct creation through `lore create` / `lore_create` is not permitted",
         value: "handoff",
+        rule: "BR-704",
       });
     }
 
@@ -2026,6 +2159,40 @@ export class CorpusService {
           'knowledge sub_type "uat" may only be created via `lore uat record` — ' +
           "direct creation through `lore create` / `lore_create` is not permitted",
         value: "uat",
+        rule: "BR-705",
+      });
+    }
+
+    // Knowledge sub_type "assessment" is the retired plan-outcome assessment (BR-1372): its docs are archived and read
+    // as plain documents, and nothing may write a new one. Refused on every path (no writer is allowed).
+    if (data.type === "knowledge" && (data.extra?.["sub_type"] as unknown) === "assessment") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.sub_type",
+        message:
+          'knowledge sub_type "assessment" is retired — the milestone review (`lore assess`) replaced it; ' +
+          "existing assessment docs are archived and stay readable, but no new one can be created",
+        value: "assessment",
+        rule: "BR-1372",
+      });
+    }
+
+    // Write-path exclusivity for knowledge sub_type "milestone-review" (BR-1372) — same writer-identity guard as
+    // "uat": the review gates plan close, and extra.milestone_review is user-supplied data a Zod shape check cannot
+    // make unforgeable. `opts.allowMilestoneReview` is set ONLY by `createMilestoneReviewDoc`.
+    if (
+      data.type === "knowledge" &&
+      (data.extra?.["sub_type"] as unknown) === MILESTONE_REVIEW_SUB_TYPE &&
+      opts?.allowMilestoneReview !== true
+    ) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.sub_type",
+        message:
+          'knowledge sub_type "milestone-review" may only be created by `lore assess` — ' +
+          "direct creation through `lore create` / `lore_create` is not permitted",
+        value: MILESTONE_REVIEW_SUB_TYPE,
+        rule: "BR-1372",
       });
     }
 
@@ -2150,6 +2317,7 @@ export class CorpusService {
             message:
               "plan declares extra.ac_scope but its parent is not a spec with declared acceptance criteria",
             value: acScope,
+            rule: "BR-98",
           });
         }
         const unknownIds = (acScope as unknown[]).filter(
@@ -2163,6 +2331,7 @@ export class CorpusService {
               `plan extra.ac_scope references id(s) not declared on parent spec: ` +
               `${unknownIds.join(", ")}. Declared ids: ${Array.from(declared).join(", ")}.`,
             value: unknownIds,
+            rule: "BR-98",
           });
         }
       }
@@ -2189,6 +2358,7 @@ export class CorpusService {
             field: "extra.file_anchors",
             message: "extra.file_anchors must be an array of strings",
             value: rawAnchors,
+            rule: "BR-122",
           });
         }
         const normalizedResult = normalizeFileAnchors(rawAnchors as string[]);
@@ -2225,6 +2395,7 @@ export class CorpusService {
             field: "extra.code_anchors",
             message: "extra.code_anchors must be an array of strings",
             value: rawCodeAnchors,
+            rule: "BR-11",
           });
         }
         for (const raw of rawCodeAnchors as string[]) {
@@ -2286,10 +2457,14 @@ export class CorpusService {
     // of the spec_kind-defaulted extra — the two defaults are independent
     // (never both apply to the same doc type) but composed this way so a
     // future third create-time extra transform can chain the same way.
-    const resolvedExtra: Record<string, unknown> =
+    const anchoredExtra: Record<string, unknown> =
       normalizedFileAnchors !== undefined
         ? { ...specKindDefaultedExtra, file_anchors: normalizedFileAnchors }
         : specKindDefaultedExtra;
+    // reason: BR-1339 — a baseline node is born with its own part awaiting a first approval (`pending.node.initial`), so it
+    // is `draft` by derivation, not by a status nobody may set; the first approval removes the marker.
+    const resolvedExtra: Record<string, unknown> =
+      data.type === "baseline" && anchoredExtra["pending"] === undefined ? { ...anchoredExtra, pending: initialPending() } : anchoredExtra;
 
     // SPEC-103 §Mechanisms M1 — ledger fast-track (D1: knowledge sub_types
     // assessment/retro/handoff/uat ONLY; `task` is deliberately excluded, see
@@ -2743,14 +2918,10 @@ export class CorpusService {
     const startMs = Date.now();
     const result = await this._getImpl(idOrSlug, _opts);
     this.recordTelemetryEvent("get", startMs, result, { idOrSlug });
-    // reason: SPEC-102 — fire-and-forget trace row AFTER the store call
-    // succeeds, never before and never on a failed lookup (a NOT_FOUND/
-    // STORE_ERROR result records nothing — "get" traces a REAL doc read).
-    // `traceRecorder` is absent in every bare test construction, mirroring
-    // `gateEnforcer`'s identical optional-DI shape.
-    if (result.ok && this.traceRecorder !== undefined) {
-      this.traceRecorder.recordGet(this.resolveWriteActor(undefined), result.value.doc.id);
-    }
+    // reason: BR-1373 — a successful read is COUNTED into the per-day counter (never a trace row), AFTER the store
+    // call succeeds and never on a failed lookup. The counter is anonymous, so no actor is needed. `traceRecorder`
+    // is absent in every bare test construction, mirroring `gateEnforcer`'s identical optional-DI shape.
+    if (result.ok && this.traceRecorder !== undefined) this.traceRecorder.recordRead();
     return result;
   }
 
@@ -2899,6 +3070,7 @@ export class CorpusService {
         code: "VALIDATION_ERROR",
         field: issue ? String(issue.path.join(".")) : "patch",
         message: issue ? issue.message : "Invalid patch",
+        rule: "BR-727",
       });
     }
 
@@ -2908,7 +3080,7 @@ export class CorpusService {
     const findResult = await this.store.find(resolveResult.value);
     if (!findResult.ok) return findResult;
     if (findResult.value === null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-531" });
     }
 
     const existing = findResult.value;
@@ -2916,6 +3088,24 @@ export class CorpusService {
 
     const carrierRefusal = judgeIssueCarrierExtra(existing.type, parsedPatch.data.extra);
     if (carrierRefusal !== undefined) return err(carrierRefusal);
+    // BR-1339 — a baseline node's status is derived from its items (approved iff nothing is pending): no command sets it.
+    // A resend of the stored value is not a change (the dashboard and MCP resend whole forms).
+    if (
+      existing.type === "baseline" &&
+      (parsedPatch.data.status === "approved" || parsedPatch.data.status === "draft") &&
+      parsedPatch.data.status !== existing.status
+    ) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "status",
+        message:
+          `a baseline node's status is derived from its items: ${existing.slug} is ${existing.status} and becomes approved when nothing is pending. ` +
+          `Review it (\`lore review ${existing.slug}\`), then approve what the review saw (\`lore approve ${existing.slug}\`, or \`--item <BR-n|node>\`); ` +
+          `discard a revision with \`lore reject ${existing.slug} --item <BR-n|node>\``,
+        value: parsedPatch.data.status,
+        rule: "BR-1339",
+      });
+    }
 
     // BR-1071 (issues #65 #50) — setting a status to approved IS an approval: it takes the approve path
     // (judgment, spec/plan-promote, rule-citation checks; an `approve` version + audit row), never a
@@ -2964,6 +3154,7 @@ export class CorpusService {
           field: "correction.reason",
           message: "a correction needs a non-empty reason (--correction \"<why this is a fix, not a change>\")",
           value: correction.reason,
+          rule: "BR-1049",
         });
       }
       if (parsedPatch.data.status !== undefined && parsedPatch.data.status !== existing.status) {
@@ -2974,6 +3165,7 @@ export class CorpusService {
             "a correction fixes text and keeps the record's status; it cannot be combined with a status change — " +
             "make the status change in a separate `lore set --status`",
           value: parsedPatch.data.status,
+          rule: "BR-1178",
         });
       }
       const lockResult = await this.recordLock.resolve(existing);
@@ -3031,9 +3223,12 @@ export class CorpusService {
     // and fails if EITHER call site stops following it.
     // reason: a correction on a locked record writes ONE version and keeps its status (D15) — it skips this
     // demotion, and `isApprovedAutoResetToDraft` staying false also skips the ledger re-approve second write.
-    const demotedStatus = correctionApplies
-      ? existing.status
-      : resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
+    // reason: BR-722 — a baseline node is never demoted by an edit: a body or title edit records a PENDING revision of the
+    // node's own part (below) and the status is derived from the pending items (BR-1339).
+    const demotedStatus =
+      correctionApplies || existing.type === "baseline"
+        ? existing.status
+        : resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
     const isApprovedAutoResetToDraft = demotedStatus !== existing.status;
     if (isApprovedAutoResetToDraft) {
       newStatus = demotedStatus;
@@ -3139,6 +3334,7 @@ export class CorpusService {
             `slug "${parsedPatch.data.slug}" is already taken by ` +
             `${holderResult.value.slug} (id ${holderResult.value.id})`,
           value: parsedPatch.data.slug,
+          rule: "BR-725",
         });
       }
     }
@@ -3165,6 +3361,7 @@ export class CorpusService {
             `${existing.slug} --json\` (read \`.extra\`), merge your change into it, and pass ` +
             `the FULL merged object as \`extra\`.`,
           value: parsedPatch.data.extra,
+          rule: "BR-728",
         });
       }
     }
@@ -3197,6 +3394,28 @@ export class CorpusService {
             `Use \`${violation.writer}\` instead, or pass the current value byte-equal.`,
           value: parsedPatch.data.extra[violation.key],
         });
+      }
+    }
+
+    // BR-722 — a body or title edit of a baseline node is a pending revision of the node's own part, never a write to the
+    // approved text (a never-approved node has none to protect, so its text is written directly). Runs after the
+    // dedicated-key guard so the guard still sees the caller's own `extra`.
+    if (existing.type === "baseline" && (docPatch.title !== undefined || docPatch.content !== undefined)) {
+      const proposal = proposeNodePart(
+        { title: existing.title, content: existing.content, extra: docPatch.extra ?? existing.extra },
+        {
+          ...(docPatch.title !== undefined ? { title: docPatch.title } : {}),
+          ...(docPatch.content !== undefined ? { content: docPatch.content } : {}),
+        },
+      );
+      delete docPatch.title;
+      delete docPatch.content;
+      if (proposal.kind === "pending") {
+        docPatch.extra = proposal.extra;
+        docPatch.status = statusFor(existing.status, proposal.extra);
+      } else if (proposal.kind === "direct") {
+        if (proposal.title !== undefined) docPatch.title = proposal.title;
+        if (proposal.content !== undefined) docPatch.content = proposal.content;
       }
     }
 
@@ -3271,6 +3490,7 @@ export class CorpusService {
           field: issue ? `extra.${String(issue.path.join("."))}` : "extra",
           message: issue ? issue.message : "invalid spec extra",
           value: parsedPatch.data.extra["spec_kind"],
+          rule: "BR-246",
         });
       }
     }
@@ -3332,6 +3552,7 @@ export class CorpusService {
           field: issue ? `extra.${String(issue.path.join("."))}` : "extra",
           message: issue ? issue.message : `invalid ${existing.type} extra`,
           value: parsedPatch.data.extra,
+          rule: "BR-729",
         });
       }
 
@@ -3343,6 +3564,7 @@ export class CorpusService {
           field: "extra.validity",
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
+          rule: "BR-730",
         });
       }
     }
@@ -3444,53 +3666,10 @@ export class CorpusService {
       const effectiveExtra = (parsedPatch.data.extra !== undefined
         ? parsedPatch.data.extra
         : existing.extra) as Record<string, unknown>;
-      // ─── PLAN-CLOSE GATE-READ EXTRA FIELDS (AC-069-12 scan region) ────────
-      // ⛔ Every plan-level `extra.*` field this block reads MUST have an
-      // authoring surface under `packages/lore/src/adapters`. A gate that
-      // demands a field no surface can author fails SILENT — measured: both
-      // `attestation_exempt` and `assessment_freshness_exempt` shipped
-      // gate-read with no writer, and with the only sanctioned opt-out
-      // unreachable, four plans were archived by riding a vacuous predicate
-      // instead. `tests/unit/cli/plan-exempt-attestation.test.ts` (AC-069-12)
-      // scans BETWEEN these two sentinels and fails when a field read here has
-      // no writer, so the next one fails a test instead of an incident.
-      // Adding a read here ⇒ add the writer AND its row in that test's
-      // AUTHORING_SURFACES map. Reads mediated by a helper (rather than a
-      // literal `effectiveExtra["…"]` subscript) must be registered in the same
-      // test's HELPER_READS map — an unregistered `extract*`/`resolve*` call in
-      // this region fails the scan by construction. Keep both sentinels intact:
-      // the scan THROWS (never silently passes) when it cannot find them.
+      // reason: BR-1372 — plan close measures exactly two things: the UAT verdict for a plan that opted in
+      // (`requires_uat`) and the plan's milestone review. Per-task attestation is enforced at `lore done`; the
+      // review's correctness and snapshot-accuracy dimensions read the attested evidence and the cited-rule state.
       const requiresUat = effectiveExtra["requires_uat"] === true;
-      const attestationExemptReason = effectiveExtra["attestation_exempt_reason"];
-      const attestationExempt =
-        effectiveExtra["attestation_exempt"] === true &&
-        typeof attestationExemptReason === "string" &&
-        attestationExemptReason.trim().length > 0;
-      // reason: spec-verify-reachability-plan-promote-early-warning §Scope M3 —
-      // the raw, UNVALIDATED kind is threaded through to `checkPlanClose`
-      // (`attestationExemptKindValid` there is the SOLE fail-loud enforcement
-      // point); `exemptKindValid` here is only a local optimization signal for
-      // whether `getPlanBundle` needs fetching below, re-deriving the SAME
-      // predicate rather than duplicating its enum logic.
-      const attestationExemptKindRaw = effectiveExtra["attestation_exempt_kind"];
-      const attestationExemptKind =
-        typeof attestationExemptKindRaw === "string" ? attestationExemptKindRaw : undefined;
-      const exemptKindValid = attestationExemptKindValid(attestationExempt, attestationExemptKind).ok;
-      const citedRuleCheckEnabled = this.gateEnforcer.isCitedRuleCheckEnabled();
-      // reason: SPEC-106 §Design Decisions D4 — mirrors `attestationExempt`'s
-      // flag-plus-non-empty-reason resolution EXACTLY (a bare
-      // `assessment_freshness_exempt: true` with no reason is NOT exempt); there
-      // is no separate "exempt kind" taxonomy for this predicate.
-      const assessmentFreshnessExemptReason = effectiveExtra["assessment_freshness_exempt_reason"];
-      const assessmentFreshnessExempt =
-        effectiveExtra["assessment_freshness_exempt"] === true &&
-        typeof assessmentFreshnessExemptReason === "string" &&
-        assessmentFreshnessExemptReason.trim().length > 0;
-      // ─── END PLAN-CLOSE GATE-READ EXTRA FIELDS ────────────────────────────
-
-      // reason: AC-FR-8/D7 — see corpus-service.ts's spec-create gate block's
-      // identical note; `existing.id` is the RESOLVED plan's real id, never its slug.
-      let citedRuleUnknowns: CitedRuleUnknown[] = [];
       let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug, targetDocId: existing.id };
 
       if (requiresUat) {
@@ -3505,175 +3684,44 @@ export class CorpusService {
         };
       }
 
-      planCloseCtx = {
-        ...planCloseCtx,
-        attestationExempt,
-        ...(attestationExemptKind !== undefined ? { attestationExemptKind } : {}),
-      };
-
-      // reason: SPEC-080 §C4 — the attestation-floor branch and the
-      // cited-rule-state branch both need `getPlanBundle` (the former for its
-      // tasks' evidence counts, the latter for its resolved ancestor spec) — fetched AT MOST ONCE for this whole
-      // block, never once per sub-gate. `!exemptKindValid` (spec-verify-
-      // reachability-plan-promote-early-warning §Scope M3) joins the SAME
-      // condition `checkPlanClose` uses to decide whether `attestationFloor`
-      // itself runs — a plan claiming exemption with an invalid/missing kind
-      // still needs its tasks' evidence counts for the feeding pack's
-      // offending-task diagnostics.
-      const needsBundle =
-        !attestationExempt || !exemptKindValid || (citedRuleCheckEnabled && this.ruleStateService !== undefined);
-      const bundleResult = needsBundle ? await this.getPlanBundle(existing.id) : undefined;
-      if (bundleResult !== undefined && !bundleResult.ok) return bundleResult;
-
-      // reason: spec-plan-closure-must-be-loud-terminality-divergence-silent
-      // §Design Decisions DD-4(a) — the live 2026-07-28 incident's root cause.
-      // `getPlanBundle` has ALREADY resolved `bundle.spec` (the plan's
-      // ancestor spec, or `undefined` when it has none) whenever `bundleResult`
-      // is fetched above; this call site used to just drop that resolved fact
-      // on the floor, leaving `hasSpecParent`/`parentSpecScriptAcCount`
-      // permanently unset on `planCloseCtx` — which `verifyReachability`
-      // (DD-4(b), gate-predicates.ts) then read as `undefined`, an outcome it
-      // used to conflate with "resolved a genuinely non-spec parent" and
-      // render as the false claim "no spec-tier ancestor at all". Threading
-      // `buildUpstreamSpecContext(bundle.spec)` here — the SAME derivation
-      // `plan-promote`/`task-claim` already use — makes this ctx a RESOLVED
-      // fact (`hasSpecParent: true` or `false`, never left absent) whenever a
-      // bundle was fetched at all; `countScriptModeAcceptanceCriteria` is the
-      // SAME script-AC counter `ReviewService`'s plan-promote branch uses
-      // (relocated to checkpoint-registry.ts for this exact reuse — see that
-      // function's own JSDoc), never a second hand-rolled counter.
-      if (bundleResult !== undefined) {
-        const bundle = bundleResult.value;
-        planCloseCtx = {
-          ...planCloseCtx,
-          ...buildUpstreamSpecContext(bundle.spec),
-          ...(bundle.spec !== undefined
-            ? { parentSpecScriptAcCount: countScriptModeAcceptanceCriteria(bundle.spec) }
-            : {}),
-        };
-      }
-
-      if (!attestationExempt || !exemptKindValid) {
-        // reason: SPEC-075 D6 — the evidence/attested counting SSOT moved to
-        // @lore/core's buildTaskAttestationInfos (evidence-panel.ts), which the
-        // dashboard adjudication workbench's plan Evidence-panel branch also
-        // calls; this call site no longer re-derives the same counts inline.
-        // SPEC-143 AC-CT-3 — the stamp axis rides the same counting call: `unbound` rows leave
-        // `attestedCount` and a task attested only by them is refused by `attestationFloor`.
-        const stampBinding = await loadStampBindingContext(this.store, bundleResult!.value.tasks, this.stampRadiusDiff);
-        if (!stampBinding.ok) return stampBinding;
-        const planTasksAttestation = buildTaskAttestationInfos(bundleResult!.value.tasks, stampBinding.value);
-        // reason: spec-plan-close-predicates-measure-invariants-an-applicability
-        // §D3/§D5 — per-claimed-AC attested-coverage facts, computed via the
-        // SAME `computeAcCoverage` (@lore/core) AND the SAME declared-criteria
-        // extraction (`specAcceptanceCriteriaSchema.safeParse` over
-        // `spec.extra.acceptance_criteria`) that `countScriptModeAcceptanceCriteria`
-        // (checkpoint-registry.ts, reused a few lines above via
-        // `buildUpstreamSpecContext`) already applies to the SAME resolved
-        // `bundle.spec` — no hand-rolled second extraction. `[]` when the plan
-        // has no spec-tier ancestor at all (`bundle.spec === undefined`),
-        // mirroring `parentSpecScriptAcCount`'s "populate only when relevant"
-        // shape: a plan with nothing upstream has nothing to claim against.
-        const declaredAcParsed = specAcceptanceCriteriaSchema.safeParse(
-          bundleResult!.value.spec?.extra["acceptance_criteria"],
-        );
-        const declaredCriteria = declaredAcParsed.success ? declaredAcParsed.data : [];
-        const planClaimedAcCoverage =
-          bundleResult!.value.spec !== undefined
-            ? computeAcCoverage(declaredCriteria, bundleResult!.value.tasks)
-            : [];
-        // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope
-        // §Facts D4 — the coverage conjunct's input is the DECLARED scope, not the
-        // evidence-derived coverage above. Only this call site holds the task
-        // DOCUMENTS that carry `extra.ac_scope`, so it resolves the fact and
-        // threads it through `GateContext`; the predicate layer stays pure. Always
-        // populated whenever this branch runs (never left absent, which
-        // `checkPlanClose` would have to read as "undeclared").
-        const planDeclaredScopeCoverage = deriveDeclaredScopeCoverage(
-          bundleResult!.value.tasks,
-          planClaimedAcCoverage,
-        );
-        planCloseCtx = {
-          ...planCloseCtx,
-          planTasksAttestation,
-          attestationMinRatio: this.gateEnforcer.resolveAttestationMinRatio(),
-          planClaimedAcCoverage,
-          planDeclaredScopeCoverage,
-        };
-      }
-
-      planCloseCtx = { ...planCloseCtx, citedRuleCheckEnabled };
-      // reason: BR-984 — the cited-rule-state predicate. `bundle.spec` is undefined for a PRD-parented or
-      // unparented plan (getPlanBundle's own contract): nothing is cited, so `citedRuleViolations` stays
-      // unset and `checkPlanClose` pushes nothing. Knob off (default) never reads rule state at all.
-      if (citedRuleCheckEnabled && this.ruleStateService !== undefined) {
-        const spec = bundleResult!.value.spec;
-        if (spec !== undefined) {
-          const violationsResult = await this.resolveCitedRuleViolations(spec);
-          if (!violationsResult.ok) return violationsResult;
-          citedRuleUnknowns = violationsResult.value.unknowns;
-          planCloseCtx = {
-            ...planCloseCtx,
-            citedRuleViolations: violationsResult.value.violations,
-            citedRuleUnknowns,
-          };
-        }
-      }
-
-      planCloseCtx = { ...planCloseCtx, assessmentFreshnessExempt };
-      if (!assessmentFreshnessExempt) {
-        const freshnessResult = await this.getAssessmentFreshness(existing.id);
-        if (!freshnessResult.ok) return freshnessResult;
-        planCloseCtx = { ...planCloseCtx, ...freshnessResult.value };
-      }
+      const bundleResult = await this.getPlanBundle(existing.id);
+      if (!bundleResult.ok) return bundleResult;
+      const reviewDocsResult = await this.listMilestoneReviewDocs(existing.id);
+      if (!reviewDocsResult.ok) return reviewDocsResult;
+      const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
+      const milestoneReview =
+        measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview, opts?.trustedOpenIssues): measuredReview;
+      planCloseCtx = { ...planCloseCtx, milestoneReview };
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
       if (!gateResult.ok) return gateResult;
-
-      // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
-      // (spec-governance-visibility-an-armed-gate-that-vacuously-passes §AC-GV-6)
-      // — `enforce()` above already ran `checkpointRegistry["plan-close"].check`
-      // internally and, via `warnVacuousCheckpoint`, already prints THIS SAME
-      // notice to stderr when the run was fully vacuous — that pre-existing
-      // mechanism is the human-render half of the discriminator. Nothing put
-      // the fact anywhere a `--json` consumer could read: measured directly
-      // (throwaway-corpus probe, not assumed) that a vacuous and a satisfied
-      // close both serialized to `"extra": {}"` before this line existed. This
-      // recomputes the SAME pure check via the SAME exported functions
-      // `enforce()` used (never a second, divergent implementation) purely to
-      // READ the verdict back out, since `enforce()`'s own signature returns
-      // only ok/err on all seven checkpoints and widening it would ripple into
-      // every other call site's pinned `Result<void, LoreError>` return type.
-      // Written to `extra` ONLY when vacuous — a satisfied close, or a
-      // fully-exempted one (already announced via
-      // `formatAttestationExemptionNotice`), gets no new key at all, so every
-      // pre-existing satisfied-close fixture's `extra` shape stays untouched.
-      //
-      // reason: `planCloseCheckpointDef` is provably defined here — the
-      // `enforce("plan-close", …)` call two lines above already resolved this
-      // SAME registry key and would have thrown its own "checkpoint not
-      // registered" internal-invariant error otherwise (checkpoint-registry.ts's
-      // second module invariant: all `GateCheckpoint` members are registered).
-      // The check is still explicit, never a `!` assertion, so a future
-      // registry edit that broke that invariant fails loud HERE too, not only
-      // inside `enforce()`.
-      const planCloseCheckpointDef = checkpointRegistry["plan-close"];
-      if (planCloseCheckpointDef === undefined) {
-        throw new Error('Internal error: gate checkpoint "plan-close" not registered');
+      // reason: plan close waits for the owner's one confirmation of the ACs retired during the plan
+      // (adr-an-acceptance-criterion-retires-with-the-feature-it); a rejection was carried out by `settle` and keeps
+      // the close refused until the plan is re-planned.
+      if (this.planCloseRetirementPort !== undefined) {
+        const retirement = await this.planCloseRetirementPort.settle(existing.id);
+        if (!retirement.ok) return retirement;
+        const refusal = describeRetirementRefusal(existing.slug, retirement.value);
+        if (refusal !== undefined) {
+          return err({ code: "VALIDATION_ERROR", field: "gate:plan-close", message: refusal, rule: "BR-1372" });
+        }
       }
-      const planCloseVacuityNotice = describeCheckpointVacuity(
-        "plan-close",
-        planCloseCheckpointDef.check(planCloseCtx),
-      );
-      if (planCloseVacuityNotice !== null) {
-        docPatch.extra = { ...effectiveExtra, [PLAN_CLOSE_VACUITY_NOTICE_FIELD]: planCloseVacuityNotice };
-      }
-      // reason: BR-984 - the closed plan records which cited rules were unmeasured, so the report is not stderr-only.
-      if (citedRuleUnknowns.length > 0) {
-        docPatch.extra = {
-          ...(docPatch.extra ?? effectiveExtra),
-          [PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD]: citedRuleUnknowns.map((u) => ({ rule_id: u.rule_id, reason: u.reason })),
-        };
+      if (milestoneReview.state === "accepted") {
+        const issueList = milestoneReview.issues.map((n) => `#${String(n)}`).join(", ");
+        const recorded = await this.appendAudit({
+          action: "plan-close-accepted-with-known-defects",
+          sessionId: existing.id,
+          docId: existing.id,
+          details: {
+            message: `accepted with known defects: ${issueList}`,
+            review: milestoneReview.reviewSlug,
+            failed_dimensions: [...milestoneReview.failed],
+            issues: [...milestoneReview.issues],
+            rule: "BR-1372",
+          },
+          ...(opts?.by !== undefined ? { by: opts.by } : {}),
+        });
+        if (!recorded.ok) return recorded;
       }
     }
 
@@ -3769,6 +3817,36 @@ export class CorpusService {
       shouldAllocateOrdinalOnKindFlip = wasExemptKind && !isNowExemptKind;
     }
 
+    // BR-1307 - a spec moved to `deprecated` before its change set landed abandons it: its still-proposed ids become
+    // `retired` "never landed: <spec>". The retirements are PLANNED here (a read) and committed by the SAME
+    // `updateWithProvenance` transaction as the status write below, so the deprecation and the retirements both land
+    // or neither does: a plan that cannot be made, or a leaf that moved since it was read, refuses the deprecation
+    // with nothing written. reason: do not split this back into a second write - that is the half-done state
+    // (deprecated spec, ids still reserved, "re-run lore rule apply" to finish) this replaced.
+    // retired-AC attribution (adr-an-acceptance-criterion-retires-with-the-feature-it): a deprecation records the plan
+    // whose work made it on its own audit row, in the same write.
+    let retiredInPlan: string | undefined;
+    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated") {
+      const claimedPlan = await findPlanClaimedByWriter(this.store, opts?.plan);
+      if (!claimedPlan.ok) return claimedPlan;
+      retiredInPlan = claimedPlan.value;
+    }
+    let abandonmentWrites: CompanionDocWrite[] = [];
+    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated" && this.ruleChangeLanding !== undefined) {
+      const abandonment = await this.ruleChangeLanding.planAbandonment(existing.slug, { by: resolvedActor });
+      if (!abandonment.ok) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "rule_changes",
+          message:
+            `${existing.slug} was not deprecated: retiring its proposed rules failed (${describeLandingFailure(abandonment.error)}); ` +
+            `nothing was written`,
+          value: abandonment.error,
+        });
+      }
+      abandonmentWrites = leafPlansToCompanionWrites(abandonment.value.leaves, resolvedActor, now, false);
+    }
+
     const updateResult = await this.store.updateWithProvenance(
       existing.id,
       docPatch,
@@ -3789,28 +3867,13 @@ export class CorpusService {
           new_version: newVersion,
           version: newVersion,
           ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
+          ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
+          ...(retiredInPlan !== undefined ? { retired_in_plan: retiredInPlan } : {}),
         },
       },
+      abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,
     );
     if (!updateResult.ok) return updateResult;
-
-    // A spec moved to `deprecated` before its change set landed abandons it: its still-proposed ids become
-    // `retired` "never landed: <spec>" (spec-a-spec-carries-its-rule-changes-the-baseline-takes-them, Edge cases).
-    // After the status write, so a refused/stale deprecation never retires anything; `apply` on a deprecated spec
-    // is idempotent, so a failure here is repaired by re-running `lore rule apply <spec>` (named in the error).
-    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated" && this.ruleChangeLanding !== undefined) {
-      const abandoned = await this.ruleChangeLanding.apply(existing.slug, { by: resolvedActor });
-      if (!abandoned.ok) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "rule_changes",
-          message:
-            `${existing.slug} is now deprecated, but retiring its proposed rules failed (${abandoned.error.code}); ` +
-            `re-run \`lore rule apply ${existing.slug}\` to retire them`,
-          value: abandoned.error,
-        });
-      }
-    }
 
     // SPEC-103 §Mechanisms M1, §Design Decisions D4 — uniform edit-reset semantics:
     // an edit to an approved ledger doc (assessment/retro/handoff/uat) still applies
@@ -4133,6 +4196,7 @@ export class CorpusService {
         from: doc.status,
         to: "archived",
         allowed: getAllowedTransitions(doc.status, doc.type),
+        rule: "BR-456",
       });
     }
 
@@ -4218,7 +4282,7 @@ export class CorpusService {
       // Resolve ID for the error even without confirm
       const r = await this.resolve(idOrSlug);
       const id = r.ok ? r.value : idOrSlug;
-      return err({ code: "DELETE_REQUIRES_CONFIRM", id });
+      return err({ code: "DELETE_REQUIRES_CONFIRM", id, rule: "BR-739" });
     }
 
     const resolved = await resolveDoc(this.store, idOrSlug);
@@ -4264,6 +4328,7 @@ export class CorpusService {
         field: "deleted_at",
         message: `${idOrSlug} is not deleted — nothing to undelete`,
         value: idOrSlug,
+        rule: "BR-741",
       });
     }
     const now = opts?.now ?? new Date().toISOString();
@@ -4276,6 +4341,7 @@ export class CorpusService {
           `${idOrSlug} was deleted on ${deletedAt.slice(0, 10)} and its recovery window ended on ` +
           `${recoverableUntil.slice(0, 10)}; it can no longer be undeleted`,
         value: recoverableUntil,
+        rule: "BR-741",
       });
     }
 
@@ -4483,7 +4549,8 @@ export class CorpusService {
     // same count a caller actually sees), never the raw pre-filter store hit
     // count. `traceRecorder` absent in bare test constructions (mirrors `get`).
     if (this.traceRecorder !== undefined) {
-      this.traceRecorder.recordSearch(this.resolveWriteActor(undefined), query, visibleHits.length);
+      const traceActor = findTraceActorFor(this.store);
+      if (traceActor !== undefined) this.traceRecorder.recordSearch(traceActor, query, visibleHits.length);
     }
     return result;
   }
@@ -4527,7 +4594,7 @@ export class CorpusService {
       const findResult = await this.store.find(resolveResult.value);
       if (!findResult.ok) return findResult;
       if (findResult.value === null) {
-        return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+        return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-753" });
       }
       rootDoc = findResult.value;
     } else {
@@ -4537,7 +4604,7 @@ export class CorpusService {
       if (!strategyResult.ok) return strategyResult;
       const first = baselineRootResult.value ?? strategyResult.value;
       if (!first) {
-        return err({ code: "DOC_NOT_FOUND", id: "prd", suggestions: ["No PRD documents found"] });
+        return err({ code: "DOC_NOT_FOUND", id: "prd", suggestions: ["No PRD documents found"], rule: "BR-753" });
       }
       rootDoc = first;
     }
@@ -4718,181 +4785,72 @@ export class CorpusService {
   }
 
   /**
-   * Resolves a plan's newest linked (`informs`) assessment doc's `created_at`
-   * (SPEC-106 §Design Decisions D2) — walks the plan's INCOMING `informs` links
-   * (mirrors {@link getLatestUatVerdict}'s exact shape, narrowed to
-   * `sub_type === "assessment"` instead of `"uat"`) and returns the most recent
-   * one. Assessment docs are write-once (`lore assess` never edits one after
-   * creation, `commands/assess.ts`), so `created_at` is the correct freshness
-   * timestamp for this doc — unlike a TASK's `updated_at`, which
-   * {@link getAssessmentFreshness} deliberately never reads.
+   * The milestone-review docs informs-linked to a plan (BR-1372): the knowledge docs with `sub_type`
+   * `milestone-review` whose `informs` link targets the plan. Read by plan close and by `lore assess`.
    *
-   * @returns `undefined` when no assessment is linked to the plan at all — the
-   *   "no assessment yet" vacuous-pass case `assessmentFreshness`
-   *   (gate-predicates.ts) treats identically to "no task activity".
+   * @param planId - the plan's document id
+   * @returns `ok(docs)` (possibly empty); a store read failure is returned as itself, never read as "no review"
    */
-  private async resolveNewestAssessmentAt(planId: string): Promise<Result<string | undefined, LoreError>> {
+  async listMilestoneReviewDocs(planId: string): Promise<Result<DocRecord[], LoreError>> {
     const linksResult = await this.store.findLinks(planId, "in");
     if (!linksResult.ok) return linksResult;
-    const informsSources = linksResult.value
-      .filter((link) => link.link_type === "informs" && link.to_id === planId)
-      .map((link) => link.from_id);
-
-    let newest: string | undefined;
-    for (const sourceId of informsSources) {
-      const docResult = await this.store.find(sourceId);
+    const docs: DocRecord[] = [];
+    for (const link of linksResult.value) {
+      if (link.link_type !== "informs" || link.to_id !== planId) continue;
+      const docResult = await this.store.find(link.from_id);
       if (!docResult.ok) return docResult;
       const doc = docResult.value;
       if (doc === null || doc.deleted_at !== null || doc.type !== "knowledge") continue;
-      const parsedExtra = knowledgeExtraSchema.safeParse(doc.extra);
-      if (!parsedExtra.success || parsedExtra.data.sub_type !== "assessment") continue;
-      if (newest === undefined || doc.created_at > newest) {
-        newest = doc.created_at;
-      }
+      if (doc.extra["sub_type"] !== MILESTONE_REVIEW_SUB_TYPE) continue;
+      docs.push(doc);
     }
-    return ok(newest);
+    return ok(docs);
+  }
+
+  /** The live open-issue reader wired for plan close (`setPlanCloseIssuePort`); `undefined` when no GitHub upstream is configured. */
+  getPlanCloseIssuePort(): PlanCloseIssuePort | undefined {
+    return this.planCloseIssuePort;
   }
 
   /**
-   * Resolves the newest `evidence`/`done` AUDIT-row timestamp among `tasks`
-   * (SPEC-106 §Design Decisions D2) — deliberately AUDIT rows, never doc
-   * `updated_at` (the latter moves on cosmetic edits — anchor adds, link
-   * writes, a bare status change — that carry no new outcome information an
-   * assessment would need to re-judge, AC-FRESH-3). "Evidence" activity is any
-   * audit row with `action === "evidence"` (`TaskWorkflowService.addEvidence`'s
-   * `writeTaskExtra` call); "done" activity is any row with
-   * `action === "update"` AND `details.done === true` (`TaskWorkflowService
-   * .done`'s `writeTaskStatus` call deliberately shares the generic "update"
-   * action label with an unrelated `lore set --status` write — see that
-   * method's own JSDoc — so `details.done` is the only reliable
-   * discriminator). One `queryAudit` call per task — bounded by the plan's own
-   * task set, never a corpus-wide scan (SPEC-106's own NFR).
+   * The state of every rule a spec's criteria cite, as `RuleStateService.full()` computed it (BR-984). Read by the
+   * milestone review's snapshot-accuracy dimension; it refuses nothing.
    *
-   * @returns `undefined` when `tasks` is empty, or none of them carry any
-   *   evidence/done audit row — the "no task activity" vacuous-pass case.
+   * @param spec - the plan's resolved ancestor spec (`PlanBundle.spec`)
+   * @returns `ok([])` when the spec cites nothing or no rule-state service is wired; one row per cited rule otherwise
+   *   (`state`, plus `unknown_reason` when the state is `unknown`); `err` when the criteria are unreadable or rule
+   *   state could not be computed
    */
-  private async resolveNewestTaskActivityAt(tasks: DocRecord[]): Promise<Result<string | undefined, LoreError>> {
-    let newest: string | undefined;
-    for (const task of tasks) {
-      const auditResult = await this.store.queryAudit({ doc_id: task.id });
-      if (!auditResult.ok) return auditResult;
-      for (const entry of auditResult.value) {
-        const isEvidence = entry.action === "evidence";
-        const isDone = entry.action === "update" && entry.details?.["done"] === true;
-        if (!isEvidence && !isDone) continue;
-        if (newest === undefined || entry.timestamp > newest) {
-          newest = entry.timestamp;
-        }
-      }
-    }
-    return ok(newest);
-  }
-
-  /**
-   * Resolves the two facts the `plan-close` gate's `assessmentFreshness`
-   * predicate (gate-predicates.ts) needs, AND the ONLY read `lore assess` itself
-   * consults for its own non-blocking staleness advisory (SPEC-106 §Design
-   * Decisions D2/D3/D5) — one shared computation, never two independently
-   * maintained copies (mirrors this module's `buildUpstreamSpecContext`
-   * precedent one tier over in `checkpoint-registry.ts`). Read-side only, never
-   * stored (D5) — a persisted `assessment_stale` field would itself go stale.
-   *
-   * @param planIdOrSlug - The plan to resolve freshness facts for.
-   * @returns `ok({newestAssessmentAt?, newestTaskActivityAt?})` — either or both
-   *   keys OMITTED (not `undefined`-valued) when unresolved, so a caller
-   *   spreading this into a `GateContext` never overwrites an already-set field
-   *   with an explicit `undefined`.
-   */
-  async getAssessmentFreshness(
-    planIdOrSlug: string,
-  ): Promise<Result<{ newestAssessmentAt?: string; newestTaskActivityAt?: string }, LoreError>> {
-    const resolveResult = await this.resolve(planIdOrSlug);
-    if (!resolveResult.ok) return resolveResult;
-    const planId = resolveResult.value;
-
-    const newestAssessmentResult = await this.resolveNewestAssessmentAt(planId);
-    if (!newestAssessmentResult.ok) return newestAssessmentResult;
-
-    // reason: task-eight-more-plan-member-queries-still-key-on-parent-id — this feeds
-    // the `assessmentFreshness` gate-predicate advisory (non-blocking); a
-    // `parent_id`-keyed miss on a diverged member would silently under-report task
-    // activity, making a plan with genuinely-recent diverged-member work read as
-    // stale. `isPlanMember` (`extra.plan_id`) replaces the proxy; the `phase` query
-    // stays `parent_id`-keyed (phase docs carry no `extra.plan_id`, SPEC-023).
-    const allTasksResult = await this.store.findMany({ type: "task" });
-    const tasksResult = allTasksResult.ok
-      ? ok(allTasksResult.value.filter((t) => isPlanMember(t, planId)))
-      : allTasksResult;
-    if (!tasksResult.ok) return tasksResult;
-    const phasesResult = await this.store.findMany({ parent_id: planId, type: "phase" });
-    if (!phasesResult.ok) return phasesResult;
-    const tasks = [...tasksResult.value, ...phasesResult.value];
-
-    const newestActivityResult = await this.resolveNewestTaskActivityAt(tasks);
-    if (!newestActivityResult.ok) return newestActivityResult;
-
-    return ok({
-      ...(newestAssessmentResult.value !== undefined ? { newestAssessmentAt: newestAssessmentResult.value } : {}),
-      ...(newestActivityResult.value !== undefined ? { newestTaskActivityAt: newestActivityResult.value } : {}),
-    });
-  }
-
-  /**
-   * The rules the closing plan's spec criteria cite whose state makes the close refuse (BR-984):
-   * `contradicted`, or `stale` (BR-984: ANY citing spec's code changed after its criterion's latest
-   * attested pass, by any plan). A fresh attested pass of the stale criterion makes the rule `verified`,
-   * so it no longer lists here. `verified`, `unverified` and `unknown` never refuse. Each violation
-   * carries the per-input `offences` `RuleStateService.full()` computed, for the refusal to name.
-   *
-   * @param spec - The closing plan's resolved ancestor spec (`PlanBundle.spec`).
-   * @returns `ok([])` when the spec cites nothing (rule state is then not even read), when no
-   *   rule-state service is wired, or when every cited rule is fine; `err` when the spec's stored
-   *   criteria are unreadable or rule state could not be computed.
-   */
-  private async resolveCitedRuleViolations(
-    spec: DocRecord,
-  ): Promise<Result<{ violations: CitedRuleViolation[]; unknowns: CitedRuleUnknown[] }, LoreError>> {
-    const none = { violations: [], unknowns: [] };
+  async getCitedRuleStates(spec: DocRecord): Promise<Result<CitedRuleStateRow[], LoreError>> {
     const ruleState = this.ruleStateService;
-    if (ruleState === undefined) return ok(none);
+    if (ruleState === undefined) return ok([]);
     const raw = spec.extra["acceptance_criteria"];
-    if (raw === undefined) return ok(none);
+    if (raw === undefined) return ok([]);
     const parsed = specAcceptanceCriteriaSchema.safeParse(raw);
     if (!parsed.success) {
       return err({
         code: "VALIDATION_ERROR",
-        message: `plan-close cannot read the acceptance criteria of ${spec.slug} to find the rules it cites: ${parsed.error.message}`,
+        message: `the milestone review cannot read the acceptance criteria of ${spec.slug} to find the rules it cites: ${parsed.error.message}`,
         field: "extra.acceptance_criteria",
+        rule: "BR-1372",
       });
     }
     const cited = new Set(parsed.data.flatMap((criterion) => criterion.cites ?? []));
-    if (cited.size === 0) return ok(none);
+    if (cited.size === 0) return ok([]);
+    const citingAcs = (ruleId: string): string[] =>
+      parsed.data.filter((criterion) => criterion.superseded_by === undefined && (criterion.cites ?? []).includes(ruleId)).map((c) => c.id);
     const full = await ruleState.full();
     if (!full.ok) return full;
-    const violations: CitedRuleViolation[] = [];
-    const unknowns: CitedRuleUnknown[] = [];
-    const unmeasurable: string[] = [];
-    for (const rule of full.value.rules) {
-      if (!cited.has(rule.rule_id)) continue;
-      if (rule.state === "contradicted" || rule.state === "stale") {
-        violations.push({ rule_id: rule.rule_id, state: rule.state, offences: rule.offences });
-      } else if (rule.state === "unknown" && rule.unknown_reason !== undefined) {
-        // reason: BR-984 - git-unavailable is a failed measurement and refuses; the other reasons are facts about
-        // the recorded evidence or the spec's own choice (no anchors) and are reported, not refused.
-        if (rule.unknown_reason === "git-unavailable") unmeasurable.push(rule.rule_id);
-        else unknowns.push({ rule_id: rule.rule_id, reason: rule.unknown_reason });
-      }
-    }
-    if (unmeasurable.length > 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        message:
-          `plan-close cannot close ${spec.slug}: the state of cited rule(s) ${unmeasurable.join(", ")} could not be measured ` +
-          `(git-unavailable: git did not answer for HEAD or the citing pass's commit). Restore git access, then close again.`,
-        field: "gate:plan-close:cited-rule-measurement",
-      });
-    }
-    return ok({ violations, unknowns });
+    return ok(
+      full.value.rules
+        .filter((rule) => cited.has(rule.rule_id))
+        .map((rule) => ({
+          rule_id: rule.rule_id,
+          state: rule.state,
+          ...(rule.unknown_reason !== undefined ? { unknown_reason: rule.unknown_reason } : {}),
+          ...(rule.state === "stale" ? { citing_acs: citingAcs(rule.rule_id) } : {}),
+        })),
+    );
   }
 
   /**
@@ -4993,7 +4951,7 @@ export class CorpusService {
     if (!planResult.ok) return planResult;
     const plan = planResult.value;
     if (plan === null || plan.deleted_at !== null) {
-      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value, rule: "BR-1328" });
     }
     if (plan.type !== "plan") {
       return err({
@@ -5001,6 +4959,7 @@ export class CorpusService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
+        rule: "BR-1329",
       });
     }
 
@@ -5242,6 +5201,7 @@ export class CorpusService {
           "extra.plan_id (never parent_id) — declare it, or drop extra.phase. An --adhoc task " +
           "is planless by design and can never carry a phase.",
         value: taskPhase,
+        rule: "BR-116",
       });
     }
 
@@ -5256,6 +5216,7 @@ export class CorpusService {
           "ULID — a slug or short prefix makes the task a member of nothing at every " +
           "phase-scoped read too, so it is not accepted here either.",
         value: taskPhase,
+        rule: "BR-116",
       });
     }
 
@@ -5270,6 +5231,7 @@ export class CorpusService {
           `task references phase "${taskPhase}" but its plan ${owningPlan.slug} ` +
           `(${owningPlan.id}) declares no phases`,
         value: taskPhase,
+        rule: "BR-116",
       });
     }
 
@@ -5290,6 +5252,7 @@ export class CorpusService {
         `unknown phase "${taskPhase}"; its plan ${owningPlan.slug} (${owningPlan.id}) declares: ` +
         `[${knownNames}]`,
       value: taskPhase,
+      rule: "BR-116",
     });
   }
 
@@ -5370,6 +5333,7 @@ export class CorpusService {
           "be resolved (no plan/spec link exists for an --adhoc task, SPEC-069 D2) — declare " +
           `one with 'lore scope add ${task.slug} <AC-ID>' first.`,
         value: task.slug,
+        rule: "BR-1327",
       });
     }
     if (declared.length === 0) {
@@ -5381,6 +5345,7 @@ export class CorpusService {
           "EMPTY array, so there is no declared AC id to resolve a governing spec from. " +
           `Re-declare with 'lore scope add ${task.slug} <AC-ID>' before recording evidence.`,
         value: task.slug,
+        rule: "BR-1327",
       });
     }
 
@@ -5572,7 +5537,7 @@ export class CorpusService {
       const fromDocResult = await this.store.find(fromResult.value);
       if (!fromDocResult.ok) return fromDocResult;
       const fromDoc = fromDocResult.value;
-      if (fromDoc === null) return err({ code: "DOC_NOT_FOUND", id: fromResult.value });
+      if (fromDoc === null) return err({ code: "DOC_NOT_FOUND", id: fromResult.value, rule: "BR-550" });
 
       const toDocResult = await this.store.find(toResult.value);
       if (!toDocResult.ok) return toDocResult;

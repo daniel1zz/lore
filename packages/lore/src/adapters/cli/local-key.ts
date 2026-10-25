@@ -71,7 +71,9 @@ export async function ensureLocalApiKey(io: CliIo,
     return readFileSync(keyPath, "utf8").trim();
   }
 
-  const result = await store.create("dashboard-local", "admin");
+  // reason: the key's owner is a placeholder, never a person: a local dashboard write is made by the checkout's open
+  // human session (GitHub #324; HttpConfig.humanWrites), so no person's name lives on this machine-wide key.
+  const result = await store.create("dashboard-local", "dashboard-local");
 
   if (result.ok) {
     const rawKey = result.value.rawKey;

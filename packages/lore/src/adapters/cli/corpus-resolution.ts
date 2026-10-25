@@ -184,10 +184,7 @@ function resolveCallerTreeRoot(cwd: string): string {
  * Supplies `@lore/core`'s pure `resolveCorpusProvenance` with real
  * `CorpusProvenanceGitFacts` about `cwd` — the §D1 "one boundary detector,
  * never a third" adapter. Extracted from `utils.ts`'s `findMainCheckoutLoreDb`
- * (the git-shellout detector), NOT `detectWorktreeDerivedActor` (the
- * `.git`-file-reading one, still in `utils.ts` unchanged, serving SPEC-104's
- * unrelated actor-identity question): the git-shellout detector already
- * answers exactly the "main-checkout CROSSING determination" §D1 calls out
+ * (the git-shellout detector): that detector answers exactly the "main-checkout CROSSING determination" §D1 calls out
  * as the two detectors' disagreement surface, via git's OWN documented
  * `rev-parse` contract rather than a hand-parsed assumption about the
  * `.git/worktrees/<name>` internal layout. Extending it one step further
@@ -196,11 +193,6 @@ function resolveCallerTreeRoot(cwd: string): string {
  * already established as the precedent — see `@lore/core`'s
  * `corpus-provenance.ts` module header) supplies `callerTreeRoot` too, with
  * zero new detection MECHANISM invented.
- *
- * `detectWorktreeDerivedActor` stays exactly where it is, doing its own
- * independent `.git`-file probe for a DIFFERENT question (branch name for
- * actor identity) — that overlap is coincidental, not a second competing
- * boundary detector for corpus resolution.
  */
 export function gatherCorpusGitFacts(cwd: string): CorpusProvenanceGitFacts {
   const probe = probeGitCommonDir(cwd);
@@ -384,4 +376,27 @@ export function findLoreDbPath(io: CliIo, locator: CorpusLocator): string {
  */
 export function findLoreDbPathQuiet(io: CliIo, locator: CorpusLocator): string | undefined {
   return definiteCorpusPath(io, locator);
+}
+
+/**
+ * The priming probe's resolution: the same corpus path {@link findLoreDbPathQuiet} finds, but a corpus the test
+ * sandbox refuses is reported as a miss (`undefined`) instead of ending the run with exit 4.
+ *
+ * reason: replica priming runs for EVERY command, including corpus-free ones (`--help`, `governance`, `setup --check`),
+ * and only reads the config to decide whether to load the sync client. Refusing there broke every sandboxed test that
+ * spawns lore at the repo root. The refusal is not weakened: a command that really opens the corpus still goes through
+ * {@link resolveCorpus} in `loadLoreApp` and exits 4 there (corpus-free-commands.test.ts pins both halves).
+ *
+ * @param locator - the run's `cwd` + `env` (an `Invocation` works)
+ * @returns the `.lore/lore.db` path, or `undefined` when none is confirmed or the sandbox refuses it
+ */
+export function findLoreDbPathForPriming(locator: CorpusLocator): string | undefined {
+  const resolved = resolveCorpusProvenance({
+    cwd: locator.cwd,
+    probeExists: existsSync,
+    gitFacts: gatherCorpusGitFacts(locator.cwd),
+  });
+  if (resolved === undefined || resolved.provenance === "undetermined") return undefined;
+  if (findSandboxRefusal(resolved.path, locator.env) !== undefined) return undefined;
+  return resolved.path;
 }

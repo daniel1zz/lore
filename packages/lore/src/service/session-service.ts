@@ -59,7 +59,7 @@
  * Source: SPEC-041 §3 D1-D5; task-active-sessions-derives-only-over-active-plans-tasks-with.
  */
 
-import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
+import { pickArchitectureRoot, pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import {
   err,
   ok,
@@ -103,6 +103,7 @@ import { resolveDoc } from "./resolve.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 import { isPlanMember } from "./plan-membership.js";
+import { resolveMessageAddressByRun } from "./holder-message-address.js";
 import { computeRuleDiffSinceClaim, renderRuleDiff } from "./resume-rule-diff.js";
 import { deriveLivenessVerdict, type LivenessVerdict } from "./session-liveness.js";
 import { probeProcessStartTime, type ProcessStartTimeProbe } from "../adapters/process-probe-port.js";
@@ -424,6 +425,13 @@ export class SessionService {
     const navigationRoot = baselineRoot ?? firstPrd;
     const root = navigationRoot !== undefined ? toRootRef(navigationRoot) : null;
     const strategy = baselineRoot !== undefined && firstPrd !== undefined ? toRootRef(firstPrd) : undefined;
+    // `architecture` is ADDITIVE (`root` stays the business root for every `data.root` consumer);
+    // `null` = no architecture root in this corpus, reported explicitly rather than omitted.
+    const architectureDoc = pickArchitectureRoot(allDocs);
+    const architecture =
+      architectureDoc !== undefined
+        ? { tree: "architecture" as const, id: architectureDoc.id, ...toRootRef(architectureDoc) }
+        : null;
 
     // Active (non-terminal) plans + per-plan task readiness counts. Batched: ONE
     // findLinksByToIds across every active plan's tasks (below) instead of the
@@ -483,7 +491,9 @@ export class SessionService {
     // paying for this method's unrelated plan/queue/handoff assembly.
     // `TaskWorkflowService.ready`'s plan-scoped `sessions[]` remains a
     // SEPARATE, untouched call site over the shared `deriveSessions` pure fn.
-    const activeSessions: ReadySession[] = this.computeActiveSessionsFrom(allDocs, nowIso);
+    const activeSessionsResult = await this.computeActiveSessionsFrom(allDocs, nowIso);
+    if (!activeSessionsResult.ok) return activeSessionsResult;
+    const activeSessions: ReadySession[] = activeSessionsResult.value;
 
     // Pending review queue — same `status: "draft"` filter ReviewService.pending uses.
     const pendingDrafts = allDocs.filter((d) => d.status === "draft").sort(byCreatedAtAsc);
@@ -643,6 +653,7 @@ export class SessionService {
     const report: BootstrapReport = {
       root,
       ...(strategy !== undefined ? { strategy } : {}),
+      architecture,
       active_plans: activePlans,
       pending_reviews: pendingReviews,
       my_claims: myClaims,
@@ -686,7 +697,7 @@ export class SessionService {
     const nowIso = now();
     const allDocsResult = await this.store.findMany({});
     if (!allDocsResult.ok) return allDocsResult;
-    return ok(this.computeActiveSessionsFrom(allDocsResult.value, nowIso));
+    return this.computeActiveSessionsFrom(allDocsResult.value, nowIso);
   }
 
   /**
@@ -762,8 +773,7 @@ export class SessionService {
    *      advisory-only, never rendered as a live/dead verdict). An ABSENT
    *      `session.machine` does NOT trip this — `TaskClaim.machine` is
    *      additive/optional, and absence is not evidence of a DIFFERENT
-   *      machine (mirrors `actorIdentityGuard`'s "missing on either side ⇒
-   *      not comparable, never a trip" discipline, `gate-predicates.ts`).
+   *      machine (a missing side is "not comparable", never a trip).
    *   3. No recorded heartbeat on file for this `session_id` → `"unmeasured"`
    *      (the session never called `recordOwnHeartbeat` — on this machine or
    *      at all — or its heartbeat was never written).
@@ -801,6 +811,7 @@ export class SessionService {
         records.push({ ...session, liveness: "unmeasured" });
         continue;
       }
+      /** @lore-site BR-383 */
       const probed = await this.probeProcessStartTimePort(recorded.pid);
       records.push({ ...session, liveness: deriveLivenessVerdict(recorded, probed, true) });
     }
@@ -868,6 +879,7 @@ export class SessionService {
           field: "plan_ref",
           message: `plan_ref "${handoff.plan_ref}" does not resolve to any document`,
           value: handoff.plan_ref,
+          rule: "BR-338",
         });
       }
       const planDoc = resolveResult.value;
@@ -879,6 +891,7 @@ export class SessionService {
             `plan_ref "${handoff.plan_ref}" must resolve to a live plan document — ` +
             `found type "${planDoc.type}"${planDoc.deleted_at !== null ? " (soft-deleted)" : ""}`,
           value: handoff.plan_ref,
+          rule: "BR-338",
         });
       }
       parentId = planDoc.id;
@@ -895,6 +908,7 @@ export class SessionService {
           message:
             "multiple PRDs exist in the corpus; plan_ref is required to disambiguate the handoff's parent",
           value: prds.map((p) => p.slug),
+          rule: "BR-339",
         });
       }
       // prds.length === 0 → parentId stays null (parentless — legal for knowledge docs).
@@ -917,7 +931,7 @@ export class SessionService {
    * only the trail may say what changed. Never throws — an unreadable trail is "not measured" with its reason.
    */
   private withTrailChangedFiles(handoff: HandoffExtra, caller: HandoffCaller): HandoffExtra {
-    const { changed_files: _dropFiles, changed_files_measured: _dropMeasured, trail_gaps: _dropGaps, ...base } = handoff;
+    const { changed_files: _dropFiles, changed_files_measured: _dropMeasured, changed_files_overflow: _dropOverflow, trail_gaps: _dropGaps, ...base } = handoff;
     let trail: SessionTrail | null = null;
     let reason: string;
     if (caller.run === null) {
@@ -925,6 +939,7 @@ export class SessionService {
     } else {
       try {
         const { session } = parseRunId(caller.run);
+        /** @lore-site BR-1149 */
         trail = this.readTrailPort(session);
         reason = `no session trail for ${session}`;
       } catch (e) {
@@ -1208,19 +1223,30 @@ export class SessionService {
    * @param allDocs - Every doc in the corpus (already fetched by the caller).
    * @param nowIso - Current time, ISO 8601.
    */
-  private computeActiveSessionsFrom(allDocs: DocRecord[], nowIso: string): ReadySession[] {
+  private async computeActiveSessionsFrom(
+    allDocs: DocRecord[],
+    nowIso: string,
+  ): Promise<Result<ReadySession[], LoreError>> {
     const claimBearingTasks = allDocs.filter(
       (d) => d.type === "task" && d.status !== "archived" && d.status !== "deprecated",
     );
+    // reason: BR-1363 — every holder listing shows the holding session's main-run address; the registry reads
+    // happen here so `deriveSessions` stays pure.
+    const addressByRun = await resolveMessageAddressByRun(this.store, claimBearingTasks);
+    if (!addressByRun.ok) return addressByRun;
     const UNBOUNDED_TTL_MINUTES = Number.POSITIVE_INFINITY;
-    return deriveSessions(claimBearingTasks, nowIso, UNBOUNDED_TTL_MINUTES).map((session) => {
-      const groupIsStale = isClaimStale(
-        { by: session.by, at: session.newest_at },
-        nowIso,
-        this.deps.claimTtlMinutes,
-      );
-      return groupIsStale ? { ...session, stale: true } : session;
-    });
+    return ok(
+      deriveSessions(claimBearingTasks, nowIso, UNBOUNDED_TTL_MINUTES, undefined, addressByRun.value).map(
+        (session) => {
+          const groupIsStale = isClaimStale(
+            { by: session.by, at: session.newest_at },
+            nowIso,
+            this.deps.claimTtlMinutes,
+          );
+          return groupIsStale ? { ...session, stale: true } : session;
+        },
+      ),
+    );
   }
 
   /**

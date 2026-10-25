@@ -27,6 +27,10 @@
  *   register ... [--harness-pid <pid>]
  *       Also records the harness process (pid resolved past a plain shell wrapper, its start time read now, and the
  *       checkout root the command ran in) so `reap` can prove a run dead and what it left behind (AC-AU-5).
+ *   register ... [--messaging-socket <absolute path>]
+ *       Records the run's messaging address (BR-1360). The CLI composes the harness grammar (claude-code ->
+ *       `uds:<path>`); a harness without a known grammar, or an empty / non-absolute path, exits 2 and stores nothing.
+ *       Written on EVERY register: a resume replaces it and omitting the flag clears it. A subagent run stores none.
  *   reap [--apply] [--json]
  *       (AC-AU-5, RunReapService) Ends runs with no end whose recorded harness pid is dead (decide run-end-stale, reason
  *       dead-pid), escalates legacy runs without a pid as ONE decision, and reaps processes inside ENDED runs' worktrees
@@ -100,18 +104,35 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
+/** Message-address grammar per harness (BR-1360). The hook forwards the raw socket path; the grammar lives only here. */
+const MESSAGE_ADDRESS_COMPOSERS: Readonly<Record<string, (socketPath: string) => string>> = {
+  "claude-code": (socketPath) => `uds:${socketPath}`,
+};
+
+/** `{ address }` composed from `--messaging-socket`, or `{ error }` (exit 2, nothing stored). Absent flag -> `{ address: undefined }`. */
+function composeMessageAddress(harness: string, raw: unknown): { address: string | undefined } | { error: string } {
+  if (raw === undefined) return { address: undefined };
+  if (typeof raw !== "string" || raw === "") return { error: "--messaging-socket requires a non-empty absolute socket path" };
+  if (!raw.startsWith("/")) return { error: `--messaging-socket must be an absolute path (got "${raw}")` };
+  const composer = MESSAGE_ADDRESS_COMPOSERS[harness];
+  if (composer === undefined) {
+    return { error: `--messaging-socket has no known address grammar for harness "${harness}" (known: ${Object.keys(MESSAGE_ADDRESS_COMPOSERS).join(", ")})` };
+  }
+  return { address: composer(raw) };
+}
+
 /**
  * Composition for a run: what the fragment flow selects, hashed from the fragment FILES.
  * A subagent records its `hook:subagent-start` selection. A main run (no agent type) records the union of the
- * `rules:user` and `rules:project` selections: those are the static fragments its rules files carry into the
- * session (BR-1028), so the record lists what the session was given.
+ * `rules:user` and `rules:project` selections (the launch fragments its rules files carry into the session,
+ * BR-1028) and the `hook:user-prompt` selection (re-injected every turn), so the record lists what the session was given.
  */
 async function computeComposition(agentType: string | undefined, inv: Invocation): Promise<CompositionRecord | { error: string }> {
   const deps = buildFlowDeps(inv.cwd, inv);
   if (!deps.ok) return { error: `${deps.error.code}: ${deps.error.message}` };
   const requests =
     agentType === undefined
-      ? [{ outlet: "rules:user" as const }, { outlet: "rules:project" as const }]
+      ? [{ outlet: "rules:user" as const }, { outlet: "rules:project" as const }, { outlet: "hook:user-prompt" as const }]
       : [{ outlet: "hook:subagent-start" as const, agentType }];
   const byId = new Map<string, string>();
   for (const request of requests) {
@@ -170,6 +191,7 @@ function renderRunText(run: RunRecord): string {
     `Parent: ${run.parentRunId ?? (run.kind === "main" ? "-" : "unknown")}`,
     `Branch: ${run.branch ?? "-"}`,
     `Registered: ${run.registeredAt}`,
+    `address: ${run.messageAddress ?? "none recorded"}`,
     `Composition (${run.composition.fragments.length} fragments):`,
     ...run.composition.fragments.map((f) => `  ${f.id} ${f.sha256}`),
   ];
@@ -198,6 +220,9 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   const parent = stringArg(args, "parent");
   const branch = stringArg(args, "branch");
 
+  const messageAddress = composeMessageAddress(harness, args["messaging-socket"]);
+  if ("error" in messageAddress) return usageError(inv.io, messageAddress.error);
+
   const composition = await computeComposition(agentId !== undefined ? agentType : undefined, inv);
   if ("error" in composition) {
     inv.io.stderr.write(`Error: cannot compute the run composition: ${composition.error}\n`);
@@ -216,6 +241,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
       ...(branch !== undefined ? { branch } : {}),
       composition,
       ...(runProcess !== undefined ? { process: runProcess } : {}),
+      ...(messageAddress.address !== undefined ? { messageAddress: messageAddress.address } : {}),
     });
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
@@ -444,6 +470,7 @@ export default defineLoreCommand({
     parent: { type: "string", description: "register: the parent run id; omitted => stored as unknown" },
     branch: { type: "string", description: "register: branch the run works on" },
     "harness-pid": { type: "string", description: "register: pid of the harness process (its start time and checkout are recorded for `reap`)" },
+    "messaging-socket": { type: "string", description: "register: absolute path of the session's messaging socket (stored as the run's address)" },
     apply: { type: "boolean", description: "reap: actually end dead runs and reap proven orphans (default: report only)" },
     reason: { type: "string", description: "end: why the run ended (required)" },
     worktree: { type: "string", description: "occupancy: worktree directory to measure (required)" },

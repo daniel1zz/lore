@@ -61,6 +61,7 @@ import {
   type EvidenceEntry,
 } from "@lore/core";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -108,15 +109,15 @@ afterEach(() => {
  * nothing, so {@link configRoundTrips} asserts parseability directly.
  */
 function writeCaptureWindowConfig(rawValue: string): void {
-  writeFileSync(
-    join(tmpDir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    tmpDir,
     "project:\n" +
       "  name: capture-window-fixture\n" +
       "  author: tester\n" +
       "workflow:\n" +
       "  evidence:\n" +
       `    capture_timeout_ms: ${rawValue}\n`,
-    "utf8",
+    { replace: true },
   );
 }
 
@@ -353,24 +354,20 @@ describe("lore evidence --capture window — BOUNDARY", () => {
 // ─── ERROR ───────────────────────────────────────────────────────────────────
 
 describe("lore evidence --capture window — ERROR", () => {
-  it("CAPCLI-E1: a malformed capture_timeout_ms degrades to the DEFAULT window (loader.ts's documented pre-existing non-`ai` fallback) — measured, not claimed fixed", async () => {
-    // 0 violates the schema's .positive(), so the whole config fails to parse and
-    // `loadProjectConfig()` returns undefined. This is loader.ts's long-standing
-    // silent fallback for every non-`ai` section (an explicit SPEC-030 non-goal),
-    // NOT something this change introduced — and NOT something it fixes. Pinning the
-    // real behavior here so a future loader-level fix has a failing test to flip
-    // rather than a silent semantics change.
+  it("CAPCLI-E1: a malformed capture_timeout_ms is REFUSED (exit 4) instead of degrading to the default window (BR-926)", async () => {
+    // 0 violates the schema's .positive(), so the whole config fails to parse. This test used to pin loader.ts's
+    // silent fallback to the 600s default ("a future loader-level fix has a failing test to flip"); BR-926 is that
+    // fix: the unusable file is refused, so no capture runs and no evidence row is written.
+    const taskSlug = await seedTask();
     writeCaptureWindowConfig("0");
-    // the degradation is MEASURED, not assumed: this config genuinely does not parse
+    // the refusal is MEASURED against a config that genuinely does not parse
     const parsed = loadConfigFromString(readFileSync(join(tmpDir, ".lore", "config.yaml"), "utf8"));
     expect(parsed.ok).toBe(false);
-    const taskSlug = await seedTask();
 
     const { exitCode } = await runCapture(taskSlug, "sleep 1");
 
-    // the 600s default applied, so a 1s command still captured
-    expect(exitCode).toBe(0);
-    expect((await readEvidence(taskSlug)).length).toBe(1);
+    expect(exitCode).toBe(4);
+    expect(await readEvidence(taskSlug)).toEqual([]);
   });
 });
 

@@ -14,6 +14,7 @@
  *   - ContextFacts — `{ moduleIndex, memoryModules, commands, packageFile, ... }`, the full collected bundle
  *   - MemoryModuleEntry — a folder with a memory file + its Purpose sentence
  *   - extractPurposeSentence(content) — pure Purpose-section reader
+ *   - ModuleCardRef / extractModuleCardRefs(docs) — pure card->module-directory mapping read from architecture module-card docs
  *   - collectContextFacts(fs, root, budgetsCfg) — the collection entry point
  *
  * Invariants:
@@ -92,8 +93,8 @@
 
 import { z } from "zod";
 import ignoreFactory, { type Ignore } from "ignore";
-import { err, ok } from "@lore/core";
-import type { FsReadPort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import { err, ok, parseModuleCardDirectory } from "@lore/core";
+import type { DocRecord, FsReadPort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 
 // ─── Public shapes ───────────────────────────────────────────────────────────
 
@@ -260,6 +261,7 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
       field: packagePath,
       message: `${packagePath} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
       value: packagePath,
+      rule: "BR-883",
     });
   }
 
@@ -272,6 +274,7 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
         .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
         .join("; ")}`,
       value: packagePath,
+      rule: "BR-883",
     });
   }
   const scripts = validated.data.scripts ?? {};
@@ -286,6 +289,7 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
         .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
         .join("; ")}`,
       value: marker,
+      rule: "BR-1294",
     });
   }
   const documented: Record<string, DocumentedCommand> = {};
@@ -297,6 +301,7 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Packag
         field: "package.json lore.documentedScripts",
         message: `lore.documentedScripts names "${name}" but package.json has no such script`,
         value: name,
+        rule: "BR-883",
       });
     }
     documented[name] = { command: body, description };
@@ -516,4 +521,45 @@ export async function collectContextFacts(
     commands,
     packageFile,
   });
+}
+
+// ─── Architecture module cards ───────────────────────────────────────────────
+
+/** One architecture module card and the module directory it declares (`Source:` line of its body). */
+export interface ModuleCardRef {
+  /** The card's slug — the stable address written into the module memory file. */
+  slug: string;
+  /** Repo-relative module directory (no trailing slash) the card summarises. */
+  directory: string;
+}
+
+/**
+ * Picks the architecture module cards out of a baseline listing and reads each card's module directory.
+ * A card that declares no `Source:` directory is skipped (it cannot be matched to a module — never matched by title).
+ * Two cards declaring one directory is ambiguous and fails loud rather than picking one.
+ *
+ * @param docs - Full baseline records (`extra` and `content` present).
+ * @returns `ok(refs)` sorted by directory; `err(VALIDATION_ERROR)` when two cards claim the same directory.
+ * @example
+ * extractModuleCardRefs(allBaselineDocs); // ok([{ slug: "baseline-module-card-core", directory: "packages/core/src" }])
+ */
+export function extractModuleCardRefs(docs: readonly DocRecord[]): Result<ModuleCardRef[], LoreError> {
+  const byDirectory = new Map<string, ModuleCardRef>();
+  for (const doc of docs) {
+    const extra = doc.extra as { tree?: unknown; node?: unknown } | undefined;
+    if (extra?.tree !== "architecture" || extra.node !== "module-card") continue;
+    const directory = parseModuleCardDirectory(doc.content);
+    if (directory === null) continue;
+    const previous = byDirectory.get(directory);
+    if (previous !== undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "module-card",
+        message: `module cards ${previous.slug} and ${doc.slug} both declare ${directory}/ — one module has exactly one architecture card.`,
+        value: directory,
+      });
+    }
+    byDirectory.set(directory, { slug: doc.slug, directory });
+  }
+  return ok([...byDirectory.values()].sort((a, b) => a.directory.localeCompare(b.directory)));
 }

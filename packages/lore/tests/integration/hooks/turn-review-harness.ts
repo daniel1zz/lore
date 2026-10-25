@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, makeGitRepo, makeTmpDir, runHook, type HookRun } from "./hook-harness";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { DEFAULT_TEST_RUN, registerTestRun } from "../../helpers/test-run-identity.js";
 
 export const STOP_HOOK = "stop-turn-review.mjs";
 
@@ -49,18 +51,66 @@ export function markEdit(f: TurnFixture, absPath: string, agentId?: string): Hoo
   return runHook("post-edit-mark.mjs", payload, f.base);
 }
 
+/**
+ * Runs the Stop hook and removes the shared-checkout finding (BR-1349) from its block.
+ *
+ * reason: the suites using this helper test the OTHER findings (source edits, anchor drift, CLAUDE.md budget) and
+ * leave their edits uncommitted in the fixture repo, which the shared-checkout check rightly reports. Dropping that
+ * one finding keeps each suite about its own subject; the check itself is covered by
+ * `dj-turn-end-no-helper-review.bun.test.ts`, which spawns the hook directly. A block with no other finding left
+ * becomes the empty stdout the hook prints when nothing is wrong.
+ */
 export function stopTurn(f: TurnFixture, extra: Record<string, unknown> = {}): HookRun {
+  const run = stopTurnUnfiltered(f, extra);
+  return { ...run, stdout: withoutSharedCheckoutFinding(run.stdout) };
+}
+
+/** Runs the Stop hook and returns its output as printed, the shared-checkout finding (BR-1349) included. */
+export function stopTurnUnfiltered(f: TurnFixture, extra: Record<string, unknown> = {}): HookRun {
   return runHook(STOP_HOOK, { session_id: f.sid, cwd: f.repo, hook_event_name: "Stop", stop_hook_active: false, ...extra }, f.base);
+}
+
+function withoutSharedCheckoutFinding(stdout: string): string {
+  if (stdout === "") return stdout;
+  const parsed = JSON.parse(stdout) as { decision?: string; reason?: string };
+  if (parsed.decision !== "block" || typeof parsed.reason !== "string") return stdout;
+  const lines = parsed.reason.split("\n");
+  const first = lines.findIndex((l) => /^\d+\. /.test(l));
+  const tail = lines.findIndex((l, i) => i > first && (l === "" && lines[i + 1]?.startsWith("Not measured:") || l === "</turn-end-review>"));
+  const sections: string[][] = [];
+  for (const line of lines.slice(first, tail)) {
+    if (/^\d+\. /.test(line)) sections.push([line]);
+    else sections[sections.length - 1]!.push(line);
+  }
+  const kept = sections.filter((section) => !section[0]!.includes("Shared checkout has "));
+  if (kept.length === sections.length) return stdout;
+  if (kept.length === 0) {
+    // reason: with the shared-checkout finding gone the hook would have printed no block; its source-edit
+    // not-measured reasons then reach the user as a systemMessage, which is rebuilt from the block's own
+    // "Not measured:" line.
+    const notMeasured = lines.find((l) => l.startsWith("Not measured:")) ?? "";
+    const notes = notMeasured.slice("Not measured:".length).split("; ").map((r) => r.trim()).filter((r) => r.startsWith("source-edit finding not measured"));
+    return notes.length === 0 ? "" : JSON.stringify({ systemMessage: notes.map((r) => `Turn-end review: ${r}; no verdict.`).join("\n") });
+  }
+  const renumbered = kept.map((section, i) => [section[0]!.replace(/^\d+\./, `${i + 1}.`), ...section.slice(1)].join("\n"));
+  const rebuilt = [
+    "<turn-end-review>",
+    `Turn-end review: ${kept.length} finding${kept.length === 1 ? "" : "s"}. Resolve ${kept.length === 1 ? "it" : "all of them"}, then finish.`,
+    "",
+    ...renumbered,
+    ...lines.slice(tail),
+  ].join("\n");
+  return JSON.stringify({ decision: "block", reason: rebuilt });
 }
 
 /** Writes `.lore/config.yaml` (replacing it) carrying workflow.turn_end.main_session_source_edits. */
 export function writeTurnEndSetting(repo: string, value: string): void {
-  writeRepoFile(repo, ".lore/config.yaml", `project:\n  name: t\n  author: owner\nworkflow:\n  turn_end:\n    main_session_source_edits: ${value}\n`);
+  patchLoreConfig(repo, `project:\n  name: t\n  author: owner\nworkflow:\n  turn_end:\n    main_session_source_edits: ${value}\n`, { replace: true });
 }
 
 /** Appends a workflow block that switches the four service-layer gates off (placeholder spec content). */
 export function disableGates(repo: string): void {
-  appendFileSync(join(repo, ".lore", "config.yaml"), [
+  patchLoreConfig(repo, [
     "workflow:", "  gates:",
     "    spec-create:", "      enabled: false",
     "    spec-promote:", "      enabled: false",
@@ -79,7 +129,9 @@ export function initLoreWithAnchoredSpec(repo: string, anchors: string[]): strin
   const init = runLore(repo, ["init"]);
   if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   disableGates(repo);
-  const args = ["create", "spec", "--title", "Anchored fixture spec", "--kind", "feature", "--no-ai", "--content", "## Overview\n\nBody.", "--json"];
+  // a write is made by a known party (BR-1351): the fixture spec is written by a registered test run, as an installed hook would register it
+  registerTestRun(repo, DEFAULT_TEST_RUN);
+  const args = ["--harness-run", DEFAULT_TEST_RUN, "create", "spec", "--title", "Anchored fixture spec", "--kind", "feature", "--no-ai", "--content", "## Overview\n\nBody.", "--json"];
   for (const a of anchors) args.push("--code-anchor", a);
   const created = runLore(repo, args);
   if (created.status !== 0) throw new Error(`lore create spec failed: ${created.stderr}${created.stdout}`);

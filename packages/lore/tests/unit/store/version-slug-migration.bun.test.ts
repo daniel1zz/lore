@@ -39,6 +39,7 @@ import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.j
 import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
 import type { DocRecord, VersionRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -120,7 +121,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     // the head — a fresh store runs every migration up to it, not just
     // through migration-007. This test's own concern (versions.slug present)
     // is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     store.close();
@@ -230,10 +231,10 @@ describe("migration-007 (versions.slug nullable column)", () => {
     // migration-009 (SPEC-079 G3 audit hash chain, currentVersion 8 < 9),
     // then migration-010 (SPEC-084 docs.ordinal, currentVersion 9 < 10) —
     // never throw, never touch the pre-existing rows.
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(26);
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     const preservedDoc = db
@@ -253,13 +254,13 @@ describe("migration-007 (versions.slug nullable column)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, versions.slug unchanged", () => {
-    const firstOpen = actedStore(new SQLiteStore(dbPath));
+    const firstOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = actedStore(new SQLiteStore(dbPath));
+      const secondOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(26);
+      expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       expect(tableColumnNames(db, "versions")).toContain("slug");
       secondOpen.close();
     }).not.toThrow();

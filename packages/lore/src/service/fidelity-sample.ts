@@ -1,9 +1,9 @@
 /**
- * Module: fidelity-sample — seeded fidelity sampling of baseline citations and non-business exclusions.
+ * Module: fidelity-sample — seeded fidelity sampling of baseline citations.
  *
- * Purpose: `lore baseline fidelity` (spec baseline-slice-2c C7, rules BR-963/964/965/967). Draws a
- *   reproducible sample of (criterion, rule) citation pairs — or of `non-business:` site-map
- *   exclusions — asks an AI judge whether each is faithful, and returns the record. It never writes.
+ * Purpose: `lore baseline fidelity` (spec baseline-slice-2c C7, rules BR-963/964/965). Draws a
+ *   reproducible sample of (criterion, rule) citation pairs, asks an AI judge whether each is faithful, and returns
+ *   the record. It never writes.
  * Public surface: {@link drawFidelitySample}, {@link buildCitationPairs}, {@link renderJudgeInput},
  *   {@link runFidelity}, types {@link CitationPair}, {@link FidelityRecord}, {@link FidelityVerdict}.
  * Invariants:
@@ -13,7 +13,7 @@
  *   - The judge reply is parsed strictly: a missing, extra or duplicate `n`, a bad verdict, bad JSON
  *     or a provider error ends the run as AI_PROVIDER_ERROR; there is no partial record (BR-964).
  *   - Two judges: judge A, judge B, then an adjudicator for the disagreeing `n` only (BR-965).
- *   - `faithful_share` = faithful / size and `wrong_share` = not_faithful / size (whole-sample denominator).
+ *   - `faithful_share` = faithful / size (whole-sample denominator).
  *   - The judge sees the source of each test file a criterion's command names (paths extracted by
  *     `@lore/core`'s `extractTestFileTokens`, the parser verify's precheck uses), capped at
  *     {@link TEST_SOURCE_MAX_CHARS} per file with a counted truncation note. A criterion with any
@@ -28,10 +28,10 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection } from "@lore/core";
+import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection, validationError } from "@lore/core";
 import type { AIProvider, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
-import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
+import { approvedRulesOf } from "./baseline-items.js";
 
 /** A rule cited by more than this share of the live-rule-citing criteria is a catch-all. */
 export const CATCH_ALL_THRESHOLD_SHARE = 0.05;
@@ -57,7 +57,7 @@ export type FidelityOutcome = FidelityVerdictValue | "not_seen";
 export interface FidelityVerdict {
   /** 1-based position in the drawn sample. */
   n: number;
-  /** Stable identity of the sampled item (citation `spec#ac->rule` or exclusion `leaf site-key`). */
+  /** Stable identity of the sampled item (citation `spec#ac->rule`). */
   key: string;
   verdict: FidelityOutcome;
   reason: string;
@@ -79,7 +79,7 @@ export interface CatchAllRule {
 }
 
 export interface FidelityRecord {
-  mode: "citations" | "exclusions";
+  mode: "citations";
   seed: number | string;
   size: number;
   pool: number;
@@ -89,9 +89,6 @@ export interface FidelityRecord {
   faithful_share: number;
   /** Sampled items never judged because a cited test file could not be read; excluded from faithful and wrong. */
   not_seen: number;
-  /** Present in exclusions mode only: not_faithful / size (the share of exclusions judged wrong). */
-  wrong_share?: number;
-  /** Citations mode only; always `[]` in exclusions mode (the catch-all question is about citations). */
   catch_all: CatchAllRule[];
   threshold_share: number;
 }
@@ -100,12 +97,8 @@ const judgeReplySchema = z.array(
   z.object({ n: z.number().int(), verdict: z.enum(["faithful", "not_faithful"]), reason: z.string() }).strict(),
 );
 
-function validationError(field: string, message: string): LoreError {
-  return { code: "VALIDATION_ERROR", field, message };
-}
-
 function aiError(provider: string, message: string): LoreError {
-  return { code: "AI_PROVIDER_ERROR", provider, message };
+  return { code: "AI_PROVIDER_ERROR", provider, message, rule: "BR-964" };
 }
 
 // ─── Seeded draw ──────────────────────────────────────────────────────────────
@@ -139,9 +132,9 @@ function makeRandom(seed: number | string): () => number {
  * @example drawFidelitySample([{ id: 1 }, { id: 2 }], 1, 42); // ok([{ id: 2 }]) for every call
  */
 export function drawFidelitySample<T>(pairs: readonly T[], size: number, seed: number | string): Result<T[], LoreError> {
-  if (!Number.isInteger(size) || size < 1) return err(validationError("size", `--size must be a positive integer, got ${String(size)}`));
+  if (!Number.isInteger(size) || size < 1) return err(validationError("size", `--size must be a positive integer, got ${String(size)}`, undefined, "BR-963"));
   if (size > pairs.length) {
-    return err(validationError("size", `--size ${size} exceeds the pool of ${pairs.length}; the sample would repeat or be empty`));
+    return err(validationError("size", `--size ${size} exceeds the pool of ${pairs.length}; the sample would repeat or be empty`, undefined, "BR-963"));
   }
   const random = makeRandom(seed);
   const working = [...pairs];
@@ -166,10 +159,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function liveRulesOf(leaf: DocRecord, branchSlug: string | null): Array<[string, LiveRule]> {
-  const raw = leaf.extra["rules"];
-  if (!Array.isArray(raw)) return [];
   const out: Array<[string, LiveRule]> = [];
-  for (const rule of raw as unknown[]) {
+  for (const rule of approvedRulesOf(leaf)) {
     if (!isRecord(rule) || typeof rule["id"] !== "string" || rule["lifecycle"] !== "live") continue;
     const examples = Array.isArray(rule["examples"]) ? (rule["examples"] as unknown[]).filter((e): e is string => typeof e === "string") : [];
     out.push([rule["id"], { statement: typeof rule["statement"] === "string" ? rule["statement"] : "", examples, leaf: leaf.slug, branch: branchSlug }]);
@@ -223,33 +214,6 @@ export async function buildCitationPairs(store: StoreInterface): Promise<Result<
     }
   }
   return ok(pairs);
-}
-
-/** One `non-business:` site-map entry of a live leaf. */
-interface ExclusionEntry {
-  leaf: string;
-  label: string;
-  site: string;
-  reason: string;
-}
-
-async function buildExclusionEntries(store: StoreInterface): Promise<Result<ExclusionEntry[], LoreError>> {
-  const leaves = await loadLiveLeaves(store);
-  if (!leaves.ok) return leaves;
-  const entries: ExclusionEntry[] = [];
-  for (const { leaf } of leaves.value) {
-    const siteMap = leaf.extra["site_map"];
-    if (!isRecord(siteMap)) continue;
-    for (const site of Object.keys(siteMap).sort()) {
-      const value = siteMap[site];
-      if (!Array.isArray(value)) continue;
-      const marker = (value as unknown[]).find((e): e is string => typeof e === "string" && e.startsWith(NON_BUSINESS_PREFIX));
-      if (marker === undefined) continue;
-      const label = leaf.extra["label"];
-      entries.push({ leaf: leaf.slug, label: typeof label === "string" ? label : leaf.title, site, reason: marker.slice(NON_BUSINESS_PREFIX.length).trim() });
-    }
-  }
-  return ok(entries);
 }
 
 /** Catch-all rules: cited by more than {@link CATCH_ALL_THRESHOLD_SHARE} of the live-rule-citing criteria. */
@@ -350,14 +314,6 @@ export function renderJudgeInput(pairs: readonly CitationPair[], nonce: string):
   return fenceItems(CITATION_INSTRUCTIONS, pairs.map((p, i) => ({ n: i + 1, body: citationBody(p) })), nonce);
 }
 
-const EXCLUSION_INSTRUCTIONS =
-  "You judge baseline exclusions. Each item is a code failure site that a baseline leaf declared NOT business behaviour, with the stated reason. " +
-  "'faithful' means the exclusion is right (the site really is not business behaviour); 'not_faithful' means it hides business behaviour.";
-
-function exclusionBody(e: ExclusionEntry): string {
-  return `Leaf ${e.leaf} (${e.label})\nSite: ${e.site}\nStated reason: ${e.reason}`;
-}
-
 // ─── Judge calls ──────────────────────────────────────────────────────────────
 
 type Judged = Map<number, { verdict: FidelityVerdictValue; reason: string }>;
@@ -376,17 +332,22 @@ async function askJudge(ai: AIProvider, prompt: string, expected: readonly numbe
   try {
     parsed = JSON.parse(stripJsonFence(generated.value.content));
   } catch (cause) {
+    /** @lore-site BR-964 */
     return err(aiError(ai.name, `${role} reply is not JSON: ${String(cause)}`));
   }
   const reply = judgeReplySchema.safeParse(parsed);
+  /** @lore-site BR-964 */
   if (!reply.success) return err(aiError(ai.name, `${role} reply does not match [{n, verdict, reason}]: ${reply.error.message.slice(0, 300)}`));
   const judged: Judged = new Map();
   for (const entry of reply.data) {
+    /** @lore-site BR-964 */
     if (!expected.includes(entry.n)) return err(aiError(ai.name, `${role} reply names item ${entry.n}, which is not in the request`));
+    /** @lore-site BR-964 */
     if (judged.has(entry.n)) return err(aiError(ai.name, `${role} reply gives item ${entry.n} twice`));
     judged.set(entry.n, { verdict: entry.verdict, reason: entry.reason });
   }
   const missing = expected.filter((n) => !judged.has(n));
+  /** @lore-site BR-964 */
   if (missing.length > 0) return err(aiError(ai.name, `${role} reply has no verdict for item(s) ${missing.join(", ")}`));
   return ok(judged);
 }
@@ -399,8 +360,6 @@ export interface RunFidelityInput {
   size: number;
   seed: number | string;
   judges: 1 | 2;
-  /** true: sample the `non-business:` exclusions instead of the citations. */
-  exclusions: boolean;
   /** Fence nonce; a fresh random one per run when omitted. */
   nonce?: string;
   /**
@@ -419,28 +378,18 @@ export interface RunFidelityInput {
 export async function runFidelity(input: RunFidelityInput): Promise<Result<FidelityRecord, LoreError>> {
   const nonce = input.nonce ?? randomBytes(6).toString("hex");
   const repoRoot = input.repoRoot;
-  let pool: Array<{ key: string; read: () => { body: string; unseen: string[] } }>;
-  let catchAll: CatchAllRule[] = [];
-  let instructions: string;
-  if (input.exclusions) {
-    const entries = await buildExclusionEntries(input.store);
-    if (!entries.ok) return entries;
-    pool = entries.value.map((e) => ({ key: `${e.leaf} ${e.site}`, read: () => ({ body: exclusionBody(e), unseen: [] }) }));
-    instructions = EXCLUSION_INSTRUCTIONS;
-  } else {
-    const pairs = await buildCitationPairs(input.store);
-    if (!pairs.ok) return pairs;
-    // reason: test files are read only for the drawn sample (after the draw), never for the whole pool.
-    pool = pairs.value.map((p) => ({
-      key: `${p.spec}#${p.ac}->${p.rule_id}`,
-      read: () => {
-        const tests = readCitedTestSource(p.verify, repoRoot);
-        return { body: citationBody(p, tests.section), unseen: tests.unseen };
-      },
-    }));
-    catchAll = findCatchAllRules(pairs.value);
-    instructions = CITATION_INSTRUCTIONS;
-  }
+  const pairs = await buildCitationPairs(input.store);
+  if (!pairs.ok) return pairs;
+  // reason: test files are read only for the drawn sample (after the draw), never for the whole pool.
+  const pool: Array<{ key: string; read: () => { body: string; unseen: string[] } }> = pairs.value.map((p) => ({
+    key: `${p.spec}#${p.ac}->${p.rule_id}`,
+    read: () => {
+      const tests = readCitedTestSource(p.verify, repoRoot);
+      return { body: citationBody(p, tests.section), unseen: tests.unseen };
+    },
+  }));
+  const catchAll = findCatchAllRules(pairs.value);
+  const instructions = CITATION_INSTRUCTIONS;
   const sample = drawFidelitySample(pool, input.size, input.seed);
   if (!sample.ok) return sample;
   const reads = sample.value.map((s) => s.read());
@@ -449,7 +398,7 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
   const items: JudgeItem[] = reads.flatMap((r, i) => (r.unseen.length === 0 ? [{ n: i + 1, body: r.body }] : []));
   const allN = items.map((i) => i.n);
   if (items.some((i) => i.body.includes(`<<END-${nonce}>>`))) {
-    return err(validationError("nonce", "the sampled text contains the closing fence; pass another --nonce"));
+    return err(validationError("nonce", "the sampled text contains the closing fence; pass another --nonce", undefined, "BR-964"));
   }
 
   const first: Result<Judged, LoreError> = allN.length === 0 ? ok(new Map()) : await askJudge(input.ai, fenceItems(instructions, items, nonce), allN, "judge A");
@@ -499,7 +448,7 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
   const notFaithful = verdicts.filter((v) => v.verdict === "not_faithful").length;
   const notSeen = verdicts.length - faithful - notFaithful;
   return ok({
-    mode: input.exclusions ? "exclusions" : "citations",
+    mode: "citations",
     seed: input.seed,
     size: input.size,
     pool: pool.length,
@@ -508,7 +457,6 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
     disagreements,
     faithful_share: faithful / input.size,
     not_seen: notSeen,
-    ...(input.exclusions ? { wrong_share: notFaithful / input.size } : {}),
     catch_all: catchAll,
     threshold_share: CATCH_ALL_THRESHOLD_SHARE,
   });

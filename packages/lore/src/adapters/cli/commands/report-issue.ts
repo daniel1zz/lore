@@ -1,6 +1,7 @@
 /**
  * lore report-issue --title <t> --description <d> --expected <e> --actual <a>
- *   [--repro-command <cmd>] [--severity <s>] [--category <c>] [--tags <t1,t2>] [--json]
+ *   [--repro-command <cmd>] [--repro-steps <text>] [--suggested-fix <text>] [--refs <ref>]...
+ *   --severity <s> --category <c> [--tags <t1,t2>] [--json]
  * lore report-issue --list [--json]
  *
  * ── GitHub intake path (spec-the-defect-channel-reaches-no-machine-but-its-own-github P2, AC-GI-1) ──
@@ -50,11 +51,12 @@
  * admission decision.
  *
  * `--list` and any of `--title`/`--description`/`--expected`/`--actual`/
- * `--repro-command` together is a usage error (exit 2, checked BEFORE any
+ * `--repro-command`/`--repro-steps`/`--suggested-fix`/`--refs` together is a usage error (exit 2, checked BEFORE any
  * IO) — mirrors `assess.ts`'s `--diff`/`--diff-file` mutex-check convention.
  * Filing mode also requires `--title`/`--description`/`--expected`/`--actual`
- * (aggregated into ONE missing-flags message, exit 2) — `--repro-command` is
- * the only optional report field.
+ * (aggregated into ONE missing-flags message, exit 2); `--severity`/`--category`
+ * are required too (GitHub path). The optional report fields are --repro-command
+ * (checked, see below), --repro-steps, --suggested-fix, --refs (repeatable) and --tags.
  *
  * Actor resolution mirrors `claim.ts`: `resolveActor()` (session tier, then
  * OS username — no `--by` flag on this command, since
@@ -94,10 +96,15 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
-import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
+import {
+  checkReproCommandForInvocation,
+  classifyFeedbackUpstream,
+  fileGithubIssue,
+  formatReproRefusal,
+  resolveConsumerCorpusRoot,
+} from "../report-issue-wiring.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
@@ -114,6 +121,9 @@ const REPORT_FLAGS = [
   "expected",
   "actual",
   "repro-command",
+  "repro-steps",
+  "suggested-fix",
+  "refs",
   "severity",
   "category",
   "tags",
@@ -155,6 +165,7 @@ function validateTriageLabels(
           `Invalid --severity '${severityArg}'. Valid values: ${ISSUE_SEVERITIES.join(", ")}. ` +
           "Severity is an ordering-only label — it never changes whether a report is accepted.",
         value: severityArg,
+        rule: "BR-492",
       });
     }
     severity = trimmed;
@@ -169,6 +180,7 @@ function validateTriageLabels(
         field: "category",
         message: "--category must be a non-empty label (omit the flag to declare none).",
         value: categoryArg,
+        rule: "BR-492",
       });
     }
     if (trimmed.length > ISSUE_CATEGORY_MAX_LENGTH) {
@@ -179,6 +191,7 @@ function validateTriageLabels(
           `--category is limited to ${ISSUE_CATEGORY_MAX_LENGTH} characters ` +
           `(got ${trimmed.length}) — it is rendered as a column on both issue read surfaces.`,
         value: categoryArg,
+        rule: "BR-492",
       });
     }
     category = trimmed;
@@ -216,7 +229,21 @@ export default defineLoreCommand({
     },
     "repro-command": {
       type: "string",
-      description: "A command that reproduces the issue (optional)",
+      description:
+        "One-line command that reproduces the issue (optional) — checked: one line, shell-lexable, program on PATH, " +
+        "a builtin, lore or an existing path; use --repro-steps for prose or several steps",
+    },
+    "repro-steps": {
+      type: "string",
+      description: "Multi-line reproduction steps (optional) — for what a one-line --repro-command cannot hold",
+    },
+    "suggested-fix": {
+      type: "string",
+      description: "Your proposed fix (optional) — keep --expected to the behaviour",
+    },
+    refs: {
+      type: "string",
+      description: "[repeatable] A spec, criterion, commit or issue this report relates to (optional)",
     },
     severity: {
       type: "string",
@@ -224,11 +251,11 @@ export default defineLoreCommand({
       // typed out — the same discipline `commands/issues.ts` applies to the
       // terminal-resolution set, and for the same reason (a hand-written help
       // string is how a list silently rots out of date).
-      description: `Ordering-only severity label (${ISSUE_SEVERITIES.join(" | ")}) — never changes whether a report is accepted (optional)`,
+      description: `Ordering-only severity label (${ISSUE_SEVERITIES.join(" | ")}) — never changes whether a report is accepted (required)`,
     },
     category: {
       type: "string",
-      description: `Ordering-only free-text category label, max ${ISSUE_CATEGORY_MAX_LENGTH} chars — never changes whether a report is accepted (optional)`,
+      description: `Ordering-only free-text category label, max ${ISSUE_CATEGORY_MAX_LENGTH} chars — never changes whether a report is accepted (required)`,
     },
     tags: {
       type: "string",
@@ -362,7 +389,25 @@ export default defineLoreCommand({
               .filter((tag) => tag.length > 0)
           : [];
 
-      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, inv.user);
+      // The repro command is checked HERE, in the input adapter, before the duplicate search, any GitHub call or
+      // receipt intent (spec-defect-reports-carry-their-own-context-a-checked-repro D4). Usage error, exit 2.
+      const reproArg = args["repro-command"];
+      if (typeof reproArg === "string") {
+        const reproCheck = checkReproCommandForInvocation(reproArg, inv);
+        if (!reproCheck.ok) {
+          inv.io.stderr.write(`Usage error: ${formatReproRefusal(reproCheck)}\n`);
+          exitCli(2);
+        }
+      }
+      const refsArg = args.refs;
+      const refs = (Array.isArray(refsArg) ? (refsArg as unknown[]) : typeof refsArg === "string" ? [refsArg] : [])
+        .filter((ref): ref is string => typeof ref === "string" && ref.trim().length > 0)
+        .map((ref) => ref.trim());
+      const reproSteps = args["repro-steps"];
+      const suggestedFix = args["suggested-fix"];
+
+      // reason: filing is attributed to the invocation's known party (BR-1055); with none it is refused (exit 4).
+      const actor = resolveActor(inv);
       const reproCommand = args["repro-command"];
 
       const githubResult = await fileGithubIssue(
@@ -372,6 +417,9 @@ export default defineLoreCommand({
           expected: args.expected as string,
           actual: args.actual as string,
           ...(typeof reproCommand === "string" ? { repro_command: reproCommand } : {}),
+          ...(typeof reproSteps === "string" && reproSteps.trim().length > 0 ? { repro_steps: reproSteps } : {}),
+          ...(typeof suggestedFix === "string" && suggestedFix.trim().length > 0 ? { suggested_fix: suggestedFix } : {}),
+          ...(refs.length > 0 ? { refs } : {}),
           severity: triageLabels.severity,
           category: triageLabels.category,
           tags,
@@ -381,7 +429,6 @@ export default defineLoreCommand({
           consumerCorpusRoot: corpusRoot,
           corpusService: app.corpusService,
           actor,
-          actorSource,
           home: inv.paths.home,
           env: inv.env,
         },

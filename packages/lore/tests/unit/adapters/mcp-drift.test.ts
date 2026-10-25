@@ -1,6 +1,7 @@
 // @reads never/exists/anywhere.ts
 // @reads package.json
 // @reads src/task-anchor.ts
+// @reads src/y.ts
 // @reads this/path/definitely/does/not/exist.ts
 /**
  * Unit tests for the SPEC-045 `lore_status {check_drift}` extension and
@@ -88,8 +89,8 @@ function makeApp(): App {
     new NoOpTelemetry(),
     false,
     8000,
-    { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
-    { max_doc_chars: 12000, max_context_chars: 8000 },
+    { max_diff_chars: 24000 },
+    { max_context_chars: 8000 },
     { max_doc_chars: 12000, neighbor_limit: 20 },
   );
   const stalenessProbeService = new StalenessProbeService(
@@ -358,16 +359,15 @@ describe("lore_anchor_set — REGRESSION (task target, byte-identical to pre-SPE
     expect((data.doc.extra["verification_evidence"] as unknown[]).length).toBe(1);
   });
 
-  it("a '#'-carrying task anchor is STILL rejected loud, naming the SPEC code-anchor grammar", async () => {
+  it("a symbol-scoped task anchor (path#Symbol) is accepted and stored as written", async () => {
     const { id: planId } = await createPlan();
     const { slug: taskSlug } = await createTask(planId);
 
     const call = getToolHandler(server, "lore_anchor_set");
     const result = await call({ id_or_slug: taskSlug, anchors: ["src/y.ts#Foo"], by: "agent:mcp" });
-    expect(result.isError).toBe(true);
-    const error = parseError(result);
-    if (error.code !== "VALIDATION_ERROR") throw new Error(`expected VALIDATION_ERROR, got ${error.code}`);
-    expect(error.message).toContain("SPEC-045");
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result) as { doc: { extra: Record<string, unknown> } };
+    expect(data.doc.extra["file_anchors"]).toEqual(["src/y.ts#Foo"]);
   });
 });
 

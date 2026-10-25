@@ -3,10 +3,10 @@ id: KN-013
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-029 Implementation — assess reliability (2026-07-03)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-03
-updated: 2026-07-08
+updated: 2026-10-23
 tags: []
 parent: PLAN-009
 links:

@@ -13,6 +13,9 @@
  * superRefine) — every resolution below is per spec, never by global id.
  * Side-effect class: IO (reads the corpus through `lore ac list --json`, reads test files).
  *
+ * Live criteria only: a criterion with `superseded_by` is retired behaviour (its test was deleted on
+ * purpose, #313) — it is not checked for an owner file and is not an owner for the reference rules.
+ *
  * Rules (printed as `rule=<name>`):
  *   - `missing-owner-file`: the AC's first test file does not exist on disk.
  *   - `ambiguous-ac-id`: a test file is the owner of the same AC id in two or more specs and
@@ -38,10 +41,16 @@
  * Residual (named, not hidden): a script AC whose command names no test file (e.g. a `tsc`
  * or `grep` oracle) has no owning file to check; it is counted in the report, never failed.
  *
- * Usage: bun scripts/check-ac-oracle-ownership.ts [--reader=per-spec-cli]  (the flag selects the slow reference reader)
+ * `--changed` (the integrate floor's `check:ac-oracle-ownership:changed`, BR-1368): judges only the branch's own change against main.
+ * A diff touching no test file exits 0 without reading the corpus. Otherwise the rules run over the touched test files only
+ * (edited/added: their references; deleted or renamed-away: `missing-owner-file` for the live script ACs that name them);
+ * see {@link mainChanged}. The full scan stays in `check:ac-oracle-ownership` (plan close).
+ *
+ * Usage: bun scripts/check-ac-oracle-ownership.ts [--reader=per-spec-cli | --changed]  (the flag selects the slow reference reader)
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { changedFiles, resolveBase, wantsChanged, type ChangedFile } from "./changed-files.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -58,6 +67,8 @@ export interface ScriptAc {
   readonly command: string;
   /** The `--allow-missing-path` reason when the AC is declared red-first (its oracle is not written yet). */
   readonly allowMissingReason?: string;
+  /** True when the criterion carries `superseded_by`: retired behaviour, not live (`lore verify` skips it too). */
+  readonly superseded?: true;
 }
 
 export type OwnershipRule = "missing-owner-file" | "ambiguous-ac-id" | "unowned-ac-reference";
@@ -143,8 +154,11 @@ export function evaluateOwnership(
   const owners = new Map<string, Map<string, string[]>>(); // owner file -> acId -> owning specs
   const specsByAcId = new Map<string, string[]>();
   let acsWithoutTestFile = 0;
+  // reason: a superseded criterion's test is deleted on purpose with the retired behaviour (#313);
+  // it is neither an owner nor a referenceable AC, exactly as `lore verify` skips it.
+  const liveAcs = acs.filter((ac) => ac.superseded !== true);
 
-  for (const ac of acs) {
+  for (const ac of liveAcs) {
     specsByAcId.set(ac.id, [...(specsByAcId.get(ac.id) ?? []), ac.spec]);
     const owner = extractTestFilePaths(ac.command)[0];
     if (owner === undefined) {
@@ -180,7 +194,7 @@ export function evaluateOwnership(
     }
   }
 
-  return { scannedScriptAcs: acs.length, scannedTestFiles: testFiles.length, acsWithoutTestFile, findings, ledgered };
+  return { scannedScriptAcs: liveAcs.length, scannedTestFiles: testFiles.length, acsWithoutTestFile, findings, ledgered };
 }
 
 // ─── IO ─────────────────────────────────────────────────────────────────────
@@ -204,6 +218,7 @@ const AcListSchema = z.object({
       z.object({
         id: z.string(),
         verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional(),
+        superseded_by: z.unknown().optional(),
       }),
     ),
     allow_missing_declarations: z.array(z.object({ ac_id: z.string(), reason: z.string() })).optional(),
@@ -254,7 +269,13 @@ export function collectScriptAcs(
     for (const c of acs.data.criteria) {
       if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
         const reason = reasons.get(c.id);
-        out.push({ spec: doc.slug, id: c.id, command: c.verify.command, ...(reason !== undefined ? { allowMissingReason: reason } : {}) });
+        out.push({
+          spec: doc.slug,
+          id: c.id,
+          command: c.verify.command,
+          ...(reason !== undefined ? { allowMissingReason: reason } : {}),
+          ...(c.superseded_by !== undefined ? { superseded: true as const } : {}),
+        });
       }
     }
   }
@@ -268,7 +289,13 @@ const CorpusDumpSchema = z.object({
     z.object({
       slug: z.string(),
       status: z.string(),
-      criteria: z.array(z.object({ id: z.string(), verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional() })),
+      criteria: z.array(
+        z.object({
+          id: z.string(),
+          verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional(),
+          superseded: z.literal(true).optional(),
+        }),
+      ),
       allow_missing_declarations: z.array(z.object({ ac_id: z.string(), reason: z.string() })),
     }),
   ),
@@ -287,7 +314,13 @@ export function scriptAcsFromDump(dump: CorpusDump): ScriptAcScan {
     for (const c of spec.criteria) {
       if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
         const reason = reasons.get(c.id);
-        acs.push({ spec: spec.slug, id: c.id, command: c.verify.command, ...(reason !== undefined ? { allowMissingReason: reason } : {}) });
+        acs.push({
+          spec: spec.slug,
+          id: c.id,
+          command: c.verify.command,
+          ...(reason !== undefined ? { allowMissingReason: reason } : {}),
+          ...(c.superseded === true ? { superseded: true as const } : {}),
+        });
       }
     }
   }
@@ -358,8 +391,59 @@ export function main(
   return 1;
 }
 
+const TEST_FILE_RE = /\.test\.tsx?$/;
+
+/** Injected effects of {@link mainChanged}, so the verdict is testable without a corpus. */
+export interface ChangedOwnershipDeps {
+  readonly changed: () => ChangedFile[];
+  readonly scriptAcs: () => ScriptAc[];
+  /** Content of a touched test file that still exists, or undefined when absent. */
+  readonly readTestFile: (path: string) => string | undefined;
+}
+
+/** The `--changed` verdict: 0 clean (or no test file touched), 1 a rule fired on a touched test file / AC naming one. */
+export function mainChanged(deps: ChangedOwnershipDeps, print: (line: string) => void = console.log): number {
+  const touched = deps.changed().filter((c) => TEST_FILE_RE.test(c.path));
+  if (touched.length === 0) {
+    print("check:ac-oracle-ownership:changed: the diff touches no test file; nothing to judge");
+    return 0;
+  }
+  const touchedPaths = new Set(touched.map((c) => c.path));
+  const acs = deps.scriptAcs();
+  if (acs.length === 0) {
+    print("check:ac-oracle-ownership:changed: FAIL - rule=nothing-scanned: 0 script ACs were visible; refusing to report complete (AS-17).");
+    return 1;
+  }
+  const testFiles: TestFileContent[] = [];
+  for (const path of touchedPaths) {
+    const content = deps.readTestFile(path);
+    if (content !== undefined) testFiles.push({ path, content });
+  }
+  const present = new Set(testFiles.map((t) => t.path));
+  const report = evaluateOwnership(acs, testFiles, (p) => (touchedPaths.has(p) ? present.has(p) : true));
+  // reason: a missing owner of an untouched file is older debt the plan-close full scan reports; here only a touched path counts.
+  const findings = report.findings.filter((f) => f.rule !== "missing-owner-file" || touchedPaths.has(f.path));
+  for (const f of findings) print(`  rule=${f.rule} spec=${f.spec} ac=${f.acId} path=${f.path}`);
+  if (findings.length === 0) {
+    print(`check:ac-oracle-ownership:changed: OK - ${touched.length} touched test file(s), every live script AC naming one still has its owner`);
+    return 0;
+  }
+  print(`check:ac-oracle-ownership:changed: FAIL - ${findings.length} finding(s)`);
+  return 1;
+}
+
 if (import.meta.main) {
   try {
+    if (wantsChanged(process.argv.slice(2))) {
+      const base = resolveBase(process.cwd());
+      process.exit(
+        mainChanged({
+          changed: () => changedFiles(process.cwd(), base),
+          scriptAcs: () => collectScriptAcsBulk(REPO_ROOT).acs,
+          readTestFile: (p) => (existsSync(join(REPO_ROOT, p)) ? readFileSync(join(REPO_ROOT, p), "utf8") : undefined),
+        }),
+      );
+    }
     const reader = process.argv.includes("--reader=per-spec-cli") ? "per-spec-cli" : "bulk";
     process.exit(main(undefined, undefined, undefined, reader));
   } catch (e) {

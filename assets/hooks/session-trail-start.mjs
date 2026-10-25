@@ -17,6 +17,8 @@
 
 import { readHookPayload, resolveSessionId, getStateBase } from './lib/turn-state.mjs';
 import { recordHelperStart, recordSessionStart } from './lib/session-trail.mjs';
+import { trackOutcome, skipOutcome } from './lib/check-outcome.mjs';
+trackOutcome('hook:session-trail-start');
 
 try {
   const payload = readHookPayload();
@@ -28,6 +30,9 @@ try {
     recordHelperStart(base, sessionId, payload.agent_id, Date.now(), payload.cwd);
   }
 } catch {
+  // reason: a start that failed (malformed stdin, no usable session_id or agent id) never happened, so there is nothing
+  // to measure and the hook leaves no outcome row (and no file in a state base it was never meant to write to).
+  skipOutcome();
   // reason: spec D13 — a trail hook never speaks; failures surface later as measured:false
   // in the readers, or not at all when the trail itself was never started.
 }

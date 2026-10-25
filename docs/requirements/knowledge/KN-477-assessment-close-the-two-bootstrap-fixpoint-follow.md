@@ -3,10 +3,10 @@ id: KN-477
 type: knowledge
 role: knowledge
 title: "Assessment: Close the two bootstrap-fixpoint follow-ups: a ledger test that stops delegating membership to the checker, and a rename that carries its four records with it (2026-08-18)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-18
-updated: 2026-08-18
+updated: 2026-10-23
 tags: []
 parent: PLAN-131
 links:

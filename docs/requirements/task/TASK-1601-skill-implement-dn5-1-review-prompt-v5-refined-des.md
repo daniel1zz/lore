@@ -3,7 +3,7 @@ id: TASK-1601
 type: task
 role: plan
 title: "[Skill:implement] DN5-1 review prompt v5: refined design_necessity rule; corrected end-state fixture; validated on the real judge"
-status: draft
+status: archived
 priority: medium
 phase: "P1"
 created: 2026-10-18

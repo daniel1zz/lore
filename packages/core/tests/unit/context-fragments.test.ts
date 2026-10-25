@@ -10,7 +10,7 @@
  * Six-dimension coverage:
  *   HAPPY:      outlet-scoped config resolution (user -> global only, project -> project only,
  *               hooks -> project over global); schema accepts the spec example; constants.
- *   NEGATIVE:   schema rejects unknown keys, audience 'subagents:*', mode 'always';
+ *   NEGATIVE:   schema rejects unknown keys and an unknown inject timing;
  *               global disable never leaks into rules:project; project config never
  *               leaks into rules:user.
  *   BOUNDARY:   cap arithmetic (10_000 - 600 = 9_400, 10_000 - 400 = 9_600); empty configs.
@@ -124,8 +124,7 @@ describe("FragmentFrontmatterSchema (D1, routing table)", () => {
   const specExample = {
     id: "comm-zh",
     title: "交流语言与输出风格",
-    audience: ["main", "subagent:*"],
-    mode: "static",
+    inject: ["launch", "subagent-start"],
     when: { language: ["zh"] },
   };
 
@@ -133,13 +132,9 @@ describe("FragmentFrontmatterSchema (D1, routing table)", () => {
     expect(FragmentFrontmatterSchema.safeParse(specExample).success).toBe(true);
   });
 
-  it("accepts audience subagent:<agent_type>", () => {
-    const r = FragmentFrontmatterSchema.safeParse({ ...specExample, audience: ["subagent:tester"] });
+  it("accepts a helper-type filter beside subagent-start", () => {
+    const r = FragmentFrontmatterSchema.safeParse({ ...specExample, inject: ["subagent-start"], agents: ["tester"] });
     expect(r.success).toBe(true);
-  });
-
-  it("accepts mode dynamic", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, mode: "dynamic" }).success).toBe(true);
   });
 
   it("accepts a fragment without the optional 'when'", () => {
@@ -151,13 +146,8 @@ describe("FragmentFrontmatterSchema (D1, routing table)", () => {
     expect(FragmentFrontmatterSchema.safeParse({ ...specExample, priority: 5 }).success).toBe(false);
   });
 
-  it("rejects audience 'subagents:*' (typo of subagent:*)", () => {
-    const r = FragmentFrontmatterSchema.safeParse({ ...specExample, audience: ["subagents:*"] });
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects mode 'always'", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, mode: "always" }).success).toBe(false);
+  it("rejects an unknown inject timing", () => {
+    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, inject: ["always"] }).success).toBe(false);
   });
 
   it("rejects a missing id", () => {
@@ -165,17 +155,17 @@ describe("FragmentFrontmatterSchema (D1, routing table)", () => {
     expect(FragmentFrontmatterSchema.safeParse(noId).success).toBe(false);
   });
 
-  it("rejects a missing mode (no silent default)", () => {
-    const { mode: _mode, ...noMode } = specExample;
-    expect(FragmentFrontmatterSchema.safeParse(noMode).success).toBe(false);
+  it("rejects a missing inject (no silent default)", () => {
+    const { inject: _inject, ...noInject } = specExample;
+    expect(FragmentFrontmatterSchema.safeParse(noInject).success).toBe(false);
   });
 
-  it("rejects an empty audience list", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, audience: [] }).success).toBe(false);
+  it("rejects an empty inject list", () => {
+    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, inject: [] }).success).toBe(false);
   });
 
-  it("rejects a non-array audience string", () => {
-    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, audience: "main" }).success).toBe(false);
+  it("rejects a non-array inject string", () => {
+    expect(FragmentFrontmatterSchema.safeParse({ ...specExample, inject: "launch" }).success).toBe(false);
   });
 });
 
@@ -193,8 +183,8 @@ describe("cap constants (D6, GH #20)", () => {
     expect(SUBAGENT_FRAGMENT_CAP).toBe(9400);
   });
 
-  it("hook:session-start is not an outlet (retired, BR-912): helper start is the only hook outlet", () => {
-    expect(OUTLET_IDS.filter((id) => id.startsWith("hook:"))).toEqual(["hook:subagent-start"]);
+  it("hook:session-start is not an outlet (retired, BR-912): helper start and the per-turn outlet are the hook outlets", () => {
+    expect(OUTLET_IDS.filter((id) => id.startsWith("hook:"))).toEqual(["hook:subagent-start", "hook:user-prompt"]);
   });
 });
 

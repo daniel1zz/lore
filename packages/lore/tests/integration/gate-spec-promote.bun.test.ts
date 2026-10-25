@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11 — `lore gate spec-promote`
  * (deterministic AC-count gate + INV2 probabilistic-zone judge advisory)
@@ -39,7 +40,6 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -50,7 +50,7 @@ import type { App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import { execFileSync } from "node:child_process";
 import { UNCITED_SPEC_RULE } from "../../src/service/spec-approval-citation.js";
-import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
+import { approveFixtureNodes, ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
 import { liveInvocation, liveAmbient, liveWriteContext, actedStore, runHandlerForExit } from "../live-invocation.js";
 
@@ -141,7 +141,6 @@ beforeEach(async () => {
   app.close();
   // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
-  await loosenOverrideClasses(tmpDir, ["override-judgment"]);
 
   originalCwd = process.cwd();
   process.chdir(tmpDir);
@@ -858,6 +857,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const rule = seedLiveRule();
     loreCli(["ac", "cite", specId, "AC-PARITY-3", rule]);
     loreCli(["rule", "set", rule, "--lifecycle", "retired", "--note", "superseded for the test"]);
+    approveFixtureNodes(tmpDir, "all"); // the retirement is a pending revision until approved; the gate measures approved rules
     writeAiConfig("ghost-ai-binary-not-installed-xyz");
 
     const cmd = await importGateSpecPromoteCommand();

@@ -4,7 +4,7 @@
  * Named for what it is: it stands in for "the class was loosened and the decision came back auto" so a UNIT test of a
  * service that is not about the autonomy gate can exercise its override path. It is a test double only; product code
  * never builds one, and a service with NO port refuses an override loudly (override-decision.ts requireOverrideAuto).
- * Tests whose subject IS the gate use the real port (tests/integration/autonomy-overrides-escalate.test.ts).
+ * Tests whose subject IS the gate use the real port (tests/integration/autonomy-human-set.test.ts).
  */
 import { ok } from "@lore/core";
 import type { OverrideDecisionPort, OverrideRequest } from "../../src/service/override-decision.js";

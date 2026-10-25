@@ -3,10 +3,10 @@ id: TASK-1478
 type: task
 role: plan
 title: "[Skill:implement] Mirror export renumbers human_ids before rendering links, so one pass suffices"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-23
 tags: []
 parent: PLAN-192
 plan: PLAN-192

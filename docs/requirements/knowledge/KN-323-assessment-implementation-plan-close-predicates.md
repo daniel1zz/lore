@@ -3,10 +3,10 @@ id: KN-323
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — plan-close predicates measure invariants (applicability type, per-claimed-AC coverage, attributable sync) (2026-07-30)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-10-23
 tags: []
 parent: PLAN-102
 links:

@@ -3,13 +3,14 @@ id: SPEC-198
 type: spec
 role: spec
 title: "Ambient state is read once at the entry: owned-only prune, user-state guard, rooted writes, one Invocation"
-status: approved
+status: deprecated
 priority: high
 created: 2026-10-18
 updated: 2026-10-18
 tags: [architecture, testing, safety]
 links:
   - {id: SPEC-155, type: relates-to}
+  - {id: SPEC-204, type: relates-to}
 ---
 ## Overview/Goal
 

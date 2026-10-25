@@ -5,7 +5,9 @@
  *   `ac exempt` and `verify --yes` (a command with no attested row on the task) were granted to whoever typed them.
  *   Each now asks DecisionService.decide() for its registered class and proceeds only on an effective `auto`;
  *   anything else is refused with exit 4 (VALIDATION_ERROR), writes nothing else, and names the pending decision
- *   and the `lore decide <id>` line a human answers it with (never a nonce).
+ *   and the `lore decide <id>` line a human answers it with (never a nonce). EXCEPT the three milestone classes
+ *   (override-judgment, override-attestation, ac-exempt; BR-1370): the override APPLIES at once, a `milestone` decision
+ *   is recorded for the milestone review to resolve, and NO pending human decision is opened.
  * Public surface: OverrideClassId, OverrideRequest, OverrideDecisionPort, createOverrideDecisionPort, requireOverrideAuto,
  *   OVERRIDE_MEASURED_FACTS.
  * Invariants:
@@ -59,11 +61,12 @@ export function buildOverrideDetail(request: OverrideRequest): DecisionDetail {
 
 export interface OverrideDecisionPort {
   /**
-   * Ask decide(); `ok` only when the effective verdict of the subject is `auto`.
+   * Ask decide(); `ok` only when the effective verdict of the subject is `auto` or `milestone` (BR-1370).
    *
    * @returns err(VALIDATION_ERROR, field "autonomy") on escalate (message carries the pending id and the
    *   `lore decide <id>` line) or refuse; any store error from the decision log, unchanged.
    */
+  /** @lore-site BR-1286 */
   requireAuto(request: OverrideRequest): Promise<Result<void, LoreError>>;
 }
 
@@ -98,7 +101,7 @@ export async function requireOverrideAuto(port: OverrideDecisionPort | undefined
 }
 
 function refused(summary: string, message: string, value: unknown): LoreError {
-  return { code: "VALIDATION_ERROR", field: "autonomy", message: `Override not granted: ${summary}.\n${message}`, value };
+  return { code: "VALIDATION_ERROR", field: "autonomy", message: `Override not granted: ${summary}.\n${message}`, value, rule: "BR-1286" };
 }
 
 /** The port over a DecisionService (or any object with its `decide`/`listPending`). */
@@ -110,7 +113,12 @@ export function createOverrideDecisionPort(decisions: Pick<DecisionService, "dec
       const { decision, effective } = decided.value;
       if (effective.verdict === "auto") return ok(undefined);
       const reasons = decision.reasons.join("; ");
+      // BR-1370: the three override classes are decided by the milestone review, never by a pending human decision. The
+      // override applies now; the `milestone` record just written (class, subject, summary, change) is what the review resolves.
+      /** @lore-site BR-1370 */
+      if (effective.verdict === "milestone") return ok(undefined);
       if (effective.verdict === "refuse") {
+        /** @lore-site BR-1286 */
         return err(
           refused(
             request.summary,
@@ -127,11 +135,12 @@ export function createOverrideDecisionPort(decisions: Pick<DecisionService, "dec
       if (open === undefined) {
         return err({ code: "STORE_ERROR", message: `override ${request.classId} escalated (record ${decided.value.record_id}) but has no pending decision` });
       }
+      /** @lore-site BR-1286 */
       return err(
         refused(
           request.summary,
           `Class ${request.classId} scored ${decision.score} against threshold ${decision.threshold ?? "n/a"} (${reasons}).\n` +
-            `Pending decision ${open.id} created; nothing else was written. A human answers it with: lore decide ${open.id} --accept (or --reject); then re-run this same command.`,
+            `Pending decision ${open.id} created; nothing else was written. Ask the human in the session (lore pending --ask, then the interactive question tool); then re-run this same command.`,
           { class: request.classId, subject: request.subject, verdict: "escalate", pending_id: open.id },
         ),
       );

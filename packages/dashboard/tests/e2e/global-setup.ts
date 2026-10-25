@@ -81,6 +81,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 import type { FullConfig } from "@playwright/test";
+import { E2E_STATE_HOME_ENV, endHumanSession, knownPartyEnv, startHumanSession } from "./known-party.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // tests/e2e -> tests -> dashboard -> packages -> <repo root>
@@ -233,15 +234,24 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
   // 1. Init a throwaway corpus — never the real team `.lore/`.
   execFileSync("bun", [LORE_ENTRY, "init", "--author", "e2e-runner"], {
     cwd: tmpDir,
+    env: knownPartyEnv(machineAuthBaseDir),
     stdio: "pipe",
   });
+
+  // 1b. Known-party rule (BR-1351, GitHub #317): every spec that seeds this corpus through the `lore` CLI writes as
+  //     the human session opened here. Session files live in `machineAuthBaseDir` (isolated mkdtemp, removed in
+  //     teardown), published to the workers so their `lore` children share it. The spawns carry no CLAUDECODE marker
+  //     (stripped by knownPartyEnv, see known-party.ts): with it present `lore` treats the process as an agent and a
+  //     human session would be refused.
+  process.env[E2E_STATE_HOME_ENV] = machineAuthBaseDir;
+  startHumanSession(["bun", LORE_ENTRY], tmpDir, machineAuthBaseDir);
 
   // 2. Create the "dashboard-local" API key exactly as `ensureLocalApiKey` would,
   //    and capture the raw key so we can inject it as VITE_LORE_BOOTSTRAP_TOKEN.
   const createOut = execFileSync(
     "bun",
     [LORE_ENTRY, "agent", "create", "--name", "dashboard-local", "--owner", "admin", "--json"],
-    { cwd: tmpDir, stdio: "pipe" },
+    { cwd: tmpDir, env: knownPartyEnv(machineAuthBaseDir), stdio: "pipe" },
   ).toString();
   const created = parseLastJsonLine(createOut) as {
     ok: boolean;
@@ -327,6 +337,11 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
 
   return async function globalTeardown(): Promise<void> {
     await Promise.all([killAndWait(apiProc), killAndWait(viteProc)]);
+    try {
+      endHumanSession(["bun", LORE_ENTRY], tmpDir, machineAuthBaseDir);
+    } catch {
+      // best-effort — the session file lives in machineAuthBaseDir, removed just below
+    }
     try {
       rmSync(tmpDir, { recursive: true, force: true });
     } catch {

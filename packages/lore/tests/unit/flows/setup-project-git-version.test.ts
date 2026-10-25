@@ -1,6 +1,6 @@
 /**
- * parseGitVersion + the pre-write git-version refusal of `scaffoldProject` (BR-1246: the main-ref hook needs git >= 2.28).
- * The end-to-end refusal through the real CLI is the oracle of AC-INT-2 half 2; this file covers the parser boundary
+ * parseGitVersion + the pre-write git-version refusal of `scaffoldProject` (BR-1343: the main-ref guard needs git >= 2.46).
+ * The end-to-end refusal through the real CLI is the oracle of AC-MG-3; this file covers the parser boundary
  * and the flow contract with a fake exec: refusal names the version and writes nothing.
  *
  * @spec_ref BR-1246
@@ -32,14 +32,14 @@ describe("scaffoldProject git-version guard", () => {
     return { deps, writes };
   }
 
-  it("refuses git 2.27 naming the version before any write", async () => {
-    const { deps, writes } = depsWithGit("git version 2.27.1\n", 0);
+  it("refuses git 2.45.2 naming the version and the 2.46 floor before any write", async () => {
+    const { deps, writes } = depsWithGit("git version 2.45.2\n", 0);
     const result = await scaffoldProject(deps, { repoDir: "/tmp/never-written" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     const text = JSON.stringify(result.error);
-    expect(text).toContain("2.27.1");
-    expect(text).toContain("2.28");
+    expect(text).toContain("2.45.2");
+    expect(text).toContain("git 2.46");
     expect(writes).toEqual([]);
   });
 

@@ -1,19 +1,19 @@
 // @reads scripts/check-unclaimed-oracle.ts
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 // @reads packages/core/src/acceptance.ts
 // @reads packages/lore/src/service/ac-service.ts
 // @reads packages/lore/src/adapters/cli/commands/ac.ts
 // @reads packages/lore/src/adapters/cli/commands/status.ts
 // @reads scripts/export-spec-mirror.ts
 // @reads packages/lore/src/service/outline-service.ts
-// @reads packages/lore/src/ai/assess-template.ts
 /**
  * AC-EI-1 — an attested evidence row counts toward an AC only for the check it ran
  * (spec-evidence-identity-an-attested-row-counts-only-for-the; BR-40, AS-17).
  *
  * Drives the REAL command surfaces in a THROWAWAY corpus (mkdtemp + `lore init`, HOME and cwd inside it —
  * never this repository's own `.lore/`). Exit codes are asserted exactly. Every assertion reads a rendered
- * surface (`lore ac list` text and --json, `lore status --json`, the exported spec mirror, the assess AC
- * table), never the aggregator alone: a unit test over `computeAcCoverage` passes whether or not any surface
+ * surface (`lore ac list` text and --json, `lore status --json`, the exported spec mirror), never the aggregator alone: a unit test over `computeAcCoverage` passes whether or not any surface
  * shows the `other_command` tally.
  *
  * Halves (spec text, AC-EI-1):
@@ -37,7 +37,6 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
-import { buildAssessPrompt } from "../../../src/ai/assess-template";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -267,20 +266,6 @@ describe("AC-EI-1 REGRESSION: every surface that renders the coverage state show
     if (specFile === undefined) throw new Error("FIXTURE FAILURE - exported spec file not found");
     expect(readFileSync(specFile, "utf8")).toContain("other_command=1");
   });
-
-  it("the assess AC table names other_command in the coverage cell", async () => {
-    const specDoc = JSON.parse((await mustRun(["get", SPEC, "--json"], dir)).stdout).data.doc;
-    const taskDoc = JSON.parse((await mustRun(["get", TASK, "--json"], dir)).stdout).data.doc;
-    const planDoc = JSON.parse((await mustRun(["get", PLAN, "--json"], dir)).stdout).data.doc;
-    const { prompt } = buildAssessPrompt(
-      { plan: planDoc, spec: specDoc, tasks: [taskDoc] } as never,
-      undefined,
-      { max_plan_chars: 8000, max_spec_chars: 20000, max_task_chars: 8000, max_diff_chars: 1000 },
-    );
-    const row = prompt.split("\n").find((l) => l.startsWith("| AC-EI-A |"));
-    if (row === undefined) throw new Error(`no AC-EI-A row in the assess prompt:\n${prompt}`);
-    expect(row).toContain("other_command=1");
-  });
 });
 
 describe("AC-EI-1 half 5 (one derivation): no surface compares an evidence-row command itself", () => {
@@ -290,7 +275,6 @@ describe("AC-EI-1 half 5 (one derivation): no surface compares an evidence-row c
     "packages/lore/src/adapters/cli/commands/status.ts",
     "scripts/export-spec-mirror.ts",
     "packages/lore/src/service/outline-service.ts",
-    "packages/lore/src/ai/assess-template.ts",
   ];
   const COMPARES_EVIDENCE_COMMAND = /\b(entry|row|ref|ev|evidence\w*|e)\.command\s*[!=]==?|[!=]==?\s*(entry|row|ref|ev|evidence\w*|e)\.command\b/;
 

@@ -3,7 +3,7 @@
  * preview, `--uninstall` reversal report, and the `--project` scaffold receipt
  * (SPEC-046 §Design "`adapters/cli/setup-render.ts`", §Scope "Post-run receipt";
  * SPEC-060 §Scope D5/D6 for the `--project` half). Split out of `commands/setup.ts`
- * for vitest-testability, mirroring `assess-render.ts` / `review-render.ts` —
+ * for vitest-testability, mirroring `status-stamp-verdict.ts` / `review-render.ts` —
  * `commands/setup.ts` will transitively import `loader.ts` (`bun:sqlite`), which
  * vitest cannot resolve, but this module imports only `@lore/core` types,
  * `../../service/setup-service.js` types, and `../../flows/setup-project-flow.js`'s
@@ -28,7 +28,7 @@
  *   - Pure string assembly — no `console.*`/`process.*` calls anywhere in this module;
  *     the CLI command adapter (`commands/setup.ts`) owns printing and exit-code mapping
  *     (the "adapters/cli: no business logic, no IO" convention this repo already
- *     applies to `assess-render.ts`/`review-render.ts`).
+ *     applies to `status-stamp-verdict.ts`/`review-render.ts`).
  *   - Deterministic — every path listing (written/skipped/backup/removal paths) and
  *     every kind-count grouping is computed over a SORTED copy of its input, so two
  *     receipts differing only in array insertion order (e.g. because the underlying
@@ -41,7 +41,7 @@
  *     stderr/error tail when the CLI adapter has one on hand (e.g. the
  *     `McpRegistrar.add`/`remove()` call's `LoreError.message`), without requiring
  *     `SetupService`/`SetupReceipt` to grow a field it doesn't itself need.
- *   - Plain text, no ANSI color codes — matches `assess-render.ts`/`review-render.ts`.
+ *   - Plain text, no ANSI color codes — matches `status-stamp-verdict.ts`/`review-render.ts`.
  *     Unicode is limited to the corpus-wide convention marks already used elsewhere in
  *     this adapter (`✓`/`✘`/`·`, see `lore ac list`/`lore verify`).
  *   - `receipt.written` is DOCUMENTED (on `SetupReceipt`, `setup-service.ts`) to never
@@ -418,6 +418,8 @@ export function renderProjectScaffoldReceipt(receipt: ProjectScaffoldReceipt, ct
     `Git hooksPath: ${receipt.git_hooks_path.status} (prior: ${receipt.git_hooks_path.prior_value ?? "unset"})` +
       (receipt.git_hooks_path.detail ? ` — ${receipt.git_hooks_path.detail}` : ""),
   );
+  lines.push(`Main checkouts: ${receipt.main_detached.status}${receipt.main_detached.detail ? ` — ${receipt.main_detached.detail}` : ""}`);
+  for (const path of receipt.main_detached.detached) lines.push(`  detached at main: ${path}`);
   lines.push("");
 
   // BOUNDARY: an empty `backups` array omits the WHOLE section — D6's "loud" intent

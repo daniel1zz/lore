@@ -1,3 +1,6 @@
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§5.1/§11 — closed-loop e2e for the P2
  * gate slice's C2 state machine (task AC-P2-8): "authoring is free; every COMMIT
@@ -47,6 +50,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -152,10 +156,7 @@ async function createFullChain(dir: string): Promise<{
 
 /** Appends a `workflow.gates.<checkpoint>.enabled: false` override to `.lore/config.yaml`. */
 function disableGateInConfig(dir: string, checkpoint: string): void {
-  const cfgPath = join(dir, ".lore", "config.yaml");
-  const existing = readFileSync(cfgPath, "utf8");
-  const override = `\nworkflow:\n  gates:\n    "${checkpoint}":\n      enabled: false\n`;
-  writeFileSync(cfgPath, existing + override, "utf8");
+  patchLoreConfig(dir, { workflow: { gates: { [checkpoint]: { enabled: false } } } });
 }
 
 // ─── Project-level state ──────────────────────────────────────────────────────

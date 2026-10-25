@@ -1,58 +1,43 @@
 #!/usr/bin/env bun
 /**
- * Root baseline coverage floor step (`bun run check:baseline-coverage`) — AC-BCR-5 of
- * spec-baseline-coverage-cannot-silently-regress-one-program (BR-660, BR-1248).
+ * Root baseline coverage floor step (`bun run check:baseline-coverage`) — spec-baseline-coverage-refuses-only-undeclared-commands-a-site
+ * (BR-1248, BR-660): `lore integrate` must not advance main while a runnable command is declared by no leaf.
  *
- * Purpose: `lore integrate` must not advance main unless the MERGED tree leaves no census site of any declared command
- * unaccounted and no runnable command undeclared. This step asks `lore baseline coverage <root>` for every business-tree
- * root of the corpus it resolves (the integrate floor runs it against the corpus snapshot taken at integrate start) and
- * exits 1 unless every root is complete. The ONE exemption is the committed debt ledger `scripts/baseline-coverage-debt.json`
- * (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline): a (leaf, site) pair listed there does not fail the step but
- * is printed with a count; a pair NOT listed fails as before; a listed pair that is now mapped or no longer reported is printed
- * as an informational stale row (never a failure: mappings live in the branchless shared corpus, so failing on them would block
- * every branch's floor until a row-removing commit lands on main), so the ledger only shrinks. `lore baseline coverage` itself never reads the ledger and keeps its INCOMPLETE verdict.
+ * Purpose: this is the ONLY thing the step refuses. An unmapped census site is report output of `lore baseline coverage`, never a
+ * floor failure, so the step never runs the site census: it asks `lore baseline coverage <root> --commands-only --json` for every
+ * business-tree root of the corpus it resolves (the integrate floor runs it against the corpus snapshot taken at integrate start),
+ * which needs only the command registry and the declarations.
  *
  * Which code judges: the checkout this script lives in (`<repo>/packages/lore/src/index.ts`, run by bun), so the floor
- * judges the merged tree with the merged tree's own census, never the shared checkout's build. The census reads the
- * current working directory's checkout (the integration worktree when the floor runs it).
+ * judges the merged tree with the merged tree's own registry, never the shared checkout's build.
  *
- * Output: only what is missing, one pair per line with its `lore baseline map` fix line, so the tail of a failing floor
- * names the pairs. Exit codes: 0 complete, 1 incomplete, 2 the check itself could not run (no root, unparsable output) —
- * never a silent pass.
+ * Output: one line per undeclared command with its `lore baseline map` fix line, then a summary line, so the tail of a failing
+ * floor names the commands. Exit codes: 0 every runnable command is declared, 1 at least one is not, 2 the check itself could not
+ * run (no root, unparsable output) — never a silent pass. The step runs `--commands-only`: it never runs the site census, so a
+ * refusal site's declared rule (or the lack of one) cannot fail it.
+ *
+ * `--changed` reads coverage with `--include-pending`: a command declared only by a leaf's pending revision counts as declared, because
+ * a new command cannot be approved before it is on main (approve refuses a command main's tree lacks), so refusing it would deadlock
+ * landing. The full run stays approved-only. `--changed` (the integrate floor's `check:baseline-coverage:changed`, BR-1368): judges only the branch's own change against main.
+ * It reads coverage ONLY when the diff touches the command registry (`cli/index.ts` or a `cli/commands/*.ts` module), and then
+ * refuses only undeclared commands the diff added or renamed ({@link addedCommands}); a diff touching neither exits 0 without
+ * spawning `lore`. The full scan stays in `check:baseline-coverage` (plan close).
  *
  * Side-effect class: IO (spawns `lore`, prints).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { changedFiles, resolveBase, wantsChanged, type ChangedFile } from "./changed-files.js";
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
-/** The ledger of the checkout being JUDGED (the census reads the cwd's checkout too), not of the checkout this script lives in. */
-export const debtLedgerPath = (checkout: string = process.cwd()): string => join(checkout, "scripts", "baseline-coverage-debt.json");
-
-interface LeafReport {
-  readonly slug: string;
-  readonly commands: readonly string[];
-  readonly gaps: readonly string[];
-  readonly not_measured: readonly string[];
-  readonly unresolved_imports: readonly string[];
-  readonly fix_commands: readonly string[];
-  readonly absent_commands: readonly { readonly command: string; readonly fix: string }[];
-  readonly measured_by: "commands" | "owned_sites" | "absent" | "none";
-  readonly ok: boolean;
-}
 
 export interface CoverageData {
   readonly target: string;
   readonly complete: boolean;
-  readonly leaves: readonly LeafReport[];
   readonly undeclared_commands: readonly { readonly command: string; readonly fix: string }[];
 }
-
-/** Prefix of a line that is information only: it never counts against coverage. */
-export const INFORMATIONAL_PREFIX = "  absent (informational, not failing)";
 
 function runLore(args: string[]): { status: number; stdout: string; stderr: string } {
   const r = spawnSync("bun", ["run", LORE_ENTRY, ...args], { cwd: process.cwd(), encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
@@ -79,10 +64,15 @@ function businessRoots(): string[] {
   return roots;
 }
 
-function coverageOf(root: string): CoverageData {
-  const r = runLore(["baseline", "coverage", root, "--json"]);
-  // exit 1 = incomplete (still prints the JSON); anything else is the check failing to run
-  if (r.status !== 0 && r.status !== 1) fail(`\`lore baseline coverage ${root}\` exited ${r.status}: ${r.stderr}${r.stdout}`);
+/** Pure. The CLI arguments of one root's coverage read; only the landing (`--changed`) read counts pending declarations (BR-1368). */
+export function coverageArgs(root: string, includePending: boolean): string[] {
+  return ["baseline", "coverage", root, "--commands-only", "--json", ...(includePending ? ["--include-pending"] : [])];
+}
+
+function coverageOf(root: string, includePending: boolean): CoverageData {
+  const r = runLore(coverageArgs(root, includePending));
+  // exit 1 = an undeclared command (still prints the JSON); anything else is the check failing to run
+  if (r.status !== 0 && r.status !== 1) fail(`\`lore baseline coverage ${root} --commands-only\` exited ${r.status}: ${r.stderr}${r.stdout}`);
   try {
     const data = (JSON.parse(r.stdout) as { data: CoverageData }).data;
     if (data.complete !== (r.status === 0)) fail(`coverage of ${root} disagrees with itself: complete=${data.complete} but exit ${r.status}`);
@@ -92,171 +82,86 @@ function coverageOf(root: string): CoverageData {
   }
 }
 
-/**
- * The lines stating what the CLI's `--json` reports for a root: the CLI decided, this renders (no verdict logic here).
- * A leaf the CLI measured (by commands or owned sites) and found ok prints nothing; `measured_by: "none"` is the CLI's own
- * unmeasured state; each declared-but-absent command is printed as INFORMATIONAL (the CLI does not count it against coverage).
- */
-export function renderMissing(data: CoverageData): string[] {
-  const lines: string[] = [];
-  for (const leaf of data.leaves) {
-    if (leaf.measured_by === "none") lines.push(`  unmeasured   ${leaf.slug}: measured_by none (no command declared and no owned site)\n    fix: lore baseline map ${leaf.slug} --command <name>`);
-    for (const key of leaf.unresolved_imports) lines.push(`  unresolved   ${key} (${leaf.slug}: census incomplete behind this import)`);
-    for (const key of leaf.gaps) lines.push(`  gap          ${key}`);
-    for (const key of leaf.not_measured) lines.push(`  not_measured ${key}`);
-    for (const fix of leaf.fix_commands) lines.push(`    fix: ${fix}`);
-    for (const a of leaf.absent_commands) lines.push(`${INFORMATIONAL_PREFIX} ${a.command} (${leaf.slug}: declared command not in this tree; pending or stale)\n    if stale: ${a.fix}`);
-  }
-  for (const u of data.undeclared_commands) lines.push(`  undeclared   ${u.command}\n    fix: ${u.fix}`);
+/** The lines stating each undeclared command the CLI reported (the CLI decided, this renders: no verdict logic here). */
+export function renderUndeclared(all: readonly CoverageData[]): string[] {
+  const lines = all.flatMap((data) => data.undeclared_commands.map((u) => `  undeclared   ${u.command}\n    fix: ${u.fix}`));
+  const count = all.reduce((n, data) => n + data.undeclared_commands.length, 0);
+  if (count > 0) lines.unshift(`check:baseline-coverage: ${count} runnable command(s) no leaf declares:`);
+  lines.push(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${count} undeclared command(s)`);
   return lines;
 }
 
-/** One exempt (leaf, site) pair: `gap` = census site with no rule/non-business mapping, `not_measured` = unmeasurable site. */
-export interface DebtRow {
-  readonly leaf: string;
-  readonly site: string;
-  readonly kind: "gap" | "not_measured";
-}
+const REGISTRY_INDEX = "packages/lore/src/adapters/cli/index.ts";
+const COMMAND_MODULE_RE = /^packages\/lore\/src\/adapters\/cli\/commands\/[^/]+\.ts$/;
 
-/** The committed ledger file: pairs revealed when the census learned to record where it stops (DC2-19). */
-export interface DebtLedger {
-  readonly adr: string;
-  readonly reason: string;
-  readonly rows: readonly DebtRow[];
-}
-
-const pairKey = (row: DebtRow): string => `${row.kind}\t${row.leaf}\t${row.site}`;
-
-/** Every (leaf, site) pair the census currently reports as unaccounted, across the given roots' coverage data. */
-export function currentPairs(all: readonly CoverageData[]): DebtRow[] {
-  const rows: DebtRow[] = [];
-  for (const data of all) {
-    for (const leaf of data.leaves) {
-      for (const site of leaf.gaps) rows.push({ leaf: leaf.slug, site, kind: "gap" });
-      for (const site of leaf.not_measured) rows.push({ leaf: leaf.slug, site, kind: "not_measured" });
-    }
-  }
-  return rows;
-}
-
-export interface LedgerVerdict {
-  /** Rendered lines for what still fails: unledgered items (with their fix lines) and non-pair problems. */
-  readonly failingLines: string[];
-  /** Number of unaccounted items that fail (unledgered pairs + non-pair problems). */
-  readonly failingCount: number;
-  /** Pairs exempted by the ledger, still present in the census. */
-  readonly ledgered: number;
-  /** Ledger rows that match no current unaccounted pair (mapped, or no longer reported): informational, to be removed. */
-  readonly stale: DebtRow[];
-  /** One `stale debt row (remove it): <leaf> <site>` line per stale row. */
-  readonly staleLines: string[];
-  /** True exactly when no unaccounted pair is missing from the ledger; stale rows never fail. */
-  readonly ok: boolean;
+/** Pure. True when the diff touches the command registry or a command module (a command could have been added or renamed). */
+export function registryChanged(changed: readonly ChangedFile[]): boolean {
+  return changed.some((c) => c.path === REGISTRY_INDEX || COMMAND_MODULE_RE.test(c.path));
 }
 
 /**
- * Judge the census against the ledger (the CLI's verdict is untouched; only this floor step reads the ledger).
- *
- * @param all - coverage data of every business root.
- * @param ledger - the committed debt ledger.
- * @returns what fails, what is exempt (counted), and which ledger rows are stale.
+ * Pure. The undeclared commands this diff is responsible for: a command whose module `commands/<top>.ts` was added or modified
+ * (a subcommand added or renamed there), or whose top-level name appears in a line the diff added to the registry index.
+ * An undeclared command in an untouched module is older debt: the plan-close full scan reports it, this step does not.
  */
-export function judgeAgainstLedger(all: readonly CoverageData[], ledger: DebtLedger): LedgerVerdict {
-  const exempt = new Set(ledger.rows.map(pairKey));
-  const present = new Set(currentPairs(all).map(pairKey));
-  const stale = ledger.rows.filter((row) => !present.has(pairKey(row)));
-  let ledgered = 0;
-  const failingLines: string[] = [];
-  let failingCount = 0;
-  for (const data of all) {
-    const leaves = data.leaves.map((leaf) => {
-      const keep = (kind: "gap" | "not_measured", site: string): boolean => !exempt.has(pairKey({ leaf: leaf.slug, site, kind }));
-      const flags = [...leaf.gaps.map((site) => keep("gap", site)), ...leaf.not_measured.map((site) => keep("not_measured", site))];
-      ledgered += flags.filter((kept) => !kept).length;
-      // reason: `fix_commands` carries one entry per gap then per not_measured site, in that order; later entries (if any) are not pair-aligned and stay.
-      const fixCommands = leaf.fix_commands.filter((_, i) => i >= flags.length || flags[i] === true);
-      return {
-        ...leaf,
-        gaps: leaf.gaps.filter((site) => keep("gap", site)),
-        not_measured: leaf.not_measured.filter((site) => keep("not_measured", site)),
-        fix_commands: fixCommands,
-      };
-    });
-    const lines = renderMissing({ ...data, leaves });
-    failingCount += lines.filter((l) => !l.startsWith(INFORMATIONAL_PREFIX) && !l.startsWith("    fix: ")).length;
-    failingLines.push(...lines);
-  }
-  return {
-    failingLines,
-    failingCount,
-    ledgered,
-    stale,
-    staleLines: stale.map((row) => `stale debt row (remove it): ${row.leaf} ${row.site}`),
-    ok: failingCount === 0,
-  };
+export function addedCommands(undeclared: readonly string[], changed: readonly ChangedFile[], registryAddedLines: string): string[] {
+  const touched = new Set(changed.filter((c) => c.status !== "D").map((c) => c.path));
+  return undeclared.filter((command) => {
+    const top = command.split(" ")[0] as string;
+    return touched.has(`packages/lore/src/adapters/cli/commands/${top}.ts`) || registryAddedLines.includes(`"${top}"`) || registryAddedLines.includes(`${top}:`);
+  });
 }
 
-function readLedger(): DebtLedger {
-  const file = debtLedgerPath();
-  // reason: a tree with no ledger has no exempt debt - the strict reading; deleting the ledger reddens the step, never greens it.
-  if (!existsSync(file)) return { adr: "", reason: "no ledger in this tree", rows: [] };
+/** Injected effects of {@link mainChanged}, so the verdict is testable without a corpus. */
+export interface ChangedDeps {
+  readonly changed: () => ChangedFile[];
+  readonly registryAddedLines: () => string;
+  readonly coverage: () => CoverageData[];
+}
+
+/** The `--changed` verdict: 0 when nothing registry-related changed or the diff added no undeclared command, 1 otherwise. */
+export function mainChanged(deps: ChangedDeps, print: (line: string) => void = console.log): number {
+  const changed = deps.changed();
+  if (!registryChanged(changed)) {
+    print("check:baseline-coverage:changed: the diff touches no command registry file; nothing to declare");
+    return 0;
+  }
+  const all = deps.coverage();
+  const undeclared = all.flatMap((d) => d.undeclared_commands.map((u) => u.command));
+  const blamed = new Set(addedCommands(undeclared, changed, deps.registryAddedLines()));
+  const scoped = all.map((d) => ({ ...d, undeclared_commands: d.undeclared_commands.filter((u) => blamed.has(u.command)) }));
+  for (const line of renderUndeclared(scoped)) print(line);
+  return blamed.size === 0 ? 0 : 1;
+}
+
+function registryAddedLinesVsBase(base: string): string {
+  const r = spawnSync("git", ["diff", "-U0", "--no-color", base, "--", REGISTRY_INDEX], { cwd: process.cwd(), encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0) fail(`diff of the registry against ${base} exited ${r.status ?? -1}: ${r.stderr ?? ""}`);
+  return (r.stdout ?? "")
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+    .join("\n");
+}
+
+/** The full (plan-close) verdict: approved declarations only, so a pending declaration never approved is caught at the milestone. */
+export function mainFull(coverage: (includePending: boolean) => CoverageData[], print: (line: string) => void = console.log): number {
+  const all = coverage(false);
+  for (const line of renderUndeclared(all)) print(line);
+  return all.every((d) => d.undeclared_commands.length === 0) ? 0 : 1;
+}
+
+function main(): number {
+  return mainFull((includePending) => businessRoots().map((root) => coverageOf(root, includePending)));
+}
+
+if (import.meta.main) {
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as DebtLedger;
-  } catch (cause) {
-    return fail(`debt ledger ${file} is not valid JSON: ${String(cause)}`);
+    if (wantsChanged(process.argv.slice(2))) {
+      const base = resolveBase(process.cwd());
+      process.exit(mainChanged({ changed: () => changedFiles(process.cwd(), base), registryAddedLines: () => registryAddedLinesVsBase(base), coverage: () => businessRoots().map((root) => coverageOf(root, true)) }));
+    }
+    process.exit(main());
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e));
   }
 }
-
-/**
- * One-shot seeding (`--seed-ledger [--except <site>]...`): write the ledger from what the census reports NOW.
- * Refuses to overwrite an existing ledger: re-seeding would re-admit new debt, and the ledger may only shrink.
- */
-function seedLedger(except: ReadonlySet<string>): number {
-  if (existsSync(debtLedgerPath())) return fail(`${debtLedgerPath()} already exists; the ledger only shrinks, it is never re-seeded`);
-  const rows = currentPairs(businessRoots().map(coverageOf))
-    .filter((row) => !except.has(row.site))
-    .sort((a, b) => (pairKey(a) < pairKey(b) ? -1 : pairKey(a) > pairKey(b) ? 1 : 0));
-  const ledger: DebtLedger = {
-    adr: "adr-a-newly-armed-structural-oracle-enforces-from-a-baseline",
-    reason:
-      "Pairs revealed when the site census began recording depth cuts, shallowest-depth visits and unmodelled bindings (DC2-19). Pre-existing, now visible; each is retired by mapping it (lore baseline map) and deleting its row in the same commit.",
-    rows,
-  };
-  writeFileSync(debtLedgerPath(), `${JSON.stringify(ledger, null, 1)}\n`);
-  console.log(`check:baseline-coverage: seeded ${rows.length} ledger row(s) into ${debtLedgerPath()}`);
-  return 0;
-}
-
-/**
- * The whole floor output, as lines. Order is load-bearing: run-chain re-prints only the LAST lines of a failed step, so
- * informational output (absent commands, stale rows - collapsed to one counted line unless `listStale`) comes first and
- * every unaccounted item with its fix line comes last, right before the summary line. Failing items are never truncated.
- */
-export function renderReport(all: readonly CoverageData[], verdict: LedgerVerdict, opts: { readonly listStale: boolean }): string[] {
-  const out: string[] = [];
-  const informational = verdict.failingLines.filter((l) => l.startsWith(INFORMATIONAL_PREFIX));
-  out.push(...informational);
-  if (verdict.stale.length > 0) {
-    out.push(`check:baseline-coverage: ${verdict.stale.length} stale debt row(s) in scripts/baseline-coverage-debt.json (informational, not failing)${opts.listStale ? ":" : "; list them: bun run check:baseline-coverage -- --list-stale"}`);
-    if (opts.listStale) for (const line of verdict.staleLines) out.push(`  ${line}`);
-  }
-  if (verdict.failingCount > 0) {
-    out.push(`check:baseline-coverage: INCOMPLETE, ${verdict.failingCount} item(s) unaccounted (not in the debt ledger):`);
-    out.push(...verdict.failingLines.filter((l) => !l.startsWith(INFORMATIONAL_PREFIX)));
-  }
-  out.push(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${verdict.ledgered} ledgered (debt), ${verdict.failingCount} unaccounted, ${verdict.stale.length} stale (informational)`);
-  return out;
-}
-
-function main(argv: readonly string[]): number {
-  if (argv.includes("--seed-ledger")) {
-    const except = new Set(argv.flatMap((a, i) => (a === "--except" && argv[i + 1] !== undefined ? [argv[i + 1] as string] : [])));
-    return seedLedger(except);
-  }
-  const all = businessRoots().map(coverageOf);
-  const verdict = judgeAgainstLedger(all, readLedger());
-  for (const line of renderReport(all, verdict, { listStale: argv.includes("--list-stale") })) console.log(line);
-  return verdict.ok ? 0 : 1;
-}
-
-if (import.meta.main) process.exit(main(process.argv.slice(2)));

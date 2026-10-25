@@ -3,10 +3,10 @@ id: KN-340
 type: knowledge
 role: knowledge
 title: "Assessment: Fix — dashboard --no-open inert + nonce-failure page (F5a defects D1/D2) (2026-07-29)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-10-23
 tags: []
 parent: PLAN-104
 links:

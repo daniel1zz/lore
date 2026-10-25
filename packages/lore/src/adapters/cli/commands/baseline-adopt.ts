@@ -125,7 +125,7 @@ export async function seedAcCiteModeAudited(repoDir: string, inv: Invocation): P
   try {
     const row = await appendAdoptAuditRow(
       bareDocWriter(store),
-      resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+      resolveActor(inv),
       { mode: null, armed_branches: [] },
       { mode: "report", armed_branches: [] },
     );
@@ -148,7 +148,7 @@ function fail(inv: Invocation, error: LoreError, json: boolean, code: number): E
 }
 
 function usageError(field: string, message: string, value?: unknown): LoreError {
-  return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}) };
+  return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}), rule: "BR-987" };
 }
 
 const sameSettings = (a: AcCiteStored, b: AcCiteStored): boolean =>
@@ -242,7 +242,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
     if (!invokingTree.ok) return fail(inv, invokingTree.error, json, exitCode(invokingTree.error));
     const applied = await applyAuditedAdoption({
       writer: app.corpusService,
-      actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+      actor: resolveActor(inv),
       repoDir,
       ownTree: invokingTree.value === repoDir,
       old,

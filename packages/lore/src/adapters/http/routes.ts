@@ -261,10 +261,9 @@ export async function handleApiRoute(
     return handleCalibrationStats(url, app);
   }
 
-  // GET /api/decisions, /api/decisions/:id, /api/audit-items (HR-T3) — read-only, cookie or bearer.
+  // GET /api/decisions, /api/decisions/:id (HR-T3) — read-only, cookie or bearer.
   // reason: paths deliberately avoid the word "decide": the human channel has no HTTP route (AC-AU-3 (4) scan).
   if (method === "GET" && path === "/api/decisions") return handleListDecisions(app);
-  if (method === "GET" && path === "/api/audit-items") return handleListAuditItems(app);
   const decisionMatch = /^\/api\/decisions\/([^/]+)$/.exec(path);
   if (decisionMatch !== null && method === "GET") return handleGetDecision(decisionMatch[1] ?? "", app);
 
@@ -318,7 +317,8 @@ export async function handleApiRoute(
   // /api/review/:id/approve or /api/review/:id/reject
   const reviewMatch = matchReviewPath(path);
   if (reviewMatch !== null && method === "POST") {
-    return handleReviewAction(reviewMatch.id, reviewMatch.action, app);
+    // `?item=<BR-n|node>` (baseline nodes, BR-1338): approve / discard ONE item's pending revision
+    return handleReviewAction(reviewMatch.id, reviewMatch.action, app, url.searchParams.get("item") ?? undefined);
   }
 
   return null;
@@ -614,16 +614,23 @@ async function handleGetPhaseStatus(planIdOrSlug: string, app: App): Promise<Res
 }
 
 /**
- * GET /api/audit/verify[?since=<ISO8601>] — versions⋈audit completeness oracle.
- * `since` overrides the configured `audit.verify_since` watermark for this call
- * only (mirrors `lore audit --verify --since`); omitted, `AuditService.verify`
- * falls back to its constructor-resolved watermark.
+ * GET /api/audit/verify — versions⋈audit completeness oracle over every version. The
+ * per-call `since` option is removed (as `lore audit --verify --since`): a request carrying it is refused 422.
  */
 async function handleAuditVerify(url: URL, app: App): Promise<Response> {
-  const since = url.searchParams.get("since");
+  if (url.searchParams.has("since")) {
+    return jsonError(
+      {
+        code: "VALIDATION_ERROR",
+        field: "since",
+        message: "since is not accepted: verification checks every version. History that predates the audit writers is recorded by `lore migrate audit-backfill --apply`.",
+      },
+      422,
+    );
+  }
   // reason: the full-chain verdict runs off the serving loop (worker per persistent store) and reads the anchor file,
   // so a dashboard "clean" means what `lore audit --verify` means.
-  const result = await app.auditVerifyRunner.verify(since !== null ? { since } : undefined);
+  const result = await app.auditVerifyRunner.verify();
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value);
 }
@@ -660,15 +667,7 @@ async function handleListDecisions(app: App): Promise<Response> {
   return jsonOk(result.value);
 }
 
-/** GET /api/audit-items — sampled auto decisions awaiting a human answer. */
-async function handleListAuditItems(app: App): Promise<Response> {
-  if (app.decisionReadService === undefined) return jsonError(DECISION_READ_UNAVAILABLE, 503);
-  const result = await app.decisionReadService.readAuditItemViews();
-  if (!result.ok) return loreErrorResponse(result.error);
-  return jsonOk(result.value);
-}
-
-/** GET /api/decisions/:id — one open decision or audit item (the view's `kind` says which); unknown id → 404. */
+/** GET /api/decisions/:id — one open decision; unknown id → 404. */
 async function handleGetDecision(rawId: string, app: App): Promise<Response> {
   if (app.decisionReadService === undefined) return jsonError(DECISION_READ_UNAVAILABLE, 503);
   if (!/^\d+$/.test(rawId)) {
@@ -676,7 +675,7 @@ async function handleGetDecision(rawId: string, app: App): Promise<Response> {
   }
   const result = await app.decisionReadService.readDecisionView(Number(rawId));
   if (!result.ok) return loreErrorResponse(result.error);
-  if (result.value === null) return jsonError({ code: "NOT_FOUND", message: `No open decision or audit item ${rawId}` }, 404);
+  if (result.value === null) return jsonError({ code: "NOT_FOUND", message: `No open decision ${rawId}` }, 404);
   return jsonOk(result.value);
 }
 
@@ -702,11 +701,17 @@ async function handleDeleteLink(from: string, to: string, app: App, actor: Actor
   return jsonOk({ ok: true });
 }
 
-async function handleReviewAction(id: string, action: "approve" | "reject", app: App): Promise<Response> {
+async function handleReviewAction(id: string, action: "approve" | "reject", app: App, item?: string): Promise<Response> {
   if (action === "approve") {
-    const result = await app.reviewService.approve(id);
+    const result = await app.reviewService.approve(id, item !== undefined ? { item } : undefined);
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
+  }
+
+  if (item !== undefined) {
+    const discarded = await app.reviewService.rejectItem(id, item);
+    if (!discarded.ok) return loreErrorResponse(discarded.error);
+    return jsonOk({ ...discarded.value.doc, discarded_item: discarded.value.discarded.item });
   }
 
   const result = await app.reviewService.reject(id);

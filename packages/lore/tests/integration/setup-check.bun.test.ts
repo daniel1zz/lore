@@ -387,8 +387,8 @@ function seedUserAndProject(prefix: string): { scratch: string; userDir: string;
   seedConvergedTarget(scratch, userDir);
   const userSettings = JSON.parse(readFileSync(join(userDir, "settings.json"), "utf8"));
   const stopCommands = JSON.stringify(userSettings.hooks?.Stop ?? []);
-  if (!stopCommands.includes("stop-handoff-coverage.mjs")) {
-    throw new Error("seedUserAndProject: setup did not register stop-handoff-coverage.mjs on Stop at the user layer");
+  if (!stopCommands.includes("stop-turn-review.mjs")) {
+    throw new Error("seedUserAndProject: setup did not register stop-turn-review.mjs on Stop at the user layer");
   }
   return { scratch, userDir, projectDir };
 }
@@ -397,7 +397,7 @@ describe("lore setup --check — double registration", () => {
   it("AC1: same hook file + same event at user and project layer => finding naming file, event, both paths; exit 3", () => {
     const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-ac1-");
     const projectSettings = writeProjectSettings(projectDir, {
-      Stop: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-handoff-coverage.mjs" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-turn-review.mjs" }] }],
     });
 
     const check = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
@@ -406,7 +406,7 @@ describe("lore setup --check — double registration", () => {
     expect(payload.data.summary).toBe("stale");
     expect(payload.data.double_registrations).toEqual([
       {
-        file: "stop-handoff-coverage.mjs",
+        file: "stop-turn-review.mjs",
         event: "Stop",
         user_settings: join(userDir, "settings.json"),
         project_settings: projectSettings,
@@ -415,7 +415,7 @@ describe("lore setup --check — double registration", () => {
 
     const human = runSetup(["--check", "--claude-dir", userDir], projectDir, { PATH: healthyGhStubDir() });
     expect(human.exitCode).toBe(3);
-    expect(human.stdout).toContain("stop-handoff-coverage.mjs");
+    expect(human.stdout).toContain("stop-turn-review.mjs");
     expect(human.stdout).toContain("Stop");
     expect(human.stdout).toContain(join(userDir, "settings.json"));
     expect(human.stdout).toContain(projectSettings);
@@ -425,7 +425,7 @@ describe("lore setup --check — double registration", () => {
     const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-local-");
     const local = writeProjectSettings(
       projectDir,
-      { Stop: [{ hooks: [{ type: "command", command: "bash ./x/stop-handoff-coverage.mjs" }] }] },
+      { Stop: [{ hooks: [{ type: "command", command: "bash ./x/stop-turn-review.mjs" }] }] },
       "settings.local.json",
     );
     const check = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
@@ -450,7 +450,7 @@ describe("lore setup --check — double registration", () => {
   it("AC3: same basename under a different event => no finding, exit 0", () => {
     const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-ac3-");
     writeProjectSettings(projectDir, {
-      SessionEnd: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-handoff-coverage.mjs" }] }],
+      SessionEnd: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-turn-review.mjs" }] }],
     });
     const check = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
     expect(check.exitCode).toBe(0);

@@ -359,6 +359,94 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
 
     // ── softDeleteWithProvenance ─────────────────────────────────────────
 
+    // ── updateWithProvenance: companion doc writes (BR-1307) ─────────────
+
+    describe("updateWithProvenance also_update (task-deprecating-a-spec-retires-its-proposed-rule-ids-in-the)", () => {
+      async function seed(title: string): Promise<DocRecord> {
+        const doc = makeDoc({ title });
+        const result = await store.insertWithProvenance(doc, makeVersion(doc), makeAudit(doc));
+        if (!result.ok) throw new Error(`seed failed: ${JSON.stringify(result.error)}`);
+        return result.value;
+      }
+
+      function companionOf(doc: DocRecord, title: string, expectedVersion: number) {
+        return {
+          id: doc.id,
+          patch: { title, version: expectedVersion + 1 } as Partial<DocRecord>,
+          opts: { expected_version: expectedVersion },
+          version: makeVersion(doc, { version: expectedVersion + 1, title, action: "update" }),
+          audit: makeAudit(doc, { action: "update", details: { version: expectedVersion + 1 } }),
+        };
+      }
+
+      it("HAPPY — the primary doc and its companion both commit with their own version and audit rows", async () => {
+        const primary = await seed("Primary");
+        const companion = await seed("Companion");
+
+        const result = await store.updateWithProvenance(
+          primary.id,
+          { title: "Primary done", version: 2 },
+          { expected_version: 1 },
+          makeVersion(primary, { version: 2, title: "Primary done", action: "update" }),
+          makeAudit(primary, { action: "update", details: { version: 2 } }),
+          { also_update: [companionOf(companion, "Companion done", 1)] },
+        );
+        expect(result.ok).toBe(true);
+
+        const foundCompanion = await store.find(companion.id);
+        expect(foundCompanion.ok && foundCompanion.value?.title).toBe("Companion done");
+        expect(foundCompanion.ok && foundCompanion.value?.version).toBe(2);
+        const versions = await store.findVersions(companion.id);
+        expect(versions.ok && versions.value).toHaveLength(2);
+        const audits = await store.queryAudit({ doc_id: companion.id, action: "update" });
+        expect(audits.ok && audits.value).toHaveLength(1);
+      });
+
+      it("ERROR/STATE — a companion CAS miss refuses with STALE_VERSION and the primary write is rolled back", async () => {
+        const primary = await seed("Primary stays");
+        const companion = await seed("Companion stays");
+
+        const result = await store.updateWithProvenance(
+          primary.id,
+          { title: "Must not persist", version: 2 },
+          { expected_version: 1 },
+          makeVersion(primary, { version: 2, title: "Must not persist", action: "update" }),
+          makeAudit(primary, { action: "update", details: { version: 2 } }),
+          { also_update: [companionOf(companion, "Must not persist either", 7)] }, // wrong CAS base
+        );
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error.code).toBe("STALE_VERSION");
+
+        const foundPrimary = await store.find(primary.id);
+        expect(foundPrimary.ok && foundPrimary.value?.title).toBe("Primary stays");
+        expect(foundPrimary.ok && foundPrimary.value?.version).toBe(1);
+        const primaryVersions = await store.findVersions(primary.id);
+        expect(primaryVersions.ok && primaryVersions.value).toHaveLength(1);
+        const primaryAudits = await store.queryAudit({ doc_id: primary.id, action: "update" });
+        expect(primaryAudits.ok && primaryAudits.value).toHaveLength(0);
+        const foundCompanion = await store.find(companion.id);
+        expect(foundCompanion.ok && foundCompanion.value?.title).toBe("Companion stays");
+      });
+
+      it("NEGATIVE — a companion doc that does not exist refuses and writes nothing", async () => {
+        const primary = await seed("Primary alone");
+        const phantom = makeDoc({ title: "Phantom" });
+
+        const result = await store.updateWithProvenance(
+          primary.id,
+          { title: "Must not persist", version: 2 },
+          { expected_version: 1 },
+          makeVersion(primary, { version: 2, title: "Must not persist", action: "update" }),
+          makeAudit(primary, { action: "update", details: { version: 2 } }),
+          { also_update: [companionOf(phantom, "x", 1)] },
+        );
+        expect(result.ok).toBe(false);
+        const foundPrimary = await store.find(primary.id);
+        expect(foundPrimary.ok && foundPrimary.value?.title).toBe("Primary alone");
+      });
+    });
+
     describe("softDeleteWithProvenance", () => {
       async function seedDoc(): Promise<DocRecord> {
         const doc = makeDoc({ title: "To Be Deleted" });

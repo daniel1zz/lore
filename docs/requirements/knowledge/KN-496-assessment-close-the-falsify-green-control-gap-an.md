@@ -3,10 +3,10 @@ id: KN-496
 type: knowledge
 role: knowledge
 title: "Assessment: Close the falsify green-control gap: an unrunnable scratch worktree must record inconclusive, never a machine-proven red (2026-08-21)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-23
 tags: []
 parent: PLAN-136
 links:

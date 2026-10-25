@@ -37,8 +37,8 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
     { key: "rules", writer: "lore rule add|set" },
     { key: "depends_on", writer: "lore baseline depends" },
     { key: "glossary", writer: "lore baseline glossary" },
-    { key: "site_map", writer: "lore baseline map" },
     { key: "commands", writer: "lore baseline map --command" },
+    { key: "pending", writer: "lore rule add|set, lore baseline set-label|depends|glossary|map --command" },
   ],
   spec: [{ key: "rule_changes", writer: "lore rule propose" }],
   // reason: DC2-8 — a recorded UAT verdict is writer-owned evidence; `lore set` replaces `extra`

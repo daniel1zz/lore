@@ -3,10 +3,10 @@ id: KN-569
 type: knowledge
 role: knowledge
 title: "Assessment: Worktree removal is decided by who is inside, not by how long it has been quiet (2026-10-12)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-23
 tags: []
 parent: PLAN-156
 links:

@@ -31,6 +31,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreFilters } from "../../../src/store/store-interface.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { approveAllPending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 
 const BRANCH_SLUG = "baseline-window-branch";
@@ -97,6 +98,7 @@ async function seed(dir: string): Promise<Fixture> {
     }, { by: "agent:seed" }),
     "rule",
   );
+  await approveAllPending(store); // a direct add is a pending add: citable (live) only once approved
   const spec = await must(await cs.create({ type: "spec", title: "Window spec", content: "s"} as CreateDocInput), "spec");
   await must(
     await ac.addCriterion(spec.id, {
@@ -114,6 +116,7 @@ async function retireOnSecondConnection(dbPath: string): Promise<void> {
   const other = actedStore(new SQLiteStore(dbPath));
   try {
     await must(await makeRuleService(other).setRule("BR-1", { lifecycle: "retired", note: "retired inside the window" }, { by: "agent:retirer" }), "retire");
+    await approveAllPending(other); // the retirement is a pending revision: it takes effect when approved
   } finally {
     other.close();
   }

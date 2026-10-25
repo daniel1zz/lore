@@ -3,7 +3,7 @@ id: TASK-1546
 type: task
 role: plan
 title: "[Skill:implement] AU-T7 self-grantable overrides call decide() and escalate below threshold"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1c: overrides, calibration, integrity"
 created: 2026-10-18

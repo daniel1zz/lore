@@ -165,6 +165,7 @@ describe("Enum schemas", () => {
       "relates-to",
       "blocks",
       "governs",
+      "known-defect",
     ];
 
     // Exhaustiveness: the schema's actual member set must equal this literal

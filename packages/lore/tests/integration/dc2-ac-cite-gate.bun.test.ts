@@ -13,7 +13,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +20,7 @@ import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp } from "../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -58,11 +58,18 @@ function addRule(leaf: string, statement: string): string {
   const out = mustRun(["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   const id = out.stdout.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${out.stdout}`);
+  // a direct add is a pending add (not live, not citable) until its leaf is approved; the suite's override class is loosened
+  mustRun(["approve", leaf, "--override-no-judgment"]);
+  leafOfRules = leaf;
   return id;
 }
 
+/** The leaf holding the suite's rules (a retirement is a pending revision of it until approved). */
+let leafOfRules = "";
+
 function retire(rule: string): void {
   mustRun(["rule", "set", rule, "--lifecycle", "retired", "--note", "retired for the test"]);
+  mustRun(["approve", leafOfRules, "--override-no-judgment"]);
 }
 
 interface AcJson {
@@ -107,7 +114,9 @@ beforeAll(async () => {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"]);
-  await loosenOverrideClasses(dir, ["override-judgment"]);
+  // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
+  // suite's subject is the citation gate, so the profiles are removed (an absent profile is a vacuous pass).
+  dropLoreConfigKey(dir, ["workflow", "verification_profiles"]);
   const prd = slugOf(mustRun(["create", "prd", "--title", "DC2-13 PRD", "--content", "root", "--no-ai"]).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-13 Root"]).stdout);
   branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "DC2-13 Branch"]).stdout);
@@ -127,7 +136,7 @@ beforeAll(async () => {
   retire(retiredB);
   retire(retiredC);
 
-  appendFileSync(join(dir, ".lore", "config.yaml"), `workflow:\n  gates:\n    ac-cite:\n      mode: enforce\n      armed_branches:\n        - ${branch}\n`);
+  patchLoreConfig(dir, `workflow:\n  gates:\n    ac-cite:\n      mode: enforce\n      armed_branches:\n        - ${branch}\n`);
 });
 
 afterAll(() => {

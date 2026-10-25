@@ -1,3 +1,6 @@
+// @reads assets/project/reference-transaction
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref spec-session-start-injection-carries-only-the-session-s-own — AC-SI-2, AC-SI-4.
  *
@@ -18,10 +21,19 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "fs";
+import { installShippedGuard } from "../integration/support/main-guard-repo.js";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+
+/** A directory that is a git repository: a claim recording it as its worktree is measured through `git worktree list` (BR-1353). */
+function makeRepoDir(path: string): void {
+  mkdirSync(path);
+  execFileSync("git", ["init", "-q", path], { stdio: "ignore" });
+}
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -146,7 +158,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   it("(b2) a claim recorded as an absolute dir D matches a seat worktree that is a symlink to D", async () => {
     const real = join(scratch, "b2-real");
     const link = join(scratch, "b2-link");
-    mkdirSync(real);
+    makeRepoDir(real);
     symlinkSync(real, link);
     const slug = await claimTask(dir, seeded.plan, real);
     expect(claimSlugs(await injection(dir, "other-b2", link))).toEqual([slug]);
@@ -155,7 +167,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   it("(b3) the reverse: a claim recorded as the symlink path matches the real seat path", async () => {
     const real = join(scratch, "b3-real");
     const link = join(scratch, "b3-link");
-    mkdirSync(real);
+    makeRepoDir(real);
     symlinkSync(real, link);
     const slug = await claimTask(dir, seeded.plan, link);
     expect(claimSlugs(await injection(dir, "other-b3", real))).toEqual([slug]);
@@ -163,7 +175,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
 
   it("(b3) a claim recorded with a trailing slash also matches", async () => {
     const real = join(scratch, "b3-slash");
-    mkdirSync(real);
+    makeRepoDir(real);
     const slug = await claimTask(dir, seeded.plan, `${real}/`);
     expect(claimSlugs(await injection(dir, "other-slash", real))).toEqual([slug]);
   });
@@ -185,8 +197,20 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   });
 
   it("(d) after lore done archives the claimed task -> stdout empty", async () => {
+    // the claimed branch really exists and is landed through `lore integrate`, the only way `lore done` accepts (BR-1291)
+    const git = (...args: string[]): void => void execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+    appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
+    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
+    git("checkout", "-q", "-b", "feat-done");
+    writeFileSync(join(dir, "feat-done.txt"), "work\n");
+    git("add", "feat-done.txt");
+    git("commit", "-q", "-m", "work on feat-done");
+    git("checkout", "-q", "main");
     const slug = await claimTask(dir, seeded.plan, "feat-done");
     expect(claimSlugs(await injection(dir, "feat-done", scratch))).toEqual([slug]);
+    git("checkout", "-q", "--detach", "main"); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+    await mustRun(["integrate", "feat-done", "--session", "seat-done-session"], dir);
     await mustRun(["evidence", slug, "--oracle", "test", "--command", "echo ok", "--result", "pass", "--capture"], dir, sessionFor(slug));
     await mustRun(["done", slug], dir, sessionFor(slug));
     const r = await injection(dir, "feat-done", scratch);
@@ -219,7 +243,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
 });
 
 describe("AC-SI-2 (e): plain bootstrap --json is unchanged", () => {
-  it("keeps exactly the 10-key set on a fresh corpus", async () => {
+  it("keeps exactly the 12-key set on a fresh corpus (the 10 measured 2026-10-11 plus `architecture` and `plan_acceptance`)", async () => {
     const fresh = mkdtempSync(join(tmpdir(), "lore-seat-fresh-"));
     try {
       await mustRun(["init"], fresh);
@@ -229,12 +253,14 @@ describe("AC-SI-2 (e): plain bootstrap --json is unchanged", () => {
         [
           "active_plans",
           "active_sessions",
+          "architecture",
           "archive_candidates",
           "armed_gates",
           "corpus",
           "latest_handoffs",
           "my_claims",
           "pending_reviews",
+          "plan_acceptance",
           "resume_hint",
           "root",
         ].sort(),
@@ -263,11 +289,7 @@ describe("AC-SI-4: retired config knobs + char_budget", () => {
   });
 
   it("exits 0 and warns exactly once per SET retired key on stderr", async () => {
-    appendFileSync(
-      join(dir, ".lore", "config.yaml"),
-      "\nworkflow:\n  bootstrap_injection:\n    max_active_plans: 2\n    max_handoffs: 2\n    max_pending_slugs: 2\n",
-      "utf8",
-    );
+    patchLoreConfig(dir, "workflow:\n  bootstrap_injection:\n    max_active_plans: 2\n    max_handoffs: 2\n    max_pending_slugs: 2\n");
     const r = await injection(dir, "feat-knobs", scratch);
     expect(r.exitCode).toBe(0);
     for (const key of ["max_active_plans", "max_handoffs", "max_pending_slugs"]) {
@@ -290,7 +312,8 @@ describe("AC-SI-4: retired config knobs + char_budget", () => {
   });
 
   it("char_budget=50 with a seat claim -> budget_exceeded true, payload parses as JSON (never sliced)", async () => {
-    appendFileSync(join(dir, ".lore", "config.yaml"), "    char_budget: 50\n", "utf8");
+    // reason: continues the `bootstrap_injection:` block the test above appended (the helper merges, so it re-states the key).
+    patchLoreConfig(dir, { workflow: { bootstrap_injection: { char_budget: 50 } } });
     const r = await injection(dir, "feat-knobs", scratch);
     expect(r.exitCode).toBe(0);
     const parsed = JSON.parse(r.stdout) as { budget_exceeded?: boolean; seat_claims: unknown[] };

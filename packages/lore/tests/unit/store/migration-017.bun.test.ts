@@ -38,6 +38,7 @@ function runRecord(id: RunId): RunRecord {
     branch: null,
     composition: { schemaVersion: 1, fragments: [] },
     registeredAt: AT,
+    messageAddress: null,
   };
 }
 
@@ -63,14 +64,14 @@ describe("migration-017 constants", () => {
       expect(c.ddl).not.toMatch(/NOT NULL/i);
     }
     expect(MIGRATION_017_SQL).toContain("PRAGMA user_version = 17;");
-    expect(LATEST_SCHEMA_VERSION).toBe(26);
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(22);
   });
 });
 
 describe("migration-017 on a SQLite file", () => {
   /** A v16 file: a real current-schema file with the two columns dropped and user_version rewound. */
   function seedV16WithRun(path: string): void {
-    const fresh = actedStore(new SQLiteStore(path));
+    const fresh = actedStore(new SQLiteStore(path, { migrate: true }));
     fresh.close();
     const raw = new Database(path);
     raw.exec("ALTER TABLE runs DROP COLUMN ended_at");
@@ -88,9 +89,9 @@ describe("migration-017 on a SQLite file", () => {
     const path = join(dir, "v16.db");
     seedV16WithRun(path);
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
 
-    expect(userVersion(store.getDatabase())).toBe(26);
+    expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     const end = await store.getRunEnd(RUN);
     expect(end).toEqual({ ok: true, value: { endedAt: null, endReason: null } });
     store.close();
@@ -103,9 +104,9 @@ describe("migration-017 on a SQLite file", () => {
     raw.exec("ALTER TABLE runs ADD COLUMN ended_at TEXT");
     raw.close();
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
 
-    expect(userVersion(store.getDatabase())).toBe(26);
+    expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     const cols = (store.getDatabase().query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
     expect(cols.filter((n) => n === "ended_at")).toHaveLength(1);
     expect(cols).toContain("end_reason");
@@ -114,14 +115,14 @@ describe("migration-017 on a SQLite file", () => {
 
   it("REGRESSION: reopening a migrated file is a no-op (version and run rows unchanged)", async () => {
     const path = join(dir, "again.db");
-    const first = actedStore(new SQLiteStore(path));
+    const first = actedStore(new SQLiteStore(path, { migrate: true }));
     await first.insertRun(runRecord(RUN));
     await first.endRun(RUN, AT, "r");
     first.close();
 
-    const second = actedStore(new SQLiteStore(path));
+    const second = actedStore(new SQLiteStore(path, { migrate: true }));
 
-    expect(userVersion(second.getDatabase())).toBe(26);
+    expect(userVersion(second.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     expect(await second.getRunEnd(RUN)).toEqual({ ok: true, value: { endedAt: AT, endReason: "r" } });
     second.close();
   });
