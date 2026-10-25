@@ -128,7 +128,10 @@
 
 import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { z } from "zod";
+import { isSameGithubRepository } from "../../service/github-remote.js";
+import { buildReportContext } from "../../service/report-issue-context.js";
 import { exitCli } from "./cli-exit.js";
 import {
   assembleIssueBody,
@@ -525,6 +528,8 @@ export interface GithubReportInput {
   readonly suggested_fix?: string;
   /** Specs, criteria, commits or issues the report relates to; one bullet each. */
   readonly refs?: readonly string[];
+  /** The `**Context:**` section text (attached test-file context); set by {@link fileGithubIssue}, never by an input adapter. */
+  readonly context?: string;
   readonly severity: IssueSeverity;
   readonly category: string;
   readonly tags: readonly string[];
@@ -545,6 +550,38 @@ export interface GithubFilingContext {
   readonly home: string;
   /** The environment `gh` is spawned from (`Invocation.env`; no ambient default, AS-26). */
   readonly env: NodeJS.ProcessEnv;
+  /** Runs `git <args>` in `cwd` for the origin lookup (injected so a test needs no git); default: the real `git` under `env`. */
+  readonly git?: OriginGit;
+}
+
+/** Raw outcome of one git call; `status` is the exit status (non-zero when git is missing or refuses). */
+export type OriginGit = (cwd: string, args: readonly string[], env: NodeJS.ProcessEnv) => { status: number; stdout: string };
+
+/** The real git for the origin lookup: never throws; a missing git reads as a non-zero status. */
+const runRealGit: OriginGit = (cwd, args, env) => {
+  const outcome = spawnSync("git", [...args], { cwd, env, encoding: "utf8" });
+  return { status: outcome.status ?? 1, stdout: outcome.stdout ?? "" };
+};
+
+/**
+ * Builds the `**Context:**` section for a filing: ONE git call for the project's `origin`, then the pure builder.
+ *
+ * @param input - the report (its repro command names the test file)
+ * @param upstreamRepo - the upstream `owner/name` the report is filed to
+ * @param ctx - the caller's root, home, env and optional injected git
+ * @returns the section text, or `undefined` when the command names no test file
+ */
+function buildFilingContext(input: GithubReportInput, upstreamRepo: string, ctx: GithubFilingContext): string | undefined {
+  if (input.repro_command === undefined) return undefined;
+  const git = ctx.git ?? runRealGit;
+  const origin = git(ctx.consumerCorpusRoot, ["remote", "get-url", "origin"], ctx.env);
+  const originUrl = origin.status === 0 ? origin.stdout.trim() : undefined;
+  return buildReportContext({
+    command: input.repro_command,
+    projectRoot: ctx.consumerCorpusRoot,
+    home: ctx.home,
+    sameRepository: isSameGithubRepository(originUrl, upstreamRepo),
+  });
 }
 
 /** Successful outcome of {@link fileGithubIssue}. */
@@ -684,7 +721,8 @@ function buildIssueDescriptionBlock(input: GithubReportInput): string {
   if (input.refs !== undefined && input.refs.length > 0) {
     lines.push("", "**Refs:**", ...input.refs.map((ref) => `- ${ref}`));
   }
-  // `**Context:**` (attached test-file spec refs / header, spec AC-RI-3/4) is appended HERE by the context task; it precedes `Reported by:`.
+  // reason: `**Context:**` (attached test-file spec refs / header, AC-RI-3/4) comes last, right before `Reported by:`.
+  if (input.context !== undefined) lines.push("", input.context);
   return lines.join("\n");
 }
 
@@ -876,10 +914,13 @@ async function mintIssueTask(
  *   never block filing")
  */
 export async function fileGithubIssue(
-  input: GithubReportInput,
+  rawInput: GithubReportInput,
   cfg: GithubUpstreamCfg,
   ctx: GithubFilingContext,
 ): Promise<Result<GithubReportResult, LoreError>> {
+  // reason: the context is built once here so the CLI and MCP paths (both call this) and the minted task share one body.
+  const context = buildFilingContext(rawInput, cfg.repo, ctx);
+  const input: GithubReportInput = context === undefined ? rawInput : { ...rawInput, context };
   const receiptsPath = join(ctx.consumerCorpusRoot, ".lore", RECEIPT_LOG_V2_FILENAME);
 
   const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });

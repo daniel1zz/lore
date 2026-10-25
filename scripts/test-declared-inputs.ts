@@ -21,6 +21,8 @@
  * `?` (one character); no absolute paths, no `..`.
  */
 
+import { leadingCommentLines } from "../packages/lore/src/service/leading-comment.js";
+
 /** Typed failure for a malformed declaration; `context` names the offending line. */
 export class DeclaredInputsError extends Error {
   constructor(
@@ -90,18 +92,9 @@ function validatePattern(pattern: string, line: string): void {
 export function parseDeclaredInputs(content: string): DeclaredInputs {
   const reads: string[] = [];
   const spawns: string[] = [];
-  let inBlock = false;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (inBlock) {
-      if (trimmed.includes("*/")) inBlock = false;
-    } else if (trimmed === "" || trimmed.startsWith("//") || trimmed.startsWith("#!")) {
-      // leading line comment / blank line: still the header
-    } else if (trimmed.startsWith("/*")) {
-      if (!trimmed.includes("*/")) inBlock = true;
-    } else {
-      break;
-    }
+  // The boundary rule (where the leading comment region ends) is shared with the defect report's context
+  // attachment: it lives in packages/lore so the compiled binary ships it.
+  for (const line of leadingCommentLines(content)) {
     const match = DECLARATION_LINE_RE.exec(line);
     if (match === null) continue;
     const pattern = match[2]!;
