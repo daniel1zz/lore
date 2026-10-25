@@ -20,6 +20,10 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { handleGetIssueReports, type IssueListingPort } from "../../../src/adapters/http/issue-reports-routes.js";
 import type { GithubListedIssue, GithubListing } from "../../../src/service/github-intake-port.js";
+import { handleApiRoute } from "../../../src/adapters/http/routes.js";
+import { authenticateRequest } from "../../../src/adapters/http/auth.js";
+import type { ActorContext, ApiKeyStore } from "../../../src/adapters/http/auth.js";
+import type { SessionStore } from "../../../src/adapters/http/sessions.js";
 import type { App } from "../../../src/app.js";
 import { makeDoc } from "../store/store-core.shared.js";
 
@@ -153,5 +157,50 @@ describe(`${SPEC}#AC-GS-14 HTTP issue route serves only the live join`, () => {
     const store = new InMemoryStore();
     const res = await handleGetIssueReports(makeApp(store, ok(stubPort({ issues: [listedIssue(9)] }))));
     expect((await readBody(res)).data?.rows?.[0]).toMatchObject({ number: 9 });
+  });
+});
+
+// The auth matrix of the route, carried over from the retired mirror-era suite: the dispatcher answers a cookie
+// session and a bearer token, and the shared gate every /api/* route sits behind refuses a request with neither.
+describe("GET /api/issue-reports auth matrix", () => {
+  const COOKIE_ACTOR: ActorContext = { name: "test-user", session_id: "cookie-session", callerSurface: "http_cookie" as const, owner: "admin" };
+  const BEARER_ACTOR: ActorContext = { name: "test-agent", session_id: "token-session", callerSurface: "http_token" as const };
+  /** Never invoked on the "no auth" path: duck-typed stub only. */
+  const stubApiKeyStore = {} as ApiKeyStore;
+
+  async function dispatch(actor: ActorContext): Promise<Response> {
+    const store = new InMemoryStore();
+    await insertCarrier(store, "task-carrier-30", 30);
+    const app = makeApp(store, ok(stubPort({ issues: [listedIssue(30)] })));
+    const request = new Request("http://localhost/api/issue-reports", { method: "GET" });
+    return (await handleApiRoute(request, new URL("http://localhost/api/issue-reports"), app, actor)) as Response;
+  }
+
+  it("HAPPY: a cookie session returns 200 with the live rows", async () => {
+    const res = await dispatch(COOKIE_ACTOR);
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.ok).toBe(true);
+    expect(body.data?.rows).toHaveLength(1);
+  });
+
+  it("HAPPY: a bearer token returns 200 (read-only)", async () => {
+    const res = await dispatch(BEARER_ACTOR);
+    expect(res.status).toBe(200);
+    const body = await readBody(res);
+    expect(body.ok).toBe(true);
+    expect(body.data?.rows).toHaveLength(1);
+  });
+
+  it("NEGATIVE: no auth is refused by the shared gate (401 in index.ts) before the route runs", async () => {
+    // reason: authenticateRequest is the REAL upstream gate; with neither cookie nor bearer it returns not-ok before
+    // touching the key or session store, so the stubs are never invoked.
+    const authResult = await authenticateRequest(
+      new Request("http://localhost/api/issue-reports", { method: "GET" }),
+      stubApiKeyStore,
+      undefined as unknown as SessionStore,
+    );
+    expect(authResult.ok).toBe(false);
+    if (!authResult.ok) expect(authResult.error.code).toBe("VALIDATION_ERROR");
   });
 });

@@ -1,7 +1,7 @@
 // @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired
- *   AC-IS-1, AC-IS-2, AC-IS-3, AC-IS-4.
+ *   AC-IS-1, AC-IS-2, AC-IS-4 (AC-IS-3 was superseded by AC-GS-2).
  *
  * RED-FIRST (P1, plan-make-lore-issues-refuse-a-retired-shape-upstream-as-loudly).
  * `lore issues` and `lore report-issue` give OPPOSITE verdicts on a
@@ -12,7 +12,7 @@
  * oracle for the fix (a shared `classifyFeedbackUpstream` classifier both
  * verbs must consume) — written and run BEFORE that classifier exists, so
  * AC-IS-1 and AC-IS-4 are EXPECTED to fail at RED time (see the plan's own
- * "Measured baseline" table). AC-IS-2 and AC-IS-3 are expected to PASS
+ * "Measured baseline" table). AC-IS-2 is expected to PASS
  * immediately: they pin behaviour that is ALREADY correct at HEAD and exist
  * so AC-IS-1's new assertion has discriminating power (spec D3) rather than
  * being satisfiable by breaking `lore issues` outright.
@@ -40,7 +40,7 @@
  * is dispatched to cover (AC-IS-1..4) — AC-IS-5 (stale-comment lint) is a
  * pure `grep` with no describe here, per the governing plan's own P1 scope
  * note.
- *   HAPPY:      AC-IS-3 — `--local` stays exit 0 under both shapes.
+ *   HAPPY:      (none — the `--local` opt-out cell was superseded by AC-GS-2).
  *   NEGATIVE:   AC-IS-1 — the defect cell must refuse, not silently succeed.
  *   BOUNDARY:   AC-IS-2 — the neighbouring GitHub-shape cell — ⛔ AMENDED
  *               2026-08-25 (spec-a-github-filed-defect-must-be-claimable-
@@ -53,8 +53,8 @@
  *   STATE:      AC-IS-4 — the SAME literal fires from both verbs, evidence
  *               that they consume one shared classifier rather than two
  *               independently-drifted `if` chains.
- *   REGRESSION: AC-IS-3 — the legitimate `--local` opt-out must not become
- *               collateral damage of the coming fix.
+ *   REGRESSION: `--local` is an unknown switch (exit 2) — the opt-out must not return
+ *               by accident.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -303,11 +303,11 @@ describe("AC-IS-2 green control: GitHub-shape upstream reaches the GitHub read p
   });
 });
 
-// reason: spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-2 retired the local-corpus read of
-// `lore issues`: `--local` is an unknown switch under every upstream shape, so the old "stays exit 0" cell pins the
-// opposite — exit exactly 2, nothing listed. The describe/it name keeps the AC id the spec declares.
-describe("AC-IS-3 --local stays exit 0 under both shapes", () => {
-  it("AC-IS-3 --local stays exit 0 under both shapes", () => {
+// reason: `lore issues --local` was removed with the local-corpus read (spec-github-owns-issue-report-state-no-mirror-
+// task-work-carries AC-GS-2 superseded the old "--local stays exit 0" criterion): it is an unknown switch under
+// every upstream shape. Plain regression, no criterion id.
+describe("lore issues --local is an unknown switch", () => {
+  it("exits exactly 2 under the retired shape and the GitHub shape, listing nothing", () => {
     for (const dir of [retiredDir, githubDir]) {
       const result = runLore(["issues", "--local"], dir);
       expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(2);
