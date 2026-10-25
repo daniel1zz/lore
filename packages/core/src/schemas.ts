@@ -89,6 +89,10 @@ export const linkTypeSchema = z.enum([
   // computeIssueResolution (issue-resolution.ts, D2) to derive fixed/resolving.
   // Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D1.
   "resolves",
+  // "known-defect": from = a plan accepted with known defects, to = the issue task (carrying extra.issue_report)
+  // that files one of its defects. NOT a fix: archiving the plan never closes the issue (#404), and plan-close
+  // coverage reads this link type only. Written by the review batch and `lore assess --file-issues`.
+  "known-defect",
 ]);
 
 export const versionActionSchema = z.enum([

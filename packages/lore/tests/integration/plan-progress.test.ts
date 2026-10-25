@@ -1496,9 +1496,25 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
       listOpenIssues: async () => ok({ repoId: REPO_ID, open: [{ number: 1, title: "regression: broken" }, { number: 2, title: "correctness_vs_acs: broken" }] }),
     });
     for (const n of [1, 2]) {
-      const linked = await w.corpus.link(w.plan.id, w.carriers.get(n)!.id, "resolves");
+      const linked = await w.corpus.link(w.plan.id, w.carriers.get(n)!.id, "known-defect");
       expect(linked.ok).toBe(true);
     }
+    expect((await closePlan(w)).ok).toBe(false);
+  });
+
+  it("REGRESSION (#404): the batch's link is a known-defect link, and a resolves link covers nothing even with a finding record", async () => {
+    const w = await failingPlan();
+    await issueCarrier(w, 1);
+    await issueCarrier(w, 2);
+    w.open.add(1).add(2);
+    const port = wireIssues(w);
+    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
+    const out = await w.store.findLinks(w.plan.id, "out");
+    if (!out.ok) throw new Error(JSON.stringify(out.error));
+    expect(out.value.filter((l) => l.to_id === w.carriers.get(1)!.id).map((l) => l.link_type)).toEqual(["known-defect"]);
+    // #2 carries a finding record but is linked as a fix (`resolves`): not a known defect, so it covers nothing
+    expect((await port.linkToPlan(w.otherPlan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
+    expect((await w.corpus.link(w.plan.id, w.carriers.get(2)!.id, "resolves")).ok).toBe(true);
     expect((await closePlan(w)).ok).toBe(false);
   });
 

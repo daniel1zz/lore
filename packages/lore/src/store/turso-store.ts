@@ -90,6 +90,7 @@ import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
+import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -1042,6 +1043,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 36) {
         // reason: migration-036 creates review_leases (the review batch's expiring lease, BR-1379).
         await this.client.executeMultiple(MIGRATION_036_SQL);
+      }
+
+      if (currentVersion < 37) {
+        // reason: migration-037 widens links.link_type to 'known-defect' and converts the batch's links (#404).
+        await this.client.executeMultiple(MIGRATION_037_SQL);
       }
     })();
 
