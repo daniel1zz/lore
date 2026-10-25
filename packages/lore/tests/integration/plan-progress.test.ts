@@ -30,7 +30,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ulid } from "ulidx";
 import { createGithubIssuePort } from "../../src/adapters/cli/assess-file-issues.js";
 import type { GithubFilingContext, GithubUpstreamCfg } from "../../src/adapters/cli/report-issue-wiring.js";
-import { DOC_TYPE_ROLE_MAP, MILESTONE_DIMENSIONS, err, ok, renderMilestoneReviewContent, type AuditEntry, type DocId, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type PlanBundle, type VersionRecord } from "@lore/core";
+import { DOC_TYPE_ROLE_MAP, MILESTONE_DIMENSIONS, err, ok, readKnownDefects, renderMilestoneReviewContent, type AuditEntry, type DocId, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type PlanBundle, type VersionRecord } from "@lore/core";
 import { IntegrateService, type IntegrateDeps } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
@@ -588,10 +588,12 @@ class FakeIssuePort implements IssuePort {
     this.open.push({ number, title: input.title, body: input.body });
     return ok<IssueRef>({ number });
   }
-  async linkToPlan(plan: string, issue: IssueRef, finding: { dimension: string; fingerprint: string }) {
-    const hit = this.links.find((l) => l.plan === plan && l.issue === issue.number);
-    if (hit === undefined) this.links.push({ plan, issue: issue.number, dimensions: [finding.dimension] });
-    else if (!hit.dimensions.includes(finding.dimension)) hit.dimensions.push(finding.dimension);
+  async recordKnownDefects(plan: string, issue: IssueRef, findings: readonly { dimension: string; fingerprint: string }[]) {
+    for (const finding of findings) {
+      const hit = this.links.find((l) => l.plan === plan && l.issue === issue.number);
+      if (hit === undefined) this.links.push({ plan, issue: issue.number, dimensions: [finding.dimension] });
+      else if (!hit.dimensions.includes(finding.dimension)) hit.dimensions.push(finding.dimension);
+    }
     return ok(undefined);
   }
 }
@@ -631,8 +633,11 @@ class World {
 
   async coverage(planId: string, failed: readonly string[]) {
     const slug = this.find(planId).slug;
-    const linked = this.issues.links.filter((l) => l.plan === slug).map((l) => ({ number: l.issue, dimensions: l.dimensions }));
-    return ok(coverFailedDimensions(failed, linked, { repoId: 1, open: this.issues.open.map((i) => ({ number: i.number, title: i.title })) }));
+    const openNumbers = new Set(this.issues.open.map((i) => i.number));
+    const entries = this.issues.links
+      .filter((l) => l.plan === slug)
+      .flatMap((l) => l.dimensions.map((dimension) => ({ number: l.issue, dimension, state: openNumbers.has(l.issue) ? ("open" as const) : ("closed" as const) })));
+    return ok(coverFailedDimensions(failed, entries));
   }
 
   triggerDeps(opts: { pending?: Set<string>; leaseLive?: boolean } = {}): ReviewTriggerDeps {
@@ -1392,11 +1397,10 @@ describe("visible and measured — bootstrap complete line, checks stats time-to
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// AC-PCR-4 — plan close reads grouped issue coverage from the link record, never from titles
+// AC-PCR-4 — plan close reads grouped issue coverage from the plan's known-defect record, never from titles
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-describe("AC-PCR-4 plan close reads grouped issue coverage from the link record", () => {
-  const REPO = "owner/repo";
+describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known-defect record", () => {
   const REPO_ID = 7;
   const FP_A = "a".repeat(64);
   const FP_B = "b".repeat(64);
@@ -1431,22 +1435,27 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
     if (!doc.ok) throw new Error(JSON.stringify(doc.error));
     const informs = await corpus.link(doc.value.id, plan.id, "informs");
     if (!informs.ok) throw new Error(JSON.stringify(informs.error));
-    return { store, corpus, plan, otherPlan, open: new Set<number>(), carriers: new Map<number, DocRecord>() };
+    return { store, corpus, plan, otherPlan, states: new Map<number, "open" | "closed">() };
   }
 
   type World = Awaited<ReturnType<typeof failingPlan>>;
 
-  /** The corpus carrier of GitHub issue `n` (what `lore issue adopt` or the filing mints). */
-  async function issueCarrier(w: World, n: number): Promise<void> {
-    w.carriers.set(n, await seed(w.store, rawDoc("task", `issue ${String(n)}`, { issues: [{ repo_id: REPO_ID, number: n }] }, "approved")));
-  }
-
+  /** The reader plan close uses: every issue is read by its own number; the listing is deliberately empty. */
   function wireIssues(w: World) {
     w.corpus.setPlanCloseIssuePort({
-      listOpenIssues: async () => ok({ repoId: REPO_ID, open: [...w.open].map((number) => ({ number, title: `unrelated words ${String(number)}` })) }),
+      listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }),
+      readIssue: async (n) => {
+        const state = w.states.get(n);
+        return state === undefined ? err<LoreError>({ code: "STORE_ERROR", message: `gh: HTTP 404 for issue #${String(n)}` }) : ok({ repoId: REPO_ID, state });
+      },
     });
-    // the same port the batch and `lore assess --file-issues` link through
-    return createGithubIssuePort({ repo: REPO } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, w.corpus, undefined);
+  }
+
+  /** What the filer's port records on the plan (the real port, over this corpus). */
+  function recorder(w: World) {
+    wireIssues(w);
+    const port = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, w.corpus, w.corpus.getPlanCloseIssuePort());
+    return (plan: DocRecord, number: number, dimension: MilestoneDimension, fingerprint: string) => port.recordKnownDefects(plan.slug, { number }, [{ dimension, fingerprint }]);
   }
 
   async function closePlan(w: World) {
@@ -1455,13 +1464,11 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
 
   it("HAPPY: two failed dimensions covered by two grouped issues (one shared with another plan) close as accepted with known defects", async () => {
     const w = await failingPlan();
-    await issueCarrier(w, 1);
-    await issueCarrier(w, 2);
-    w.open.add(1).add(2);
-    const port = wireIssues(w);
-    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
-    expect((await port.linkToPlan(w.plan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
-    expect((await port.linkToPlan(w.otherPlan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
+    w.states.set(1, "open").set(2, "open");
+    const record = recorder(w);
+    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 2, "correctness_vs_acs", FP_B)).ok).toBe(true);
+    expect((await record(w.otherPlan, 2, "correctness_vs_acs", FP_B)).ok).toBe(true);
 
     const closed = await closePlan(w);
     if (!closed.ok) throw new Error(JSON.stringify(closed.error));
@@ -1471,73 +1478,62 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
     expect(JSON.stringify(audit.value)).toContain("accepted with known defects: #1, #2");
   });
 
-  it("NEGATIVE: a failed dimension with no linked open issue refuses with BR-1372 (exit 4)", async () => {
+  it("NEGATIVE: a failed dimension with no recorded open issue refuses with BR-1372 (exit 4)", async () => {
     const w = await failingPlan();
-    await issueCarrier(w, 1);
-    w.open.add(1);
-    const port = wireIssues(w);
-    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
+    w.states.set(1, "open");
+    const record = recorder(w);
+    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
     const refused = await closePlan(w);
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
     expect(refused.error.code).toBe("VALIDATION_ERROR");
     expect(JSON.stringify(refused.error)).toContain("MILESTONE_REVIEW_FAILED");
     expect(JSON.stringify(refused.error)).toContain("BR-1372");
-    expect(JSON.stringify(refused.error)).not.toContain("title must name");
     expect((await reload(w.store, w.plan.id)).status).toBe("approved");
   });
 
-  it("NEGATIVE: an issue linked without a finding record covers nothing, whatever its title says", async () => {
+  it("NEGATIVE: an issue open on GitHub but recorded for another dimension covers nothing, whatever its title says", async () => {
     const w = await failingPlan();
-    await issueCarrier(w, 1);
-    await issueCarrier(w, 2);
-    w.open.add(1).add(2);
-    w.corpus.setPlanCloseIssuePort({
-      listOpenIssues: async () => ok({ repoId: REPO_ID, open: [{ number: 1, title: "regression: broken" }, { number: 2, title: "correctness_vs_acs: broken" }] }),
-    });
-    for (const n of [1, 2]) {
-      const linked = await w.corpus.link(w.plan.id, w.carriers.get(n)!.id, "known-defect");
-      expect(linked.ok).toBe(true);
-    }
+    w.states.set(1, "open").set(2, "open");
+    const record = recorder(w);
+    // #1 and #2 are both open, but the plan records them for regression only
+    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 2, "regression", FP_B)).ok).toBe(true);
     expect((await closePlan(w)).ok).toBe(false);
   });
 
-  it("REGRESSION (#404): the batch's link is a known-defect link, and a relates-to link covers nothing even with a finding record", async () => {
+  it("REGRESSION (#404): the record is on the plan, not extra.issues, and a relates-to link covers nothing", async () => {
     const w = await failingPlan();
-    await issueCarrier(w, 1);
-    await issueCarrier(w, 2);
-    w.open.add(1).add(2);
-    const port = wireIssues(w);
-    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
-    const out = await w.store.findLinks(w.plan.id, "out");
-    if (!out.ok) throw new Error(JSON.stringify(out.error));
-    expect(out.value.filter((l) => l.to_id === w.carriers.get(1)!.id).map((l) => l.link_type)).toEqual(["known-defect"]);
-    // #2 carries a finding record but is linked only as related (`relates-to`): not a known defect, so it covers nothing
-    expect((await port.linkToPlan(w.otherPlan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
-    expect((await w.corpus.link(w.plan.id, w.carriers.get(2)!.id, "relates-to")).ok).toBe(true);
+    w.states.set(1, "open").set(2, "open");
+    const record = recorder(w);
+    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
+    const stored = await reload(w.store, w.plan.id);
+    expect(stored.extra["issues"]).toBeUndefined();
+    expect(stored.extra["known_defects"]).toEqual([{ repo_id: REPO_ID, number: 1, dimension: "regression", fingerprint: FP_A }]);
+    const issueTask = await seed(w.store, rawDoc("task", "issue 2", { issues: [{ repo_id: REPO_ID, number: 2 }] }, "approved"));
+    expect((await w.corpus.link(w.plan.id, issueTask.id, "relates-to")).ok).toBe(true);
     expect((await closePlan(w)).ok).toBe(false);
   });
 
-  it("STATE: a closed linked issue does not count", async () => {
+  it("STATE: a closed recorded issue does not count and the refusal names it", async () => {
     const w = await failingPlan();
-    await issueCarrier(w, 1);
-    await issueCarrier(w, 2);
-    w.open.add(1); // #2 is closed on the tracker
-    const port = wireIssues(w);
-    expect((await port.linkToPlan(w.plan.slug, { number: 1 }, { dimension: "regression", fingerprint: FP_A })).ok).toBe(true);
-    expect((await port.linkToPlan(w.plan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
-    expect((await closePlan(w)).ok).toBe(false);
-    w.open.add(2);
+    w.states.set(1, "open").set(2, "closed");
+    const record = recorder(w);
+    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 2, "correctness_vs_acs", FP_B)).ok).toBe(true);
+    const refused = await closePlan(w);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(JSON.stringify(refused.error)).toContain("#2");
+    w.states.set(2, "open");
     expect((await closePlan(w)).ok).toBe(true);
   });
 });
 
 describe("AC-PCR-4 an issue the batch just filed counts as open at the close of the same run", () => {
-  const REPO = "owner/repo";
   const REPO_ID = 7;
   const FP = "c".repeat(64);
 
-  it("HAPPY: the listing has not caught up with the just-filed issue and the plan still closes as accepted with known defects", async () => {
+  it("HAPPY: the open listing has not caught up with the just-filed issue and the plan still closes, because coverage reads it by number", async () => {
     const store = actedStore(new InMemoryStore());
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
     const plan = await seed(store, rawDoc("plan", "Fresh filing plan", {}, "approved"));
@@ -1564,16 +1560,12 @@ describe("AC-PCR-4 an issue the batch just filed counts as open at the close of 
     });
     if (!doc.ok) throw new Error(JSON.stringify(doc.error));
     expect((await corpus.link(doc.value.id, plan.id, "informs")).ok).toBe(true);
-    await seed(store, rawDoc("task", "issue 9", { issues: [{ repo_id: REPO_ID, number: 9 }] }, "approved"));
-    // the listing is empty: GitHub's read has not caught up with the issue the batch filed moments ago
-    corpus.setPlanCloseIssuePort({ listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }) });
-    const port = createGithubIssuePort({ repo: REPO } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, undefined);
-    expect((await port.linkToPlan(plan.slug, { number: 9 }, { dimension: "regression", fingerprint: FP })).ok).toBe(true);
+    // the listing is empty: GitHub's list has not caught up with the issue filed moments ago, but its own read says open
+    corpus.setPlanCloseIssuePort({ listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }), readIssue: async () => ok({ repoId: REPO_ID, state: "open" as const }) });
+    const port = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, corpus.getPlanCloseIssuePort());
+    expect((await port.recordKnownDefects(plan.slug, { number: 9 }, [{ dimension: "regression", fingerprint: FP }])).ok).toBe(true);
 
-    // without the batch's own filed numbers, or with a number the plan has no record for, the close is refused
-    expect((await corpus.set(plan.id, { status: "archived" })).ok).toBe(false);
-    expect((await corpus.set(plan.id, { status: "archived" }, { trustedOpenIssues: [8] })).ok).toBe(false);
-    const closed = await corpus.set(plan.id, { status: "archived" }, { trustedOpenIssues: [9] });
+    const closed = await corpus.set(plan.id, { status: "archived" });
     if (!closed.ok) throw new Error(JSON.stringify(closed.error));
     expect((await reload(store, plan.id)).status).toBe("archived");
     const audit = await store.queryAudit({ doc_id: plan.id });
@@ -1581,19 +1573,18 @@ describe("AC-PCR-4 an issue the batch just filed counts as open at the close of 
     expect(JSON.stringify(audit.value)).toContain("accepted with known defects: #9");
   });
 
-  it("HAPPY: the batch hands the numbers it filed to the close of that plan", async () => {
+  it("HAPPY: the batch closes the plan through the gated close with no issue numbers handed over", async () => {
     const world = new World();
     const plan = world.add(makeWorldPlan("p-fresh"));
     plan.failing = ["regression"];
     plan.regressionFiles = ["fresh.test.ts"];
     world.suiteFailingFiles = ["fresh.test.ts"];
-    const handed: (readonly number[])[] = [];
-    const ports = world.ports("batch-fresh", { closePlan: async (_ref, filed) => { handed.push(filed); return ok(undefined); } });
+    const handed: unknown[][] = [];
+    const ports = world.ports("batch-fresh", { closePlan: async (...args: unknown[]) => { handed.push(args); return ok(undefined); } });
     const run = await world.runner().runBatch(["p-fresh"], ports);
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
     expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects"]);
-    expect(handed).toEqual([rows[0]?.issues]);
-    expect(handed[0]?.length).toBeGreaterThan(0);
+    expect(handed).toEqual([["p-fresh"]]);
   });
 });
 
@@ -1743,5 +1734,136 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", false, [101]]]);
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
     expect(plan.archived).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// AC-KD-2 — filing records known defects on the plan and creates no document (BR-1421, BR-1379)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("AC-KD-2 filing records known defects on the plan, no document and no link", () => {
+  const REPO_ID = 7;
+
+  /** The tracker the filer talks to: filing returns the number from the create call; the open LISTING never shows it. */
+  class Tracker {
+    readonly titles = new Map<number, string>();
+    nextNumber = 50;
+    created = 0;
+    /** `findOpenByFingerprint` reads the open issues, as the real port does through its listing. */
+    async findOpenByFingerprint(short: string) {
+      for (const [number, title] of this.titles) if (title.includes(`[fp:${short}]`)) return ok<IssueRef | undefined>({ number });
+      return ok<IssueRef | undefined>(undefined);
+    }
+    async file(input: { title: string }) {
+      this.created += 1;
+      const number = this.nextNumber++;
+      this.titles.set(number, input.title);
+      return ok<IssueRef>({ number });
+    }
+  }
+
+  async function world() {
+    const store = actedStore(new InMemoryStore());
+    const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
+    const tracker = new Tracker();
+    // the open listing is EMPTY (GitHub's list lags): only the by-number read sees an issue
+    corpus.setPlanCloseIssuePort({
+      listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }),
+      readIssue: async (n) => (tracker.titles.has(n) ? ok({ repoId: REPO_ID, state: "open" as const }) : err<LoreError>({ code: "STORE_ERROR", message: "404" })),
+    });
+    const real = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, corpus.getPlanCloseIssuePort());
+    const port: IssuePort = { ...real, findOpenByFingerprint: (short) => tracker.findOpenByFingerprint(short), file: (input) => tracker.file(input) };
+    const plan = await seed(store, rawDoc("plan", "Kd plan", {}, "approved"));
+    return { store, corpus, tracker, port, plan };
+  }
+
+  type W = Awaited<ReturnType<typeof world>>;
+
+  async function counts(w: W): Promise<{ docs: number; links: number }> {
+    const all = await w.corpus.listFull({});
+    if (!all.ok) throw new Error(JSON.stringify(all.error));
+    let links = 0;
+    for (const doc of all.value.docs) {
+      const out = await w.store.findLinks(doc.id, "out");
+      if (!out.ok) throw new Error(JSON.stringify(out.error));
+      links += out.value.length;
+    }
+    return { docs: all.value.docs.length, links };
+  }
+
+  async function entriesOf(w: W, plan: DocRecord) {
+    return readKnownDefects((await reload(w.store, plan.id)).extra).map((e) => `${String(e.number)}/${e.dimension}`);
+  }
+
+  const regression = (plan: string) => ({ plan, dimension: "regression" as const, reason: "red", reference: "", reviewSlug: "r", causes: { regression_files: ["a.test.ts"], suite_failing_files: ["a.test.ts"] } });
+  const security = (plan: string) => ({ plan, dimension: "security" as const, reason: "leak", reference: "", reviewSlug: "r", cites: ["src/auth.ts"] });
+
+  it("a plan failing regression and security with two fingerprints files two issues and records exactly one entry per failed dimension", async () => {
+    const w = await world();
+    const before = await counts(w);
+    const filed = await new IssueFilingService(w.port).fileFindings([regression(w.plan.slug), security(w.plan.slug)]);
+    if (!filed.ok) throw new Error(JSON.stringify(filed.error));
+    expect(filed.value.map((g) => g.error)).toEqual([undefined, undefined]);
+    expect(w.tracker.created).toBe(2);
+    expect((await entriesOf(w, w.plan)).sort()).toEqual(["50/regression", "51/security"]);
+    // no corpus document and no link was created by filing
+    expect(await counts(w)).toEqual(before);
+    expect((await reload(w.store, w.plan.id)).extra["issues"]).toBeUndefined();
+  });
+
+  it("findings of two dimensions sharing one fingerprint file ONE issue and add two entries for it", async () => {
+    const w = await world();
+    const sameCause = (finding: Parameters<typeof rootCauseOf>[0]) => {
+      const cause = rootCauseOf(regression(finding.plan));
+      return cause.ok ? ok({ ...cause.value, dimension: finding.dimension }) : cause;
+    };
+    const filed = await new IssueFilingService(w.port, sameCause).fileFindings([regression(w.plan.slug), security(w.plan.slug)]);
+    if (!filed.ok) throw new Error(JSON.stringify(filed.error));
+    expect(w.tracker.created).toBe(1);
+    expect((await entriesOf(w, w.plan)).sort()).toEqual(["50/regression", "50/security"]);
+    const entries = readKnownDefects((await reload(w.store, w.plan.id)).extra);
+    expect(new Set(entries.map((e) => e.fingerprint)).size).toBe(1);
+    expect(entries.every((e) => e.repo_id === REPO_ID)).toBe(true);
+  });
+
+  it("a just-created issue absent from the open listing is still recorded: its number comes from the create call", async () => {
+    const w = await world();
+    const listing = await w.corpus.getPlanCloseIssuePort()!.listOpenIssues();
+    expect(listing.ok && listing.value.open).toEqual([]);
+    const filed = await new IssueFilingService(w.port).fileFindings([regression(w.plan.slug)]);
+    expect(filed.ok).toBe(true);
+    expect(await entriesOf(w, w.plan)).toEqual(["50/regression"]);
+  });
+
+  it("a second batch with the same fingerprint while the issue is open files nothing and adds no duplicate entry", async () => {
+    const w = await world();
+    const service = new IssueFilingService(w.port);
+    expect((await service.fileFindings([regression(w.plan.slug)])).ok).toBe(true);
+    const second = await service.fileFindings([regression(w.plan.slug)]);
+    expect(second.ok && second.value[0]?.reused).toBe(true);
+    expect(w.tracker.created).toBe(1);
+    expect(await entriesOf(w, w.plan)).toEqual(["50/regression"]);
+  });
+
+  it("two concurrent appends to one plan both land", async () => {
+    const w = await world();
+    w.tracker.titles.set(60, "a").set(61, "b");
+    const [a, b] = await Promise.all([
+      w.port.recordKnownDefects(w.plan.slug, { number: 60 }, [{ dimension: "regression", fingerprint: "fa" }]),
+      w.port.recordKnownDefects(w.plan.slug, { number: 61 }, [{ dimension: "security", fingerprint: "fb" }]),
+    ]);
+    expect(a.ok && b.ok).toBe(true);
+    expect((await entriesOf(w, w.plan)).sort()).toEqual(["60/regression", "61/security"]);
+  });
+
+  it("recording onto a document that is not a plan is refused and an unreadable issue is returned, never swallowed", async () => {
+    const w = await world();
+    const task = await seed(w.store, rawDoc("task", "Not a plan", { plan_id: w.plan.id }, "draft", w.plan.id));
+    w.tracker.titles.set(70, "x");
+    const refused = await w.port.recordKnownDefects(task.slug, { number: 70 }, [{ dimension: "regression", fingerprint: "f" }]);
+    expect(refused.ok).toBe(false);
+    const unreadable = await w.port.recordKnownDefects(w.plan.slug, { number: 999 }, [{ dimension: "regression", fingerprint: "f" }]);
+    expect(unreadable.ok).toBe(false);
+    expect(await entriesOf(w, w.plan)).toEqual([]);
   });
 });

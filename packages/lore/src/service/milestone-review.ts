@@ -19,6 +19,7 @@
 import { createHash } from "node:crypto";
 import {
   failedDimensions,
+  knownDefectWrites,
   milestoneReviewSchema,
   specAcceptanceCriteriaSchema,
   type DocRecord,
@@ -57,7 +58,7 @@ function liveAcHashes(spec: Pick<DocRecord, "extra"> | undefined): string[] {
 
 /**
  * The plan's current state as one comparable value: the SHA-256 (hex) of its four inputs (BR-1379): the plan's id and
- * version; the sorted task/phase ids with versions; the main commit that last landed one of the tasks; and the sorted
+ * version (net of the writes that only recorded known defects); the sorted task/phase ids with versions; the main commit that last landed one of the tasks; and the sorted
  * live (not superseded) AC ids of the governing spec with their content hashes. Restoring or retiring an AC therefore
  * changes it.
  *
@@ -66,7 +67,7 @@ function liveAcHashes(spec: Pick<DocRecord, "extra"> | undefined): string[] {
  * @param spec - the plan's governing spec; absent = the plan has none (no AC input)
  */
 export function planStateFingerprint(
-  plan: Pick<DocRecord, "id" | "version">,
+  plan: Pick<DocRecord, "id" | "version"> & { readonly extra?: Readonly<Record<string, unknown>> },
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
   spec: Pick<DocRecord, "extra"> | undefined,
 ): string {
@@ -74,7 +75,10 @@ export function planStateFingerprint(
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((t) => `${t.id}@${String(t.version)}`)
     .join(",");
-  const canonical = `plan:${plan.id}@${String(plan.version)}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}|acs:${liveAcHashes(spec).join(",")}`;
+  // reason: recording a known defect writes the plan (BR-1421) and bumps its version; the version is read NET of those
+  // writes so recording leaves the fingerprint, and so the plan's own review, current.
+  const planVersion = plan.version - knownDefectWrites(plan.extra);
+  const canonical = `plan:${plan.id}@${String(planVersion)}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}|acs:${liveAcHashes(spec).join(",")}`;
   return createHash("sha256").update(canonical).digest("hex");
 }
 
