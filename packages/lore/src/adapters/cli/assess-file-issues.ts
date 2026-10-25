@@ -3,8 +3,8 @@
  * Used by `lore assess --file-issues` and the automatic review batch alike; the grouping is `IssueFilingService`'s.
  *
  * Purpose: file ONE issue per root-cause fingerprint, find an already-open one by the `[fp:<12 hex>]` tag in its
- *   title, and link an issue to a plan with the existing `resolves` link, so plan close finds it through the same
- *   carrier as any `--resolves` issue.
+ *   title, and link an issue to a plan with a `known-defect` link (never `resolves`, which archive closes), so plan
+ *   close finds it as coverage.
  * Public surface: createGithubIssuePort.
  * Invariants:
  *   - The title is the one `IssueFilingService` built (`<dimension>: <cause> [fp:<12 hex>]`); the full fingerprint is
@@ -100,7 +100,7 @@ async function linkIssueToPlan(
     return err({
       code: "VALIDATION_ERROR",
       field: "file-issues",
-      message: `issue #${String(issue.number)} exists but no corpus issue task carries it, so it cannot be linked to plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type resolves\``,
+      message: `issue #${String(issue.number)} exists but no corpus issue task carries it, so it cannot be linked to plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type known-defect\``,
       rule: "BR-1379",
     });
   }
@@ -115,7 +115,7 @@ async function linkIssueToPlan(
     );
     if (!written.ok) return written;
   }
-  const linked = await corpusService.link(bundle.value.plan.id, issueTask.id, "resolves", { by: actor });
+  const linked = await corpusService.link(bundle.value.plan.id, issueTask.id, "known-defect", { by: actor });
   if (!linked.ok && linked.error.code !== "DUPLICATE_LINK") return linked;
   return ok(undefined);
 }

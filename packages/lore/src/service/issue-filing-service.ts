@@ -36,7 +36,7 @@ export interface IssuePort {
   /** Files ONE new issue. */
   readonly file: (input: IssueInput) => Promise<Result<IssueRef, LoreError>>;
   /**
-   * Links the issue to the plan (the plan-close `resolves` carrier) and records on the issue's carrier which finding
+   * Links the issue to the plan (a `known-defect` link: the plan-close coverage carrier) and records on the issue's carrier which finding
    * (dimension + fingerprint) it files, so plan close reads coverage from the record, never the title; an existing
    * link is success.
    */

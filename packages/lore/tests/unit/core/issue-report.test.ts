@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readdirSync } from "node:fs";
 import {
   FeedbackConfigSchema,
   LoreConfigSchema,
@@ -207,8 +208,12 @@ describe("buildIssueReportExtra", () => {
 // spec-issue-closure-loop-computed-resolution-agent-reachable's "resolves"
 // link-type CHECK widening, so the ceiling is 12).
 describe("LATEST_SCHEMA_VERSION", () => {
-  it("LATEST_SCHEMA_VERSION equals 36 — the highest migration number in sqlite-store.ts's runMigrations chain", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(36);
+  it("LATEST_SCHEMA_VERSION equals the highest migration-NNN file in store/migrations", () => {
+    const dir = new URL("../../../src/store/migrations/", import.meta.url);
+    const numbers = readdirSync(dir)
+      .map((name) => /^migration-(\d+)\.ts$/.exec(name))
+      .flatMap((m) => (m === null ? [] : [Number(m[1])]));
+    expect(LATEST_SCHEMA_VERSION).toBe(Math.max(...numbers));
   });
 
   it("LATEST_SCHEMA_VERSION is importable without touching bun:sqlite (pure module)", () => {

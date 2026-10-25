@@ -44,7 +44,10 @@ export type LinkType =
   /** from = the doc that fixes a defect (spec | plan | task), to = an issue
    * task (a task carrying extra.issue_report). Write-time validated in
    * CorpusService.link — see schemas.ts::linkTypeSchema's matching entry. */
-  | "resolves";
+  | "resolves"
+  /** from = a plan accepted with known defects, to = the issue task that files one of its defects. Never closed by
+   * archive (unlike `resolves`); plan-close coverage reads it. Same write-time target rule as `resolves`. */
+  | "known-defect";
 
 export type VersionAction =
   | "create"

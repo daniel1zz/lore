@@ -1266,7 +1266,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (!links.ok) return links;
     const linked: { number: number; repoId?: number; dimensions: string[] }[] = [];
     for (const link of links.value) {
-      if (link.link_type !== "resolves" || link.from_id !== planId) continue;
+      // reason: #404 — only a `known-defect` link is coverage; `resolves` means "fixed" and is closed on archive.
+      if (link.link_type !== "known-defect" || link.from_id !== planId) continue;
       const target = await this.store.find(link.to_id);
       if (!target.ok) return target;
       if (target.value === null || target.value.deleted_at !== null) continue;
@@ -5532,7 +5533,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // MCP, and HTTP are all covered by one implementation. `hasIssueReport`
     // (issue-resolution.ts) is the same defensive presence predicate D2's
     // `computeIssueResolution` builds on.
-    if (type === "resolves") {
+    // `known-defect` (#404) names the same kind of target: the issue task that files the defect.
+    if (type === "resolves" || type === "known-defect") {
       const toDocResult = await this.store.find(toResult.value);
       if (!toDocResult.ok) return toDocResult;
       const toDoc = toDocResult.value;

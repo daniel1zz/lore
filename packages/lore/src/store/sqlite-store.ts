@@ -178,6 +178,7 @@ import { MIGRATION_033_SQL } from "./migrations/migration-033.js";
 import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
+import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -964,6 +965,21 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-035 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 37 && 37 <= ceiling) {
+      // reason: migration-037 widens links.link_type to 'known-defect' and converts the batch's plan -> issue
+      // `resolves` links (#404) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 36.
+      try {
+        this.db.exec(MIGRATION_037_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-036 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }

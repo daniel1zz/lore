@@ -31,7 +31,7 @@ describe("autonomy_thresholds store contract (migration-022)", () => {
     try {
       const store = actedStore(new SQLiteStore(join(dir, "lore.db")));
       try {
-        expect(LATEST_SCHEMA_VERSION).toBe(36);
+        expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(22); // autonomy_thresholds is migration 022; the exact ceiling is pinned in issue-report.test.ts
         await roundTrip(store);
         const db = store.getDatabase();
         expect((db.query("SELECT COUNT(*) AS n FROM autonomy_thresholds").get() as { n: number }).n).toBe(1);
