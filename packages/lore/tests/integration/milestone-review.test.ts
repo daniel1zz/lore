@@ -164,6 +164,8 @@ const path = args[1];
 if (path === "user") console.log(JSON.stringify({ login: "fake" }));
 else if (path === "repos/o/r") console.log(JSON.stringify({ id: 777 }));
 else if (path === "repos/o/r/issues?state=all&per_page=100") console.log(JSON.stringify(issues()));
+else if (path === "repos/o/r/issues?state=all&per_page=100&page=1" && args.includes("-i")) console.log("HTTP/2.0 200 OK\\r\\ncontent-type: application/json\\r\\n\\r\\n" + JSON.stringify(issues()));
+else if (/^repos\\/o\\/r\\/issues\\/[0-9]+$/.test(path)) console.log(JSON.stringify(issues().find((i) => i.number === Number(path.split("/").pop())) ?? { state: "open" }));
 else if (path === "repos/o/r/issues?state=open&per_page=100" && args.includes("--paginate")) console.log(JSON.stringify([issues().filter((i) => i.state === "open")]));
 else if (path === "repos/o/r/issues" && args.includes("POST")) {
   const field = (name) => (args.find((a) => a.startsWith(name + "=")) ?? "").slice(name.length + 1);
@@ -683,9 +685,11 @@ describe("milestone review gates close", () => {
     return (JSON.parse(r.stdout) as { data: { number: number } }).data.number;
   }
 
-  /** Links the plan to the corpus task minted for `issueNumber` (the existing `resolves` carrier link). */
+  /** Adopts `issueNumber` as a carrier task (filing creates no corpus document) and links the plan to it as a known defect. */
   function linkIssue(plan: string, issueNumber: number): void {
-    const linked = runLore(["link", plan, `task-gh-777-${String(issueNumber)}`, "--type", "resolves"], tmpDir);
+    const adopted = runLore(["issue", "adopt", String(issueNumber)], tmpDir);
+    expect(adopted.exitCode, adopted.stderr).toBe(0);
+    const linked = runLore(["link", plan, `task-issue-777-${String(issueNumber)}`, "--type", "known-defect"], tmpDir);
     expect(linked.exitCode, linked.stderr).toBe(0);
   }
 

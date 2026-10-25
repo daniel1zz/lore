@@ -1438,7 +1438,7 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
 
   /** The corpus carrier of GitHub issue `n` (what `lore issue adopt` or the filing mints). */
   async function issueCarrier(w: World, n: number): Promise<void> {
-    w.carriers.set(n, await seed(w.store, rawDoc("task", `issue ${String(n)}`, { issue_report: { github: { repo: REPO, number: n, repo_id: REPO_ID } } }, "approved")));
+    w.carriers.set(n, await seed(w.store, rawDoc("task", `issue ${String(n)}`, { issues: [{ repo_id: REPO_ID, number: n }] }, "approved")));
   }
 
   function wireIssues(w: World) {
@@ -1502,7 +1502,7 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
     expect((await closePlan(w)).ok).toBe(false);
   });
 
-  it("REGRESSION (#404): the batch's link is a known-defect link, and a resolves link covers nothing even with a finding record", async () => {
+  it("REGRESSION (#404): the batch's link is a known-defect link, and a relates-to link covers nothing even with a finding record", async () => {
     const w = await failingPlan();
     await issueCarrier(w, 1);
     await issueCarrier(w, 2);
@@ -1512,9 +1512,9 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the link record"
     const out = await w.store.findLinks(w.plan.id, "out");
     if (!out.ok) throw new Error(JSON.stringify(out.error));
     expect(out.value.filter((l) => l.to_id === w.carriers.get(1)!.id).map((l) => l.link_type)).toEqual(["known-defect"]);
-    // #2 carries a finding record but is linked as a fix (`resolves`): not a known defect, so it covers nothing
+    // #2 carries a finding record but is linked only as related (`relates-to`): not a known defect, so it covers nothing
     expect((await port.linkToPlan(w.otherPlan.slug, { number: 2 }, { dimension: "correctness_vs_acs", fingerprint: FP_B })).ok).toBe(true);
-    expect((await w.corpus.link(w.plan.id, w.carriers.get(2)!.id, "resolves")).ok).toBe(true);
+    expect((await w.corpus.link(w.plan.id, w.carriers.get(2)!.id, "relates-to")).ok).toBe(true);
     expect((await closePlan(w)).ok).toBe(false);
   });
 
@@ -1564,7 +1564,7 @@ describe("AC-PCR-4 an issue the batch just filed counts as open at the close of 
     });
     if (!doc.ok) throw new Error(JSON.stringify(doc.error));
     expect((await corpus.link(doc.value.id, plan.id, "informs")).ok).toBe(true);
-    await seed(store, rawDoc("task", "issue 9", { issue_report: { github: { repo: REPO, number: 9, repo_id: REPO_ID } } }, "approved"));
+    await seed(store, rawDoc("task", "issue 9", { issues: [{ repo_id: REPO_ID, number: 9 }] }, "approved"));
     // the listing is empty: GitHub's read has not caught up with the issue the batch filed moments ago
     corpus.setPlanCloseIssuePort({ listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }) });
     const port = createGithubIssuePort({ repo: REPO } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, undefined);

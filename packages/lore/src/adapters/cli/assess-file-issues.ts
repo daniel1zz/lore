@@ -21,9 +21,10 @@
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
 import { readCarrierIssueRefs } from "../../service/issue-carrier.js";
+import { buildCarrierTaskInput, decideAdoption } from "../../service/issue-adoption.js";
 import type { IssueFinding, IssuePort, IssueRef } from "../../service/issue-filing-service.js";
 import { FINGERPRINT_TITLE_TAG } from "../../service/root-cause-fingerprint.js";
-import { MILESTONE_FINDINGS_FIELD, readMilestoneFindings, type PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
+import { MILESTONE_FINDINGS_FIELD, readMilestoneFindings, type OpenIssueListing, type PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
 import { fileGithubIssue, type GithubFilingContext, type GithubUpstreamCfg } from "./report-issue-wiring.js";
 
 /**
@@ -77,13 +78,13 @@ export function createGithubIssuePort(
     linkToPlan: async (plan, issue, finding) => {
       // reason: a carrier names its issue by numeric repo id (D1); the repo id of the configured repository is the one
       // the open-issue reader verified. Absent a reader the number alone matches (one upstream per corpus).
-      let repoId: number | undefined;
+      let listing: OpenIssueListing | undefined;
       if (openIssues !== undefined) {
-        const listing = await openIssues.listOpenIssues();
-        if (!listing.ok) return listing;
-        repoId = listing.value.repoId;
+        const listed = await openIssues.listOpenIssues();
+        if (!listed.ok) return listed;
+        listing = listed.value;
       }
-      return linkIssueToPlan(corpusService, plan, issue, finding, repoId, ctx.actor);
+      return linkIssueToPlan(corpusService, plan, issue, finding, listing, cfg.repo, ctx.actor);
     },
   };
 }
@@ -93,24 +94,45 @@ async function linkIssueToPlan(
   planRef: string,
   issue: IssueRef,
   finding: IssueFinding,
-  repoId: number | undefined,
+  listing: OpenIssueListing | undefined,
+  repo: string,
   actor: string,
 ): Promise<Result<void, LoreError>> {
+  const repoId = listing?.repoId;
   const bundle = await corpusService.getPlanBundle(planRef);
   if (!bundle.ok) return bundle;
   const tasks = await corpusService.listFull({ type: "task" });
   if (!tasks.ok) return tasks;
-  const issueTask = tasks.value.docs.find((doc) => {
+  let issueTask = tasks.value.docs.find((doc) => {
     if (doc.status === "archived") return false;
     return readCarrierIssueRefs(doc).some((ref) => ref.number === issue.number && (repoId === undefined || ref.repo_id === repoId));
   });
   if (issueTask === undefined) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "file-issues",
-      message: `issue #${String(issue.number)} exists but no live corpus task carries it (extra.issues), so it cannot be linked to plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type known-defect\``,
-      rule: "BR-1379",
-    });
+    // reason: filing creates no corpus document (AC-GS-10), so the carrier the known-defect link needs is adopted here:
+    // an ad-hoc draft task naming the issue, exactly what `lore issue adopt <n>` creates, never a plan member (a draft
+    // member would hold the plan's own close open).
+    const open = listing?.open.find((candidate) => candidate.number === issue.number);
+    if (listing === undefined || open === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "file-issues",
+        message: `issue #${String(issue.number)} exists but no live corpus task carries it (extra.issues) and it is not in the open listing, so it cannot be adopted for plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type known-defect\``,
+        rule: "BR-1379",
+      });
+    }
+    const listed = { number: issue.number, title: open.title, state: "open", body: "" } as const;
+    const decision = decideAdoption(listed, listing.repoId, tasks.value.docs, new Date().toISOString());
+    if (decision.kind !== "create") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "file-issues",
+        message: `issue #${String(issue.number)} cannot be adopted for plan ${planRef}: ${decision.kind}${"slug" in decision ? ` (${decision.slug})` : ""}`,
+        rule: "BR-1379",
+      });
+    }
+    const created = await corpusService.create(buildCarrierTaskInput({ issue: listed, repo, repoId: listing.repoId, slug: decision.slug }), { by: actor });
+    if (!created.ok) return created;
+    issueTask = created.value;
   }
   // reason: BR-1379 — the record on the carrier (not the title) is what plan close reads as coverage. Written BEFORE the
   // link so a link never exists without the record; an unchanged record writes nothing (idempotent retry).

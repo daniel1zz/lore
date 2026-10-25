@@ -1,11 +1,12 @@
 /**
- * R1 (#404) — a plan accepted with known defects links its defect issues with `known-defect`, never `resolves`,
- * so archiving the plan closes none of them; real fixes (`resolves`) keep closing on archive.
+ * R1 (#404) — a plan accepted with known defects links the task CARRYING each defect issue (`extra.issues`) with
+ * `known-defect`, so archiving the plan closes none of them; a document that carries an issue itself still closes it
+ * on archive (spec-github-owns-issue-report-state-no-mirror-task-work-carries D3).
  *
  * Real services over InMemoryStore + a RECORDING FAKE `IssueCloser` — nothing here can reach GitHub.
  *   HAPPY:      a plan archived with a known-defect link closes no issue; the issue stays linked as a known defect.
- *   NEGATIVE:   a known-defect link to a non-issue target is refused.
- *   REGRESSION: a plan that `resolves` the same kind of issue still closes it on archive.
+ *   NEGATIVE:   a known-defect link to a target that carries no issue is refused.
+ *   REGRESSION: a plan that carries the same kind of issue itself still closes it on archive.
  */
 import { describe, expect, it } from "vitest";
 import { ok } from "@lore/core";
@@ -56,13 +57,7 @@ async function build() {
     cs.create({
       type: "task",
       title: "Filed defect",
-      extra: {
-        adhoc: true,
-        issue_report: {
-          reporter_project: "consumer", reporter_actor: "agent:x", lore_version: "0.0.0", expected: "exit 0", actual: "exit 4",
-          reported_at: "2026-01-01T00:00:00.000Z", github: { repo: "acme/widget", number: 7, repo_id: 123 },
-        },
-      },
+      extra: { adhoc: true, issues: [{ repo_id: 123, number: 7 }] },
     } as CreateDocInput),
     "issue",
   );
@@ -88,7 +83,7 @@ describe("known-defect links", () => {
     expect(links.map((l) => [l.to_id, l.link_type])).toEqual([[w.issue.id, "known-defect"]]);
   });
 
-  it("NEGATIVE: a known-defect link whose target carries no issue_report is refused", async () => {
+  it("NEGATIVE: a known-defect link whose target carries no extra.issues is refused", async () => {
     const w = await build();
     const other = await must(w.cs.create({ type: "plan", title: "Not an issue", content: "b" } as CreateDocInput), "other");
     const linked = await w.cs.link(w.plan.id, other.id, "known-defect");
@@ -96,11 +91,14 @@ describe("known-defect links", () => {
     if (!linked.ok) expect(linked.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("REGRESSION: a plan that resolves the same kind of issue still closes it on archive", async () => {
+  it("REGRESSION: a plan that carries the same kind of issue itself still closes it on archive", async () => {
     const w = await build();
-    await must(w.cs.link(w.plan.id, w.issue.id, "resolves"), "link");
+    const carrierPlan = await must(
+      w.cs.create({ type: "plan", title: "Carries the issue", content: "body", extra: { issues: [{ repo_id: 123, number: 7 }] } } as CreateDocInput),
+      "carrier plan",
+    );
 
-    await archive(w.cs, w.plan);
+    await archive(w.cs, carrierPlan);
 
     expect(w.closer.calls).toContain("close:7");
   });
