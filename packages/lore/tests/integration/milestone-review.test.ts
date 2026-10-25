@@ -55,7 +55,7 @@ const DIMENSIONS = [
   "security",
 ] as const;
 
-function judgeAnswer(overrides: Record<string, { verdict: string; reason: string; reference: string }> = {}): string {
+function judgeAnswer(overrides: Record<string, { verdict: string; reason: string; reference: string; cites?: string[] }> = {}): string {
   const dimensions = Object.fromEntries(
     DIMENSIONS.map((d) => [d, overrides[d] ?? { verdict: "pass", reason: `${d} holds`, reference: "Google engineering code review guide" }]),
   );
