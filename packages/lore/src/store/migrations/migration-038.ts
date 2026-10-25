@@ -25,7 +25,7 @@
  * Side-effect class: schema DDL + data rewrite (executed once per store); the check is pure over its reads.
  */
 
-import { appendKnownDefects, MILESTONE_DIMENSIONS, readKnownDefects, withKnownDefects, type AuditEntry, type KnownDefectEntry } from "@lore/core";
+import { appendKnownDefects, KNOWN_DEFECTS_FIELD, MILESTONE_DIMENSIONS, readKnownDefects, type AuditEntry, type KnownDefectEntry } from "@lore/core";
 import { computeFtsShadowValues } from "../store-shared.js";
 import { MigrationFailedError } from "./migration-026.js";
 import {
@@ -253,7 +253,7 @@ export function planWrites(plan: ConversionPlan, extraOf: (planId: string) => st
     const extra = parseObject(extraOf(planId));
     const existing = readKnownDefects(extra);
     const merged = appendKnownDefects(existing, additions);
-    writes.push({ planId, extra: withKnownDefects(extra, merged), addedKeys: merged.length - existing.length });
+    writes.push({ planId, extra: { ...extra, [KNOWN_DEFECTS_FIELD]: merged }, addedKeys: merged.length - existing.length });
   }
   return writes;
 }

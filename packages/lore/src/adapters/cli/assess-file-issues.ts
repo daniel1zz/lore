@@ -19,7 +19,7 @@
  * @spec_ref spec-a-plan-s-known-defects-are-its-own-record-of-github-issues (AC-KD-2, BR-1421)
  */
 
-import { appendKnownDefects, err, ok, readKnownDefects, withKnownDefects, type KnownDefectEntry, type LoreError, type Result } from "@lore/core";
+import { appendKnownDefects, err, ok, KNOWN_DEFECTS_FIELD, readKnownDefects, type KnownDefectEntry, type LoreError, type Result } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
 import type { IssueFinding, IssuePort, IssueRef } from "../../service/issue-filing-service.js";
 import { FINGERPRINT_TITLE_TAG } from "../../service/root-cause-fingerprint.js";
@@ -117,7 +117,7 @@ async function recordOnPlan(
     if (merged === existing) return ok(undefined);
     const written = await corpusService.set(
       plan.id,
-      { extra: withKnownDefects(plan.extra as Record<string, unknown>, merged) },
+      { extra: { ...(plan.extra as Record<string, unknown>), [KNOWN_DEFECTS_FIELD]: merged } },
       { by: actor, expectedVersion: plan.version },
     );
     if (written.ok) return ok(undefined);

@@ -6,7 +6,7 @@
  * Public surface: planStateFingerprint, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
  *   MilestoneReviewCurrency, MILESTONE_REVIEW_SUB_TYPE.
  * Invariants:
- *   - Fingerprint = SHA-256 of plan id@version, every task id@version (sorted by id), the main commit that last landed one of
+ *   - Fingerprint = SHA-256 of the plan id and its reviewed content (title, body, canonical `extra.phases`), every task id@version (sorted by id), the main commit that last landed one of
  *     the tasks (the `extra.landing.landing_commit` with the newest `recorded_at`; `none` when no task has a landing) and
  *     the governing spec's live AC ids with content hashes (BR-1379).
  *     Any plan edit, task edit, evidence write, or a newer landing therefore makes the stored review not current.
@@ -19,7 +19,6 @@
 import { createHash } from "node:crypto";
 import {
   failedDimensions,
-  knownDefectWrites,
   milestoneReviewSchema,
   specAcceptanceCriteriaSchema,
   type DocRecord,
@@ -56,18 +55,34 @@ function liveAcHashes(spec: Pick<DocRecord, "extra"> | undefined): string[] {
     .sort();
 }
 
+/** Key-order-insensitive JSON text, so equal phase data hashes equal whatever order its keys were stored in. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
 /**
- * The plan's current state as one comparable value: the SHA-256 (hex) of its four inputs (BR-1379): the plan's id and
- * version (net of the writes that only recorded known defects); the sorted task/phase ids with versions; the main commit that last landed one of the tasks; and the sorted
- * live (not superseded) AC ids of the governing spec with their content hashes. Restoring or retiring an AC therefore
- * changes it.
+ * The plan's reviewed state as one comparable value: the SHA-256 (hex) of its four inputs (BR-1379): the plan's id and
+ * its reviewed content (title, body and the canonical JSON of its declared `extra.phases`); the sorted task/phase ids
+ * with versions; the main commit that last landed one of the tasks; and the sorted live (not superseded) AC ids of the
+ * governing spec with their content hashes. Restoring or retiring an AC therefore changes it.
  *
- * @param plan - the plan (id, version)
+ * The plan's own version is deliberately NOT an input: bookkeeping writes (`extra.progress`, `extra.known_defects`)
+ * bump it without changing what the review judged, and must never make a stored review stale.
+ *
+ * @param plan - the plan (id, title, content, extra for its phases)
  * @param tasks - every member task (id, version, extra for the landing)
  * @param spec - the plan's governing spec; absent = the plan has none (no AC input)
  */
 export function planStateFingerprint(
-  plan: Pick<DocRecord, "id" | "version"> & { readonly extra?: Readonly<Record<string, unknown>> },
+  plan: Pick<DocRecord, "id" | "title" | "content"> & { readonly extra?: Readonly<Record<string, unknown>> },
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
   spec: Pick<DocRecord, "extra"> | undefined,
 ): string {
@@ -75,10 +90,10 @@ export function planStateFingerprint(
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((t) => `${t.id}@${String(t.version)}`)
     .join(",");
-  // reason: recording a known defect writes the plan (BR-1421) and bumps its version; the version is read NET of those
-  // writes so recording leaves the fingerprint, and so the plan's own review, current.
-  const planVersion = plan.version - knownDefectWrites(plan.extra);
-  const canonical = `plan:${plan.id}@${String(planVersion)}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}|acs:${liveAcHashes(spec).join(",")}`;
+  const planPart = createHash("sha256")
+    .update(canonicalJson({ title: plan.title, content: plan.content, phases: plan.extra?.["phases"] ?? null }))
+    .digest("hex");
+  const canonical = `plan:${plan.id}#${planPart}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}|acs:${liveAcHashes(spec).join(",")}`;
   return createHash("sha256").update(canonical).digest("hex");
 }
 
@@ -122,7 +137,7 @@ export type MilestoneReviewCurrency =
  *   failed (current but a dimension fails) | pass
  */
 export function assessMilestoneCurrency(
-  plan: Pick<DocRecord, "id" | "version">,
+  plan: Pick<DocRecord, "id" | "title" | "content"> & { readonly extra?: Readonly<Record<string, unknown>> },
   tasks: readonly Pick<DocRecord, "id" | "version" | "extra">[],
   reviewDocs: readonly DocRecord[],
   spec: Pick<DocRecord, "extra"> | undefined,

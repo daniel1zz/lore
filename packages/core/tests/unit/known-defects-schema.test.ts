@@ -11,7 +11,7 @@
  *   REGRESSION: append is idempotent by key and keeps order
  */
 import { describe, expect, it } from "vitest";
-import { MILESTONE_DIMENSIONS, appendKnownDefects, judgeKnownDefectsExtra, knownDefectKey, knownDefectWrites, readKnownDefects, withKnownDefects } from "../../src/index.js";
+import { MILESTONE_DIMENSIONS, appendKnownDefects, judgeKnownDefectsExtra, knownDefectKey, readKnownDefects } from "../../src/index.js";
 
 const entry = (over: Record<string, unknown> = {}) => ({ repo_id: 7, number: 50, dimension: "regression", fingerprint: "f".repeat(64), ...over });
 
@@ -52,18 +52,6 @@ describe("AC-KD-1 extra.known_defects schema", () => {
     ["a missing field", [{ repo_id: 7, number: 5, dimension: "security" }]],
   ])("%s is refused", (_name, value) => {
     expect(judgeKnownDefectsExtra("plan", { known_defects: value })?.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("known_defect_writes is plan-only and a non-negative integer; withKnownDefects raises it by one", () => {
-    expect(judgeKnownDefectsExtra("plan", { known_defect_writes: 0 })).toBeUndefined();
-    expect(JSON.stringify(judgeKnownDefectsExtra("task", { known_defect_writes: 1 }))).toContain("known_defect_writes");
-    expect(judgeKnownDefectsExtra("plan", { known_defect_writes: -1 })?.code).toBe("VALIDATION_ERROR");
-    expect(judgeKnownDefectsExtra("plan", { known_defect_writes: 1.5 })?.code).toBe("VALIDATION_ERROR");
-    const first = withKnownDefects({ progress: { state: "complete" } }, [entry() as never]);
-    expect(first["known_defect_writes"]).toBe(1);
-    expect(first["progress"]).toEqual({ state: "complete" });
-    expect(withKnownDefects(first, [entry() as never])["known_defect_writes"]).toBe(2);
-    expect(knownDefectWrites(undefined)).toBe(0);
   });
 
   it("readKnownDefects returns only valid entries and appendKnownDefects is idempotent by key", () => {

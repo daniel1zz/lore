@@ -114,10 +114,10 @@ describe("AC-KD-4 migration 038 converts known-defect links into plan entries, a
   it("findings source, body-line source and a soft-deleted target all convert; links and the link type are gone", () => {
     const fixture = makeFixture();
     const before = new Database(fixture.dbPath, { readonly: true });
-    const planBefore = before.query("SELECT id, version, extra FROM docs WHERE id = 'PLAN1'").get() as { id: string; version: number; extra: string };
+    const planBefore = before.query("SELECT id, title, content, version, extra FROM docs WHERE id = 'PLAN1'").get() as { id: string; title: string; content: string; version: number; extra: string };
     const tasks = before.query("SELECT id, version, extra FROM docs WHERE type = 'task'").all() as { id: string; version: number; extra: string }[];
     before.close();
-    const fingerprintBefore = planStateFingerprint({ id: "PLAN1", version: planBefore.version, extra: JSON.parse(planBefore.extra) }, tasks.map((t) => ({ ...t, extra: JSON.parse(t.extra) })), undefined);
+    const fingerprintBefore = planStateFingerprint({ id: "PLAN1", title: planBefore.title, content: planBefore.content, extra: JSON.parse(planBefore.extra) }, tasks.map((t) => ({ ...t, extra: JSON.parse(t.extra) })), undefined);
 
     const migrated = runLore(fixture, ["migrate", "schema"]);
     expect(migrated.exitCode, migrated.out).toBe(0);
@@ -126,7 +126,7 @@ describe("AC-KD-4 migration 038 converts known-defect links into plan entries, a
     const db = new Database(fixture.dbPath);
     try {
       const plan = db.query("SELECT version, extra FROM docs WHERE id = 'PLAN1'").get() as { version: number; extra: string };
-      const extra = JSON.parse(plan.extra) as { known_defects: { repo_id: number; number: number; dimension: string; fingerprint: string }[]; known_defect_writes: number };
+      const extra = JSON.parse(plan.extra) as { known_defects: { repo_id: number; number: number; dimension: string; fingerprint: string }[] };
       expect(extra.known_defects.map((e) => `${String(e.repo_id)}#${String(e.number)}/${e.dimension}`).sort()).toEqual([
         "7#340/concurrency_safety",
         "7#50/regression",
@@ -135,13 +135,12 @@ describe("AC-KD-4 migration 038 converts known-defect links into plan entries, a
       ]);
       expect(extra.known_defects.find((e) => e.number === 340)?.fingerprint).toBe(FP);
       expect(extra.known_defects.find((e) => e.dimension === "security")?.fingerprint).toBe("f2");
-      expect(extra.known_defect_writes).toBe(1);
       expect(plan.version).toBe(2);
       // STATE: a version row and a hash-chained audit row exist for the plan write
       expect((db.query("SELECT COUNT(*) AS n FROM versions WHERE doc_id = 'PLAN1' AND version = 2").get() as { n: number }).n).toBe(1);
       expect((db.query("SELECT COUNT(*) AS n FROM audit WHERE action = 'migrate-schema-038' AND doc_id = 'PLAN1'").get() as { n: number }).n).toBe(1);
       // the plan's own review stays current: the fingerprint is the same after the conversion
-      expect(planStateFingerprint({ id: "PLAN1", version: plan.version, extra }, tasks.map((t) => ({ ...t, extra: JSON.parse(t.extra) })), undefined)).toBe(fingerprintBefore);
+      expect(planStateFingerprint({ id: "PLAN1", title: planBefore.title, content: planBefore.content, extra }, tasks.map((t) => ({ ...t, extra: JSON.parse(t.extra) })), undefined)).toBe(fingerprintBefore);
       // links gone, type gone
       expect((db.query("SELECT COUNT(*) AS n FROM links WHERE link_type = 'known-defect'").get() as { n: number }).n).toBe(0);
       expect(() => insertKnownDefectLink(db, "PLAN1", "T1")).toThrow(/CHECK/i);
@@ -220,12 +219,11 @@ describe("AC-KD-4 migration 038 converts known-defect links into plan entries, a
   });
 
   it("a plan that already records one of the entries gets only the missing ones (idempotent by key)", () => {
-    const fixture = makeFixture({ planExtra: { known_defects: [{ repo_id: 7, number: 50, dimension: "regression", fingerprint: "f1" }], known_defect_writes: 2 } });
+    const fixture = makeFixture({ planExtra: { known_defects: [{ repo_id: 7, number: 50, dimension: "regression", fingerprint: "f1" }] } });
     expect(runLore(fixture, ["migrate", "schema"]).exitCode).toBe(0);
     const db = new Database(fixture.dbPath, { readonly: true });
-    const extra = JSON.parse((db.query("SELECT extra FROM docs WHERE id = 'PLAN1'").get() as { extra: string }).extra) as { known_defects: unknown[]; known_defect_writes: number };
+    const extra = JSON.parse((db.query("SELECT extra FROM docs WHERE id = 'PLAN1'").get() as { extra: string }).extra) as { known_defects: unknown[] };
     db.close();
     expect(extra.known_defects).toHaveLength(4);
-    expect(extra.known_defect_writes).toBe(3);
   }, TEST_TIMEOUT_MS);
 });
