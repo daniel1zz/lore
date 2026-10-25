@@ -13,6 +13,8 @@
  * below (each group's own JSDoc states which dimensions it covers) rather
  * than one dimension per top-level `describe` — the task's oracle scope is
  * per-group matched-count, not per-dimension.
+ *
+ * @reads packages/lore/src/store/migrations
  */
 
 import { describe, it, expect } from "vitest";
