@@ -685,14 +685,6 @@ describe("milestone review gates close", () => {
     return (JSON.parse(r.stdout) as { data: { number: number } }).data.number;
   }
 
-  /** Adopts `issueNumber` as a carrier task (filing creates no corpus document) and links the plan to it as a known defect. */
-  function linkIssue(plan: string, issueNumber: number): void {
-    const adopted = runLore(["issue", "adopt", String(issueNumber)], tmpDir);
-    expect(adopted.exitCode, adopted.stderr).toBe(0);
-    const linked = runLore(["link", plan, `task-issue-777-${String(issueNumber)}`, "--type", "known-defect"], tmpDir);
-    expect(linked.exitCode, linked.stderr).toBe(0);
-  }
-
   function setIssueState(issueNumber: number, state: "open" | "closed"): void {
     const file = join(judgeDir, "gh-state", "issues.json");
     const all = JSON.parse(readFileSync(file, "utf8")) as { number: number; state: string }[];
@@ -706,14 +698,13 @@ describe("milestone review gates close", () => {
     const bare = close(plan);
     expect(bare.exitCode).toBe(4);
     expect(bare.stderr).toContain("MILESTONE_REVIEW_FAILED");
-    // a hand-filed issue whose TITLE names the dimension and is linked to the plan covers nothing: coverage is the
-    // finding record on the issue's corpus task, never its title.
+    // a hand-filed issue whose TITLE names the dimension covers nothing: coverage is the plan's own known-defect
+    // record, never an issue title.
     expect(fileIssue(`${plan}: security`)).toBe(2);
-    linkIssue(plan, 2);
     const titled = close(plan);
     expect(titled.exitCode).toBe(4);
     expect(statusOf(plan)).toBe("approved");
-    // the supported way: --file-issues records each failed dimension's finding on its issue and links it to the plan.
+    // the supported way: --file-issues records each failed dimension's issue in the plan's extra.known_defects.
     const filed = runLore(["assess", plan, "--file-issues", "--json"], tmpDir);
     expect(filed.exitCode, filed.stderr).toBe(1);
     const numbers = (JSON.parse(filed.stdout) as { data: { rows: (AssessRow & { filed_issues?: number[] })[] } }).data.rows[0]?.filed_issues ?? [];
@@ -754,7 +745,7 @@ describe("milestone review gates close", () => {
     const listed = JSON.parse(readFileSync(join(judgeDir, "gh-state", "issues.json"), "utf8")) as { body: string }[];
     expect(listed[0]?.body).toContain("breaks the old path");
     expect(listed[1]?.body).toContain("unvalidated input reaches a shell");
-    // the issues are linked to the plan, so plan close accepts the failing review.
+    // the issues are recorded on the plan, so plan close accepts the failing review.
     const closed = close(plan);
     expect(closed.exitCode, closed.stderr).toBe(0);
     expect(statusOf(plan)).toBe("archived");
