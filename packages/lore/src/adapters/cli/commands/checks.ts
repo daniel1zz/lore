@@ -75,7 +75,10 @@ export default defineLoreCommand({
             const cfg = classification.cfg;
             const listIssues = async (): Promise<Result<readonly EscapeIssue[], LoreError>> => {
               const listing = await resolveGithubIssueListing(inv.io, cfg, inv);
-              return listing.ok ? { ok: true, value: listing.value.issues } : listing;
+              // reason: GitHub's listing names the instant `created_at`; the escaped-defect reader names it `createdAt`.
+              return listing.ok
+                ? { ok: true, value: listing.value.issues.map((issue) => ({ ...issue, ...(issue.created_at === undefined ? {} : { createdAt: issue.created_at }) })) }
+                : listing;
             };
             const quality = await service.quality(listIssues);
             if (!quality.ok) return fail(quality.error);

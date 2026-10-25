@@ -82,18 +82,26 @@ export const linkTypeSchema = z.enum([
   // artifact's production (P4 provenance). Plain typed edge, no lifecycle
   // or validation coupling beyond the generic link rules above.
   "governs",
-  // "resolves": from = the doc that fixes a defect (spec | plan | task), to =
-  // an issue task (a task carrying extra.issue_report). Write-time validated
-  // in CorpusService.link (shared write path, D1b) — a target lacking
-  // extra.issue_report is rejected with VALIDATION_ERROR. Consumed by
-  // computeIssueResolution (issue-resolution.ts, D2) to derive fixed/resolving.
-  // Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D1.
-  "resolves",
-  // "known-defect": from = a plan accepted with known defects, to = the issue task (carrying extra.issue_report)
-  // that files one of its defects. NOT a fix: archiving the plan never closes the issue (#404), and plan-close
-  // coverage reads this link type only. Written by the review batch and `lore assess --file-issues`.
-  "known-defect",
+  // "resolves" is RETIRED (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1):
+  // the carrier is `extra.issues` on a task or plan. Stored legacy rows are read by
+  // `lore issues migrate`; CorpusService.link refuses to create a new one.
+  // "known-defect" is RETIRED (spec-a-plan-s-known-defects-are-its-own-record-of-github-issues D1): a plan records
+  // its known defects itself in `extra.known_defects`; the schema migration converts every old link into entries.
 ]);
+
+/**
+ * One GitHub issue reference, the element of `extra.issues` on a task or plan (the "carrier").
+ * `repo_id` is GitHub's numeric repository id; the repository name is never part of identity.
+ * Source: spec-github-owns-issue-report-state-no-mirror-task-work-carries D1.
+ */
+export const issueRefSchema = z.object({
+  repo_id: z.number().int().positive(),
+  number: z.number().int().positive(),
+});
+export type IssueRef = z.infer<typeof issueRefSchema>;
+
+/** Upper bound on `extra.issues` length (spec D1: 1..50 distinct refs). */
+export const MAX_ISSUE_REFS_PER_CARRIER = 50;
 
 export const versionActionSchema = z.enum([
   "create",

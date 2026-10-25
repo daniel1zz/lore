@@ -57,11 +57,6 @@
  *     (`--adopted-by`) additionally REQUIRES the resolved doc's type to be
  *     `plan` or `task` — the one pointer requirement with a type constraint,
  *     because an owner that cannot itself do work defeats the point of §M7.
- *   - `checkResolutionPointer` — the ONE decision `lore issue resolve` calls
- *     for EVERY pointer-carrying state's refusal (missing / unresolvable /
- *     self-reference / wrong-type), given a lookup the CLI already performed.
- *     Store-free like every other export here, so AC-DC-15's pointer-refusal
- *     verdicts are testable under vitest with zero fixtures.
  *   - `isDanglingAdoption` — §M7's dangling-claim predicate (AC-DC-16): given
  *     a report's COMPUTED resolution and its `adopted_by` owner's current
  *     status, is this an abandoned adoption? `commands/status.ts`'s
@@ -124,6 +119,7 @@ import {
   TERMINAL_ISSUE_RESOLUTION_MEMBERS,
   type DocStatus,
   type IssueResolution,
+  type IssueStatus,
   type TerminalIssueResolution,
 } from "@lore/core";
 
@@ -372,86 +368,6 @@ export function reachOfExplicitResolution(state: ExplicitResolution): TerminalRe
     return { route: "issue-resolve", pointer: ADOPTED_RESOLUTION_POINTER };
   }
   return reachOfTerminalResolution(state);
-}
-
-/**
- * A resolved pointer target's minimal identity, as read from the live corpus
- * by the CLI's doc lookup (`CorpusService.get`) — just enough for
- * {@link checkResolutionPointer} to judge self-reference and type.
- */
-export interface ResolvedPointerTarget {
-  readonly id: string;
-  readonly type: string;
-}
-
-/**
- * Why a pointer failed {@link checkResolutionPointer}'s verdict — `"missing"`
- * (no value supplied), `"unresolvable"` (the value does not resolve to an
- * existing doc), `"self-reference"` (it names the report being resolved),
- * `"wrong-type"` (resolves fine, but not to a doc type
- * {@link TerminalResolutionPointer.allowed_doc_types} permits — only
- * `adopted`'s pointer declares this constraint, §M7).
- */
-export type PointerCheckFailureReason = "missing" | "unresolvable" | "self-reference" | "wrong-type";
-
-/**
- * Pure verdict over an ALREADY-ATTEMPTED pointer resolution
- * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M3/§M7,
- * AC-DC-4/AC-DC-15) — the ONE decision `lore issue resolve`'s CLI wiring
- * consults for every pointer-carrying state, so a fourth pointer-carrying
- * state added later needs no NEW validation branch, only a new
- * {@link TerminalResolutionPointer} declaration.
- *
- * Deliberately store-free like every other export in this module: the actual
- * corpus lookup (the I/O) happens in the CLI BEFORE calling this function;
- * this function only judges the OUTCOME that lookup already produced, which
- * is what makes it 100% decidable — and testable under vitest with zero
- * fixtures, no `InMemoryStore`, no async.
- *
- * @param pointer - the reach table's declared pointer requirement for this state
- * @param pointerValue - the trimmed `--flag` value the caller supplied; `""`
- *   means absent
- * @param resolvedTarget - the doc the CLI's lookup for `pointerValue`
- *   returned, or `undefined` if that lookup failed (does not resolve to an
- *   existing doc)
- * @param issueDocId - the report being resolved's own doc id (self-reference check)
- * @returns `{ok: true}` when the pointer satisfies every declared
- *   requirement; otherwise `{ok: false, reason}` naming the FIRST failing
- *   check, in the fixed precedence missing > unresolvable > self-reference >
- *   wrong-type (each check assumes every prior one already passed, so a
- *   caller cannot ask "was it ALSO wrong-type" about a pointer that was never
- *   supplied)
- * @example
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", undefined, "issue-1")
- *     // => {ok: false, reason: "missing"}
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "plan-x", undefined, "issue-1")
- *     // => {ok: false, reason: "unresolvable"} (lookup failed)
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "issue-1", {id: "issue-1", type: "task"}, "issue-1")
- *     // => {ok: false, reason: "self-reference"}
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "spec-x", {id: "spec-x", type: "spec"}, "issue-1")
- *     // => {ok: false, reason: "wrong-type"} (spec is neither plan nor task)
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "task-x", {id: "task-x", type: "task"}, "issue-1")
- *     // => {ok: true}
- */
-export function checkResolutionPointer(
-  pointer: TerminalResolutionPointer,
-  pointerValue: string,
-  resolvedTarget: ResolvedPointerTarget | undefined,
-  issueDocId: string,
-): { ok: true } | { ok: false; reason: PointerCheckFailureReason } {
-  if (pointerValue.length === 0) {
-    return { ok: false, reason: "missing" };
-  }
-  if (resolvedTarget === undefined) {
-    return { ok: false, reason: "unresolvable" };
-  }
-  if (resolvedTarget.id === issueDocId) {
-    return { ok: false, reason: "self-reference" };
-  }
-  if (pointer.allowed_doc_types !== undefined && !pointer.allowed_doc_types.includes(resolvedTarget.type)) {
-    return { ok: false, reason: "wrong-type" };
-  }
-  return { ok: true };
 }
 
 /**
@@ -723,4 +639,90 @@ export function computeIssueResolution(
     return "closed";
   }
   return "open";
+}
+
+// ─── deriveIssueStatus: the displayed status (GitHub state x carriers) ──────
+//
+// ⛔ The corpus stores no issue status. This is the ONE function that turns a live
+// GitHub listing row plus the carriers (tasks/plans naming it in `extra.issues`)
+// into the status shown by `lore issues`, the dashboard, MCP and HTTP. It replaces
+// `computeIssueResolution` for every consumer migrated to the carrier model
+// (the legacy function above stays only until its last consumer is migrated).
+// Source: adr-github-owns-issue-report-state-the-corpus-owns-only-the (status table),
+//   spec-github-owns-issue-report-state-no-mirror-task-work-carries D4, AC-GS-3.
+
+/** The GitHub facts of one listed issue that status derivation reads. */
+export interface ListedIssue {
+  /** `open` | `closed` (GitHub's native state). */
+  readonly state: string;
+  /** GitHub's `state_reason`; `null`/`undefined` when GitHub gives none. */
+  readonly state_reason?: string | null | undefined;
+  /** Label names on the issue. */
+  readonly labels?: readonly string[] | undefined;
+}
+
+/** What one carrier (a task or plan naming the issue in `extra.issues`) contributes. */
+export interface CarrierFact {
+  readonly type: "task" | "plan";
+  /** The carrier doc's lifecycle status. */
+  readonly status: DocStatus;
+  /** True when the carrier is invalidated (`isInvalidated`) at the read instant. */
+  readonly invalidated: boolean;
+  /** True when a task carrier holds an open claim; always false for plans. */
+  readonly hasOpenClaim: boolean;
+}
+
+/** Label prefix of the verdict labels maintainers write. */
+const RESOLUTION_LABEL_PREFIX = "resolution:";
+
+/**
+ * Verdicts a `not_planned` close can carry as a label. Derived from the hand-settable
+ * terminal set minus `duplicate` (which has its own state_reason), so no second list of
+ * the tokens exists here.
+ */
+const NOT_PLANNED_VERDICTS: readonly ExplicitTerminalResolution[] = [...EXPLICIT_TERMINAL_RESOLUTIONS].filter(
+  (state) => state !== "duplicate",
+);
+
+const isDeadCarrier = (c: CarrierFact): boolean => c.invalidated || c.status === "deprecated";
+
+/**
+ * The displayed status of one listed issue; total over GitHub state x carriers.
+ *
+ * Precedence (ADR status table):
+ *   - OPEN issue: labels are ignored (a stray verdict label never rejects an open issue).
+ *     An archived carrier wins (`fixed (close pending)`), then a live carrier
+ *     (`resolving` when a task carrier holds a claim, else `adopted`), then carriers that
+ *     are all dead (`adopted (abandoned)`), else `open`.
+ *   - CLOSED issue: the verdict wins over carriers. `duplicate` (state_reason or label),
+ *     then a `not_planned` close with a verdict label (that verdict) or without
+ *     (`closed (no verdict)`); otherwise it was closed as completed: `fixed` ONLY when an
+ *     archived carrier exists, else `closed (unverified)`.
+ *   - ⛔ `fixed` is never read from the `resolution:fixed` label or from state_reason
+ *     alone: it is a joined fact.
+ *   - A closed issue with no `state_reason` is read as completed (GitHub's close default).
+ *
+ * @example
+ *   deriveIssueStatus({ state: "open" }, [])                                  // => "open"
+ *   deriveIssueStatus({ state: "closed", state_reason: "completed" }, [])    // => "closed (unverified)"
+ */
+export function deriveIssueStatus(issue: ListedIssue, carriers: readonly CarrierFact[]): IssueStatus {
+  const alive = carriers.filter((c) => !isDeadCarrier(c));
+  const archived = alive.some((c) => c.status === "archived");
+
+  if (issue.state !== "closed") {
+    if (archived) return "fixed (close pending)";
+    const live = alive.filter((c) => c.status !== "archived");
+    if (live.length > 0) return live.some((c) => c.type === "task" && c.hasOpenClaim) ? "resolving" : "adopted";
+    return carriers.length > 0 ? "adopted (abandoned)" : "open";
+  }
+
+  const labels = new Set(issue.labels ?? []);
+  const labelled = (verdict: string): boolean => labels.has(`${RESOLUTION_LABEL_PREFIX}${verdict}`);
+  if (issue.state_reason === "duplicate" || labelled("duplicate")) return "duplicate";
+  if (issue.state_reason === "not_planned") {
+    const verdict = NOT_PLANNED_VERDICTS.find(labelled);
+    return verdict ?? "closed (no verdict)";
+  }
+  return archived ? "fixed" : "closed (unverified)";
 }

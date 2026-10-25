@@ -590,7 +590,7 @@ describe("AC-069-7: readyAdhoc() lists OPEN ad-hoc tasks corpus-wide", () => {
   });
 
   it("REGRESSION (SPEC-072): an issue-report ad-hoc task IS excluded while draft/in-review, but a plain one alongside it is not", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+    const { store, corpusService, taskWorkflowService } = makeServices();
     await createRootPrd(corpusService);
     const plainAdhoc = await corpusService.create({
       type: "task",
@@ -600,8 +600,16 @@ describe("AC-069-7: readyAdhoc() lists OPEN ad-hoc tasks corpus-wide", () => {
     const issueReportAdhoc = await corpusService.create({
       type: "task",
       title: "Foreign issue report",
+      extra: { adhoc: true },
+    } as CreateDocInput);
+    expect(plainAdhoc.ok && issueReportAdhoc.ok).toBe(true);
+    if (!plainAdhoc.ok || !issueReportAdhoc.ok) return;
+    // reason: CorpusService refuses extra.issue_report on every write now (spec-github-owns-issue-report-state-
+    // no-mirror-task-work-carries D1), but an unmigrated corpus still holds the shape, and readyAdhoc still
+    // gates on it until `lore issues migrate --apply` runs — so the legacy row is stamped at the store.
+    const stamped = await store.update(issueReportAdhoc.value.id, {
       extra: {
-        adhoc: true,
+        ...issueReportAdhoc.value.extra,
         issue_report: {
           reporter_project: "consumer-corpus",
           reporter_actor: "agent:someone",
@@ -611,9 +619,8 @@ describe("AC-069-7: readyAdhoc() lists OPEN ad-hoc tasks corpus-wide", () => {
           reported_at: "2026-01-01T00:00:00.000Z",
         },
       },
-    } as CreateDocInput);
-    expect(plainAdhoc.ok && issueReportAdhoc.ok).toBe(true);
-    if (!plainAdhoc.ok || !issueReportAdhoc.ok) return;
+    });
+    expect(stamped.ok).toBe(true);
     expect(plainAdhoc.value.status).toBe("draft");
     expect(issueReportAdhoc.value.status).toBe("draft");
 

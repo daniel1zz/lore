@@ -22,7 +22,8 @@ import { selectPlanMilestoneDecisions } from "../../../src/service/milestone-rev
 import { buildMilestoneReviewPrompt } from "../../../src/ai/milestone-review-template.js";
 import type { DecisionLogRow } from "../../../src/store/decision-log.js";
 
-const plan = { id: "P1", version: 3 };
+// reason: the stored plan also carries a `version` that every write bumps; the fingerprint must not read it.
+const plan = { id: "P1", title: "Plan one", content: "Body.", version: 3, extra: {} as Record<string, unknown> };
 const task = (id: string, version: number, landing?: { at: string; commit: string }) => ({
   id,
   version,
@@ -64,15 +65,34 @@ function reviewDoc(slug: string, createdAt: string, review: Partial<MilestoneRev
 }
 
 describe("planStateFingerprint", () => {
-  it("HAPPY: names the plan version, every task id@version sorted by id, and the landed commit", () => {
+  it("HAPPY: names the plan content, every task id@version sorted by id, and the landed commit", () => {
     expect(planStateFingerprint(plan, [task("T2", 1), task("T1", 2)], undefined)).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("STATE: a plan edit, a task edit and a newer landing each move the fingerprint", () => {
     const base = planStateFingerprint(plan, [task("T1", 2)], undefined);
-    expect(planStateFingerprint({ id: "P1", version: 4 }, [task("T1", 2)], undefined)).not.toBe(base);
+    expect(planStateFingerprint({ ...plan, content: "Edited body." }, [task("T1", 2)], undefined)).not.toBe(base);
     expect(planStateFingerprint(plan, [task("T1", 3)], undefined)).not.toBe(base);
     expect(planStateFingerprint(plan, [task("T1", 2, { at: "2026-10-01T00:00:00Z", commit: "abc" })], undefined)).not.toBe(base);
+  });
+
+  it("STATE: bookkeeping writes to the plan (known defects, progress) leave the fingerprint unchanged; a body edit, a title edit and a new phase change it", () => {
+    const tasks = [task("T1", 2)];
+    const base = planStateFingerprint(plan, tasks, undefined);
+    const entry = { repo_id: 7, number: 50, dimension: "regression", fingerprint: "f".repeat(64) };
+    // recording a known defect and a progress update: the extra keys that are bookkeeping, not reviewed state
+    const bookkept = { ...plan, version: 4, extra: { known_defects: [entry], progress: { state: "complete", open: 0, total: 1, at: "2026-10-01T00:00:00.000Z" } } };
+    expect(planStateFingerprint(bookkept, tasks, undefined)).toBe(base);
+    const second = { ...bookkept, extra: { ...bookkept.extra, known_defects: [entry, { ...entry, number: 51 }] }, version: 5 };
+    expect(planStateFingerprint(second, tasks, undefined)).toBe(base);
+    // reviewed state: body, title, phases
+    expect(planStateFingerprint({ ...plan, content: "Edited body." }, tasks, undefined)).not.toBe(base);
+    expect(planStateFingerprint({ ...plan, title: "Renamed" }, tasks, undefined)).not.toBe(base);
+    const withPhase = { ...plan, extra: { phases: [{ name: "p1" }] } };
+    expect(planStateFingerprint(withPhase, tasks, undefined)).not.toBe(base);
+    expect(planStateFingerprint({ ...plan, extra: { phases: [{ name: "p1" }, { name: "p2" }] } }, tasks, undefined)).not.toBe(planStateFingerprint(withPhase, tasks, undefined));
+    // key order inside stored phase data never matters
+    expect(planStateFingerprint({ ...plan, extra: { phases: [{ b: 2, a: 1 }] } }, tasks, undefined)).toBe(planStateFingerprint({ ...plan, extra: { phases: [{ a: 1, b: 2 }] } }, tasks, undefined));
   });
 
   it("STATE: the commit that last landed one of the tasks wins, by recorded_at", () => {

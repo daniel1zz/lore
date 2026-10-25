@@ -1,70 +1,27 @@
 // @spawns dist/lore
 /**
- * @spec_ref spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-1/2/8/10/12
- * @task task-skill-implement-the-read-surface-reaches-github-and-never
- * @task task-skill-implement-the-six-read-flags-work-on-the-github-path
+ * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries
+ * @task task-skill-refactor-gs-t5-lore-issues-live-only-push-only-sync
  *
- * The read surface reaches GitHub and never writes: `lore issues` against a
- * GitHub-configured `feedback.upstream` used to exit 4 (a hard refusal,
- * "reading it via 'lore issues' is not yet supported"). This file is the
- * oracle for the read path that replaces that refusal —
- * `report-issue-wiring.ts::resolveGithubJoinedRows` (read + join) rendered
- * by `commands/issues.ts::runGithubIssuesListing` — proving it (AC-GR-1)
- * reaches the real GitHub shape at all, (AC-GR-2) renders an un-ingested row
- * distinguishably from a computed resolution, (AC-GR-10) never unions in
- * the corpus's local-only pre-GitHub reports, (AC-GR-12) never writes, and
- * (AC-GR-8, added by `task-skill-implement-the-six-read-flags-work-on-the-
- * github-path` after a SECOND exit-4 refusal was found for
- * `--open`/`--resolved`/`--all`/`--severity`/`--category`/`--verify`
- * specifically) that all six read flags actually filter, not just exit 0.
+ * The live read surface: `lore issues` against a GitHub-configured `feedback.upstream` reads the complete live
+ * listing, joins it with the CARRIERS (work naming an issue in `extra.issues`) into one derived status per issue,
+ * renders every flag, and never writes. Moved here from the mirror model (`not_ingested` rows, the local-only
+ * boundary note, `--verify`, `extra.issue_report` seeds): those subjects are retired with the mirror task; an
+ * issue without a carrier is now simply `open`.
  *
- * ── A service-layer test may NOT stand in for this (spec's own rule,
- *    mirrored from `github-defect-claim-lifecycle.bun.test.ts`) ──
- * This file spawns the COMPILED `dist/lore` binary (never `bun run
- * src/index.ts`) for every real assertion, asserting real process exit
- * codes and real stdout — the live counter-example the governing spec
- * names is a unit test staying green while the wired CLI command exits 4 on
- * the identical config.
+ * Every assertion spawns the COMPILED `dist/lore` (never `bun run src/index.ts`) and reads real exit codes and
+ * stdout against a payload-serving `gh` stub (`payloadGhStubDir`), never the network. Corpora are throwaway
+ * (`mkdtemp`), opened through `createApp` so carrier plans can be written through the service without a
+ * `lore init` spawn; carriers that must be ARCHIVED go through a bare ungated CorpusService.
  *
- * ── Payload-serving `gh` stub, never the real network ──
- * `payloadGhStubDir` (`tests/integration/helpers/payload-gh-stub.ts`) serves
- * the exact `gh api` responses `GitHubIntakePort.verifyTarget`/`.listIssues`
- * need — `healthyGhStubDir()` is deliberately NOT used (its empty stdout
- * would make every `JSON.parse` inside `GitHubIntakePort` fail with a FALSE
- * `VALIDATION_ERROR` that looks like a real defect in this task's code).
- *
- * ── Throwaway corpus only, seeded WITHOUT a `lore init` CLI spawn ──
- * Each describe block builds its own `mkdtempSync` corpus and opens it
- * directly via `createApp(dbPath)` (SQLiteStore auto-runs its migrations on
- * a fresh file — mirrors `issue-migration.bun.test.ts`'s seeding idiom) so
- * an "already-ingested" or "local-only pre-GitHub" fixture task can be
- * written straight through `corpusService.create` without a live
- * `report-issue` filing round-trip (which the current, still-retired local
- * write path cannot produce any more — see `report-issue.ts`'s own header).
- * Never this repo's own `.lore/` — every corpus lives under `os.tmpdir()`.
- *
- * ── Naming note (dispatch bundle's own warning) ──
- * `bun test -t` matches as a SUBSTRING: `-t 'AC-GR-1'` ALSO selects the
- * `describe` below titled `AC-GR-10: …`. Both must pass for AC-GR-1's own
- * oracle command to exit 0 — this file's scenarios are independent
- * fixtures precisely so that is never a problem in practice. `AC-GR-8` is
- * NOT a substring of `AC-GR-1`/`AC-GR-2`/`AC-GR-10`/`AC-GR-12` (checked
- * before adding it) so `-t 'AC-GR-8'` selects only its own describe below.
- *
- * Six-dimension coverage note: AC-GR-1/2/10/12's own scope is exactly those
- * four HAPPY paths (declared read-surface properties). `fileGithubIssue`'s
- * own error taxonomy (NEGATIVE/ERROR/STATE) is covered by
- * `tests/unit/service/github-filing-split-write.test.ts` and
- * `github-defect-claim-lifecycle.bun.test.ts` (AC-GR-9); duplicating them
- * here would blur which file is the oracle for which AC. AC-GR-8's OWN
- * scope (below) is wider — HAPPY (all six flags exit 0), NEGATIVE/BOUNDARY
- * (`--open`/`--resolved` are disjoint and non-empty, not silently ignored),
- * MANDATORY (`--severity` narrows a strict subset), and STATE (`--verify`
- * renders `data.clean` correctly against an agreeing fixture) — because it
- * is the oracle for a flag actually FILTERING, not merely accepting the
- * flag and exiting 0. REGRESSION for this read path is this file's own
- * re-run after any future change to
- * `resolveGithubJoinedRows`/`runGithubIssuesListing`/`runGithubVerify`.
+ * Six-dimension note:
+ *   HAPPY       three listed issues, no carriers: exit 0, three rows, all `open`, source github.
+ *   NEGATIVE    `--open` and `--resolved` return disjoint, non-empty row sets (a flag that is ignored fails).
+ *   BOUNDARY    `--severity` selects a strict non-empty subset of `--all` and `total` is the filtered count.
+ *   STATE       open+live carrier -> adopted; open+archived carrier -> fixed (close pending); closed+archived
+ *               carrier -> fixed; closed with no carrier -> closed (unverified).
+ *   ERROR       `--local`/`--verify` are unknown switches: exit 2.
+ *   REGRESSION  a real run leaves the document count and the PRD's version-log count byte-equal.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -73,12 +30,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { ISSUE_RESOLUTION_MEMBERS } from "@lore/core";
+import { assembleIssueBody, type CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
-import { resolutionToLabel } from "../../../src/service/resolution-projector.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } from "../helpers/payload-gh-stub";
-import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { actedStore, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
@@ -89,12 +49,8 @@ const TMP_ROOT = tmpdir();
 
 /** Fake, never-dialed repo string — `gh` is fully stubbed, so this never touches the network. */
 const FAKE_REPO = "acme-test/read-surface-defect-channel";
-/** D5's rename-proof join key — the stub's `gh api repos/<repo>` response. */
+/** The join key's first half: the stub's `gh api repos/<repo>` response. */
 const STUB_REPO_ID = 727_384_951;
-
-/** AC-GR-10's PINNED literal — must appear character-for-character in this listing's output. */
-const GITHUB_LISTING_LOCAL_BOUNDARY_NOTE =
-  "pre-GitHub local-only reports are not listed here (see 'lore issues --local')";
 
 interface RunResult {
   readonly stdout: string;
@@ -102,15 +58,25 @@ interface RunResult {
   readonly exitCode: number;
 }
 
+interface ListedRow {
+  readonly number: number;
+  readonly state: string;
+  readonly status: string;
+  readonly carriers: readonly string[];
+  readonly severity?: string;
+  readonly category?: string;
+}
+
+interface ListPayload {
+  readonly source: string;
+  readonly total: number;
+  readonly reports: readonly ListedRow[];
+}
+
 let isolatedConfigHome: string;
 
 /** Synchronous `dist/lore <args>` spawn against a specific throwaway corpus + gh stub. */
-function run(
-  args: string[],
-  corpusRoot: string,
-  ghStubDir: string,
-  envOverrides: Record<string, string> = {},
-): RunResult {
+function run(args: string[], corpusRoot: string, ghStubDir: string): RunResult {
   const proc = Bun.spawnSync([DIST_LORE, ...args], {
     cwd: corpusRoot,
     env: {
@@ -118,231 +84,105 @@ function run(
       CLAUDECODE: "1",
       LORE_CONFIG_HOME: isolatedConfigHome,
       PATH: ghStubDir,
-      LORE_ACTOR: "agent:ac-gr-read-surface-e2e",
-      ...envOverrides,
+      LORE_ACTOR: "agent:gs-t5-read-surface-e2e",
     },
   });
-  return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
-  };
+  return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
+}
+
+function listed(args: string[], corpusRoot: string, ghStubDir: string): ListPayload {
+  const result = run(args, corpusRoot, ghStubDir);
+  expect(result.exitCode, `'${args.join(" ")}' — stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+  return (JSON.parse(result.stdout) as { data: ListPayload }).data;
 }
 
 /**
- * Builds a throwaway `.lore/lore.db` directly via `createApp` — no `lore
- * init` CLI spawn needed (SQLiteStore auto-migrates a fresh file, mirrors
- * `issue-migration.bun.test.ts`'s seeding idiom). The caller MUST close the
- * returned `App` before spawning `dist/lore` against the same file.
+ * Builds a throwaway `.lore/lore.db` directly via `createApp` (SQLiteStore auto-migrates a fresh file) and writes
+ * the `project:` + `feedback.upstream.repo` config `lore init` would. The caller MUST close the returned `App`
+ * before spawning `dist/lore` against the same file.
  */
 function makeThrowawayCorpus(prefix: string): { app: App; corpusRoot: string } {
-  const corpusRoot = mkdtempSync(join(TMP_ROOT, `lore-gr-read-${prefix}-`));
+  const corpusRoot = mkdtempSync(join(TMP_ROOT, `lore-gs-read-${prefix}-`));
   const loreDir = join(corpusRoot, ".lore");
   mkdirSync(loreDir, { recursive: true });
+  // reason: LoreConfigSchema requires a top-level `project:` (no defaults); omitting it makes the config parse fail and
+  // `feedback.upstream` read back as UNCONFIGURED with no error surfaced — a false red this block avoids.
+  patchLoreConfig(
+    corpusRoot,
+    ["project:", "  name: lore-gs-read-surface-fixture", "  author: lore-gs-read-surface-fixture", "feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"),
+  );
   const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   return { app, corpusRoot };
 }
 
-/**
- * Writes a `feedback.upstream.repo: <repo>` config into the corpus's own
- * `.lore/config.yaml` — `LoreConfigSchema` requires a top-level `project:
- * {name, author}` section (`.strict()`, no defaults), which `lore init`
- * normally writes; since this file bypasses `lore init` entirely (see
- * `makeThrowawayCorpus`'s own header), this function writes it directly.
- * MEASURED: omitting it makes `loadConfigFromString` return
- * `VALIDATION_ERROR` ("project: Required"), which `loadLoreApp()` then
- * silently treats as "config: undefined" — `feedback.upstream` reads back
- * as unconfigured with NO error surfaced anywhere, a false green this
- * function exists to avoid re-discovering.
- */
-function writeGithubUpstreamConfig(corpusRoot: string, repo: string): void {
-  patchLoreConfig(
-    corpusRoot,
-    [
-      "project:",
-      "  name: lore-gr-read-surface-fixture",
-      "  author: lore-gr-read-surface-fixture",
-      "feedback:",
-      "  upstream:",
-      `    repo: ${repo}`,
-      "",
-    ].join("\n"),
-  );
+/** A bare, ungated CorpusService over the corpus file, for seeding carriers (the caller closes the store). */
+function bareService(corpusRoot: string): { cs: CorpusService; close: () => void } {
+  const store = actedStore(new SQLiteStore(join(corpusRoot, ".lore", "lore.db")));
+  return { cs: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), close: () => store.close() };
 }
 
-/**
- * Seeds one "already-ingested" issue-report task carrying a GitHub pointer
- * (`extra.issue_report.github`, the shape `readGithubIssueRef`/`joinListing`
- * key on) — built directly via `corpusService.create` rather than a live
- * `report-issue` filing round-trip, mirroring `issue-migration.bun.test.ts`'s
- * seeding idiom for "already exists in the corpus" fixtures.
- *
- * @returns the created task's slug (unused by every current AC here, kept
- *   for a future assertion that might want it)
- */
-async function seedIngestedIssueTask(app: App, planId: string, issueNumber: number, repoId: number): Promise<string> {
-  const created = await app.corpusService.create({
-    type: "task",
-    title: `[issue-report] AC-GR-2 fixture #${issueNumber}`,
-    content:
-      "Synthetic already-ingested fixture for AC-GR-2. Expected: fixture behaves as specified. Actual: fixture behaves as specified.",
-    parent_id: planId,
-    extra: {
-      plan_id: planId,
-      issue_report: {
-        severity: "medium",
-        category: "regression",
-        tags: ["e2e"],
-        reporter_corpus: "lore-gr-read-surface-fixture",
-        reporter_root_prd: "prd-lore-gr-read-surface-fixture-root",
-        expected: "fixture behaves as specified",
-        actual: "fixture behaves as specified",
-        github: { repo: FAKE_REPO, number: issueNumber, repo_id: repoId },
-      },
-    },
-  });
-  if (!created.ok) {
-    throw new Error(`fixture ingested-task creation failed: ${JSON.stringify(created.error)}`);
+/** Seeds a PLAN carrier naming `number`, optionally walked to `archived`. Returns its slug. */
+async function seedPlanCarrier(corpusRoot: string, title: string, number: number, archived: boolean): Promise<string> {
+  const { cs, close } = bareService(corpusRoot);
+  try {
+    const created = await cs.create({
+      type: "plan",
+      title,
+      content: "## Overview\n\nCarrier body.",
+      extra: { issues: [{ repo_id: STUB_REPO_ID, number }] },
+    } as CreateDocInput);
+    if (!created.ok) throw new Error(`carrier create failed: ${JSON.stringify(created.error)}`);
+    if (archived) {
+      for (const status of ["approved", "active", "archived"] as const) {
+        const moved = await cs.set(created.value.id, { status });
+        if (!moved.ok) throw new Error(`carrier -> ${status} failed: ${JSON.stringify(moved.error)}`);
+      }
+    }
+    return created.value.slug;
+  } finally {
+    close();
   }
-  return created.value.slug;
 }
 
-/**
- * AC-GR-8's fixture: seeds one "already-ingested" issue-report task with a
- * CALLER-CHOSEN severity/category and an OPTIONAL explicit terminal
- * resolution state (`extra.issue_report.resolution.state`,
- * `computeIssueResolution`'s Rule 1) — unlike {@link seedIngestedIssueTask},
- * whose severity/category/resolution are fixed, this lets one test build
- * two rows that land on OPPOSITE sides of `--open`/`--resolved` and on
- * different sides of a `--severity`/`--category` filter.
- *
- * @returns the created task's slug
- */
-async function seedTriagedIngestedIssueTask(
-  app: App,
-  planId: string,
-  issueNumber: number,
-  repoId: number,
-  opts: { readonly severity: string; readonly category: string; readonly resolutionState?: string },
-): Promise<string> {
-  const created = await app.corpusService.create({
-    type: "task",
-    title: `[issue-report] AC-GR-8 fixture #${issueNumber}`,
-    content:
-      "Synthetic already-ingested fixture for AC-GR-8. Expected: fixture behaves as specified. Actual: fixture behaves as specified.",
-    parent_id: planId,
-    extra: {
-      plan_id: planId,
-      issue_report: {
-        severity: opts.severity,
-        category: opts.category,
-        tags: ["e2e"],
-        reporter_corpus: "lore-gr-read-surface-fixture",
-        reporter_root_prd: "prd-lore-gr-read-surface-fixture-root",
-        expected: "fixture behaves as specified",
-        actual: "fixture behaves as specified",
-        github: { repo: FAKE_REPO, number: issueNumber, repo_id: repoId },
-        ...(opts.resolutionState !== undefined ? { resolution: { state: opts.resolutionState } } : {}),
-      },
-    },
-  });
-  if (!created.ok) {
-    throw new Error(`fixture triaged ingested-task creation failed: ${JSON.stringify(created.error)}`);
-  }
-  return created.value.slug;
+/** `lore list --json`'s document count and `lore log <slug> --json`'s version-row count. */
+function countDocuments(corpusRoot: string, ghStubDir: string): number {
+  const result = run(["list", "--json"], corpusRoot, ghStubDir);
+  if (result.exitCode !== 0) throw new Error(`'lore list --json' failed (exit ${result.exitCode}): ${result.stderr}`);
+  const data = (JSON.parse(result.stdout) as { data: unknown }).data as { docs?: unknown[]; documents?: unknown[] } | unknown[];
+  return Array.isArray(data) ? data.length : (data.docs ?? data.documents ?? []).length;
 }
 
-/**
- * Seeds one "local-only pre-GitHub" issue-report task — carries
- * `extra.issue_report` but NO `github` pointer, exactly the shape
- * `readGithubIssueRef` returns `undefined` for (a report filed before this
- * spec's GitHub intake existed). AC-GR-10's fixture: this task must NEVER
- * appear in a GitHub-shaped `lore issues` listing.
- */
-async function seedLocalOnlyIssueTask(app: App, planId: string): Promise<string> {
-  const created = await app.corpusService.create({
-    type: "task",
-    title: "[issue-report] AC-GR-10 local-only fixture",
-    content:
-      "Synthetic pre-GitHub local-only fixture for AC-GR-10. Expected: fixture behaves as specified. Actual: fixture behaves as specified.",
-    parent_id: planId,
-    extra: {
-      plan_id: planId,
-      issue_report: {
-        severity: "low",
-        category: "docs",
-        tags: [],
-        reporter_corpus: "lore-gr-read-surface-fixture",
-        reporter_root_prd: "prd-lore-gr-read-surface-fixture-root",
-        expected: "fixture behaves as specified",
-        actual: "fixture behaves as specified",
-      },
-    },
-  });
-  if (!created.ok) {
-    throw new Error(`fixture local-only task creation failed: ${JSON.stringify(created.error)}`);
-  }
-  return created.value.slug;
-}
-
-/** Builds three `PayloadGhStubIssue`s from three distinct numbers — the shape `listIssues()` returns. */
-function threeStubIssues(numbers: readonly [number, number, number]): PayloadGhStubIssue[] {
-  return numbers.map((n) => ({ number: n, title: `Fixture issue #${n}`, state: "open" as const, body: "" }));
-}
-
-/** `lore issues --local --all --json`'s `.data.total` — the count of corpus tasks carrying `extra.issue_report` (AC-GR-12's own measured shape). */
-function getIssueTaskCount(corpusRoot: string, ghStubDir: string): number {
-  const result = run(["issues", "--local", "--all", "--json"], corpusRoot, ghStubDir);
-  if (result.exitCode !== 0) {
-    throw new Error(`'lore issues --local --all --json' failed (exit ${result.exitCode}): ${result.stderr}`);
-  }
-  const parsed = JSON.parse(result.stdout) as { data: { total: number } };
-  return parsed.data.total;
-}
-
-/** `lore log <slug> --json`'s `.data.total` — the target doc's version-log row count (AC-GR-12's own measured shape). */
-function getVersionLogCount(corpusRoot: string, ghStubDir: string, slug: string): number {
+function countVersions(corpusRoot: string, ghStubDir: string, slug: string): number {
   const result = run(["log", slug, "--json"], corpusRoot, ghStubDir);
-  if (result.exitCode !== 0) {
-    throw new Error(`'lore log ${slug} --json' failed (exit ${result.exitCode}): ${result.stderr}`);
-  }
-  const parsed = JSON.parse(result.stdout) as { data: { total: number } };
-  return parsed.data.total;
+  if (result.exitCode !== 0) throw new Error(`'lore log ${slug} --json' failed (exit ${result.exitCode}): ${result.stderr}`);
+  return (JSON.parse(result.stdout) as { data: { total: number } }).data.total;
 }
+
+const stubIssues = (numbers: readonly number[]): PayloadGhStubIssue[] =>
+  numbers.map((n) => ({ number: n, title: `Fixture issue #${n}`, state: "open" as const, body: "" }));
+
+const stubDirFor = (issues: readonly PayloadGhStubIssue[]): string =>
+  payloadGhStubDir({ repoId: STUB_REPO_ID, existingIssues: [...issues], createdNumber: 1, createdUrl: "https://example.invalid/never-created" });
 
 beforeAll(() => {
   // dist/lore is built ONCE per run by the runner (scripts/test-global-setup.ts); a test never rebuilds it (TG-24).
-  assertFreshBinary(DIST_LORE, [
-    join(WORKTREE_ROOT, "packages", "lore", "src"),
-    join(WORKTREE_ROOT, "packages", "core", "src"),
-  ]);
-  isolatedConfigHome = mkdtempSync(join(TMP_ROOT, "lore-gr-read-config-home-"));
+  assertFreshBinary(DIST_LORE, [join(WORKTREE_ROOT, "packages", "lore", "src"), join(WORKTREE_ROOT, "packages", "core", "src")]);
+  isolatedConfigHome = mkdtempSync(join(TMP_ROOT, "lore-gs-read-config-home-"));
 }, 180_000);
 
 afterAll(() => {
-  try {
-    rmSync(isolatedConfigHome, { recursive: true, force: true });
-  } catch {
-    // reason: best-effort cleanup only, mirrors every other scratch-dir cleanup in this suite family.
-  }
+  rmSync(isolatedConfigHome, { recursive: true, force: true });
 });
 
-describe("AC-GR-1: lore issues reaches the GitHub shape", () => {
+describe("lore issues reaches the GitHub shape", () => {
   let corpusRoot: string;
   let ghStubDir: string;
 
   beforeAll(() => {
-    const built = makeThrowawayCorpus("ac-gr-1");
+    const built = makeThrowawayCorpus("shape");
     corpusRoot = built.corpusRoot;
     built.app.close();
-
-    writeGithubUpstreamConfig(corpusRoot, FAKE_REPO);
-    ghStubDir = payloadGhStubDir({
-      repoId: STUB_REPO_ID,
-      existingIssues: threeStubIssues([61_001, 61_002, 61_003]),
-      createdNumber: 1,
-      createdUrl: "https://example.invalid/never-created",
-    });
+    ghStubDir = stubDirFor(stubIssues([61_001, 61_002, 61_003]));
   });
 
   afterAll(() => {
@@ -350,43 +190,46 @@ describe("AC-GR-1: lore issues reaches the GitHub shape", () => {
     rmSync(corpusRoot, { recursive: true, force: true });
   });
 
-  it(
-    "AC-GR-1 HAPPY: real dist/lore issues exits 0 and prints exactly 3 rows against a 3-issue gh stub",
-    () => {
-      const result = run(["issues", "--json"], corpusRoot, ghStubDir);
-      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+  it("HAPPY: real dist/lore issues exits 0 and prints exactly 3 rows, each open (no work names them), against a 3-issue stub", () => {
+    const data = listed(["issues", "--json"], corpusRoot, ghStubDir);
+    expect(data.source).toBe("github");
+    expect(data.total).toBe(3);
+    expect(data.reports.map((r) => r.status)).toEqual(["open", "open", "open"]);
+    expect(data.reports.every((r) => r.carriers.length === 0)).toBe(true);
+  }, 60_000);
 
-      const parsed = JSON.parse(result.stdout) as {
-        data: { total: number; reports: unknown[]; source: string };
-      };
-      expect(parsed.data.source).toBe("github");
-      expect(parsed.data.total).toBe(3);
-      expect(parsed.data.reports.length).toBe(3);
-    },
-    60_000,
-  );
+  it("ERROR: --local and --verify are unknown switches (exit 2)", () => {
+    for (const flag of ["--local", "--verify"]) {
+      const result = run(["issues", flag], corpusRoot, ghStubDir);
+      expect(result.exitCode, `${flag}: ${result.stderr}`).toBe(2);
+    }
+  }, 60_000);
 });
 
-describe("AC-GR-2: not_ingested renders distinguishably from open", () => {
-  const INGESTED_NUMBER = 62_001;
+describe("an issue's status joins the live listing with its carriers", () => {
+  const ADOPTED = 62_001;
+  const PENDING = 62_002;
+  const FIXED = 62_003;
+  const UNVERIFIED = 62_004;
+  const BARE = 62_005;
   let corpusRoot: string;
   let ghStubDir: string;
+  const carrierSlugs: Record<number, string> = {};
 
   beforeAll(async () => {
-    const built = makeThrowawayCorpus("ac-gr-2");
+    const built = makeThrowawayCorpus("status");
     corpusRoot = built.corpusRoot;
-    const plan = await built.app.corpusService.create({ type: "plan", title: "AC-GR-2 fixture plan" });
-    if (!plan.ok) throw new Error(`fixture plan creation failed: ${JSON.stringify(plan.error)}`);
-    await seedIngestedIssueTask(built.app, plan.value.id, INGESTED_NUMBER, STUB_REPO_ID);
     built.app.close();
-
-    writeGithubUpstreamConfig(corpusRoot, FAKE_REPO);
-    ghStubDir = payloadGhStubDir({
-      repoId: STUB_REPO_ID,
-      existingIssues: threeStubIssues([INGESTED_NUMBER, 62_002, 62_003]),
-      createdNumber: 1,
-      createdUrl: "https://example.invalid/never-created",
-    });
+    carrierSlugs[ADOPTED] = await seedPlanCarrier(corpusRoot, "Live carrier", ADOPTED, false);
+    carrierSlugs[PENDING] = await seedPlanCarrier(corpusRoot, "Archived carrier of an open issue", PENDING, true);
+    carrierSlugs[FIXED] = await seedPlanCarrier(corpusRoot, "Archived carrier of a closed issue", FIXED, true);
+    ghStubDir = stubDirFor([
+      { number: ADOPTED, title: "adopted probe", state: "open", body: "" },
+      { number: PENDING, title: "pending probe", state: "open", body: "" },
+      { number: FIXED, title: "fixed probe", state: "closed", body: "" },
+      { number: UNVERIFIED, title: "unverified probe", state: "closed", body: "" },
+      { number: BARE, title: "bare probe", state: "open", body: "" },
+    ]);
   });
 
   afterAll(() => {
@@ -394,106 +237,34 @@ describe("AC-GR-2: not_ingested renders distinguishably from open", () => {
     rmSync(corpusRoot, { recursive: true, force: true });
   });
 
-  it(
-    "AC-GR-2 HAPPY: the ingested row prints its computed resolution, the other two print not_ingested — never the same token",
-    () => {
-      const result = run(["issues", "--json"], corpusRoot, ghStubDir);
-      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-
-      const parsed = JSON.parse(result.stdout) as {
-        data: { total: number; reports: Array<{ number: number; resolution: string }> };
-      };
-      expect(parsed.data.total).toBe(3);
-
-      const ingestedRow = parsed.data.reports.find((r) => r.number === INGESTED_NUMBER);
-      if (ingestedRow === undefined) {
-        throw new Error(`no row rendered for issue #${INGESTED_NUMBER} — reports: ${JSON.stringify(parsed.data.reports)}`);
-      }
-      // A real 9-state computed resolution — a fresh, unresolved task computes "open".
-      expect(ingestedRow.resolution).toBe("open");
-      expect(ISSUE_RESOLUTION_MEMBERS as readonly string[]).toContain(ingestedRow.resolution);
-
-      const notIngestedRows = parsed.data.reports.filter((r) => r.number !== INGESTED_NUMBER);
-      expect(notIngestedRows.length).toBe(2);
-      for (const row of notIngestedRows) {
-        expect(row.resolution).toBe("not_ingested");
-        // The discriminating assertion: "not_ingested" is NOT a member of the 9-state vocabulary.
-        expect(ISSUE_RESOLUTION_MEMBERS as readonly string[]).not.toContain(row.resolution);
-      }
-      expect(ingestedRow.resolution).not.toBe(notIngestedRows[0]?.resolution);
-    },
-    60_000,
-  );
+  it("STATE: each row's status follows GitHub state x carriers, and names the carriers that produced it", () => {
+    const data = listed(["issues", "--all", "--json"], corpusRoot, ghStubDir);
+    const byNumber = new Map(data.reports.map((r) => [r.number, r]));
+    expect(byNumber.get(ADOPTED)).toMatchObject({ status: "adopted", carriers: [carrierSlugs[ADOPTED]] });
+    expect(byNumber.get(PENDING)).toMatchObject({ status: "fixed (close pending)", carriers: [carrierSlugs[PENDING]] });
+    expect(byNumber.get(FIXED)).toMatchObject({ status: "fixed", carriers: [carrierSlugs[FIXED]] });
+    expect(byNumber.get(UNVERIFIED)).toMatchObject({ status: "closed (unverified)", carriers: [] });
+    expect(byNumber.get(BARE)).toMatchObject({ status: "open", carriers: [] });
+  }, 60_000);
 });
 
-describe("AC-GR-10: the GitHub listing excludes local-only reports and says so", () => {
-  let corpusRoot: string;
-  let ghStubDir: string;
-
-  beforeAll(async () => {
-    const built = makeThrowawayCorpus("ac-gr-10");
-    corpusRoot = built.corpusRoot;
-    const plan = await built.app.corpusService.create({ type: "plan", title: "AC-GR-10 fixture plan" });
-    if (!plan.ok) throw new Error(`fixture plan creation failed: ${JSON.stringify(plan.error)}`);
-    await seedLocalOnlyIssueTask(built.app, plan.value.id);
-    built.app.close();
-
-    writeGithubUpstreamConfig(corpusRoot, FAKE_REPO);
-    ghStubDir = payloadGhStubDir({
-      repoId: STUB_REPO_ID,
-      existingIssues: threeStubIssues([63_001, 63_002, 63_003]),
-      createdNumber: 1,
-      createdUrl: "https://example.invalid/never-created",
-    });
-  });
-
-  afterAll(() => {
-    cleanupPayloadGhStubDir(ghStubDir);
-    rmSync(corpusRoot, { recursive: true, force: true });
-  });
-
-  it(
-    "AC-GR-10 HAPPY: exactly 3 GitHub rows, the local-only report is excluded, and the boundary literal appears verbatim",
-    () => {
-      const result = run(["issues", "--json"], corpusRoot, ghStubDir);
-      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-      expect(result.stdout).toContain(GITHUB_LISTING_LOCAL_BOUNDARY_NOTE);
-
-      const parsed = JSON.parse(result.stdout) as { data: { total: number; reports: unknown[] } };
-      // Would be 4 if the local-only pre-GitHub report were ever unioned in — this is the
-      // discriminating assertion the AC's own falsifier names ("union the two sources and the
-      // row count exceeds 3").
-      expect(parsed.data.total).toBe(3);
-      expect(parsed.data.reports.length).toBe(3);
-    },
-    60_000,
-  );
-});
-
-describe("AC-GR-12: lore issues mutates nothing", () => {
+describe("lore issues mutates nothing", () => {
   let corpusRoot: string;
   let ghStubDir: string;
   let prdSlug: string;
 
   beforeAll(async () => {
-    const built = makeThrowawayCorpus("ac-gr-12");
+    const built = makeThrowawayCorpus("readonly");
     corpusRoot = built.corpusRoot;
     const prd = await built.app.corpusService.create({
       type: "prd",
-      title: "AC-GR-12 fixture root PRD",
-      content: "Throwaway root PRD whose version log this AC checks for a byte-equal count before/after a real read.",
+      title: "read-only fixture root PRD",
+      content: "Throwaway root PRD whose version log this test checks for a byte-equal count before/after a real read.",
     });
     if (!prd.ok) throw new Error(`fixture PRD creation failed: ${JSON.stringify(prd.error)}`);
     prdSlug = prd.value.slug;
     built.app.close();
-
-    writeGithubUpstreamConfig(corpusRoot, FAKE_REPO);
-    ghStubDir = payloadGhStubDir({
-      repoId: STUB_REPO_ID,
-      existingIssues: threeStubIssues([64_001, 64_002, 64_003]),
-      createdNumber: 1,
-      createdUrl: "https://example.invalid/never-created",
-    });
+    ghStubDir = stubDirFor(stubIssues([64_001, 64_002, 64_003]));
   });
 
   afterAll(() => {
@@ -501,88 +272,41 @@ describe("AC-GR-12: lore issues mutates nothing", () => {
     rmSync(corpusRoot, { recursive: true, force: true });
   });
 
-  it(
-    "AC-GR-12 HAPPY: the corpus task count (extra.issue_report) and the PRD's version-log count are byte-equal before and after a real run",
-    () => {
-      const taskCountBefore = getIssueTaskCount(corpusRoot, ghStubDir);
-      const versionCountBefore = getVersionLogCount(corpusRoot, ghStubDir, prdSlug);
-      expect(taskCountBefore).toBe(0); // sanity: 3 un-ingested GitHub issues, 0 corpus tasks
+  it("REGRESSION: the document count and the PRD's version-log count are byte-equal before and after a real run", () => {
+    const docsBefore = countDocuments(corpusRoot, ghStubDir);
+    const versionsBefore = countVersions(corpusRoot, ghStubDir, prdSlug);
 
-      const result = run(["issues", "--json"], corpusRoot, ghStubDir);
-      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-      const parsed = JSON.parse(result.stdout) as { data: { total: number } };
-      expect(parsed.data.total).toBe(3); // sanity: all 3 seeded issues are un-ingested
+    const data = listed(["issues", "--json"], corpusRoot, ghStubDir);
+    expect(data.total).toBe(3); // sanity: the read really listed three issues
 
-      const taskCountAfter = getIssueTaskCount(corpusRoot, ghStubDir);
-      const versionCountAfter = getVersionLogCount(corpusRoot, ghStubDir, prdSlug);
-
-      // The discriminating assertion: a read path that minted a task for even one
-      // un-ingested issue would raise taskCountAfter above taskCountBefore (the AC's own
-      // falsifier: "the task count rises from 0 to 3").
-      expect(taskCountAfter).toBe(taskCountBefore);
-      expect(taskCountAfter).toBe(0);
-      expect(versionCountAfter).toBe(versionCountBefore);
-    },
-    60_000,
-  );
+    // The discriminating assertion: a read path that minted a document for even one listed issue raises the count.
+    expect(countDocuments(corpusRoot, ghStubDir)).toBe(docsBefore);
+    expect(countVersions(corpusRoot, ghStubDir, prdSlug)).toBe(versionsBefore);
+  }, 60_000);
 });
 
-describe("AC-GR-8: all six read flags work against a GitHub-configured feedback.upstream", () => {
-  const OPEN_HIGH_NUMBER = 65_001;
-  const REJECTED_CRITICAL_NUMBER = 65_002;
+describe("the read flags filter, they are not merely accepted", () => {
+  const OPEN_HIGH = 65_001;
+  const CLOSED_CRITICAL = 65_002;
   let corpusRoot: string;
   let ghStubDir: string;
-  let openHighSlug: string;
-  let rejectedCriticalSlug: string;
+
+  const bodyWith = (severity: string, category: string, key: string): string =>
+    assembleIssueBody(
+      { severity: severity as "critical" | "high" | "medium" | "low", category, tags: [], reporter_corpus: "fixture", reporter_root_prd: "prd-fixture", idempotency_key: key },
+      "fixture description",
+    );
 
   beforeAll(async () => {
-    const built = makeThrowawayCorpus("ac-gr-8");
+    const built = makeThrowawayCorpus("flags");
     corpusRoot = built.corpusRoot;
-    const plan = await built.app.corpusService.create({ type: "plan", title: "AC-GR-8 fixture plan" });
-    if (!plan.ok) throw new Error(`fixture plan creation failed: ${JSON.stringify(plan.error)}`);
-
-    // Two ingested tasks on OPPOSITE sides of every filter this AC exercises:
-    // openHigh is non-terminal ("open") / severity "high" / category "regression";
-    // rejectedCritical is terminal ("rejected") / severity "critical" / category "security".
-    openHighSlug = await seedTriagedIngestedIssueTask(built.app, plan.value.id, OPEN_HIGH_NUMBER, STUB_REPO_ID, {
-      severity: "high",
-      category: "regression",
-    });
-    rejectedCriticalSlug = await seedTriagedIngestedIssueTask(
-      built.app,
-      plan.value.id,
-      REJECTED_CRITICAL_NUMBER,
-      STUB_REPO_ID,
-      { severity: "critical", category: "security", resolutionState: "rejected" },
-    );
     built.app.close();
-
-    writeGithubUpstreamConfig(corpusRoot, FAKE_REPO);
-    ghStubDir = payloadGhStubDir({
-      repoId: STUB_REPO_ID,
-      // Each stub issue's `resolution:*` label agrees with its task's own
-      // computed resolution — this fixture is `--verify`-CLEAN by
-      // construction, so exit 0 for `--verify` proves it reached the real
-      // read path rather than accidentally landing on the divergence exit.
-      existingIssues: [
-        {
-          number: OPEN_HIGH_NUMBER,
-          title: "AC-GR-8 fixture (open, high, regression)",
-          state: "open",
-          body: "",
-          labels: [resolutionToLabel("open")],
-        },
-        {
-          number: REJECTED_CRITICAL_NUMBER,
-          title: "AC-GR-8 fixture (rejected, critical, security)",
-          state: "closed",
-          body: "",
-          labels: [resolutionToLabel("rejected")],
-        },
-      ],
-      createdNumber: 1,
-      createdUrl: "https://example.invalid/never-created",
-    });
+    await seedPlanCarrier(corpusRoot, "Carrier of the open one", OPEN_HIGH, false);
+    // Two issues on OPPOSITE sides of every filter below: unfinished/high/regression vs finished/critical/security.
+    ghStubDir = stubDirFor([
+      { number: OPEN_HIGH, title: "open high regression", state: "open", body: bodyWith("high", "regression", "k-65001") },
+      { number: CLOSED_CRITICAL, title: "closed critical security", state: "closed", body: bodyWith("critical", "security", "k-65002") },
+    ]);
   });
 
   afterAll(() => {
@@ -590,86 +314,42 @@ describe("AC-GR-8: all six read flags work against a GitHub-configured feedback.
     rmSync(corpusRoot, { recursive: true, force: true });
   });
 
-  it(
-    "AC-GR-8 HAPPY: --open/--resolved/--all/--severity/--category/--verify each exit 0 against a GitHub-configured upstream",
-    () => {
-      const invocations: string[][] = [
-        ["issues", "--open", "--json"],
-        ["issues", "--resolved", "--json"],
-        ["issues", "--all", "--json"],
-        ["issues", "--severity", "critical", "--json"],
-        ["issues", "--category", "security", "--json"],
-        ["issues", "--verify", "--json"],
-      ];
-      for (const args of invocations) {
-        const result = run(args, corpusRoot, ghStubDir);
-        expect(result.exitCode, `'${args.join(" ")}' — stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-      }
-    },
-    60_000,
-  );
+  it("HAPPY: --open/--resolved/--all/--severity/--category each exit 0", () => {
+    for (const args of [
+      ["issues", "--open", "--json"],
+      ["issues", "--resolved", "--json"],
+      ["issues", "--all", "--json"],
+      ["issues", "--severity", "critical", "--json"],
+      ["issues", "--category", "security", "--json"],
+    ]) {
+      const result = run(args, corpusRoot, ghStubDir);
+      expect(result.exitCode, `'${args.join(" ")}' — stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+    }
+  }, 120_000);
 
-  it(
-    "AC-GR-8 NEGATIVE/BOUNDARY: --open and --resolved return different, non-empty, disjoint row sets — not an ignored flag",
-    () => {
-      const openResult = run(["issues", "--open", "--json"], corpusRoot, ghStubDir);
-      expect(openResult.exitCode, `stdout: ${openResult.stdout}\nstderr: ${openResult.stderr}`).toBe(0);
-      const openParsed = JSON.parse(openResult.stdout) as {
-        data: { total: number; reports: Array<{ slug?: string }> };
-      };
+  it("NEGATIVE: --open and --resolved return different, non-empty, disjoint row sets", () => {
+    const open = listed(["issues", "--open", "--json"], corpusRoot, ghStubDir);
+    const resolved = listed(["issues", "--resolved", "--json"], corpusRoot, ghStubDir);
+    // Non-vacuous: both sets non-empty, so a filter that always returns [] cannot satisfy the disjointness check.
+    expect(open.total).toBeGreaterThan(0);
+    expect(resolved.total).toBeGreaterThan(0);
+    expect(open.reports.map((r) => r.number)).toEqual([OPEN_HIGH]);
+    expect(resolved.reports.map((r) => r.number)).toEqual([CLOSED_CRITICAL]);
+  }, 60_000);
 
-      const resolvedResult = run(["issues", "--resolved", "--json"], corpusRoot, ghStubDir);
-      expect(resolvedResult.exitCode, `stdout: ${resolvedResult.stdout}\nstderr: ${resolvedResult.stderr}`).toBe(0);
-      const resolvedParsed = JSON.parse(resolvedResult.stdout) as {
-        data: { total: number; reports: Array<{ slug?: string }> };
-      };
+  it("BOUNDARY: --severity selects a strict, non-empty subset of --all and total is the filtered count", () => {
+    const all = listed(["issues", "--all", "--json"], corpusRoot, ghStubDir);
+    expect(all.total).toBe(2);
+    const critical = listed(["issues", "--all", "--severity", "critical", "--json"], corpusRoot, ghStubDir);
+    expect(critical.total).toBe(1);
+    expect(critical.total).toBeLessThan(all.total);
+    expect(critical.reports[0]).toMatchObject({ number: CLOSED_CRITICAL, severity: "critical", category: "security" });
+    const category = listed(["issues", "--all", "--category", "regression", "--json"], corpusRoot, ghStubDir);
+    expect(category.reports.map((r) => r.number)).toEqual([OPEN_HIGH]);
+  }, 60_000);
 
-      // Non-vacuous: both sets must be non-empty — a filter that always
-      // returns [] would otherwise satisfy a bare "the two sets differ" check.
-      expect(openParsed.data.total).toBeGreaterThan(0);
-      expect(resolvedParsed.data.total).toBeGreaterThan(0);
-
-      const openSlugs = openParsed.data.reports.map((r) => r.slug);
-      const resolvedSlugs = resolvedParsed.data.reports.map((r) => r.slug);
-      expect(openSlugs).toContain(openHighSlug);
-      expect(openSlugs).not.toContain(rejectedCriticalSlug);
-      expect(resolvedSlugs).toContain(rejectedCriticalSlug);
-      expect(resolvedSlugs).not.toContain(openHighSlug);
-    },
-    60_000,
-  );
-
-  it(
-    "AC-GR-8 MANDATORY: --severity selects a strict, non-empty subset of --all — not an ignored flag",
-    () => {
-      const allResult = run(["issues", "--all", "--json"], corpusRoot, ghStubDir);
-      expect(allResult.exitCode, `stdout: ${allResult.stdout}\nstderr: ${allResult.stderr}`).toBe(0);
-      const allParsed = JSON.parse(allResult.stdout) as { data: { total: number } };
-      expect(allParsed.data.total).toBe(2);
-
-      const severityResult = run(["issues", "--all", "--severity", "critical", "--json"], corpusRoot, ghStubDir);
-      expect(severityResult.exitCode, `stdout: ${severityResult.stdout}\nstderr: ${severityResult.stderr}`).toBe(0);
-      const severityParsed = JSON.parse(severityResult.stdout) as {
-        data: { total: number; reports: Array<{ slug?: string; severity?: string }> };
-      };
-      // Strict, non-empty subset: fewer rows than the unfiltered --all, never zero.
-      expect(severityParsed.data.total).toBe(1);
-      expect(severityParsed.data.total).toBeLessThan(allParsed.data.total);
-      expect(severityParsed.data.reports[0]?.slug).toBe(rejectedCriticalSlug);
-      expect(severityParsed.data.reports[0]?.severity).toBe("critical");
-    },
-    60_000,
-  );
-
-  it(
-    "AC-GR-8 STATE: --verify against a matching-labels fixture is clean (data.clean true, zero divergences)",
-    () => {
-      const result = run(["issues", "--verify", "--json"], corpusRoot, ghStubDir);
-      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-      const parsed = JSON.parse(result.stdout) as { data: { clean: boolean; divergences: unknown[] } };
-      expect(parsed.data.clean).toBe(true);
-      expect(parsed.data.divergences).toHaveLength(0);
-    },
-    60_000,
-  );
+  it("ERROR: --open together with --resolved is a usage error (exit 2)", () => {
+    const result = run(["issues", "--open", "--resolved"], corpusRoot, ghStubDir);
+    expect(result.exitCode).toBe(2);
+  }, 60_000);
 });

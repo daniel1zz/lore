@@ -91,6 +91,19 @@ import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
 import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
+import {
+  convertedPlanAuditEntry,
+  convertedPlanBindings,
+  convertedPlanVersionBindings,
+  describeUnconvertible,
+  MIGRATION_038_SQL,
+  planKnownDefectConversion,
+  planWrites,
+  requireConversionActor,
+  SELECT_KNOWN_DEFECT_LINKS_SQL,
+  SELECT_PLAN_ROW_SQL,
+  type KnownDefectLinkRow,
+} from "./migrations/migration-038.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -1048,6 +1061,70 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 37) {
         // reason: migration-037 widens links.link_type to 'known-defect' and converts the batch's links (#404).
         await this.client.executeMultiple(MIGRATION_037_SQL);
+      }
+
+      if (currentVersion < 38) {
+        // reason: migration-038 converts every known-defect link into the plan's extra.known_defects and removes the link
+        // type (BR-1421), planned by the same pure function the SQLite store runs, in ONE interactive transaction.
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          step = "plan known-defect link conversion";
+          const linkRs = await tx.execute(SELECT_KNOWN_DEFECT_LINKS_SQL);
+          const rows: KnownDefectLinkRow[] = linkRs.rows.map((row) => ({
+            from_id: rowStr(row, "from_id"),
+            to_id: rowStr(row, "to_id"),
+            from_slug: rowStr(row, "from_slug"),
+            from_type: rowStr(row, "from_type"),
+            to_slug: rowStrOrNull(row, "to_slug"),
+            to_extra: rowStrOrNull(row, "to_extra"),
+            to_content: rowStrOrNull(row, "to_content"),
+          }));
+          const plan = planKnownDefectConversion(rows);
+          if (plan.unconvertible.length > 0) throw new Error(describeUnconvertible(plan.unconvertible));
+          const planRows = new Map<string, BaselineNodeRow>();
+          for (const id of new Set(plan.conversions.map((c) => c.planId))) {
+            const rs = await tx.execute({ sql: SELECT_PLAN_ROW_SQL, args: [id] });
+            const row = rs.rows[0];
+            if (row === undefined) throw new Error(`plan ${id} not found`);
+            planRows.set(id, {
+              id: rowStr(row, "id"),
+              slug: rowStr(row, "slug"),
+              title: rowStr(row, "title"),
+              content: rowStr(row, "content"),
+              status: rowStr(row, "status"),
+              extra: rowStr(row, "extra"),
+              tags: rowStr(row, "tags"),
+              version: rowNum(row, "version"),
+            });
+          }
+          for (const write of planWrites(plan, (id) => planRows.get(id)?.extra ?? "{}")) {
+            const row = planRows.get(write.planId);
+            if (row === undefined || write.addedKeys === 0) continue;
+            step = `record known defects on plan ${row.slug}`;
+            const by = requireConversionActor(this.migrationActor, row.slug);
+            const now = new Date().toISOString();
+            await tx.execute({ sql: UPDATE_CONVERTED_NODE_SQL, args: convertedPlanBindings(row, write, now) as InValue[] });
+            await tx.execute({ sql: INSERT_CONVERSION_VERSION_SQL, args: convertedPlanVersionBindings(row, write, by, now) as InValue[] });
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(convertedPlanAuditEntry(row, write, by, now), prevHash) as InValue[] });
+          }
+          step = "delete links, remove the link type, set user_version 38";
+          await tx.executeMultiple(MIGRATION_038_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(38, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
       }
     })();
 

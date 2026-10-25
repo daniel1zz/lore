@@ -140,6 +140,11 @@ case "$second" in
     done < "$dir/${ISSUES_FILE}"
     exit 0
     ;;
+  repos/*/issues/[0-9]*)
+    # one issue read back (retry recognition reads a prior filing's state, #397): a filed issue is open
+    printf '%s\\n' '{"state":"open"}'
+    exit 0
+    ;;
   repos/*)
     printf '%s\\n' ${shellSingleQuote(repoJson)}
     exit 0

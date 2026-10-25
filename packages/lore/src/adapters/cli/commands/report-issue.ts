@@ -208,7 +208,7 @@ export default defineLoreCommand({
     name: "report-issue",
     description:
       "File a structured lore-defect report into a configured upstream corpus. --list delegates to 'lore issues', " +
-      "the canonical read verb — use that directly for the full flag set (--open/--resolved/--all/--local/--severity/--category)",
+      "the canonical read verb — use that directly for the full flag set (--open/--resolved/--all/--severity/--category)",
   },
   args: {
     title: {
@@ -267,7 +267,7 @@ export default defineLoreCommand({
       type: "boolean",
       description:
         "List previously filed reports with live upstream status, instead of filing a new one — delegates to " +
-        "'lore issues' (the canonical read verb; use it directly for --open/--resolved/--all/--local/--severity/--category)",
+        "'lore issues' (the canonical read verb; use it directly for --open/--resolved/--all/--severity/--category)",
     },
     json: {
       type: "boolean",

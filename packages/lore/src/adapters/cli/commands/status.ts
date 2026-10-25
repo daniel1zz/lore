@@ -4,12 +4,11 @@
  * With --check-tree --fix: auto-fix orphan/misplaced drift.
  * With --check-drift: verify spec-declared code_anchors against the working tree
  *   (SPEC-045 §Design Decisions D5) — deterministic, zero LLM calls.
- * With --check-issues: flag stale open reports (computed `open` and older than
- *   `feedback.stale_after_days`) — deterministic, report-only, mutates nothing
- *   (spec-issue-closure-loop-computed-resolution-agent-reachable §D5). A report whose
- *   computed resolution is `fixed` is NOT flagged: archiving the fix closes its GitHub
- *   issue, so the computed resolution plus the closed issue are the record
- *   (spec-archiving-the-work-that-resolves-a-defect-report-closes D6).
+ * With --check-issues: read the LIVE GitHub listing, join it with the carriers, and count issues per derived
+ *   status (closed_unverified / adopted_abandoned / close_pending / closed_no_verdict / unknown_ref / stale_open) — report-only,
+ *   mutates nothing. The ONLY status path that contacts GitHub: plain `lore status` makes no gh call and reports
+ *   `issues: {checked: false}` (spec-github-owns-issue-report-state-no-mirror-task-work-carries D8, AC-GS-4/9).
+ *   Offline → exit 8/9/10 for the whole command.
  * With --check-claude-md: lint project memory files (CLAUDE.md by default)
  *   against corpus-governed line/byte ceilings (spec-project-claude-md-
  *   content-contract-governance-injected §D9) — see that branch's own inline
@@ -180,6 +179,7 @@ import {
   resolveDriftEnabled,
   resolveMemoryFileBudgets,
   resolveMemoryFileBudgetsFromConfigResult,
+  buildUnconfiguredUpstreamRemedy,
   resolveStaleAfterDays,
   SPEC_KINDS,
   outlineBudgetSchema,
@@ -187,6 +187,7 @@ import {
 } from "@lore/core";
 import type {
   CallerSurface,
+  Invocation,
   LoreConfig,
   LoreError,
   MemoryFileBudgetResolution,
@@ -215,11 +216,13 @@ import {
   renderBinaryProvenanceVerdict,
 } from "../../../service/binary-provenance.js";
 import {
-  computeIssueResolution,
-  hasIssueReport,
-  isDanglingAdoption,
-} from "../../../service/issue-resolution.js";
-import { computeIssueCheck, type IssueCheckPayload } from "../status-issue-check.js";
+  computeIssueCheck,
+  ISSUE_CHECK_FIELDS,
+  listCarrierDocs,
+  type IssueCheckPayload,
+  type IssuesNotChecked,
+} from "../status-issue-check.js";
+import { classifyFeedbackUpstream, resolveGithubStatusRows } from "../report-issue-wiring.js";
 // reason: loadConfig reads `.lore/config.yaml` via plain Node fs — only
 // reachable via the `@lore/core/node` subpath (browser-safety split,
 // packages/core/src/CLAUDE.md). NOT a bun:sqlite dependency, so it's safe to
@@ -423,18 +426,38 @@ function renderDriftSection(io: CliIo, payload: CodeDriftPayload): void {
  * prints fully).
  */
 function renderIssuesSection(io: CliIo, payload: IssueCheckPayload): void {
-  if (payload.consistent) {
-    printLine(io.stdout, `Issue closure: consistent (${payload.checked} issue report(s) checked).`);
-    return;
+  printLine(io.stdout, "Issues (live GitHub listing joined with carriers):");
+  for (const field of ISSUE_CHECK_FIELDS) {
+    const members = payload.members[field];
+    printLine(io.stdout, `  ${field}: ${payload[field]}${members.length > 0 ? ` (${members.join(", ")})` : ""}`);
   }
-  const total = payload.stale_open.length;
-  printLine(io.stdout, `Issue closure: ${total} issue(s) flagged (${payload.checked} checked):`);
-  for (const row of payload.stale_open) {
-    printLine(io.stdout, 
-      `  - ${row.slug} [stale open]: reported ${row.reported_at}, ${row.age_days}d old, still open ` +
-        `(fix: triage via \`lore issue resolve ${row.slug} --state rejected|wontfix --reason <r>\`, or link a fixing doc via \`lore link ... --type resolves ${row.slug}\`)`,
-    );
+}
+
+/**
+ * The live issue facts behind `--check-issues` and the issue count enumerators: classify the upstream config,
+ * read the complete GitHub listing, join it with the carriers, count. The ONLY status path that contacts GitHub;
+ * a failing listing returns its error unchanged (exit 8/9/10) and no count is produced.
+ *
+ * @param inv - the run's invocation (`cwd` + `env` locate the corpus and the `gh` PATH)
+ * @param app - a wired `App`; `app.corpusService` is read for carriers only
+ * @param config - the resolved `feedback.upstream` source
+ */
+async function collectLiveIssueCheck(
+  inv: Invocation,
+  app: ReturnType<typeof loadLoreApp>["app"],
+  config: LoreConfig | undefined,
+): Promise<Result<IssueCheckPayload, LoreError>> {
+  const classification = classifyFeedbackUpstream(config);
+  if (classification.kind !== "github") {
+    return err(classification.kind === "retired" ? classification.error : buildUnconfiguredUpstreamRemedy());
   }
+  const joined = await resolveGithubStatusRows(inv.io, app.corpusService, classification.cfg, inv);
+  if (!joined.ok) return joined;
+  const carriers = await listCarrierDocs(app.corpusService);
+  if (!carriers.ok) return carriers;
+  return ok(
+    computeIssueCheck(joined.value.rows, carriers.value, joined.value.repoId, resolveStaleAfterDays(config), Date.now()),
+  );
 }
 
 /**
@@ -771,80 +794,16 @@ async function collectCodeAnchorSpecMembers(
   return ok(members);
 }
 
-/**
- * The MEMBER LIST behind `lore status --json`'s `adopted_abandoned_count`
- * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16) —
- * every filed issue report `isDanglingAdoption` (`service/issue-resolution.js`,
- * the ONE judgment this function defers to rather than re-deriving) rules a
- * DANGLING adoption. This function's only job is assembling that predicate's
- * two inputs per report, both read fresh (never cached from write time,
- * because the pointer must "stay honest after the fact"):
- *
- *   - `computedResolution` — `computeIssueResolution` over the report's
- *     `extra` plus its CURRENT `resolves` in-edges (the SAME per-doc
- *     derivation `collectCodeAnchorSpecMembers`'s sibling read surfaces use).
- *     A report a real fix has since landed on computes `fixed`/`resolving`,
- *     not `adopted`, EVEN THOUGH its stored `resolution.state` field still
- *     literally says `adopted` — `isDanglingAdoption`'s own JSDoc explains why
- *     that is correct, not a bug.
- *   - `ownerStatus` — the CURRENT lifecycle status of the doc
- *     `resolution.adopted_by` names, or `undefined` when that pointer is
- *     absent (malformed/legacy `extra`) or no longer resolves (the owner doc
- *     was deleted).
- *
- * Same "N candidates -> N per-doc `get()` calls" CLI-scale trade-off
- * `commands/issues.ts::readLocalRows` already documents for the identical
- * resolves-edge read.
- *
- * @param app - a wired `App` instance
- * @returns sorted slugs of every dangling adoption; `adopted_abandoned_count`
- *   is this list's `.length` at both the `--json` and the `--enumerate` surface
- */
-async function collectAdoptedAbandonedMembers(
+/** The `#<n>` members of one live issue count (see {@link collectLiveIssueCheck}). */
+async function liveIssueMembers(
+  inv: Invocation,
   app: ReturnType<typeof loadLoreApp>["app"],
+  config: LoreConfig | undefined,
+  field: (typeof ISSUE_CHECK_FIELDS)[number],
 ): Promise<Result<string[], LoreError>> {
-  const listResult = await app.corpusService.listFull({ type: "task" });
-  if (!listResult.ok) return listResult;
-
-  const issueTasks = listResult.value.docs.filter((d) => hasIssueReport(d.extra));
-  const members: string[] = [];
-
-  for (const task of issueTasks) {
-    const getResult = await app.corpusService.get(task.id);
-    // reason: a task that matched listFull() but vanished before this
-    // per-doc get() (deleted between the two calls) degrades to "excluded
-    // from this census" rather than aborting the whole command — the same
-    // graceful-partial-result shape `readLocalRows` accepts for its own
-    // per-doc lookup loop.
-    if (!getResult.ok) continue;
-
-    const resolvesInEdges = getResult.value.navigation.related.filter((r) => r.link_type === "resolves");
-    const computed = computeIssueResolution(
-      task,
-      resolvesInEdges.map((r) => ({ from_id: r.id })),
-      resolvesInEdges.map((r) => ({ id: r.id, status: r.status })),
-    );
-
-    const issueReport = task.extra["issue_report"] as Record<string, unknown> | undefined;
-    const resolution = issueReport?.["resolution"] as Record<string, unknown> | undefined;
-    const adoptedBy = typeof resolution?.["adopted_by"] === "string" ? (resolution["adopted_by"] as string) : undefined;
-    // reason: `adopted_by` is REQUIRED at write time (AC-DC-15) — an absent
-    // value here means a malformed/legacy `extra`, not a live report; the
-    // owner-status lookup below degrades to `undefined` in that case, which
-    // `isDanglingAdoption` already treats as "not abandoned" (never crash).
-    const ownerResult = adoptedBy === undefined ? undefined : await app.corpusService.get(adoptedBy);
-    // reason: the owner doc no longer resolves (deleted, or never declared) —
-    // cannot assert "archived/deprecated" about a doc that does not exist;
-    // `isDanglingAdoption` treats an `undefined` owner status as excluded.
-    const ownerStatus = ownerResult?.ok === true ? ownerResult.value.doc.status : undefined;
-
-    // §M7, AC-DC-16 — the ONE dangling-claim judgment, never re-derived here.
-    if (!isDanglingAdoption({ computedResolution: computed, ownerStatus })) continue;
-
-    members.push(task.slug);
-  }
-
-  return ok(members.sort());
+  const check = await collectLiveIssueCheck(inv, app, config);
+  if (!check.ok) return check;
+  return ok(check.value.members[field]);
 }
 
 /**
@@ -866,7 +825,13 @@ async function collectAdoptedAbandonedMembers(
  */
 const COUNT_FIELD_ENUMERATORS: Record<
   string,
-  (app: ReturnType<typeof loadLoreApp>["app"], dbPath: string, cwd: string) => Promise<Result<string[], LoreError>>
+  (
+    app: ReturnType<typeof loadLoreApp>["app"],
+    dbPath: string,
+    cwd: string,
+    inv: Invocation,
+    config: LoreConfig | undefined,
+  ) => Promise<Result<string[], LoreError>>
 > = {
   pass_unfalsified_count: async (app, dbPath, cwd) => {
     const signalsResult = await collectFalsifiabilitySignals(app, dbPath, cwd);
@@ -901,7 +866,20 @@ const COUNT_FIELD_ENUMERATORS: Record<
     return ok(membersResult.value.runnerUnattested);
   },
   code_anchor_specs: async (app) => collectCodeAnchorSpecMembers(app),
-  adopted_abandoned_count: async (app) => collectAdoptedAbandonedMembers(app),
+  // The issue counts read the LIVE GitHub listing: asking to enumerate one IS the explicit request to contact
+  // GitHub (offline -> exit 8/9/10), same as `--check-issues`. Members are the sorted `#<n>` lists.
+  closed_unverified_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "closed_unverified_count"),
+  adopted_abandoned_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "adopted_abandoned_count"),
+  close_pending_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "close_pending_count"),
+  closed_no_verdict_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "closed_no_verdict_count"),
+  unknown_ref_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "unknown_ref_count"),
+  stale_open_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "stale_open_count"),
 };
 
 /**
@@ -1106,7 +1084,7 @@ export default defineLoreCommand({
     enumerate: {
       type: "string",
       description:
-        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
+        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs; with a GitHub-shaped feedback.upstream, the live issue counts closed_unverified_count, adopted_abandoned_count, close_pending_count, closed_no_verdict_count, unknown_ref_count, stale_open_count, which contact GitHub). Unknown field → exit 4, naming it and the known set.",
     },
   },
   async run(context): Promise<number> {
@@ -1161,7 +1139,7 @@ export default defineLoreCommand({
     // standalone query over the same COUNT_FIELD_ENUMERATORS registry the
     // normal-status branch consumes below, never composed with --check-*.
     if (typeof args.enumerate === "string") {
-      const { app, dbPath } = loadLoreApp({ inv });
+      const { app, dbPath, config } = loadLoreApp({ inv });
       try {
         const enumerator = COUNT_FIELD_ENUMERATORS[args.enumerate];
         if (enumerator === undefined) {
@@ -1176,7 +1154,7 @@ export default defineLoreCommand({
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           return exitCode(error);
         }
-        const membersResult = await enumerator(app, dbPath, inv.cwd);
+        const membersResult = await enumerator(app, dbPath, inv.cwd, inv, config);
         if (!membersResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, membersResult.error) + "\n");
           return exitCode(membersResult.error);
@@ -1575,21 +1553,18 @@ export default defineLoreCommand({
           }
         }
 
-        // ---- Issues section (D5, spec-issue-closure-loop-computed-resolution-agent-reachable) ----
-        // reason: mirrors the requirements/prd-budget sections immediately above — store-only
-        // (plus one corpusService.get per issue task, same N-loop shape those two sections already
-        // use), zero-LLM, zero fs probing, REPORT-ONLY (see computeIssueCheck's own header).
+        // ---- Issues section (spec-github-owns-issue-report-state-no-mirror-task-work-carries D8) ----
+        // reason: the one section that contacts GitHub (live listing x carriers); it runs ONLY because
+        // --check-issues was given. An offline/unauthenticated/rate-limited listing fails the whole command
+        // with its own exit kind (8/9/10) and prints no partial count. REPORT-ONLY: counts never set exit 3.
         let issuesPayload: IssueCheckPayload | undefined;
-        let issuesInconsistent = false;
         if (checkIssuesRequested) {
-          const staleAfterDays = resolveStaleAfterDays(config);
-          const issuesResult = await computeIssueCheck(app.corpusService, staleAfterDays);
+          const issuesResult = await collectLiveIssueCheck(inv, app, config);
           if (!issuesResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, issuesResult.error) + "\n");
             return exitCode(issuesResult.error);
           }
           issuesPayload = issuesResult.value;
-          issuesInconsistent = !issuesPayload.consistent;
         }
 
         // ---- Memory pointers section (Phase 2, N14, spec-claude-md-governance-content-dimension-checks-wire-the) ----
@@ -1653,7 +1628,6 @@ export default defineLoreCommand({
           requirementsInconsistent ||
           prdBudgetInconsistent ||
           baselineBudgetInconsistent ||
-          issuesInconsistent ||
           memoryPointersInconsistent ||
           baselineInconsistent
         ) {
@@ -1847,17 +1821,9 @@ export default defineLoreCommand({
       const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
       const captureSourceRunnerUnattestedCount = captureSourceMembersResult.value.runnerUnattested.length;
 
-      // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
-      // — corpus-wide count of DANGLING `adopted` claims (owner archived/
-      // deprecated without the defect ever being fixed). REPORT-ONLY, same
-      // discipline as every other count on this branch. The count is this
-      // list's `.length`, never a separately-tallied counter (AC-FR-5).
-      const adoptedAbandonedMembersResult = await collectAdoptedAbandonedMembers(app);
-      if (!adoptedAbandonedMembersResult.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, adoptedAbandonedMembersResult.error) + "\n");
-        return exitCode(adoptedAbandonedMembersResult.error);
-      }
-      const adoptedAbandonedCount = adoptedAbandonedMembersResult.value.length;
+      // spec-github-owns-issue-report-state-no-mirror-task-work-carries D8 — plain status makes NO GitHub call, so
+      // it computes no issue count and says so (never a count it did not compute this run).
+      const issuesNotChecked: IssuesNotChecked = { checked: false };
 
       // spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor (AC-BFI-1)
       // — WHICH BINARY produced everything above. Ambient-only (no corpus, no
@@ -2000,7 +1966,7 @@ export default defineLoreCommand({
                 capture_source_runner_unattested_count: captureSourceRunnerUnattestedCount,
                 stamp_verdicts: stampVerdicts,
                 state_binding: stateBindingState,
-                adopted_abandoned_count: adoptedAbandonedCount,
+                issues: issuesNotChecked,
                 // ALWAYS present, `null` included (same convention as
                 // `invalid_docs`) — an omitted key would let a consumer read
                 // "absent" as "this binary is fine".
@@ -2150,17 +2116,7 @@ export default defineLoreCommand({
             : "State binding: NOT armed — run `lore audit arm` to see the impact, then `lore audit arm --confirm`",
       );
 
-      // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
-      // — printed UNCONDITIONALLY (including 0), same "never a silent count"
-      // discipline as every other count above: abandonment must stay visible
-      // even when nothing is dangling, or the count itself becomes the kind of
-      // silent gap §M7 exists to close. Enumerate exact members via
-      // `lore status --enumerate adopted_abandoned_count`. REPORT-ONLY.
-      printLine(inv.io.stdout, 
-        `Adopted-and-abandoned reports: ${adoptedAbandonedCount} ` +
-          "('adopted' claims whose owner plan/task reached archived/deprecated with the report still carrying " +
-          "no terminal resolution — report-only, see spec-the-defect-channel-cannot-be-honestly-maintained-an §M7)",
-      );
+      printLine(inv.io.stdout, "issues: not checked (lore status --check-issues)");
 
       // spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor (AC-BFI-1)
       // — printed UNCONDITIONALLY, including the "none embedded" case, same

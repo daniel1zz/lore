@@ -28,15 +28,16 @@ import { printLine } from "../output.js";
 
 /**
  * The CLI's accepted `--type` values — DERIVED from `linkTypeSchema.options`
- * (schemas.ts), never re-listed by hand. Before this fix, this file carried
- * its OWN independent array that had drifted behind the schema (missing
- * `"resolves"`, the schema's 8th member) — a valid, schema-accepted link type
- * was rejected here with exit 2 before `CorpusService.link`'s validated write
- * path was ever reached. Deriving from the schema makes that class of drift
- * structurally impossible: a 9th schema member is automatically valid here
- * with zero edits to this file.
+ * (schemas.ts), never re-listed by hand, so a schema member is automatically
+ * valid here with zero edits to this file.
+ *
+ * `resolves` is retired (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1) and is
+ * no longer a schema member, but the CLI still forwards it so `CorpusService.link` — the one
+ * refusal every surface shares — answers with VALIDATION_ERROR (exit 4) naming `extra.issues`,
+ * instead of this adapter's generic exit 2.
  */
 const VALID_LINK_TYPES: readonly LinkType[] = linkTypeSchema.options;
+const RETIRED_LINK_TYPES_FORWARDED_TO_SERVICE: readonly string[] = ["resolves", "known-defect"];
 
 export default defineLoreCommand({
   meta: {
@@ -155,7 +156,7 @@ export default defineLoreCommand({
       // ─── Manual path (unchanged from pre-SPEC-019) ────────────────────────────
       const linkType = (args.type ?? "relates-to") as LinkType;
 
-      if (!VALID_LINK_TYPES.includes(linkType)) {
+      if (!VALID_LINK_TYPES.includes(linkType) && !RETIRED_LINK_TYPES_FORWARDED_TO_SERVICE.includes(linkType)) {
         inv.io.stderr.write(
           `Error: Invalid link type '${linkType}'. Valid types: ${VALID_LINK_TYPES.join(", ")}\n`,
         );

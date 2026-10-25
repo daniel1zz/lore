@@ -179,6 +179,7 @@ import { MIGRATION_034_SQL } from "./migrations/migration-034.js";
 import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
 import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
+import { applyMigration038 } from "./migrations/migration-038.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -983,6 +984,13 @@ export class SQLiteStore implements StoreInterface {
         }
         throw error;
       }
+    }
+
+    if (currentVersion < 38 && 38 <= ceiling) {
+      // reason: migration-038 converts every plan -> task `known-defect` link into the plan's extra.known_defects and
+      // removes the link type (BR-1421) in ONE transaction; an unconvertible link rolls everything back, throws
+      // MigrationFailedError naming each such link, and leaves schema 37 byte-identical.
+      applyMigration038(this.db, this.corpusPath, this.migrationActor);
     }
   }
 

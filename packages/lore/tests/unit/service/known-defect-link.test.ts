@@ -1,11 +1,12 @@
 /**
- * R1 (#404) — a plan accepted with known defects links its defect issues with `known-defect`, never `resolves`,
- * so archiving the plan closes none of them; real fixes (`resolves`) keep closing on archive.
+ * R1 (#404) — a plan accepted with known defects records them in `extra.known_defects` (not `extra.issues`), so
+ * archiving the plan closes none of them; a document that carries an issue itself still closes it
+ * on archive (spec-github-owns-issue-report-state-no-mirror-task-work-carries D3).
  *
  * Real services over InMemoryStore + a RECORDING FAKE `IssueCloser` — nothing here can reach GitHub.
- *   HAPPY:      a plan archived with a known-defect link closes no issue; the issue stays linked as a known defect.
- *   NEGATIVE:   a known-defect link to a non-issue target is refused.
- *   REGRESSION: a plan that `resolves` the same kind of issue still closes it on archive.
+ *   HAPPY:      a plan archived with a known-defect record closes no issue; the record stays.
+ *   NEGATIVE:   the retired known-defect link type is refused.
+ *   REGRESSION: a plan that carries the same kind of issue itself still closes it on archive.
  */
 import { describe, expect, it } from "vitest";
 import { ok } from "@lore/core";
@@ -56,13 +57,7 @@ async function build() {
     cs.create({
       type: "task",
       title: "Filed defect",
-      extra: {
-        adhoc: true,
-        issue_report: {
-          reporter_project: "consumer", reporter_actor: "agent:x", lore_version: "0.0.0", expected: "exit 0", actual: "exit 4",
-          reported_at: "2026-01-01T00:00:00.000Z", github: { repo: "acme/widget", number: 7, repo_id: 123 },
-        },
-      },
+      extra: { adhoc: true, issues: [{ repo_id: 123, number: 7 }] },
     } as CreateDocInput),
     "issue",
   );
@@ -76,31 +71,36 @@ async function archive(cs: CorpusService, doc: DocRecord) {
   return must(cs.set(doc.id, { status: "archived" }), "archive");
 }
 
-describe("known-defect links", () => {
-  it("HAPPY: archiving a plan that links an issue as a known defect closes no issue and keeps the link", async () => {
+describe("known defects are not issues the plan carries", () => {
+  it("HAPPY: archiving a plan that records a known defect closes no issue and keeps the record", async () => {
     const w = await build();
-    await must(w.cs.link(w.plan.id, w.issue.id, "known-defect"), "link");
+    await must(w.cs.set(w.plan.id, { extra: { known_defects: [{ repo_id: 123, number: 7, dimension: "regression", fingerprint: "f".repeat(64) }] } }), "record");
 
     await archive(w.cs, w.plan);
 
     expect(w.closer.calls.filter((c) => !c.startsWith("read:"))).toEqual([]);
-    const links = await must(w.store.findLinks(w.plan.id, "out"), "links");
-    expect(links.map((l) => [l.to_id, l.link_type])).toEqual([[w.issue.id, "known-defect"]]);
+    const stored = await must(w.store.find(w.plan.id), "plan");
+    expect(JSON.stringify(stored?.extra)).toContain('"known_defects"');
   });
 
-  it("NEGATIVE: a known-defect link whose target carries no issue_report is refused", async () => {
+  it("NEGATIVE: a known-defect link is refused naming extra.known_defects (the type is retired)", async () => {
     const w = await build();
-    const other = await must(w.cs.create({ type: "plan", title: "Not an issue", content: "b" } as CreateDocInput), "other");
-    const linked = await w.cs.link(w.plan.id, other.id, "known-defect");
+    const linked = await w.cs.link(w.plan.id, w.issue.id, "known-defect" as never);
     expect(linked.ok).toBe(false);
-    if (!linked.ok) expect(linked.error.code).toBe("VALIDATION_ERROR");
+    if (!linked.ok) {
+      expect(linked.error.code).toBe("VALIDATION_ERROR");
+      expect(JSON.stringify(linked.error)).toContain("extra.known_defects");
+    }
   });
 
-  it("REGRESSION: a plan that resolves the same kind of issue still closes it on archive", async () => {
+  it("REGRESSION: a plan that carries the same kind of issue itself still closes it on archive", async () => {
     const w = await build();
-    await must(w.cs.link(w.plan.id, w.issue.id, "resolves"), "link");
+    const carrierPlan = await must(
+      w.cs.create({ type: "plan", title: "Carries the issue", content: "body", extra: { issues: [{ repo_id: 123, number: 7 }] } } as CreateDocInput),
+      "carrier plan",
+    );
 
-    await archive(w.cs, w.plan);
+    await archive(w.cs, carrierPlan);
 
     expect(w.closer.calls).toContain("close:7");
   });

@@ -11,7 +11,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 
 let dir = "";
 let dbPath = "";
@@ -76,7 +75,7 @@ describe("migration 037 known-defect link type", () => {
 
   it("converts only batch links: plan -> issue resolves with milestone_findings", () => {
     seedAt36();
-    const store = new SQLiteStore(dbPath, { migrate: true });
+    const store = new SQLiteStore(dbPath, { migrate: true, schemaCeiling: 37 });
     expect(linkTypes(store)).toEqual([
       ["PLAN1", "ISSUE_BADREC", "resolves"],
       ["PLAN1", "ISSUE_BATCH", "known-defect"],
@@ -87,11 +86,11 @@ describe("migration 037 known-defect link type", () => {
     store.close();
   });
 
-  it("lands on LATEST_SCHEMA_VERSION, accepts the new type and keeps the indexes", () => {
+  it("lands on 37 (the ceiling; migration 038 retires the type again), accepts the new type and keeps the indexes", () => {
     seedAt36();
-    const store = new SQLiteStore(dbPath, { migrate: true });
+    const store = new SQLiteStore(dbPath, { migrate: true, schemaCeiling: 37 });
     const db = store.getDatabase();
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(37);
     expect(() => insertLink(store, "PLAN1", "TASK1", "known-defect")).not.toThrow();
     const indexes = (db.query("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='links'").all() as { name: string }[]).map((i) => i.name);
     expect(indexes).toEqual(expect.arrayContaining(["idx_links_from", "idx_links_to", "idx_links_type"]));
@@ -102,10 +101,10 @@ describe("migration 037 known-defect link type", () => {
 
   it("REGRESSION: reopening a migrated corpus changes nothing", () => {
     seedAt36();
-    const first = new SQLiteStore(dbPath, { migrate: true });
+    const first = new SQLiteStore(dbPath, { migrate: true, schemaCeiling: 37 });
     const before = linkTypes(first);
     first.close();
-    const again = new SQLiteStore(dbPath);
+    const again = new SQLiteStore(dbPath, { schemaCeiling: 37 });
     expect(linkTypes(again)).toEqual(before);
     again.close();
   });

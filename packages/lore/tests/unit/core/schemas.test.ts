@@ -156,7 +156,7 @@ describe("Enum schemas", () => {
   // check below compares it against `linkTypeSchema.options` by VALUE. A
   // future 9th member added to the schema without a matching update here now
   // fails LOUD (length/member mismatch) instead of silently staying green.
-  it("linkTypeSchema accepts every declared link type (exhaustive — 8 as of spec-issue-closure-loop-computed-resolution-agent-reachable)", () => {
+  it("linkTypeSchema accepts every declared link type (exhaustive — 7 since `resolves` was retired by spec-github-owns-issue-report-state-no-mirror-task-work-carries D1)", () => {
     const expectedLinkTypes = [
       "parent",
       "implements",
@@ -165,8 +165,6 @@ describe("Enum schemas", () => {
       "relates-to",
       "blocks",
       "governs",
-      "resolves",
-      "known-defect",
     ];
 
     // Exhaustiveness: the schema's actual member set must equal this literal

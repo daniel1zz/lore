@@ -34,10 +34,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import {
   computeIssueResolution,
-  hasIssueReport,
-  checkResolutionPointer,
   isDanglingAdoption,
-  ADOPTED_RESOLUTION_POINTER,
   type ResolutionSourceDocLike,
   type ResolvesInEdgeLike,
 } from "../../../src/service/issue-resolution.js";
@@ -77,21 +74,7 @@ async function createFixingSpec(cs: CorpusService, rootPrdId: string): Promise<D
   } as CreateDocInput);
 }
 
-/** An ad-hoc issue task carrying extra.issue_report — a valid `resolves` target. */
-async function createIssueTask(
-  cs: CorpusService,
-  title = "Filed defect",
-  issueReport: unknown = { reporter_project: "consumer-a", expected: "exit 0", actual: "exit 4" },
-): Promise<DocRecord> {
-  return mustCreate(cs, {
-    type: "task",
-    title,
-    content: `# ${title}`,
-    extra: { adhoc: true, issue_report: issueReport },
-  } as CreateDocInput);
-}
-
-/** An ad-hoc task with NO extra.issue_report — a valid task, but an invalid `resolves` target. */
+/** An ad-hoc task with NO extra.issue_report — a valid task. */
 async function createPlainTask(cs: CorpusService, title = "Ordinary task"): Promise<DocRecord> {
   return mustCreate(cs, {
     type: "task",
@@ -101,88 +84,36 @@ async function createPlainTask(cs: CorpusService, title = "Ordinary task"): Prom
   } as CreateDocInput);
 }
 
-// ─── AC-ICL-1: resolves link type + write-time validation ──────────────────
+// ─── AC-ICL-1 (retired): the `resolves` link type is refused ────────────────
+// reason: spec-github-owns-issue-report-state-no-mirror-task-work-carries D1 retired `resolves` (the carrier is
+// extra.issues). The former AC-ICL-1 HAPPY/NEGATIVE/BOUNDARY/ERROR/STATE cases asserted the write-time target
+// check that no longer exists; the one surviving contract is that no `resolves` edge can be created at all
+// (full refusal matrix: tests/unit/service/issue-carrier-schema.test.ts).
 
-describe("AC-ICL-1: resolves link type", () => {
-  it("AC-ICL-1 HAPPY: linkTypeSchema accepts 'resolves'; CorpusService.link creates the edge to an issue task", async () => {
-    expect(linkTypeSchema.safeParse("resolves").success).toBe(true);
+describe("AC-ICL-1 (retired by the carrier schema): resolves link type", () => {
+  it("AC-ICL-1 NEGATIVE: linkTypeSchema no longer lists 'resolves'; CorpusService.link refuses it whatever the target", async () => {
+    expect(linkTypeSchema.safeParse("resolves").success).toBe(false);
 
-    const { service } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    const issueTask = await createIssueTask(service);
-
-    const linkResult = await service.link(fixingSpec.id, issueTask.id, "resolves");
-    expect(linkResult.ok).toBe(true);
-    if (!linkResult.ok) return;
-    expect(linkResult.value.link_type).toBe("resolves");
-    expect(linkResult.value.from_id).toBe(fixingSpec.id);
-    expect(linkResult.value.to_id).toBe(issueTask.id);
-  });
-
-  it("AC-ICL-1 NEGATIVE: resolves edge to a task lacking extra.issue_report is rejected with a named VALIDATION_ERROR", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const rootPrd = await createRootPrd(service);
     const fixingSpec = await createFixingSpec(service, rootPrd.id);
     const plainTask = await createPlainTask(service);
 
-    const linkResult = await service.link(fixingSpec.id, plainTask.id, "resolves");
-    expect(linkResult.ok).toBe(false);
-    if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("AC-ICL-1 BOUNDARY: resolves edge to a non-task doc is rejected (type check fires independently of the issue_report check)", async () => {
-    const { service } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    // The root PRD itself: not a task at all, so hasIssueReport is irrelevant here —
-    // this isolates the `toDoc.type !== "task"` half of the write-time check.
-    const linkResult = await service.link(fixingSpec.id, rootPrd.id, "resolves");
-    expect(linkResult.ok).toBe(false);
-    if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("AC-ICL-1 ERROR: a task whose extra.issue_report is malformed (a string, not an object) is rejected as if absent", async () => {
-    const { service } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    const malformedTask = await createIssueTask(service, "Malformed", "not-an-object");
-
-    // Confirms the defensive predicate itself classifies this as absent...
-    expect(hasIssueReport(malformedTask.extra)).toBe(false);
-
-    // ...and that CorpusService.link's write-time check agrees, never throwing.
-    const linkResult = await service.link(fixingSpec.id, malformedTask.id, "resolves");
-    expect(linkResult.ok).toBe(false);
-    if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("AC-ICL-1 STATE: after a successful resolves link, findLinks reflects exactly one resolves edge", async () => {
-    const { service, store } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    const issueTask = await createIssueTask(service);
-
-    await service.link(fixingSpec.id, issueTask.id, "resolves");
-
+    for (const target of [plainTask.id, rootPrd.id]) {
+      const linkResult = await service.link(fixingSpec.id, target, "resolves");
+      expect(linkResult.ok).toBe(false);
+      if (linkResult.ok) return;
+      expect(linkResult.error.code).toBe("VALIDATION_ERROR");
+    }
     const findResult = await store.findLinks(fixingSpec.id, "out");
-    expect(findResult.ok).toBe(true);
-    if (!findResult.ok) return;
-    expect(findResult.value.length).toBe(1);
-    expect(findResult.value[0]?.to_id).toBe(issueTask.id);
-    expect(findResult.value[0]?.link_type).toBe("resolves");
+    expect(findResult.ok && findResult.value.length).toBe(0);
   });
 
-  it("AC-ICL-1 REGRESSION: non-resolves link types are unaffected by the new validation", async () => {
+  it("AC-ICL-1 REGRESSION: non-resolves link types are unaffected", async () => {
     const { service } = makeService();
     const rootPrd = await createRootPrd(service);
     const fixingSpec = await createFixingSpec(service, rootPrd.id);
 
-    // A "relates-to" link to the root PRD (not a task, no issue_report) must
-    // still succeed — the D1b check is scoped to type === "resolves" only.
     const linkResult = await service.link(fixingSpec.id, rootPrd.id, "relates-to");
     expect(linkResult.ok).toBe(true);
     if (!linkResult.ok) return;
@@ -393,75 +324,13 @@ describe("AC-ICL-11 (P2): computeIssueResolution — recorded review rejection (
 // (enumerated in that spec's Scope section, deliberately not repeated here as
 // literal identifiers — AC-GI-9's oracle is a case-sensitive scan for exactly
 // those six strings across `packages/**`, this file included). There is no
-// quota left for `adopted` to free. `checkResolutionPointer`/
-// `isDanglingAdoption` below are pure functions unrelated to the cap and are
-// unaffected.
+// quota left for `adopted` to free. `isDanglingAdoption` below is a pure
+// function unrelated to the cap and is unaffected.
 
-describe("AC-DC-15: adopted-pointer-required — the owner pointer is required and must resolve to a live plan or task", () => {
-  const ISSUE_DOC_ID = "01ISSUEDOC0000000000000000";
-
-  it("adopted-pointer-required HAPPY: a pointer resolving to a live plan or task is accepted", () => {
-    expect(
-      checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "plan-x", { id: "01PLANX", type: "plan" }, ISSUE_DOC_ID),
-    ).toEqual({ ok: true });
-    expect(
-      checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "task-x", { id: "01TASKX", type: "task" }, ISSUE_DOC_ID),
-    ).toEqual({ ok: true });
-  });
-
-  it("adopted-pointer-required NEGATIVE (a): an ABSENT --adopted-by is refused as missing", () => {
-    expect(checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", undefined, ISSUE_DOC_ID)).toEqual({
-      ok: false,
-      reason: "missing",
-    });
-  });
-
-  it("adopted-pointer-required NEGATIVE (b): a --adopted-by that does not resolve to an existing doc is refused as unresolvable", () => {
-    expect(checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "no-such-doc", undefined, ISSUE_DOC_ID)).toEqual({
-      ok: false,
-      reason: "unresolvable",
-    });
-  });
-
-  it("adopted-pointer-required NEGATIVE (c): a --adopted-by resolving to a doc whose type is neither plan nor task is refused as wrong-type", () => {
-    for (const type of ["spec", "adr", "knowledge", "prd"]) {
-      expect(
-        checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "some-doc", { id: "01SOMEDOC", type }, ISSUE_DOC_ID),
-        `type "${type}" must be refused as wrong-type`,
-      ).toEqual({ ok: false, reason: "wrong-type" });
-    }
-  });
-
-  it("adopted-pointer-required BOUNDARY: a --adopted-by naming the report ITSELF is refused as self-reference, even though the type would otherwise be allowed", () => {
-    expect(
-      checkResolutionPointer(
-        ADOPTED_RESOLUTION_POINTER,
-        ISSUE_DOC_ID,
-        { id: ISSUE_DOC_ID, type: "task" },
-        ISSUE_DOC_ID,
-      ),
-    ).toEqual({ ok: false, reason: "self-reference" });
-  });
-
-  it("adopted-pointer-required STATE: refusal precedence is fixed — missing beats every other reason, unresolvable beats self-reference/wrong-type", () => {
-    // An empty pointerValue is refused as "missing" regardless of what
-    // resolvedTarget claims — a caller cannot skip the argv-level check by
-    // fabricating a resolved doc.
-    expect(
-      checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", { id: ISSUE_DOC_ID, type: "task" }, ISSUE_DOC_ID),
-    ).toEqual({ ok: false, reason: "missing" });
-  });
-
-  it("adopted-pointer-required REGRESSION: superseded/duplicate pointers (§M3, no type constraint) still accept any doc type — M7's wrong-type check does not leak onto them", () => {
-    const supersededByPointer = { flag: "--superseded-by", extra_key: "superseded_by", names: "the doc that supersedes this report" };
-    for (const type of ["spec", "adr", "knowledge", "prd", "plan", "task"]) {
-      expect(
-        checkResolutionPointer(supersededByPointer, "some-doc", { id: "01SOMEDOC", type }, ISSUE_DOC_ID),
-        `M3 pointer must accept type "${type}"`,
-      ).toEqual({ ok: true });
-    }
-  });
-});
+// ⛔ AC-DC-15 (the owner pointer of `adopted` must resolve to a live plan or task) is RETIRED with its subject:
+// the pointer check and `lore issue resolve --state adopted --adopted-by` were deleted by
+// spec-github-owns-issue-report-state-no-mirror-task-work-carries (GS-T6). Ownership is now a carrier task
+// (`lore issue adopt`, AC-GS-7); the `adopted` display status is derived, never written.
 
 describe("AC-DC-16: adopted-abandonment-count — a dangling adopted claim is counted, and the count names its members", () => {
   it("adopted-abandonment-count RED SEED (a): adopted + archived owner + no terminal resolution MUST be counted", () => {

@@ -132,6 +132,11 @@ export interface RenderedBodyFacts {
    * `ResolvedDoc.codeAnchors !== undefined`.
    */
   readonly codeAnchorsProjected: boolean;
+  /**
+   * Whether the plan's `## Known defects` section was printed (BR-1421) — i.e. the plan carries entries in
+   * `extra.known_defects`. Optional so a caller that predates it still compiles; `commands/get.ts` always supplies it.
+   */
+  readonly knownDefectsProjected?: boolean;
   /** Injected clock for the SAME `isInvalidated` predicate the banner itself uses. */
   readonly nowIso: string;
 }
@@ -210,6 +215,7 @@ export function findExtraKeysAlreadyRendered(
   if (facts.mdxResolved && isInvalidated({ extra: doc.extra }, facts.nowIso)) keys.push("validity");
   if (facts.acceptanceCriteriaProjected) keys.push("acceptance_criteria");
   if (facts.codeAnchorsProjected) keys.push("code_anchors");
+  if (facts.knownDefectsProjected === true) keys.push("known_defects");
   return keys;
 }
 
@@ -372,4 +378,21 @@ function formatFieldShape(field: HiddenExtraField): string {
       return exhaustive;
     }
   }
+}
+
+/** One known defect with the live state read for display. */
+export interface KnownDefectDisplayRow {
+  readonly number: number;
+  readonly dimension: string;
+  /** `open` / `closed`, or `unknown (<why>)` when the read failed or no reader is wired: never guessed. */
+  readonly state: string;
+}
+
+/**
+ * The `Known defects` section of `lore get <plan>` (BR-1421): one line per entry with the issue, the dimension it
+ * covers and the issue's live GitHub state. Empty input yields no lines (no section).
+ */
+export function formatKnownDefectLines(rows: readonly KnownDefectDisplayRow[]): string[] {
+  if (rows.length === 0) return [];
+  return ["Known defects:", ...rows.map((row) => `  #${String(row.number)}  ${row.dimension}  ${row.state}`)];
 }

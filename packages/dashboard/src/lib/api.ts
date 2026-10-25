@@ -56,6 +56,7 @@ import type {
   EvidencePanelProjection,
   GlobalLoreConfig,
   IssueResolution,
+  IssueStatus,
   LoreConfig,
   ReadyRecord,
   ReadySession,
@@ -731,39 +732,31 @@ export async function apiGetMachineConfig(
  * (AC-DC-12) proves the coupling with a synthetic-member tsc probe.
  */
 export { ISSUE_RESOLUTION_MEMBERS as ISSUE_RESOLUTIONS };
-export type { IssueResolution };
+export type { IssueResolution, IssueStatus };
 
 /**
- * One row of the `GET /api/issue-reports` projection. Mirrors `IssueReportRow`
- * (`packages/lore/src/adapters/http/issue-reports-routes.ts`) exactly — the 8
- * report-identity fields plus lifecycle `status` plus the D7 computed
- * `resolution`. Never carries the full `extra.issue_report` payload (e.g.
- * `expected`/`actual`/`repro_command`) — the detail view reads those via the
- * existing `GET /api/docs/:id` route (`apiGetDoc`), per the server module's
- * own doc comment.
- *
- * `status` and `resolution` are INTENTIONALLY independent (see the server
- * type's own doc comment) — a row can render `status: "draft"` alongside
- * `resolution: "fixed"` (an unclosed escalation, D5(a)); consumers must
- * render `resolution`, never infer it from `status`.
+ * One row of the `GET /api/issue-reports` live join. Mirrors `IssueListingRow`
+ * (`packages/lore/src/adapters/http/issue-reports-routes.ts`): one row per issue GitHub
+ * currently lists, with its DERIVED `status` (a render-time fact, never stored) and the slugs of
+ * the corpus work (carriers) that name it. GitHub owns every other issue fact.
+ * (spec-github-owns-issue-report-state-no-mirror-task-work-carries, AC-GS-14)
  */
 export interface IssueReportRow {
-  id: string;
-  slug: string;
+  number: number;
   title: string;
-  reporter_project: string;
-  reporter_actor: string;
-  lore_version: string;
-  reported_at: string;
-  possible_duplicates: string[];
-  status: string;
-  resolution: IssueResolution;
+  /** GitHub's own `open` / `closed`. */
+  state: string;
+  status: IssueStatus;
+  /** First carrier slug, or `null` when no work names the issue. */
+  carrier: string | null;
+  /** Every carrier slug, sorted. */
+  carriers: string[];
 }
 
 /**
- * Response shape of `GET /api/issue-reports`. `open_count` counts rows whose
- * `resolution` is `"open"` (D7/D8) — can be strictly less than `rows.length`
- * once a row has resolved but not yet been archived (see `IssueReportRow`).
+ * Response shape of `GET /api/issue-reports`. `open_count` counts rows whose derived `status` is
+ * `"open"`. A failed GitHub listing is NOT this shape: it is an `ApiError` (401 `AUTH_REQUIRED`,
+ * 429 `RATE_LIMITED`, 503 `TRANSPORT_UNAVAILABLE`) and carries no `rows`.
  */
 export interface IssueReportsResponse {
   rows: IssueReportRow[];

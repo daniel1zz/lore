@@ -6,7 +6,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
-import { err, ok, DEDICATED_EXTRA_KEYS, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -109,9 +109,8 @@ import {
   type CitedRuleStateRow,
   type MilestoneReviewCurrency,
 } from "./milestone-review.js";
-import { coverFailedDimensions, readMilestoneFindings, type DimensionCoverage, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { coverFailedDimensions, type DimensionCoverage, type KnownDefectLive, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
 import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
-import { readGithubIssueRef } from "./resolution-projector.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
 import { computeRecoverableUntil } from "./soft-delete-window.js";
@@ -121,7 +120,7 @@ import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { initialPending, proposeNodePart, statusFor } from "./baseline-pending.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
-import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
+import { type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
@@ -322,12 +321,6 @@ export interface SetOptions extends WriteActorOpts {
    * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
    */
   readonly plan?: string;
-  /**
-   * Plan close only: GitHub issue numbers the CALLER filed or linked in this very run. They count as open for this
-   * close (open by construction), so the close does not depend on the issue listing having caught up (#402). Coverage
-   * still requires the plan's own `milestone_findings` record on the linked issue; a number without one covers nothing.
-   */
-  readonly trustedOpenIssues?: readonly number[];
 }
 
 /**
@@ -1002,6 +995,54 @@ function definedOnly(patch: DocWritePatch): DocWritePatch {
 }
 
 /**
+ * `extra` keys that no write may carry any more. GitHub owns issue-report state; the corpus owns only the
+ * carrier `extra.issues` (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1).
+ * reason: this list is the service-layer refusal every write path (CLI, MCP, HTTP, batch) shares; a check
+ * in a CLI adapter alone would let MCP and batch writes slip through (AC-GS-11).
+ */
+const RETIRED_EXTRA_KEYS: readonly string[] = ["issue_report"];
+
+/**
+ * Judges the issue-carrier shape of an `extra` bag about to be written to a document of `docType`.
+ *
+ * @param docType - type of the document being created or patched
+ * @param extra - the `extra` bag the write carries (undefined = nothing to judge)
+ * @returns a VALIDATION_ERROR naming the offending field, or `undefined` when the bag is acceptable
+ */
+function judgeIssueCarrierExtra(docType: string, extra: Record<string, unknown> | undefined): LoreError | undefined {
+  if (extra === undefined) return undefined;
+  for (const key of RETIRED_EXTRA_KEYS) {
+    if (key in extra) {
+      return {
+        code: "VALIDATION_ERROR",
+        field: `extra.${key}`,
+        message: `extra.${key} is retired: GitHub owns issue-report state. Carry the issue on the work with extra.issues ([{repo_id, number}]), and convert existing reports with \`lore issues migrate --apply\``,
+        value: extra[key],
+      };
+    }
+  }
+  const issues = extra["issues"];
+  if (issues === undefined) return undefined;
+  const refuse = (message: string): LoreError => ({ code: "VALIDATION_ERROR", field: "extra.issues", message, value: issues });
+  if (docType !== "task" && docType !== "plan") {
+    return refuse(`extra.issues is allowed only on a task or plan (a ${docType} is not an issue carrier)`);
+  }
+  if (!Array.isArray(issues) || issues.length === 0) return refuse("extra.issues must be a non-empty array of {repo_id, number}");
+  if (issues.length > MAX_ISSUE_REFS_PER_CARRIER) {
+    return refuse(`extra.issues holds ${issues.length} refs; at most ${MAX_ISSUE_REFS_PER_CARRIER} are allowed`);
+  }
+  const seen = new Set<string>();
+  for (const entry of issues) {
+    const parsedRef = issueRefSchema.safeParse(entry);
+    if (!parsedRef.success) return refuse("each extra.issues entry must be {repo_id, number}, both positive integers");
+    const refKey = `${parsedRef.data.repo_id}#${parsedRef.data.number}`;
+    if (seen.has(refKey)) return refuse(`extra.issues names ${refKey} more than once`);
+    seen.add(refKey);
+  }
+  return undefined;
+}
+
+/**
  * The write route a service falls back to when its composition root handed it none: a bare `CorpusService`
  * with an ungated record lock and an inert foreign-corpus context. Same convention as every other optional
  * wiring (`new GateEnforcer(undefined)`, "bare `new XService(store)` stays ungated"): production composes
@@ -1229,62 +1270,74 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   private planCloseRetirementPort: PlanCloseRetirementPort | undefined;
 
   /**
-   * Upgrades a `failed` review currency to `accepted` when every failed dimension has an OPEN GitHub issue linked to
-   * the plan (BR-1372). Anything else (no port, no links, an unreachable GitHub) leaves it `failed`: the close is
-   * refused, never waved through on a read that did not happen.
+   * Upgrades a `failed` review currency to `accepted` when every failed dimension has an entry in the plan's
+   * `extra.known_defects` whose GitHub issue is OPEN (BR-1372, BR-1421). A closed issue refuses the close naming it; a
+   * read that failed refuses naming the issue and the error; anything else (no port, an uncovered dimension) leaves
+   * it `failed`: the close is refused, never waved through on a read that did not happen.
    */
   private async acceptKnownDefects(
-    planId: string,
+    plan: DocRecord,
     currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
-    trustedOpenIssues: readonly number[] = [],
-  ): Promise<MilestoneReviewCurrency> {
-    const coverage = await this.coverageOfFailedDimensions(planId, currency.failed, trustedOpenIssues);
-    if (!coverage.ok || !coverage.value.accepted) return currency;
-    return { state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues };
+  ): Promise<Result<MilestoneReviewCurrency, LoreError>> {
+    const coverage = await this.coverageOfFailedDimensions(plan.id, currency.failed);
+    if (!coverage.ok) {
+      // reason: a missing open-issue reader is "not wired" (the gate refuses generically); a failed read of a named
+      // issue must be shown to the caller verbatim.
+      if (this.planCloseIssuePort === undefined) return ok(currency);
+      return coverage;
+    }
+    if (!coverage.value.accepted) {
+      if (coverage.value.closed.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gate:plan-close",
+          message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close with known defects: ${coverage.value.closed.map((n) => `#${String(n)}`).join(", ")} ${coverage.value.closed.length === 1 ? "is" : "are"} closed on GitHub and no open issue covers ${coverage.value.uncovered.join(", ")} (BR-1372); the plan needs a new review`,
+          rule: "BR-1372",
+        });
+      }
+      return ok(currency);
+    }
+    return ok({ state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues });
   }
 
   /**
-   * The ONE coverage predicate (BR-1372, BR-1379): which failed dimensions an OPEN issue linked to the plan covers,
-   * read from the `milestone_findings` record on the linked issue carriers, never from a title. Plan close and the
-   * review batch's "is filing complete" both decide from this.
+   * The ONE coverage predicate (BR-1372, BR-1379, BR-1421): which failed dimensions are covered by an entry of the
+   * plan's `extra.known_defects` whose issue is open on GitHub, read per issue NUMBER (single-issue read, never the
+   * listing). Plan close and the review batch's "is filing complete" both decide from this.
    *
    * @param planId - the plan's document id
    * @param failed - the failed dimension ids of the current review
-   * @param trustedOpenIssues - issue numbers the caller filed or linked in this run: counted as open without waiting for the listing (#402)
-   * @returns the coverage; `err` when no open-issue reader is wired or a store/GitHub read failed (never read as "covered")
+   * @returns the coverage; `err` when no issue reader is wired, the plan cannot be read, or an issue read failed or
+   *   names another repository (the error names the issue; never read as "covered")
    */
-  async coverageOfFailedDimensions(
-    planId: string,
-    failed: readonly string[],
-    trustedOpenIssues: readonly number[] = [],
-  ): Promise<Result<DimensionCoverage, LoreError>> {
+  async coverageOfFailedDimensions(planId: string, failed: readonly string[]): Promise<Result<DimensionCoverage, LoreError>> {
     const port = this.planCloseIssuePort;
     if (port === undefined) {
       return err({ code: "VALIDATION_ERROR", message: "issue coverage cannot be read: no open-issue reader is wired (no GitHub upstream configured)", field: "planCloseIssuePort", rule: "BR-1379" });
     }
-    const links = await this.store.findLinks(planId, "out");
-    if (!links.ok) return links;
-    const linked: { number: number; repoId?: number; dimensions: string[] }[] = [];
-    for (const link of links.value) {
-      // reason: #404 — only a `known-defect` link is coverage; `resolves` means "fixed" and is closed on archive.
-      if (link.link_type !== "known-defect" || link.from_id !== planId) continue;
-      const target = await this.store.find(link.to_id);
-      if (!target.ok) return target;
-      if (target.value === null || target.value.deleted_at !== null) continue;
-      const ref = readGithubIssueRef(target.value.extra);
-      if (ref !== undefined) {
-        linked.push({
-          number: ref.issueNumber,
-          ...(ref.repo_id !== undefined ? { repoId: ref.repo_id } : {}),
-          dimensions: readMilestoneFindings(target.value.extra).map((f) => f.dimension),
-        });
+    const plan = await this.store.find(planId);
+    if (!plan.ok) return plan;
+    if (plan.value === null) return err({ code: "DOC_NOT_FOUND", id: planId });
+    const entries = readKnownDefects(plan.value.extra).filter((entry) => failed.includes(entry.dimension));
+    const reads = new Map<number, { repoId: number; state: "open" | "closed" }>();
+    const live: KnownDefectLive[] = [];
+    for (const entry of entries) {
+      let read = reads.get(entry.number);
+      if (read === undefined) {
+        const fetched = await port.readIssue(entry.number);
+        if (!fetched.ok) {
+          const detail = "message" in fetched.error ? fetched.error.message : fetched.error.code;
+          return err({ code: "VALIDATION_ERROR", field: "gate:plan-close", message: `issue #${String(entry.number)} cannot be read, so it does not cover ${entry.dimension} of ${plan.value.slug}: ${detail}`, rule: "BR-1372" });
+        }
+        read = fetched.value;
+        reads.set(entry.number, read);
       }
+      if (read.repoId !== entry.repo_id) {
+        return err({ code: "VALIDATION_ERROR", field: "gate:plan-close", message: `known defect #${String(entry.number)} of ${plan.value.slug} is recorded for repository id ${String(entry.repo_id)} but the configured repository has id ${String(read.repoId)}; it cannot be read`, rule: "BR-1372" });
+      }
+      live.push({ number: entry.number, dimension: entry.dimension, state: read.state });
     }
-    const listing = await port.listOpenIssues();
-    if (!listing.ok) return listing;
-    const listedNumbers = new Set(listing.value.open.map((issue) => issue.number));
-    const trusted = trustedOpenIssues.filter((n) => !listedNumbers.has(n)).map((number) => ({ number, title: "" }));
-    return ok(coverFailedDimensions(failed, linked, { ...listing.value, open: [...listing.value.open, ...trusted] }));
+    return ok(coverFailedDimensions(failed, live));
   }
 
   /** Present iff {@link setArchiveIssueClosePort} was called. */
@@ -2014,6 +2067,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     }
 
     const data = parsed.data;
+
+    const carrierRefusal = judgeIssueCarrierExtra(data.type, data.extra) ?? judgeKnownDefectsExtra(data.type, data.extra);
+    if (carrierRefusal !== undefined) return err(carrierRefusal);
 
     // AC write chokepoint (spec-baseline-slice-2 §C3, AC-BLS2-1; amendment log 2026-10-08):
     // create is a SANCTIONED path — inline criteria are additions, re-validated here, and the
@@ -3035,6 +3091,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     const existing = findResult.value;
     const now = new Date().toISOString();
 
+    const carrierRefusal = judgeIssueCarrierExtra(existing.type, parsedPatch.data.extra) ?? judgeKnownDefectsExtra(existing.type, parsedPatch.data.extra);
+    if (carrierRefusal !== undefined) return err(carrierRefusal);
     // BR-1339 — a baseline node's status is derived from its items (approved iff nothing is pending): no command sets it.
     // A resend of the stored value is not a change (the dashboard and MCP resend whole forms).
     if (
@@ -3636,8 +3694,12 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       const reviewDocsResult = await this.listMilestoneReviewDocs(existing.id);
       if (!reviewDocsResult.ok) return reviewDocsResult;
       const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
-      const milestoneReview =
-        measuredReview.state === "failed" ? await this.acceptKnownDefects(existing.id, measuredReview, opts?.trustedOpenIssues): measuredReview;
+      let milestoneReview: MilestoneReviewCurrency = measuredReview;
+      if (measuredReview.state === "failed") {
+        const accepted = await this.acceptKnownDefects(existing, measuredReview);
+        if (!accepted.ok) return accepted;
+        milestoneReview = accepted.value;
+      }
       planCloseCtx = { ...planCloseCtx, milestoneReview };
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
@@ -5527,30 +5589,27 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       }
     }
 
-    // D1b (spec-issue-closure-loop-computed-resolution-agent-reachable) —
-    // a `resolves` edge's `to` MUST be a task carrying `extra.issue_report`
-    // (an issue task). Enforced here, the shared link write path, so CLI,
-    // MCP, and HTTP are all covered by one implementation. `hasIssueReport`
-    // (issue-resolution.ts) is the same defensive presence predicate D2's
-    // `computeIssueResolution` builds on.
-    // `known-defect` (#404) names the same kind of target: the issue task that files the defect.
-    if (type === "resolves" || type === "known-defect") {
-      const toDocResult = await this.store.find(toResult.value);
-      if (!toDocResult.ok) return toDocResult;
-      const toDoc = toDocResult.value;
-      if (toDoc === null || toDoc.deleted_at !== null) {
-        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
-      }
+    // reason: `resolves` links are retired (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1);
+    // the carrier is extra.issues. Refused here, the shared link write path, so CLI, MCP and HTTP agree.
+    // The `LinkType` union still names "resolves" until the readers of stored legacy rows are rewritten.
+    if ((type as string) === "resolves") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: "link type 'resolves' is retired: carry the issue on the work with extra.issues (lore create task --issue <n>)",
+        value: type,
+      });
+    }
 
-      if (toDoc.type !== "task" || !hasIssueReport(toDoc.extra)) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "to",
-          message:
-            "resolves edge target must be a task carrying extra.issue_report (an issue task)",
-          value: { id: toResult.value, type: toDoc.type },
-        });
-      }
+    // `known-defect` is retired (spec-a-plan-s-known-defects-are-its-own-record-of-github-issues D1): the plan records its
+    // known defects itself. Refused here, the shared link write path, so CLI, MCP and HTTP agree.
+    if ((type as string) === "known-defect") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: "link type 'known-defect' is retired (no such link type remains): a plan records its known defects in extra.known_defects",
+        value: type,
+      });
     }
 
     const now = new Date().toISOString();
@@ -5644,6 +5703,42 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     }
 
     return ok(undefined);
+  }
+
+  /**
+   * Remove ONE link row of an exact type between two docs addressed by ID (a deleted doc included), with one
+   * `unlink` audit row. Unlike {@link unlink} it never touches the pair's other link types and does not resolve
+   * slugs, so `lore issues migrate` can delete a retired `resolves`/`relates-to` edge whose target is a soft-deleted
+   * mirror. A missing row is a no-op (idempotent, no audit row).
+   *
+   * @param request - `fromId`/`toId` doc ids and the stored `linkType` string (legacy types such as `resolves` are
+   *   valid here: deleting one is never refused)
+   * @returns `ok(true)` when a row was removed and audited, `ok(false)` when none existed
+   */
+  async removeLinkOfType(request: {
+    readonly fromId: DocId;
+    readonly toId: DocId;
+    readonly linkType: string;
+    readonly by?: string;
+  }): Promise<Result<boolean, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<boolean>();
+    if (refusal !== undefined) return refusal;
+    const found = await this.store.findLinks(request.fromId, "out");
+    if (!found.ok) return found;
+    const row = found.value.find((link) => link.to_id === request.toId && (link.link_type as string) === request.linkType);
+    if (row === undefined) return ok(false);
+    const removed = await this.store.removeLink(request.fromId, request.toId, row.link_type);
+    if (!removed.ok) return removed;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      actor: this.resolveWriteActor(request.by),
+      session_id: request.fromId,
+      action: "unlink",
+      doc_id: request.fromId,
+      details: { to_id: request.toId, link_type: [request.linkType] },
+    });
+    if (!audited.ok) return audited;
+    return ok(true);
   }
 
   /**
