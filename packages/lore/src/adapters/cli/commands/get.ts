@@ -95,7 +95,8 @@ import {
   loadVersionAttributions,
   type WriteAttribution,
 } from "../../../service/attribution-report.js";
-import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
+import { composeWithStructuredExtraNotice, formatKnownDefectLines, type KnownDefectDisplayRow, type RenderedBodyFacts } from "../get-render.js";
+import { readKnownDefects } from "@lore/core";
 import type { LockState } from "@lore/core";
 import type { StoreInterface } from "../../../store/store-interface.js";
 import { invocationOf } from "../command-invocation.js";
@@ -121,6 +122,24 @@ async function loadSpecRelations(
     if (!specs.ok) return specs;
     const view = computeImplementedBy(doc, specs.value.docs);
     return ok({ json: { implemented_by: view }, lines: formatImplementedByLines(view) });
+  }
+  if (doc.type === "plan") {
+    const entries = readKnownDefects(doc.extra);
+    if (entries.length === 0) return ok({ json: {}, lines: [] });
+    const port = app.corpusService.getPlanCloseIssuePort();
+    const rows: KnownDefectDisplayRow[] = [];
+    for (const entry of entries) {
+      let state: string;
+      if (port === undefined) state = "unknown (no GitHub upstream configured)";
+      else {
+        const read = await port.readIssue(entry.number);
+        if (!read.ok) state = `unknown (${"message" in read.error ? read.error.message : read.error.code})`;
+        else if (read.value.repoId !== entry.repo_id) state = `unknown (recorded for repository id ${String(entry.repo_id)}, configured is ${String(read.value.repoId)})`;
+        else state = read.value.state;
+      }
+      rows.push({ number: entry.number, dimension: entry.dimension, state });
+    }
+    return ok({ json: { known_defects_live: rows }, lines: formatKnownDefectLines(rows) });
   }
   return ok({ json: {}, lines: [] });
 }
@@ -320,6 +339,7 @@ export default defineLoreCommand({
         mdxResolved: !args.raw,
         acceptanceCriteriaProjected,
         codeAnchorsProjected,
+        knownDefectsProjected: relations.value.lines.length > 0 && doc.type === "plan",
         nowIso: new Date().toISOString(),
       };
       printLine(inv.io.stdout, 

@@ -11,7 +11,8 @@
  *   - `GitHubIntakePort` — `new GitHubIntakePort(options)`, then
  *     `verifyTarget()` / `searchDuplicates(title, limit)` /
  *     `fileIssue(input)` / `listIssues()`, plus the plan-close reader
- *     `listOpenIssues()` (all pages, open only, no PRs; #402). Exactly the
+ *     `listOpenIssues()` (all pages, open only, no PRs; #402) and the single-issue read
+ *     `readIssue(number)` (BR-1421). Exactly the
  *     four spec ops and that one read — never another public method (the retry/idempotency-lookup orchestration that
  *     needs to run BEFORE `fileIssue` is a caller concern, wired in
  *     `adapters/cli/report-issue-wiring.ts::fileGithubIssue`, precisely so
@@ -470,6 +471,32 @@ export class GitHubIntakePort {
           ...(entry.created_at !== undefined ? { created_at: entry.created_at } : {}),
         })),
     );
+  }
+
+  /**
+   * Reads ONE issue by its number (`gh api repos/<repo>/issues/<n>`): the plan-close coverage read (BR-1372, BR-1421).
+   * Never the listing: a just-filed issue may be missing from it (#402), and a closed issue must read as closed.
+   *
+   * @param number - the issue number
+   * @returns `ok({number, state})`, or `err(...)` on a failing `gh` call (a 404 included), a payload this module cannot
+   *   parse, or a number that names a pull request
+   */
+  async readIssue(number: number): Promise<Result<{ number: number; state: "open" | "closed" }, LoreError>> {
+    const result = await this.runner.run(["api", `repos/${this.repo}/issues/${String(number)}`]);
+    if (!result.ok) return result;
+    const parsed = z.object({ number: z.number(), state: z.string(), pull_request: z.unknown().optional() }).passthrough().safeParse(parseJsonSafely(result.value.stdout));
+    if (!parsed.success || parsed.data.number !== number || (parsed.data.state !== "open" && parsed.data.state !== "closed")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_issue_read_response",
+        message: `gh returned a payload for issue #${String(number)} this module could not parse as an open or closed issue`,
+        value: result.value.stdout,
+      });
+    }
+    if (parsed.data.pull_request !== undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "gh_issue_read_response", message: `#${String(number)} is a pull request, not an issue`, value: number });
+    }
+    return ok({ number, state: parsed.data.state });
   }
 
   /**

@@ -37,7 +37,7 @@ import { printLine } from "../output.js";
  * instead of this adapter's generic exit 2.
  */
 const VALID_LINK_TYPES: readonly LinkType[] = linkTypeSchema.options;
-const RETIRED_LINK_TYPE_FORWARDED_TO_SERVICE = "resolves";
+const RETIRED_LINK_TYPES_FORWARDED_TO_SERVICE: readonly string[] = ["resolves", "known-defect"];
 
 export default defineLoreCommand({
   meta: {
@@ -156,7 +156,7 @@ export default defineLoreCommand({
       // ─── Manual path (unchanged from pre-SPEC-019) ────────────────────────────
       const linkType = (args.type ?? "relates-to") as LinkType;
 
-      if (!VALID_LINK_TYPES.includes(linkType) && linkType !== RETIRED_LINK_TYPE_FORWARDED_TO_SERVICE) {
+      if (!VALID_LINK_TYPES.includes(linkType) && !RETIRED_LINK_TYPES_FORWARDED_TO_SERVICE.includes(linkType)) {
         inv.io.stderr.write(
           `Error: Invalid link type '${linkType}'. Valid types: ${VALID_LINK_TYPES.join(", ")}\n`,
         );

@@ -1728,6 +1728,15 @@ function wirePlanCloseIssues(app: App, config: LoreConfig | undefined, ambient: 
         open: listed.value.map((issue) => ({ number: issue.number, title: issue.title })),
       });
     },
+    readIssue: async (number) => {
+      const runner = new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env });
+      const port = new GitHubIntakePort({ runner, repo, receiptsPath: join(dirname(dbPath), "issue-receipts-v2.jsonl") });
+      const verified = await port.verifyTarget();
+      if (!verified.ok) return verified;
+      const read = await port.readIssue(number);
+      if (!read.ok) return read;
+      return ok({ repoId: verified.value.id, state: read.value.state });
+    },
   });
 }
 

@@ -274,82 +274,67 @@ export interface OpenIssueListing {
   readonly open: readonly OpenIssueRef[];
 }
 
-/** The port plan close uses to learn which GitHub issues are OPEN right now. */
+/** One issue read by its own number: the repository it belongs to and whether it is open right now. */
+export interface IssueRead {
+  readonly repoId: number;
+  readonly state: "open" | "closed";
+}
+
+/** The port plan close and the filer use to read GitHub: the open listing (fingerprint search) and one issue by number (coverage). */
 export interface PlanCloseIssuePort {
   readonly listOpenIssues: () => Promise<Result<OpenIssueListing, LoreError>>;
+  /** Single-issue read (never the paginated listing: a just-filed issue may be missing from it, #402). */
+  readonly readIssue: (number: number) => Promise<Result<IssueRead, LoreError>>;
 }
 
 /** Result of {@link coverFailedDimensions}. */
 export interface DimensionCoverage {
-  /** True when every failed dimension has at least one open linked issue. */
+  /** True when every failed dimension has at least one entry whose issue is open. */
   readonly accepted: boolean;
-  /** Per failed dimension: the open linked issue numbers that name it. */
+  /** Per failed dimension: the open issue numbers recorded for it. */
   readonly byDimension: Readonly<Record<string, readonly number[]>>;
   readonly uncovered: readonly string[];
   /**
-   * The uncovered dimensions whose linked issue record names them but whose issue is no longer open (closed: the defect
-   * was fixed). That is new input: the plan needs review again (#394).
+   * The uncovered dimensions that have an entry whose issue is no longer open (closed: the defect was fixed). That is
+   * new input: the plan needs review again (#394).
    */
   readonly fixed: readonly string[];
+  /** Every closed issue number recorded for an uncovered failed dimension, ascending. */
+  readonly closed: readonly number[];
   /** Every issue number that covers some dimension, ascending. */
   readonly issues: readonly number[];
 }
 
-/** The issue carrier's `extra` field that records which milestone findings (dimension + fingerprint) the issue files. */
-export const MILESTONE_FINDINGS_FIELD = "milestone_findings";
-
-/** One finding an issue covers: written when the batch files or links the issue, read by plan close. */
-export const milestoneFindingSchema = z.object({
-  dimension: z.string().min(1),
-  fingerprint: z.string().min(1),
-});
-export type MilestoneFinding = z.infer<typeof milestoneFindingSchema>;
-
-/**
- * The findings recorded on an issue carrier's `extra`.
- *
- * @param extra - an issue task's `extra`
- * @returns the valid recorded findings; `[]` when none are recorded (an issue linked by hand covers nothing)
- */
-export function readMilestoneFindings(extra: unknown): MilestoneFinding[] {
-  if (extra === null || typeof extra !== "object") return [];
-  const raw = (extra as Record<string, unknown>)[MILESTONE_FINDINGS_FIELD];
-  const parsed = z.array(milestoneFindingSchema).safeParse(raw);
-  return parsed.success ? parsed.data : [];
+/** A recorded known defect with its live state, as {@link coverFailedDimensions} reads it. */
+export interface KnownDefectLive {
+  readonly number: number;
+  readonly dimension: string;
+  readonly state: "open" | "closed";
 }
 
 /**
- * Accepted with known defects (Part D, BR-1379): a failed dimension is covered by an OPEN issue that is linked to the
- * plan and whose carrier records that dimension (`milestone_findings`, written when the batch files or links the
- * issue). The issue title is never read.
+ * Accepted with known defects (Part D, BR-1379, BR-1421): a failed dimension is covered by a recorded known-defect
+ * entry FOR THAT DIMENSION whose issue is open. The issue title is never read, and an entry covers only its own dimension.
  *
  * @param failed - the failed dimension ids of the current review
- * @param linked - the issues linked to the plan: `{number, repoId?, dimensions}` read from the linked issue tasks
- * @param listing - the live open issues
+ * @param entries - the plan's recorded known defects, each with the issue's live state (read by number)
  * @returns accepted only when `failed` is non-empty and every entry is covered
  */
-export function coverFailedDimensions(
-  failed: readonly string[],
-  linked: readonly { readonly number: number; readonly repoId?: number; readonly dimensions: readonly string[] }[],
-  listing: OpenIssueListing,
-): DimensionCoverage {
-  const linkedOpen = listing.open.flatMap((issue) => {
-    const carrier = linked.find((l) => l.number === issue.number && (l.repoId === undefined || l.repoId === listing.repoId));
-    return carrier === undefined ? [] : [{ number: issue.number, dimensions: carrier.dimensions }];
-  });
+export function coverFailedDimensions(failed: readonly string[], entries: readonly KnownDefectLive[]): DimensionCoverage {
   const byDimension: Record<string, number[]> = {};
   const uncovered: string[] = [];
   const fixed: string[] = [];
+  const closed = new Set<number>();
   for (const dimension of failed) {
-    const numbers = linkedOpen.filter((i) => i.dimensions.includes(dimension)).map((i) => i.number);
+    const mine = entries.filter((e) => e.dimension === dimension);
+    const numbers = [...new Set(mine.filter((e) => e.state === "open").map((e) => e.number))];
     byDimension[dimension] = numbers;
-    if (numbers.length === 0) {
-      uncovered.push(dimension);
-      // reason: no open linked issue covers it, so a linked record that names it belongs to an issue that is now closed.
-      const recordedOnLinked = linked.some((l) => l.dimensions.includes(dimension) && (l.repoId === undefined || l.repoId === listing.repoId));
-      if (recordedOnLinked) fixed.push(dimension);
-    }
+    if (numbers.length > 0) continue;
+    uncovered.push(dimension);
+    const closedHere = mine.filter((e) => e.state === "closed");
+    if (closedHere.length > 0) fixed.push(dimension);
+    for (const e of closedHere) closed.add(e.number);
   }
   const issues = [...new Set(Object.values(byDimension).flat())].sort((a, b) => a - b);
-  return { accepted: failed.length > 0 && uncovered.length === 0, byDimension, uncovered, fixed, issues };
+  return { accepted: failed.length > 0 && uncovered.length === 0, byDimension, uncovered, fixed, closed: [...closed].sort((a, b) => a - b), issues };
 }

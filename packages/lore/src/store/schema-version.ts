@@ -35,5 +35,5 @@
  * originally sited alongside).
  */
 
-/** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`; 037 = known-defect link type). */
-export const LATEST_SCHEMA_VERSION = 37;
+/** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`; 038 = known defects on the plan, known-defect link type retired). */
+export const LATEST_SCHEMA_VERSION = 38;

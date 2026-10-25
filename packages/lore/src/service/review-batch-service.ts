@@ -140,8 +140,8 @@ export interface BatchRunPorts {
   readonly measureSuite: (planRefs: readonly string[]) => Promise<SuiteRun | undefined>;
   /** Judges one plan and stores the review. */
   readonly reviewPlan: (planRef: string, suite: SuiteRun | undefined) => Promise<Result<MilestoneReviewResult, LoreError>>;
-  /** Archives the plan through the gated close; `filedIssues` are the issue numbers this run filed or linked for the plan (open by construction, #402). */
-  readonly closePlan: (planRef: string, filedIssues: readonly number[]) => Promise<Result<void, LoreError>>;
+  /** Archives the plan through the gated close (coverage reads the plan's known defects, each issue by number). */
+  readonly closePlan: (planRef: string) => Promise<Result<void, LoreError>>;
   /** Records an errored attempt as an audit row (never a review). */
   readonly recordError: (error: BatchErrorRecord) => Promise<Result<void, LoreError>>;
   readonly filing: IssueFilingService | undefined;
@@ -363,7 +363,7 @@ export class ReviewBatchRunner {
       if (broken?.error !== undefined) return fail("filing", fingerprint, broken.error, reviewed, latest.doc.slug);
       for (const group of filed.value) if (group.issue !== undefined) issues.push(group.issue.number);
     }
-    const closed = await ports.closePlan(ref, [...new Set(issues)].sort((a, b) => a - b));
+    const closed = await ports.closePlan(ref);
     if (!closed.ok) return fail("close", fingerprint, closed.error, reviewed, latest.doc.slug);
     return {
       plan: planSlug,

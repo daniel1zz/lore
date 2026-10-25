@@ -85,10 +85,8 @@ export const linkTypeSchema = z.enum([
   // "resolves" is RETIRED (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1):
   // the carrier is `extra.issues` on a task or plan. Stored legacy rows are read by
   // `lore issues migrate`; CorpusService.link refuses to create a new one.
-  // "known-defect": from = a plan accepted with known defects, to = the issue task (carrying extra.issue_report)
-  // that files one of its defects. NOT a fix: archiving the plan never closes the issue (#404), and plan-close
-  // coverage reads this link type only. Written by the review batch and `lore assess --file-issues`.
-  "known-defect",
+  // "known-defect" is RETIRED (spec-a-plan-s-known-defects-are-its-own-record-of-github-issues D1): a plan records
+  // its known defects itself in `extra.known_defects`; the schema migration converts every old link into entries.
 ]);
 
 /**

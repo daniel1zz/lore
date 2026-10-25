@@ -3,20 +3,23 @@
  * the automatic review batch and `lore assess --file-issues`.
  *
  * Purpose: group findings by root-cause fingerprint, search the open issues for each fingerprint first, file ONE issue
- *   per fingerprint that has none, and link the issue to every plan that shares it.
+ *   per fingerprint that has none, and record it on every plan that shares it, one known-defect entry per failed
+ *   dimension of that plan carrying the fingerprint (`extra.known_defects`; no corpus document, no link).
  * Public surface: {@link IssuePort}, {@link IssueRef}, {@link FilingGroup}, {@link IssueFilingService}.
  * Invariants:
  *   - One group (and so at most one new issue) per fingerprint, however many plans or batches hit it; an open issue
  *     carrying the fingerprint is linked, never duplicated.
  *   - Filing is idempotent: a re-run after a partial failure finds the issue it already filed (it is open and tagged)
- *     and only completes the missing links.
+ *     and only completes the missing records.
+ *   - The number of a just-created issue comes from the create call, never from a listing.
  *   - A group's failure is a value on that group (`error`), never thrown; the other groups still run. The caller keeps
  *     the review's verdict and retries only the filing next batch.
- *   - Links are written per plan; a link that already exists is not an error (the port ignores DUPLICATE_LINK).
+ *   - Entries are recorded per plan; an entry already recorded is not an error (the port appends idempotently by key).
  * Side-effect class: IO through the injected {@link IssuePort}.
  *
  * Reference: Sentry error grouping by fingerprint.
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-4, BR-1379)
+ * @spec_ref spec-a-plan-s-known-defects-are-its-own-record-of-github-issues (AC-KD-2, BR-1421)
  */
 
 import type { LoreError, MilestoneDimension, Result } from "@lore/core";
@@ -36,11 +39,10 @@ export interface IssuePort {
   /** Files ONE new issue. */
   readonly file: (input: IssueInput) => Promise<Result<IssueRef, LoreError>>;
   /**
-   * Links the issue to the plan (a `known-defect` link: the plan-close coverage carrier) and records on the issue's carrier which finding
-   * (dimension + fingerprint) it files, so plan close reads coverage from the record, never the title; an existing
-   * link is success.
+   * Appends one known-defect entry per finding (dimension + fingerprint) of this issue to the plan's
+   * `extra.known_defects`, with the plan's expected version; an entry already recorded is success. Creates no document.
    */
-  readonly linkToPlan: (plan: string, issue: IssueRef, finding: IssueFinding) => Promise<Result<void, LoreError>>;
+  readonly recordKnownDefects: (plan: string, issue: IssueRef, findings: readonly IssueFinding[]) => Promise<Result<void, LoreError>>;
 }
 
 /** The finding a filed or reused issue covers. */
@@ -67,9 +69,9 @@ export interface FilingGroup {
   readonly issue?: IssueRef;
   /** True when an open issue already carried the fingerprint (nothing was filed). */
   readonly reused: boolean;
-  /** Plans whose link to the issue was written. */
+  /** Plans whose known-defect entries for the issue were recorded. */
   readonly linked: readonly string[];
-  /** The failure of this group (search, filing or a link); the plans not in `linked` still need their filing retried. */
+  /** The failure of this group (search, filing or recording); the plans not in `linked` still need their filing retried. */
   readonly error?: LoreError;
 }
 
@@ -90,7 +92,10 @@ function bodyOf(cause: RootCause, findings: readonly FailedFinding[]): string {
 
 /** See the module header. */
 export class IssueFilingService {
-  constructor(private readonly port: IssuePort) {}
+  constructor(
+    private readonly port: IssuePort,
+    private readonly rootCause: (finding: FailedFinding) => Result<RootCause, LoreError> = rootCauseOf,
+  ) {}
 
   /**
    * Files and links the findings by root cause.
@@ -102,7 +107,7 @@ export class IssueFilingService {
   async fileFindings(findings: readonly FailedFinding[]): Promise<Result<FilingGroup[], LoreError>> {
     const byFingerprint = new Map<string, { cause: RootCause; findings: FailedFinding[] }>();
     for (const finding of findings) {
-      const caused = rootCauseOf(finding);
+      const caused = this.rootCause(finding);
       if (!caused.ok) return caused;
       const cause = caused.value;
       const group = byFingerprint.get(cause.fingerprint);
@@ -135,7 +140,12 @@ export class IssueFilingService {
     }
     const linked: string[] = [];
     for (const plan of plans) {
-      const result = await this.port.linkToPlan(plan, issue, { dimension: cause.dimension, fingerprint: cause.fingerprint });
+      const dimensions = [...new Set(members.filter((m) => m.plan === plan).map((m) => m.dimension))];
+      const result = await this.port.recordKnownDefects(
+        plan,
+        issue,
+        dimensions.map((dimension) => ({ dimension, fingerprint: cause.fingerprint })),
+      );
       if (!result.ok) return { cause, plans, issue, reused, linked, error: result.error };
       linked.push(plan);
     }

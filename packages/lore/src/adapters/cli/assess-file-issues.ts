@@ -3,8 +3,8 @@
  * Used by `lore assess --file-issues` and the automatic review batch alike; the grouping is `IssueFilingService`'s.
  *
  * Purpose: file ONE issue per root-cause fingerprint, find an already-open one by the `[fp:<12 hex>]` tag in its
- *   title, and link an issue to a plan with a `known-defect` link (never `resolves`, which archive closes), so plan
- *   close finds it as coverage.
+ *   title, and record it on the plan's own `extra.known_defects` (one entry per failed dimension, never `extra.issues`,
+ *   which archive closes), so plan close finds it as coverage. No corpus document is created (GS D7).
  * Public surface: createGithubIssuePort.
  * Invariants:
  *   - The title is the one `IssueFilingService` built (`<dimension>: <cause> [fp:<12 hex>]`); the full fingerprint is
@@ -12,19 +12,18 @@
  *   - A filing or link failure is returned, never swallowed.
  *   - Open issues are read live (`PlanCloseIssuePort.listOpenIssues`), the same reader plan close uses; with none
  *     wired, searching fails loud instead of reading as "no open issue" (that would file duplicates).
- * Side-effect class: IO (GitHub through `fileGithubIssue`, corpus link writes).
+ * Side-effect class: IO (GitHub through `fileGithubIssue`, a plan write per filed batch).
  *
  * Reference: Sentry error grouping by fingerprint.
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-4, BR-1379)
+ * @spec_ref spec-a-plan-s-known-defects-are-its-own-record-of-github-issues (AC-KD-2, BR-1421)
  */
 
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { appendKnownDefects, err, KNOWN_DEFECTS_FIELD, ok, readKnownDefects, type KnownDefectEntry, type LoreError, type Result } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
-import { readCarrierIssueRefs } from "../../service/issue-carrier.js";
-import { buildCarrierTaskInput, decideAdoption } from "../../service/issue-adoption.js";
 import type { IssueFinding, IssuePort, IssueRef } from "../../service/issue-filing-service.js";
 import { FINGERPRINT_TITLE_TAG } from "../../service/root-cause-fingerprint.js";
-import { MILESTONE_FINDINGS_FIELD, readMilestoneFindings, type OpenIssueListing, type PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
+import { type PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
 import { fileGithubIssue, type GithubFilingContext, type GithubUpstreamCfg } from "./report-issue-wiring.js";
 
 /**
@@ -32,7 +31,7 @@ import { fileGithubIssue, type GithubFilingContext, type GithubUpstreamCfg } fro
  *
  * @param cfg - the GitHub `feedback.upstream`
  * @param ctx - filing context of the caller
- * @param corpusService - the corpus the issue tasks live in and the links are written to
+ * @param corpusService - the corpus whose plans record the known defects
  * @param openIssues - the live open-issue reader (plan close's), absent when none is wired
  */
 export function createGithubIssuePort(
@@ -75,77 +74,55 @@ export function createGithubIssuePort(
       if (!result.ok) return result;
       return ok({ number: result.value.number, url: result.value.url });
     },
-    linkToPlan: async (plan, issue, finding) => {
-      // reason: a carrier names its issue by numeric repo id (D1); the repo id of the configured repository is the one
-      // the open-issue reader verified. Absent a reader the number alone matches (one upstream per corpus).
-      let listing: OpenIssueListing | undefined;
-      if (openIssues !== undefined) {
-        const listed = await openIssues.listOpenIssues();
-        if (!listed.ok) return listed;
-        listing = listed.value;
+    recordKnownDefects: async (plan, issue, findings) => {
+      // reason: the entry names its issue by numeric repo id (D1). The issue is read BY NUMBER (never the listing: a
+      // just-created issue may be missing from it, #402), which also yields the repository id the reader verified.
+      if (openIssues === undefined) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "feedback.upstream",
+          message: "cannot record known defects: no issue reader is wired (needs a GitHub feedback.upstream.repo)",
+          rule: "BR-1421",
+        });
       }
-      return linkIssueToPlan(corpusService, plan, issue, finding, listing, cfg.repo, ctx.actor);
+      const read = await openIssues.readIssue(issue.number);
+      if (!read.ok) return read;
+      return recordOnPlan(corpusService, plan, read.value.repoId, issue, findings, ctx.actor);
     },
   };
 }
 
-async function linkIssueToPlan(
+/** Re-read and re-append attempts after losing a version race on the plan (D4). */
+const MAX_APPEND_ATTEMPTS = 5;
+
+async function recordOnPlan(
   corpusService: CorpusService,
   planRef: string,
+  repoId: number,
   issue: IssueRef,
-  finding: IssueFinding,
-  listing: OpenIssueListing | undefined,
-  repo: string,
+  findings: readonly IssueFinding[],
   actor: string,
 ): Promise<Result<void, LoreError>> {
-  const repoId = listing?.repoId;
-  const bundle = await corpusService.getPlanBundle(planRef);
-  if (!bundle.ok) return bundle;
-  const tasks = await corpusService.listFull({ type: "task" });
-  if (!tasks.ok) return tasks;
-  let issueTask = tasks.value.docs.find((doc) => {
-    if (doc.status === "archived") return false;
-    return readCarrierIssueRefs(doc).some((ref) => ref.number === issue.number && (repoId === undefined || ref.repo_id === repoId));
-  });
-  if (issueTask === undefined) {
-    // reason: filing creates no corpus document (AC-GS-10), so the carrier the known-defect link needs is adopted here:
-    // an ad-hoc draft task naming the issue, exactly what `lore issue adopt <n>` creates, never a plan member (a draft
-    // member would hold the plan's own close open).
-    const open = listing?.open.find((candidate) => candidate.number === issue.number);
-    if (listing === undefined || open === undefined) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "file-issues",
-        message: `issue #${String(issue.number)} exists but no live corpus task carries it (extra.issues) and it is not in the open listing, so it cannot be adopted for plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type known-defect\``,
-        rule: "BR-1379",
-      });
+  const additions: KnownDefectEntry[] = findings.map((f) => ({ repo_id: repoId, number: issue.number, dimension: f.dimension, fingerprint: f.fingerprint }));
+  let lastConflict: LoreError | undefined;
+  for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt += 1) {
+    const read = await corpusService.get(planRef);
+    if (!read.ok) return read;
+    const plan = read.value.doc;
+    if (plan.type !== "plan") {
+      return err({ code: "VALIDATION_ERROR", field: "plan", message: `${planRef} is a ${plan.type}, not a plan: known defects are recorded on a plan`, rule: "BR-1421" });
     }
-    const listed = { number: issue.number, title: open.title, state: "open", body: "" } as const;
-    const decision = decideAdoption(listed, listing.repoId, tasks.value.docs, new Date().toISOString());
-    if (decision.kind !== "create") {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "file-issues",
-        message: `issue #${String(issue.number)} cannot be adopted for plan ${planRef}: ${decision.kind}${"slug" in decision ? ` (${decision.slug})` : ""}`,
-        rule: "BR-1379",
-      });
-    }
-    const created = await corpusService.create(buildCarrierTaskInput({ issue: listed, repo, repoId: listing.repoId, slug: decision.slug }), { by: actor });
-    if (!created.ok) return created;
-    issueTask = created.value;
-  }
-  // reason: BR-1379 — the record on the carrier (not the title) is what plan close reads as coverage. Written BEFORE the
-  // link so a link never exists without the record; an unchanged record writes nothing (idempotent retry).
-  const recorded = readMilestoneFindings(issueTask.extra);
-  if (!recorded.some((f) => f.dimension === finding.dimension && f.fingerprint === finding.fingerprint)) {
+    const existing = readKnownDefects(plan.extra);
+    const merged = appendKnownDefects(existing, additions);
+    if (merged === existing) return ok(undefined);
     const written = await corpusService.set(
-      issueTask.id,
-      { extra: { ...(issueTask.extra as Record<string, unknown>), [MILESTONE_FINDINGS_FIELD]: [...recorded, { dimension: finding.dimension, fingerprint: finding.fingerprint }] } },
-      { by: actor },
+      plan.id,
+      { extra: { ...(plan.extra as Record<string, unknown>), [KNOWN_DEFECTS_FIELD]: merged } },
+      { by: actor, expectedVersion: plan.version },
     );
-    if (!written.ok) return written;
+    if (written.ok) return ok(undefined);
+    if (written.error.code !== "STALE_VERSION") return written;
+    lastConflict = written.error;
   }
-  const linked = await corpusService.link(bundle.value.plan.id, issueTask.id, "known-defect", { by: actor });
-  if (!linked.ok && linked.error.code !== "DUPLICATE_LINK") return linked;
-  return ok(undefined);
+  return err(lastConflict ?? { code: "VALIDATION_ERROR", field: "plan", message: `could not record known defects on ${planRef}`, rule: "BR-1421" });
 }
