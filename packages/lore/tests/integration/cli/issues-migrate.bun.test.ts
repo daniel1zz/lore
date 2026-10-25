@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries#AC-GS-12

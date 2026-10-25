@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 // @reads packages
 // @reads scripts/check-unclaimed-oracle.ts
@@ -28,6 +29,7 @@
  *   REGRESSION the red-once mutation: computing abandonment per carrier instead of per issue.
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -162,8 +164,8 @@ async function buildCorpus(): Promise<Corpus> {
   const corpus: Corpus = { dir, stubDir };
   makeCleanTreeRepo(dir);
   await mustRun(corpus, ["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     `workflow:\n  review:\n    judgment_required_types: []\nfeedback:\n  upstream:\n    repo: ${FAKE_REPO}\n`,
   );
   const prd = slugOfCreate(

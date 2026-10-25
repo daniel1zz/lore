@@ -16,6 +16,7 @@
  * Side-effect class: IO (temp dirs, subprocesses).
  */
 
+import { patchLoreConfig } from "./patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -188,8 +189,8 @@ export async function makeIssueFixture(
     if (result.exitCode !== 0) throw new Error(`lore ${args.join(" ")} failed (${result.exitCode}): ${result.stderr}${result.stdout}`);
   };
   await must(["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    plan-close:", "      enabled: false", "  review:", "    judgment_required_types: []", "feedback:", "  upstream:", `    repo: ${STUB_REPO}`, ""].join("\n"),
   );
   await must(["create", "prd", "--title", "Issue Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);

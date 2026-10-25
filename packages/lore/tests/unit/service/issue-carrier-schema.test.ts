@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries#AC-GS-11
  * @task task-skill-refactor-gs-t1-carrier-schema-extra-issues-retired
@@ -19,6 +20,7 @@
  * Made red once by removing 'issue_report' from RETIRED_EXTRA_KEYS in CorpusService.
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,8 +99,7 @@ beforeAll(async () => {
   if (init.exitCode !== 0) throw new Error(`init failed: ${init.stderr}`);
   const prd = await lore(["create", "prd", "--title", "gs-t1 root", "--content", "root", "--no-ai"]);
   if (prd.exitCode !== 0) throw new Error(`prd failed: ${prd.stderr}`);
-  const configPath = join(corpus, ".lore", "config.yaml");
-  writeFileSync(configPath, `${readFileSync(configPath, "utf8")}feedback:\n  upstream:\n    repo: ${REPO}\n`);
+  patchLoreConfig(corpus, `feedback:\n  upstream:\n    repo: ${REPO}\n`);
 }, CLI_TIMEOUT_MS);
 
 afterAll(() => {

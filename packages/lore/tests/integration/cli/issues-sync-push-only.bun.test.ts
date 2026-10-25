@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries#AC-GS-16
@@ -27,6 +28,7 @@
  *              listing was complete (a swallowed listing failure becomes an empty listing).
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -191,9 +193,8 @@ async function mustRun(fixture: Fixture, session: string, args: string[]): Promi
 
 const slugOfCreate = (stdout: string): string => (JSON.parse(stdout) as { data: { slug: string } }).data.slug;
 
-/** `lore done` after a claim and a runner-attested pass. */
+/** `lore done` after a runner-attested pass on an unclaimed task (a claim naming a working copy would arm the not-landed floor, which needs a real `lore integrate`). */
 async function completeWithDone(fixture: Fixture, slug: string): Promise<RunResult> {
-  await mustRun(fixture, "worker", ["claim", slug, "--worktree", fixture.dir]);
   await mustRun(fixture, "worker", ["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
   return await runLore(fixture, "worker", ["done", slug, "--declare-no-new-tests", "fixture: throwaway task"]);
 }
@@ -228,8 +229,8 @@ async function makeFixture(): Promise<{ fixture: Fixture; slugs: { forty: string
   const fixture: Fixture = { dir, stubDir };
   makeCleanTreeRepo(dir);
   await mustRun(fixture, "setup", ["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

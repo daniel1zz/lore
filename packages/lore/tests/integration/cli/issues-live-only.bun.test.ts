@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries#AC-GS-2
@@ -26,6 +27,7 @@
  *              catches it.
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -110,7 +112,7 @@ function makeCorpusWithCarrier(): { dir: string; stubDir: string; slug: string }
   writeStubGh(stubDir);
   makeCleanTreeRepo(dir);
   mustRun(dir, stubDir, ["init"]);
-  appendFileSync(join(dir, ".lore", "config.yaml"), `feedback:\n  upstream:\n    repo: ${FAKE_REPO}\n`);
+  patchLoreConfig(dir, `feedback:\n  upstream:\n    repo: ${FAKE_REPO}\n`);
   mustRun(dir, stubDir, ["create", "prd", "--title", "Carrier Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
   const created = mustRun(dir, stubDir, [
     "create", "task", "--adhoc", "--ac-scope", "", "--title", "Carrier of seven", "--no-ai", "--content", "Carrier.", "--issue", "7", "--json",

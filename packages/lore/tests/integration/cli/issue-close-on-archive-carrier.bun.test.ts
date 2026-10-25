@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 // @reads packages
 /**
@@ -23,6 +24,7 @@
  *   REGRESSION the red-once mutation: onArchived reading only the first IssueRef.
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -215,8 +217,8 @@ async function makeCorpus(issues: readonly StubIssue[]): Promise<Corpus & { prdS
   const corpus: Corpus = { dir, stubDir };
   makeCleanTreeRepo(dir);
   await mustRun(corpus, "setup", ["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",
@@ -246,9 +248,8 @@ async function createCarrierTask(corpus: Corpus, title: string, numbers: readonl
   );
 }
 
-/** `lore done` after a claim and a runner-attested pass (`--capture` runs the command and attests its exit code). */
+/** `lore done` after a runner-attested pass (`--capture` runs the command and attests its exit code) on an unclaimed task: a claim naming a working copy would arm the not-landed floor, which needs a real `lore integrate`. */
 async function completeWithDone(corpus: Corpus, slug: string): Promise<RunResult> {
-  await mustRun(corpus, "worker", ["claim", slug, "--worktree", corpus.dir]);
   await mustRun(corpus, "worker", ["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
   return await runLore(corpus, "worker", ["done", slug, "--declare-no-new-tests", "fixture: throwaway task"]);
 }

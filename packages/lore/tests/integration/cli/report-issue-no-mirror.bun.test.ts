@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 // @reads packages
 // @reads packages/*/src/**
@@ -21,6 +22,7 @@
  * intent/outcome still written).
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -107,9 +109,7 @@ beforeAll(() => {
     corpus,
   );
   if (prd.exitCode !== 0) throw new Error(`root PRD creation failed (exit ${prd.exitCode}): ${prd.stderr}`);
-  const configPath = join(corpus, ".lore", "config.yaml");
-  const existing = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-  writeFileSync(configPath, `${existing}feedback:\n  upstream:\n    repo: ${REPO}\n`);
+  patchLoreConfig(corpus, `feedback:\n  upstream:\n    repo: ${REPO}\n`);
 }, 120_000);
 
 afterAll(() => {

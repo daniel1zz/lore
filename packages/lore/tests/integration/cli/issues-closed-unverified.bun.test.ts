@@ -1,3 +1,4 @@
+// @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 // @reads packages
 /**
@@ -23,6 +24,7 @@
  *   REGRESSION the red-once mutation: relaxing the carrier predicate in `deriveIssueStatus` to "any carrier".
  */
 
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -112,7 +114,7 @@ async function makeCorpus(): Promise<Corpus> {
   const corpus: Corpus = { dir, stubDir };
   makeCleanTreeRepo(dir);
   await mustRun(corpus, ["init"]);
-  appendFileSync(join(dir, ".lore", "config.yaml"), `feedback:\n  upstream:\n    repo: ${FAKE_REPO}\n`);
+  patchLoreConfig(dir, `feedback:\n  upstream:\n    repo: ${FAKE_REPO}\n`);
   // an ad-hoc carrier task needs a root PRD to be parented to
   await mustRun(corpus, ["create", "prd", "--title", "Carrier Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
   return corpus;
