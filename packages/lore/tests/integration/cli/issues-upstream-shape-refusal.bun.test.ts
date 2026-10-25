@@ -303,19 +303,17 @@ describe("AC-IS-2 green control: GitHub-shape upstream reaches the GitHub read p
   });
 });
 
+// reason: spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-2 retired the local-corpus read of
+// `lore issues`: `--local` is an unknown switch under every upstream shape, so the old "stays exit 0" cell pins the
+// opposite — exit exactly 2, nothing listed. The describe/it name keeps the AC id the spec declares.
 describe("AC-IS-3 --local stays exit 0 under both shapes", () => {
   it("AC-IS-3 --local stays exit 0 under both shapes", () => {
-    const retiredResult = runLore(["issues", "--local"], retiredDir);
-    expect(retiredResult.exitCode).toBe(0);
-    const retiredFirstLine = retiredResult.stdout.split("\n")[0] ?? "";
-    expect(retiredFirstLine.startsWith("Corpus: ")).toBe(true);
-    expect(retiredFirstLine).toBe(`Corpus: ${realpathSync(retiredDir)}`);
-
-    const githubResult = runLore(["issues", "--local"], githubDir);
-    expect(githubResult.exitCode).toBe(0);
-    const githubFirstLine = githubResult.stdout.split("\n")[0] ?? "";
-    expect(githubFirstLine.startsWith("Corpus: ")).toBe(true);
-    expect(githubFirstLine).toBe(`Corpus: ${realpathSync(githubDir)}`);
+    for (const dir of [retiredDir, githubDir]) {
+      const result = runLore(["issues", "--local"], dir);
+      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(2);
+      expect(result.stdout.startsWith("Corpus: ")).toBe(false);
+      expect(result.stderr).toContain("--local");
+    }
   });
 });
 
