@@ -22,13 +22,16 @@
  *   - the command stops printing the issue address / number
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { fileURLToPath } from "node:url";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { parseIssueBody } from "@lore/core";
+import { LoreConfigSchema, NoOpTelemetry, parseIssueBody } from "@lore/core";
+import type { LoreConfig } from "@lore/core";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../helpers/payload-gh-stub";
@@ -64,6 +67,8 @@ let recordedBodyPath: string;
 let fileResult: RunResult;
 let humanResult: RunResult;
 let filedBody: string;
+/** Throwaway corpora the AC-RI-2 cases create (one per filing: the stub's fixed issue number collides within a corpus). */
+const extraRoots: string[] = [];
 
 function run(args: string[], cwd: string = corpusRoot): RunResult {
   const proc = Bun.spawnSync([DIST_LORE, ...args], {
@@ -168,7 +173,7 @@ beforeAll(() => {
 
 afterAll(() => {
   if (ghStubDir !== undefined) cleanupPayloadGhStubDir(ghStubDir);
-  for (const path of [isolatedConfigHome, corpusRoot, humanCorpusRoot]) {
+  for (const path of [isolatedConfigHome, corpusRoot, humanCorpusRoot, ...extraRoots]) {
     if (path === undefined) continue;
     try {
       rmSync(path, { recursive: true, force: true });
@@ -206,7 +211,7 @@ describe("BR-494 filed issue body", () => {
       afterBlock.indexOf(DESCRIPTION),
       afterBlock.indexOf(`**Expected:** ${EXPECTED}`),
       afterBlock.indexOf(`**Actual:** ${ACTUAL}`),
-      afterBlock.indexOf(`**Repro command:** \`${REPRO}\``),
+      afterBlock.indexOf(`**Repro command:**\n\`\`\`\n${REPRO}\n\`\`\``),
     ];
     for (const position of positions) expect(position).toBeGreaterThanOrEqual(0);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
@@ -230,5 +235,160 @@ describe("BR-494 filed issue body", () => {
     expect(humanResult.exitCode, `stdout: ${humanResult.stdout}\nstderr: ${humanResult.stderr}`).toBe(0);
     expect(humanResult.stdout).toContain(STUB_ISSUE_URL);
     expect(humanResult.stdout).toContain(String(STUB_ISSUE_NUMBER));
+  });
+});
+
+// ─── AC-RI-2 — body sections, optional parts, prose repro refused before GitHub ───
+
+const intakeFileIssue = vi.fn();
+// reason: the MCP case below drives the in-process handler; the intake port is mocked so "posts nothing" is observable.
+// The compiled-binary cases above and below are separate processes and unaffected by this mock.
+vi.mock("../../../src/service/github-intake-port.js", () => ({
+  GitHubIntakePort: vi.fn().mockImplementation(() => ({
+    verifyTarget: vi.fn(),
+    searchDuplicates: vi.fn(),
+    fileIssue: intakeFileIssue,
+  })),
+}));
+
+/** A filing's inputs minus the optional parts; each AC-RI-2 case adds its own. */
+function baseArgs(title: string): string[] {
+  return [
+    "report-issue",
+    "--title",
+    title,
+    "--description",
+    DESCRIPTION,
+    "--expected",
+    EXPECTED,
+    "--actual",
+    ACTUAL,
+    "--severity",
+    "high",
+    "--category",
+    "regression",
+    "--json",
+  ];
+}
+
+/** Files into a fresh corpus and returns the run plus the body the stub recorded (empty string when no POST happened). */
+function fileInFreshCorpus(args: string[]): { result: RunResult; body: string } {
+  const root = mkdtempSync(join(TMP_ROOT, "lore-ri2-corpus-"));
+  extraRoots.push(root);
+  prepareCorpus(root);
+  rmSync(recordedBodyPath, { force: true });
+  const result = run(args, root);
+  const body = existsSync(recordedBodyPath) ? readFileSync(recordedBodyPath, "utf8") : "";
+  return { result, body };
+}
+
+/** Index of `marker` in the body, asserting it appears exactly once. */
+function onlyOccurrence(body: string, marker: string): number {
+  expect(body.split(marker).length - 1, marker).toBe(1);
+  return body.indexOf(marker);
+}
+
+const REPRO_WITH_TICKS = "lore br494-repro ```x```";
+const STEPS = "RI2-STEPS first line\nRI2-STEPS second line";
+const FIX = "RI2-FIX change the thing";
+const PROSE_REPRO = "with an old fragment: lore integrate x";
+
+describe("AC-RI-2", () => {
+  it("a filing with every optional part records the sections once, in order, with a longer fence for a command containing backticks", () => {
+    const { result, body } = fileInFreshCorpus([
+      ...baseArgs("RI-2 all parts"),
+      "--repro-command",
+      REPRO_WITH_TICKS,
+      "--repro-steps",
+      STEPS,
+      "--suggested-fix",
+      FIX,
+      "--refs",
+      "spec-one AC-1",
+      "--refs",
+      "#123",
+    ]);
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+
+    // `**Context:**` is attached by the context-attachment task (AC-RI-3/4/6), so it is absent here: no test file is named.
+    const positions = [
+      DESCRIPTION,
+      "**Expected:**",
+      "**Actual:**",
+      "**Repro command:**",
+      "**Repro steps:**",
+      "**Suggested fix:**",
+      "**Refs:**",
+      "Reported by:",
+    ].map((marker) => onlyOccurrence(body, marker));
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+
+    expect(body).toContain(`**Repro command:**\n\`\`\`\`\n${REPRO_WITH_TICKS}\n\`\`\`\`\n`);
+    expect(body).toContain(`**Repro steps:**\n${STEPS}`);
+    expect(body).toContain(`**Suggested fix:**\n${FIX}`);
+    expect(body).toContain("**Refs:**\n- spec-one AC-1\n- #123\n");
+    const parsed = parseIssueBody(body);
+    expect(parsed.present).toBe(true);
+    if (parsed.present) expect(parsed.fields.severity).toBe("high");
+  });
+
+  it("a filing with none of the optional parts has no Repro, Suggested fix, Refs or Context heading and still round-trips", () => {
+    const { result, body } = fileInFreshCorpus(baseArgs("RI-2 bare"));
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+    for (const marker of ["**Repro command:**", "**Repro steps:**", "**Suggested fix:**", "**Refs:**", "**Context:**"]) {
+      expect(body, marker).not.toContain(marker);
+    }
+    const parsed = parseIssueBody(body);
+    expect(parsed.present).toBe(true);
+    if (parsed.present) expect(parsed.fields.severity).toBe("high");
+  });
+
+  it("a prose --repro-command exits exactly 2 naming the reason and records no issue POST", () => {
+    const { result, body } = fileInFreshCorpus([...baseArgs("RI-2 prose"), "--repro-command", PROSE_REPRO]);
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(2);
+    expect(result.stderr).toContain("program_not_found");
+    expect(result.stderr).toContain("with");
+    expect(result.stderr).toContain("--repro-steps");
+    expect(body).toBe("");
+  });
+
+  it("the same prose through the MCP handler returns VALIDATION_ERROR and posts nothing", async () => {
+    const { registerTools } = await import("../../../src/adapters/mcp/tools.js");
+    const { liveInvocation } = await import("../../live-invocation.js");
+    const server = new McpServer({ name: "test", version: "0.0.0" });
+    const config = LoreConfigSchema.parse({
+      project: { name: "test", author: "test" },
+      feedback: { upstream: { repo: FAKE_REPO } },
+    }) as LoreConfig;
+    // reason: the check refuses before the handler touches the app, so a bare app stub is enough for this case.
+    const app = { warn: () => undefined, close: () => undefined, telemetry: new NoOpTelemetry() } as never;
+    registerTools(server, app, () => config, liveInvocation());
+    const tools = (
+      server as unknown as {
+        _registeredTools: Record<string, { handler: (args: unknown, extra: unknown) => Promise<CallToolResult> }>;
+      }
+    )._registeredTools;
+    const tool = tools["lore_report_issue"];
+    if (tool === undefined) throw new Error("lore_report_issue is not registered");
+    const result = await tool.handler(
+      {
+        by: ACTOR,
+        title: "RI-2 mcp prose",
+        description: DESCRIPTION,
+        expected: EXPECTED,
+        actual: ACTUAL,
+        severity: "high",
+        category: "regression",
+        repro_command: PROSE_REPRO,
+      },
+      {},
+    );
+    expect(result.isError).toBe(true);
+    const first = result.content[0];
+    const error = JSON.parse(first !== undefined && first.type === "text" ? first.text : "{}") as Record<string, string>;
+    expect(error["code"]).toBe("VALIDATION_ERROR");
+    expect(error["field"]).toBe("repro_command");
+    expect(error["message"]).toContain("program_not_found");
+    expect(intakeFileIssue).not.toHaveBeenCalled();
   });
 });

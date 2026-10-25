@@ -1145,9 +1145,30 @@ export const LoreReportIssueSchema = z.object({
   description: z.string().min(1),
   expected: z.string().min(1),
   actual: z.string().min(1),
-  repro_command: z.string().optional(),
-  severity: z.enum(ISSUE_SEVERITIES).optional(),
-  category: z.string().min(1).max(ISSUE_CATEGORY_MAX_LENGTH).optional(),
+  repro_command: z
+    .string()
+    .optional()
+    .describe(
+      "One-line command that reproduces the issue — checked: one line, shell-lexable, program on PATH, a builtin, " +
+        "lore or an existing path. Use repro_steps for prose or several steps.",
+    ),
+  repro_steps: z.string().optional().describe("Multi-line reproduction steps, for what a one-line repro_command cannot hold."),
+  suggested_fix: z.string().optional().describe("Your proposed fix; keep `expected` to the behaviour."),
+  refs: z.array(z.string().min(1)).optional().describe("Specs, criteria, commits or issues this report relates to; one bullet each."),
+  // reason: kept `.optional()` in the shape although REQUIRED — a zod-required field would answer before BR-489's
+  // unconfigured-upstream remedy; the handler's refusal below is the enforcement (spec ...-a-checked-repro D7).
+  severity: z
+    .enum(ISSUE_SEVERITIES)
+    .optional()
+    .describe(`Required. Ordering-only severity label (${ISSUE_SEVERITIES.join(" | ")}); never changes whether a report is accepted.`),
+  category: z
+    .string()
+    .min(1)
+    .max(ISSUE_CATEGORY_MAX_LENGTH)
+    .optional()
+    .describe(
+      `Required. Ordering-only free-text category label, max ${ISSUE_CATEGORY_MAX_LENGTH} chars; never changes whether a report is accepted.`,
+    ),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -3428,9 +3449,13 @@ export function registerTools(
       // also normalizes vendor -> `{repo: VENDOR_INTAKE_REPO}`, so everything
       // below this line is unchanged and cannot drift from the CLI's own
       // policy (`commands/report-issue.ts` / `commands/issues.ts`).
-      const { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } = await import(
-        "../cli/report-issue-wiring.js"
-      );
+      const {
+        checkReproCommandForInvocation,
+        classifyFeedbackUpstream,
+        fileGithubIssue,
+        formatReproRefusal,
+        resolveConsumerCorpusRoot,
+      } = await import("../cli/report-issue-wiring.js");
       const classification = classifyFeedbackUpstream(getConfig?.());
 
       if (classification.kind === "unconfigured") {
@@ -3466,6 +3491,20 @@ export function registerTools(
           });
         }
 
+        // The repro command is checked here, in the input adapter, before the duplicate search, any GitHub call or
+        // receipt intent (spec-defect-reports-carry-their-own-context-a-checked-repro D4); PATH is the invocation's own.
+        if (args.repro_command !== undefined) {
+          const reproCheck = checkReproCommandForInvocation(args.repro_command, inv);
+          if (!reproCheck.ok) {
+            return errorContent({
+              code: "VALIDATION_ERROR",
+              field: "repro_command",
+              message: formatReproRefusal(reproCheck).replaceAll("--repro-command", "repro_command").replaceAll("--repro-steps", "repro_steps"),
+              value: args.repro_command,
+            });
+          }
+        }
+
         // The actor is the call identity's resolved name (no MCP caller names itself —
         // BR-1055), threaded through `GithubFilingContext.actor`.
         // This module does NO actor resolution of its own (report-issue-
@@ -3480,6 +3519,9 @@ export function registerTools(
             expected: args.expected,
             actual: args.actual,
             ...(args.repro_command !== undefined ? { repro_command: args.repro_command } : {}),
+            ...(args.repro_steps !== undefined && args.repro_steps.trim().length > 0 ? { repro_steps: args.repro_steps } : {}),
+            ...(args.suggested_fix !== undefined && args.suggested_fix.trim().length > 0 ? { suggested_fix: args.suggested_fix } : {}),
+            ...(args.refs !== undefined && args.refs.length > 0 ? { refs: args.refs } : {}),
             severity: args.severity,
             category: args.category,
             // No `tags` field on THIS surface (LoreReportIssueSchema's own

@@ -126,7 +126,8 @@
  * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D8, D13.
  */
 
-import { basename, dirname, join } from "node:path";
+import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { exitCli } from "./cli-exit.js";
 import {
@@ -145,6 +146,7 @@ import {
   type Result,
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
+import { checkReproCommand, type ReproCheck } from "../../service/report-issue-repro.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
 import { joinListing, type GithubIssueRow } from "../../service/github-issue-listing.js";
@@ -517,6 +519,12 @@ export interface GithubReportInput {
   readonly expected: string;
   readonly actual: string;
   readonly repro_command?: string;
+  /** Free multi-line text: the steps a one-line `repro_command` cannot hold. */
+  readonly repro_steps?: string;
+  /** The reporter's proposed fix, kept out of `expected` (which stays the behaviour). */
+  readonly suggested_fix?: string;
+  /** Specs, criteria, commits or issues the report relates to; one bullet each. */
+  readonly refs?: readonly string[];
   readonly severity: IssueSeverity;
   readonly category: string;
   readonly tags: readonly string[];
@@ -651,13 +659,79 @@ async function resolveLocalRootPrd(
   return ok(rootPrd ? { id: rootPrd.id, slug: rootPrd.slug } : null);
 }
 
-/** Joins `description`/`expected`/`actual`/`repro_command` into ONE free-form body block — the consumer-authority content the Per-Field-Authority table assigns to the issue body (never the front-matter block). */
+/**
+ * Fence for a repro command: `max(3, longest backtick run in the command + 1)` backticks, so no command can
+ * close its own block early (D5).
+ */
+function fenceFor(command: string): string {
+  const longestRun = Math.max(0, ...(command.match(/`+/g) ?? []).map((run) => run.length));
+  return "`".repeat(Math.max(3, longestRun + 1));
+}
+
+/**
+ * Joins the report's free-form fields into ONE body block — the consumer-authority content the Per-Field-Authority table assigns to the issue body (never the front-matter block).
+ * Order: description, Expected, Actual, Repro command (fenced), Repro steps, Suggested fix, Refs, [Context], then the caller's `Reported by:`.
+ * A field that is absent contributes no heading; each marker appears once.
+ */
 function buildIssueDescriptionBlock(input: GithubReportInput): string {
   const lines = [input.description, "", `**Expected:** ${input.expected}`, `**Actual:** ${input.actual}`];
   if (input.repro_command !== undefined) {
-    lines.push(`**Repro command:** \`${input.repro_command}\``);
+    const fence = fenceFor(input.repro_command);
+    lines.push("", "**Repro command:**", fence, input.repro_command, fence);
   }
+  if (input.repro_steps !== undefined) lines.push("", "**Repro steps:**", input.repro_steps);
+  if (input.suggested_fix !== undefined) lines.push("", "**Suggested fix:**", input.suggested_fix);
+  if (input.refs !== undefined && input.refs.length > 0) {
+    lines.push("", "**Refs:**", ...input.refs.map((ref) => `- ${ref}`));
+  }
+  // `**Context:**` (attached test-file spec refs / header, spec AC-RI-3/4) is appended HERE by the context task; it precedes `Reported by:`.
   return lines.join("\n");
+}
+
+/** The slice of an Invocation the repro-command check reads: its PATH (never the process default) and its cwd. */
+export interface ReproCheckEnvironment {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly cwd: string;
+}
+
+/**
+ * Runs {@link checkReproCommand} against the invocation's own PATH and cwd — the ONE composition of the lookups,
+ * shared by the CLI flag and the MCP field so both refuse the same values.
+ *
+ * @param command - the raw `--repro-command` / `repro_command` value
+ * @param environment - the invocation's `env` and `cwd`
+ * @returns the check result (pure data; the caller renders the refusal)
+ */
+export function checkReproCommandForInvocation(command: string, environment: ReproCheckEnvironment): ReproCheck {
+  const pathDirs = (environment.env["PATH"] ?? "").split(delimiter).filter((dir) => dir.length > 0);
+  return checkReproCommand(command, {
+    selfName: "lore",
+    which: (name) =>
+      pathDirs.some((dir) => {
+        const candidate = join(dir, name);
+        try {
+          accessSync(candidate, fsConstants.X_OK);
+          return statSync(candidate).isFile();
+        } catch {
+          // reason: an unreadable or missing PATH entry simply does not hold the program.
+          return false;
+        }
+      }),
+    pathExists: (path) => existsSync(resolve(environment.cwd, path)),
+  });
+}
+
+/**
+ * One-line refusal text for a failed repro check, naming the reason and offending word and pointing at `--repro-steps`.
+ *
+ * @param check - a `{ ok: false }` result
+ * @returns the message both adapters print (CLI: usage error exit 2; MCP: VALIDATION_ERROR)
+ */
+export function formatReproRefusal(check: Extract<ReproCheck, { ok: false }>): string {
+  return (
+    `--repro-command must be one runnable command line, but it is refused (${check.reason}: ${check.detail}). ` +
+    "Put multi-step or prose reproduction text in --repro-steps instead."
+  );
 }
 
 /**

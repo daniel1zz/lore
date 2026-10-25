@@ -97,13 +97,15 @@ export function buildReportIssueHint(
     return (
       "If, after re-checking your own input, you still judge this a lore reporting " +
       'gap: configure feedback.upstream.repo (e.g. "owner/repo") in .lore/config.yaml, ' +
-      "then re-run with --title <short-title> --expected <what-you-expected> " +
-      "--actual <what-happened> to file it."
+      "then re-run with --title <short-title> --description <details> " +
+      "--expected <what-you-expected> --actual <what-happened> " +
+      "--severity <severity> --category <category> to file it."
     );
   }
   return (
     "If, after re-checking your own input, you still judge this a lore defect: run " +
-    "`lore report-issue --title <short-title> --expected <what-you-expected> " +
-    "--actual <what-happened>` to file it."
+    "`lore report-issue --title <short-title> --description <details> " +
+    "--expected <what-you-expected> --actual <what-happened> " +
+    "--severity <severity> --category <category>` to file it."
   );
 }
