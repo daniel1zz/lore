@@ -24,7 +24,7 @@
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { fileURLToPath } from "node:url";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -330,6 +330,25 @@ describe("AC-RI-2", () => {
     const parsed = parseIssueBody(body);
     expect(parsed.present).toBe(true);
     if (parsed.present) expect(parsed.fields.severity).toBe("high");
+  });
+
+  it("a filing whose repro names a test file shows **Context:** after Refs and before Reported by", () => {
+    const root = mkdtempSync(join(TMP_ROOT, "lore-ri2-ctx-corpus-"));
+    extraRoots.push(root);
+    prepareCorpus(root);
+    mkdirSync(join(root, "tests"));
+    writeFileSync(join(root, "tests", "ctx.test.ts"), "// @spec_ref spec-ri2-ctx ctx-marker-one\nimport { it } from \"vitest\";\nit(\"x\", () => {});\n");
+    rmSync(recordedBodyPath, { force: true });
+    const result = run(
+      [...baseArgs("RI-2 context order"), "--repro-command", "lore x tests/ctx.test.ts", "--refs", "spec-one AC-1"],
+      root,
+    );
+    const body = existsSync(recordedBodyPath) ? readFileSync(recordedBodyPath, "utf8") : "";
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+    const positions = ["**Refs:**", "**Context:**", "Reported by:"].map((marker) => onlyOccurrence(body, marker));
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(body).toContain("**Context:** tests/ctx.test.ts");
+    expect(body).toContain("// @spec_ref spec-ri2-ctx ctx-marker-one");
   });
 
   it("a filing with none of the optional parts has no Repro, Suggested fix, Refs or Context heading and still round-trips", () => {
