@@ -319,7 +319,7 @@ export class MilestoneReviewService {
       }
       currentPrompt =
         `${prompt}\n\nYour previous answer was rejected: ${lastProblem}\n` +
-        "Answer again with ONE JSON object containing all seven dimensions, each with verdict, reason and reference.";
+        "Answer again with ONE JSON object containing all seven dimensions, each with verdict, reason and reference, and a non-empty cites list on every failed finding.";
     }
     return err(aiError(`the judge did not return a valid seven-dimension review after one retry: ${lastProblem}`));
   }

@@ -3,7 +3,7 @@
  *
  * Purpose: the single home of the seven review dimensions, the judge's output shape, the stored review shape and the
  *   deterministic verdict rules. Plan close reads the stored review; nothing else decides it.
- * Public surface: MILESTONE_DIMENSIONS, MilestoneDimension, DimensionVerdict, dimensionJudgmentSchema,
+ * Public surface: MILESTONE_DIMENSIONS, MEASURED_CAUSE_DIMENSIONS, MilestoneDimension, DimensionVerdict, dimensionJudgmentSchema,
  *   llmMilestoneOutputSchema, LlmMilestoneOutput, milestoneReviewSchema, MilestoneReview, applyDeterministicDimensionRules,
  *   overallMilestoneVerdict, failedDimensions, renderMilestoneReviewContent, retiredAcRefSchema, RetiredAcRef.
  * Invariants:
@@ -31,6 +31,9 @@ export const MILESTONE_DIMENSIONS = [
 
 export type MilestoneDimension = (typeof MILESTONE_DIMENSIONS)[number];
 
+/** Dimensions whose root cause is measured (suite failing set, contradicted rules), never taken from the judge's cites. */
+export const MEASURED_CAUSE_DIMENSIONS: readonly MilestoneDimension[] = ["regression", "snapshot_accuracy"];
+
 /** One dimension's verdict. */
 export const dimensionVerdictSchema = z.enum(["pass", "fail", "na"]);
 export type DimensionVerdict = z.infer<typeof dimensionVerdictSchema>;
@@ -41,6 +44,12 @@ export const dimensionJudgmentSchema = z.object({
   reason: z.string().trim().min(1),
   /** May be empty only where no reference applies; `design_necessity` needs one to pass. */
   reference: z.string().trim(),
+  /**
+   * Stable cites of a failed finding: AC ids, rule ids, file paths or symbols it names. They are the root-cause identity
+   * of a judge-text finding (never its wording). Optional in the stored shape only because reviews stored before this
+   * field exist; `llmMilestoneOutputSchema` requires them on a failed non-measured dimension.
+   */
+  cites: z.array(z.string().trim().min(1)).optional(),
 });
 export type DimensionJudgment = z.infer<typeof dimensionJudgmentSchema>;
 
@@ -50,9 +59,20 @@ const dimensionsShape = Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d
 >;
 
 /** The shape the judge returns. */
-export const llmMilestoneOutputSchema = z.object({
-  dimensions: z.object(dimensionsShape),
-});
+export const llmMilestoneOutputSchema = z
+  .object({
+    dimensions: z.object(dimensionsShape),
+  })
+  .superRefine((output, ctx) => {
+    // reason: a failed judge-text finding's fingerprint is its cites; without them the plan's review errors and retries
+    // instead of falling back to wording (#405; Sentry groups by stack frames, not message text).
+    for (const d of MILESTONE_DIMENSIONS) {
+      if (MEASURED_CAUSE_DIMENSIONS.includes(d) || output.dimensions[d].verdict !== "fail") continue;
+      if ((output.dimensions[d].cites ?? []).length === 0) {
+        ctx.addIssue({ code: "custom", path: ["dimensions", d, "cites"], message: "a failed finding must cite at least one AC id, rule id, file path or symbol" });
+      }
+    }
+  });
 export type LlmMilestoneOutput = z.infer<typeof llmMilestoneOutputSchema>;
 
 /** A `milestone` decision (BR-1370) the review lists under correctness. */

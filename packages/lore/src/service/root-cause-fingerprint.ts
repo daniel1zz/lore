@@ -9,7 +9,8 @@
  *   - Fingerprint = SHA-256 of `<dimension>|<cause key>`. Cause key by dimension: `regression` -> the sorted set of
  *     ALL failing test files of the suite run (an attributed regression without that set is an error, never a fallback) ("main red: <files>", one fingerprint for a failing main suite);
  *     `snapshot_accuracy` -> the sorted set of contradicted rule ids; every other dimension (and a regression the
- *     suite did not measure) -> the sorted cited symbols/paths plus the normalised summary.
+ *     suite did not measure) -> the sorted, unique STRUCTURED cites the judge named (AC ids, rule ids, paths, symbols),
+ *     never the finding's wording; no cite is a VALIDATION_ERROR (the plan is re-reviewed).
  *   - The causes come from the MEASURED `causes` stored on the review, never from the judge's prose, whenever the
  *     dimension has a measured cause.
  *   - The issue title starts with the dimension id (plan close covers a failed dimension by finding it in an open
@@ -28,6 +29,8 @@ export interface FailedFinding {
   readonly dimension: MilestoneDimension;
   readonly reason: string;
   readonly reference: string;
+  /** The judge's structured cites (AC ids, rule ids, paths, symbols); absent on a review stored before they existed. */
+  readonly cites?: readonly string[] | undefined;
   readonly reviewSlug: string;
   /** The review's measured root causes; absent on a review stored before grouping existed. */
   readonly causes?: ReviewCauses | undefined;
@@ -52,27 +55,9 @@ export function fingerprintTag(short: string): string {
 /** Marker of the tag inside a title (`[fp:`), exported so the issue search and the title builder agree. */
 export const FINGERPRINT_TITLE_TAG = "[fp:";
 
-const PATH_OR_SYMBOL = /`([^`]+)`|((?:[\w.-]+\/)+[\w.-]+)|\b([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$.]*)\b/g;
-
-/** Cited symbols and paths in a finding's text: backticked tokens, slash paths and dotted names; sorted, unique. */
-function citedTokens(text: string): string[] {
-  const found = new Set<string>();
-  for (const match of text.matchAll(PATH_OR_SYMBOL)) {
-    const token = (match[1] ?? match[2] ?? match[3] ?? "").trim();
-    if (token !== "") found.add(token);
-  }
-  return [...found].sort();
-}
-
-/** Lower-case summary with ids, hashes and numbers removed so a cosmetic difference does not split a cause. */
-function normaliseSummary(reason: string): string {
-  return reason
-    .toLowerCase()
-    .replace(/\b[0-9a-f]{7,}\b/g, "")
-    .replace(/\d+/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200);
+/** The finding's cites, trimmed, de-duplicated and sorted so order and spacing never split a cause. */
+function normalisedCites(cites: readonly string[] | undefined): string[] {
+  return [...new Set((cites ?? []).map((c) => c.trim()).filter((c) => c !== ""))].sort();
 }
 
 function digest(dimension: MilestoneDimension, key: string): { fingerprint: string; short: string } {
@@ -112,12 +97,19 @@ export function rootCauseOf(finding: FailedFinding): Result<RootCause, LoreError
     const sorted = [...new Set(rules)].sort();
     return ok({ dimension, ...digest(dimension, `rules:${sorted.join(",")}`), label: `contradicted rules: ${sorted.join(", ")}` });
   }
-  const cited = citedTokens(`${finding.reason}\n${finding.reference}`);
-  const summary = normaliseSummary(finding.reason);
-  // reason: the fingerprint keys on the normalised summary (ids removed) but the label shown in the title is the
-  // finding's ORIGINAL summary, so ids stay readable (#346; Sentry: grouping key is not the display title).
+  const cites = normalisedCites(finding.cites);
+  if (cites.length === 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "cites",
+      message: `the stored review ${finding.reviewSlug} failed ${dimension} without any cite (AC id, rule id, file path or symbol); a judge-text finding is never fingerprinted by its wording, so the plan needs a new review`,
+      rule: "BR-1379",
+    });
+  }
+  // reason: the title label is the finding's ORIGINAL summary (#346) but the fingerprint never reads it: wording changes
+  // on every re-review and split one defect into several issues (#405; Sentry: grouping key is not the display title).
   const display = finding.reason.replace(/\s+/g, " ").trim().slice(0, 80);
-  return ok({ dimension, ...digest(dimension, `cited:${cited.join(",")}|summary:${summary}`), label: display });
+  return ok({ dimension, ...digest(dimension, `cites:${cites.join(",")}`), label: display });
 }
 
 /** The issue title of a root cause: `<dimension>: <label> [fp:<12 hex>]`. */

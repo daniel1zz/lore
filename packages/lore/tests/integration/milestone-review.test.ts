@@ -55,7 +55,7 @@ const DIMENSIONS = [
   "security",
 ] as const;
 
-function judgeAnswer(overrides: Record<string, { verdict: string; reason: string; reference: string }> = {}): string {
+function judgeAnswer(overrides: Record<string, { verdict: string; reason: string; reference: string; cites?: string[] }> = {}): string {
   const dimensions = Object.fromEntries(
     DIMENSIONS.map((d) => [d, overrides[d] ?? { verdict: "pass", reason: `${d} holds`, reference: "Google engineering code review guide" }]),
   );
@@ -350,7 +350,7 @@ describe("milestone review gates close", () => {
   it("milestone review gates close: a failing dimension refuses the close even though the review is current", { timeout: 300_000 }, () => {
     const { plan } = makePlan("Failing");
     installJudge(
-      judgeAnswer({ security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection" } }),
+      judgeAnswer({ security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection", cites: ["src/shell-runner.ts"] } }),
       judgeAnswer(),
     );
     const review = assessRows([plan]);
@@ -407,7 +407,7 @@ describe("milestone review gates close", () => {
     const bad = makePlan("FAILMARK batch");
     installJudge(
       judgeAnswer(),
-      judgeAnswer({ regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis" } }),
+      judgeAnswer({ regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis", cites: ["src/old-path.ts"] } }),
     );
     const byIds = assessRows([good.plan, bad.plan]);
     expect(byIds.exitCode).toBe(1);
@@ -664,8 +664,8 @@ describe("milestone review gates close", () => {
     const { plan } = makePlan(title);
     installJudge(
       judgeAnswer({
-        security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection" },
-        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis" },
+        security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection", cites: ["src/shell-runner.ts"] },
+        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis", cites: ["src/old-path.ts"] },
       }),
       judgeAnswer(),
     );
@@ -731,8 +731,8 @@ describe("milestone review gates close", () => {
     const { plan } = makePlan("Filed");
     installJudge(
       judgeAnswer({
-        security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection" },
-        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis" },
+        security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection", cites: ["src/shell-runner.ts"] },
+        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis", cites: ["src/old-path.ts"] },
       }),
       judgeAnswer(),
     );
