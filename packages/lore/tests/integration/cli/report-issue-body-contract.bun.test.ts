@@ -337,7 +337,7 @@ describe("AC-RI-2", () => {
     extraRoots.push(root);
     prepareCorpus(root);
     mkdirSync(join(root, "tests"));
-    writeFileSync(join(root, "tests", "ctx.test.ts"), "// @spec_ref spec-ri2-ctx AC-CTX-1\nimport { it } from \"vitest\";\nit(\"x\", () => {});\n");
+    writeFileSync(join(root, "tests", "ctx.test.ts"), "// @spec_ref spec-ri2-ctx ctx-marker-one\nimport { it } from \"vitest\";\nit(\"x\", () => {});\n");
     rmSync(recordedBodyPath, { force: true });
     const result = run(
       [...baseArgs("RI-2 context order"), "--repro-command", "lore x tests/ctx.test.ts", "--refs", "spec-one AC-1"],
@@ -348,7 +348,7 @@ describe("AC-RI-2", () => {
     const positions = ["**Refs:**", "**Context:**", "Reported by:"].map((marker) => onlyOccurrence(body, marker));
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     expect(body).toContain("**Context:** tests/ctx.test.ts");
-    expect(body).toContain("// @spec_ref spec-ri2-ctx AC-CTX-1");
+    expect(body).toContain("// @spec_ref spec-ri2-ctx ctx-marker-one");
   });
 
   it("a filing with none of the optional parts has no Repro, Suggested fix, Refs or Context heading and still round-trips", () => {
