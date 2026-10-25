@@ -28,7 +28,6 @@
 
 import type { DocRecord, Invocation, IssueRef, LoreError, Result } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, err, issueRefSchema, MAX_ISSUE_REFS_PER_CARRIER, ok, readIssueTriageLabels } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
 import { dirname } from "node:path";
 
 import { loadLoreApp } from "../loader.js";
@@ -51,7 +50,7 @@ import {
   type PlannedMirror,
 } from "../issues-migrate-plan.js";
 import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot, resolveGithubIssueListing, type GithubUpstreamCfg } from "../report-issue-wiring.js";
-import { exitCode, formatErrorFor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
 import { joinIssueStatuses } from "../../../service/github-issue-listing.js";
 import { GhIssueCloser } from "../../../service/issue-closer-port.js";
@@ -496,7 +495,7 @@ export async function runIssuesMigrate(args: { apply: boolean; json: boolean }, 
     }
 
     const runner = new GhRunner({ execFile: createNodeGhExecFile(inv.cwd), env: inv.env });
-    const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, inv.user);
+    const actor = resolveActor(inv);
     const ctx: ApplyContext = {
       app,
       cfg,
@@ -521,7 +520,7 @@ export async function runIssuesMigrate(args: { apply: boolean; json: boolean }, 
             tags: [],
           },
           cfg,
-          { consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv), corpusService: app.corpusService, actor, actorSource, home: inv.paths.home, env: inv.env },
+          { consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv), corpusService: app.corpusService, actor, home: inv.paths.home, env: inv.env },
         );
         return filed.ok ? ok(filed.value.number) : filed;
       },
