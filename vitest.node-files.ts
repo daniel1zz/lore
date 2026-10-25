@@ -31,8 +31,6 @@ export const NODE_PROJECT_FILES: Readonly<Record<string, string>> = {
     "a vi.mock'd/spied telemetry call is never observed under the Bun runtime ('spy' called 0 times, expected 1)",
   // lore: vi.mock interop
   "packages/lore/tests/unit/adapters/foreign-corpus-write-adapters.test.ts": VI_MOCK,
-  "packages/lore/tests/unit/service/issue-read-batching.test.ts": VI_MOCK_REAL_CALL,
-  "packages/lore/tests/unit/service/resolution-label-non-authority.test.ts": VI_MOCK_REAL_CALL,
   "packages/lore/tests/unit/service/resolution-projector.test.ts": VI_MOCK_REAL_CALL,
   "packages/lore/tests/unit/adapters/mcp-github-filing.test.ts": VI_MOCK_REAL_CALL,
   "packages/lore/tests/unit/service/github-filing-split-write.test.ts": VI_MOCK_REAL_CALL,

@@ -313,7 +313,7 @@ export default defineLoreCommand({
           type: "string",
           description: "With --state duplicate: the other issue number this one duplicates",
         },
-        by: {
+        "superseded-by": {
           type: "string",
           description: "With --state superseded: the issue number or corpus doc (id or slug) that supersedes it",
         },
@@ -354,14 +354,14 @@ export default defineLoreCommand({
           return exitCode(error);
         }
         const ofArg = readStringArg(argRecord, "of");
-        const byArg = readStringArg(argRecord, "by");
+        const byArg = readStringArg(argRecord, "superseded-by");
         if (ofArg.length > 0 && state !== "duplicate") {
           const error = validationError("of", `--of is only valid with --state duplicate, but --state ${state} was requested.`, ofArg);
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           return exitCode(error);
         }
         if (byArg.length > 0 && state !== "superseded") {
-          const error = validationError("by", `--by is only valid with --state superseded, but --state ${state} was requested.`, byArg);
+          const error = validationError("superseded-by", `--superseded-by is only valid with --state superseded, but --state ${state} was requested.`, byArg);
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           return exitCode(error);
         }
@@ -408,7 +408,7 @@ export default defineLoreCommand({
           if (byArg.length > 0) {
             if (/^[1-9]\d*$/.test(byArg)) {
               if (!isListedOtherIssue(Number(byArg))) {
-                const error = validationError("by", `--by ${byArg} must be ANOTHER issue number present in ${cfg.repo}'s live listing.`, byArg);
+                const error = validationError("superseded-by", `--superseded-by ${byArg} must be ANOTHER issue number present in ${cfg.repo}'s live listing.`, byArg);
                 inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
                 return exitCode(error);
               }
@@ -416,7 +416,7 @@ export default defineLoreCommand({
             } else {
               const byDoc = await app.corpusService.get(byArg);
               if (!byDoc.ok) {
-                const error = validationError("by", `--by '${byArg}' is neither a listed issue number nor an existing corpus doc (${byDoc.error.code}).`, byArg);
+                const error = validationError("superseded-by", `--superseded-by '${byArg}' is neither a listed issue number nor an existing corpus doc (${byDoc.error.code}).`, byArg);
                 inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
                 return exitCode(error);
               }
