@@ -926,7 +926,7 @@ const V6_RENDERING: StructuredRendering = {
   withExamplesAndCommands: true,
   withSpecCriteria: false,
 };
-const V8_RENDERING: StructuredRendering = { ...V6_RENDERING, withSpecCriteria: false };
+const V8_RENDERING: StructuredRendering = { ...V6_RENDERING, withSpecCriteria: true };
 
 /** Shared v2/v3/v6 body; the {@link StructuredRendering} flags are the ONLY difference between those versions. */
 function buildReviewPromptWithStructuredParts(
