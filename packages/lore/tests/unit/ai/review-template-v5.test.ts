@@ -49,7 +49,7 @@ describe("review prompt v5", () => {
   });
 
   it("ERROR: an unknown version key is not registered", () => {
-    expect(REVIEW_TEMPLATES["v8"]).toBeUndefined();
+    expect(REVIEW_TEMPLATES["v9"]).toBeUndefined();
   });
 
   it.each(KINDS)("HAPPY: the v5 prompt for a %s lists the four non-findings", (kind) => {
