@@ -76,7 +76,7 @@ describe("migration 037 known-defect link type", () => {
 
   it("converts only batch links: plan -> issue resolves with milestone_findings", () => {
     seedAt36();
-    const store = new SQLiteStore(dbPath);
+    const store = new SQLiteStore(dbPath, { migrate: true });
     expect(linkTypes(store)).toEqual([
       ["PLAN1", "ISSUE_BADREC", "resolves"],
       ["PLAN1", "ISSUE_BATCH", "known-defect"],
@@ -89,7 +89,7 @@ describe("migration 037 known-defect link type", () => {
 
   it("lands on LATEST_SCHEMA_VERSION, accepts the new type and keeps the indexes", () => {
     seedAt36();
-    const store = new SQLiteStore(dbPath);
+    const store = new SQLiteStore(dbPath, { migrate: true });
     const db = store.getDatabase();
     expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(() => insertLink(store, "PLAN1", "TASK1", "known-defect")).not.toThrow();
@@ -102,7 +102,7 @@ describe("migration 037 known-defect link type", () => {
 
   it("REGRESSION: reopening a migrated corpus changes nothing", () => {
     seedAt36();
-    const first = new SQLiteStore(dbPath);
+    const first = new SQLiteStore(dbPath, { migrate: true });
     const before = linkTypes(first);
     first.close();
     const again = new SQLiteStore(dbPath);
