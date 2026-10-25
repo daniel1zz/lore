@@ -40,7 +40,8 @@ import type { GithubListedIssue } from "./github-intake-port.js";
 import { joinIssueStatuses } from "./github-issue-listing.js";
 import { labelToResolution, resolutionToLabel } from "./resolution-projector.js";
 import type { GithubIssueRef } from "./resolution-projector.js";
-import { err, isInvalidated, issueRefSchema } from "@lore/core";
+import { err, isInvalidated } from "@lore/core";
+import { readCarrierIssueRefs } from "./issue-carrier.js";
 import type { DocRecord, IssueRef, IssueResolution, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
@@ -155,24 +156,6 @@ function closedVerdictOf(snapshot: GithubIssueSnapshot): string | undefined {
     if (resolution !== undefined && isVerdictResolution(resolution)) return resolution;
   }
   return reason === "duplicate" ? "duplicate" : "not planned";
-}
-
-/**
- * The issues a carrier names, in declared order; `[]` for a non-carrier or a malformed `extra.issues`.
- * reason: the write path (`judgeIssueCarrierExtra`) already refuses a malformed bag, so a malformed one
- * here is legacy or hand-edited data; each entry is Zod-parsed and an invalid one is dropped rather than
- * allowed to abort the archive that is already committed.
- */
-function readCarrierIssueRefs(doc: DocRecord): readonly IssueRef[] {
-  if (doc.type !== "task" && doc.type !== "plan") return [];
-  const raw = doc.extra["issues"];
-  if (!Array.isArray(raw)) return [];
-  const refs: IssueRef[] = [];
-  for (const entry of raw) {
-    const parsed = issueRefSchema.safeParse(entry);
-    if (parsed.success) refs.push(parsed.data);
-  }
-  return refs;
 }
 
 function describeError(error: LoreError): string {

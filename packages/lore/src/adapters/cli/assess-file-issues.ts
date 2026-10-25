@@ -20,11 +20,10 @@
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
-import { hasIssueReport } from "../../service/issue-resolution.js";
+import { readCarrierIssueRefs } from "../../service/issue-carrier.js";
 import type { IssueFinding, IssuePort, IssueRef } from "../../service/issue-filing-service.js";
 import { FINGERPRINT_TITLE_TAG } from "../../service/root-cause-fingerprint.js";
 import { MILESTONE_FINDINGS_FIELD, readMilestoneFindings, type PlanCloseIssuePort } from "../../service/milestone-review-inputs.js";
-import { readGithubIssueRef } from "../../service/resolution-projector.js";
 import { fileGithubIssue, type GithubFilingContext, type GithubUpstreamCfg } from "./report-issue-wiring.js";
 
 /**
@@ -75,7 +74,17 @@ export function createGithubIssuePort(
       if (!result.ok) return result;
       return ok({ number: result.value.number, url: result.value.url });
     },
-    linkToPlan: (plan, issue, finding) => linkIssueToPlan(corpusService, plan, issue, finding, cfg.repo, ctx.actor),
+    linkToPlan: async (plan, issue, finding) => {
+      // reason: a carrier names its issue by numeric repo id (D1); the repo id of the configured repository is the one
+      // the open-issue reader verified. Absent a reader the number alone matches (one upstream per corpus).
+      let repoId: number | undefined;
+      if (openIssues !== undefined) {
+        const listing = await openIssues.listOpenIssues();
+        if (!listing.ok) return listing;
+        repoId = listing.value.repoId;
+      }
+      return linkIssueToPlan(corpusService, plan, issue, finding, repoId, ctx.actor);
+    },
   };
 }
 
@@ -84,7 +93,7 @@ async function linkIssueToPlan(
   planRef: string,
   issue: IssueRef,
   finding: IssueFinding,
-  repo: string,
+  repoId: number | undefined,
   actor: string,
 ): Promise<Result<void, LoreError>> {
   const bundle = await corpusService.getPlanBundle(planRef);
@@ -92,15 +101,14 @@ async function linkIssueToPlan(
   const tasks = await corpusService.listFull({ type: "task" });
   if (!tasks.ok) return tasks;
   const issueTask = tasks.value.docs.find((doc) => {
-    if (!hasIssueReport(doc.extra)) return false;
-    const ref = readGithubIssueRef(doc.extra);
-    return ref !== undefined && ref.issueNumber === issue.number && ref.repo === repo;
+    if (doc.status === "archived") return false;
+    return readCarrierIssueRefs(doc).some((ref) => ref.number === issue.number && (repoId === undefined || ref.repo_id === repoId));
   });
   if (issueTask === undefined) {
     return err({
       code: "VALIDATION_ERROR",
       field: "file-issues",
-      message: `issue #${String(issue.number)} exists but no corpus issue task carries it, so it cannot be linked to plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type known-defect\``,
+      message: `issue #${String(issue.number)} exists but no live corpus task carries it (extra.issues), so it cannot be linked to plan ${planRef}; run \`lore issue adopt ${String(issue.number)}\` then \`lore link ${planRef} <task> --type known-defect\``,
       rule: "BR-1379",
     });
   }

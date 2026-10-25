@@ -111,7 +111,7 @@ import {
 } from "./milestone-review.js";
 import { coverFailedDimensions, readMilestoneFindings, type DimensionCoverage, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
 import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
-import { readGithubIssueRef } from "./resolution-projector.js";
+import { isIssueCarrier, readCarrierIssueRefs } from "./issue-carrier.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
 import { computeRecoverableUntil } from "./soft-delete-window.js";
@@ -1319,13 +1319,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       const target = await this.store.find(link.to_id);
       if (!target.ok) return target;
       if (target.value === null || target.value.deleted_at !== null) continue;
-      const ref = readGithubIssueRef(target.value.extra);
-      if (ref !== undefined) {
-        linked.push({
-          number: ref.issueNumber,
-          ...(ref.repo_id !== undefined ? { repoId: ref.repo_id } : {}),
-          dimensions: readMilestoneFindings(target.value.extra).map((f) => f.dimension),
-        });
+      // reason: the carrier model (D1) — the linked document is the task carrying `extra.issues`, one entry per issue.
+      const dimensions = readMilestoneFindings(target.value.extra).map((f) => f.dimension);
+      for (const ref of readCarrierIssueRefs(target.value)) {
+        linked.push({ number: ref.number, repoId: ref.repo_id, dimensions });
       }
     }
     const listing = await port.listOpenIssues();
@@ -5590,6 +5587,25 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         message: "link type 'resolves' is retired: carry the issue on the work with extra.issues (lore create task --issue <n>)",
         value: type,
       });
+    }
+
+    // `known-defect` (#404) names the work that carries the issue filing one of the plan's defects: its `to` MUST be a
+    // task carrying `extra.issues` (the carrier, D1). Enforced on the shared link write path so CLI, MCP and HTTP agree.
+    if (type === "known-defect") {
+      const toDocResult = await this.store.find(toResult.value);
+      if (!toDocResult.ok) return toDocResult;
+      const toDoc = toDocResult.value;
+      if (toDoc === null || toDoc.deleted_at !== null) {
+        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
+      }
+      if (toDoc.type !== "task" || !isIssueCarrier(toDoc)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "to",
+          message: "known-defect edge target must be a task carrying extra.issues (adopt the issue first: lore issue adopt <n>)",
+          value: { id: toResult.value, type: toDoc.type },
+        });
+      }
     }
 
     const now = new Date().toISOString();
