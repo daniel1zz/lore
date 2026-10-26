@@ -71,7 +71,7 @@ async function approvedSpec(f: Fixture, title = "Reopen spec"): Promise<DocRecor
   return forceStatus(f.store, spec, "approved");
 }
 
-async function addEvidence(store: InMemoryStore, taskId: string, count: number, acRef: string): Promise<void> {
+async function addEvidence(store: InMemoryStore, taskId: string, count: number, acRef: string | undefined): Promise<void> {
   const before = await store.find(taskId);
   if (!before.ok || before.value === null) throw new Error("task fetch failed");
   const existing = Array.isArray(before.value.extra["verification_evidence"])
@@ -83,7 +83,7 @@ async function addEvidence(store: InMemoryStore, taskId: string, count: number, 
     result: "pass",
     recorded_at: new Date().toISOString(),
     recorded_by: "tester",
-    ac_ref: acRef,
+    ...(acRef === undefined ? {} : { ac_ref: acRef }),
   }));
   const updated = await store.update(taskId, {
     extra: { ...before.value.extra, verification_evidence: [...existing, ...rows] },
@@ -174,7 +174,7 @@ describe("ReviewService.reopen (AC-DR-4)", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.error.code).toBe("VALIDATION_ERROR");
-      expect(messageOf(result.error)).toMatch(/\b1 evidence/);
+      expect(messageOf(result.error)).toMatch(/\b1 criteria evidence/);
       const after = await f.store.find(spec.id);
       expect(after.ok && after.value?.status).toBe("approved");
     });
@@ -190,7 +190,7 @@ describe("ReviewService.reopen (AC-DR-4)", () => {
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect(messageOf(result.error)).toMatch(/\b3 evidence/);
+      expect(messageOf(result.error)).toMatch(/\b3 criteria evidence/);
       expect((await versions(f.store, spec.id)).length).toBe(versionsBefore);
     });
 
@@ -227,6 +227,52 @@ describe("ReviewService.reopen (AC-DR-4)", () => {
       const result = await f.review.reopen(spec.slug, "nothing to reopen");
 
       expect(result.ok).toBe(false);
+    });
+  });
+
+  describe("BR-1050 counts evidence against criteria only (issue #461)", () => {
+    it("reopens a spec whose only task evidence names no criterion (no ac_ref)", async () => {
+      const f = makeFixture();
+      const spec = await approvedSpec(f);
+      const task = await planTaskFor(f, spec);
+      await addEvidence(f.store, task.id, 4, undefined);
+
+      const result = await f.review.reopen(spec.slug, "stop-and-re-review");
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.status).toBe("draft");
+    });
+
+    it("still refuses naming only the criteria evidence when no-criterion rows sit beside it", async () => {
+      const f = makeFixture();
+      const spec = await approvedSpec(f);
+      const task = await planTaskFor(f, spec);
+      await addEvidence(f.store, task.id, 4, undefined);
+      await addEvidence(f.store, task.id, 2, "AC-ANY");
+
+      const result = await f.review.reopen(spec.slug, "try");
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(messageOf(result.error)).toMatch(/\b2 criteria evidence/);
+      expect(messageOf(result.error)).not.toMatch(/\b6 /);
+    });
+
+    it("the post-write re-check ignores no-criterion evidence that appears mid-reopen", async () => {
+      const f = makeFixture();
+      const spec = await approvedSpec(f);
+      const task = await planTaskFor(f, spec);
+
+      const result = await f.review.reopen(spec.slug, "racing", {
+        afterStatusWrite: async () => {
+          await addEvidence(f.store, task.id, 1, undefined);
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      const after = await f.store.find(spec.id);
+      expect(after.ok && after.value?.status).toBe("draft");
     });
   });
 
@@ -290,7 +336,7 @@ describe("ReviewService.reopen (AC-DR-4)", () => {
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect(messageOf(result.error)).toMatch(/\b1 evidence/);
+      expect(messageOf(result.error)).toMatch(/\b1 criteria evidence/);
       const after = await f.store.find(spec.id);
       expect(after.ok && after.value?.status).toBe("draft");
       const all = await versions(f.store, spec.id);
