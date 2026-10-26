@@ -101,7 +101,7 @@ async function records() {
   if (!rows.ok) throw new Error(JSON.stringify(rows.error));
   const folded = foldMainRedRecords(rows.value);
   if (!folded.ok) throw new Error(JSON.stringify(folded.error));
-  return folded.value;
+  return folded.value.records;
 }
 
 async function rawCount(action: string): Promise<number> {

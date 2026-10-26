@@ -102,6 +102,7 @@ import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
+import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION, type MainRedLedgerPort } from "./service/milestone-review.js";
 import { RetiredAcService } from "./service/retired-ac-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -1120,6 +1121,7 @@ function buildAppFromSqlite(
       judge: aiProviderService.judgeMilestone.bind(aiProviderService),
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+      mainRedLedger: buildMainRedLedger(store, corpusService),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1552,6 +1554,7 @@ function buildAppFromTurso(
       judge: aiProviderService.judgeMilestone.bind(aiProviderService),
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
+      mainRedLedger: buildMainRedLedger(store, corpusService),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1679,6 +1682,27 @@ function buildAppFromTurso(
  *
  * D-007 invariant: with sync.enabled=true there is NO silent fallback to SQLiteStore.
  */
+/**
+ * The local main-red ledger port (BR-1412): reads the three ledger actions from the store's audit chain in `id` order
+ * and appends through `CorpusService.appendAudit` (the audit write route: foreign-corpus refusal, caller attribution,
+ * serialized hash-chain append).
+ */
+function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService): MainRedLedgerPort {
+  return {
+    now: () => new Date().toISOString(),
+    listRows: async () => {
+      const rows = [];
+      for (const action of [MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION]) {
+        const listed = await store.listAuditRowsByAction(action);
+        if (!listed.ok) return listed;
+        rows.push(...listed.value);
+      }
+      return { ok: true as const, value: rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} })) };
+    },
+    appendRow: (row) => corpusService.appendAudit({ action: row.action, sessionId: "main-red", timestamp: row.timestamp, details: { ...row.details } }),
+  };
+}
+
 /**
  * Builds the post-archive issue step and hands it to every service that commits an archive
  * (spec-archiving-the-work-that-resolves-a-defect-report-closes D4). The closer exists only for a
