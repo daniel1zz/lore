@@ -628,6 +628,11 @@ export const evidenceEntrySchema = z.object({
        * `head_sha`.
        */
       worktree_dirty: z.boolean().optional(),
+      /**
+       * The integration branch's head when a pass was recorded on a NO-BRANCH claim (corpus-only work proven at main's
+       * head): the pass counts only when `head_sha` equals it. Written by the evidence write path, never by a caller.
+       */
+      main_head: z.string().regex(/^[0-9a-f]{40}$/, "main_head must be a 40-hex git sha").optional(),
     })
     .optional(),
 });
@@ -832,6 +837,16 @@ export const taskClaimSchema = z.object({
    * inherits (D4 — "whose output names the dirty worktree it inherits"). Informational; never decides anything.
    */
   inherited_dirty_worktree: z.string().min(1).optional(),
+  /**
+   * The commit the claimed work started from: a branch claim's `base_sha`, or main's head for a no-branch claim.
+   * Carried forward on a same-holder refresh (the work did not restart). The landing predicate (`landing.ts`) reads it.
+   */
+  start_head: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  /**
+   * The newest tip of the claimed branch lore measured: at every evidence capture on the branch and at release.
+   * The newest write wins, so a branch the harness removed without a release still has its last known tip.
+   */
+  end_tip: z.string().regex(/^[0-9a-f]{40}$/).optional(),
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -850,6 +865,8 @@ export interface ClaimCaptureInput {
   corpus_scope?: string;
   /** See {@link taskClaimSchema}'s `harness_run` — the claimant's own run; NEVER carried forward. */
   harness_run?: string | null;
+  /** See {@link taskClaimSchema}'s `start_head` — a carried-forward value wins over this one. */
+  start_head?: string;
 }
 
 /**
@@ -931,6 +948,9 @@ export function buildTaskClaim(
   // re-granting write authority nobody re-declared (foreign-corpus-write-guard.ts header,
   // "a claim REFRESH must keep declaring intent explicitly").
   const corpusScope = input.corpus_scope;
+  // reason: a same-holder refresh continues the same work, so the start it recorded first stays the start.
+  const startHead = base?.start_head ?? input.start_head;
+  const endTip = base?.end_tip;
 
   return {
     by: input.by,
@@ -943,7 +963,19 @@ export function buildTaskClaim(
     // reason: BR-1040 — a refresh records the REFRESHING run, never `?? base?.harness_run`; the store refuses a claim
     // that carries none (BR-1352).
     ...(input.harness_run !== undefined ? { harness_run: input.harness_run } : {}),
+    ...(startHead !== undefined ? { start_head: startHead } : {}),
+    ...(endTip !== undefined ? { end_tip: endTip } : {}),
   };
+}
+
+/**
+ * The claim with its tip updated to `sha`; the newest write wins. Pure: returns a new claim.
+ *
+ * @example
+ * recordClaimTip({ by: "a", at: "t" }, "0".repeat(40)).end_tip // "000…0"
+ */
+export function recordClaimTip(claim: TaskClaim, sha: string): TaskClaim {
+  return { ...claim, end_tip: sha };
 }
 
 // ─── Claim Staleness ───────────────────────────────────────────────────────
