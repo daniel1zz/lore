@@ -137,12 +137,12 @@
  *   spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0.
  */
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { err, ok } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import type { FactResult, LandingGitFacts, LoreError, Result } from "@lore/core";
 import type { GitPort, WorktreeInfo } from "../service/seat-service.js";
 
 const GIT_COMMAND = "git";
@@ -878,5 +878,119 @@ export class RealGitPort implements GitPort {
     const result = await runGit(cwd, args);
     if (result.exitCode !== 0) return err(gitFailure(args, result));
     return ok(result.stdout.trim().length > 0);
+  }
+}
+
+// ── Landing facts (the one landing predicate's git port) ────────────────────
+
+const FACTS_GIT_TIMEOUT_MS = 30_000;
+
+function factsGit(cwd: string, args: readonly string[]): { status: number | null; stdout: string; detail: string } {
+  const run = spawnSync("git", [...args], { cwd, encoding: "utf8", timeout: FACTS_GIT_TIMEOUT_MS });
+  if (run.error !== undefined) return { status: null, stdout: "", detail: run.error.message };
+  return { status: run.status, stdout: run.stdout ?? "", detail: (run.stderr ?? "").trim().split("\n")[0] ?? "" };
+}
+
+function realOrResolved(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/**
+ * The real {@link LandingGitFacts}: plain read-only `git` subprocesses run from `cwd` (any worktree of the repo; refs are
+ * shared). Every failure is an `ok: false` with git's own first stderr line, never a default.
+ *
+ * @param cwd - the invocation's working directory (`Invocation.cwd`)
+ */
+export function createGitFacts(cwd: string): LandingGitFacts {
+  const fail = (what: string, run: { status: number | null; detail: string }): { ok: false; reason: string } => ({
+    ok: false,
+    reason: `git ${what} exited ${String(run.status)}${run.detail !== "" ? `: ${run.detail}` : ""}`,
+  });
+  const integrationBranch = (): FactResult<string> => {
+    for (const candidate of ["main", "master"]) {
+      if (factsGit(cwd, ["rev-parse", "--verify", "--quiet", candidate]).status === 0) return { ok: true, value: candidate };
+    }
+    return { ok: false, reason: "neither `main` nor `master` exists" };
+  };
+  const revParse = (rev: string): FactResult<string> => {
+    const run = factsGit(cwd, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+    return run.status === 0 ? { ok: true, value: run.stdout.trim() } : fail(`rev-parse ${rev}`, run);
+  };
+  const isAncestor = (commit: string, of: string): FactResult<boolean> => {
+    // reason: `merge-base --is-ancestor` answers 1 for "not an ancestor" and 128 for an unreadable object; only the first is a fact.
+    const known = revParse(commit);
+    if (!known.ok) return { ok: false, reason: `commit ${commit.slice(0, 12)} is not readable in the repository` };
+    const run = factsGit(cwd, ["merge-base", "--is-ancestor", commit, of]);
+    if (run.status === 0) return { ok: true, value: true };
+    if (run.status === 1) return { ok: true, value: false };
+    return fail("merge-base --is-ancestor", run);
+  };
+  const worktreeOfBranch = (name: string): FactResult<string | null> => {
+    const run = factsGit(cwd, ["worktree", "list", "--porcelain"]);
+    if (run.status !== 0) return fail("worktree list", run);
+    for (const block of run.stdout.split("\n\n")) {
+      const lines = block.split("\n");
+      const path = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
+      const branch = lines.find((line) => line.startsWith("branch "))?.slice("branch ".length).replace(/^refs\/heads\//, "");
+      if (path !== undefined && branch === name) return { ok: true, value: path };
+    }
+    return { ok: true, value: null };
+  };
+  return {
+    integrationBranch,
+    integrationHead: () => {
+      const branch = integrationBranch();
+      return branch.ok ? revParse(branch.value) : branch;
+    },
+    isOnIntegration: (commit) => {
+      const branch = integrationBranch();
+      return branch.ok ? isAncestor(commit, branch.value) : branch;
+    },
+    isAncestor,
+    branchTip: (name) => {
+      const run = factsGit(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`]);
+      if (run.status === 0) return { ok: true, value: run.stdout.trim() };
+      if (run.status === 1) return { ok: true, value: null };
+      return fail(`rev-parse refs/heads/${name}`, run);
+    },
+    worktreeOfBranch,
+    pathExists: (path) => isAbsolute(path) && statExists(path),
+    isDirty: (path) => {
+      const run = factsGit(path, ["status", "--porcelain"]);
+      return run.status === 0 ? { ok: true, value: run.stdout.trim() !== "" } : fail("status", run);
+    },
+    headOf: (path) => {
+      const run = factsGit(path, ["rev-parse", "HEAD"]);
+      return run.status === 0 ? { ok: true, value: run.stdout.trim() } : fail("rev-parse HEAD", run);
+    },
+    isInsideBranchWorktree: (dir, branch) => {
+      const where = worktreeOfBranch(branch);
+      if (!where.ok) return where;
+      if (where.value === null) return { ok: true, value: false };
+      const top = factsGit(dir, ["rev-parse", "--show-toplevel"]);
+      if (top.status !== 0) return { ok: true, value: false };
+      return { ok: true, value: realOrResolved(top.stdout.trim()) === realOrResolved(where.value) };
+    },
+    pathExistsInIntegration: (path) => {
+      const branch = integrationBranch();
+      if (!branch.ok) return branch;
+      const run = factsGit(cwd, ["cat-file", "-e", `${branch.value}:${path}`]);
+      if (run.status === 0) return { ok: true, value: true };
+      // reason: `cat-file -e` exits 128 both for an absent path and for a broken repo; the branch resolved above, so an absent path is the fact.
+      return { ok: true, value: false };
+    },
+  };
+}
+
+function statExists(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch {
+    return false;
   }
 }

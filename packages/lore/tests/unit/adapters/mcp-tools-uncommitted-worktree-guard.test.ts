@@ -302,7 +302,8 @@ describe("NEGATIVE — a no-worktree claim with NO caller_cwd declared is unaffe
 // ─── BOUNDARY ────────────────────────────────────────────────────────────────
 
 describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd repo", () => {
-  it("RED-pin (lore_evidence_add): claim recorded NO worktree + caller_cwd IS a real git repo → REFUSED, naming the repair", async () => {
+  // reason: BR-159 / #304 — the Q3 refusal is gone: a no-worktree claim is corpus-only work (BR-1468), proven at main's head.
+  it("lore_evidence_add: claim recorded NO worktree + caller_cwd IS a real git repo → accepted", async () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
     const realRepoCwd = makeCleanRepo();
@@ -321,14 +322,10 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
       output_tail: "ok",
       caller_cwd: realRepoCwd,
     });
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as { code: string; message: string };
-    expect(error.code).toBe("VALIDATION_ERROR");
-    expect(error.message).toContain("recorded NO");
-    expect(error.message).toContain("--worktree");
+    expect(result.isError).toBeFalsy();
   });
 
-  it("RED-pin (lore_release): claim recorded NO worktree + caller_cwd IS a real git repo → REFUSED", async () => {
+  it("lore_release: claim recorded NO worktree + caller_cwd IS a real git repo → accepted", async () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
     const realRepoCwd = makeCleanRepo();
@@ -339,10 +336,7 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
       by: "alice",
       caller_cwd: realRepoCwd,
     });
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as { code: string; message: string };
-    expect(error.code).toBe("VALIDATION_ERROR");
-    expect(error.message).toContain("recorded NO");
+    expect(result.isError).toBeFalsy();
   });
 
   it("control pair (lore_evidence_add): claim recorded NO worktree + caller_cwd is NOT a repo → accepted", async () => {
@@ -510,7 +504,7 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
   // "no claim recorded" is precisely the case that is ACCEPTED, so the stale
   // title asserted the exact opposite of current behavior while staying green
   // (the AC-statement-drift shape: a true body under a false statement).
-  it("a caller_cwd that resolves the precheck's file AND is a real repo (claim recorded NO worktree) → BOTH concerns satisfied, still refused for the Q3 mismatch", async () => {
+  it("a caller_cwd that resolves the precheck's file AND is a real repo (claim recorded NO worktree) → BOTH concerns satisfied, and accepted (the Q3 refusal is gone: BR-159 / #304)", async () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
@@ -525,14 +519,9 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
       output_tail: "ok",
       caller_cwd: CALLER_CWD_AS_PACKAGE_DIR,
     });
-    // reason: the precheck finds the file (no VALIDATION_ERROR naming "Oracle
-    // file(s) not found") — the refusal that DOES fire is the worktree-guard
-    // Q3 mismatch, proving neither use of caller_cwd clobbers the other.
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as { code: string; field: string; message: string };
-    expect(error.code).toBe("VALIDATION_ERROR");
-    expect(error.field).toBe("extra.claim.worktree");
-    expect(error.message).toContain("recorded NO");
+    // reason: the precheck finds the file (no "Oracle file(s) not found") and the worktree guard no longer refuses a
+    // no-worktree claim, so the write goes through: neither use of caller_cwd clobbers the other.
+    expect(result.isError).toBeFalsy();
   });
 
   it("the same caller_cwd, with a CLEAN recorded worktree instead of no claim, satisfies BOTH and succeeds", async () => {

@@ -333,7 +333,7 @@ function runOfLabel(label: string): string {
 async function claimTask(taskId: string, by: string, run: string = runOfLabel(by)): Promise<void> {
   const app = createFixtureApp(dbPath());
   try {
-    const result = await app.taskWorkflowService.claim(taskId, { by, harnessRun: run as RunId });
+    const result = await app.taskWorkflowService.claim(taskId, { by, harnessRun: run as RunId, worktree: `gate-wt-${taskId.slice(-8).toLowerCase()}` });
     if (!result.ok) throw new Error(`claim failed: ${JSON.stringify(result.error)}`);
   } finally {
     app.close();

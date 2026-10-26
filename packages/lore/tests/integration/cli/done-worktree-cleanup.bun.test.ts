@@ -267,20 +267,22 @@ describe("done removes the recorded worktree (#106)", () => {
     expect(branchExists(zeroCommit.branch)).toBe(true);
   }, 120_000);
 
-  it("keeps a worktree with an untracked file: exit 0, reason uncommitted-changes", () => {
+  // reason: spec-lore-done-closes-a-commitless-task-through-an-audited-no AC-ND-4 supersedes "exit 0, kept: uncommitted-changes":
+  // a claimed working copy that still exists with uncommitted work is unlanded work, so `lore done` refuses before archiving.
+  it("refuses a worktree with an untracked file: exit 4 [floor: not-landed] uncommitted-work, nothing removed", () => {
     const r = done(dirtyUntracked);
-    expect(r.status).toBe(0);
-    expect(worktreeLine(r)).toMatch(/^worktree: kept /);
-    expect(worktreeLine(r)).toContain("uncommitted-changes");
+    expect(r.status).toBe(4);
+    expect(r.out).toContain("[floor: not-landed]");
+    expect(r.out).toContain("uncommitted-work");
     expect(existsSync(join(dirtyUntracked.path, "scratch.txt"))).toBe(true);
     expect(branchExists(dirtyUntracked.branch)).toBe(true);
   }, 120_000);
 
-  it("keeps a worktree with a modified tracked file: exit 0, reason uncommitted-changes", () => {
+  it("refuses a worktree with a modified tracked file: exit 4 [floor: not-landed] uncommitted-work, nothing removed", () => {
     const r = done(dirtyTracked);
-    expect(r.status).toBe(0);
-    expect(worktreeLine(r)).toMatch(/^worktree: kept /);
-    expect(worktreeLine(r)).toContain("uncommitted-changes");
+    expect(r.status).toBe(4);
+    expect(r.out).toContain("[floor: not-landed]");
+    expect(r.out).toContain("uncommitted-work");
     expect(existsSync(dirtyTracked.path)).toBe(true);
   }, 120_000);
 

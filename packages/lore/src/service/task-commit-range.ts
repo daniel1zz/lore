@@ -69,6 +69,16 @@ export const taskLandingSchema = z.object({
    */
   outside_anchors: z.array(z.string().min(1)).optional(),
   recorded_at: z.string().min(1),
+  /**
+   * What the one landing predicate (`landing.ts`) measured: `no-change` (the branch tip equals the work's start) or `commits`,
+   * with the start, the tip, the integration head and when. Present when the claim recorded a start; `lore done` completes a
+   * record that lacks them.
+   */
+  kind: z.enum(["no-change", "commits"]).optional(),
+  start_head: z.string().min(1).optional(),
+  tip: z.string().min(1).optional(),
+  integration_head: z.string().min(1).optional(),
+  measured_at: z.string().min(1).optional(),
 });
 
 export type TaskLanding = z.infer<typeof taskLandingSchema>;

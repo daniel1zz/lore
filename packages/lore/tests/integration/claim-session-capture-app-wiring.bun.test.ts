@@ -141,7 +141,7 @@ describe("createApp wiring — claim-time session capture (app.ts passes process
     const { taskIds } = await createPlanWithTasks([[SHARED_ANCHOR]]);
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3DE02220-5d69-4b5a-ac23-d66e14c0261b");
 
-    const claimed = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: runOfName(ORCHESTRATOR) }));
+    const claimed = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: runOfName(ORCHESTRATOR), worktree: "csc-wt-0" }));
     expect(claimed.ok).toBe(true);
 
     const claim = readClaim(await fetchTask(taskIds[0]!));
@@ -153,7 +153,7 @@ describe("createApp wiring — claim-time session capture (app.ts passes process
     const { taskIds } = await createPlanWithTasks([[SHARED_ANCHOR]]);
     setSessionEnv("CLAUDE_SESSION_ID", "7ab19c04-fallback");
 
-    const claimed = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: runOfName(ORCHESTRATOR) }));
+    const claimed = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: runOfName(ORCHESTRATOR), worktree: "csc-wt-0" }));
     expect(claimed.ok).toBe(true);
     expect(readClaim(await fetchTask(taskIds[0]!))?.session_id).toBe("7ab19c04");
   });
@@ -169,13 +169,13 @@ describe("createApp wiring — claim-time session capture (app.ts passes process
     ]);
 
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-first");
-    const first = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_FIRST }));
+    const first = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_FIRST, worktree: "csc-wt-0" }));
     expect(first.ok).toBe(true);
 
     // A SECOND live orchestrator: identical actor string, identical checkout, its
     // own session id — the exact measured topology of the defect.
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "7ab19c04-second");
-    const overlapping = await withApp((app) => app.taskWorkflowService.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_SECOND }));
+    const overlapping = await withApp((app) => app.taskWorkflowService.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_SECOND, worktree: "csc-wt-1" }));
     expect(overlapping.ok).toBe(false);
     if (!overlapping.ok) {
       expect((overlapping.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
@@ -183,7 +183,7 @@ describe("createApp wiring — claim-time session capture (app.ts passes process
 
     // The same second session CAN hold a disjoint-anchor task — the mutex is about
     // overlapping files, not about the session existing.
-    const disjoint = await withApp((app) => app.taskWorkflowService.claim(taskIds[2]!, { by: ORCHESTRATOR, harnessRun: RUN_SECOND }));
+    const disjoint = await withApp((app) => app.taskWorkflowService.claim(taskIds[2]!, { by: ORCHESTRATOR, harnessRun: RUN_SECOND, worktree: "csc-wt-2" }));
     expect(disjoint.ok).toBe(true);
 
     // `lore ready`'s derived session registry now sees BOTH live sessions under the
@@ -201,7 +201,7 @@ describe("createApp wiring — claim-time session capture (app.ts passes process
     // CONTROL — the FIRST session claiming the overlapping task IS permitted, so the
     // refusal above is session-scoped rather than a blanket refuse.
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-first");
-    const sameSession = await withApp((app) => app.taskWorkflowService.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_FIRST }));
+    const sameSession = await withApp((app) => app.taskWorkflowService.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_FIRST, worktree: "csc-wt-1" }));
     expect(sameSession.ok).toBe(true);
     expect(readClaim(await fetchTask(taskIds[1]!))?.session_id).toBe("3de02220");
   });
@@ -210,11 +210,11 @@ describe("createApp wiring — claim-time session capture (app.ts passes process
     const { taskIds } = await createPlanWithTasks([[SHARED_ANCHOR], [SHARED_ANCHOR]]);
     setSessionEnv(null);
 
-    const first = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_FIRST }));
+    const first = await withApp((app) => app.taskWorkflowService.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_FIRST, worktree: "csc-wt-0" }));
     expect(first.ok).toBe(true);
     expect(readClaim(await fetchTask(taskIds[0]!))?.session_id).toBeUndefined();
 
-    const second = await withApp((app) => app.taskWorkflowService.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_SECOND }));
+    const second = await withApp((app) => app.taskWorkflowService.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_SECOND, worktree: "csc-wt-1" }));
     expect(second.ok).toBe(false);
     if (!second.ok) {
       expect((second.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
