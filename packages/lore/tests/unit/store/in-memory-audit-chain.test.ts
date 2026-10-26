@@ -193,6 +193,7 @@ describe("InMemoryStore — audit hash chain parity (SPEC-079 G3)", () => {
       undefined,
       makeVersion(updatedDoc, { version: 2, action: "update" }),
       makeAudit({ action: "update", doc_id: doc.id, details: { version: 2 } }),
+    true,
     );
     expect(updateRes.ok).toBe(true);
 

@@ -233,7 +233,9 @@ describe("InMemoryStore.updateWithProvenance — failure-injection atomicity", (
     const version = makeVersion(doc, { version: 2, title: "Must Not Persist", action: "update" });
     const audit = makeAudit(doc, { action: "update", details: { version: 2 } });
 
-    const result = await store.updateWithProvenance(doc.id, patch, { expected_version: 1 }, version, audit);
+    const result = await store.updateWithProvenance(doc.id, patch, { expected_version: 1 }, version, audit,
+true,
+);
     expect(result.ok).toBe(false);
 
     const found = await store.find(doc.id);
@@ -253,7 +255,9 @@ describe("InMemoryStore.updateWithProvenance — failure-injection atomicity", (
     const version = makeVersion(doc, { version: 2, title: "Must Not Persist Either", action: "update" });
     const audit = makeAudit(doc, { action: "update", details: { version: 2 } });
 
-    const result = await store.updateWithProvenance(doc.id, patch, { expected_version: 1 }, version, audit);
+    const result = await store.updateWithProvenance(doc.id, patch, { expected_version: 1 }, version, audit,
+true,
+);
     expect(result.ok).toBe(false);
 
     const found = await store.find(doc.id);

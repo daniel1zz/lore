@@ -2236,6 +2236,7 @@ export class TursoStore implements StoreInterface {
     opts: UpdateOpts | undefined,
     rawVersion: VersionRecord,
     audit: AuditEntry,
+    snapshot: boolean,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     await this.ensureReady();
@@ -2375,26 +2376,30 @@ export class TursoStore implements StoreInterface {
         });
       }
 
-      await tx.execute({
-        sql: `INSERT INTO versions
-               (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug, harness_run)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          version.doc_id,
-          version.version,
-          version.content,
-          JSON.stringify(version.extra),
-          version.status,
-          version.title,
-          version.action,
-          version.created_at,
-          version.created_by,
-          version.change_summary ?? null,
-          version.slug ?? null,
-          version.harness_run ?? null,
-        ] as InValue[],
-      });
+      // reason: snapshot=false is a working-state-only write (ADR D1/D3): version raise + audit row commit, the
+      // versions row is withheld. The caller decides; never infer here (SQLiteStore twin).
+      if (snapshot) {
+        await tx.execute({
+          sql: `INSERT INTO versions
+                 (doc_id, version, content, extra, status, title,
+                  action, created_at, created_by, change_summary, slug, harness_run)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            version.doc_id,
+            version.version,
+            version.content,
+            JSON.stringify(version.extra),
+            version.status,
+            version.title,
+            version.action,
+            version.created_at,
+            version.created_by,
+            version.change_summary ?? null,
+            version.slug ?? null,
+            version.harness_run ?? null,
+          ] as InValue[],
+        });
+      }
 
       await this.appendAuditEntryTx(tx, audit);
       for (const extraAudit of extras?.also_audit ?? []) {
@@ -2456,26 +2461,28 @@ export class TursoStore implements StoreInterface {
             actual: companionCurrent.version,
           });
         }
-        await tx.execute({
-          sql: `INSERT INTO versions
-                 (doc_id, version, content, extra, status, title,
-                  action, created_at, created_by, change_summary, slug, harness_run)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          args: [
-            companion.version.doc_id,
-            companion.version.version,
-            companion.version.content,
-            JSON.stringify(companion.version.extra),
-            companion.version.status,
-            companion.version.title,
-            companion.version.action,
-            companion.version.created_at,
-            companion.version.created_by,
-            companion.version.change_summary ?? null,
-            companion.version.slug ?? null,
-            companion.version.harness_run ?? null,
-          ] as InValue[],
-        });
+        if (companion.snapshot) {
+          await tx.execute({
+            sql: `INSERT INTO versions
+                   (doc_id, version, content, extra, status, title,
+                    action, created_at, created_by, change_summary, slug, harness_run)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              companion.version.doc_id,
+              companion.version.version,
+              companion.version.content,
+              JSON.stringify(companion.version.extra),
+              companion.version.status,
+              companion.version.title,
+              companion.version.action,
+              companion.version.created_at,
+              companion.version.created_by,
+              companion.version.change_summary ?? null,
+              companion.version.slug ?? null,
+              companion.version.harness_run ?? null,
+            ] as InValue[],
+          });
+        }
         await this.appendAuditEntryTx(tx, companion.audit);
         // reason: the docs triggers keep a registry lifecycle the leaf no longer lists; see SQLiteStore's twin.
         for (const ruleId of companion.propose_rules ?? []) {

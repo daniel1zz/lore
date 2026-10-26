@@ -94,7 +94,8 @@ function makeRacingStore(real: StoreInterface, planId: string, specId: string): 
               );
             }
           }
-          return target.updateWithProvenance(id, patch, opts, version, audit, extras);
+          return target.updateWithProvenance(id, patch, opts, version, audit,
+ true, extras);
         };
       }
       const value = Reflect.get(target, prop, receiver) as unknown;

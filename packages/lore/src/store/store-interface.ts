@@ -138,8 +138,13 @@ export interface CompanionDocWrite {
   readonly patch: Partial<DocRecord>;
   /** CAS base: a version miss fails the whole transaction with `STALE_VERSION`. */
   readonly opts: UpdateOpts;
-  /** The version row of this doc's write. */
+  /** The version row of this doc's write (inserted only when `snapshot` is true). */
   readonly version: VersionRecord;
+  /**
+   * Whether this doc's write adds a `versions` row. REQUIRED, no default: the caller (the service) decides, the store
+   * obeys. `false`: the doc version still rises by one under the same CAS and the audit row is still written.
+   */
+  readonly snapshot: boolean;
   /** The audit row of this doc's write. */
   readonly audit: AuditEntry;
   /**
@@ -830,6 +835,10 @@ export interface StoreInterface {
    * @param opts - Same {@link UpdateOpts} contract as {@link update}
    * @param version - The post-patch version snapshot (same contract as {@link insertVersion})
    * @param audit - The audit entry for this update (same contract as {@link appendAuditEntry})
+   * @param snapshot - REQUIRED, no default. `true`: insert `version` as a `versions` row. `false`: same CAS, same
+   *   version raise, same audit row, but NO `versions` row (a working-state-only write; the caller decides, the
+   *   store never classifies content — adr-a-history-entry-records-content-working-state-is-recorded D1/D3).
+   *   Everything lands in the one transaction either way.
    * @returns `ok(updatedDoc)` on success (mirrors `update`'s return shape);
    *   `DOC_NOT_FOUND` / `STALE_VERSION` from the doc write step, or the
    *   version/audit step's own error, on failure — never a new error shape.
@@ -841,6 +850,7 @@ export interface StoreInterface {
     opts: UpdateOpts | undefined,
     version: VersionRecord,
     audit: AuditEntry,
+    snapshot: boolean,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>>;
 

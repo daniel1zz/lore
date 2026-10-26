@@ -694,7 +694,9 @@ describe("OutlineService.resolve", () => {
         insertWithAllocatedOrdinalAndProvenance: (doc, version, audit) =>
           store.insertWithAllocatedOrdinalAndProvenance(doc, version, audit),
         updateWithProvenance: (id, patch, opts, version, audit) =>
-          store.updateWithProvenance(id, patch, opts, version, audit),
+          store.updateWithProvenance(id, patch, opts, version, audit,
+true,
+),
         softDeleteWithProvenance: (id, version, audit) => store.softDeleteWithProvenance(id, version, audit),
         addLink: (link) => store.addLink(link),
         addLinkWithProvenance: (link, audit) => store.addLinkWithProvenance(link, audit),

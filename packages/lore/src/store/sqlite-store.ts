@@ -2506,6 +2506,7 @@ export class SQLiteStore implements StoreInterface {
     opts: UpdateOpts | undefined,
     rawVersion: VersionRecord,
     audit: AuditEntry,
+    snapshot: boolean,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     // See insertWithProvenance's identical split above: BEGIN IMMEDIATE gets
@@ -2559,10 +2560,14 @@ export class SQLiteStore implements StoreInterface {
         return updateResult;
       }
 
-      const versionResult = this.insertVersionSync(version);
-      if (!versionResult.ok) {
-        this.db.run("ROLLBACK");
-        return versionResult;
+      // reason: snapshot=false is a working-state-only write (ADR D1/D3): the version raise above and the audit row
+      // below still commit in this transaction, only the versions row is withheld. The caller decides; never infer here.
+      if (snapshot) {
+        const versionResult = this.insertVersionSync(version);
+        if (!versionResult.ok) {
+          this.db.run("ROLLBACK");
+          return versionResult;
+        }
       }
 
       const auditResult = this.appendAuditEntrySync(audit);
@@ -2588,10 +2593,12 @@ export class SQLiteStore implements StoreInterface {
           this.db.run("ROLLBACK");
           return companionUpdate;
         }
-        const companionVersion = this.insertVersionSync(companion.version);
-        if (!companionVersion.ok) {
-          this.db.run("ROLLBACK");
-          return companionVersion;
+        if (companion.snapshot) {
+          const companionVersion = this.insertVersionSync(companion.version);
+          if (!companionVersion.ok) {
+            this.db.run("ROLLBACK");
+            return companionVersion;
+          }
         }
         const companionAudit = this.appendAuditEntrySync(companion.audit);
         if (!companionAudit.ok) {
