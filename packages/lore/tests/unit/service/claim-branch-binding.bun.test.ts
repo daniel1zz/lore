@@ -145,20 +145,20 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     expect((result.value.extra["claim"] as Record<string, unknown>)["branch"]).toBe("declared-branch");
   });
 
-  it('BOUNDARY: a detached HEAD worktree records NO branch — never the literal "HEAD"', async () => {
+  it("BOUNDARY: a detached HEAD worktree is refused worktree-without-branch (BR-1468), never recorded as the literal \"HEAD\"", async () => {
     const { repoRoot } = makeDetachedRepo();
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
     const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const claim = result.value.extra["claim"] as Record<string, unknown>;
-    expect(claim["branch"]).toBeUndefined();
-    expect(Object.prototype.hasOwnProperty.call(claim, "branch")).toBe(false);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(JSON.stringify(result.error)).toContain("worktree-without-branch");
+    const after = await corpusService.get(taskId);
+    expect(JSON.stringify(after)).not.toContain('"claim":');
   });
 
-  it("ERROR: a worktree path that does not exist on disk records no branch and never throws", async () => {
+  it("ERROR: a worktree path that does not exist on disk is refused worktree-without-branch and never throws", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
@@ -166,10 +166,9 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
       by: "alice", harnessRun: runOfName("alice"),
       worktree: "/definitely/does/not/exist/lore-ac-own-2",
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const claim = result.value.extra["claim"] as Record<string, unknown>;
-    expect(Object.prototype.hasOwnProperty.call(claim, "branch")).toBe(false);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(JSON.stringify(result.error)).toContain("worktree-without-branch");
   });
 
   it("STATE: a same-holder fresh refresh with no branch/worktree re-passed carries the auto-detected branch forward", async () => {

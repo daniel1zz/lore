@@ -135,19 +135,17 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     expect(session?.branches).toEqual(["release/y"]);
   });
 
-  it("NEGATIVE: a detached-HEAD worktree with no measurable branch surfaces branches: []", async () => {
+  it("NEGATIVE: a detached-HEAD worktree is refused worktree-without-branch, so no session names it", async () => {
     const { repoRoot } = makeDetachedRepo();
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), worktree: repoRoot });
-
+    const claimed = await taskWorkflowService.claim(taskId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), worktree: repoRoot });
+    expect(claimed.ok).toBe(false);
     const bootstrap = await sessionService.bootstrap("agent:t2");
     expect(bootstrap.ok).toBe(true);
     if (!bootstrap.ok) return;
-    const session = findSessionByWorktree(bootstrap.value.active_sessions, repoRoot);
-    expect(session).toBeDefined();
-    expect(session?.branches).toEqual([]);
+    expect(findSessionByWorktree(bootstrap.value.active_sessions, repoRoot)).toBeUndefined();
   });
 
   it("BOUNDARY: a second task claimed by the SAME session on the SAME working copy is refused (BR-1337), so the entry keeps one branch and one task", async () => {
@@ -169,19 +167,17 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     expect(session?.task_slugs.length).toBe(1);
   });
 
-  it("ERROR: a claim whose worktree path does not exist on disk never throws, branches: []", async () => {
+  it("ERROR: a claim whose worktree path does not exist on disk is refused and never throws", async () => {
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
     const fakeWorktree = "/definitely/does/not/exist/lore-ac-own-3";
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t4", harnessRun: runOfName("agent:t4"), worktree: fakeWorktree });
-
+    const claimed = await taskWorkflowService.claim(taskId, { by: "agent:t4", harnessRun: runOfName("agent:t4"), worktree: fakeWorktree });
+    expect(claimed.ok).toBe(false);
     const bootstrap = await sessionService.bootstrap("agent:t4");
     expect(bootstrap.ok).toBe(true);
     if (!bootstrap.ok) return;
-    const session = findSessionByWorktree(bootstrap.value.active_sessions, fakeWorktree);
-    expect(session).toBeDefined();
-    expect(session?.branches).toEqual([]);
+    expect(findSessionByWorktree(bootstrap.value.active_sessions, fakeWorktree)).toBeUndefined();
   });
 
   it("STATE: releasing the claim removes that session from active_sessions entirely", async () => {

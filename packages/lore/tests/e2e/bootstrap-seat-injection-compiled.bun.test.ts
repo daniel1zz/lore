@@ -183,8 +183,12 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   });
 
   it("(b3) a claim whose recorded directory no longer exists still matches its own path string, never throws (D12)", async () => {
+    // reason: a claim on a path with no readable branch is refused now (BR-1468), so the directory is a real repo at claim time and
+    // is removed afterwards: the recorded claim then names a directory that no longer exists.
     const gone = join(scratch, "never-created");
+    makeRepoDir(gone);
     const slug = await claimTask(dir, seeded.plan, gone);
+    rmSync(gone, { recursive: true, force: true });
     const r = await injection(dir, "other-gone", gone);
     expect(r.stderr).not.toContain("ENOENT");
     expect(claimSlugs(r)).toEqual([slug]);

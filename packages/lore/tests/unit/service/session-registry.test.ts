@@ -129,8 +129,8 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const taskOneId = await createTask(corpusService, planId, "Task One");
     const taskTwoId = await createTask(corpusService, planId, "Task Two");
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1" });
-    await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostA", worktree: "/w2" });
+    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1", branch: "b1" });
+    await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostA", worktree: "/w2", branch: "b2" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -150,8 +150,8 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const taskOneId = await createTask(corpusService, planId, "Task One");
     const taskTwoId = await createTask(corpusService, planId, "Task Two");
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1" });
-    await taskWorkflowService.claim(taskTwoId, { by: "agent:t1", machine: "hostA", worktree: "/w2" });
+    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1", branch: "b1" });
+    await taskWorkflowService.claim(taskTwoId, { by: "agent:t1", machine: "hostA", worktree: "/w2", branch: "b2" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);

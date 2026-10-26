@@ -144,7 +144,7 @@ describe("bootstrap active_sessions — NEGATIVE: zero-plan corpus, adhoc claim 
     const { corpusService, taskWorkflowService, sessionService, store } = makeServices();
     await createPrd(corpusService);
     const adhoc = await createAdhocTask(corpusService, "Investigate the flaky timeout");
-    await taskWorkflowService.claim(adhoc.id, { by: "agent:incident-repro", harnessRun: runOfName("agent:incident-repro"), worktree: "/repo/.worktrees/t1" });
+    await taskWorkflowService.claim(adhoc.id, { by: "agent:incident-repro", harnessRun: runOfName("agent:incident-repro"), worktree: "/repo/.worktrees/t1", branch: "b-t1" });
 
     // This is the exact incident shape today: no plan exists anywhere in the
     // corpus, so `activePlanIds` (pre-fix) is empty and `activeTasks` is empty.

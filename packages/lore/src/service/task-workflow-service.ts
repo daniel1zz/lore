@@ -440,7 +440,19 @@ import {
  * Refuses a claim under a fixed name (BR-1468); nothing is written. The name is part of the text so a caller and a test
  * can match it without parsing `details`.
  */
-function refuseClaim(taskSlug: string, name: "work-needs-branch"): Result<never, LoreError> {
+function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-without-branch"): Result<never, LoreError> {
+  if (name === "worktree-without-branch") {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "worktree",
+      message:
+        `The worktree named for task "${taskSlug}" has no readable branch (detached HEAD or an unreadable ref), so the start of the work ` +
+        `cannot be measured [claim: ${name}]. Check out a branch in that worktree and claim again, or claim without --worktree when the ` +
+        "task anchors no file (corpus-only work). Nothing was written.",
+      value: name,
+      rule: "BR-1468",
+    });
+  }
   return err({
     code: "VALIDATION_ERROR",
     field: "worktree",
@@ -3267,6 +3279,10 @@ export class TaskWorkflowService {
       const measurement = await this.detectBranch(opts.worktree);
       if (measurement.status === "measured") {
         capturedBranch = measurement.branch;
+      } else if (isAbsolute(opts.worktree) && existingClaim?.branch === undefined) {
+        // reason: BR-1468 — a worktree PATH with no readable branch has no start_head to measure; admitting it would be a silent
+        // path. A non-absolute value is a branch name (measured by measureStartHead below), not a path.
+        return refuseClaim(task.slug, "worktree-without-branch");
       }
     }
 

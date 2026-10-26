@@ -499,6 +499,26 @@ describe("AC-ND-9 — no-branch claims: work that changes files needs its branch
     expect(docOf(task, dir).version).toBe(before.version);
   }, 300_000);
 
+  it("AC-ND-9 claiming on a detached-HEAD worktree exits 4 worktree-without-branch and writes no claim; a branch worktree still claims", () => {
+    const task = createTask("Detached", ["--anchor", "src/feature.ts"]);
+    const wt = addWorktree("nd9-detached");
+    git(["checkout", "-q", "--detach"], wt);
+    const before = docOf(task, dir);
+
+    const refused = runLore(["claim", task, "--worktree", wt], dir);
+
+    expect(refused.exitCode).toBe(4);
+    expect(refused.text).toContain("worktree-without-branch");
+    expect(refused.text).toContain("without --worktree");
+    expect(docOf(task, dir).extra["claim"]).toBeUndefined();
+    expect(docOf(task, dir).version).toBe(before.version);
+
+    git(["checkout", "-q", "nd9-detached"], wt);
+    const claimed = runLore(["claim", task, "--worktree", wt], dir);
+    expect(claimed.exitCode).toBe(0);
+    expect(docOf(task, dir).extra["claim"]).toBeDefined();
+  }, 300_000);
+
   it("AC-ND-9 a corpus-only task passes at main's head despite an unrelated dirty shared checkout, and lore done archives it as no-change", () => {
     const task = createTask("Corpus only", ["--ac-scope", ""]);
     mustRun(["claim", task], dir);

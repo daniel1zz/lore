@@ -83,7 +83,7 @@ async function seed(options: { resumeAddress?: string } = {}) {
     const svc = new TaskWorkflowService(w.store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, {
       CLAUDE_CODE_SESSION_ID: session,
     }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-    const r = await svc.claim(task.id, { by, harnessRun: run, worktree });
+    const r = await svc.claim(task.id, { by, harnessRun: run, worktree, branch: { "/w/m1": "b1", "/w/sub": "b2", "/w/m2": "b3" }[worktree] ?? "b0" });
     if (!r.ok) throw new Error(`claim failed: ${JSON.stringify(r.error)}`);
   };
   await claim(a, "agent:session-S1", m1, "/w/m1", "s1");
@@ -185,7 +185,7 @@ describe("holder listings show the holding run's messaging address (AC-MA-3)", (
       composition: COMPOSITION,
     });
     if (!sub.ok) throw new Error(JSON.stringify(sub.error));
-    const claimed = await w.tasks.claim(t.id, { by: "agent:session-S9", harnessRun: sub.value.id, worktree: "/w/s9" });
+    const claimed = await w.tasks.claim(t.id, { by: "agent:session-S9", harnessRun: sub.value.id, worktree: "/w/s9", branch: "b-s9" });
     expect(claimed.ok).toBe(true);
     const active = await w.sessions.getActiveSessions();
     if (!active.ok) throw new Error(JSON.stringify(active.error));
@@ -203,7 +203,7 @@ describe("holder listings show the holding run's messaging address (AC-MA-3)", (
       extra: { plan_id: plan.id },
     } as CreateDocInput);
     // reason: the claim verb may refuse an unregistered run; when it accepts, the listing must still be total.
-    const claimed = await w.tasks.claim(t.id, { by: "agent:session-ghost", harnessRun: "cc:ghost" as RunId, worktree: "/w/g" });
+    const claimed = await w.tasks.claim(t.id, { by: "agent:session-ghost", harnessRun: "cc:ghost" as RunId, worktree: "/w/g", branch: "b-g" });
     const active = await w.sessions.getActiveSessions();
     if (!active.ok) throw new Error(JSON.stringify(active.error));
     if (claimed.ok) expect(addressOfTask(active.value, t.slug)).toBeNull();
