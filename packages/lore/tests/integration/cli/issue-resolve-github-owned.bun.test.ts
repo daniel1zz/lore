@@ -23,6 +23,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { cleanDirs, makeIssueFixture, type IssueFixture } from "../../helpers/gh-issue-stub";
 
@@ -169,5 +171,93 @@ describe(`${SPEC}#AC-GS-6 resolve writes only GitHub, idempotent, exit kind on p
     expect(after.labels).toEqual(["resolution:duplicate"]);
     expect(after.comments[0]).toContain("Duplicate of #10");
     expect(fixture.counts()).toEqual(countsBefore);
+  }, 120_000);
+});
+
+// ─── AC-IL-9 / AC-IL-10: pointer rules and the fixed refusal (BR-1457, BR-1458) ───
+
+describe("AC-IL-9 pointers are validated before any GitHub write", () => {
+  let fixture: IssueFixture;
+  let prdSlug = "";
+
+  beforeAll(async () => {
+    fixture = await makeIssueFixture([{ number: 5 }, { number: 6 }, { number: 7 }, { number: 8 }], { dirsToClean });
+    const listed = await fixture.run(["list", "--type", "prd", "--json"], "setup");
+    expect(listed.exitCode, listed.stderr).toBe(0);
+    const data = (JSON.parse(listed.stdout) as { data: { docs?: { slug: string }[] } | { slug: string }[] }).data;
+    prdSlug = (Array.isArray(data) ? data : (data.docs ?? []))[0]?.slug ?? "";
+    expect(prdSlug).not.toBe("");
+    fixture.resetLog();
+  }, 240_000);
+
+  it("AC-IL-9 each invalid pointer exits exactly 4 and writes nothing to GitHub", async () => {
+    const cases: readonly (readonly string[])[] = [
+      ["--state", "rejected", "--of", "6"], // --of under a non-duplicate verdict
+      ["--state", "duplicate", "--of", "5"], // --of naming the issue itself
+      ["--state", "duplicate", "--of", "999"], // --of naming an unlisted issue
+      ["--state", "rejected", "--superseded-by", "6"], // --superseded-by under a non-superseded verdict
+      ["--state", "superseded", "--superseded-by", "5"], // --superseded-by naming the issue itself
+      ["--state", "superseded", "--superseded-by", "no-such-document-anywhere"], // naming nothing resolvable
+    ];
+    for (const flags of cases) {
+      fixture.resetLog();
+      const result = await fixture.run(["issue", "resolve", "5", "--reason", "r", ...flags]);
+      expect(result.exitCode, `${flags.join(" ")}: ${result.stderr}${result.stdout}`).toBe(4);
+      expect(fixture.writes(), flags.join(" ")).toEqual([]);
+    }
+    expect(fixture.stateOf(5).state).toBe("open");
+  }, 240_000);
+
+  it("AC-IL-9 --superseded-by a listed issue closes the issue with a comment naming the pointer", async () => {
+    const result = await fixture.run(["issue", "resolve", "6", "--state", "superseded", "--reason", "replaced", "--superseded-by", "7"]);
+    expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    const after = fixture.stateOf(6);
+    expect(after.state).toBe("closed");
+    expect(after.comments[0]).toContain("Superseded by #7");
+  }, 120_000);
+
+  it("AC-IL-9 --superseded-by a corpus document closes the issue with a comment naming the document", async () => {
+    const result = await fixture.run(["issue", "resolve", "8", "--state", "superseded", "--reason", "replaced", "--superseded-by", prdSlug]);
+    expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    const after = fixture.stateOf(8);
+    expect(after.state).toBe("closed");
+    expect(after.comments[0]).toContain(`Superseded by ${prdSlug}`);
+  }, 120_000);
+});
+
+describe("AC-IL-10 an issue whose naming work is archived is not given a verdict", () => {
+  const PENDING = 31;
+  const FIXED = 32;
+  let fixture: IssueFixture;
+  const slugs: Record<number, string> = {};
+
+  beforeAll(async () => {
+    fixture = await makeIssueFixture([{ number: PENDING }, { number: FIXED }], { dirsToClean });
+    for (const n of [PENDING, FIXED]) {
+      const created = await fixture.run(["create", "task", "--adhoc", "--ac-scope", "", "--title", `Carrier of ${n}`, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"], "setup");
+      expect(created.exitCode, created.stderr + created.stdout).toBe(0);
+      const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
+      slugs[n] = slug;
+      // The close of PENDING is made to fail, so it stays open with archived work; FIXED is closed as completed by the archive.
+      if (n === PENDING) writeFileSync(join(fixture.stubDir, `fail-patch-${n}`), "1");
+      const evidence = await fixture.run(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], "setup");
+      expect(evidence.exitCode, evidence.stderr + evidence.stdout).toBe(0);
+      const done = await fixture.run(["done", slug, "--declare-no-new-tests", "fixture: throwaway task"], "setup");
+      expect(done.exitCode, done.stderr + done.stdout).toBe(0);
+      rmSync(join(fixture.stubDir, `fail-patch-${n}`), { force: true });
+    }
+    expect(fixture.stateOf(PENDING).state).toBe("open");
+    expect(fixture.stateOf(FIXED).state).toBe("closed");
+    fixture.resetLog();
+  }, 300_000);
+
+  it("AC-IL-10 resolve --state rejected on a fixed (close pending) and on a fixed issue each exit exactly 4 naming the task, with no GitHub write", async () => {
+    for (const n of [PENDING, FIXED]) {
+      fixture.resetLog();
+      const result = await fixture.run(["issue", "resolve", String(n), "--state", "rejected", "--reason", "r"]);
+      expect(result.exitCode, `#${n}: ${result.stderr}${result.stdout}`).toBe(4);
+      expect(result.stderr, `#${n}`).toContain(slugs[n]);
+      expect(fixture.writes(), `#${n}`).toEqual([]);
+    }
   }, 120_000);
 });

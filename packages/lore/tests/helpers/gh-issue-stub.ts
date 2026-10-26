@@ -129,10 +129,11 @@ out({ state: issue.state, state_reason: issue.reason, labels: issue.labels.map((
  * @param issues - the issues the stub serves, in number order across pages
  * @param options.pageSize - issues per listing page (default 100)
  * @param options.dirsToClean - the caller's cleanup list; the two temp dirs are pushed onto it
+ * @param options.withRootPrd - false builds a corpus with NO prd (default true: one root PRD is created)
  */
 export async function makeIssueFixture(
   issues: readonly StubIssue[],
-  options: { readonly pageSize?: number; readonly dirsToClean: string[] },
+  options: { readonly pageSize?: number; readonly dirsToClean: string[]; readonly withRootPrd?: boolean },
 ): Promise<IssueFixture> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-issue-corpus-")));
   const stubDir = realpathSync(mkdtempSync(join(tmpdir(), "lore-issue-stub-")));
@@ -193,7 +194,9 @@ export async function makeIssueFixture(
     dir,
     ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    plan-close:", "      enabled: false", "  review:", "    judgment_required_types: []", "feedback:", "  upstream:", `    repo: ${STUB_REPO}`, ""].join("\n"),
   );
-  await must(["create", "prd", "--title", "Issue Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
+  if (options.withRootPrd !== false) {
+    await must(["create", "prd", "--title", "Issue Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
+  }
   writeFileSync(join(stubDir, "gh.log"), "");
 
   const ghCalls = (): string[][] =>
