@@ -78,7 +78,10 @@ async function versionRows(store: StoreInterface, id: string) {
 async function auditRows(store: StoreInterface, id: string) {
   const r = await store.queryAudit({ doc_id: id as never, limit: 500 });
   if (!r.ok) throw new Error("queryAudit failed");
-  return [...r.value].reverse(); // oldest first
+  // reason: queryAudit orders by timestamp DESC and rows written in one millisecond tie; every audit writer stamps
+  // details.version (SPEC-035 §2), so order oldest-first by that, array position breaking the remaining ties.
+  const versionOf = (e: { details?: unknown }): number => (e.details as { version?: number } | undefined)?.version ?? 0;
+  return [...r.value].reverse().sort((a, b) => versionOf(a) - versionOf(b));
 }
 
 function stateChangeOf(entry: { details?: unknown }): StateChange | undefined {
@@ -193,9 +196,12 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
       expect(none.ok).toBe(false);
 
       // NEGATIVE: STALE_VERSION for a second writer on the old version
-      const stale = await corpus.set(task.id, { title: "late" }, { expectedVersion: createRow.version });
+      // reason: the task is a locked record by now (claimed), so the second writer targets the plan, whose
+      // version a working-state write has bumped without a snapshot.
+      expect((await corpus.set(plan.id, { extra: { ...plan.extra, progress: { done: 0, total: 1 } } })).ok).toBe(true);
+      const stale = await corpus.set(plan.id, { title: "late" }, { expectedVersion: plan.version });
       expect(stale.ok).toBe(false);
-      if (!stale.ok) expect(stale.error.code).toBe("STALE_VERSION");
+      if (!stale.ok) expect(stale.error, JSON.stringify(stale.error)).toMatchObject({ code: "STALE_VERSION" });
     });
   });
 }

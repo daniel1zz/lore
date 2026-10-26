@@ -5,7 +5,7 @@
  */
 
 import { createTwoFilesPatch } from "diff";
-import type { DocId, DocRecord, DocStatus, VersionAction } from "@lore/core";
+import type { DocId, DocRecord, DocStatus, VersionAction, VersionRecord } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDocId } from "./resolve.js";
@@ -66,6 +66,34 @@ export class VersionService {
   }
 
   private readonly writer: DocWritePort;
+
+  /**
+   * The versions row that holds a doc's content as of stored version number `version`: the row numbered
+   * `version`, or — when `version` was a working-state-only write that added no row — the closest EARLIER row
+   * (spec-history-records-content-a-working-state-only-write-adds-no Scope 2, ADR D4). Used for a version
+   * number stored elsewhere (a review judgment's `doc_version`).
+   *
+   * @param docId - the doc (soft-deleted docs stay readable)
+   * @param version - a stored doc version number, >= 1
+   * @returns the row; `DOC_NOT_FOUND` when no row exists at or below `version`.
+   */
+  async resolveClosestEarlierRow(docId: DocId, version: number): Promise<Result<VersionRecord, LoreError>> {
+    const all = await this.store.findVersions(docId);
+    if (!all.ok) return all;
+    let best: VersionRecord | undefined;
+    for (const row of all.value) {
+      if (row.version <= version && (best === undefined || row.version > best.version)) best = row;
+    }
+    if (best === undefined) {
+      return err({
+        code: "DOC_NOT_FOUND",
+        id: docId,
+        suggestions: [`No versions row at or below version ${version}`],
+        rule: "BR-769",
+      });
+    }
+    return ok(best);
+  }
 
   /**
    * Return version history for a document, newest first.
