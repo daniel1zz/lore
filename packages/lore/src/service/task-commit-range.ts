@@ -146,6 +146,8 @@ export function collectRecordedRanges(
     // reason: the landing record outranks `commit_range` — a later re-claim can rewrite the latter, never the former.
     const landing = readTaskLanding(task.extra);
     if (landing !== undefined) {
+      // reason: a no-change landing (the one predicate, `landingOf`) put no commit on main: it contributes no commit range.
+      if (landing.kind === "no-change") continue;
       ranges.set(task.slug, { head: landing.branch_head, base: landing.main_before, worktree: landing.branch });
       continue;
     }
