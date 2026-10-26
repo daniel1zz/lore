@@ -121,6 +121,7 @@ describe("lore rule propose amend --leaf", () => {
     const spec = await createSpec("Amend leaf on modify");
     await loreOk(["rule", "propose", spec, "modify", liveRuleId, "--statement", "reworded live rule"]);
     const run = await lore(["rule", "propose", spec, "amend", liveRuleId, "--leaf", leafB]);
+    await lore(["rule", "propose", spec, "withdraw", liveRuleId]); // free the rule for the other cases (modify is exclusive per rule)
     expect(run.exitCode, text(run)).toBe(4);
     expect(text(run)).toMatch(/modify/);
   });
@@ -139,6 +140,7 @@ describe("lore rule propose: a flag the op does not take is exit 2 naming flag a
     const spec = await createSpec("Withdraw example");
     await loreOk(["rule", "propose", spec, "modify", liveRuleId, "--statement", "reworded live rule"]);
     const run = await lore(["rule", "propose", spec, "withdraw", liveRuleId, "--example", "ignored?"]);
+    await lore(["rule", "propose", spec, "withdraw", liveRuleId]); // free the rule (a no-op failure when the run above already withdrew it)
     expect(run.exitCode, text(run)).toBe(2);
     expect(text(run)).toContain("--example");
     expect(text(run)).toContain("withdraw");
