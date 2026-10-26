@@ -64,7 +64,9 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
 
       const audit = await store.queryAudit({ doc_id: id, limit: 100 });
       if (!audit.ok) throw new Error("audit");
-      const withDelta = [...audit.value].reverse().filter((e) => (e.details as { state_change?: unknown } | undefined)?.state_change !== undefined);
+      // reason: queryAudit orders by timestamp DESC and same-millisecond rows tie; details.version (SPEC-035 §2) orders them.
+      const versionOf = (e: { details?: unknown }): number => (e.details as { version?: number } | undefined)?.version ?? 0;
+      const withDelta = [...audit.value].sort((a, b) => versionOf(a) - versionOf(b)).filter((e) => (e.details as { state_change?: unknown } | undefined)?.state_change !== undefined);
       expect(withDelta).toHaveLength(3); // claim, steal, forced release
 
       const steal = withDelta[1]!;
