@@ -90,6 +90,22 @@ async function makeArchivableTask(probeRepo: string = process.cwd()): Promise<{ 
   return { svc, taskId: task.value.id };
 }
 
+/**
+ * A runner-attested pass the landing predicate counts: recorded AFTER the latest claim and bound to a clean commit
+ * (`head_sha`). The legacy fixtures recorded theirs before the claim and bound to nothing, which a branch claim no longer accepts.
+ */
+async function recordCountingPass(svc: TaskWorkflowService, taskId: string, headSha: string): Promise<void> {
+  const ev = await svc.recordVerifiedEvidence(
+    taskId,
+    {
+      oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: headSha, worktree_dirty: false },
+    },
+    new Date(Date.now() + 1000).toISOString(),
+  );
+  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
+}
+
 describe("lore done under the dispatch protocol: --worktree is a branch NAME (issue #180 retry)", () => {
   it("records state:recorded with head = the branch tip, and assess attributes the commits though the merge lacks the slug", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-done-branch-test-")));
@@ -128,6 +144,7 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
 
     const claim = await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "agent-branch-x" });
     expect(claim.ok).toBe(true);
+    await recordCountingPass(svc, taskId, base);
     const c1 = commit(repo, "a.txt", "feat: a");
     const c2 = commit(repo, "b.txt", "feat: b");
     run(repo, "checkout", "-q", "main");
@@ -161,6 +178,7 @@ describe("lore done records extra.commit_range (issue #180)", () => {
 
     const claim = await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo });
     expect(claim.ok).toBe(true);
+    await recordCountingPass(svc, taskId, base);
     commit(repo, "a.txt", "feat: a");
     const head = commit(repo, "b.txt", "feat: b");
     // the working copy is main itself, so its commits are on main already; the landing is what done reads (BR-1291)
@@ -174,13 +192,15 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", base, head, worktree: "main", head_source: "landing" });
   });
 
-  it("NEGATIVE: the same claim without a recorded landing is refused [floor: not-landed], whatever the working copy's head", async () => {
+  it("NEGATIVE: a claimed branch whose commits are not on main is refused [floor: not-landed], whatever evidence says", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-done-range-nolanding-")));
     dirs.push(repo);
     run(repo, "init", "-q", "-b", "main");
-    commit(repo, "seed.txt", "seed");
+    const base = commit(repo, "seed.txt", "seed");
+    run(repo, "checkout", "-q", "-b", "feat-unlanded");
     const { svc, taskId } = await makeArchivableTask(repo);
-    expect((await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo })).ok).toBe(true);
+    expect((await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "feat-unlanded" })).ok).toBe(true);
+    await recordCountingPass(svc, taskId, base);
     commit(repo, "a.txt", "feat: a");
 
     const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });

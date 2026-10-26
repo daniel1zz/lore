@@ -3199,7 +3199,14 @@ export class TaskWorkflowService {
 
     // reason: BR-1468 — work that changes files needs its own branch: a no-branch claim has no tip to measure, so it is
     // allowed only for a task that declares no file anchor (corpus-only work). A refresh that already holds a branch is fine.
-    if (opts.worktree === undefined && readClaimRecord(task)?.worktree === undefined && extractFileAnchors(task).length > 0) {
+    // Armed only on a service wired to git (`app.ts` always wires the probe): a bare construction has no repository to put a
+    // branch in, and its unit tests claim anchored tasks freely.
+    if (
+      this.worktreeProbe !== undefined &&
+      opts.worktree === undefined &&
+      readClaimRecord(task)?.worktree === undefined &&
+      extractFileAnchors(task).length > 0
+    ) {
       return refuseClaim(task.slug, "work-needs-branch");
     }
 
@@ -4440,6 +4447,9 @@ export class TaskWorkflowService {
     const endTip = current !== undefined ? current.end_tip : rowString(newerReleases[newerReleases.length - 1], "end_tip");
 
     const facts = this.landingFacts();
+    // reason: a bare construction (no probe) with a claim that named no working copy has no branch work to measure and no git to
+    // ask: not armed, exactly as before. With a branch named and no probe, the verdict below is `unmeasurable` (no fail-open).
+    if (facts === undefined && branches.length === 0 && worktrees.length === 0) return ok({ armed: false, mode });
     const verdict: LandingVerdict =
       facts === undefined
         ? { state: "unmeasurable", reason: `the landing cannot be measured (${NO_WORKTREE_PROBE_REASON})` }

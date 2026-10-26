@@ -362,7 +362,9 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
 // ─── STATE ───────────────────────────────────────────────────────────────────
 
 describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on the CALLER's cwd", () => {
-  it("no recorded worktree + callerCwd IS a real git repo => refused (evidence)", async () => {
+  // reason: BR-159 / #304 — a claim with no working copy is corpus-only work (BR-1468 refuses an anchored task without a branch),
+  // proven at main's head; the shared checkout's own files are not this task's, so the Q3 refusal is gone, in or out of a repository.
+  it("no recorded worktree + callerCwd IS a real git repo => accepted (evidence)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
     const realRepoCwd = makeCleanRepo();
@@ -372,28 +374,17 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
       taskId,
       evidence({ callerCwd: realRepoCwd }),
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    if (result.error.code !== "VALIDATION_ERROR") {
-      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
-    }
-    expect(result.error.message).toContain("recorded NO");
-    expect(result.error.message).toContain("--worktree");
+    expect(result.ok).toBe(true);
   });
 
-  it("no recorded worktree + callerCwd IS a real git repo => refused (release)", async () => {
+  it("no recorded worktree + callerCwd IS a real git repo => accepted (release)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
     const realRepoCwd = makeCleanRepo();
 
     await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree
     const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice"), callerCwd: realRepoCwd });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    if (result.error.code !== "VALIDATION_ERROR") {
-      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
-    }
-    expect(result.error.message).toContain("recorded NO");
+    expect(result.ok).toBe(true);
   });
 
   it("no recorded worktree + callerCwd is NOT a repo => unaffected (control pair to the above)", async () => {
