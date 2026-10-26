@@ -71,10 +71,11 @@ export const taskLandingSchema = z.object({
   recorded_at: z.string().min(1),
   /**
    * What the one landing predicate (`landing.ts`) measured: `no-change` (the branch tip equals the work's start) or `commits`,
-   * with the start, the tip, the integration head and when. Present when the claim recorded a start; `lore done` completes a
+   * with the start, the tip, the integration head and when. `kind` is REQUIRED (the one-time back-fill gave every stored
+   * landing one, so no reader defaults it); the rest is present when the claim recorded a start, and `lore done` completes a
    * record that lacks them.
    */
-  kind: z.enum(["no-change", "commits"]).optional(),
+  kind: z.enum(["no-change", "commits"]),
   start_head: z.string().min(1).optional(),
   tip: z.string().min(1).optional(),
   integration_head: z.string().min(1).optional(),
@@ -83,8 +84,8 @@ export const taskLandingSchema = z.object({
 
 export type TaskLanding = z.infer<typeof taskLandingSchema>;
 
-/** A landing without its timestamp: what integrate measures. */
-export type LandingFact = Omit<TaskLanding, "recorded_at">;
+/** A landing without its timestamp and its measured kind: what integrate measures (the recorder derives the kind). */
+export type LandingFact = Omit<TaskLanding, "recorded_at" | "kind">;
 
 /**
  * What `lore integrate` hands the recorder. `base_from_claim: true` marks a branch found ALREADY on main: there is no

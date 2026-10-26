@@ -4896,9 +4896,10 @@ export class TaskWorkflowService {
         ...landing,
         main_before: mainBefore,
         recorded_at: nowIso,
+        // reason: `kind` is required on every landing; with no recorded start the branch's own commits are what landed.
+        kind: startHead !== undefined && startHead === landing.branch_head ? ("no-change" as const) : ("commits" as const),
         ...(startHead !== undefined
           ? {
-              kind: startHead === landing.branch_head ? ("no-change" as const) : ("commits" as const),
               start_head: startHead,
               tip: landing.branch_head,
               integration_head: landing.main_after,

@@ -181,6 +181,7 @@ import { MIGRATION_035_SQL } from "./migrations/migration-035.js";
 import { MIGRATION_036_SQL } from "./migrations/migration-036.js";
 import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
 import { applyMigration038 } from "./migrations/migration-038.js";
+import { applyMigration039 } from "./migrations/migration-039.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -992,6 +993,12 @@ export class SQLiteStore implements StoreInterface {
       // removes the link type (BR-1421) in ONE transaction; an unconvertible link rolls everything back, throws
       // MigrationFailedError naming each such link, and leaves schema 37 byte-identical.
       applyMigration038(this.db, this.corpusPath, this.migrationActor);
+    }
+
+    if (currentVersion < 39 && 39 <= ceiling) {
+      // reason: migration-039 back-fills landing.kind and the claims' start_head once (D7, #422) in ONE BEGIN IMMEDIATE
+      // transaction that re-reads the task rows inside the lock; a failure rolls back and leaves schema 38.
+      applyMigration039(this.db, this.corpusPath, this.migrationActor);
     }
   }
 

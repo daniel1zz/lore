@@ -30,7 +30,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { taskClaimSchema } from "@lore/core";
+import { taskClaimSchema, taskExtraSchema } from "@lore/core";
 import { taskLandingSchema } from "../../../src/service/task-commit-range.js";
 
 interface Row {
@@ -120,6 +120,7 @@ function fixtureRows(): Row[] {
     },
     { slug: "t-gone-branch-nothing", extra: { claim: legacyClaim("leg-vanished"), verification_evidence: [evidence(BEFORE_CLAIM, m0)] } },
     { slug: "t-corpus-only-claim", extra: { claim: { by: "agent:legacy", at: CLAIMED_AT } } },
+    { slug: "t-anchored-no-branch", extra: { file_anchors: ["packages/x/src/a.ts"], claim: { by: "agent:legacy", at: CLAIMED_AT } } },
     {
       slug: "t-already-current",
       extra: { claim: { ...legacyClaim("leg-live"), start_head: m0, end_tip: liveTip }, landing: { kind: "commits", branch: "leg-live", branch_head: liveTip, main_before: m0, main_after: m1, landing_commit: m1, recorded_at: AFTER_CLAIM } },
@@ -143,7 +144,10 @@ describe("AC-ND-7 — the one-time back-fill", () => {
     const { changes } = backfill({ tasks: fixtureRows(), repoRoot: repo, integrationBranch: "main" });
 
     const landed = changes.find((c) => c.slug === "t-kindless-landing");
-    expect((landed?.extra["landing"] as Record<string, unknown> | undefined)?.["kind"]).toBe("commits");
+    const landingAfter = landed?.extra["landing"] as Record<string, unknown> | undefined;
+    expect(landingAfter?.["kind"]).toBe("commits");
+    expect(landingAfter?.["tip"]).toBe(m0); // the recorded branch_head; start_head is not recoverable and stays absent
+    expect(landingAfter?.["start_head"]).toBeUndefined();
     expect(changes.find((c) => c.slug === "t-already-current")).toBeUndefined();
     expect(changes.find((c) => c.slug === "t-corpus-only-claim")).toBeUndefined(); // not a branch claim: nothing to fill
   });
@@ -181,7 +185,7 @@ describe("AC-ND-7 — the one-time back-fill", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.reason).toContain("no start or tip recordable");
     expect(entries[0]?.remedy).toMatch(/claim again|re-claim/i);
-    expect(audits).toHaveLength(1); // no other row is released
+    expect(audits.filter((a) => a.slug !== "t-anchored-no-branch")).toHaveLength(1); // no other branch claim is released
   });
 
   it("AC-ND-7 a second run over the back-filled rows changes nothing and audits nothing", async () => {
@@ -205,5 +209,28 @@ describe("AC-ND-7 — the one-time back-fill", () => {
     expect(taskClaimSchema.safeParse(claim).success).toBe(false); // a branch claim needs a sha start_head
     expect(taskClaimSchema.safeParse({ ...claim, start_head: "main" }).success).toBe(false); // a sha, not a ref name
     expect(taskClaimSchema.safeParse({ by: "agent:x", at: CLAIMED_AT }).success).toBe(true); // a no-branch claim needs none
+  });
+});
+
+describe("AC-ND-7 — open no-branch claims on anchored tasks (BR-1468)", () => {
+  it("AC-ND-7 releases a no-branch claim on a task with file anchors with one audit entry, and leaves an unanchored one", async () => {
+    const backfill = await loadBackfill();
+
+    const { changes, audits } = backfill({ tasks: fixtureRows(), repoRoot: repo, integrationBranch: "main" });
+
+    const released = changes.find((c) => c.slug === "t-anchored-no-branch");
+    expect(released?.extra["claim"]).toBeUndefined();
+    expect(released?.extra["file_anchors"]).toEqual(["packages/x/src/a.ts"]); // only the claim goes
+    const entries = audits.filter((a) => a.slug === "t-anchored-no-branch");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.reason).toContain("no-branch claim on a task with file anchors (BR-1468)");
+    expect(changes.find((c) => c.slug === "t-corpus-only-claim")).toBeUndefined();
+  });
+
+  it("AC-ND-7 afterwards task extra holding such a claim fails schema parsing, and the released row parses", () => {
+    const base = { adhoc: true, file_anchors: ["packages/x/src/a.ts"] };
+    expect(taskExtraSchema.safeParse({ ...base, claim: { by: "agent:x", at: CLAIMED_AT } }).success).toBe(false);
+    expect(taskExtraSchema.safeParse({ ...base, claim: { by: "agent:x", at: CLAIMED_AT, branch: "b", start_head: m0 } }).success).toBe(true);
+    expect(taskExtraSchema.safeParse({ adhoc: true, claim: { by: "agent:x", at: CLAIMED_AT } }).success).toBe(true); // no anchors: allowed
   });
 });

@@ -847,6 +847,10 @@ export const taskClaimSchema = z.object({
    * The newest write wins, so a branch the harness removed without a release still has its last known tip.
    */
   end_tip: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+}).refine((claim) => claim.branch === undefined || claim.start_head !== undefined, {
+  // reason: after the one-time back-fill an open branch claim always has a sha start (no unmeasured variant, no read-time default).
+  message: "a branch claim needs a sha start_head",
+  path: ["start_head"],
 });
 
 /** Derived TypeScript type for a task claim lease. */
