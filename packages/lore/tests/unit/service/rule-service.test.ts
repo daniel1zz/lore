@@ -124,6 +124,7 @@ import type { App } from "../../../src/app.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 import { approvePending } from "../../helpers/approve-baseline.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── RuleService loader (guarded import: the module does not exist yet) ───────
 
 interface RuleServiceLike {
@@ -177,7 +178,7 @@ function makeApp(): App {
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, async () => ok(new Set())),
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],

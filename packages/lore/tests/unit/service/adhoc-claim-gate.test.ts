@@ -44,6 +44,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures (mirrors claim-anchor-gate.test.ts) ──────────────────────────
 
 async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<DocRecord> {
@@ -68,7 +69,7 @@ function makeServices() {
     undefined,
     { enforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     undefined,
-    { CLAUDE_CODE_SESSION_ID: "3de02220-adhoc" },
+    { CLAUDE_CODE_SESSION_ID: "3de02220-adhoc" }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   return { store, corpusService, taskWorkflowService };
 }

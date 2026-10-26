@@ -66,6 +66,7 @@ import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures (mirror task-workflow-service.test.ts's shapes exactly) ────────
 
 function makeServices() {
@@ -73,7 +74,7 @@ function makeServices() {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, new NoOpTelemetry(), {
     claimTtlMinutes: 120,
-  });
+  }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   return { store, corpusService, taskWorkflowService };
 }
 

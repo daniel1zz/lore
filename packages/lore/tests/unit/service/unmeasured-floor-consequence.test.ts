@@ -59,6 +59,7 @@ import { ATTESTATION_FLOOR_FIELD, ATTESTATION_FLOOR_REASON, attestationFloor } f
 import { formatStampVerdictLine } from "../../../src/adapters/cli/status-stamp-verdict.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 const NOW = "2026-10-17T10:00:00.000Z";
@@ -68,7 +69,7 @@ const REFUSED = { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATIO
 function makeCorpus() {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const tasks = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const tasks = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const binding = new StateBindingService(store);
   return { store, corpus, tasks, binding };
 }

@@ -14,6 +14,7 @@ import { TaskWorkflowService, type VerifiedEvidenceInput } from "../../../src/se
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const ANCHOR = "packages/lore/tests/unit/x.bun.test.ts";
 
 const REPO_ROOT = "/work/repo";
@@ -21,7 +22,7 @@ const REPO_ROOT = "/work/repo";
 async function setup() {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const svc = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120, repoRoot: REPO_ROOT });
+  const svc = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120, repoRoot: REPO_ROOT }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const plan = await cs.create({ type: "plan", title: "P", content: "b" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({

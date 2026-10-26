@@ -43,13 +43,14 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const NOW = "2026-08-06T12:00:00.000Z";
 
 function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   return {
     store,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    taskWorkflowService: new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }),
+    taskWorkflowService: new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
   };
 }
 

@@ -132,6 +132,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Git identity (local, per-commit — never touches the machine's real git config) ──
 
 const GIT_AUTHOR_ARGS = ["-c", "user.email=lore-test@example.com", "-c", "user.name=Lore Test"] as const;
@@ -401,7 +402,7 @@ async function buildInMemoryFixture(): Promise<InMemoryFixture> {
     undefined,
     undefined,
     {},
-    corpusService.resolveDeclaredAcCriteria.bind(corpusService),
+    corpusService.resolveDeclaredAcCriteria.bind(corpusService), undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
 
   const prd = await corpusService.create({ type: "prd", title: "Launch-Fail PRD", content: "body" } as CreateDocInput);

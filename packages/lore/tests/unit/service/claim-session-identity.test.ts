@@ -76,6 +76,7 @@ import { deriveSessions, taskClaimSchema } from "@lore/core";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const ORCHESTRATOR = "agent:main-orchestrator";
@@ -156,7 +157,7 @@ function makeSessionService(
     undefined,
     { enforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     undefined,
-    env,
+    env, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
 }
 

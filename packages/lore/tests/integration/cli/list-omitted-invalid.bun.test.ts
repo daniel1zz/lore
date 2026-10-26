@@ -31,6 +31,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import type { App } from "../../../src/app.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 
@@ -136,7 +137,7 @@ describe("AC-CRIT-6: MCP lore_list carries omitted_invalid", () => {
         store,
         new NoOpTelemetry(),
         { claimTtlMinutes: 120 },
-        async () => ok(new Set()),
+        async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
       ),
       callerSurface: "mcp" as const,
       telemetry: new NoOpTelemetry(),

@@ -44,6 +44,7 @@ import { approvePending } from "../../helpers/approve-baseline.js";
 import { pendingCountOf } from "../../../src/service/baseline-pending.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 interface RuleChange { rule_id: string; kind: "statement" | "confidence" | "lifecycle"; old: string; new: string }
 interface RuleDiff { claimed_at: string; changes: RuleChange[]; retired: string[] }
 type Res<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -189,7 +190,7 @@ beforeEach(() => {
   store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   rules = makeRuleService(store);
-  workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
 });
 
 afterEach(() => { vi.useRealTimers(); });

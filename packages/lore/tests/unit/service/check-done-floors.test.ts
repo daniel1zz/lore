@@ -34,6 +34,7 @@ import {
 import type { CreateDocInput, LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 type DoneFloorId = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
 
 /** The contract the paired task adds (spec D5). Cast: the method does not exist yet. */
@@ -44,7 +45,7 @@ interface WithCheckDoneFloors {
 function makeServices(wireOverridePort = true) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   if (wireOverridePort) taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const floors = taskWorkflowService as unknown as WithCheckDoneFloors;
   return { store, corpusService, taskWorkflowService, floors };

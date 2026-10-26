@@ -60,6 +60,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, DocId, LoreError } from "@lore/core";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Test Infrastructure (mirrors mcp-tools-review.test.ts) ──────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
@@ -113,7 +114,7 @@ function makeApp(): App {
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     specKindService: null as unknown as App["specKindService"],
     judgmentService,
     stalenessProbeService,

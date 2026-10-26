@@ -2384,9 +2384,6 @@ function buildNoWorktreeMismatchRefusal(opts: {
 
 // ─── TaskWorkflowService ───────────────────────────────────────────────────
 
-/** Why a worktree measurement is absent on a service built without a probe (bare test construction). */
-const NO_WORKTREE_PROBE_REASON = "no worktree probe is wired into this TaskWorkflowService";
-
 /** A working copy as a claim named it: the `--worktree` value (path or branch name) and the branch the claim captured. */
 interface ClaimedWorkingCopy {
   readonly name: string;
@@ -2574,7 +2571,7 @@ export class TaskWorkflowService {
     resolveDeclaredAcIds: (
       planId: string,
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
-    private readonly gate?: GateDependencies,
+    private readonly gate: GateDependencies | undefined,
     resolveAdhocGoverningAcIds: (
       task: DocRecord,
     ) => Promise<Result<Set<string>, LoreError>> = async () =>
@@ -2601,10 +2598,10 @@ export class TaskWorkflowService {
       worktree: string,
       sessionId: string,
     ) => Promise<void> = unbindClaimSessionForTrailer,
-    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup, built by `app.ts` over the invocation's cwd. ABSENT =>
-    // the claim-time base and the done-time commit range read `not-measured`, and the cleanup (which also needs `worktreeRemoval`) is
-    // unreachable — never a probe over the process's own directory.
-    private readonly worktreeProbe?: WorktreeGitProbe,
+    // reason: issue #106 / spec-lore-done-closes-a-commitless-task-through-an-audited-no — the git/fs probe, built by `app.ts` over the
+    // invocation's cwd. REQUIRED: the landing predicate's facts ({@link LandingGitFacts}) and the claim-time start are read through it,
+    // so an unwired service cannot type-check and there is no silent "no git" path. Unit tests pass a fake probe.
+    private readonly worktreeProbe: WorktreeGitProbe,
     // reason: the single worktree-removal test's facts (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a);
     // wired by `app.ts` (a service never imports another service). ABSENT => `done`'s cleanup reports every recorded
     // worktree `not-measured`, never removes — no silent "safe" default.
@@ -3199,10 +3196,7 @@ export class TaskWorkflowService {
 
     // reason: BR-1468 — work that changes files needs its own branch: a no-branch claim has no tip to measure, so it is
     // allowed only for a task that declares no file anchor (corpus-only work). A refresh that already holds a branch is fine.
-    // Armed only on a service wired to git (`app.ts` always wires the probe): a bare construction has no repository to put a
-    // branch in, and its unit tests claim anchored tasks freely.
     if (
-      this.worktreeProbe !== undefined &&
       opts.worktree === undefined &&
       readClaimRecord(task)?.worktree === undefined &&
       extractFileAnchors(task).length > 0
@@ -3276,7 +3270,12 @@ export class TaskWorkflowService {
       }
     }
 
-    const startHead = this.measureStartHead(opts.worktree);
+    // reason: a claim naming a working copy or a branch needs a start the landing predicate can measure from (the claim
+    // schema refuses a branch claim without a sha `start_head`). A start git cannot read is a refusal here, before anything is
+    // written, never a claim with no start.
+    const startResult = this.measureStartHead(opts.worktree ?? capturedBranch);
+    if (!startResult.ok) return startResult;
+    const startHead = startResult.value;
     const builtClaim: TaskClaim = buildTaskClaim(
       existingClaim,
       {
@@ -3324,9 +3323,7 @@ export class TaskWorkflowService {
     // so the base is resolved by `resolveClaimHead`, never by `headSha` alone (issue #180 retry).
     const claimBaseResolved =
       opts.worktree !== undefined
-        ? this.worktreeProbe === undefined
-          ? ({ ok: false, reason: NO_WORKTREE_PROBE_REASON } as const)
-          : resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
+        ? resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
         : undefined;
     const claimBase =
       claimBaseResolved === undefined
@@ -3435,7 +3432,7 @@ export class TaskWorkflowService {
   ): Promise<Result<void, LoreError>> {
     const target = opts.worktree;
     const probe = this.worktreeProbe;
-    if (target === undefined || probe === undefined || !probe.pathExists(target)) return ok(undefined);
+    if (target === undefined || !probe.pathExists(target)) return ok(undefined);
     const field = "gate:task-claim:first-claim-off-main";
     const unreadable = (what: string, reason: string): Result<void, LoreError> =>
       err({
@@ -4268,7 +4265,6 @@ export class TaskWorkflowService {
   private oracleFileExists(repoRoot: string): (path: string) => boolean {
     const facts = this.landingFacts();
     return (path) => {
-      if (facts === undefined) return existsSync(path);
       const rel = relative(repoRoot, path);
       if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return existsSync(path);
       const inTree = facts.pathExistsInIntegration(rel);
@@ -4329,15 +4325,12 @@ export class TaskWorkflowService {
   }
 
   /**
-   * The git facts the landing predicate reads: the wired {@link LandingGitFacts}, else real ones over the probe's working
-   * directory. `undefined` when no probe is wired (a bare construction): nothing can be measured then, and every caller
-   * says so instead of defaulting.
+   * The git facts the landing predicate reads: {@link LandingGitFacts} over the wired probe's working directory. The probe is
+   * a required constructor dependency, so facts always exist; a question git cannot answer is an `ok: false` fact, never a default.
    */
-  private landingFacts(): LandingGitFacts | undefined {
+  private landingFacts(): LandingGitFacts {
     if (this.gitFactsCache !== undefined) return this.gitFactsCache;
-    const probe = this.worktreeProbe;
-    if (probe === undefined) return undefined;
-    this.gitFactsCache = createGitFacts(probe.currentWorkingDirectory());
+    this.gitFactsCache = createGitFacts(this.worktreeProbe.currentWorkingDirectory());
     return this.gitFactsCache;
   }
 
@@ -4355,7 +4348,6 @@ export class TaskWorkflowService {
   ): VerifiedEvidenceInput["attestation"] {
     if (attestation === undefined || claim === undefined || claim.worktree !== undefined) return attestation;
     const facts = this.landingFacts();
-    if (facts === undefined) return attestation;
     const mainHead = facts.integrationHead();
     const callerHead = attestation.head_sha === undefined && callerCwd !== undefined ? facts.headOf(callerCwd) : undefined;
     return {
@@ -4368,7 +4360,7 @@ export class TaskWorkflowService {
   /** Whether the capture ran inside the worktree of the claim's branch (the only place its head is the branch's tip). */
   private captureRanInClaimBranch(claim: TaskClaim, callerCwd: string | undefined): boolean {
     const facts = this.landingFacts();
-    if (facts === undefined || callerCwd === undefined || claim.worktree === undefined) return false;
+    if (callerCwd === undefined || claim.worktree === undefined) return false;
     const branch = claim.branch ?? (isAbsolute(claim.worktree) ? undefined : claim.worktree);
     if (branch === undefined) return false;
     const inside = facts.isInsideBranchWorktree(callerCwd, branch);
@@ -4381,34 +4373,41 @@ export class TaskWorkflowService {
    */
   private measureClaimTip(claim: TaskClaim): string | undefined {
     const facts = this.landingFacts();
-    if (facts !== undefined) {
-      const names = [claim.branch, claim.worktree].filter((name): name is string => name !== undefined && !isAbsolute(name));
-      for (const name of names) {
-        const tip = facts.branchTip(name);
-        if (tip.ok && tip.value !== null) return tip.value;
-      }
-      if (claim.worktree !== undefined && isAbsolute(claim.worktree) && facts.pathExists(claim.worktree)) {
-        const head = facts.headOf(claim.worktree);
-        if (head.ok) return head.value;
-      }
+    const names = [claim.branch, claim.worktree].filter((name): name is string => name !== undefined && !isAbsolute(name));
+    for (const name of names) {
+      const tip = facts.branchTip(name);
+      if (tip.ok && tip.value !== null) return tip.value;
+    }
+    if (claim.worktree !== undefined && isAbsolute(claim.worktree) && facts.pathExists(claim.worktree)) {
+      const head = facts.headOf(claim.worktree);
+      if (head.ok) return head.value;
     }
     return claim.end_tip;
   }
 
   /**
-   * The commit a claim's work starts from: the branch (or worktree) head for a claim naming a working copy, main's head
-   * for a no-branch claim. `undefined` when it cannot be read (never a guess).
+   * The commit a claim's work starts from: the branch (or worktree) head for a claim naming a working copy or branch, main's
+   * head for a no-branch claim (absent when git cannot answer: corpus-only work outside a repository has nothing to land).
+   *
+   * @param target - the worktree path or branch name the claim names, or `undefined` for a no-branch claim
+   * @returns `err(VALIDATION_ERROR)` (exit 4) when a named working copy or branch has no readable head
    */
-  private measureStartHead(worktree: string | undefined): string | undefined {
+  private measureStartHead(target: string | undefined): Result<string | undefined, LoreError> {
     const probe = this.worktreeProbe;
-    const facts = this.landingFacts();
-    if (probe === undefined || facts === undefined) return undefined;
-    if (worktree === undefined) {
-      const head = facts.integrationHead();
-      return head.ok ? head.value : undefined;
+    if (target === undefined) {
+      const head = this.landingFacts().integrationHead();
+      return ok(head.ok ? head.value : undefined);
     }
-    const resolved = resolveClaimHead(probe, worktree, probe.currentWorkingDirectory());
-    return resolved.ok ? resolved.value.sha : undefined;
+    const resolved = resolveClaimHead(probe, target, probe.currentWorkingDirectory());
+    if (resolved.ok) return ok(resolved.value.sha);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "worktree",
+      message:
+        `The start of the work cannot be measured: \`${target}\` has no readable head (${resolved.reason}). A claim on a branch needs ` +
+        "a start commit to measure the work from; create the branch or worktree first, then claim it. Nothing was written.",
+      value: target,
+    });
   }
 
   /**
@@ -4451,21 +4450,15 @@ export class TaskWorkflowService {
       readTaskLanding(task.extra)?.tip;
 
     const facts = this.landingFacts();
-    // reason: a bare construction (no probe) with a claim that named no working copy has no branch work to measure and no git to
-    // ask: not armed, exactly as before. With a branch named and no probe, the verdict below is `unmeasurable` (no fail-open).
-    if (facts === undefined && branches.length === 0 && worktrees.length === 0) return ok({ armed: false, mode });
-    const verdict: LandingVerdict =
-      facts === undefined
-        ? { state: "unmeasurable", reason: `the landing cannot be measured (${NO_WORKTREE_PROBE_REASON})` }
-        : landingOf(
-            {
-              ...(startHead !== undefined ? { start_head: startHead } : {}),
-              branches,
-              worktrees: worktrees.filter((path) => facts.pathExists(path)),
-              ...(endTip !== undefined ? { end_tip: endTip } : {}),
-            },
-            facts,
-          );
+    const verdict: LandingVerdict = landingOf(
+      {
+        ...(startHead !== undefined ? { start_head: startHead } : {}),
+        branches,
+        worktrees: worktrees.filter((path) => facts.pathExists(path)),
+        ...(endTip !== undefined ? { end_tip: endTip } : {}),
+      },
+      facts,
+    );
     // reason: corpus-only work (no branch, no working copy named) in a place git cannot answer (not a repository) has nothing to land.
     if (verdict.state === "unmeasurable" && branches.length === 0 && worktrees.length === 0) return ok({ armed: false, mode });
     return ok({
@@ -4547,7 +4540,6 @@ export class TaskWorkflowService {
     };
     if (recorded === undefined) return ok(settle({ kind: "kept" }));
     const probe = this.worktreeProbe;
-    if (probe === undefined) return ok(settle({ kind: "not-measured", reason: NO_WORKTREE_PROBE_REASON }));
 
     const cwd = probe.currentWorkingDirectory();
     const head = resolveClaimHead(probe, recorded.path, cwd);
@@ -4572,7 +4564,7 @@ export class TaskWorkflowService {
    */
   private countingRule(task: DocRecord, measure: LandingMeasure): CountingRule | undefined {
     const facts = this.landingFacts();
-    if (!measure.armed || facts === undefined) return undefined;
+    if (!measure.armed) return undefined;
     const verdict = measure.verdict;
     const tip =
       verdict !== undefined && (verdict.state === "landed" || (verdict.state === "not-landed" && verdict.tip !== undefined))
@@ -4889,23 +4881,34 @@ export class TaskWorkflowService {
         }
         mainBefore = claimBase;
       }
-      // reason: the landing also carries what the one predicate measures (kind, start, tip), so `lore done` finds the same facts
-      // and writes nothing more; a task whose start was never recorded gets them from `lore done` instead.
+      // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
+      // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
+      // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).
       const startHead = readClaimRecord(task)?.start_head ?? TaskWorkflowService.claimBaseFor(rows, landing.branch);
+      const verdict: LandingVerdict =
+        startHead === undefined
+          ? { state: "unmeasurable", reason: `no claim of this task recorded a start commit for ${landing.branch}` }
+          : landingOf({ start_head: startHead, branches: [landing.branch], worktrees: [], end_tip: landing.branch_head }, this.landingFacts());
+      if (verdict.state !== "landed") {
+        firstFailure ??= {
+          code: "VALIDATION_ERROR",
+          field: "extra.landing",
+          message:
+            `${task.slug}: the landing of ${landing.branch} could not be measured (${verdict.reason}); ` +
+            "re-claim the task on a branch so its work has a start",
+          value: task.slug,
+        };
+        continue;
+      }
       const record: TaskLanding = {
         ...landing,
         main_before: mainBefore,
         recorded_at: nowIso,
-        // reason: `kind` is required on every landing; with no recorded start the branch's own commits are what landed.
-        kind: startHead !== undefined && startHead === landing.branch_head ? ("no-change" as const) : ("commits" as const),
-        ...(startHead !== undefined
-          ? {
-              start_head: startHead,
-              tip: landing.branch_head,
-              integration_head: landing.main_after,
-              measured_at: nowIso,
-            }
-          : {}),
+        kind: verdict.kind,
+        start_head: verdict.start_head,
+        tip: verdict.tip,
+        integration_head: landing.main_after,
+        measured_at: nowIso,
       };
       const written = await this.writer.writeDoc({
         doc: task,
@@ -4993,14 +4996,11 @@ export class TaskWorkflowService {
    * reading the record: a task that is merely claimed, with nothing committed yet, still occupies its working copy.
    */
   private async isLandingOnMain(task: DocRecord): Promise<boolean> {
-    const landing = readTaskLanding(task.extra);
-    const probe = this.worktreeProbe;
-    if (landing === undefined || probe === undefined) return false;
-    const cwd = probe.currentWorkingDirectory();
-    const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return false;
-    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
-    return offMain.ok && offMain.value === 0;
+    if (readTaskLanding(task.extra) === undefined) return false;
+    // reason: whether the work landed is the one predicate's answer ({@link landingOf} through `measureLanding`), never a second
+    // reachability computation here; any measurement that fails reads as not landed.
+    const measured = await this.measureLanding(task);
+    return measured.ok && measured.value.verdict?.state === "landed";
   }
 
   /**
@@ -5069,7 +5069,6 @@ export class TaskWorkflowService {
 
   /** The probe, or a loud wiring error: cleanup needs `worktreeRemoval` AND this probe, both wired by `app.ts`. */
   private requireWorktreeProbe(): WorktreeGitProbe {
-    if (this.worktreeProbe === undefined) throw new Error(`TaskWorkflowService: ${NO_WORKTREE_PROBE_REASON}`);
     return this.worktreeProbe;
   }
 
@@ -5308,6 +5307,24 @@ export class TaskWorkflowService {
     by: string,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1468 is decided at claim time, so an anchor added under an open NO-BRANCH claim would let the task close as
+    // no-change from a pass at main's head while its file changes were never measured. Refused (not "release the claim"):
+    // silently changing another run's lease mid-work hides a conflict. Every anchor writer ends here (`lore anchor add`/`set`,
+    // `lore_anchor_set`), so one check covers all of them. Removing or keeping anchors is never refused.
+    const held = readClaimRecord(task);
+    const existingAnchors = new Set(extractFileAnchors(task));
+    if (held !== undefined && held.worktree === undefined && newAnchors.some((anchor) => !existingAnchors.has(anchor))) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "file_anchors",
+        message:
+          `Task "${task.slug}" holds an open claim with no branch (held by ${held.by}), so its work cannot change files: an anchor ` +
+          `cannot be added while a no-branch claim is open [anchor: work-needs-branch]. Release the claim and re-claim on a branch ` +
+          `(\`lore release ${task.slug}\`, then \`lore claim ${task.slug} --worktree <path>\`) before adding the anchor. Nothing was written.`,
+        value: "work-needs-branch",
+        rule: "BR-1468",
+      });
+    }
     const nowIso = now();
     const newExtra: Record<string, unknown> = { ...task.extra, file_anchors: newAnchors };
     return this.writeTaskExtra(
@@ -5676,7 +5693,7 @@ export class TaskWorkflowService {
     const landed = new Map<DocId, string>();
     const declared = plan.extra?.["integration_branch"];
     const probe = this.worktreeProbe;
-    if (typeof declared !== "string" || declared === "" || probe === undefined) return ok(landed);
+    if (typeof declared !== "string" || declared === "") return ok(landed);
     const cwd = probe.currentWorkingDirectory();
     if (!probe.branchTip(cwd, declared).ok) return ok(landed);
 

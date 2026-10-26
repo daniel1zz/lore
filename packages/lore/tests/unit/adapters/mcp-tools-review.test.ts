@@ -58,6 +58,7 @@ import type { AiDefaultSource, CreateDocInput, DocId, LoreError, ReviewJudgment 
 import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Test Infrastructure (mirrors mcp-tools-assess.test.ts) ──────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
@@ -107,7 +108,7 @@ function makeApp(
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     specKindService: null as unknown as App["specKindService"],
     judgmentService,
     auditService: null as unknown as App["auditService"],

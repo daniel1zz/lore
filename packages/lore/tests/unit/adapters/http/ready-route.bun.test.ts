@@ -48,6 +48,7 @@ import type { App } from "../../../../src/app.js";
 import { actedStore, liveIo } from "../../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../../helpers/fake-worktree-probe.js";
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ async function makeTestServer(): Promise<TestContext> {
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
     // reason: SPEC-037 D1 — GET /api/ready/:planIdOrSlug exercises this directly.
-    taskWorkflowService: new TaskWorkflowService(docStore, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    taskWorkflowService: new TaskWorkflowService(docStore, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(docStore, new NoOpTelemetry()),
     auditService: new AuditService(docStore),

@@ -66,6 +66,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, LoreError } from "@lore/core";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Test Infrastructure (mirrors mcp-staleness.test.ts) ─────────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
@@ -98,7 +99,7 @@ function makeApp(): App {
     aiProviderService.probeStaleness.bind(aiProviderService),
     judgmentService.record.bind(judgmentService),
   );
-  taskWorkflowService = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
+  taskWorkflowService = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   driftCheckService = new DriftCheckService(store);
 
   return {

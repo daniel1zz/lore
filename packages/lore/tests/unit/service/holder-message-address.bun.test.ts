@@ -29,13 +29,14 @@ import { formatSessionLine } from "../../../src/adapters/cli/commands/ready.js";
 import { formatTerritoryHuman, partitionTerritory } from "../../../src/adapters/cli/territory-partition.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const COMPOSITION = { schemaVersion: 1 as const, fragments: [] };
 
 function makeWorld() {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const runs = new RunService(store, undefined, undefined, undefined, "/repo");
-  const tasks = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const tasks = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const sessions = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10080,
@@ -81,7 +82,7 @@ async function seed(options: { resumeAddress?: string } = {}) {
   const claim = async (task: DocRecord, by: string, run: RunId, worktree: string, session: string) => {
     const svc = new TaskWorkflowService(w.store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, {
       CLAUDE_CODE_SESSION_ID: session,
-    });
+    }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     const r = await svc.claim(task.id, { by, harnessRun: run, worktree });
     if (!r.ok) throw new Error(`claim failed: ${JSON.stringify(r.error)}`);
   };

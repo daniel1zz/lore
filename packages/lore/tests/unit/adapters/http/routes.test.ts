@@ -84,6 +84,7 @@ import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/au
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
 import { actedStore } from "../../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../../helpers/fake-worktree-probe.js";
 /** Always before any doc/judgment/audit entry created during a test run (SPEC-033 F1 routes). */
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -113,7 +114,7 @@ function makeApp(): App {
     phaseService: null as unknown as App["phaseService"],
     // reason: SPEC-037 D1 — GET /api/ready/:planIdOrSlug exercises this directly (real
     // instance backed by the SAME `store`, mirroring the judgmentService fix above).
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],

@@ -41,13 +41,14 @@ import { resolveValidityBanner } from "../../../src/service/outline-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const validityService = new ValidityService(store);
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   return { store, corpusService, validityService, taskWorkflowService };
 }
 
@@ -129,7 +130,7 @@ describe("STATE — readyAdhoc() excludes a retracted ad-hoc task the same way",
     const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const validityService = new ValidityService(store);
-    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
 
     // reason: an --adhoc task auto-parents to the corpus root PRD
     // (CorpusService._createImpl) — one must exist first, or creation

@@ -329,7 +329,7 @@ export default defineLoreCommand({
       for (const line of humanStanding) printLine(inv.io.stdout, line);
       // reason: how an archived task landed (the one landing predicate): `no-change` (nothing to merge) or `commits`.
       const measuredLanding = readMeasuredLanding(doc.extra);
-      if (measuredLanding !== undefined) printLine(inv.io.stdout, `Landing: ${measuredLanding.kind}`);
+      if (measuredLanding !== undefined) printLine(inv.io.stdout, measuredLanding.kind === "no-change" ? "Landing: no-change" : `Landing: commits ${measuredLanding.tip}`);
       if (doc.tags.length > 0) {
         printLine(inv.io.stdout, `Tags: ${doc.tags.join(", ")}`);
       }

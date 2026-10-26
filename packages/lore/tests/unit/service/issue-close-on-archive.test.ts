@@ -27,6 +27,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const NOW = "2026-10-12T10:00:00.000Z";
 const REPO_ID = 123;
 const REPO = "acme/widget";
@@ -101,7 +102,7 @@ async function must<T>(promise: Promise<Result<T, LoreError>>, what: string): Pr
 async function buildWorld(opts: { closer?: RecordingCloser | null; repo?: string | null } = {}): Promise<World> {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const tw = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const tw = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const closer = opts.closer === null ? undefined : (opts.closer ?? new RecordingCloser());
   const repo = opts.repo === null ? undefined : (opts.repo ?? REPO);
   const step = new IssueCloseOnArchive(store, closer, repo, () => NOW);

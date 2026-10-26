@@ -32,6 +32,7 @@ import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
 import { liveWriteActor, actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
@@ -341,7 +342,7 @@ describe("REGRESSION — an unrelated action family (\"judge\") does not mask a 
 describe("REGRESSION — TaskWorkflowService's action-string divergence does not produce false misses", () => {
   it("claim → addEvidence → release all satisfy verify() despite versions:'update' vs audit:'claim'/'evidence'/'release'", async () => {
     const { store, corpusService } = makeStore();
-    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     const auditService = new AuditService(store);
 
     const planId = await createPlan(corpusService);

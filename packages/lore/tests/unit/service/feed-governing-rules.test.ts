@@ -64,6 +64,7 @@ import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 /** Pinned section heading — the implementation must emit exactly this line. */
 const HEADING = "## Governing rules";
 const FILE_F = "packages/widget/src/engine.ts";
@@ -99,7 +100,7 @@ function makeApp(): App {
       store,
       new NoOpTelemetry(),
       { claimTtlMinutes: 120 },
-      corpus.resolveDeclaredAcIds.bind(corpus),
+      corpus.resolveDeclaredAcIds.bind(corpus), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     ),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],

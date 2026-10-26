@@ -13,10 +13,11 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 async function setup() {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const twf = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const twf = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const mk = async (input: CreateDocInput) => {
     const r = await cs.create(input);
     if (!r.ok) throw new Error(JSON.stringify(r.error));

@@ -84,6 +84,7 @@ import { captureOracleCommand } from "../../../src/adapters/evidence-capture.js"
 import type { CreateDocInput, DocRecord, EvidenceEntry } from "@lore/core";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const createdDirs: string[] = [];
@@ -122,7 +123,7 @@ function makeApp(): App {
     store,
     new NoOpTelemetry(),
     { claimTtlMinutes: 120 },
-    async () => ok(new Set()),
+    async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   return {
     warn: () => undefined,

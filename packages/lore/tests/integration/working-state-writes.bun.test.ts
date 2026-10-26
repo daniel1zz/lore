@@ -29,6 +29,7 @@ import type { StoreInterface } from "../../src/store/store-interface.js";
 import { actedStore } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
 const scratch: string[] = [];
 const closers: Array<() => void> = [];
 afterAll(() => {
@@ -52,7 +53,7 @@ function compose(kind: Kind) {
   const store = openStore(kind);
   const recordLock = new RecordLockService(store, new GateEnforcer(undefined));
   const corpus = new CorpusService(store, recordLock);
-  const tasks = new TaskWorkflowService(store, undefined as never, { claimTtlMinutes: 120 });
+  const tasks = new TaskWorkflowService(store, undefined as never, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const versions = new VersionService(store, recordLock, corpus);
   return { store, corpus, tasks, versions };
 }

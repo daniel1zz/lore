@@ -59,6 +59,7 @@ import type {
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
 
 class CapturingTelemetry implements Telemetry {
@@ -87,7 +88,7 @@ function makeServices(ttl = 120) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();
-  const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl });
+  const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService, telemetry };
 }
@@ -111,7 +112,7 @@ function makeServicesWithAcPort(
     callCount++;
     return resolveDeclaredAcIds(planId);
   };
-  const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, spiedPort);
+  const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, spiedPort, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return {
     store,
@@ -1140,7 +1141,7 @@ function makeServicesWithRealAcPorts(ttl = 120) {
     { claimTtlMinutes: ttl },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     undefined,
-    corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
+    corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService), undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, acService, taskWorkflowService, telemetry };

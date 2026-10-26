@@ -55,6 +55,7 @@ import type { CreateDocInput, DocRecord, DocType, LoreConfig } from "@lore/core"
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Shared interleave helper ─────────────────────────────────────────────────
 
 /**
@@ -115,7 +116,7 @@ function makeTaskServices(config?: LoreConfig, withGate = true) {
     undefined,
     gate,
     undefined,
-    { ...TOCTOU_SESSION_ENV },
+    { ...TOCTOU_SESSION_ENV }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   return { store, corpusService, taskWorkflowService };
 }
