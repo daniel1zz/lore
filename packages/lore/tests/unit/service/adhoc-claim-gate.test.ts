@@ -44,6 +44,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures (mirrors claim-anchor-gate.test.ts) ──────────────────────────
 
 async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<DocRecord> {
@@ -68,7 +69,7 @@ function makeServices() {
     undefined,
     { enforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     undefined,
-    { CLAUDE_CODE_SESSION_ID: "3de02220-adhoc" },
+    { CLAUDE_CODE_SESSION_ID: "3de02220-adhoc" }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   return { store, corpusService, taskWorkflowService };
 }
@@ -110,7 +111,7 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     await createRootPrd(corpusService);
     const taskId = await createAdhocTask(corpusService, "Adhoc Task");
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const result = await taskWorkflowService.claim(taskId, { worktree: "wt-taskId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
   });
 
@@ -120,7 +121,7 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     await createRootPrd(corpusService);
     const taskId = await createAdhocTask(corpusService, "Solo Adhoc Task", ["src/solo.ts"]);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const result = await taskWorkflowService.claim(taskId, { worktree: "wt-taskId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
   });
 
@@ -131,10 +132,10 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     const taskOneId = await createAdhocTask(corpusService, "Adhoc One", ["src/shared.ts"]);
     const taskTwoId = await createAdhocTask(corpusService, "Adhoc Two", ["src/shared.ts"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const second = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("VALIDATION_ERROR");
@@ -149,10 +150,10 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     const taskOneId = await createAdhocTask(corpusService, "Adhoc Same Actor One", ["src/shared.ts"]);
     const taskTwoId = await createAdhocTask(corpusService, "Adhoc Same Actor Two", ["src/shared.ts"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:same", harnessRun: runOfName("agent:same") });
+    const first = await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:same", harnessRun: runOfName("agent:same") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:same", harnessRun: runOfName("agent:same") });
+    const second = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:same", harnessRun: runOfName("agent:same") });
     expect(second.ok).toBe(true);
   });
 
@@ -163,10 +164,10 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     const taskOneId = await createAdhocTask(corpusService, "Adhoc Disjoint One", ["src/a.ts"]);
     const taskTwoId = await createAdhocTask(corpusService, "Adhoc Disjoint Two", ["src/b.ts"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const second = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(true);
   });
 
@@ -179,7 +180,7 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
 
     // An ad-hoc task holds a fresh claim on an anchor.
     const adhocId = await createAdhocTask(corpusService, "Adhoc Holder", ["src/legacy-shared.ts"]);
-    const adhocClaim = await taskWorkflowService.claim(adhocId, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
+    const adhocClaim = await taskWorkflowService.claim(adhocId, { worktree: "wt-adhocId", by: "agent:holder", harnessRun: runOfName("agent:holder") });
     expect(adhocClaim.ok).toBe(true);
 
     // A separate, REAL plan-parented task (deliberately NOT ad-hoc — this proves
@@ -192,7 +193,7 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     const forceNull = await store.update(legacyTaskId, { parent_id: null });
     if (!forceNull.ok) throw new Error(`force parent_id:null failed: ${JSON.stringify(forceNull.error)}`);
 
-    const result = await taskWorkflowService.claim(legacyTaskId, { by: "agent:other", harnessRun: runOfName("agent:other") });
+    const result = await taskWorkflowService.claim(legacyTaskId, { worktree: "wt-legacyTaskId", by: "agent:other", harnessRun: runOfName("agent:other") });
     expect(result.ok).toBe(true);
   });
 
@@ -201,7 +202,7 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanParentedTask(corpusService);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const result = await taskWorkflowService.claim(taskId, { worktree: "wt-taskId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
   });
 });

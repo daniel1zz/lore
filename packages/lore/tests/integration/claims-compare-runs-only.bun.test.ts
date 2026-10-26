@@ -79,7 +79,7 @@ function seedRunlessLease(corpus: PartyCorpus, slug: string, by: string): void {
 }
 
 function claim(corpus: PartyCorpus, slug: string, party: Parameters<PartyCorpus["lore"]>[1], extra: readonly string[] = []): LoreRun {
-  return corpus.lore(["claim", slug, ...extra], party);
+  return corpus.lore(["claim", slug, ...(extra.includes("--worktree") ? [] : ["--worktree", `cr-wt-${slug}`]), ...extra], party);
 }
 
 describe("AC-HID-3: claims compare runs, never names", () => {

@@ -30,6 +30,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { FAKE_HEAD_SHA, fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<DocRecord> {
@@ -41,7 +42,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   return { store, corpusService, taskWorkflowService };
 }
 
@@ -77,6 +78,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       branch: "b1",
       machine: "A",
       worktree: "/w",
+      start_head: FAKE_HEAD_SHA,
       harness_run: runOfName("alice"),
     });
 
@@ -89,6 +91,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       branch: "b1",
       machine: "A",
       worktree: "/w",
+      start_head: FAKE_HEAD_SHA,
       harness_run: runOfName("alice"),
     });
   });
@@ -229,7 +232,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     // machine/worktree keys present at all, not merely undefined).
     const taskResult = await store.find(taskId);
     if (!taskResult.ok || taskResult.value === null) throw new Error("task not found");
-    const legacyClaim = { by: "carol", at: "2026-07-05T00:00:00.000Z", branch: "legacy-branch", harness_run: runOfName("carol") };
+    const legacyClaim = { by: "carol", at: "2026-07-05T00:00:00.000Z", branch: "legacy-branch", start_head: FAKE_HEAD_SHA, harness_run: runOfName("carol") };
     expect(taskClaimSchema.safeParse(legacyClaim).success).toBe(true);
     const updateResult = await store.update(taskId, {
       extra: { ...taskResult.value.extra, claim: legacyClaim },
@@ -244,6 +247,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       by: "carol",
       at: "2026-07-05T01:00:00.000Z",
       branch: "legacy-branch",
+      start_head: FAKE_HEAD_SHA,
       harness_run: runOfName("carol"),
     });
   });

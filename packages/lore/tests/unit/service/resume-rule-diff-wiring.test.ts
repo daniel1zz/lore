@@ -28,6 +28,7 @@ import { makeRuleService } from "../../helpers/make-rule-service.js";
 import { approvePending } from "../../helpers/approve-baseline.js";
 import { actedStore, liveInvocation, liveIo } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const T_SETUP = "2026-03-01T08:00:00.000Z";
 const T_CLAIM = "2026-03-01T10:00:00.000Z";
 const T_POST = "2026-03-01T11:00:00.000Z";
@@ -106,7 +107,7 @@ beforeEach(() => {
   store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   rules = makeRuleService(store);
-  workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 1440,

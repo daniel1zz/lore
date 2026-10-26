@@ -66,12 +66,13 @@ import { exitCode } from "../../../src/adapters/cli/utils.js";
 import type { CreateDocInput, LoreError } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService };
 }

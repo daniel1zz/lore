@@ -53,6 +53,7 @@ import type { RelatedKnowledgeRef } from "../../../src/flows/task-feed-flow.js";
 import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/lore/tests/unit/adapters/ -> ../../../src/adapters/cli/commands/ac.ts
 const AC_TS_PATH = resolve(__dirname, "../../../src/adapters/cli/commands/ac.ts");
@@ -93,7 +94,7 @@ function makeApp(): App {
       store,
       new NoOpTelemetry(),
       { claimTtlMinutes: 120 },
-      corpusService.resolveDeclaredAcIds.bind(corpusService),
+      corpusService.resolveDeclaredAcIds.bind(corpusService), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     ),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],

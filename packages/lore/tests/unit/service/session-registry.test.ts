@@ -48,6 +48,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const MUTATING_METHODS = [
@@ -93,7 +94,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10080,
@@ -128,8 +129,8 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const taskOneId = await createTask(corpusService, planId, "Task One");
     const taskTwoId = await createTask(corpusService, planId, "Task Two");
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1" });
-    await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostA", worktree: "/w2" });
+    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1", branch: "b1" });
+    await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostA", worktree: "/w2", branch: "b2" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -149,8 +150,8 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const taskOneId = await createTask(corpusService, planId, "Task One");
     const taskTwoId = await createTask(corpusService, planId, "Task Two");
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1" });
-    await taskWorkflowService.claim(taskTwoId, { by: "agent:t1", machine: "hostA", worktree: "/w2" });
+    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "/w1", branch: "b1" });
+    await taskWorkflowService.claim(taskTwoId, { by: "agent:t1", machine: "hostA", worktree: "/w2", branch: "b2" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -267,7 +268,7 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     await seed.taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostB" });
 
     const { proxy, counts } = countingProxy(rawStore);
-    const wrapped = new TaskWorkflowService(proxy, undefined, { claimTtlMinutes: 120 });
+    const wrapped = new TaskWorkflowService(proxy, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
 
     const result = await wrapped.ready(planId);
     expect(result.ok).toBe(true);

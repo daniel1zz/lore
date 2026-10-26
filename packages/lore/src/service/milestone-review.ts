@@ -43,6 +43,8 @@ export function latestLandingCommit(tasks: readonly Pick<DocRecord, "extra">[]):
   for (const task of tasks) {
     const landing = readTaskLanding(task.extra);
     if (landing === undefined) continue;
+    // reason: a no-change landing (the one predicate, `landingOf`) moved nothing onto main: it adds no commit range to the review.
+    if (landing.kind === "no-change") continue;
     if (newest === undefined || landing.recorded_at > newest.at) newest = { at: landing.recorded_at, commit: landing.landing_commit };
   }
   return newest?.commit ?? "none";

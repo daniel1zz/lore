@@ -410,6 +410,14 @@ export const taskExtraSchema = z
         path: ["plan_id"],
       });
     }
+    // reason: BR-1468 — work on declared files needs a branch; the one-time back-fill released every such no-branch claim.
+    if (data.claim !== undefined && data.claim.branch === undefined && (data.file_anchors?.length ?? 0) > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "a claim that names no branch cannot be held on a task with file anchors (work-needs-branch)",
+        path: ["claim"],
+      });
+    }
   });
 
 /**

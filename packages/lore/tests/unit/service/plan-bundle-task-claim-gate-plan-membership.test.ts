@@ -44,10 +44,11 @@ import {
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   return { store, corpusService, taskWorkflowService };
 }
 
@@ -106,7 +107,7 @@ describe("getPlanBundle feeds the task-claim gate (dedicated, task-eight-more-pl
       "src/shared.ts",
     ]);
 
-    const claimResult = await taskWorkflowService.claim(t6.id, { by: "bob", worktree: "/wt/bob" });
+    const claimResult = await taskWorkflowService.claim(t6.id, { by: "bob", worktree: "/wt/bob", branch: "b-bob" });
     expect(claimResult.ok).toBe(true);
 
     const bundleResult = await corpusService.getPlanBundle(p3.id);
@@ -142,7 +143,7 @@ describe("getPlanBundle feeds the task-claim gate (dedicated, task-eight-more-pl
       "src/other.ts",
     ]);
 
-    const claimResult = await taskWorkflowService.claim(t7.id, { by: "carol", worktree: "/wt/carol" });
+    const claimResult = await taskWorkflowService.claim(t7.id, { by: "carol", worktree: "/wt/carol", branch: "b-carol" });
     expect(claimResult.ok).toBe(true);
 
     const bundleResult = await corpusService.getPlanBundle(p3.id);

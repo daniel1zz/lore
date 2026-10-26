@@ -25,6 +25,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version";
 import { SQLiteStore } from "../../../src/store/sqlite-store";
 import { checkKnownDefectConversion, planKnownDefectConversion, summarizeConversion } from "../../../src/store/migrations/migration-038";
 import { planStateFingerprint } from "../../../src/service/milestone-review";
@@ -121,7 +122,7 @@ describe("AC-KD-4 migration 038 converts known-defect links into plan entries, a
 
     const migrated = runLore(fixture, ["migrate", "schema"]);
     expect(migrated.exitCode, migrated.out).toBe(0);
-    expect(userVersion(fixture.dbPath)).toBe(38);
+    expect(userVersion(fixture.dbPath)).toBe(LATEST_SCHEMA_VERSION);
 
     const db = new Database(fixture.dbPath);
     try {

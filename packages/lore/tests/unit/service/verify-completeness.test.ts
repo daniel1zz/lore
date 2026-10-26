@@ -63,6 +63,7 @@ import { exitCode } from "../../../src/adapters/cli/utils.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── VerifyRunnerService fixture builders (mirrors verify-runner-service.test.ts) ──
 
 function makeDoc(overrides: Partial<DocRecord> & Pick<DocRecord, "id" | "type" | "title">): DocRecord {
@@ -401,7 +402,7 @@ describe("REGRESSION — caller-supplied inconclusive result via addEvidence is 
   it("VALIDATION_ERROR field result, doc unchanged, exit code 4 (same mapping as the pre-existing attestation-smuggling guard)", async () => {
     const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     const planId = await createPlanDoc(corpusService);
     const taskId = await createTaskDoc(corpusService, planId);
 
@@ -433,7 +434,7 @@ describe("REGRESSION — caller-supplied inconclusive result via addEvidence is 
   it("a legitimate pass/fail addEvidence call is UNAFFECTED by the new guard (REGRESSION)", async () => {
     const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     const planId = await createPlanDoc(corpusService);
     const taskId = await createTaskDoc(corpusService, planId);
 

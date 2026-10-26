@@ -63,6 +63,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Test Infrastructure (mirrors mcp-tools.test.ts) ─────────────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
@@ -99,7 +100,7 @@ function makeApp(): App {
       store,
       new NoOpTelemetry(),
       { claimTtlMinutes: 120 },
-      async () => ok(new Set(["AC-ACODE-8"])),
+      async () => ok(new Set(["AC-ACODE-8"])), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     ),
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.

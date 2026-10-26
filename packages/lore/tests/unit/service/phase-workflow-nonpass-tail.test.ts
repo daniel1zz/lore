@@ -32,6 +32,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures (mirrors phase-workflow-inconclusive-guard.test.ts's raw-insert
 // pattern — `type: "phase"` is migration-created only, D6a, never via
 // CorpusService.create) ──
@@ -175,7 +176,7 @@ describe("AC-ETI-6 — phase-tier self-report path rejects a tail-less non-pass 
     // Task-path rejection (same fixture pattern as phase-workflow-inconclusive-guard.test.ts)
     const taskStore = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(taskStore, new RecordLockService(taskStore, new GateEnforcer(undefined)));
-    const taskWorkflowService = new TaskWorkflowService(taskStore, undefined, { claimTtlMinutes: 120 });
+    const taskWorkflowService = new TaskWorkflowService(taskStore, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     const planResult = await corpusService.create({
       type: "plan",
       title: "Test Plan",

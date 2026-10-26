@@ -104,6 +104,14 @@ import {
   SELECT_PLAN_ROW_SQL,
   type KnownDefectLinkRow,
 } from "./migrations/migration-038.js";
+import {
+  MIGRATION_039_SQL,
+  planLandingBackfill,
+  SELECT_TASK_ROWS_SQL,
+  taskAuditEntry,
+  taskVersionBindings,
+  taskWriteBindings,
+} from "./migrations/migration-039.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -1123,6 +1131,51 @@ export class TursoStore implements StoreInterface {
             // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
           }
           throw new MigrationFailedError(38, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
+      }
+
+      if (currentVersion < 39) {
+        // reason: migration-039 back-fills landing.kind and the claims' start_head once (D7, #422), planned by the same pure
+        // function the SQLite store runs; the rows are read inside the write transaction (re-read under the lock).
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          step = "plan the landing back-fill";
+          const rs = await tx.execute(SELECT_TASK_ROWS_SQL);
+          const rows: BaselineNodeRow[] = rs.rows.map((row) => ({
+            id: rowStr(row, "id"),
+            slug: rowStr(row, "slug"),
+            title: rowStr(row, "title"),
+            content: rowStr(row, "content"),
+            status: rowStr(row, "status"),
+            extra: rowStr(row, "extra"),
+            tags: rowStr(row, "tags"),
+            version: rowNum(row, "version"),
+          }));
+          for (const write of planLandingBackfill(rows, this.localPath).writes) {
+            step = `back-fill task ${write.row.slug}`;
+            const by = requireMigrationActor(this.migrationActor, write.row.slug);
+            const now = new Date().toISOString();
+            await tx.execute({ sql: UPDATE_CONVERTED_NODE_SQL, args: taskWriteBindings(write, now) as InValue[] });
+            await tx.execute({ sql: INSERT_CONVERSION_VERSION_SQL, args: taskVersionBindings(write, by, now) as InValue[] });
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(taskAuditEntry(write, by, now), prevHash) as InValue[] });
+          }
+          step = "set user_version 39";
+          await tx.executeMultiple(MIGRATION_039_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(39, step, this.localPath, error);
         } finally {
           tx.close();
         }

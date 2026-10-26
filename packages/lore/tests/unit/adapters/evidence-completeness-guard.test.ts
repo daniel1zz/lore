@@ -80,6 +80,7 @@ import {
   findFilteredPassRefusal,
 } from "../../../src/adapters/cli/evidence-precheck.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixture command strings ────────────────────────────────────────────────
 
 /**
@@ -371,7 +372,7 @@ function makeApp(): App {
       store,
       new NoOpTelemetry(),
       { claimTtlMinutes: 120 },
-      async () => ok(new Set<string>()),
+      async () => ok(new Set<string>()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     ),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],

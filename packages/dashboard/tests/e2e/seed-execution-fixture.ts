@@ -43,6 +43,7 @@ import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
 import { declareWriteActorForTests } from "../../../lore/src/store/write-context-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../lore/src/service/task-workflow-service.js";
+import { createRealWorktreeProbe } from "../../../lore/src/service/worktree-cleanup.js";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 
 async function unwrap<T>(promise: Promise<Result<T, LoreError>>, label: string): Promise<T> {
@@ -63,7 +64,21 @@ async function main(): Promise<void> {
   // reason: a fixed seeding author — this fixture script is its own entry and reads nothing from the process.
   const store = declareWriteActorForTests(new SQLiteStore(dbPath), "e2e-seed");
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflow = new TaskWorkflowService(
+    store,
+    undefined,
+    { claimTtlMinutes: 120 },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createRealWorktreeProbe(process.cwd()),
+  );
 
   const planTitle = `E2E Execution Plan ${runId}`;
   const plan = await unwrap(

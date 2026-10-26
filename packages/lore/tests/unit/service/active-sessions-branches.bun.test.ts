@@ -41,6 +41,8 @@ import { SessionService } from "../../../src/service/session-service.js";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { createRealWorktreeProbe, type WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
 const cleanupDirs: string[] = [];
@@ -81,10 +83,10 @@ function makeDetachedRepo(): { repoRoot: string } {
 
 // ─── Service fixtures ───────────────────────────────────────────────────────
 
-function makeServices() {
+function makeServices(probe: WorktreeGitProbe = fakeWorktreeProbe()) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, probe);
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10080,
@@ -134,19 +136,17 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     expect(session?.branches).toEqual(["release/y"]);
   });
 
-  it("NEGATIVE: a detached-HEAD worktree with no measurable branch surfaces branches: []", async () => {
+  it("NEGATIVE: a detached-HEAD worktree is refused worktree-without-branch, so no session names it", async () => {
     const { repoRoot } = makeDetachedRepo();
-    const { corpusService, taskWorkflowService, sessionService } = makeServices();
+    const { corpusService, taskWorkflowService, sessionService } = makeServices(createRealWorktreeProbe(repoRoot));
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), worktree: repoRoot });
-
+    const claimed = await taskWorkflowService.claim(taskId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), worktree: repoRoot });
+    expect(claimed.ok).toBe(false);
     const bootstrap = await sessionService.bootstrap("agent:t2");
     expect(bootstrap.ok).toBe(true);
     if (!bootstrap.ok) return;
-    const session = findSessionByWorktree(bootstrap.value.active_sessions, repoRoot);
-    expect(session).toBeDefined();
-    expect(session?.branches).toEqual([]);
+    expect(findSessionByWorktree(bootstrap.value.active_sessions, repoRoot)).toBeUndefined();
   });
 
   it("BOUNDARY: a second task claimed by the SAME session on the SAME working copy is refused (BR-1337), so the entry keeps one branch and one task", async () => {
@@ -168,7 +168,7 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     expect(session?.task_slugs.length).toBe(1);
   });
 
-  it("ERROR: a claim whose worktree path does not exist on disk never throws, branches: []", async () => {
+  it("ERROR: a claim whose worktree path does not exist on disk records no branch and never throws", async () => {
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
     const fakeWorktree = "/definitely/does/not/exist/lore-ac-own-3";

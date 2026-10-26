@@ -148,7 +148,7 @@ function runLore(args: string[]) {
 /** Gate verdict first (read-only), then the real claim of B; both exit codes. */
 async function gateAndClaimExitCodes(bSlug: string): Promise<{ gate: number; claim: number; claimErr: string }> {
   const gate = await runLore(["gate", "task-claim", "--task", bSlug]);
-  const claim = await runLore(["claim", bSlug]);
+  const claim = await runLore(["claim", bSlug, "--worktree", "cgt-wt-candidate"]);
   return { gate: gate.exitCode, claim: claim.exitCode, claimErr: claim.stderr };
 }
 

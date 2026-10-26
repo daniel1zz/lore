@@ -25,6 +25,7 @@ import { AcService } from "../../../src/service/ac-service.js";
 import { TaskWorkflowService, type VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const AC_A = "AC-ZQ-1";
 const AC_B = "AC-ZQ-2";
 const FULL = /Evidence log is full/;
@@ -42,7 +43,7 @@ async function make() {
     undefined,
     undefined,
     undefined,
-    corpus.resolveDeclaredAcCriteria.bind(corpus),
+    corpus.resolveDeclaredAcCriteria.bind(corpus), undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   const mk = async (input: CreateDocInput): Promise<string> => {
     const r = await corpus.create(input);

@@ -75,6 +75,7 @@ import { partitionTerritory, type TerritoryEntry } from "../../src/adapters/cli/
 import { actedStore } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
 const cleanupDirs: string[] = [];
@@ -212,7 +213,7 @@ function makeTaskWorkflowService(store: InMemoryStore, sessionIdEnvValue: string
     undefined,
     undefined,
     undefined,
-    processEnv,
+    processEnv, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
 }
 

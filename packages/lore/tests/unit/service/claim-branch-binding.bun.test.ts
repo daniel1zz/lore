@@ -44,6 +44,8 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { createRealWorktreeProbe, type WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
 const cleanupDirs: string[] = [];
@@ -94,10 +96,10 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
   return result.value;
 }
 
-function makeServices() {
+function makeServices(probe: WorktreeGitProbe = fakeWorktreeProbe()) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, probe);
   return { store, corpusService, taskWorkflowService };
 }
 
@@ -144,17 +146,17 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     expect((result.value.extra["claim"] as Record<string, unknown>)["branch"]).toBe("declared-branch");
   });
 
-  it('BOUNDARY: a detached HEAD worktree records NO branch — never the literal "HEAD"', async () => {
+  it("BOUNDARY: a detached HEAD worktree is refused worktree-without-branch (BR-1468), never recorded as the literal \"HEAD\"", async () => {
     const { repoRoot } = makeDetachedRepo();
-    const { corpusService, taskWorkflowService } = makeServices();
+    const { corpusService, taskWorkflowService } = makeServices(createRealWorktreeProbe(repoRoot));
     const { taskId } = await createPlanAndTask(corpusService);
 
     const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const claim = result.value.extra["claim"] as Record<string, unknown>;
-    expect(claim["branch"]).toBeUndefined();
-    expect(Object.prototype.hasOwnProperty.call(claim, "branch")).toBe(false);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(JSON.stringify(result.error)).toContain("worktree-without-branch");
+    const after = await corpusService.get(taskId);
+    expect(JSON.stringify(after)).not.toContain('"claim":');
   });
 
   it("ERROR: a worktree path that does not exist on disk records no branch and never throws", async () => {

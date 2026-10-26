@@ -44,6 +44,7 @@ import type { CreateDocInput } from "@lore/core";
 import type { FeedOutcome } from "../../../src/flows/feed-flow.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Test Infrastructure (mirrors mcp-tools-verify.test.ts) ──────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
@@ -72,7 +73,7 @@ function makeApp(): App {
       store,
       new NoOpTelemetry(),
       { claimTtlMinutes: 120 },
-      async () => ok(new Set()),
+      async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     ),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],

@@ -60,7 +60,7 @@ function makeTaskDoc(extra: Record<string, unknown>): DocRecord {
 describe("TaskExecution", () => {
   describe("happy path", () => {
     it("renders the claim card with holder, branch, and a relative time", () => {
-      const doc = makeTaskDoc({ claim: { by: "alice", at: new Date(Date.now() - 60_000).toISOString(), branch: "feat/x" } });
+      const doc = makeTaskDoc({ claim: { by: "alice", at: new Date(Date.now() - 60_000).toISOString(), branch: "feat/x", start_head: "0123456789abcdef0123456789abcdef01234567" } });
       render(<TaskExecution task={doc} />);
 
       expect(screen.getByText("alice")).toBeInTheDocument();

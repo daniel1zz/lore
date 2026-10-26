@@ -97,17 +97,18 @@ async function claimedTask(
     extra: { plan_id: plan.value.id, file_anchors: anchors },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
+  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "agent-x" });
+  if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
+  // reason: the landing predicate counts a pass recorded AFTER the latest claim and bound to a clean commit on main (head_sha).
   const ev = await svc.recordVerifiedEvidence(
     task.value.id,
     {
       oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: run(repo, "rev-parse", "main"), worktree_dirty: false },
     },
-    "2026-10-19T09:00:00.000Z",
+    new Date(Date.now() + 1000).toISOString(),
   );
   if (!ev.ok) throw new Error("evidence");
-  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "agent-x" });
-  if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   return { svc, taskId: task.value.id };
 }
 

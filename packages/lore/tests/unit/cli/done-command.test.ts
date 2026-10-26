@@ -39,6 +39,7 @@ import type { DoneResult, EvidenceInput, VerifiedEvidenceInput } from "../../../
 import type { DocRecord, CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 function makeTaskDoc(overrides: Partial<DocRecord> = {}): DocRecord {
   return {
     id: "01HDONE0000000000000000001",
@@ -237,7 +238,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
   function makeServices() {
     const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     return { store, corpusService, taskWorkflowService };
   }
 

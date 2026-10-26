@@ -62,6 +62,7 @@ import { actedStore, liveInvocation } from "../live-invocation.js";
 import { createLiveApp } from "../helpers/live-app.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
 const CALLER = "agent:dcl5-caller";
 const AUTHOR = "agent:dcl5-original-author";
 const RUN = "cc:dcl5-run";
@@ -282,7 +283,7 @@ function buildOwnSvc(store: StoreInterface, lock: RecordLockService, writer: Cor
   return {
     taskWorkflow: new TaskWorkflowService(
       store, telemetry, { claimTtlMinutes: 120 },
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(), undefined,
       writer,
     ),
     phaseWorkflow: new PhaseWorkflowService(store, telemetry, { claimTtlMinutes: 120 }, undefined, undefined, undefined, writer),

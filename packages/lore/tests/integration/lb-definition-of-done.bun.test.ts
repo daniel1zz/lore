@@ -61,7 +61,7 @@ interface DodJson {
 }
 
 async function claimJson(task: string): Promise<{ dod: DodJson; stdout: string }> {
-  const stdout = await must(["claim", task, "--json"]);
+  const stdout = await must(["claim", task, "--worktree", `lb-dod-${task}`, "--json"]);
   const parsed = JSON.parse(stdout) as { ok: boolean; data: { definition_of_done?: DodJson } };
   expect(parsed.data.definition_of_done, stdout).toBeDefined();
   return { dod: parsed.data.definition_of_done as DodJson, stdout };
@@ -132,7 +132,7 @@ describe("AC-LB-5 claim prints the definition of done", () => {
   it(
     "the human claim output and `lore feed task-start` carry the same definition",
     async () => {
-      const human = await must(["claim", taskT]);
+      const human = await must(["claim", taskT, "--worktree", `lb-dod-${taskT}`]);
       expect(human).toContain("Definition of done");
       expect(human).toContain("tests/a.test.ts");
       expect(human).toContain("tests/b.test.ts");

@@ -68,6 +68,7 @@ import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { findUnderMatchedPassRefusal } from "../../../src/adapters/cli/evidence-precheck.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 // reason: both named files must EXIST: the MCP surface refuses a missing oracle file (field `command`) before the
@@ -260,7 +261,7 @@ function makeApp(): App {
       store,
       new NoOpTelemetry(),
       { claimTtlMinutes: 120 },
-      async () => ok(new Set<string>()),
+      async () => ok(new Set<string>()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     ),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],

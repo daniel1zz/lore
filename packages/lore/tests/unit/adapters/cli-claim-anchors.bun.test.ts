@@ -291,7 +291,7 @@ describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-r
     const planSlug = await createPlan(tmpDir, "Anchor State Plan");
     const taskSlug = await createTask(tmpDir, planSlug, "Stateful Task", ["src/a", "src/b"]);
 
-    const claimResult = await runLore(["claim", taskSlug, "--branch", "wt-x"], tmpDir, "alice");
+    const claimResult = await runLore(["claim", taskSlug, "--worktree", "wt-x"], tmpDir, "alice");
     expect(claimResult.exitCode).toBe(0);
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — "tsc" self-report is now refused regardless of
@@ -312,7 +312,7 @@ describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-r
     const got = JSON.parse(getResult.stdout) as {
       data: { doc: { extra: { claim: { by: string; branch: string }; verification_evidence: unknown[]; file_anchors: string[] } } };
     };
-    expect(got.data.doc.extra.claim).toMatchObject({ by: sessionActorFor("alice"), branch: "wt-x" });
+    expect(got.data.doc.extra.claim).toMatchObject({ by: sessionActorFor("alice"), worktree: "wt-x" });
     expect(got.data.doc.extra.verification_evidence).toHaveLength(1);
     expect(got.data.doc.extra.file_anchors).toEqual(["src/b"]);
   });
@@ -374,10 +374,10 @@ describe("lore claim — anchor-overlap gate block (SPEC-042 D5)", () => {
     const taskASlug = await createTask(tmpDir, planSlug, "Task A", ["src/shared"]);
     const taskBSlug = await createTask(tmpDir, planSlug, "Task B", ["src/shared"]);
 
-    const claimA = await runLore(["claim", taskASlug], tmpDir, "agent:t1");
+    const claimA = await runLore(["claim", taskASlug, "--worktree", "cca-wt-a"], tmpDir, "agent:t1");
     expect(claimA.exitCode).toBe(0);
 
-    const claimB = await runLore(["claim", taskBSlug], tmpDir, "agent:t2");
+    const claimB = await runLore(["claim", taskBSlug, "--worktree", "cca-wt-b"], tmpDir, "agent:t2");
 
     expect(claimB.exitCode).not.toBe(0);
     expect(claimB.stderr).toContain("ANCHOR_OVERLAP");
@@ -389,8 +389,8 @@ describe("lore claim — anchor-overlap gate block (SPEC-042 D5)", () => {
     const taskASlug = await createTask(tmpDir, planSlug, "Steal Task A", ["src/shared"]);
     const taskBSlug = await createTask(tmpDir, planSlug, "Steal Task B", ["src/shared"]);
 
-    await runLore(["claim", taskASlug], tmpDir, "agent:t1");
-    const stealAttempt = await runLore(["claim", taskBSlug, "--steal"], tmpDir, "agent:t2");
+    await runLore(["claim", taskASlug, "--worktree", "cca-wt-a"], tmpDir, "agent:t1");
+    const stealAttempt = await runLore(["claim", taskBSlug, "--steal", "--worktree", "cca-wt-b"], tmpDir, "agent:t2");
 
     expect(stealAttempt.exitCode).not.toBe(0);
     expect(stealAttempt.stderr).toContain("ANCHOR_OVERLAP");

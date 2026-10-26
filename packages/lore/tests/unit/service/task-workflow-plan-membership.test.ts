@@ -45,10 +45,11 @@ import type {
 import type { CreateDocInput, DocRecord, Result, LoreError } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 function makeServices(ttl = 120) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   return { store, corpusService, taskWorkflowService };
 }
 

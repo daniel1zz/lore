@@ -40,12 +40,13 @@ import { exitCode } from "../../../src/adapters/cli/utils.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   return { store, corpusService, taskWorkflowService };
 }
 

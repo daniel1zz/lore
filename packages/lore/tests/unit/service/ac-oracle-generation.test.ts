@@ -65,6 +65,7 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 const AC_ID = "AC-BG-5";
@@ -105,7 +106,7 @@ function makeServices(): {
     // reads the criterion (and its oracle_generation) from THIS port rather than a
     // private traversal of its own, so this fixture must wire it for the stamping
     // this whole file asserts on to happen at all.
-    corpusService.resolveDeclaredAcCriteria.bind(corpusService),
+    corpusService.resolveDeclaredAcCriteria.bind(corpusService), undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   return { store, corpusService, acService, taskWorkflowService };
 }

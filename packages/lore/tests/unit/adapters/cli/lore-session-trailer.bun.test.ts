@@ -95,6 +95,7 @@ import { TaskWorkflowService } from "../../../../src/service/task-workflow-servi
 import { actedStore } from "../../../live-invocation.js";
 import { runOfName } from "../../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../../helpers/fake-worktree-probe.js";
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
 const cleanupDirs: string[] = [];
@@ -174,7 +175,7 @@ function makeServices(processEnv: Record<string, string | undefined> = {}) {
     undefined,
     undefined,
     undefined,
-    processEnv,
+    processEnv, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   return { store, corpusService, taskWorkflowService };
 }
@@ -272,7 +273,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
       undefined,
       undefined,
       undefined,
-      { CLAUDE_CODE_SESSION_ID: "first-session-1234" },
+      { CLAUDE_CODE_SESSION_ID: "first-session-1234" }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     );
     await serviceFirst.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     commitFile(repoRoot, "first.txt", "first\n", "commit under first session");
@@ -285,7 +286,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
       undefined,
       undefined,
       undefined,
-      { CLAUDE_CODE_SESSION_ID: "second-session-5678" },
+      { CLAUDE_CODE_SESSION_ID: "second-session-5678" }, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
     );
     await serviceSecond.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repoRoot });
     commitFile(repoRoot, "second.txt", "second\n", "commit under second session");

@@ -317,7 +317,7 @@
 import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
 import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { AuditEntry, LoreError } from "@lore/core";
@@ -423,8 +423,47 @@ import {
   detectWorktreeBranch,
   bindClaimSessionForTrailer,
   unbindClaimSessionForTrailer,
+  createGitFacts,
   type BranchMeasurement,
 } from "../adapters/real-git-port.js";
+import {
+  countsAsLandedPass,
+  landingOf,
+  readMeasuredLanding,
+  recordClaimTip,
+  type LandingGitFacts,
+  type LandingVerdict,
+  type PassMode,
+} from "@lore/core";
+
+/**
+ * Refuses a claim under a fixed name (BR-1468); nothing is written. The name is part of the text so a caller and a test
+ * can match it without parsing `details`.
+ */
+function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-without-branch"): Result<never, LoreError> {
+  if (name === "worktree-without-branch") {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "worktree",
+      message:
+        `The worktree named for task "${taskSlug}" has no readable branch (detached HEAD or an unreadable ref), so the start of the work ` +
+        `cannot be measured [claim: ${name}]. Check out a branch in that worktree and claim again, or claim without --worktree when the ` +
+        "task anchors no file (corpus-only work). Nothing was written.",
+      value: name,
+      rule: "BR-1468",
+    });
+  }
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "worktree",
+    message:
+      `Task "${taskSlug}" declares file anchors, so its work changes files and needs its own branch [claim: ${name}]. ` +
+      `Create a worktree and claim with \`lore claim ${taskSlug} --worktree <branch>\`; only a task with no file anchors ` +
+      "(corpus-only work) may be claimed without one.",
+    value: name,
+    rule: "BR-1468",
+  });
+}
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -645,6 +684,19 @@ export type DoneFloorId =
   | "missing-oracle-file";
 
 /** One floor's refusal: the id plus the exact LoreError `done()` returns (`details.floor` set). */
+/** What {@link TaskWorkflowService.measureLanding} measured about one task's claimed work. */
+interface LandingMeasure {
+  /** `false` for a task that was never claimed: nothing to measure, nothing refused. */
+  readonly armed: boolean;
+  readonly mode: PassMode;
+  readonly latestClaimAt?: string;
+  readonly branches?: readonly string[];
+  readonly verdict?: LandingVerdict;
+}
+
+/** The evidence-counting rule of one task: which pass rows satisfy the attested-pass floor under the landing predicate. */
+type CountingRule = (row: EvidenceEntry) => boolean;
+
 export interface DoneFloorRefusal {
   floor: DoneFloorId;
   error: LoreError;
@@ -2344,9 +2396,6 @@ function buildNoWorktreeMismatchRefusal(opts: {
 
 // ─── TaskWorkflowService ───────────────────────────────────────────────────
 
-/** Why a worktree measurement is absent on a service built without a probe (bare test construction). */
-const NO_WORKTREE_PROBE_REASON = "no worktree probe is wired into this TaskWorkflowService";
-
 /** A working copy as a claim named it: the `--worktree` value (path or branch name) and the branch the claim captured. */
 interface ClaimedWorkingCopy {
   readonly name: string;
@@ -2534,7 +2583,7 @@ export class TaskWorkflowService {
     resolveDeclaredAcIds: (
       planId: string,
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
-    private readonly gate?: GateDependencies,
+    private readonly gate: GateDependencies | undefined,
     resolveAdhocGoverningAcIds: (
       task: DocRecord,
     ) => Promise<Result<Set<string>, LoreError>> = async () =>
@@ -2561,10 +2610,10 @@ export class TaskWorkflowService {
       worktree: string,
       sessionId: string,
     ) => Promise<void> = unbindClaimSessionForTrailer,
-    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup, built by `app.ts` over the invocation's cwd. ABSENT =>
-    // the claim-time base and the done-time commit range read `not-measured`, and the cleanup (which also needs `worktreeRemoval`) is
-    // unreachable — never a probe over the process's own directory.
-    private readonly worktreeProbe?: WorktreeGitProbe,
+    // reason: issue #106 / spec-lore-done-closes-a-commitless-task-through-an-audited-no — the git/fs probe, built by `app.ts` over the
+    // invocation's cwd. REQUIRED: the landing predicate's facts ({@link LandingGitFacts}) and the claim-time start are read through it,
+    // so an unwired service cannot type-check and there is no silent "no git" path. Unit tests pass a fake probe.
+    private readonly worktreeProbe: WorktreeGitProbe,
     // reason: the single worktree-removal test's facts (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a);
     // wired by `app.ts` (a service never imports another service). ABSENT => `done`'s cleanup reports every recorded
     // worktree `not-measured`, never removes — no silent "safe" default.
@@ -2788,7 +2837,7 @@ export class TaskWorkflowService {
     // admission checks it always was; the promotion changes what gets WRITTEN, never
     // what gets ADMITTED. Shared with PhaseWorkflowService (SSOT — see
     // promoteCapturedAttestation's own JSDoc for why it is one function, not a pair).
-    return this.appendEvidenceEntry(idOrSlug, promoteCapturedAttestation(entry), entry.recorded_by, now);
+    return this.appendEvidenceEntry(idOrSlug, promoteCapturedAttestation(entry), entry.recorded_by, now, false, entry.callerCwd);
   }
 
   /**
@@ -2827,6 +2876,7 @@ export class TaskWorkflowService {
     actor: string,
     now: () => string,
     verifyRunIntent = false,
+    callerCwd?: string,
   ): Promise<Result<DocRecord, LoreError>> {
     // §M5 (AC-DC-8) — fail-loud, NOT a silent strip, and bound to the SHARED chokepoint
     // rather than the self-report path: `ac_oracle_generation` is resolved from the
@@ -2907,6 +2957,9 @@ export class TaskWorkflowService {
     const captureSourceResult = resolveWrittenCaptureSource(entry);
     if (!captureSourceResult.ok) return captureSourceResult;
     const captureSource: CaptureSource = captureSourceResult.value;
+    // reason: a pass on a NO-BRANCH claim is proven at main's head: the attestation records main's head (and the head the run
+    // measured, even when the shared checkout holds unrelated uncommitted files) and the counting rule compares the two.
+    const attestation = this.bindAttestationToClaim(entry.attestation, readClaimRecord(task), callerCwd);
     const candidate = {
       oracle: entry.oracle,
       command: entry.command,
@@ -2920,7 +2973,7 @@ export class TaskWorkflowService {
       // `evidenceEntrySchema.safeParse` every other field goes through below.
       ...(acOracleGeneration !== null ? { ac_oracle_generation: acOracleGeneration } : {}),
       recorded_corpus_rev: corpusRev.value,
-      ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
+      ...(attestation !== undefined ? { attestation } : {}),
       ...(isRefresh ? { milestone_refresh: true as const } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
@@ -2992,7 +3045,13 @@ export class TaskWorkflowService {
     // expires between evidence appends. `renewClaimForEvidence` reuses `nowIso`
     // captured above — NEVER a second `now()` invocation (would break the
     // STALE_VERSION sequential-CAS test recipe, which relies on single-fire).
-    const renewedClaim = renewClaimForEvidence(readClaimRecord(task), actor, nowIso);
+    const renewedBase = renewClaimForEvidence(readClaimRecord(task), actor, nowIso);
+    // reason: every capture on a branch claim records where the branch ended (the head the run measured in the branch's own
+    // worktree); the newest write wins, so a branch the harness removes without a release still has its tip.
+    const renewedClaim =
+      renewedBase !== null && attestation?.head_sha !== undefined && this.captureRanInClaimBranch(renewedBase, callerCwd)
+        ? recordClaimTip(renewedBase, attestation.head_sha)
+        : renewedBase;
     // The previous refresh row(s) of the same criterion and runner leave the log in this SAME write; the version
     // snapshot keeps them, and the audit row below names what was replaced.
     const replaced = isRefresh ? existing.filter((row) => isSameRefreshKey(row, parsedEntry.data)) : [];
@@ -3147,6 +3206,16 @@ export class TaskWorkflowService {
       });
     }
 
+    // reason: BR-1468 — work that changes files needs its own branch: a no-branch claim has no tip to measure, so it is
+    // allowed only for a task that declares no file anchor (corpus-only work). A refresh that already holds a branch is fine.
+    if (
+      opts.worktree === undefined &&
+      readClaimRecord(task)?.worktree === undefined &&
+      extractFileAnchors(task).length > 0
+    ) {
+      return refuseClaim(task.slug, "work-needs-branch");
+    }
+
     const scopeResult = await this.resolveCorpusScope(opts);
     if (!scopeResult.ok) return scopeResult;
     const corpusScope = scopeResult.value;
@@ -3210,9 +3279,22 @@ export class TaskWorkflowService {
       const measurement = await this.detectBranch(opts.worktree);
       if (measurement.status === "measured") {
         capturedBranch = measurement.branch;
+      } else if (
+        isAbsolute(opts.worktree) &&
+        existingClaim?.branch === undefined &&
+        this.worktreeProbe.pathExists(opts.worktree) &&
+        this.measureStartHead(opts.worktree).sha !== undefined
+      ) {
+        // narrowed (AC-OWN-4): only a path that exists AND is a readable worktree (it has a head) but sits on no branch is refused;
+        // a path that does not exist, or is not a git worktree, keeps its no-throw behaviour.
+        // reason: BR-1468 — a worktree PATH with no readable branch has no start_head to measure; admitting it would be a silent
+        // path. A non-absolute value is a branch name (measured by measureStartHead below), not a path.
+        return refuseClaim(task.slug, "worktree-without-branch");
       }
     }
 
+    const measuredStart = this.measureStartHead(opts.worktree ?? capturedBranch);
+    const startHead = measuredStart.sha;
     const builtClaim: TaskClaim = buildTaskClaim(
       existingClaim,
       {
@@ -3229,11 +3311,27 @@ export class TaskWorkflowService {
         // §Opt-in). `buildTaskClaim` never carries it forward.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
         ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
+        // reason: the landing predicate's start — a branch claim's base commit, a no-branch claim's main head.
+        ...(startHead !== undefined ? { start_head: startHead } : {}),
         // reason: BR-1040 — the claim always names the run that took it; the store refuses one that does not (BR-1352).
         harness_run: claimant.harnessRun,
       },
       carryForward,
     );
+    // reason: a claim that records a branch needs a start the landing predicate can measure from (the claim schema refuses a branch
+    // claim without a sha `start_head`). A start git cannot read is a refusal here (exit 4, before anything is written), never
+    // a branch claim with no start. A carried-forward start (a same-holder refresh) counts.
+    if (builtClaim.branch !== undefined && builtClaim.start_head === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "worktree",
+        message:
+          `The start of the work cannot be measured: the claim records branch \`${builtClaim.branch}\` but ` +
+          `${measuredStart.reason ?? "no start commit could be read for it"}. A claim on a branch needs a start commit to measure the ` +
+          "work from; create the branch or worktree first, then claim it. Nothing was written.",
+        value: builtClaim.branch,
+      });
+    }
     const newClaim: TaskClaim =
       inheritedDirtyWorktree !== undefined
         ? { ...builtClaim, inherited_dirty_worktree: inheritedDirtyWorktree }
@@ -3258,9 +3356,7 @@ export class TaskWorkflowService {
     // so the base is resolved by `resolveClaimHead`, never by `headSha` alone (issue #180 retry).
     const claimBaseResolved =
       opts.worktree !== undefined
-        ? this.worktreeProbe === undefined
-          ? ({ ok: false, reason: NO_WORKTREE_PROBE_REASON } as const)
-          : resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
+        ? resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
         : undefined;
     const claimBase =
       claimBaseResolved === undefined
@@ -3280,6 +3376,8 @@ export class TaskWorkflowService {
       // audit row survives `lore release`, so a claim by worktree PATH still names its branch here.
       ...(capturedBranch !== undefined ? { branch: capturedBranch } : {}),
       ...(claimBase !== undefined && claimBase.ok ? { base_sha: claimBase.value } : {}),
+      // reason: the audit row survives `lore release`, so the landing predicate still finds the work's start afterwards.
+      ...(newClaim.start_head !== undefined ? { start_head: newClaim.start_head } : {}),
     }, opts.worktree !== undefined);
     if (!writeResult.ok) return writeResult;
 
@@ -3367,7 +3465,7 @@ export class TaskWorkflowService {
   ): Promise<Result<void, LoreError>> {
     const target = opts.worktree;
     const probe = this.worktreeProbe;
-    if (target === undefined || probe === undefined || !probe.pathExists(target)) return ok(undefined);
+    if (target === undefined || !probe.pathExists(target)) return ok(undefined);
     const field = "gate:task-claim:first-claim-off-main";
     const unreadable = (what: string, reason: string): Result<void, LoreError> =>
       err({
@@ -3590,12 +3688,16 @@ export class TaskWorkflowService {
     const reasonNote = opts.reason !== undefined ? `: ${opts.reason}` : "";
     const summary = `Released by ${opts.by}${runNote}${forcedNote}${reasonNote}`;
 
+    // reason: the release row carries the branch tip measured NOW (else the tip the claim recorded at its last capture), so a
+    // branch removed afterwards is still judged by where the work ended (the newest recorded tip wins).
+    const releasedTip = this.measureClaimTip(existingClaim);
     const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "release", {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
       previous_run: holder.harnessRun,
       harness_run: releaser.harnessRun,
+      ...(releasedTip !== undefined ? { end_tip: releasedTip } : {}),
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
 
@@ -3708,6 +3810,7 @@ export class TaskWorkflowService {
           harness_run: runId,
           reason,
           worktree: worktreeNote,
+          ...(this.measureClaimTip(claim) !== undefined ? { end_tip: this.measureClaimTip(claim) as string } : {}),
           ...(measuredWorktree === undefined ? { worktree_cleanliness: cleanliness.status } : {}),
         },
       );
@@ -3810,7 +3913,20 @@ export class TaskWorkflowService {
     now: () => string = defaultNow,
   ): Promise<Result<DoneResult, LoreError>> {
     const startMs = Date.now();
-    const result = await this._doneImpl(idOrSlug, opts, now);
+    let result = await this._doneImpl(idOrSlug, opts, now);
+    // reason: two closers racing on one task: the loser's compare-and-set fails with STALE_VERSION. It re-reads and re-measures:
+    // an archived task answers `already_done`, a task that is still open is judged again. Never a blind retry of the write.
+    for (let attempt = 0; attempt < 3 && !result.ok && result.error.code === "STALE_VERSION"; attempt += 1) {
+      result = await this._doneImpl(idOrSlug, opts, now);
+    }
+    // reason: the same race seen one step later: the write route re-read the task and found it already archived by the rival
+    // closer ("Cannot move archived ..."). The work IS done, so this closer reports exactly what a second `lore done` reports.
+    if (!result.ok && result.error.code === "VALIDATION_ERROR" && result.error.field === "status") {
+      const reread = await this.resolveTask(idOrSlug);
+      if (reread.ok && (reread.value.status === "archived" || reread.value.status === "deprecated")) {
+        result = ok({ task: reread.value, already_done: true, transitions: [] });
+      }
+    }
     this.recordEvent("task.done", startMs, result, opts.source, {
       by: opts.by,
       already_done: result.ok ? result.value.already_done : false,
@@ -3840,6 +3956,7 @@ export class TaskWorkflowService {
     stampBinding: StampBindingContext,
     anchorRemovals: ReadonlyMap<string, AnchorRemovalVerdict>,
     supersession?: DeclaredScopeSupersession,
+    counting?: CountingRule,
   ): Result<
     {
       refusal: DoneFloorRefusal | null;
@@ -3871,9 +3988,19 @@ export class TaskWorkflowService {
     // floor. `legacy_unbound` and every row of an UNARMED corpus still do, so arming refuses
     // nothing retroactively.
     const stampReadings = classifyEvidenceStamps(task.id, evidence, stampBinding);
-    const hasAttestedPass = evidence.some(
-      (e, index) => e.result === "pass" && e.attestation !== undefined && stampReadings[index]?.stamp !== "unbound",
+    // reason: a pass on a no-branch claim records `main_head` and is judged by the counting rule alone (head_sha == main_head);
+    // an unbound stamp there only says the shared checkout holds unrelated uncommitted files, which this work does not depend on.
+    const attestedRows = evidence.filter(
+      (e, index) =>
+        e.result === "pass" &&
+        e.attestation !== undefined &&
+        (stampReadings[index]?.stamp !== "unbound" || e.attestation.main_head !== undefined),
     );
+    // reason: the landing predicate's counting rule (BR-199): only passes recorded after the latest claim, bound to a
+    // clean commit that is on main (or at main's head for a no-branch claim) count. BR-159 stays the one write-time
+    // refusal of a pass on a dirty claimed worktree; this rule only needs the recorded commit, not a second dirty check.
+    const hasAttestedPass = attestedRows.some((e) => counting === undefined || counting(e));
+    const excludedByLanding = !hasAttestedPass && attestedRows.length > 0 && counting !== undefined;
     const unboundPassReasons = evidence.flatMap((e, index) => {
       const reading = stampReadings[index];
       return e.result === "pass" && reading?.stamp === "unbound" ? [reading.reason] : [];
@@ -3915,7 +4042,12 @@ export class TaskWorkflowService {
                 `armed without a valid state stamp, so it certifies no named state. Re-run \`lore verify\` ` +
                 `or \`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result pass --capture\` ` +
                 `on a committed tree to record a stamped row (or use --override-attestation with a reason).`
-              : buildAttestationFloorRefusal(task.slug, evidence),
+              : excludedByLanding
+                ? `Task "${task.slug}" holds ${attestedRows.length} runner-attested pass row(s), but none counts: a pass counts only when ` +
+                  "it was recorded after the task's latest claim and is bound to a clean commit that is on main (a branch claim), " +
+                  "or to main's head (a no-branch claim). Re-run the oracle on a clean, committed tree after the latest claim: " +
+                  `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result pass --capture\` (or \`lore verify\`).`
+                : buildAttestationFloorRefusal(task.slug, evidence),
           value: evidence.map((e, index) => ({
             result: e.result,
             attested: e.attestation !== undefined,
@@ -4084,10 +4216,12 @@ export class TaskWorkflowService {
     const removals = await this.measureAnchorRemovals(task);
     if (!removals.ok) return removals;
     const supersession = await this.resolveScopeSupersession(task);
-    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value, removals.value, supersession);
+    const measure = await this.measureLanding(task);
+    if (!measure.ok) return measure;
+    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value, removals.value, supersession, this.countingRule(task, measure.value));
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
-    return this.findAsyncFloor(task);
+    return this.findAsyncFloor(task, measure.value);
   }
 
   /**
@@ -4156,6 +4290,21 @@ export class TaskWorkflowService {
     return partitionDeclaredScopeBySupersession(scope, criteria.value);
   }
 
+  /**
+   * The file-existence port of the `missing-oracle-file` floor: a path inside the repository is read from the INTEGRATION
+   * BRANCH's tree (#329: a stale main checkout must not hide a file the landed work added, nor show one it never landed);
+   * a path outside the repository, or a repository with no readable integration branch, is checked on disk as before.
+   */
+  private oracleFileExists(repoRoot: string): (path: string) => boolean {
+    const facts = this.landingFacts();
+    return (path) => {
+      const rel = relative(repoRoot, path);
+      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return existsSync(path);
+      const inTree = facts.pathExistsInIntegration(rel);
+      return inTree.ok ? inTree.value : existsSync(path);
+    };
+  }
+
   private async findMissingOracleFileFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
     const repoRoot = this.repoRoot;
     if (repoRoot === undefined) return ok(null);
@@ -4182,7 +4331,7 @@ export class TaskWorkflowService {
       const criterionCommand = criterion.verify.command;
       const missing = findMissingOracleFiles(criterionCommand, {
         cwd: repoRoot,
-        fileExists: existsSync,
+        fileExists: this.oracleFileExists(repoRoot),
       });
       if (missing.length === 0) continue;
       // reason: a red-first AC declared with `--allow-missing-path` whose file a LATER task writes is not a lie —
@@ -4202,77 +4351,190 @@ export class TaskWorkflowService {
         `Task "${task.slug}" covers AC(s) whose oracle file is missing: ${findings.join("; ")} — lore done ` +
         "refuses: an AC whose test file does not exist is NOT MEASURED, whatever an earlier attested pass said. " +
         "Repoint the command with `lore ac set <spec> <AC-ID> --command \"<cmd naming an existing file>\"`, " +
-        `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`.`,
+        `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`. [floor: missing-oracle-file]`,
       value: findings,
     };
     return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" } } });
   }
 
   /**
-   * The `not-landed` floor (BR-1291, spec-a-task-is-archived-only-on-a-landing-lore-recorded-one): a task whose
-   * claim ever named a working copy archives only when `lore integrate` recorded a landing on it
-   * (`extra.landing`) whose landed commit is on the integration branch, and its claimed branch — if the ref still
-   * exists — holds no commit outside that branch (work committed after the landing). The claimed working copy's own
-   * head is never consulted, and there is no fail-open path: an unwired probe, an unreadable integration branch or
-   * an unreadable commit count REFUSES. A claimed branch whose ref is gone counts as having no unlanded commits
-   * (`git branch -d` only deletes a merged branch, and the landing record is what proves it landed).
-   *
-   * Not armed (returns `ok(null)`) for a task whose claims never named a working copy (adhoc and orchestrator-run
-   * tasks have no branch to land).
-   *
-   * @returns `ok(refusal)` named `not-landed` (naming the branch and how to land it); `ok(null)` when landed;
-   *   `err` only when the claim audit history itself is unreadable.
+   * The git facts the landing predicate reads: {@link LandingGitFacts} over the wired probe's working directory. The probe is
+   * a required constructor dependency, so facts always exist; a question git cannot answer is an `ok: false` fact, never a default.
    */
-  private async findNotLandedFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const recordedResult = await this.readRecordedWorktrees(task);
-    if (!recordedResult.ok) return recordedResult;
-    if (recordedResult.value.length === 0) return ok(null);
-    const claimedOn = recordedResult.value.map((r) => r.path).join(", ");
-    const refuse = (why: string, value: Record<string, unknown>): Result<DoneFloorRefusal, LoreError> => {
-      const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
-        code: "VALIDATION_ERROR",
-        field: "extra.landing",
-        message:
-          `Task "${task.slug}" was claimed on ${claimedOn} and lore done archives only work whose landing lore integrate ` +
-          `recorded: ${why}. Land the branch with \`lore integrate <branch>\` (it records the landing on this task, also ` +
-          `when the branch is already integrated), then re-run \`lore done ${task.slug}\`. [floor: not-landed]`,
-        value: { claimed_on: claimedOn, ...value },
-      };
-      return ok({ floor: "not-landed", error: { ...error, details: { floor: "not-landed" } } });
+  private landingFacts(): LandingGitFacts {
+    if (this.gitFactsCache !== undefined) return this.gitFactsCache;
+    this.gitFactsCache = createGitFacts(this.worktreeProbe.currentWorkingDirectory());
+    return this.gitFactsCache;
+  }
+
+  private gitFactsCache: LandingGitFacts | undefined;
+
+  /**
+   * The attestation as it is stored: on a NO-BRANCH claim it also records main's head (`main_head`) and, when the run measured
+   * none (a dirty shared checkout leaves the stamp unbound), the head of the caller's checkout; a branch claim's attestation is
+   * stored as measured. Facts that cannot be read are left absent, never invented.
+   */
+  private bindAttestationToClaim(
+    attestation: VerifiedEvidenceInput["attestation"],
+    claim: TaskClaim | undefined,
+    callerCwd: string | undefined,
+  ): VerifiedEvidenceInput["attestation"] {
+    if (attestation === undefined || claim === undefined || claim.worktree !== undefined) return attestation;
+    const facts = this.landingFacts();
+    const mainHead = facts.integrationHead();
+    const callerHead = attestation.head_sha === undefined && callerCwd !== undefined ? facts.headOf(callerCwd) : undefined;
+    return {
+      ...attestation,
+      ...(callerHead !== undefined && callerHead.ok ? { head_sha: callerHead.value } : {}),
+      ...(mainHead.ok ? { main_head: mainHead.value } : {}),
     };
+  }
 
-    const landing = readTaskLanding(task.extra);
-    if (landing === undefined) return refuse("no landing is recorded on it", { reason: "no-landing" });
+  /** Whether the capture ran inside the worktree of the claim's branch (the only place its head is the branch's tip). */
+  private captureRanInClaimBranch(claim: TaskClaim, callerCwd: string | undefined): boolean {
+    const facts = this.landingFacts();
+    if (callerCwd === undefined || claim.worktree === undefined) return false;
+    const branch = claim.branch ?? (isAbsolute(claim.worktree) ? undefined : claim.worktree);
+    if (branch === undefined) return false;
+    const inside = facts.isInsideBranchWorktree(callerCwd, branch);
+    return inside.ok && inside.value;
+  }
+
+  /**
+   * Where a claim's branch ends now: the tip of its branch ref (or the head of its worktree path), else the tip the claim
+   * recorded at its last capture. `undefined` when neither exists (never a guess, never `start_head`).
+   */
+  private measureClaimTip(claim: TaskClaim): string | undefined {
+    const facts = this.landingFacts();
+    const names = [claim.branch, claim.worktree].filter((name): name is string => name !== undefined && !isAbsolute(name));
+    for (const name of names) {
+      const tip = facts.branchTip(name);
+      if (tip.ok && tip.value !== null) return tip.value;
+    }
+    if (claim.worktree !== undefined && isAbsolute(claim.worktree) && facts.pathExists(claim.worktree)) {
+      const head = facts.headOf(claim.worktree);
+      if (head.ok) return head.value;
+    }
+    return claim.end_tip;
+  }
+
+  /**
+   * The commit a claim's work starts from: the branch (or worktree) head for a claim naming a working copy or branch, main's
+   * head for a no-branch claim. Absent, with the reason, when git cannot answer: never a guess.
+   *
+   * @param target - the worktree path or branch name the claim names, or `undefined` for a no-branch claim
+   */
+  private measureStartHead(target: string | undefined): { readonly sha?: string; readonly reason?: string } {
+    if (target === undefined) {
+      const head = this.landingFacts().integrationHead();
+      return head.ok ? { sha: head.value } : { reason: head.reason };
+    }
     const probe = this.worktreeProbe;
-    if (probe === undefined) return refuse(`the landing cannot be checked against main (${NO_WORKTREE_PROBE_REASON})`, { reason: "unmeasurable" });
-    const cwd = probe.currentWorkingDirectory();
-    const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return refuse(`the integration branch is unreadable (${integration.reason})`, { reason: "unmeasurable" });
-    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
-    if (!offMain.ok) return refuse(`the landing commit ${landing.landing_commit.slice(0, 12)} cannot be checked (${offMain.reason})`, { reason: "unmeasurable" });
-    if (offMain.value > 0) {
-      return refuse(`its landing commit ${landing.landing_commit.slice(0, 12)} is not on ${integration.value}`, {
-        reason: "landing-not-on-main",
-        landing_commit: landing.landing_commit,
-      });
-    }
+    const resolved = resolveClaimHead(probe, target, probe.currentWorkingDirectory());
+    return resolved.ok ? { sha: resolved.value.sha } : { reason: `\`${target}\` has no readable head (${resolved.reason})` };
+  }
 
-    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
-    if (!auditResult.ok) return auditResult;
-    for (const name of await this.landingCandidateNames(auditResult.value, task)) {
-      const tip = probe.branchTip(cwd, name);
-      if (!tip.ok) continue; // reason: no such branch ref (a path name, or a branch deleted after it landed)
-      const ahead = probe.countCommits(cwd, `${integration.value}..${tip.value}`);
-      if (!ahead.ok) return refuse(`branch ${name} cannot be compared with ${integration.value} (${ahead.reason})`, { reason: "unmeasurable", branch: name });
-      if (ahead.value > 0) {
-        return refuse(`branch ${name} has ${ahead.value} commit(s) not on ${integration.value} (committed after the landing)`, {
-          reason: "commits-after-landing",
-          branch: name,
-          unmerged: ahead.value,
-        });
-      }
+  /**
+   * Everything the landing predicate and the evidence-counting rule need about one task, measured now: its claim
+   * history, the branches and working copies it named, its start and newest recorded tip, and the verdict of
+   * {@link landingOf}. `armed: false` for a task that was never claimed (nothing to measure, nothing refused).
+   */
+  private async measureLanding(task: DocRecord): Promise<Result<LandingMeasure, LoreError>> {
+    const claimRows = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+    if (!claimRows.ok) return claimRows;
+    const releaseRows = await this.store.queryAudit({ doc_id: task.id, action: "release" });
+    if (!releaseRows.ok) return releaseRows;
+    const claims = claimRows.value
+      .filter((row) => row.details?.["orphaned_dirty"] !== true)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const current = readClaimRecord(task);
+    const latest = claims[claims.length - 1];
+    if (latest === undefined && current === undefined) return ok({ armed: false, mode: "unclaimed" });
+
+    const names = await this.landingCandidateNames(claimRows.value, task);
+    const worktrees = names.filter((name) => isAbsolute(name));
+    const branches = names.filter((name) => !isAbsolute(name));
+    const latestWorktree = latest !== undefined ? latest.details?.["worktree"] : current?.worktree;
+    const mode: PassMode = typeof latestWorktree === "string" && latestWorktree !== "" ? "branch" : "no-branch";
+
+    const rowString = (row: AuditEntry | undefined, key: string): string | undefined => {
+      const value = row?.details?.[key];
+      return typeof value === "string" && value !== "" ? value : undefined;
+    };
+    const latestWithStart = [...claims].reverse().find((row) => rowString(row, "start_head") !== undefined || rowString(row, "base_sha") !== undefined);
+    const startHead = current?.start_head ?? rowString(latestWithStart, "start_head") ?? rowString(latestWithStart, "base_sha");
+    const newerReleases = releaseRows.value
+      .filter((row) => latest === undefined || row.timestamp >= latest.timestamp)
+      .filter((row) => rowString(row, "end_tip") !== undefined)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    // reason: tip = the ref (landingOf), else the newest recorded `end_tip`, else the tip `lore integrate` measured when it landed
+    // the branch (a fact read from git at the merge). Never `start_head`, never an evidence head.
+    const endTip =
+      (current !== undefined ? current.end_tip : rowString(newerReleases[newerReleases.length - 1], "end_tip")) ??
+      readTaskLanding(task.extra)?.tip;
+
+    const facts = this.landingFacts();
+    const verdict: LandingVerdict = landingOf(
+      {
+        ...(startHead !== undefined ? { start_head: startHead } : {}),
+        branches,
+        worktrees: worktrees.filter((path) => facts.pathExists(path)),
+        ...(endTip !== undefined ? { end_tip: endTip } : {}),
+      },
+      facts,
+    );
+    // reason: corpus-only work (no branch, no working copy named) in a place git cannot answer (not a repository) has nothing to land.
+    if (verdict.state === "unmeasurable" && branches.length === 0 && worktrees.length === 0) return ok({ armed: false, mode });
+    return ok({
+      armed: true,
+      mode,
+      ...(latest !== undefined ? { latestClaimAt: latest.timestamp } : {}),
+      branches,
+      verdict,
+    });
+  }
+
+  /**
+   * The `not-landed` floor (BR-1291), decided from git facts by the one predicate {@link landingOf}: the claimed work's
+   * tip must be on the integration branch (reached by ANY route), or equal its start (nothing was changed). A working copy
+   * that still exists with uncommitted changes refuses (`uncommitted-work`), and so does any state git cannot answer
+   * (`unmeasurable`): there is no fail-open path. Nothing is written by a refusal.
+   *
+   * Not armed (`ok(null)`) for a task that was never claimed.
+   */
+  private notLandedRefusal(task: DocRecord, measure: LandingMeasure): DoneFloorRefusal | null {
+    const verdict = measure.verdict;
+    if (!measure.armed || verdict === undefined || verdict.state === "landed") return null;
+    const branchNames = measure.branches ?? [];
+    const claimedOn = branchNames.length > 0 ? branchNames.join(", ") : "no branch";
+    const base = `Task "${task.slug}" (claimed on ${claimedOn}) cannot be archived as landed:`;
+    let message: string;
+    let reason: string;
+    if (verdict.state === "unmeasurable") {
+      reason = "unmeasurable";
+      message =
+        `${base} unmeasurable: ${verdict.reason}. Nothing was changed. Run \`lore release ${task.slug}\` from the claim's branch to ` +
+        `record its tip, or re-claim the task on a branch.`;
+    } else if (verdict.reason === "uncommitted-work") {
+      reason = "uncommitted-work";
+      message =
+        `${base} uncommitted-work: the working copy ${verdict.dirty_paths_in ?? ""} has uncommitted changes. Commit or discard them, ` +
+        `then re-run \`lore done ${task.slug}\`.`;
+    } else {
+      reason = "tip-not-on-main";
+      message =
+        `${base} tip-not-on-main: branch ${verdict.branch ?? claimedOn} has commit(s) (tip ${(verdict.tip ?? "").slice(0, 12)}) ` +
+        `not on ${verdict.integration_branch}. Land the branch with \`lore integrate ${verdict.branch ?? "<branch>"}\`, ` +
+        `then re-run \`lore done ${task.slug}\`.`;
     }
-    return ok(null);
+    const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
+      code: "VALIDATION_ERROR",
+      field: "extra.landing",
+      message: `${message} [floor: not-landed]`,
+      value: { claimed_on: claimedOn, reason, ...(verdict.state === "not-landed" && verdict.tip !== undefined ? { tip: verdict.tip } : {}) },
+      rule: "BR-1292",
+    };
+    return { floor: "not-landed", error: { ...error, details: { floor: "not-landed" } } };
   }
 
   /**
@@ -4302,7 +4564,6 @@ export class TaskWorkflowService {
     };
     if (recorded === undefined) return ok(settle({ kind: "kept" }));
     const probe = this.worktreeProbe;
-    if (probe === undefined) return ok(settle({ kind: "not-measured", reason: NO_WORKTREE_PROBE_REASON }));
 
     const cwd = probe.currentWorkingDirectory();
     const head = resolveClaimHead(probe, recorded.path, cwd);
@@ -4315,10 +4576,39 @@ export class TaskWorkflowService {
   }
 
   /** The async floors, in order: landed work, then oracle-file existence. The first refusal wins. */
-  private async findAsyncFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const unlanded = await this.findNotLandedFloor(task);
-    if (!unlanded.ok || unlanded.value !== null) return unlanded;
+  private async findAsyncFloor(task: DocRecord, measure: LandingMeasure): Promise<Result<DoneFloorRefusal | null, LoreError>> {
+    const unlanded = this.notLandedRefusal(task, measure);
+    if (unlanded !== null) return ok(unlanded);
     return this.findMissingOracleFileFloor(task);
+  }
+
+  /**
+   * The evidence-counting rule for `task` (BR-199 under the landing predicate), or `undefined` when it cannot apply: a task
+   * never claimed, or one measured without git facts (the not-landed floor refuses that case on its own).
+   */
+  private countingRule(task: DocRecord, measure: LandingMeasure): CountingRule | undefined {
+    const facts = this.landingFacts();
+    if (!measure.armed) return undefined;
+    const verdict = measure.verdict;
+    const tip =
+      verdict !== undefined && (verdict.state === "landed" || (verdict.state === "not-landed" && verdict.tip !== undefined))
+        ? verdict.tip
+        : this.currentClaimTip(task);
+    return (row) =>
+      countsAsLandedPass(
+        row,
+        {
+          mode: measure.mode,
+          ...(measure.latestClaimAt !== undefined ? { latestClaimAt: measure.latestClaimAt } : {}),
+          ...(tip !== undefined ? { tip } : {}),
+        },
+        facts,
+      );
+  }
+
+  /** The tip recorded on the current claim, when the task still holds one. */
+  private currentClaimTip(task: DocRecord): string | undefined {
+    return readClaimRecord(task)?.end_tip;
   }
 
   private async _doneImpl(
@@ -4343,6 +4633,9 @@ export class TaskWorkflowService {
     const removals = await this.measureAnchorRemovals(task);
     if (!removals.ok) return removals;
     const supersession = await this.resolveScopeSupersession(task);
+    const measured = await this.measureLanding(task);
+    if (!measured.ok) return measured;
+    const landing = measured.value;
     const evaluated = this.evaluateDoneFloors(
       task,
       {
@@ -4352,6 +4645,7 @@ export class TaskWorkflowService {
       stampBinding.value,
       removals.value,
       supersession,
+      this.countingRule(task, landing),
     );
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
@@ -4371,7 +4665,7 @@ export class TaskWorkflowService {
       if (!decided.ok) return decided;
     }
 
-    const asyncFloor = await this.findAsyncFloor(task);
+    const asyncFloor = await this.findAsyncFloor(task, landing);
     if (!asyncFloor.ok) return asyncFloor;
     if (asyncFloor.value !== null) return err(asyncFloor.value.error);
 
@@ -4400,9 +4694,17 @@ export class TaskWorkflowService {
     // `lore assess` does not depend on the slug appearing in a merge message. Measured here, after every
     // floor passed and BEFORE the archive walk and the worktree cleanup below (cleanup may remove the
     // worktree this reads). One git call (`rev-parse HEAD`); the base comes from the claim audit row.
-    const rangeRecorded = await this.recordCommitRange(task, nowIso, opts.by);
-    if (!rangeRecorded.ok) return rangeRecorded;
-    task = rangeRecorded.value;
+    const measuredLanding = landing.verdict?.state === "landed" ? landing.verdict : undefined;
+    // reason: commitless work has no commit range to record; nothing is written for it (and so nothing for a rival closer to race).
+    if (measuredLanding?.kind !== "no-change") {
+      const rangeRecorded = await this.recordCommitRange(task, nowIso, opts.by);
+      if (!rangeRecorded.ok) return rangeRecorded;
+      task = rangeRecorded.value;
+    }
+    // reason: the landing is written in the FIRST archive step (one CAS-guarded write with the status), so a rival closer
+    // that read the same version loses the compare-and-set and re-reads an archived task. A record written by the
+    // integrate step is kept and completed; a record that already says the same thing is not rewritten.
+    const landingExtra = measuredLanding === undefined ? undefined : this.landingExtraFor(task, measuredLanding, nowIso);
 
     const walk = computeArchiveWalk(task.status);
     const transitions: DocStatus[] = [];
@@ -4431,6 +4733,7 @@ export class TaskWorkflowService {
           ...(overrideReason !== undefined ? { overrideReason } : {}),
           ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
           ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+          ...(landingExtra !== undefined && transitions.length === 0 ? { landing: landingExtra } : {}),
         },
       );
       if (!stepResult.ok) return stepResult;
@@ -4602,7 +4905,35 @@ export class TaskWorkflowService {
         }
         mainBefore = claimBase;
       }
-      const record: TaskLanding = { ...landing, main_before: mainBefore, recorded_at: nowIso };
+      // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
+      // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
+      // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).
+      const startHead = readClaimRecord(task)?.start_head ?? TaskWorkflowService.claimBaseFor(rows, landing.branch);
+      const verdict: LandingVerdict =
+        startHead === undefined
+          ? { state: "unmeasurable", reason: `no claim of this task recorded a start commit for ${landing.branch}` }
+          : landingOf({ start_head: startHead, branches: [landing.branch], worktrees: [], end_tip: landing.branch_head }, this.landingFacts());
+      if (verdict.state !== "landed") {
+        firstFailure ??= {
+          code: "VALIDATION_ERROR",
+          field: "extra.landing",
+          message:
+            `${task.slug}: the landing of ${landing.branch} could not be measured (${verdict.reason}); ` +
+            "re-claim the task on a branch so its work has a start",
+          value: task.slug,
+        };
+        continue;
+      }
+      const record: TaskLanding = {
+        ...landing,
+        main_before: mainBefore,
+        recorded_at: nowIso,
+        kind: verdict.kind,
+        start_head: verdict.start_head,
+        tip: verdict.tip,
+        integration_head: landing.main_after,
+        measured_at: nowIso,
+      };
       const written = await this.writer.writeDoc({
         doc: task,
         // a re-landing replaces `landing` (singular) but the replaced one is appended to `landing_history`, so nothing is lost
@@ -4683,16 +5014,43 @@ export class TaskWorkflowService {
     return ok(undefined);
   }
 
-  /** Whether `task` holds a landing whose commit is on the integration branch; any unmeasurable step answers false. */
+  /**
+   * Whether `task` holds a landing record (written when `lore integrate` landed its branch) whose commit is on the
+   * integration branch; any unmeasurable step answers false. BR-1337 (one working copy carries one unlanded task) keeps
+   * reading the record: a task that is merely claimed, with nothing committed yet, still occupies its working copy.
+   */
   private async isLandingOnMain(task: DocRecord): Promise<boolean> {
-    const landing = readTaskLanding(task.extra);
-    const probe = this.worktreeProbe;
-    if (landing === undefined || probe === undefined) return false;
-    const cwd = probe.currentWorkingDirectory();
-    const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return false;
-    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
-    return offMain.ok && offMain.value === 0;
+    if (readTaskLanding(task.extra) === undefined) return false;
+    // reason: whether the work landed is the one predicate's answer ({@link landingOf} through `measureLanding`), never a second
+    // reachability computation here; any measurement that fails reads as not landed.
+    const measured = await this.measureLanding(task);
+    return measured.ok && measured.value.verdict?.state === "landed";
+  }
+
+  /**
+   * The `extra.landing` record `done` writes for work it measured: the integrate-written record (if any) completed with
+   * `kind`/`start_head`/`tip`/`integration_head`/`measured_at`. `undefined` when the stored record already carries the same
+   * kind, start and tip (a closer that lost a race, or integrate, already wrote it: no second write).
+   */
+  private landingExtraFor(
+    task: DocRecord,
+    verdict: Extract<LandingVerdict, { state: "landed" }>,
+    nowIso: string,
+  ): Record<string, unknown> | undefined {
+    const stored = readMeasuredLanding(task.extra);
+    if (stored !== undefined && stored.kind === verdict.kind && stored.start_head === verdict.start_head && stored.tip === verdict.tip) {
+      return undefined;
+    }
+    const existing = task.extra["landing"];
+    const base = typeof existing === "object" && existing !== null ? (existing as Record<string, unknown>) : {};
+    return {
+      ...base,
+      kind: verdict.kind,
+      start_head: verdict.start_head,
+      tip: verdict.tip,
+      integration_head: verdict.integration_head,
+      measured_at: nowIso,
+    };
   }
 
   /**
@@ -4735,7 +5093,6 @@ export class TaskWorkflowService {
 
   /** The probe, or a loud wiring error: cleanup needs `worktreeRemoval` AND this probe, both wired by `app.ts`. */
   private requireWorktreeProbe(): WorktreeGitProbe {
-    if (this.worktreeProbe === undefined) throw new Error(`TaskWorkflowService: ${NO_WORKTREE_PROBE_REASON}`);
     return this.worktreeProbe;
   }
 
@@ -4974,6 +5331,24 @@ export class TaskWorkflowService {
     by: string,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: BR-1468 is decided at claim time, so an anchor added under an open NO-BRANCH claim would let the task close as
+    // no-change from a pass at main's head while its file changes were never measured. Refused (not "release the claim"):
+    // silently changing another run's lease mid-work hides a conflict. Every anchor writer ends here (`lore anchor add`/`set`,
+    // `lore_anchor_set`), so one check covers all of them. Removing or keeping anchors is never refused.
+    const held = readClaimRecord(task);
+    const existingAnchors = new Set(extractFileAnchors(task));
+    if (held !== undefined && held.worktree === undefined && held.branch === undefined && newAnchors.some((anchor) => !existingAnchors.has(anchor))) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "file_anchors",
+        message:
+          `Task "${task.slug}" holds an open claim with no branch or worktree (held by ${held.by}), so its work cannot change files: an anchor ` +
+          `cannot be added while a no-branch claim is open [anchor: work-needs-branch]. Release the claim and re-claim on a branch ` +
+          `(\`lore release ${task.slug}\`, then \`lore claim ${task.slug} --worktree <path>\`) before adding the anchor. Nothing was written.`,
+        value: "work-needs-branch",
+        rule: "BR-1468",
+      });
+    }
     const nowIso = now();
     const newExtra: Record<string, unknown> = { ...task.extra, file_anchors: newAnchors };
     return this.writeTaskExtra(
@@ -5342,7 +5717,7 @@ export class TaskWorkflowService {
     const landed = new Map<DocId, string>();
     const declared = plan.extra?.["integration_branch"];
     const probe = this.worktreeProbe;
-    if (typeof declared !== "string" || declared === "" || probe === undefined) return ok(landed);
+    if (typeof declared !== "string" || declared === "") return ok(landed);
     const cwd = probe.currentWorkingDirectory();
     if (!probe.branchTip(cwd, declared).ok) return ok(landed);
 
@@ -5633,28 +6008,10 @@ export class TaskWorkflowService {
     const worktree = claim?.worktree;
 
     if (worktree === undefined) {
-      // reason: task-the-uncommitted-worktree-guard-treats-no-claim-at-all-
-      // as-a — `claim?.worktree === undefined` is ALSO true when there is no
-      // claim at all (never claimed, or already released). Check the RAW
-      // claim presence FIRST: with nothing recorded, there is nothing to
-      // measure and nothing to escalate — this is the fix, not a proxy for
-      // it (hasRecordedClaim reads task.extra.claim directly, never through
-      // readClaim's schema-validated result, so a malformed claim object
-      // still counts as "recorded" here rather than re-collapsing into
-      // no-claim).
-      if (!hasRecordedClaim(task)) {
-        return null;
-      }
-      // reason: Q3 opt-in-hole close — a claim that DOES exist but recorded
-      // NO worktree bypasses the primary predicate entirely (nothing to
-      // measure). Rather than a silent pass-through, escalate ONLY when this
-      // call is demonstrably running from inside a real git repository
-      // (callerCwd supplied AND it resolves as one) — that combination means
-      // --worktree was simply never passed at claim time, not that this
-      // corpus/session has nothing to do with git at all.
-      if (callerCwd !== undefined && isInsideGitRepo(callerCwd)) {
-        return buildNoWorktreeMismatchRefusal({ actionLabel, taskSlug: task.slug, callerCwd });
-      }
+      // reason: BR-159 (#304) — a claim that recorded no working copy is corpus-only work (an anchored task cannot be claimed
+      // without a branch, BR-1468), proven at main's head by the counting rule; the shared checkout's own uncommitted files
+      // say nothing about it, so there is nothing to refuse here, from inside a repository or not.
+      void callerCwd;
       return null;
     }
 
@@ -5979,11 +6336,11 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    escapes: { overrideReason?: string; noNewTestsReason?: string; reason?: string } = {},
+    escapes: { overrideReason?: string; noNewTestsReason?: string; reason?: string; landing?: Record<string, unknown> } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const written = await this.writer.writeDoc({
       doc: task,
-      patch: { status: newStatus },
+      patch: { status: newStatus, ...(escapes.landing !== undefined ? { extra: { ...task.extra, landing: escapes.landing } } : {}) },
       action: "update",
       changeSummary,
       auditAction: "update",
@@ -5999,6 +6356,7 @@ export class TaskWorkflowService {
           ? { no_new_tests_reason: escapes.noNewTestsReason, no_new_tests_declared: true }
           : {}),
         ...(escapes.reason !== undefined ? { reason: escapes.reason } : {}),
+        ...(escapes.landing !== undefined ? { landing: escapes.landing } : {}),
       },
       auditSessionId: `done-${task.id}`,
       lock: "none",

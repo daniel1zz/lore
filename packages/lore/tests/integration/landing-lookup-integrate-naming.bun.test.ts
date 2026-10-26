@@ -96,14 +96,30 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   // reason: the branch is unmeasured only AT CLAIM TIME (the claim then records the path alone); the landing lookup
   // that runs later reads the worktree's branch from git for real.
   let claiming = true;
+  let hideNextPathProbe = false;
   const detectBranch = recordsBranch
     ? undefined
-    : async (path: string) => (claiming ? ({ status: "unmeasured" } as const) : detectWorktreeBranch(path));
+    : async (path: string) => {
+        if (!claiming) return detectWorktreeBranch(path);
+        hideNextPathProbe = true;
+        return { status: "unmeasured" } as const;
+      };
   const svc = new TaskWorkflowService(
     store, undefined, { claimTtlMinutes: 120 },
     undefined, undefined, undefined, undefined, undefined, undefined,
     detectBranch, undefined, undefined,
-    createRealWorktreeProbe(repo),
+    // reason: a path-only claim is the legacy shape; today's claim refuses a readable worktree with no branch (BR-1468), so the
+    // fixture hides the path from the one existence probe the refusal makes, right after the unmeasured branch read.
+    {
+      ...createRealWorktreeProbe(repo),
+      pathExists: (path: string) => {
+        if (hideNextPathProbe) {
+          hideNextPathProbe = false;
+          return false;
+        }
+        return createRealWorktreeProbe(repo).pathExists(path);
+      },
+    },
   );
   const plan = await cs.create({ type: "plan", title: "Landing name plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
@@ -111,18 +127,19 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
     type: "task", title: "Landing name task", parent_id: plan.value.id, content: "body", extra: { plan_id: plan.value.id },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
+  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: realWorktree });
+  if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
+  claiming = false;
+  // reason: the landing predicate counts a pass recorded AFTER the latest claim and bound to a clean commit on main (head_sha).
   const ev = await svc.recordVerifiedEvidence(
     task.value.id,
     {
       oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: run(repo, "rev-parse", "main"), worktree_dirty: false },
     },
-    "2026-10-19T09:00:00.000Z",
+    new Date(Date.now() + 1000).toISOString(),
   );
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
-  const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: realWorktree });
-  if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
-  claiming = false;
   // reason: BR-1353 — a first claim starts from main, so the branch's own work is committed AFTER the claim.
   writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
   run(realWorktree, "add", "own-file.txt");
@@ -171,12 +188,16 @@ describe("LAND-NAME: the landing lookup matches the branch name `lore integrate`
     expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", head_source: "landing", landing_commit: mergeSha });
   }, 60_000);
 
-  it("LAND-NAME (b): no landing record, path-only claim -> done is refused [floor: not-landed]; nothing is backfilled from merge(<branch>)", async () => {
+  it("LAND-NAME (b): no landing record, path-only claim -> done archives by reachability (kind commits); nothing is backfilled from merge(<branch>)", async () => {
     const f = await fixture(false);
     const { landing, done } = await landAndFinish(f, false);
-    expect(landing).toBeUndefined();
-    expect(done.ok).toBe(false);
-    expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
+    expect(landing).toBeUndefined(); // integrate recorded nothing (no recorder wired)
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    // the branch tip is on main (merge commit), so the one predicate lands it; the record is the measured one only
+    const stored = done.value.task.extra["landing"] as Record<string, unknown>;
+    expect(stored["kind"]).toBe("commits");
+    expect(stored["branch"]).toBeUndefined();
   }, 60_000);
 
   it("LAND-NAME (c): control, the claim recorded its branch (auto-capture) -> same outcome", async () => {

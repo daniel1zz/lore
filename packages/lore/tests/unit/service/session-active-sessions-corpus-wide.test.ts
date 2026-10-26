@@ -60,9 +60,10 @@ import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
@@ -143,7 +144,7 @@ describe("bootstrap active_sessions — NEGATIVE: zero-plan corpus, adhoc claim 
     const { corpusService, taskWorkflowService, sessionService, store } = makeServices();
     await createPrd(corpusService);
     const adhoc = await createAdhocTask(corpusService, "Investigate the flaky timeout");
-    await taskWorkflowService.claim(adhoc.id, { by: "agent:incident-repro", harnessRun: runOfName("agent:incident-repro"), worktree: "/repo/.worktrees/t1" });
+    await taskWorkflowService.claim(adhoc.id, { by: "agent:incident-repro", harnessRun: runOfName("agent:incident-repro"), worktree: "/repo/.worktrees/t1", branch: "b-t1" });
 
     // This is the exact incident shape today: no plan exists anywhere in the
     // corpus, so `activePlanIds` (pre-fix) is empty and `activeTasks` is empty.

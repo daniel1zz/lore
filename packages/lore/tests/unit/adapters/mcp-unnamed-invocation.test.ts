@@ -33,6 +33,7 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore, liveInvocation } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const REASON = refusalNamingHowToBecomeKnown("The server has no known party.");
 
 /** Every refusal of a call with no known party names both remedies (BR-1351). */
@@ -69,7 +70,7 @@ function fixture(env: Record<string, string>): Fixture {
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, async () => ok(new Set())),
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],

@@ -44,6 +44,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── (a) BEHAVIOUR fixtures ─────────────────────────────────────────────────
 
 const AC_ID = "AC-PORT-1";
@@ -140,7 +141,7 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
         undefined,
         undefined,
         undefined,
-        makeMismatchedPlanPort(),
+        makeMismatchedPlanPort(), undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
       );
 
       const evidenceResult = await taskWorkflowService.addEvidence(taskId, {
@@ -206,7 +207,7 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
         corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
         undefined,
         undefined,
-        makeMismatchedAdhocPort(),
+        makeMismatchedAdhocPort(), undefined, undefined, undefined, fakeWorktreeProbe(),
       );
 
       const evidenceResult = await taskWorkflowService.addEvidence(taskId, {

@@ -33,6 +33,7 @@ import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 let store: InMemoryStore;
 let corpusService: CorpusService;
 
@@ -53,7 +54,7 @@ function makeApp(): App {
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe()),
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],

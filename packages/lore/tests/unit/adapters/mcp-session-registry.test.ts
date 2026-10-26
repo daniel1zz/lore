@@ -66,6 +66,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Test Infrastructure (mirrors mcp-session-tools.test.ts) ─────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
@@ -82,7 +83,7 @@ function makeApp(): App {
     store,
     new NoOpTelemetry(),
     { claimTtlMinutes: 120 },
-    async () => ok(new Set()),
+    async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
   sessionService = new SessionService(store, {
     claimTtlMinutes: 120,

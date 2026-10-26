@@ -62,6 +62,7 @@ import { sessionEnvFor } from "../../helpers/session-actor";
 import { withTestRun } from "../../helpers/test-run-identity";
 import { actedStore } from "../../live-invocation.js";
 
+import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -139,7 +140,7 @@ function makeStore(kind: StoreKind): StoreHandle {
 
 function services(store: StoreInterface) {
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
+  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
   twf.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = override refused
   return {
     corpus,
