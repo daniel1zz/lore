@@ -112,6 +112,13 @@ import {
   taskVersionBindings,
   taskWriteBindings,
 } from "./migrations/migration-039.js";
+import {
+  MIGRATION_040_SQL,
+  planUnrecoverableClaims,
+  SELECT_CLAIM_AUDIT_ROWS_SQL,
+  SELECT_TASK_CLAIM_HOLDERS_SQL,
+  unrecoverableClaimAuditEntry,
+} from "./migrations/migration-040.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -1176,6 +1183,48 @@ export class TursoStore implements StoreInterface {
             // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
           }
           throw new MigrationFailedError(39, step, this.localPath, error);
+        } finally {
+          tx.close();
+        }
+      }
+
+      if (currentVersion < 40) {
+        // reason: migration-040 marks released pre-#356 claims that hold neither start_head nor end_tip unrecoverable (#473),
+        // planned by the same pure function the SQLite store runs. It reads NO git, so a replica with no checkout applies it.
+        let step = "begin transaction";
+        const tx = await this.client.transaction("write");
+        try {
+          step = "plan the unrecoverable-claim markers";
+          const taskRs = await tx.execute(SELECT_TASK_CLAIM_HOLDERS_SQL);
+          const tasks = taskRs.rows.map((row) => ({ id: rowStr(row, "id"), slug: rowStr(row, "slug"), extra: rowStr(row, "extra") }));
+          const auditRs = await tx.execute(SELECT_CLAIM_AUDIT_ROWS_SQL);
+          const auditRows = auditRs.rows.map((row) => ({
+            id: rowNum(row, "id"),
+            timestamp: rowStr(row, "timestamp"),
+            action: rowStr(row, "action"),
+            doc_id: rowStr(row, "doc_id"),
+            details: rowStr(row, "details"),
+          }));
+          for (const mark of planUnrecoverableClaims(tasks, auditRows)) {
+            step = `mark the claim of ${mark.slug} on ${mark.branch}`;
+            const by = requireMigrationActor(this.migrationActor, mark.slug);
+            const headRs = await tx.execute(SELECT_AUDIT_HEAD_SQL);
+            const headRow = headRs.rows[0];
+            const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+            const entry = unrecoverableClaimAuditEntry(mark, by, new Date().toISOString());
+            await tx.execute({ sql: INSERT_AUDIT_SQL, args: auditBindings(entry, prevHash) as InValue[] });
+          }
+          step = "set user_version 40";
+          await tx.executeMultiple(MIGRATION_040_SQL);
+          step = "commit";
+          await tx.commit();
+        } catch (error) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already closed — the failure below is what to report.
+          }
+          throw new MigrationFailedError(40, step, this.localPath, error);
         } finally {
           tx.close();
         }

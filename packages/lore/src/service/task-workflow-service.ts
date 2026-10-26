@@ -429,6 +429,8 @@ import {
 import {
   countsAsLandedPass,
   landingOf,
+  unrecoverableBranchVerdict,
+  UNRECOVERABLE_CLAIM_ACTION,
   readMeasuredLanding,
   recordClaimTip,
   type LandingGitFacts,
@@ -692,6 +694,14 @@ interface LandingMeasure {
   readonly latestClaimAt?: string;
   readonly branches?: readonly string[];
   readonly verdict?: LandingVerdict;
+  /** The claims migration 040 classified unrecoverable (listed, never judged); absent when the task has none. */
+  readonly unrecoverable?: UnrecoverableClaims;
+}
+
+/** The unrecoverable claims of one task, listed in `lore done`'s output with their count (BR-1423). */
+export interface UnrecoverableClaims {
+  readonly count: number;
+  readonly branches: readonly string[];
 }
 
 /** The evidence-counting rule of one task: which pass rows satisfy the attested-pass floor under the landing predicate. */
@@ -776,6 +786,8 @@ export interface DoneResult {
    * closes D4) — present only after a real archive walk with the archive port wired; possibly empty.
    */
   issue_close?: IssueCloseItem[];
+  /** The claims landing left out of its judgement as unrecoverable (BR-1423), listed so none is dropped silently. */
+  unrecoverable_claims?: UnrecoverableClaims;
 }
 
 /**
@@ -4444,14 +4456,43 @@ export class TaskWorkflowService {
     if (!claimRows.ok) return claimRows;
     const releaseRows = await this.store.queryAudit({ doc_id: task.id, action: "release" });
     if (!releaseRows.ok) return releaseRows;
-    const claims = claimRows.value
+    const markerRows = await this.store.queryAudit({ doc_id: task.id, action: UNRECOVERABLE_CLAIM_ACTION });
+    if (!markerRows.ok) return markerRows;
+    // reason: BR-1423 / #473 — a claim migration 040 marked is a recorded fact (one marker row per claim, keyed by the claim's
+    // timestamp), not a runtime skip rule: only a marked claim leaves the judgement, and it is listed.
+    const markedAt = new Set(markerRows.value.map((row) => row.details?.["claim_at"]));
+    const claimHistory = claimRows.value.map((row) => ({
+      row,
+      unrecoverable: markedAt.has(row.timestamp) ? { branch: TaskWorkflowService.unrecoverableBranchOf(row, markerRows.value) } : undefined,
+    }));
+    const measurableRows = claimHistory.filter((claim) => claim.unrecoverable === undefined).map((claim) => claim.row);
+    const unrecoverableBranches = claimHistory.flatMap((claim) => (claim.unrecoverable?.branch !== undefined ? [claim.unrecoverable.branch] : []));
+    const unrecoverable: UnrecoverableClaims | undefined =
+      unrecoverableBranches.length > 0 ? { count: unrecoverableBranches.length, branches: [...new Set(unrecoverableBranches)] } : undefined;
+    const claims = measurableRows
       .filter((row) => row.details?.["orphaned_dirty"] !== true)
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     const current = readClaimRecord(task);
     const latest = claims[claims.length - 1];
+    if (unrecoverable !== undefined) {
+      const unlanded = unrecoverableBranchVerdict(unrecoverable.branches, this.landingFacts());
+      if (unlanded !== undefined) return ok({ armed: true, mode: "unclaimed", branches: unrecoverable.branches, verdict: unlanded, unrecoverable });
+      if (latest === undefined && current === undefined) {
+        const head = this.landingFacts().integrationBranch();
+        return ok({
+          armed: true,
+          mode: "unclaimed",
+          branches: unrecoverable.branches,
+          verdict: head.ok
+            ? { state: "not-landed", reason: "no-measurable-claim", integration_branch: head.value }
+            : { state: "unmeasurable", reason: `the integration branch is unreadable (${head.reason})` },
+          unrecoverable,
+        });
+      }
+    }
     if (latest === undefined && current === undefined) return ok({ armed: false, mode: "unclaimed" });
 
-    const names = await this.landingCandidateNames(claimRows.value, task);
+    const names = await this.landingCandidateNames(measurableRows, task);
     const worktrees = names.filter((name) => isAbsolute(name));
     const branches = names.filter((name) => !isAbsolute(name));
     const latestWorktree = latest !== undefined ? latest.details?.["worktree"] : current?.worktree;
@@ -4491,7 +4532,15 @@ export class TaskWorkflowService {
       ...(latest !== undefined ? { latestClaimAt: latest.timestamp } : {}),
       branches,
       verdict,
+      ...(unrecoverable !== undefined ? { unrecoverable } : {}),
     });
+  }
+
+  /** The branch a claim-unrecoverable marker recorded for the claim row `claimRow` (matched by the claim's timestamp). */
+  private static unrecoverableBranchOf(claimRow: AuditEntry, markers: readonly AuditEntry[]): string | undefined {
+    const marker = markers.find((row) => row.details?.["claim_at"] === claimRow.timestamp);
+    const branch = marker?.details?.["branch"];
+    return typeof branch === "string" && branch !== "" ? branch : undefined;
   }
 
   /**
@@ -4520,6 +4569,17 @@ export class TaskWorkflowService {
       message =
         `${base} uncommitted-work: the working copy ${verdict.dirty_paths_in ?? ""} has uncommitted changes. Commit or discard them, ` +
         `then re-run \`lore done ${task.slug}\`.`;
+    } else if (verdict.reason === "unrecoverable-claim-branch-unlanded") {
+      reason = "unrecoverable-claim-branch-unlanded";
+      message =
+        `${base} unrecoverable-claim-branch-unlanded: branch ${verdict.branch ?? "<branch>"} (an earlier claim released before tips were ` +
+        `recorded) still exists with commit(s) (tip ${(verdict.tip ?? "").slice(0, 12)}) not on ${verdict.integration_branch}. Land it with ` +
+        `\`lore integrate ${verdict.branch ?? "<branch>"}\` or delete the branch, then re-run \`lore done ${task.slug}\`.`;
+    } else if (verdict.reason === "no-measurable-claim") {
+      reason = "no-measurable-claim";
+      message =
+        `${base} no-measurable-claim: every claim of this task was released before tips were recorded and cannot be measured. ` +
+        `Claim the task again (on a branch, or without one for corpus-only work), record evidence, then re-run \`lore done ${task.slug}\`.`;
     } else {
       reason = "tip-not-on-main";
       message =
@@ -4769,6 +4829,7 @@ export class TaskWorkflowService {
         ? { superseded_scope: [...supersession.superseded] }
         : {}),
       ...(issueClose !== undefined ? { issue_close: issueClose } : {}),
+      ...(landing.unrecoverable !== undefined ? { unrecoverable_claims: landing.unrecoverable } : {}),
       ...(planFact?.kind === "fully_terminal"
         ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }
         : {}),

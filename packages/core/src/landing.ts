@@ -59,7 +59,12 @@ export interface LandingClaimFacts {
 export type LandingKind = "no-change" | "commits";
 
 /** The fixed reasons a landing refuses (`[floor: not-landed]` reason tokens). */
-export type NotLandedReason = "tip-not-on-main" | "uncommitted-work";
+export type NotLandedReason = "tip-not-on-main" | "uncommitted-work" | "unrecoverable-claim-branch-unlanded" | "no-measurable-claim";
+
+/** Audit action of the marker migration 040 writes for a claim released before tips were recorded (#473). */
+export const UNRECOVERABLE_CLAIM_ACTION = "claim-unrecoverable";
+/** The reason an unrecoverable claim carries, verbatim in the marker's details. */
+export const UNRECOVERABLE_CLAIM_REASON = "released before tips were recorded";
 
 export type LandingVerdict =
   | {
@@ -189,6 +194,29 @@ export function landingOf(claim: LandingClaimFacts, facts: LandingGitFacts): Lan
     };
   }
   return { state: "landed", kind: "commits", start_head: start, tip, integration_head: head.value, integration_branch: integration.value };
+}
+
+/**
+ * Judges the branch refs of a task's unrecoverable claims (their work range cannot be measured, but a ref that still exists
+ * can show work that never landed): a ref gone, or whose tip is on the integration branch, is excluded; a ref whose tip is
+ * NOT reachable from it refuses. `undefined` means every ref is gone or landed (the claims are listed, not judged).
+ *
+ * @param branches - the branch names of the task's unrecoverable claims
+ */
+export function unrecoverableBranchVerdict(branches: readonly string[], facts: LandingGitFacts): LandingVerdict | undefined {
+  const integration = facts.integrationBranch();
+  if (!integration.ok) return { state: "unmeasurable", reason: `the integration branch is unreadable (${integration.reason})` };
+  for (const name of branches) {
+    const tip = facts.branchTip(name);
+    if (!tip.ok) return { state: "unmeasurable", reason: `branch ${name} cannot be read (${tip.reason})` };
+    if (tip.value === null) continue; // ref gone: listed and excluded
+    const onMain = facts.isOnIntegration(tip.value);
+    if (!onMain.ok) return { state: "unmeasurable", reason: `the tip ${tip.value.slice(0, 12)} of branch ${name} cannot be checked (${onMain.reason})` };
+    if (!onMain.value) {
+      return { state: "not-landed", reason: "unrecoverable-claim-branch-unlanded", branch: name, tip: tip.value, integration_branch: integration.value };
+    }
+  }
+  return undefined;
 }
 
 /** How the task was claimed, which decides what a counting pass must prove. */
