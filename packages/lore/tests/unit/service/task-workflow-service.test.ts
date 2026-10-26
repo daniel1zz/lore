@@ -498,13 +498,15 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     if (!release.ok) return;
     expect(release.value.extra["claim"]).toBeUndefined();
 
-    const versions = await store.findVersions(taskId);
-    expect(versions.ok).toBe(true);
-    if (!versions.ok) return;
-    const latestVersion = versions.value[0];
-    expect(latestVersion?.change_summary).toContain("forced");
-    expect(latestVersion?.change_summary).toContain("alice");
-    expect(latestVersion?.change_summary).toContain("stale worker");
+    // A release is a working-state write: no versions row; the forced override lives in the audit row
+    // (spec-history-records-content-a-working-state-only-write-adds-no, AC-HC-10).
+    const audit = await store.queryAudit({ doc_id: taskId as never, action: "release" });
+    expect(audit.ok).toBe(true);
+    if (!audit.ok) return;
+    const details = JSON.stringify(audit.value[0]?.details);
+    expect(details).toContain("alice");
+    expect(details).toContain("stale worker");
+    expect(details).toContain("force");
   });
 });
 
@@ -520,13 +522,17 @@ describe("NEGATIVE — steal succeeds and records the previous holder in history
     if (!stolen.ok) return;
     expect(stolen.value.extra["claim"]).toMatchObject({ by: "bob" });
 
-    const versions = await store.findVersions(taskId);
-    expect(versions.ok).toBe(true);
-    if (!versions.ok) return;
-    const latestVersion = versions.value[0];
-    expect(latestVersion?.change_summary).toContain("bob");
-    expect(latestVersion?.change_summary).toContain("alice");
-    expect(latestVersion?.change_summary).toMatch(/previous holder/i);
+    // A steal is a working-state write: no versions row; the previous holder lives in the audit row
+    // (spec-history-records-content-a-working-state-only-write-adds-no, AC-HC-10).
+    const audit = await store.queryAudit({ doc_id: taskId as never, action: "claim" });
+    expect(audit.ok).toBe(true);
+    if (!audit.ok) return;
+    const stealRow = audit.value.find((e) => (e.details as { steal?: boolean } | undefined)?.steal === true);
+    expect(stealRow).toBeDefined();
+    const details = JSON.stringify(stealRow?.details);
+    expect(details).toContain("bob");
+    expect(details).toContain("alice");
+    expect(details).toMatch(/previous/i);
   });
 });
 

@@ -161,14 +161,16 @@ describe("HAPPY — addCodeAnchors/removeCodeAnchors/setCodeAnchors round-trip",
     const versions = await store.findVersions(specId);
     expect(versions.ok).toBe(true);
     if (!versions.ok) return;
-    const latestVersion = versions.value[0];
-    expect(latestVersion?.action).toBe("update");
-    expect(latestVersion?.version).toBe(versionBefore + 1);
+    // code_anchors is working state: the version bumps but no versions row is added; the delta is in the audit row
+    // (spec-history-records-content-a-working-state-only-write-adds-no).
+    expect(versions.value.every((v) => v.version <= versionBefore)).toBe(true);
 
     const audit = await store.queryAudit({ doc_id: specId });
     expect(audit.ok).toBe(true);
     if (!audit.ok) return;
-    expect(audit.value.filter((e) => e.action === "update")).toHaveLength(1);
+    const updates = audit.value.filter((e) => e.action === "update");
+    expect(updates).toHaveLength(1);
+    expect((updates[0]?.details as { state_change?: { keys: string[] } } | undefined)?.state_change?.keys).toEqual(["code_anchors"]);
   });
 
   it("removeCodeAnchors strips the matching entry", async () => {

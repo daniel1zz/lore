@@ -368,13 +368,18 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
 
-    // Sanity: the versions rows for these three writes really do carry action "update",
-    // NOT "claim"/"evidence"/"release" — this is the divergence the join-key design tolerates.
+    // Sanity: claim, evidence and release are working-state writes (spec-history-records-content-a-working-state-only-write-adds-no):
+    // they add NO versions row (only the create row exists) but each lands an audit row carrying the new version,
+    // and verify() must not report them as missing a version.
     const versions = await store.listAllVersions(FAR_PAST);
     expect(versions.ok).toBe(true);
     if (!versions.ok) return;
     const taskVersionActions = versions.value.filter((v) => v.doc_id === taskId).map((v) => v.action);
-    expect(taskVersionActions.filter((a) => a === "update").length).toBe(3);
+    expect(taskVersionActions.filter((a) => a === "update").length).toBe(0);
+    const audits = await store.queryAudit({ doc_id: taskId as never });
+    expect(audits.ok).toBe(true);
+    if (!audits.ok) return;
+    expect(audits.value.filter((e) => ["claim", "evidence", "release"].includes(e.action))).toHaveLength(3);
 
     const result = await auditService.verify();
     expect(result.ok).toBe(true);
