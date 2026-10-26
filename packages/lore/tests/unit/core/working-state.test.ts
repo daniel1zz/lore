@@ -1,5 +1,6 @@
+// @reads packages/**
 /**
- * AC-HC-2 — working-state classifier: isContentChange fails safe (unknown key = content),
+ * AC-HC-2— working-state classifier: isContentChange fails safe (unknown key = content),
  * WORKING_STATE_KEYS is the single list; buildStateChange delta shape (spec Scope 3).
  */
 import { describe, it, expect } from "vitest";
