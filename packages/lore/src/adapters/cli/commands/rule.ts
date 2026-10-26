@@ -14,9 +14,13 @@
  *
  *   propose <spec> add --leaf <leaf> --statement <s> --example <e>... --enforced-by <v>
  *   propose <spec> modify <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
- *   propose <spec> amend <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
- *       Rewrite THIS spec's own proposed `add` in place (same id and leaf; --example replaces wholesale; must change
- *       something). Refused (exit 4, naming the id) for a live id or one another spec proposes.
+ *   propose <spec> amend <BR-n> [--leaf <leaf>] [--statement <s>] [--example <e>...] [--enforced-by <v>]
+ *       Rewrite THIS spec's own proposed `add` in place (same id; --example replaces wholesale; must change
+ *       something). --leaf moves it to another business leaf (RuleChangeService.proposeAmendOfProposal re-points the
+ *       registry row via repointProposedRuleAndUpdateSpec). Refused (exit 4, naming the id or op) for a live id, one
+ *       another spec proposes, or a modify / retire entry. A flag the op does not take (--leaf on modify / retire /
+ *       withdraw, --note off retire, --statement / --example / --enforced-by on retire / withdraw) is exit 2
+ *       (PROPOSE_FLAG_OPS).
  *   propose <spec> withdraw <BR-n>                       [--correction "<why>" on a locked spec, BR-1069]
  *       Remove THIS spec's own unlanded modify / retire entry (one version, audited); refused for an `add`.
  *   propose <spec> retire <BR-n> --note <why>            [--correction "<why>" on a locked spec, BR-1069]

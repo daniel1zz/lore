@@ -29,6 +29,8 @@
  *   - Every method returns `Result<_, LoreError>`; a domain refusal never throws.
  *   - `add` reserves the next permanent BR id in registry state `proposed` AND writes the spec in ONE store
  *     transaction (`reserveProposedRuleAndUpdateSpec`): a refused or stale write burns no id; NO leaf is touched.
+ *   - `amend --leaf` moves a proposed `add` to another business leaf and re-points its registry row in ONE
+ *     transaction (`repointProposedRuleAndUpdateSpec`); no leaf document is written.
  *   - `modify` / `retire` name a rule that is `live` in the tree; a rule another spec already modifies or retires
  *     (that spec not deprecated) is refused naming that spec. One spec holds at most one entry per rule id: a
  *     second `modify` / `retire` of the same id replaces its earlier entry.
@@ -81,7 +83,7 @@ export type ProposeRuleChangeInput =
   | { op: "amend"; id: string; leaf?: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
   | { op: "withdraw"; id: string };
 
-/** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place. */
+/** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place (`leaf` moves it). */
 type AmendInput = Extract<ProposeRuleChangeInput, { op: "amend" }>;
 
 /** The `withdraw` member of {@link ProposeRuleChangeInput}: removes THIS spec's own unlanded `modify` / `retire` entry. */
@@ -164,7 +166,10 @@ export class RuleChangeService implements RuleChangeLandingPort {
    * @param specRef - Spec id or slug; a non-spec doc → VALIDATION_ERROR.
    * @param input - `add` (reserves the next BR id, `proposed`), `modify` (a live id; at least one field),
    *   `retire` (a live id; a non-blank note) or `amend` (an id THIS spec proposed and has not landed; at least one
-   *   field that differs; rewrites that `add` entry in place, keeping its id and leaf; `examples` replace wholesale).
+   *   field that differs, or a `leaf`; rewrites that `add` entry in place keeping its id; `examples` replace
+   *   wholesale; `amend --leaf` moves the entry to another business leaf (validated by `resolveBusinessLeaf`, as
+   *   `add --leaf` is) and re-points the registry row via `repointProposedRuleAndUpdateSpec` — refused for a
+   *   modify / retire entry, which has no proposed leaf).
    * @param opts.correction - required on a LOCKED spec; a blank reason → VALIDATION_ERROR `correction.reason`.
    * @returns `{ change, doc }` — the stored entry (an `add` carries its reserved id) and the updated spec.
    *   VALIDATION_ERROR for an invalid input, an unknown / non-live id, a rule another spec already changes
@@ -647,7 +652,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
   }
 
   /**
-   * `amend`: rewrite this spec's own proposed `add` entry in place (same id, same leaf). The locked-spec exit is the
+   * `amend`: rewrite this spec's own proposed `add` entry in place (same id; the leaf changes only when `input.leaf`
+   * names another business leaf, in which case {@link writeRepoint} moves the registry row too). The locked-spec exit is the
    * unchanged BR-1069 correction ({@link resolveLockExit}); the entry is re-read on every CAS attempt.
    * @returns VALIDATION_ERROR naming the id when it is not an unlanded `add` of THIS spec (live, proposed by
    *   another spec, unknown, a modify/retire of this spec, landed) or when the amend changes nothing.
