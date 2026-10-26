@@ -326,3 +326,35 @@ describe("AC-IS-4 both verbs source the retired refusal from one classifier", ()
     expect(reportIssueResult.stderr).toContain(buildRetiredFeedbackUpstreamError().message);
   });
 });
+
+// AC-IL-4 (spec-the-issue-loop-baseline-states-github-owned-issues-stale, BR-506): with nothing configured and with a
+// destination in the retired form, BOTH read verbs are refused with exit exactly 4.
+describe("AC-IL-4 both read verbs refuse an unconfigured and a retired-form destination with exit 4", () => {
+  let unconfiguredDir: string;
+
+  beforeAll(() => {
+    unconfiguredDir = mkdtempSync(join(tmpdir(), TMP_PREFIX + "unconfigured-"));
+    expect(unconfiguredDir.startsWith(REPO_ROOT)).toBe(false);
+    initCorpus(unconfiguredDir);
+  });
+
+  afterAll(() => {
+    rmSync(unconfiguredDir, { recursive: true, force: true });
+  });
+
+  it("AC-IL-4 no destination configured: lore issues and lore report-issue --list each exit exactly 4", () => {
+    for (const args of [["issues"], ["report-issue", "--list"]]) {
+      const result = runLore(args, unconfiguredDir);
+      expect(result.exitCode, `${args.join(" ")}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(4);
+      expect(result.stdout.startsWith("Corpus: ")).toBe(false);
+    }
+  });
+
+  it("AC-IL-4 retired-form destination: lore issues and lore report-issue --list each exit exactly 4", () => {
+    for (const args of [["issues"], ["report-issue", "--list"]]) {
+      const result = runLore(args, retiredDir);
+      expect(result.exitCode, `${args.join(" ")}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(4);
+      expect(result.stderr).toContain("retired SQLite shape");
+    }
+  });
+});

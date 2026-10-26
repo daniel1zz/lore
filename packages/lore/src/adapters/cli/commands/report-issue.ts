@@ -361,8 +361,9 @@ export default defineLoreCommand({
       // tools.ts`'s existing lazy import of THIS file). `--open`/
       // `--resolved`/`--all`/`--severity`/`--category`/`--verify` are not
       // flags on this command at all, so this branch always runs the plain,
-      // unfiltered GitHub listing — the same one `lore issues` (no flags)
-      // renders.
+      // unfiltered GitHub listing of every issue whatever its status — the
+      // same one `lore issues --all` renders, NOT bare `lore issues` (which
+      // shows unfinished issues only).
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
         return await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);

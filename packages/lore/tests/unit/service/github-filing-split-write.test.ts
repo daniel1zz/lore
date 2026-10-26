@@ -216,6 +216,33 @@ describe("GS-T7: fileGithubIssue never writes the corpus", () => {
     expect(fileIssueMock).not.toHaveBeenCalled();
   });
 
+  it("AC-IL-1 ERROR: a failed prior-issue state read fails the filing with code TRANSPORT_UNAVAILABLE and makes no create call", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
+    ghRunMock.mockResolvedValue(err({ code: "TRANSPORT_UNAVAILABLE", message: "offline", retryable: true }));
+    const { service, writes } = makeCorpusService();
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(service));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(result.error.code).toBe("TRANSPORT_UNAVAILABLE");
+    expect(fileIssueMock).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it("AC-IL-2 STATE: a different description under the title of a still-open earlier issue is retried with the earlier number and creates nothing", async () => {
+    writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
+    const different: GithubReportInput = { ...INPUT, description: "A wholly different description of another problem", actual: "something else" };
+    const { service, writes } = makeCorpusService();
+    const result = await fileGithubIssue(different, CFG, makeContext(service));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.retried).toBe(true);
+    expect(result.value.number).toBe(99);
+    expect(fileIssueMock).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+  });
+
   it("ERROR: a state payload without a state is a validation error, never read as closed", async () => {
     writePriorReceipts([["01PRIORKEY0000000000000A", 99]]);
     ghRunMock.mockResolvedValue(ok({ stdout: "not json" }));

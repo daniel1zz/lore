@@ -353,3 +353,60 @@ describe("the read flags filter, they are not merely accepted", () => {
     expect(result.exitCode).toBe(2);
   }, 60_000);
 });
+
+// AC-IL-5 (BR-509): exact filters. Its own describe and fixture: the fixture above pins total 2 and its row set.
+describe("AC-IL-5 the severity and category filters are exact", () => {
+  const FILED = 66_001;
+  const HAND_WRITTEN = 66_002;
+  let corpusRoot: string;
+  let ghStubDir: string;
+
+  beforeAll(() => {
+    const built = makeThrowawayCorpus("exact-filters");
+    corpusRoot = built.corpusRoot;
+    built.app.close();
+    const body = assembleIssueBody(
+      { severity: "high", category: "regression", tags: [], reporter_corpus: "fixture", reporter_root_prd: "prd-fixture", idempotency_key: "k-66001" },
+      "fixture description",
+    );
+    ghStubDir = stubDirFor([
+      { number: FILED, title: "filed with the field block", state: "open", body },
+      { number: HAND_WRITTEN, title: "hand written, no field block", state: "open", body: "Just prose, no field block at all." },
+    ]);
+  });
+
+  afterAll(() => {
+    cleanupPayloadGhStubDir(ghStubDir);
+    rmSync(corpusRoot, { recursive: true, force: true });
+  });
+
+  it("AC-IL-5 an unknown severity is a usage error: exit exactly 2", () => {
+    const result = run(["issues", "--severity", "bogus"], corpusRoot, ghStubDir);
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(2);
+  }, 60_000);
+
+  it("AC-IL-5 the category filter is case-sensitive: Regression does not match an issue filed with regression", () => {
+    const exact = listed(["issues", "--all", "--category", "regression", "--json"], corpusRoot, ghStubDir);
+    expect(exact.reports.map((r) => r.number)).toEqual([FILED]);
+    const wrongCase = listed(["issues", "--all", "--category", "Regression", "--json"], corpusRoot, ghStubDir);
+    expect(wrongCase.total).toBe(0);
+    expect(wrongCase.reports).toEqual([]);
+  }, 60_000);
+
+  it("AC-IL-5 a category no issue declares lists 0 rows and exits 0", () => {
+    const result = run(["issues", "--all", "--category", "Security", "--json"], corpusRoot, ghStubDir);
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+    const data = (JSON.parse(result.stdout) as { data: ListPayload }).data;
+    expect(data.total).toBe(0);
+    expect(data.reports).toEqual([]);
+  }, 60_000);
+
+  it("AC-IL-5 an issue without the filing field block matches no filter", () => {
+    const all = listed(["issues", "--all", "--json"], corpusRoot, ghStubDir);
+    expect(all.reports.map((r) => r.number).sort()).toEqual([FILED, HAND_WRITTEN]); // sanity: it is listed unfiltered
+    for (const filter of [["--severity", "high"], ["--severity", "low"], ["--category", "regression"]]) {
+      const data = listed(["issues", "--all", ...filter, "--json"], corpusRoot, ghStubDir);
+      expect(data.reports.map((r) => r.number), filter.join(" ")).not.toContain(HAND_WRITTEN);
+    }
+  }, 120_000);
+});

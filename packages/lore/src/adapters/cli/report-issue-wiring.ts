@@ -94,7 +94,10 @@
  *   - ⛔ `fileGithubIssue` NEVER writes the corpus (AC-GS-10): the former
  *     mint-a-task step and its split-write failure path are deleted. The
  *     retry branch (a prior successful filing for this exact title is in the
- *     local receipt log) returns the prior outcome with no network call.
+ *     local receipt log AND that earlier issue is still open on GitHub)
+ *     returns the prior outcome and creates nothing; the earlier issue's
+ *     state is read from GitHub first, and a failed read fails the filing
+ *     by kind (#397).
  *     `ctx.corpusService` is READ only, to resolve the reporter's root PRD.
  *
  * Side-effect class: IO indirectly — `fileGithubIssue` reads/writes the local
@@ -710,9 +713,10 @@ export function formatReproRefusal(check: Extract<ReproCheck, { ok: false }>): s
  * `IssueReportService.report()` whenever `resolveFeedbackUpstreamCfg`
  * resolved the GITHUB shape, see {@link isGithubUpstreamCfg}). Runs, in
  * order:
- *   1. Retry recognition — reads the LOCAL v2 receipt log and returns a
- *      PRIOR filing's outcome verbatim (no network call at all, and no
- *      corpus write) when one exists for the
+ *   1. Retry recognition — reads the LOCAL v2 receipt log, then reads each
+ *      earlier issue's state from GitHub (a failed read fails the filing by
+ *      kind, never reads as closed), and returns a PRIOR filing's outcome
+ *      verbatim (no corpus write, no create call) when one exists for the
  *      exact same title AND that prior issue is still OPEN
  *      ({@link findPriorGithubFilings}, {@link findOpenPriorFiling}); a closed
  *      prior issue files a new one with the same title (#397).
@@ -729,10 +733,9 @@ export function formatReproRefusal(check: Extract<ReproCheck, { ok: false }>): s
  * @param cfg - the GitHub-shaped `feedback.upstream` config
  * @param ctx - the caller's own corpus/identity context
  * @returns see {@link GithubReportResult}; `err(...)` on the first failing
- *   step (retry recognition itself never fails the call — a receipt-log
- *   read error just means "no known prior filing", proceeding to file
- *   normally, mirroring the dedup-degrade philosophy of "advisory checks
- *   never block filing")
+ *   step. A failed read of an earlier issue's state fails the filing with
+ *   that error's kind (#397); only an unreadable LOCAL receipt log means
+ *   "no known prior filing", proceeding to file normally
  */
 export async function fileGithubIssue(
   rawInput: GithubReportInput,
@@ -753,7 +756,7 @@ export async function fileGithubIssue(
     if (!open.ok) return open;
     const prior = open.value;
     if (prior !== undefined) {
-      // Retry recognition: no network call and no corpus write on this branch.
+      // Retry recognition: the earlier issue is open (state read from GitHub above); no create call and no corpus write on this branch.
       return ok({
         number: prior.number,
         url: prior.url,

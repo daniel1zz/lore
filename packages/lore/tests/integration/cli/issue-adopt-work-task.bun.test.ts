@@ -22,6 +22,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "../../helpers/gh-issue-stub";
 
@@ -162,5 +164,154 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
     expect(task.extra["plan_id"]).toBeUndefined();
     expect(task.extra["issues"]).toEqual([{ repo_id: STUB_REPO_ID, number: 5 }]);
     expect(task.extra["issue_report"]).toBeUndefined();
+  }, 120_000);
+});
+
+// ─── AC-IL-6..8: number validation, the requirements-document refusal, adoptability (BR-520, BR-524, BR-1456) ───
+
+const MALFORMED_NUMBERS = ["", "0", "007", "1.5", "0x10", "1e3", "abc", "99999999999999999999"] as const;
+
+describe("AC-IL-6 a malformed issue number is refused before GitHub is contacted", () => {
+  let fixture: IssueFixture;
+  beforeAll(async () => {
+    fixture = await makeIssueFixture([{ number: 5 }], { dirsToClean });
+    fixture.resetLog();
+  }, 120_000);
+
+  it("AC-IL-6 issue adopt refuses each malformed number with exit exactly 4 naming field 'number' and the value, no gh call", async () => {
+    for (const value of MALFORMED_NUMBERS) {
+      const result = await fixture.run(["issue", "adopt", value]);
+      expect(result.exitCode, `adopt '${value}': ${result.stderr}${result.stdout}`).toBe(4);
+      expect(result.stderr, `adopt '${value}'`).toContain("number");
+      expect(result.stderr, `adopt '${value}'`).toContain(value);
+    }
+    expect(fixture.ghCalls()).toEqual([]);
+  }, 120_000);
+
+  it("AC-IL-6 issue resolve refuses each malformed number with exit exactly 4 naming field 'number' and the value, no gh call", async () => {
+    for (const value of MALFORMED_NUMBERS) {
+      const result = await fixture.run(["issue", "resolve", value, "--state", "rejected", "--reason", "r"]);
+      expect(result.exitCode, `resolve '${value}': ${result.stderr}${result.stdout}`).toBe(4);
+      expect(result.stderr, `resolve '${value}'`).toContain("number");
+      expect(result.stderr, `resolve '${value}'`).toContain(value);
+    }
+    expect(fixture.ghCalls()).toEqual([]);
+  }, 120_000);
+
+  it("AC-IL-6 a bare -1 is read as a switch: adopt exits exactly 1 reporting the missing positional", async () => {
+    const result = await fixture.run(["issue", "adopt", "-1"]);
+    expect(result.exitCode, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr + result.stdout).toContain("Missing required positional");
+    expect(fixture.ghCalls()).toEqual([]);
+  }, 60_000);
+});
+
+describe("AC-IL-7 an ad-hoc adoption needs a requirements document, a plan adoption does not", () => {
+  let fixture: IssueFixture;
+  let planSlug = "";
+  beforeAll(async () => {
+    fixture = await makeIssueFixture([{ number: 5 }], { dirsToClean, withRootPrd: false });
+    const plan = await fixture.run(["create", "plan", "--title", "Prdless plan", "--no-ai", "--content", "## Goal\n\nBody.", "--json"], "setup");
+    expect(plan.exitCode, plan.stderr + plan.stdout).toBe(0);
+    planSlug = (JSON.parse(plan.stdout) as { data: DocJson }).data.slug;
+  }, 240_000);
+
+  it("AC-IL-7 without --plan the adoption exits exactly 4 and the task count is unchanged; with a live --plan it exits 0", async () => {
+    const before = await taskCount(fixture);
+    const refused = await fixture.run(["issue", "adopt", "5"]);
+    expect(refused.exitCode, refused.stderr + refused.stdout).toBe(4);
+    expect(await taskCount(fixture)).toBe(before);
+
+    const adopted = await fixture.run(["issue", "adopt", "5", "--plan", planSlug]);
+    expect(adopted.exitCode, adopted.stderr + adopted.stdout).toBe(0);
+    expect(await taskCount(fixture)).toBe(before + 1);
+  }, 180_000);
+});
+
+describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work issues are refused", () => {
+  const HAND_WRITTEN = 21;
+  const DAMAGED = 22;
+  const DEPRECATED = 23;
+  const ARCHIVED_TASK = 24;
+  const ARCHIVED_PLAN = 25;
+  let fixture: IssueFixture;
+  let archivedTaskSlug = "";
+  let archivedPlanSlug = "";
+  let deprecatedTaskSlug = "";
+
+  const slugOf = (stdout: string): string => (JSON.parse(stdout) as { data: { slug: string } }).data.slug;
+
+  beforeAll(async () => {
+    fixture = await makeIssueFixture(
+      [
+        { number: HAND_WRITTEN, body: "Hand written text with no field block." },
+        { number: DAMAGED, body: "---\nseverity: high\nthe block never closes\n\nDamaged block description." },
+        { number: DEPRECATED },
+        { number: ARCHIVED_TASK },
+        { number: ARCHIVED_PLAN },
+      ],
+      { dirsToClean },
+    );
+    const must = async (args: string[]): Promise<string> => {
+      const result = await fixture.run(args, "setup");
+      expect(result.exitCode, `${args.join(" ")}: ${result.stderr}${result.stdout}`).toBe(0);
+      return result.stdout;
+    };
+    const prd = await fixture.run(["list", "--type", "prd", "--json"], "setup");
+    const prdData = (JSON.parse(prd.stdout) as { data: { docs?: { slug: string }[] } | { slug: string }[] }).data;
+    const prdSlug = (Array.isArray(prdData) ? prdData : (prdData.docs ?? []))[0]?.slug ?? "";
+    expect(prdSlug).not.toBe("");
+
+    const carrier = async (title: string, n: number): Promise<string> =>
+      slugOf(await must(["create", "task", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"]));
+
+    deprecatedTaskSlug = await carrier("Deprecated carrier", DEPRECATED);
+    await must(["set", deprecatedTaskSlug, "--status", "deprecated"]);
+
+    // Archiving a carrier closes its issue on GitHub; the PATCH is made to fail so the issue stays OPEN with archived work.
+    archivedTaskSlug = await carrier("Archived carrier", ARCHIVED_TASK);
+    writeFileSync(join(fixture.stubDir, `fail-patch-${ARCHIVED_TASK}`), "1");
+    await must(["evidence", archivedTaskSlug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
+    await must(["done", archivedTaskSlug, "--declare-no-new-tests", "fixture: throwaway task"]);
+    rmSync(join(fixture.stubDir, `fail-patch-${ARCHIVED_TASK}`));
+
+    archivedPlanSlug = slugOf(
+      await must(["create", "plan", "--title", "Archived carrier plan", "--parent", prdSlug, "--no-ai", "--content", "## Goal\n\nBody.", "--issue", String(ARCHIVED_PLAN), "--json"]),
+    );
+    await must(["set", archivedPlanSlug, "--status", "approved"]);
+    await must(["set", archivedPlanSlug, "--status", "active"]);
+    writeFileSync(join(fixture.stubDir, `fail-patch-${ARCHIVED_PLAN}`), "1");
+    await must(["set", archivedPlanSlug, "--status", "archived"]);
+    rmSync(join(fixture.stubDir, `fail-patch-${ARCHIVED_PLAN}`));
+    expect(fixture.stateOf(ARCHIVED_TASK).state).toBe("open");
+    expect(fixture.stateOf(ARCHIVED_PLAN).state).toBe("open");
+  }, 300_000);
+
+  it("AC-IL-8 an issue with a hand-written body and one with a damaged field block are adopted, the task body carrying the issue text", async () => {
+    for (const [n, text] of [[HAND_WRITTEN, "Hand written text with no field block."], [DAMAGED, "Damaged block description."]] as const) {
+      const result = await fixture.run(["issue", "adopt", String(n)]);
+      expect(result.exitCode, `#${n}: ${result.stderr}${result.stdout}`).toBe(0);
+      const task = await fixture.run(["get", `task-issue-${STUB_REPO_ID}-${n}`], "reader");
+      expect(task.exitCode, task.stderr).toBe(0);
+      expect(task.stdout, `#${n}`).toContain(text);
+    }
+  }, 180_000);
+
+  it("AC-IL-8 an issue whose only naming task is deprecated is adopted as task-issue-<repo_id>-<n>-r1", async () => {
+    const result = await fixture.run(["issue", "adopt", String(DEPRECATED)]);
+    expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    expect(result.stdout).toContain(`task-issue-${STUB_REPO_ID}-${DEPRECATED}-r1`);
+    expect((await getDoc(fixture, `task-issue-${STUB_REPO_ID}-${DEPRECATED}-r1`)).status).toBe("draft");
+  }, 120_000);
+
+  it("AC-IL-8 an open issue named by an archived task, and one named by an archived plan, each exit exactly 4 naming that work and 'lore issues --sync'; nothing is created", async () => {
+    const before = await taskCount(fixture);
+    for (const [n, slug] of [[ARCHIVED_TASK, archivedTaskSlug], [ARCHIVED_PLAN, archivedPlanSlug]] as const) {
+      const result = await fixture.run(["issue", "adopt", String(n)]);
+      expect(result.exitCode, `#${n}: ${result.stderr}${result.stdout}`).toBe(4);
+      expect(result.stderr, `#${n}`).toContain(slug);
+      expect(result.stderr, `#${n}`).toContain("lore issues --sync");
+    }
+    expect(await taskCount(fixture)).toBe(before);
   }, 120_000);
 });
