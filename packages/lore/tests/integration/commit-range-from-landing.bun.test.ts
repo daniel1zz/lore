@@ -116,7 +116,16 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   const svc = new TaskWorkflowService(
     store, undefined, { claimTtlMinutes: 120 },
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-    { ...createRealWorktreeProbe(repo), ...probeOverride },
+    {
+      ...createRealWorktreeProbe(repo),
+      // reason: the orchestrator's evidence repair re-claims from a detached worktree, which today's claim refuses (BR-1468); the fixture hides
+      // the path from the existence probe while the re-claim runs so the legacy re-claim shape stays covered.
+      pathExists: (path: string) => {
+        if (hideNextPathProbe) return false;
+        return createRealWorktreeProbe(repo).pathExists(path);
+      },
+      ...probeOverride,
+    },
   );
   const plan = await cs.create({ type: "plan", title: "Landing plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
@@ -152,6 +161,8 @@ function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
 }
 
 /** The orchestrator's evidence repair: release, then re-claim from a fresh DETACHED worktree of main. */
+let hideNextPathProbe = false;
+
 async function reclaimFromDetachedMain(f: Fixture): Promise<void> {
   const holder = mkdtempSync(join(tmpdir(), "lore-landing-evid-"));
   dirs.push(holder);
@@ -159,7 +170,9 @@ async function reclaimFromDetachedMain(f: Fixture): Promise<void> {
   run(f.repo, "worktree", "add", "-q", "--detach", detached, "main");
   const released = await f.svc.release(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
   if (!released.ok) throw new Error(`release ${JSON.stringify(released.error)}`);
+  hideNextPathProbe = true;
   const reclaimed = await f.svc.claim(f.taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: realpathSync(detached) });
+  hideNextPathProbe = false;
   if (!reclaimed.ok) throw new Error(`reclaim ${JSON.stringify(reclaimed.error)}`);
   // reason: only a pass recorded after the LATEST claim counts, so the evidence repair re-attests on the re-claim.
   await recordCountingPass(f.svc, f.taskId, run(f.repo, "rev-parse", "main"));

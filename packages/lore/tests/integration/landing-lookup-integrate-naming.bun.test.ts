@@ -96,14 +96,30 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   // reason: the branch is unmeasured only AT CLAIM TIME (the claim then records the path alone); the landing lookup
   // that runs later reads the worktree's branch from git for real.
   let claiming = true;
+  let hideNextPathProbe = false;
   const detectBranch = recordsBranch
     ? undefined
-    : async (path: string) => (claiming ? ({ status: "unmeasured" } as const) : detectWorktreeBranch(path));
+    : async (path: string) => {
+        if (!claiming) return detectWorktreeBranch(path);
+        hideNextPathProbe = true;
+        return { status: "unmeasured" } as const;
+      };
   const svc = new TaskWorkflowService(
     store, undefined, { claimTtlMinutes: 120 },
     undefined, undefined, undefined, undefined, undefined, undefined,
     detectBranch, undefined, undefined,
-    createRealWorktreeProbe(repo),
+    // reason: a path-only claim is the legacy shape; today's claim refuses a readable worktree with no branch (BR-1468), so the
+    // fixture hides the path from the one existence probe the refusal makes, right after the unmeasured branch read.
+    {
+      ...createRealWorktreeProbe(repo),
+      pathExists: (path: string) => {
+        if (hideNextPathProbe) {
+          hideNextPathProbe = false;
+          return false;
+        }
+        return createRealWorktreeProbe(repo).pathExists(path);
+      },
+    },
   );
   const plan = await cs.create({ type: "plan", title: "Landing name plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");

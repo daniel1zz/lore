@@ -3279,7 +3279,14 @@ export class TaskWorkflowService {
       const measurement = await this.detectBranch(opts.worktree);
       if (measurement.status === "measured") {
         capturedBranch = measurement.branch;
-      } else if (isAbsolute(opts.worktree) && existingClaim?.branch === undefined) {
+      } else if (
+        isAbsolute(opts.worktree) &&
+        existingClaim?.branch === undefined &&
+        this.worktreeProbe.pathExists(opts.worktree) &&
+        this.measureStartHead(opts.worktree).sha !== undefined
+      ) {
+        // narrowed (AC-OWN-4): only a path that exists AND is a readable worktree (it has a head) but sits on no branch is refused;
+        // a path that does not exist, or is not a git worktree, keeps its no-throw behaviour.
         // reason: BR-1468 — a worktree PATH with no readable branch has no start_head to measure; admitting it would be a silent
         // path. A non-absolute value is a branch name (measured by measureStartHead below), not a path.
         return refuseClaim(task.slug, "worktree-without-branch");
