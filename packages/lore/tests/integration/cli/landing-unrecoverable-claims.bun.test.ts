@@ -184,6 +184,12 @@ describe("AC-UC-1 (a) a released tipless branch claim is classified once and lan
     expect(marked[0]?.["branch"]).toBe("legacy-gone");
     expect(marked[0]?.["reason"]).toBe("released before tips were recorded");
     expect(marked[0]?.["marked_by"]).toBe("migration-040");
+    const shown = JSON.parse(mustRun(["get", task, "--json"], dir)) as { data: { unrecoverable_claims?: Array<{ branch: string; reason: string }> } };
+    expect(shown.data.unrecoverable_claims).toEqual([expect.objectContaining({ branch: "legacy-gone", reason: "released before tips were recorded" })]);
+    const shownText = mustRun(["get", task], dir);
+    expect(shownText).toContain("Unrecoverable claims: 1");
+    expect(shownText).toContain("legacy-gone");
+    expect(shownText).toContain("released before tips were recorded");
 
     const done = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
 
