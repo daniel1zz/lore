@@ -89,7 +89,7 @@ function commitAfterClaim(name: string): void {
 /** The branch's content reaches main WITHOUT `lore integrate` (a hand cherry-pick): no landing is recorded anywhere. */
 function cherryPickOntoMain(branch: string): void {
   // the guard refuses a hand checkout of main and a hand commit on it; this test takes the marker bypass on purpose
-  const marked = { LORE_INTEGRATE: "1" };
+  const marked = { LORE_INTEGRATE: "1", GIT_COMMITTER_DATE: "2031-01-01T00:00:00Z" }; // a distinct committer date, so the copy is a different commit than the branch tip
   git(["checkout", "-q", "main"], marked);
   git(["cherry-pick", branch], marked);
   git(["checkout", "-q", "--detach", "main"]);
