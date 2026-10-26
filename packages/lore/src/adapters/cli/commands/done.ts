@@ -464,6 +464,7 @@ export default defineLoreCommand({
                 ...(result.value.removed_test_anchors !== undefined ? { removed_test_anchors: result.value.removed_test_anchors } : {}),
                 ...(result.value.superseded_scope !== undefined ? { superseded_scope: result.value.superseded_scope } : {}),
                 ...(result.value.issue_close !== undefined ? { issue_close: result.value.issue_close } : {}),
+                ...(result.value.unrecoverable_claims !== undefined ? { unrecoverable_claims: result.value.unrecoverable_claims } : {}),
               },
             },
             null,
@@ -475,6 +476,10 @@ export default defineLoreCommand({
       }
 
       printLine(inv.io.stdout, formatDoneMessage(result.value));
+      if (result.value.unrecoverable_claims !== undefined) {
+        const listed = result.value.unrecoverable_claims;
+        printLine(inv.io.stdout, `unrecoverable claims: ${listed.count} (${listed.branches.join(", ")})`);
+      }
       emitIssueCloseItems(inv.io, result.value.issue_close, { json: false });
     } finally {
       app.close();

@@ -75,7 +75,7 @@
 
 import { defineLoreCommand } from "../cli-exit.js";
 
-import { ok, readMeasuredLanding, ruleIdPrefixOfNode } from "@lore/core";
+import { ok, readMeasuredLanding, ruleIdPrefixOfNode, UNRECOVERABLE_CLAIM_ACTION } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import {
   computeImplementedBy,
@@ -171,6 +171,24 @@ async function countCorrections(store: StoreInterface, docId: DocRecord["id"]): 
     return details?.["correction"] !== undefined;
   }).length;
   return ok(count);
+}
+
+/** One claim migration 040 classified unrecoverable (#473), as read from its `claim-unrecoverable` audit entry. */
+interface UnrecoverableClaimView {
+  readonly claim_at: string;
+  readonly branch: string;
+  readonly reason: string;
+}
+
+/** The task's unrecoverable claims, oldest first (empty for a doc that has none). */
+async function loadUnrecoverableClaims(store: StoreInterface, docId: DocRecord["id"]): Promise<Result<UnrecoverableClaimView[], LoreError>> {
+  const rows = await store.queryAudit({ doc_id: docId, action: UNRECOVERABLE_CLAIM_ACTION });
+  if (!rows.ok) return rows;
+  const views = rows.value.flatMap((row) => {
+    const { claim_at: claimAt, branch, reason } = (row.details ?? {}) as Record<string, unknown>;
+    return typeof claimAt === "string" && typeof branch === "string" && typeof reason === "string" ? [{ claim_at: claimAt, branch, reason }] : [];
+  });
+  return ok(views.sort((a, b) => a.claim_at.localeCompare(b.claim_at)));
 }
 
 /**
@@ -278,6 +296,13 @@ export default defineLoreCommand({
         return exitCode(relations.error);
       }
 
+      // reason: BR-1423 — a claim landing leaves out of its judgement is listed, never dropped silently (text and --json).
+      const unrecoverableClaims = await loadUnrecoverableClaims(attributionStore, doc.id);
+      if (!unrecoverableClaims.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, unrecoverableClaims.error) + "\n");
+        return exitCode(unrecoverableClaims.error);
+      }
+
       // Standing / Corrections / Later changed by — human view only (the --json payload is unchanged). Standing
       // comes from the ONE lock resolver the write gate uses; the other two are read-time derivations.
       let humanStanding: string[] = [];
@@ -309,9 +334,10 @@ export default defineLoreCommand({
         // this is the only validity evaluation in this command, and `--raw` must not
         // change it (see placement rule 2 in this file's header).
         const validityStatus = projectValidityStatus(doc, new Date().toISOString());
+        const listed = unrecoverableClaims.value.length > 0 ? { unrecoverable_claims: unrecoverableClaims.value } : {};
         const data = resolvedComponents !== undefined
-          ? { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, resolved_components: resolvedComponents }
-          : { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json };
+          ? { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, ...listed, resolved_components: resolvedComponents }
+          : { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, ...listed };
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
         return 0;
       }
@@ -330,6 +356,10 @@ export default defineLoreCommand({
       // reason: how an archived task landed (the one landing predicate): `no-change` (nothing to merge) or `commits`.
       const measuredLanding = readMeasuredLanding(doc.extra);
       if (measuredLanding !== undefined) printLine(inv.io.stdout, measuredLanding.kind === "no-change" ? "Landing: no-change" : `Landing: commits ${measuredLanding.tip}`);
+      if (unrecoverableClaims.value.length > 0) {
+        printLine(inv.io.stdout, `Unrecoverable claims: ${unrecoverableClaims.value.length}`);
+        for (const claim of unrecoverableClaims.value) printLine(inv.io.stdout, `  ${claim.branch} (claimed ${claim.claim_at}): ${claim.reason}`);
+      }
       if (doc.tags.length > 0) {
         printLine(inv.io.stdout, `Tags: ${doc.tags.join(", ")}`);
       }
