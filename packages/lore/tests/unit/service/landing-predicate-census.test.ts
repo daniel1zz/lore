@@ -1,7 +1,7 @@
 // @reads packages/lore/src/**
 // @reads packages/core/src/**
 /**
- * Census: ONE landing predicate (AC-ND-8, spec-lore-done-closes-a-commitless-task-through-an-audited-no).
+ * Census: ONE landing predicate (spec-lore-done-closes-a-commitless-task-through-an-audited-no).
  *
  * `landingOf` (packages/core/src/landing.ts) is the only place that decides whether claimed work has landed and of what kind.
  * Every closer (integrate's record and post-landing archive, `lore done`, plan close) and reader (evidence counting, milestone
@@ -56,7 +56,7 @@ const DECLARES_KINDS = /["']no-change["']\s*,\s*["']commits["']|["']no-change["'
 const COMPARES_KIND = /kind\s*[!=]==\s*["'](?:no-change|commits)["']/;
 const REACHABILITY_OF_LANDING_COMMIT = /landing_commit[^\n]*(countCommits|is-ancestor|rev-list|merge-base|isOnIntegration|isAncestor)|(countCommits|is-ancestor|rev-list|merge-base|isOnIntegration|isAncestor)[^\n]*landing_commit/;
 
-describe("the landing predicate census (AC-ND-8)", () => {
+describe("the landing predicate census", () => {
   it("HAPPY: only the service that closes tasks calls landingOf (besides its definition)", () => {
     expect(filesMatching(CALLS_LANDING_OF)).toEqual([
       "packages/core/src/landing.ts", // the definition and its own doc example

@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-lore-done-closes-a-commitless-task-through-an-audited-no  AC-ND-1..4, AC-ND-9
+ * @spec_ref spec-lore-done-closes-a-commitless-task-through-an-audited-no
  *
  * The pure landing predicate and the evidence-counting rule, over a scripted {@link LandingGitFacts}. Coverage:
  * HAPPY (no-change, commits), NEGATIVE (tip not on main, dirty copy, rows that do not count), BOUNDARY (tip = start, no branch),
