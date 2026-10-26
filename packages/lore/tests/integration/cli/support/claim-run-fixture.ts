@@ -198,8 +198,8 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
 // ─── CLI verbs ──────────────────────────────────────────────────────────────
 
 /** `by` is the RESOLVED writer name the spawn runs as (`sessionActorFor(...)`), injected through the session tier. */
-export function claim(dir: string, target: string, by: string, opts: { run?: string; steal?: boolean } = {}): RunResult {
-  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : [])], dir, opts.run, by);
+export function claim(dir: string, target: string, by: string, opts: { run?: string; steal?: boolean; worktree?: string } = {}): RunResult {
+  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : []), ...(opts.worktree !== undefined ? ["--worktree", opts.worktree] : [])], dir, opts.run, by);
 }
 
 export function release(dir: string, target: string, by: string, opts: { run?: string; force?: boolean } = {}): RunResult {

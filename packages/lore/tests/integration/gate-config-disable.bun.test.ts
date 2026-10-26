@@ -301,7 +301,7 @@ function createTopLevelPlanWithOverlappingAnchorTasks(tmpDir: string): {
 describe("SPEC-042 D6: workflow.gates.'task-claim'.anchor_overlap.enabled=false disables ONLY the anchor predicate, at the `lore gate task-claim` CLI seam", () => {
   it("NEGATIVE baseline: with the sub-key absent (default enabled), a fresh foreign overlapping sibling claim blocks — exit 4, ANCHOR_OVERLAP", () => {
     const { taskASlug, taskBSlug } = createTopLevelPlanWithOverlappingAnchorTasks(tmpDir);
-    const claimResult = runLore(["claim", taskASlug], tmpDir, sessionEnvFor("agent:a"));
+    const claimResult = runLore(["claim", taskASlug, "--worktree", "gcd-wt-a"], tmpDir, sessionEnvFor("agent:a"));
     expect(claimResult.exitCode).toBe(0);
 
     const result = runLore(["gate", "task-claim", "--task", taskBSlug], tmpDir, sessionEnvFor("agent:b"));
@@ -311,7 +311,7 @@ describe("SPEC-042 D6: workflow.gates.'task-claim'.anchor_overlap.enabled=false 
 
   it("HAPPY: with the sub-key explicitly disabled, the SAME conflicting scenario passes — exit 0, gate: pass", () => {
     const { taskASlug, taskBSlug } = createTopLevelPlanWithOverlappingAnchorTasks(tmpDir);
-    const claimResult = runLore(["claim", taskASlug], tmpDir, sessionEnvFor("agent:a"));
+    const claimResult = runLore(["claim", taskASlug, "--worktree", "gcd-wt-a"], tmpDir, sessionEnvFor("agent:a"));
     expect(claimResult.exitCode).toBe(0);
 
     writeGatesConfig(tmpDir, '    "task-claim":\n      anchor_overlap:\n        enabled: false');

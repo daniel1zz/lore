@@ -113,9 +113,9 @@ describe("the claim gate's anchor overlap decides by run through the CLI (spec-r
     const second = await gated.newTarget("task", [ANCHOR]);
     registerRun(gated.dir, R1);
     registerRun(gated.dir, R2);
-    expect(claim(gated.dir, first, NAME, { run: R1 }).exitCode).toBe(0);
+    expect(claim(gated.dir, first, NAME, { run: R1, worktree: `ro-wt-${first}` }).exitCode).toBe(0);
 
-    const refused = claim(gated.dir, second, NAME, { run: R2 });
+    const refused = claim(gated.dir, second, NAME, { run: R2, worktree: `ro-wt-${second}` });
 
     expect(refused.exitCode).not.toBe(0);
     expect(refused.stderr).toContain("anchor-overlap");
@@ -126,9 +126,9 @@ describe("the claim gate's anchor overlap decides by run through the CLI (spec-r
     const first = await gated.newTarget("task", [ANCHOR]);
     const second = await gated.newTarget("task", [ANCHOR]);
     registerRun(gated.dir, R1);
-    expect(claim(gated.dir, first, NAME, { run: R1 }).exitCode).toBe(0);
+    expect(claim(gated.dir, first, NAME, { run: R1, worktree: `ro-wt-${first}` }).exitCode).toBe(0);
 
-    const allowed = claim(gated.dir, second, NAME, { run: R1 });
+    const allowed = claim(gated.dir, second, NAME, { run: R1, worktree: `ro-wt-${second}` });
 
     expect(allowed.exitCode).toBe(0);
     expect(getClaim(gated.dir, second)?.harness_run).toBe(R1);
@@ -138,9 +138,9 @@ describe("the claim gate's anchor overlap decides by run through the CLI (spec-r
     const first = await gated.newTarget("task", [ANCHOR]);
     const second = await gated.newTarget("task", [ANCHOR]);
     registerRun(gated.dir, R1);
-    expect(claim(gated.dir, first, NAME, { run: R1 }).exitCode).toBe(0);
+    expect(claim(gated.dir, first, NAME, { run: R1, worktree: `ro-wt-${first}` }).exitCode).toBe(0);
 
-    const refused = claim(gated.dir, second, NAME);
+    const refused = claim(gated.dir, second, NAME, { worktree: `ro-wt-${second}` });
 
     expect(refused.exitCode).not.toBe(0);
     expect(refused.stderr).toContain("anchor-overlap");

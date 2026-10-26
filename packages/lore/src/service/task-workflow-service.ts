@@ -4444,7 +4444,11 @@ export class TaskWorkflowService {
       .filter((row) => latest === undefined || row.timestamp >= latest.timestamp)
       .filter((row) => rowString(row, "end_tip") !== undefined)
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const endTip = current !== undefined ? current.end_tip : rowString(newerReleases[newerReleases.length - 1], "end_tip");
+    // reason: tip = the ref (landingOf), else the newest recorded `end_tip`, else the tip `lore integrate` measured when it landed
+    // the branch (a fact read from git at the merge). Never `start_head`, never an evidence head.
+    const endTip =
+      (current !== undefined ? current.end_tip : rowString(newerReleases[newerReleases.length - 1], "end_tip")) ??
+      readTaskLanding(task.extra)?.tip;
 
     const facts = this.landingFacts();
     // reason: a bare construction (no probe) with a claim that named no working copy has no branch work to measure and no git to
@@ -4982,10 +4986,20 @@ export class TaskWorkflowService {
     return ok(undefined);
   }
 
-  /** Whether `task`'s claimed work is landed by the one predicate; any unmeasurable step answers false. */
+  /**
+   * Whether `task` holds a landing record (written when `lore integrate` landed its branch) whose commit is on the
+   * integration branch; any unmeasurable step answers false. BR-1337 (one working copy carries one unlanded task) keeps
+   * reading the record: a task that is merely claimed, with nothing committed yet, still occupies its working copy.
+   */
   private async isLandingOnMain(task: DocRecord): Promise<boolean> {
-    const measured = await this.measureLanding(task);
-    return measured.ok && measured.value.armed && measured.value.verdict?.state === "landed";
+    const landing = readTaskLanding(task.extra);
+    const probe = this.worktreeProbe;
+    if (landing === undefined || probe === undefined) return false;
+    const cwd = probe.currentWorkingDirectory();
+    const integration = probe.integrationBranch(cwd);
+    if (!integration.ok) return false;
+    const offMain = probe.countCommits(cwd, `${integration.value}..${landing.landing_commit}`);
+    return offMain.ok && offMain.value === 0;
   }
 
   /**
