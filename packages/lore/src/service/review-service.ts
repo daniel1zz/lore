@@ -19,7 +19,7 @@ import type {
   Validity,
   VersionRecord,
 } from "@lore/core";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, extractEvidence, ok, type LoreError, type Result } from "@lore/core";
 import {
   getAllowedTransitions,
   isReopenTransition,
@@ -48,7 +48,7 @@ import {
 import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
 import { REOPEN_AUDIT_ACTION, REOPEN_OPERATION, type RecordLockService } from "./record-lock-service.js";
-import { countEvidenceEntries, findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
+import { findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
 import { ANY_RULE_ID_PATTERN } from "@lore/core";
 import {
   appendApprovedRule,
@@ -1404,18 +1404,25 @@ export class ReviewService {
     return ok(reopened);
   }
 
-  /** Evidence rows recorded against `spec`, through the shared AC-coverage task query. */
+  /**
+   * Evidence rows recorded against `spec`'s CRITERIA (BR-1050), through the shared AC-coverage task query.
+   * A row with no `ac_ref` (e.g. a captured research doc) names no criterion and is not counted (#461).
+   */
   private async countSpecEvidence(spec: DocRecord): Promise<Result<number, LoreError>> {
     const tasks = await findSpecEvidenceTasks(this.store, spec);
     if (!tasks.ok) return tasks;
-    return ok(countEvidenceEntries(tasks.value.tasks));
+    const criteriaEvidence = tasks.value.tasks.reduce(
+      (sum, task) => sum + extractEvidence(task).filter((row) => (row.ac_ref ?? "").trim() !== "").length,
+      0,
+    );
+    return ok(criteriaEvidence);
   }
 
   private reopenRefusal(spec: DocRecord, count: number, raced: boolean): LoreError {
     const noun = count === 1 ? "row" : "rows";
     const tail = raced
-      ? `${count} evidence ${noun} appeared while it was being reopened, so it stays in draft (it is not written back to approved). Review the evidence, then approve it again or supersede it with a new spec.`
-      : `${count} evidence ${noun} already ${count === 1 ? "exists" : "exist"} against it. A spec with evidence cannot be reopened - supersede it with a new spec instead.`;
+      ? `${count} criteria evidence ${noun} appeared while it was being reopened, so it stays in draft (it is not written back to approved). Review the evidence, then approve it again or supersede it with a new spec.`
+      : `${count} criteria evidence ${noun} already ${count === 1 ? "exists" : "exist"} against it. A spec with criteria evidence cannot be reopened - supersede it with a new spec instead.`;
     return {
       code: "VALIDATION_ERROR",
       field: "gate:reopen",
