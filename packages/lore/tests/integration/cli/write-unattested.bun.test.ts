@@ -268,6 +268,8 @@ describe("AC-RID-8: no --harness-run at all", () => {
   it("the version rows of an unflagged write carry the session's own run", async () => {
     const t = newTask(dir, "No flag version target");
     const since = new Date().toISOString();
+    // reason: a claim is a working-state write and adds no versions row; `lore set --title` is a content write that does.
+    mustLore(["set", t, "--title", "No flag version target renamed"], dir, NAME_ENV);
     mustLore(["claim", t], dir, NAME_ENV);
     const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
     expect(versions.length).toBeGreaterThan(0);

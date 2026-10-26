@@ -6,6 +6,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
+import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
 import { err, ok, DEDICATED_EXTRA_KEYS, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
@@ -1000,6 +1001,29 @@ function patchedFieldsUnchanged(doc: DocRecord, patch: DocWritePatch): boolean {
   return true;
 }
 
+/** How one main-path write is recorded: a versions snapshot, or the working-state delta in the audit row. */
+interface WriteClassification {
+  readonly snapshot: boolean;
+  /** Present only when `snapshot` is false: the audit `details.state_change` payload. */
+  readonly stateChange?: StateChange;
+}
+
+/**
+ * Classifies a write from the stored row `before` to the row about to be written `after`
+ * (spec-history-records-content-a-working-state-only-write-adds-no Scope 3, ADR D1/D4).
+ * A content change snapshots as before. A write that touches only working-state keys writes no versions row
+ * and returns its delta. reason: a write that is neither (no content change and no working-state key
+ * changed, e.g. only `updated_at` moved) keeps its snapshot: it has no delta to put in audit, and the
+ * history must never lose a write.
+ */
+function classifyWrite(before: DocRecord, after: DocRecord): WriteClassification {
+  // reason: a DocRecord has every `docs` column ContentComparableRow's index signature describes structurally.
+  if (isContentChange(before.type, before as unknown as ContentComparableRow, after as unknown as ContentComparableRow)) return { snapshot: true };
+  const stateChange = buildStateChange(before.type, before.extra, after.extra);
+  if (stateChange.keys.length === 0) return { snapshot: true };
+  return { snapshot: false, stateChange };
+}
+
 /** `patch` without its `undefined`-valued keys (exactOptionalPropertyTypes: an undefined key must not overwrite). */
 function definedOnly(patch: DocWritePatch): DocWritePatch {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as DocWritePatch;
@@ -1478,6 +1502,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (request.versioning === "keep") return this.writeDocKeepingVersion(request, actor.value, now);
     const newVersion = doc.version + 1;
     const after: DocRecord = { ...doc, ...definedOnly(patch), version: newVersion, updated_at: now };
+    const classification = classifyWrite(doc, after);
     const versionRecord: VersionRecord = {
       doc_id: doc.id,
       version: newVersion,
@@ -1504,9 +1529,14 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         action: request.auditAction,
         doc_id: doc.id,
         // reason: SPEC-035 §2 — `version` is the join key AuditService.verify matches against the version row.
-        details: { ...request.auditDetails, version: newVersion, new_version: newVersion },
+        details: {
+          ...request.auditDetails,
+          version: newVersion,
+          new_version: newVersion,
+          ...(classification.stateChange !== undefined ? { state_change: classification.stateChange } : {}),
+        },
       },
-      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+      classification.snapshot,
 
       request.extras,
     );
@@ -3901,6 +3931,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       abandonmentWrites = leafPlansToCompanionWrites(abandonment.value.leaves, resolvedActor, now, false);
     }
 
+    const classification = classifyWrite(existing, { ...existing, ...docPatch } as DocRecord);
     const updateResult = await this.store.updateWithProvenance(
       existing.id,
       docPatch,
@@ -3923,9 +3954,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
           ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
           ...(retiredInPlan !== undefined ? { retired_in_plan: retiredInPlan } : {}),
+          ...(classification.stateChange !== undefined ? { state_change: classification.stateChange } : {}),
         },
       },
-      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+      classification.snapshot,
 
       abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,
     );

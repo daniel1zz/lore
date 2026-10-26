@@ -422,8 +422,13 @@ interface Seeded {
 
 interface Scenario {
   readonly module: string;
-  /** `versioned`: the write bumps `docIds[0]`'s version (one version row + one audit row). `audit-only`: audit rows only. */
-  readonly kind: "versioned" | "audit-only";
+  /**
+   * `versioned`: the write bumps `docIds[0]`'s version (one version row + one audit row).
+   * `working-state`: the write bumps the version, adds NO version row, and its one audit row carries `details.state_change`
+   * (spec-history-records-content-a-working-state-only-write-adds-no).
+   * `audit-only`: audit rows only.
+   */
+  readonly kind: "versioned" | "working-state" | "audit-only";
   /** Audit action the write records. */
   readonly auditAction: string;
   /** Doc the audit rows hang on (audit-only); defaults to `docIds[0]`. */
@@ -470,7 +475,7 @@ const slugFor = (prefix: string): string => `${prefix}-dcl5-${(uniq += 1)}`;
 const SCENARIOS: readonly Scenario[] = [
   {
     module: "task-workflow",
-    kind: "versioned",
+    kind: "working-state",
     auditAction: "claim",
     seed: async (w) => {
       const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
@@ -482,7 +487,7 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     module: "phase-workflow",
-    kind: "versioned",
+    kind: "working-state",
     auditAction: "evidence",
     seed: async (w) => {
       const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
@@ -521,7 +526,7 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     module: "drift-check",
-    kind: "versioned",
+    kind: "working-state",
     auditAction: "update",
     seed: async (w) => {
       const spec = await seedRaw(w.raw, makeDoc("spec", slugFor("spec")));
@@ -530,7 +535,7 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     module: "phase-checklist",
-    kind: "versioned",
+    kind: "working-state",
     auditAction: "update",
     seed: async (w) => {
       const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
@@ -544,7 +549,7 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     module: "plan-integration-branch",
-    kind: "versioned",
+    kind: "working-state",
     auditAction: "update",
     seed: async (w) => {
       const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
@@ -723,7 +728,7 @@ describe("AC-DCL-5 per module — the write carries version + audit rows naming 
 
       const after = await snapshotOf(w.raw, seeded.docIds);
       const newAudits = (await auditsOf(w.raw, { action: scenario.auditAction })).filter((a) =>
-        scenario.kind === "versioned" ? a.doc_id === primary : true,
+        scenario.kind !== "audit-only" ? a.doc_id === primary : true,
       );
       expect(newAudits.length, `no ${scenario.auditAction} audit row`).toBeGreaterThan(0);
       const expectedActor = scenario.actor ?? CALLER;
@@ -746,6 +751,12 @@ describe("AC-DCL-5 per module — the write carries version + audit rows naming 
         expect(row.harness_run).toBe(RUN);
         const joined = newAudits.filter((x) => x.details?.["version"] === a.version);
         expect(joined, "an audit row carrying the new version (the join key)").toHaveLength(1);
+      } else if (scenario.kind === "working-state") {
+        expect(a.version - b.version, "a working-state write bumps the version once").toBe(1);
+        expect(a.versionRows, "a working-state write adds no versions row").toBe(b.versionRows);
+        const joined = newAudits.filter((x) => x.details?.["version"] === a.version);
+        expect(joined, "one audit row carrying the new version").toHaveLength(1);
+        expect(joined[0]!.details?.["state_change"], "the delta lives in the audit row").toBeDefined();
       } else {
         expect(a.version, "an audit-only write bumps no version").toBe(b.version);
         expect(a.versionRows).toBe(b.versionRows);

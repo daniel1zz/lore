@@ -261,16 +261,19 @@ describe("HAPPY — checklist add/list + track add/list round-trip", () => {
     expect(after.value.extra["checklist"]).toEqual([manualItem("CHK-1")]);
     expect(after.value.version).toBe(versionBefore + 1);
 
+    // A checklist write is a working-state write: the version bumps, but no versions row is added and the delta
+    // lives in the audit row (spec-history-records-content-a-working-state-only-write-adds-no).
     const versions = await store.findVersions(phase.id);
     expect(versions.ok).toBe(true);
     if (!versions.ok) return;
-    expect(versions.value[0]?.action).toBe("update");
-    expect(versions.value[0]?.version).toBe(versionBefore + 1);
+    expect(versions.value.every((v) => v.version <= versionBefore)).toBe(true);
 
     const audit = await store.queryAudit({ doc_id: phase.id });
     expect(audit.ok).toBe(true);
     if (!audit.ok) return;
-    expect(audit.value.filter((e) => e.action === "update")).toHaveLength(1);
+    const updates = audit.value.filter((e) => e.action === "update");
+    expect(updates).toHaveLength(1);
+    expect((updates[0]?.details as { state_change?: { keys: string[] } } | undefined)?.state_change?.keys).toEqual(["checklist"]);
   });
 
   it("listChecklist round-trips items in declaration order across script and manual binds", async () => {

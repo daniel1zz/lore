@@ -244,13 +244,14 @@ describe("AC-HID-4: the store refuses a claim that names no run", () => {
     expect(corpus.counts()).toEqual(before);
   });
 
-  it("HAPPY control: a claim that names its run is written, with a version row and an audit row", async () => {
+  it("HAPPY control: a claim that names its run is written, with an audit row and no versions row", async () => {
     const before = corpus.counts();
 
     const written = await writeClaim({ by: "agent:session-hid4writ", at: new Date().toISOString(), harness_run: "cc:hid4-writer" });
 
     expect(written.ok).toBe(true);
-    expect(corpus.counts().versions).toBe(before.versions + 1);
+    // reason: a claim is a working-state write (spec-history-records-content-a-working-state-only-write-adds-no).
+    expect(corpus.counts().versions).toBe(before.versions);
     expect(corpus.counts().audit).toBeGreaterThan(before.audit);
     expect((docRow(corpus, task).extra["claim"] as { harness_run: string }).harness_run).toBe("cc:hid4-writer");
   });
@@ -314,15 +315,16 @@ describe("AC-HID-4: the schema upgrade expires the claims that name no run", () 
     expect((docRow(corpus, attested).extra["claim"] as { harness_run: string }).harness_run).toBe("cc:hid4-carol");
 
     const after = corpus.counts();
-    expect(after.versions).toBe(before.versions + 2);
+    // reason: expiring a lease is a working-state write (spec-history-records-content-a-working-state-only-write-adds-no):
+    // no versions row; the audit row carries what was expired.
+    expect(after.versions).toBe(before.versions);
     const releases = corpus.auditRows().filter((row) => row.action === "release");
     expect(releases).toHaveLength(2);
     expect(releases.map((row) => row.details["previous_holder"]).sort()).toEqual(["alice", "bob"]);
     for (const row of releases) expect(row.details["reason"]).toBe("expired_pre_run_claim");
-    // The version row keeps who held the expired lease: the history says what was expired, never silence.
-    expect(corpus.versionRowsOf(legacy).at(-1)?.created_by).toBeDefined();
+    // The audit row keeps who held the expired lease: the history says what was expired, never silence.
+    for (const row of releases) expect((row.details["state_change"] as { previous: { claim: unknown } }).previous.claim).toBeDefined();
     // ...and the upgrade's own rows name the RUN that ran it, not just a name.
-    expect(corpus.versionRowsOf(legacy).at(-1)?.harness_run).toBe(AGENT_RUN.run);
     for (const row of corpus.auditRows().filter((r) => r.action === "release" || r.action === "migrate_schema")) expect(row.harness_run).toBe(AGENT_RUN.run);
   });
 

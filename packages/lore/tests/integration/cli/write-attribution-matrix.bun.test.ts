@@ -285,7 +285,7 @@ const KINDS: readonly WriteKind[] = [
   },
   {
     name: "claim",
-    writesVersion: true,
+    writesVersion: false,
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     act: async (f) => {
       must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim");
@@ -293,7 +293,7 @@ const KINDS: readonly WriteKind[] = [
   },
   {
     name: "release",
-    writesVersion: true,
+    writesVersion: false,
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     // The claim is placed by the SAME identity through the store under test, so the measured write is the holder's own release.
     prepare: async (f) => {
@@ -305,7 +305,8 @@ const KINDS: readonly WriteKind[] = [
   },
   {
     name: "evidence",
-    writesVersion: true,
+    // reason: evidence, claim and release are working-state writes: no versions row (their audit rows carry the run).
+    writesVersion: false,
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     act: async (f) => {
       must(
@@ -613,8 +614,8 @@ describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the sessio
     for (const row of rows) expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
     const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
     try {
+      // reason: an evidence write is a working-state write and adds no versions row; any row it did write must carry R.
       const versions = (await versionRows(store)).filter((v) => v.created_by === NAME_A && v.created_at >= since);
-      expect(versions.length).toBeGreaterThan(0);
       for (const v of versions) expect(harnessRunOf(v)).toBe(ID_A.harnessRun);
     } finally {
       store.close();

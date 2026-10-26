@@ -203,29 +203,20 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
       if (!task.ok) return;
       const taskSlug = task.value.slug;
 
-      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
-      // predicate-to-its-own) — "tsc" self-report is now refused regardless of
-      // tail content; "manual" is the one oracle that still lets a genuinely
-      // non-empty self-reported tail succeed. This test only checks the
-      // version row's slug capture, not capture_source semantics.
-      const evidenceResult = await taskWorkflowService.addEvidence(task.value.id, {
-        oracle: "manual",
-        command: "bun run typecheck",
-        result: "pass",
-        recorded_by: "alice",
-        output_tail: "ok",
-        capture_source: "self-report",
-      });
-      expect(evidenceResult.ok).toBe(true);
-      if (!evidenceResult.ok) return;
+      // reason: spec-history-records-content-a-working-state-only-write-adds-no — an evidence append is a
+      // working-state write and no longer adds a versions row, so this test (which checks the slug on a row written
+      // by TaskWorkflowService, not by CorpusService.set) uses setAnchors: file_anchors is content, so it snapshots.
+      const anchorResult = await taskWorkflowService.setAnchors(task.value.id, ["src/a.ts"], { by: "alice" });
+      expect(anchorResult.ok).toBe(true);
+      if (!anchorResult.ok) return;
 
       const versions = await store.findVersions(task.value.id);
       expect(versions.ok).toBe(true);
       if (!versions.ok) return;
-      // v1 = create, v2 = evidence append.
-      const evidenceVersion = versions.value.find((v) => v.version === 2);
-      expect(evidenceVersion).toBeDefined();
-      expect(evidenceVersion!.slug).toBe(taskSlug);
+      // v1 = create, v2 = anchors write.
+      const anchorVersion = versions.value.find((v) => v.version === 2);
+      expect(anchorVersion).toBeDefined();
+      expect(anchorVersion!.slug).toBe(taskSlug);
     });
   });
 
