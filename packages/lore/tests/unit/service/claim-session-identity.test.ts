@@ -342,7 +342,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     });
     const { taskIds } = await createPlanAndTasks(corpusService, [["packages/core/src/session.ts"]]);
 
-    const claimed = await service.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
+    const claimed = await service.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(claimed.ok).toBe(true);
     if (!claimed.ok) return;
     expect(claimed.value.extra["claim"]).toMatchObject({ by: ORCHESTRATOR, session_id: "3de02220", harness_run: RUN_A });
@@ -356,10 +356,10 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const sessionOne = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
     const sessionTwo = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_B });
 
-    const first = await sessionOne.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
+    const first = await sessionOne.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(first.ok).toBe(true);
 
-    const foreignSession = await sessionTwo.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_B });
+    const foreignSession = await sessionTwo.claim(taskIds[1]!, { worktree: "wt-1", by: ORCHESTRATOR, harnessRun: RUN_B });
     expect(foreignSession.ok).toBe(false);
     if (!foreignSession.ok) {
       expect(foreignSession.error.code).toBe("VALIDATION_ERROR");
@@ -368,7 +368,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
 
     // CONTROL — the SAME run claiming both overlapping tasks is still permitted,
     // so the refusal above is run-scoped and not a blanket refuse.
-    const sameSession = await sessionOne.claim(taskIds[1]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
+    const sameSession = await sessionOne.claim(taskIds[1]!, { worktree: "wt-1", by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(sameSession.ok).toBe(true);
   });
 
@@ -380,9 +380,9 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const measured = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
     const unmeasured = makeSessionService(store, corpusService, {});
 
-    expect((await measured.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A })).ok).toBe(true);
+    expect((await measured.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A })).ok).toBe(true);
 
-    const result = await unmeasured.claim(taskIds[1]!, { by: ORCHESTRATOR });
+    const result = await unmeasured.claim(taskIds[1]!, { worktree: "wt-1", by: ORCHESTRATOR });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect((result.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
@@ -397,10 +397,10 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const measured = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
     const unmeasured = makeSessionService(store, corpusService, {});
 
-    const first = await measured.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
+    const first = await measured.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(first.ok).toBe(true);
 
-    const refreshed = await unmeasured.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
+    const refreshed = await unmeasured.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(refreshed.ok).toBe(true);
     if (!refreshed.ok) return;
     expect(refreshed.value.extra["claim"]).not.toHaveProperty("session_id");
@@ -414,7 +414,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const { taskIds } = await createPlanAndTasks(corpusService, [["packages/core/src/session.ts"]]);
     const broken = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: "!!!" });
 
-    const result = await broken.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A });
+    const result = await broken.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A });
     expect(result.ok).toBe(false);
     if (!result.ok) expect((result.error as { field?: string }).field).toBe("claim.session_id");
 
@@ -429,7 +429,7 @@ describe("TaskWorkflowService.claim — two sessions, one actor, one checkout", 
     const { planId, taskIds } = await createPlanAndTasks(corpusService, [anchors, anchors]);
 
     const sessionOne = makeSessionService(store, corpusService, { CLAUDE_CODE_SESSION_ID: SESSION_A });
-    expect((await sessionOne.claim(taskIds[0]!, { by: ORCHESTRATOR, harnessRun: RUN_A })).ok).toBe(true);
+    expect((await sessionOne.claim(taskIds[0]!, { worktree: "wt-0", by: ORCHESTRATOR, harnessRun: RUN_A })).ok).toBe(true);
 
     // The second claim is refused by the gate, so write the colliding claim directly —
     // this is also EXACTLY the legacy/foreign-session state `ready()` must report on.

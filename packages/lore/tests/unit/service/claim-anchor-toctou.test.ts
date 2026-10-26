@@ -149,7 +149,7 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const planId = await createTopLevelPlan(corpusService);
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const result = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.extra["claim"]).toMatchObject({ by: "agent:t1" });
@@ -168,11 +168,11 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     // CAS write commits, a concurrent actor agent:t1 claims the anchor-overlapping
     // Task Two. This is exactly the race a pre-write-only gate cannot see.
     interleaveFirstUpdate(store, taskOne.id, async () => {
-      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { worktree: "wt-two", by: "agent:t1", harnessRun: runOfName("agent:t1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const result = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t2", harnessRun: runOfName("agent:t2") });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -201,18 +201,18 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
 
     // agent:t9 claims Task Two far in the past — will be stale by the time Task One
     // is claimed/refreshed at T=120min+ later (TTL=120).
-    await taskWorkflowService.claim(taskTwo.id, { by: "agent:t9", harnessRun: runOfName("agent:t9") }, () => "2026-07-11T06:00:00.000Z");
+    await taskWorkflowService.claim(taskTwo.id, { worktree: "wt-two", by: "agent:t9", harnessRun: runOfName("agent:t9") }, () => "2026-07-11T06:00:00.000Z");
 
     const first = await taskWorkflowService.claim(
       taskOne.id,
-      { by: "agent:t1", harnessRun: runOfName("agent:t1") },
+      { worktree: "wt-one", by: "agent:t1", harnessRun: runOfName("agent:t1") },
       () => "2026-07-11T09:00:00.000Z",
     );
     expect(first.ok).toBe(true);
 
     const refresh = await taskWorkflowService.claim(
       taskOne.id,
-      { by: "agent:t1", harnessRun: runOfName("agent:t1") },
+      { worktree: "wt-one", by: "agent:t1", harnessRun: runOfName("agent:t1") },
       () => "2026-07-11T09:30:00.000Z",
     );
     expect(refresh.ok).toBe(true);
@@ -236,10 +236,10 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
     const taskTwo = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskTwo.id, { worktree: "wt-two", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const second = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.extra["claim"]).toMatchObject({ by: "agent:t1" });
@@ -256,9 +256,9 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const planId = await createTopLevelPlan(corpusService);
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
-    const second = await taskWorkflowService.claim(taskOne.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const second = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(second.ok).toBe(true);
 
     const doc = await store.find(taskOne.id);
@@ -282,11 +282,11 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const taskTwo = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
     interleaveFirstUpdate(store, taskOne.id, async () => {
-      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { worktree: "wt-two", by: "agent:t1", harnessRun: runOfName("agent:t1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const result = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(result.ok).toBe(true); // anchor_overlap disabled — both claims coexist, as configured
 
     const doc = await store.find(taskOne.id);
@@ -304,11 +304,11 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     const taskTwo = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
     interleaveFirstUpdate(store, taskOne.id, async () => {
-      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+      const claimTwo = await taskWorkflowService.claim(taskTwo.id, { worktree: "wt-two", by: "agent:t1", harnessRun: runOfName("agent:t1") });
       expect(claimTwo.ok).toBe(true);
     });
 
-    const result = await taskWorkflowService.claim(taskOne.id, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const result = await taskWorkflowService.claim(taskOne.id, { worktree: "wt-one", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(result.ok).toBe(true);
 
     const doc = await store.find(taskOne.id);

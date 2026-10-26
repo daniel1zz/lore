@@ -291,7 +291,7 @@ describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-r
     const planSlug = await createPlan(tmpDir, "Anchor State Plan");
     const taskSlug = await createTask(tmpDir, planSlug, "Stateful Task", ["src/a", "src/b"]);
 
-    const claimResult = await runLore(["claim", taskSlug, "--branch", "wt-x", "--worktree", "wt-x"], tmpDir, "alice");
+    const claimResult = await runLore(["claim", taskSlug, "--worktree", "wt-x"], tmpDir, "alice");
     expect(claimResult.exitCode).toBe(0);
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — "tsc" self-report is now refused regardless of
@@ -312,7 +312,7 @@ describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-r
     const got = JSON.parse(getResult.stdout) as {
       data: { doc: { extra: { claim: { by: string; branch: string }; verification_evidence: unknown[]; file_anchors: string[] } } };
     };
-    expect(got.data.doc.extra.claim).toMatchObject({ by: sessionActorFor("alice"), branch: "wt-x" });
+    expect(got.data.doc.extra.claim).toMatchObject({ by: sessionActorFor("alice"), worktree: "wt-x" });
     expect(got.data.doc.extra.verification_evidence).toHaveLength(1);
     expect(got.data.doc.extra.file_anchors).toEqual(["src/b"]);
   });

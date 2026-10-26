@@ -234,15 +234,30 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
 
   it("HISTORY: a re-landing replaces extra.landing and appends the replaced one to extra.landing_history", async () => {
     const f = await fixture();
-    const first = { branch: "feat-landing", branch_head: "h1", main_before: "m0", main_after: "m1", landing_commit: "m1" };
-    const second = { branch: "feat-landing", branch_head: "h2", main_before: "m1", main_after: "m2", landing_commit: "m2" };
+    // reason: the landing's kind is measured by the one predicate (landingOf) from real facts, so each landing names a
+    // branch head that really reached main by merge commit (the BR-1245 premise of the predicate).
+    const mergeOntoMain = (): string => {
+      // reason: the shipped guard refuses any working copy on `main`, so the merge commit is built with plumbing.
+      const tree = run(f.repo, "merge-tree", "--write-tree", "main", "feat-landing");
+      const merged = run(f.repo, "commit-tree", tree, "-p", "main", "-p", "feat-landing", "-m", "merge feat-landing");
+      run(f.repo, "update-ref", "refs/heads/main", merged);
+      return merged;
+    };
+    const m0 = run(f.repo, "rev-parse", "main");
+    const m1 = mergeOntoMain();
+    const first = { branch: "feat-landing", branch_head: f.branchHead, main_before: m0, main_after: m1, landing_commit: m1 };
     expect((await f.svc.recordLanding(first)).ok).toBe(true);
+    run(f.repo, "checkout", "-q", "feat-landing");
+    const h2 = commit(f.repo, "second-landing-file.txt", "feat: second round");
+    run(f.repo, "checkout", "-q", "--detach", "main");
+    const m2 = mergeOntoMain();
+    const second = { branch: "feat-landing", branch_head: h2, main_before: m1, main_after: m2, landing_commit: m2 };
     expect((await f.svc.recordLanding(second)).ok).toBe(true);
     expect((await f.svc.recordLanding(second)).ok).toBe(true); // idempotent: no duplicate history entry
     const task = await f.store.find(f.taskId);
     const extra = task.ok && task.value !== null ? task.value.extra : {};
     expect(extra["landing"]).toMatchObject(second);
-    expect((extra["landing_history"] as unknown[]).map((l) => (l as { branch_head: string }).branch_head)).toEqual(["h1"]);
+    expect((extra["landing_history"] as unknown[]).map((l) => (l as { branch_head: string }).branch_head)).toEqual([f.branchHead]);
   }, 60_000);
 
   it("NEGATIVE: landing a different branch records nothing on a task claimed elsewhere", async () => {

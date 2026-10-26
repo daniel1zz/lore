@@ -306,10 +306,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a/"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const second = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("VALIDATION_ERROR");
@@ -324,10 +324,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskAId = await createTask(corpusService, planAId, "Plan A Task", ["src/a"]);
     const taskBId = await createTask(corpusService, planBId, "Plan B Task", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskAId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskAId, { worktree: "wt-taskAId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskBId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const second = await taskWorkflowService.claim(taskBId, { worktree: "wt-taskBId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(true);
   });
 
@@ -337,7 +337,7 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const planId = await createUnapprovedAncestorPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Solo Task"); // no anchors
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const result = await taskWorkflowService.claim(taskId, { worktree: "wt-taskId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect((result.error as { field?: string }).field).toBe("gate:task-claim");
@@ -349,7 +349,7 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const planId = await createApprovedAncestorPlan(corpusService, store);
     const taskId = await createTask(corpusService, planId, "Solo Task", ["src/a"]);
 
-    const result = await taskWorkflowService.claim(taskId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const result = await taskWorkflowService.claim(taskId, { worktree: "wt-taskId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(result.ok).toBe(true);
   });
 
@@ -367,10 +367,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const second = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(second.ok).toBe(true); // anchor_overlap disabled — overlap no longer blocks
   });
 
@@ -381,10 +381,10 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a/"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    const first = await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const first = await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(first.ok).toBe(true);
 
-    const steal = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2"), steal: true });
+    const steal = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2"), steal: true });
     expect(steal.ok).toBe(false);
     if (steal.ok) return;
     expect((steal.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
@@ -397,14 +397,14 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     const taskOneId = await createTask(corpusService, planId, "Task One", ["src/a/"]);
     const taskTwoId = await createTask(corpusService, planId, "Task Two", ["src/a"]);
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
-    const blocked = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    await taskWorkflowService.claim(taskOneId, { worktree: "wt-taskOneId", by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    const blocked = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(blocked.ok).toBe(false);
 
     const release = await taskWorkflowService.release(taskOneId, { by: "agent:t1", harnessRun: runOfName("agent:t1") });
     expect(release.ok).toBe(true);
 
-    const retry = await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", harnessRun: runOfName("agent:t2") });
+    const retry = await taskWorkflowService.claim(taskTwoId, { worktree: "wt-taskTwoId", by: "agent:t2", harnessRun: runOfName("agent:t2") });
     expect(retry.ok).toBe(true);
   });
 

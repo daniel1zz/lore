@@ -3270,12 +3270,8 @@ export class TaskWorkflowService {
       }
     }
 
-    // reason: a claim naming a working copy or a branch needs a start the landing predicate can measure from (the claim
-    // schema refuses a branch claim without a sha `start_head`). A start git cannot read is a refusal here, before anything is
-    // written, never a claim with no start.
-    const startResult = this.measureStartHead(opts.worktree ?? capturedBranch);
-    if (!startResult.ok) return startResult;
-    const startHead = startResult.value;
+    const measuredStart = this.measureStartHead(opts.worktree ?? capturedBranch);
+    const startHead = measuredStart.sha;
     const builtClaim: TaskClaim = buildTaskClaim(
       existingClaim,
       {
@@ -3299,6 +3295,20 @@ export class TaskWorkflowService {
       },
       carryForward,
     );
+    // reason: a claim that records a branch needs a start the landing predicate can measure from (the claim schema refuses a branch
+    // claim without a sha `start_head`). A start git cannot read is a refusal here (exit 4, before anything is written), never
+    // a branch claim with no start. A carried-forward start (a same-holder refresh) counts.
+    if (builtClaim.branch !== undefined && builtClaim.start_head === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "worktree",
+        message:
+          `The start of the work cannot be measured: the claim records branch \`${builtClaim.branch}\` but ` +
+          `${measuredStart.reason ?? "no start commit could be read for it"}. A claim on a branch needs a start commit to measure the ` +
+          "work from; create the branch or worktree first, then claim it. Nothing was written.",
+        value: builtClaim.branch,
+      });
+    }
     const newClaim: TaskClaim =
       inheritedDirtyWorktree !== undefined
         ? { ...builtClaim, inherited_dirty_worktree: inheritedDirtyWorktree }
@@ -4387,27 +4397,18 @@ export class TaskWorkflowService {
 
   /**
    * The commit a claim's work starts from: the branch (or worktree) head for a claim naming a working copy or branch, main's
-   * head for a no-branch claim (absent when git cannot answer: corpus-only work outside a repository has nothing to land).
+   * head for a no-branch claim. Absent, with the reason, when git cannot answer: never a guess.
    *
    * @param target - the worktree path or branch name the claim names, or `undefined` for a no-branch claim
-   * @returns `err(VALIDATION_ERROR)` (exit 4) when a named working copy or branch has no readable head
    */
-  private measureStartHead(target: string | undefined): Result<string | undefined, LoreError> {
-    const probe = this.worktreeProbe;
+  private measureStartHead(target: string | undefined): { readonly sha?: string; readonly reason?: string } {
     if (target === undefined) {
       const head = this.landingFacts().integrationHead();
-      return ok(head.ok ? head.value : undefined);
+      return head.ok ? { sha: head.value } : { reason: head.reason };
     }
+    const probe = this.worktreeProbe;
     const resolved = resolveClaimHead(probe, target, probe.currentWorkingDirectory());
-    if (resolved.ok) return ok(resolved.value.sha);
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "worktree",
-      message:
-        `The start of the work cannot be measured: \`${target}\` has no readable head (${resolved.reason}). A claim on a branch needs ` +
-        "a start commit to measure the work from; create the branch or worktree first, then claim it. Nothing was written.",
-      value: target,
-    });
+    return resolved.ok ? { sha: resolved.value.sha } : { reason: `\`${target}\` has no readable head (${resolved.reason})` };
   }
 
   /**
@@ -5313,12 +5314,12 @@ export class TaskWorkflowService {
     // `lore_anchor_set`), so one check covers all of them. Removing or keeping anchors is never refused.
     const held = readClaimRecord(task);
     const existingAnchors = new Set(extractFileAnchors(task));
-    if (held !== undefined && held.worktree === undefined && newAnchors.some((anchor) => !existingAnchors.has(anchor))) {
+    if (held !== undefined && held.worktree === undefined && held.branch === undefined && newAnchors.some((anchor) => !existingAnchors.has(anchor))) {
       return err({
         code: "VALIDATION_ERROR",
         field: "file_anchors",
         message:
-          `Task "${task.slug}" holds an open claim with no branch (held by ${held.by}), so its work cannot change files: an anchor ` +
+          `Task "${task.slug}" holds an open claim with no branch or worktree (held by ${held.by}), so its work cannot change files: an anchor ` +
           `cannot be added while a no-branch claim is open [anchor: work-needs-branch]. Release the claim and re-claim on a branch ` +
           `(\`lore release ${task.slug}\`, then \`lore claim ${task.slug} --worktree <path>\`) before adding the anchor. Nothing was written.`,
         value: "work-needs-branch",

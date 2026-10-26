@@ -333,7 +333,8 @@ describe("lore_anchor_set — REGRESSION (task target, byte-identical to pre-SPE
     const { id: planId } = await createPlan();
     const { id: taskId, slug: taskSlug } = await createTask(planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:mcp", source: "mcp" });
+    // reason: an anchor cannot be added under a no-branch claim (BR-1468), so the claim names its branch.
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:mcp", source: "mcp", worktree: "agent-branch" });
     expect(claimResult.ok).toBe(true);
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — "test" self-report is now refused regardless of
