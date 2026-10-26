@@ -472,6 +472,27 @@ export interface ProposedRuleWrite {
   changeSummary?: string;
 }
 
+/**
+ * The spec write that {@link StoreInterface.repointProposedRuleAndUpdateSpec} commits together with moving a
+ * `proposed` rule id's registry row to another leaf.
+ */
+export interface ProposedRuleRepointWrite {
+  /** The SPEC whose `extra.rule_changes` entry names the new leaf. */
+  specId: DocId;
+  /** CAS guard: the spec's `version` the caller read. */
+  expectedVersion: number;
+  /** The spec's new `extra` (already carrying the entry's new leaf). */
+  extra: Record<string, unknown>;
+  /** The `proposed` rule id whose registry row moves. */
+  ruleId: string;
+  /** The leaf the rule will now land on; becomes the registry row's `leaf_doc_id`. */
+  toLeafId: DocId;
+  /** New spec status (e.g. approved -> draft demotion); absent = unchanged. */
+  status?: DocStatus;
+  /** `change_summary` of the spec's version row. */
+  changeSummary?: string;
+}
+
 // ─── Interface ─────────────────────────────────────────────────────────────
 
 /**
@@ -895,6 +916,25 @@ export interface StoreInterface {
     prefix?: RuleIdPrefix,
     harnessRun?: string | null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
+
+  /**
+   * Re-point a `proposed` rule id at another leaf AND write the spec's change set in ONE write transaction:
+   * CAS-update the spec's `extra` to `write.extra` (+ optional status), insert its `action: "update"` version
+   * row, set `rule_registry.leaf_doc_id = write.toLeafId` (and `version` to that leaf's current one). NO leaf is
+   * touched. Any failure rolls EVERYTHING back.
+   *
+   * @param write - the spec write and the new owner leaf; unknown/soft-deleted spec or target leaf, or an id with
+   *   no registry row → `DOC_NOT_FOUND`; a registry row that is not `proposed` → `VALIDATION_ERROR`; version
+   *   mismatch → `STALE_VERSION`.
+   * @param actor - Recorded as the version row's `created_by`.
+   * @param harnessRun - Harness run stamped on the spec's version row; supplied only by `withWriteContext`.
+   * @returns the updated spec, or a loud error.
+   */
+  repointProposedRuleAndUpdateSpec(
+    write: ProposedRuleRepointWrite,
+    actor: string,
+    harnessRun?: string | null,
+  ): Promise<Result<DocRecord, LoreError>>;
 
   /**
    * Move a rule between leaves in ONE write transaction: CAS-update both

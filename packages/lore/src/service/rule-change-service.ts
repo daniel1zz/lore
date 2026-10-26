@@ -78,7 +78,7 @@ export type ProposeRuleChangeInput =
   | { op: "add"; leaf: string; statement: string; examples: string[]; enforced_by: RuleEnforcement }
   | { op: "modify"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
   | { op: "retire"; id: string; note: string }
-  | { op: "amend"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
+  | { op: "amend"; id: string; leaf?: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
   | { op: "withdraw"; id: string };
 
 /** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place. */
@@ -679,8 +679,20 @@ export class RuleChangeService implements RuleChangeLandingPort {
         const verdict = await this.writeAuthority.authorize([leaf.value], "rule-propose", actor);
         if (!verdict.ok) return verdict;
       }
+      // An amend's --leaf is validated exactly as an add's (same lookup, same refusal) and its write authorized too.
+      let target: DocRecord | undefined;
+      if (fields.value.leaf !== undefined) {
+        const resolved = await this.resolveBusinessLeaf(fields.value.leaf);
+        if (!resolved.ok) return resolved;
+        target = resolved.value;
+        if (this.writeAuthority !== undefined) {
+          const verdict = await this.writeAuthority.authorize([target], "rule-propose", actor);
+          if (!verdict.ok) return verdict;
+        }
+      }
       const amended: Extract<RuleChange, { op: "add" }> = {
         ...entry.value,
+        ...(target !== undefined ? { leaf: target.slug } : {}),
         ...(fields.value.statement !== undefined ? { statement: fields.value.statement } : {}),
         ...(fields.value.examples !== undefined ? { examples: fields.value.examples } : {}),
         ...(fields.value.enforced_by !== undefined ? { enforced_by: fields.value.enforced_by } : {}),
@@ -693,11 +705,47 @@ export class RuleChangeService implements RuleChangeLandingPort {
       const summary = correctionReason !== undefined
         ? `Correction: ${correctionReason}`
         : `Rule change proposed: amend ${amended.id}`;
-      const written = await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
+      // A moved leaf re-points the registry row in the SAME transaction as the spec write; otherwise a plain write.
+      const written = target !== undefined && target.slug !== entry.value.leaf
+        ? await this.writeRepoint(spec, next, amended, target, status, summary, actor, correctionReason)
+        : await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
       if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
       return written;
     }
     return err(lastStale ?? staleExhausted(specResult.value.id as string));
+  }
+
+  /** Persist an amend that moves a proposed add to `target`: spec version + audit row + registry `leaf_doc_id`, one write. */
+  private async writeRepoint(
+    spec: DocRecord,
+    next: RuleChange[],
+    change: Extract<RuleChange, { op: "add" }>,
+    target: DocRecord,
+    status: DocStatus,
+    summary: string,
+    actor: string,
+    correctionReason: string | undefined,
+  ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
+    const written = await this.writer.repointProposedRule({
+      write: {
+        specId: spec.id,
+        expectedVersion: spec.version,
+        extra: { ...spec.extra, rule_changes: next },
+        ruleId: change.id,
+        toLeafId: target.id,
+        status,
+        changeSummary: summary,
+      },
+      auditDetails: {
+        operation: "rule-propose",
+        change_op: "amend",
+        ...(correctionReason !== undefined ? { correction: { reason: correctionReason } } : {}),
+      },
+      by: actor,
+      foreignIntent: this.foreignIntent,
+    });
+    if (!written.ok) return written;
+    return ok({ change, doc: written.value });
   }
 
   /**
@@ -843,11 +891,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
   private async authorizeTarget(change: RuleChange, actor: string): Promise<Result<DocRecord | undefined, LoreError>> {
     let leaf: DocRecord | undefined;
     if (change.op === "add") {
-      const resolved = await resolveDoc(this.store, change.leaf);
+      const resolved = await this.resolveBusinessLeaf(change.leaf);
       if (!resolved.ok) return resolved;
-      if (resolved.value.type !== "baseline" || ruleIdPrefixOfNode(resolved.value.extra) !== "BR") {
-        return err(validationError("leaf", `an add lands on a business leaf; '${change.leaf}' is not one`, change.leaf, "BR-1206"));
-      }
       leaf = resolved.value;
     } else {
       const baseline = await this.store.findMany({ type: "baseline" });
@@ -859,6 +904,19 @@ export class RuleChangeService implements RuleChangeLandingPort {
       if (!verdict.ok) return verdict;
     }
     return ok(leaf);
+  }
+
+  /**
+   * The business leaf an `add` lands on — and an `amend --leaf` moves to: one lookup, one refusal (BR-1206).
+   * @param ref - leaf id or slug; unresolvable → DOC_NOT_FOUND; not a business baseline leaf → VALIDATION_ERROR.
+   */
+  private async resolveBusinessLeaf(ref: string): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await resolveDoc(this.store, ref);
+    if (!resolved.ok) return resolved;
+    if (resolved.value.type !== "baseline" || ruleIdPrefixOfNode(resolved.value.extra) !== "BR") {
+      return err(validationError("leaf", `an add lands on a business leaf; '${ref}' is not one`, ref, "BR-1206"));
+    }
+    return ok(resolved.value);
   }
 
   // ── reads ────────────────────────────────────────────────────────────────
@@ -999,12 +1057,16 @@ function shapeAmend(input: AmendInput): Result<AmendInput, LoreError> {
     ));
   }
   const { statement, examples, enforced_by } = parsed.data;
-  if (statement === undefined && examples === undefined && enforced_by === undefined) {
-    return err(validationError("change", "an amend must change at least one of statement, examples, enforced_by", undefined, "BR-1287"));
+  if (input.leaf !== undefined && input.leaf.trim() === "") {
+    return err(validationError("leaf", "an amend's --leaf must name a baseline leaf", input.leaf, "BR-1287"));
+  }
+  if (statement === undefined && examples === undefined && enforced_by === undefined && input.leaf === undefined) {
+    return err(validationError("change", "an amend must change at least one of leaf, statement, examples, enforced_by", undefined, "BR-1287"));
   }
   return ok({
     op: "amend",
     id: parsed.data.id,
+    ...(input.leaf !== undefined ? { leaf: input.leaf } : {}),
     ...(statement !== undefined ? { statement } : {}),
     ...(examples !== undefined ? { examples } : {}),
     ...(enforced_by !== undefined ? { enforced_by } : {}),
