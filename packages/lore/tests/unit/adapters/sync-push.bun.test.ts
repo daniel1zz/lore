@@ -78,6 +78,7 @@ import { MIGRATION_035_SQL } from "../../../src/store/migrations/migration-035.j
 import { MIGRATION_036_SQL } from "../../../src/store/migrations/migration-036.js";
 import { MIGRATION_037_SQL } from "../../../src/store/migrations/migration-037.js";
 import { MIGRATION_038_SQL } from "../../../src/store/migrations/migration-038.js";
+import { MIGRATION_039_SQL } from "../../../src/store/migrations/migration-039.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 import { actedStore } from "../../live-invocation.js";
 
@@ -323,6 +324,8 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   await client.executeMultiple(MIGRATION_037_SQL);
   // reason: migration 038 is a plan-data conversion plus a link-type rebuild; the fixture holds no known-defect link, so its SQL half is the whole step.
   await client.executeMultiple(MIGRATION_038_SQL);
+  // reason: migration 039 back-fills landing kind and claim start_head on existing task rows; the fixture holds none, so its SQL half (the version pragma) is the whole step.
+  await client.executeMultiple(MIGRATION_039_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

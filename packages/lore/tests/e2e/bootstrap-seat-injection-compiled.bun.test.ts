@@ -33,6 +33,8 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 function makeRepoDir(path: string): void {
   mkdirSync(path);
   execFileSync("git", ["init", "-q", path], { stdio: "ignore" });
+  // reason: a claim on a branch needs a start commit (the claim schema requires `start_head`), so the seat repo is not unborn.
+  execFileSync("git", ["-c", "user.email=fixture@example.invalid", "-c", "user.name=fixture", "commit", "-q", "--allow-empty", "-m", "seat base"], { cwd: path, stdio: "ignore" });
 }
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
