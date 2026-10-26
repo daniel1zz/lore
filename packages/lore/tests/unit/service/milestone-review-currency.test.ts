@@ -30,6 +30,7 @@ const task = (id: string, version: number, landing?: { at: string; commit: strin
   extra: landing
     ? {
         landing: {
+          kind: "commits",
           branch: "b",
           branch_head: "h",
           main_before: "m0",

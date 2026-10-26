@@ -59,7 +59,7 @@ function makeTask(extra: Record<string, unknown>): DocRecord {
 
 describe("formatWorkflowBadge — HAPPY", () => {
   it("claim with branch present → claimed:by@branch", () => {
-    const doc = makeTask({ claim: { by: "alice", at: NOW_ISO, branch: "wt-a" } });
+    const doc = makeTask({ claim: { by: "alice", at: NOW_ISO, branch: "wt-a", start_head: "a".repeat(40) } });
     expect(formatWorkflowBadge(doc, NOW_ISO, TTL_MINUTES)).toBe(" [claimed:alice@wt-a]");
   });
 
@@ -73,7 +73,7 @@ describe("formatWorkflowBadge — HAPPY", () => {
 
 describe("formatWorkflowBadge — NEGATIVE", () => {
   it("malformed claim (missing required `by`) → no claim segment, no throw", () => {
-    const doc = makeTask({ claim: { at: NOW_ISO, branch: "wt-a" } });
+    const doc = makeTask({ claim: { at: NOW_ISO, branch: "wt-a", start_head: "a".repeat(40) } });
     expect(formatWorkflowBadge(doc, NOW_ISO, TTL_MINUTES)).toBe("");
   });
 });
@@ -102,7 +102,7 @@ describe("formatWorkflowBadge — ERROR", () => {
 describe("formatWorkflowBadge — STATE", () => {
   it("claim (with branch) + evidence together render both segments in one bracket", () => {
     const doc = makeTask({
-      claim: { by: "bob", at: NOW_ISO, branch: "wt-b" },
+      claim: { by: "bob", at: NOW_ISO, branch: "wt-b", start_head: "a".repeat(40) },
       verification_evidence: [
         { oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: NOW_ISO, recorded_by: "bob" },
       ],
@@ -122,7 +122,7 @@ describe("formatWorkflowBadge — REGRESSION (stale suffix + evidence counts unc
 
   it("stale claim WITH branch → branch renders before the stale suffix", () => {
     const staleAt = "2026-07-11T00:00:00.000Z";
-    const doc = makeTask({ claim: { by: "carol", at: staleAt, branch: "wt-c" } });
+    const doc = makeTask({ claim: { by: "carol", at: staleAt, branch: "wt-c", start_head: "a".repeat(40) } });
     expect(formatWorkflowBadge(doc, NOW_ISO, TTL_MINUTES)).toBe(" [claimed:carol@wt-c (stale)]");
   });
 
