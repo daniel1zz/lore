@@ -75,7 +75,7 @@
 
 import { defineLoreCommand } from "../cli-exit.js";
 
-import { ok, ruleIdPrefixOfNode } from "@lore/core";
+import { ok, readMeasuredLanding, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import {
   computeImplementedBy,
@@ -327,6 +327,9 @@ export default defineLoreCommand({
       );
       printLine(inv.io.stdout, `Last write: ${formatAttributionLabels(attribution)}`);
       for (const line of humanStanding) printLine(inv.io.stdout, line);
+      // reason: how an archived task landed (the one landing predicate): `no-change` (nothing to merge) or `commits`.
+      const measuredLanding = readMeasuredLanding(doc.extra);
+      if (measuredLanding !== undefined) printLine(inv.io.stdout, `Landing: ${measuredLanding.kind}`);
       if (doc.tags.length > 0) {
         printLine(inv.io.stdout, `Tags: ${doc.tags.join(", ")}`);
       }

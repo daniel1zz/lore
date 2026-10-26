@@ -3882,6 +3882,14 @@ export class TaskWorkflowService {
     for (let attempt = 0; attempt < 3 && !result.ok && result.error.code === "STALE_VERSION"; attempt += 1) {
       result = await this._doneImpl(idOrSlug, opts, now);
     }
+    // reason: the same race seen one step later: the write route re-read the task and found it already archived by the rival
+    // closer ("Cannot move archived ..."). The work IS done, so this closer reports exactly what a second `lore done` reports.
+    if (!result.ok && result.error.code === "VALIDATION_ERROR" && result.error.field === "status") {
+      const reread = await this.resolveTask(idOrSlug);
+      if (reread.ok && (reread.value.status === "archived" || reread.value.status === "deprecated")) {
+        result = ok({ task: reread.value, already_done: true, transitions: [] });
+      }
+    }
     this.recordEvent("task.done", startMs, result, opts.source, {
       by: opts.by,
       already_done: result.ok ? result.value.already_done : false,
@@ -3943,8 +3951,13 @@ export class TaskWorkflowService {
     // floor. `legacy_unbound` and every row of an UNARMED corpus still do, so arming refuses
     // nothing retroactively.
     const stampReadings = classifyEvidenceStamps(task.id, evidence, stampBinding);
+    // reason: a pass on a no-branch claim records `main_head` and is judged by the counting rule alone (head_sha == main_head);
+    // an unbound stamp there only says the shared checkout holds unrelated uncommitted files, which this work does not depend on.
     const attestedRows = evidence.filter(
-      (e, index) => e.result === "pass" && e.attestation !== undefined && stampReadings[index]?.stamp !== "unbound",
+      (e, index) =>
+        e.result === "pass" &&
+        e.attestation !== undefined &&
+        (stampReadings[index]?.stamp !== "unbound" || e.attestation.main_head !== undefined),
     );
     // reason: the landing predicate's counting rule (BR-199): only passes recorded after the latest claim, bound to a
     // clean commit that is on main (or at main's head for a no-branch claim) count. BR-159 stays the one write-time
@@ -4302,7 +4315,7 @@ export class TaskWorkflowService {
         `Task "${task.slug}" covers AC(s) whose oracle file is missing: ${findings.join("; ")} — lore done ` +
         "refuses: an AC whose test file does not exist is NOT MEASURED, whatever an earlier attested pass said. " +
         "Repoint the command with `lore ac set <spec> <AC-ID> --command \"<cmd naming an existing file>\"`, " +
-        `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`.`,
+        `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`. [floor: missing-oracle-file]`,
       value: findings,
     };
     return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" } } });
@@ -4860,7 +4873,23 @@ export class TaskWorkflowService {
         }
         mainBefore = claimBase;
       }
-      const record: TaskLanding = { ...landing, main_before: mainBefore, recorded_at: nowIso };
+      // reason: the landing also carries what the one predicate measures (kind, start, tip), so `lore done` finds the same facts
+      // and writes nothing more; a task whose start was never recorded gets them from `lore done` instead.
+      const startHead = readClaimRecord(task)?.start_head ?? TaskWorkflowService.claimBaseFor(rows, landing.branch);
+      const record: TaskLanding = {
+        ...landing,
+        main_before: mainBefore,
+        recorded_at: nowIso,
+        ...(startHead !== undefined
+          ? {
+              kind: startHead === landing.branch_head ? ("no-change" as const) : ("commits" as const),
+              start_head: startHead,
+              tip: landing.branch_head,
+              integration_head: landing.main_after,
+              measured_at: nowIso,
+            }
+          : {}),
+      };
       const written = await this.writer.writeDoc({
         doc: task,
         // a re-landing replaces `landing` (singular) but the replaced one is appended to `landing_history`, so nothing is lost
