@@ -162,6 +162,55 @@ function runSuite(o: SuiteOpts): void {
       expect(!refused.ok && refused.error.code).toBe("DOC_NOT_FOUND");
     });
 
+    it("HAPPY: repointProposedRuleAndUpdateSpec moves the registry leaf and the spec's change set in one write", async () => {
+      const leafA = await seed(store, doc("baseline", "leaf-a", { node: "leaf", rules: [] }));
+      const leafB = await seed(store, doc("baseline", "leaf-b", { node: "leaf", rules: [] }));
+      const spec = await seed(store, doc("spec", "a", {}));
+      await store.reserveProposedRuleAndUpdateSpec(
+        { specId: spec.id, expectedVersion: 1, buildExtra: withChange(spec), ownerLeafId: leafA.id },
+        "agent:test",
+      );
+      const moved = await store.repointProposedRuleAndUpdateSpec(
+        {
+          specId: spec.id,
+          expectedVersion: 2,
+          extra: { rule_changes: [{ op: "add", id: "BR-1", leaf: leafB.slug, statement: "s", examples: ["e"], enforced_by: "both" }] },
+          ruleId: "BR-1",
+          toLeafId: leafB.id,
+          changeSummary: "Rule change proposed: amend BR-1",
+        },
+        "agent:test",
+      );
+      expect(moved.ok && moved.value.version).toBe(3);
+      expect(moved.ok && (moved.value.extra["rule_changes"] as Array<{ leaf: string }>)[0]?.leaf).toBe(leafB.slug);
+      const rows = await store.listRuleRegistry();
+      expect(rows.ok && rows.value.map((r) => [r.id, r.leaf_doc_id, r.lifecycle])).toEqual([["BR-1", leafB.id, "proposed"]]);
+    });
+
+    it("NEGATIVE: a stale spec, an unknown target leaf and a non-proposed id leave the registry row and spec untouched", async () => {
+      const leafA = await seed(store, doc("baseline", "leaf-a", { node: "leaf", rules: [] }));
+      const leafB = await seed(store, doc("baseline", "leaf-b", { node: "leaf", rules: [] }));
+      const spec = await seed(store, doc("spec", "a", {}));
+      await store.reserveProposedRuleAndUpdateSpec(
+        { specId: spec.id, expectedVersion: 1, buildExtra: withChange(spec), ownerLeafId: leafA.id },
+        "agent:test",
+      );
+      const base = { specId: spec.id, extra: { moved: true }, ruleId: "BR-1", toLeafId: leafB.id };
+      const stale = await store.repointProposedRuleAndUpdateSpec({ ...base, expectedVersion: 9 }, "agent:test");
+      expect(!stale.ok && stale.error.code).toBe("STALE_VERSION");
+      const noLeaf = await store.repointProposedRuleAndUpdateSpec(
+        { ...base, expectedVersion: 2, toLeafId: "01HNOSUCHLEAF000000000000" as never },
+        "agent:test",
+      );
+      expect(!noLeaf.ok && noLeaf.error.code).toBe("DOC_NOT_FOUND");
+      const unknownRule = await store.repointProposedRuleAndUpdateSpec({ ...base, expectedVersion: 2, ruleId: "BR-99" }, "agent:test");
+      expect(!unknownRule.ok && unknownRule.error.code).toBe("DOC_NOT_FOUND");
+      const rows = await store.listRuleRegistry();
+      expect(rows.ok && rows.value.map((r) => [r.id, r.leaf_doc_id])).toEqual([["BR-1", leafA.id]]);
+      const specAfter = await store.find(spec.id);
+      expect(specAfter.ok && specAfter.value?.version).toBe(2);
+    });
+
     it("STATE: a status demotion and change_summary land on the spec's one new version row", async () => {
       const leaf = await seed(store, doc("baseline", "leaf", { node: "leaf" }));
       const spec = await seed(store, doc("spec", "a", {}, "approved"));

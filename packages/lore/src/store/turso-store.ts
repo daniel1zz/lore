@@ -143,6 +143,7 @@ import type {
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   SearchHit,
+  ProposedRuleRepointWrite,
   ProposedRuleWrite,
   RuleLeafPatch,
   RuleRegistryRow,
@@ -3476,6 +3477,86 @@ export class TursoStore implements StoreInterface {
         prefix,
       ),
     );
+  }
+
+  /** @see StoreInterface.repointProposedRuleAndUpdateSpec */
+  async repointProposedRuleAndUpdateSpec(
+    write: ProposedRuleRepointWrite,
+    actor: string,
+    harnessRun: string | null = null,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.serializeRuleWrite(() => this.repointProposedRuleSerialized(write, actor, harnessRun));
+  }
+
+  /** One write transaction of {@link repointProposedRuleAndUpdateSpec} — mirror of `SQLiteStore.repointProposedRuleAndUpdateSpec`. */
+  private async repointProposedRuleSerialized(
+    write: ProposedRuleRepointWrite,
+    actor: string,
+    harnessRun: string | null,
+  ): Promise<Result<DocRecord, LoreError>> {
+    let tx: Transaction;
+    try {
+      await this.ensureReady();
+      tx = await this.client.transaction("write");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const regRs = await tx.execute({ sql: "SELECT lifecycle FROM rule_registry WHERE id = ?", args: [write.ruleId] });
+      const regRow = regRs.rows[0];
+      if (!regRow) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id: write.ruleId });
+      }
+      const lifecycle = rowStr(regRow, "lifecycle");
+      if (lifecycle !== "proposed") {
+        await tx.rollback();
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "id",
+          message: `${write.ruleId} is ${lifecycle} in the registry; only a proposed id can be re-pointed`,
+          value: write.ruleId,
+        });
+      }
+      const leafRs = await tx.execute({ sql: "SELECT version, deleted_at FROM docs WHERE id = ?", args: [write.toLeafId] });
+      const leafRow = leafRs.rows[0];
+      if (!leafRow || rowStrOrNull(leafRow, "deleted_at") !== null) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id: write.toLeafId });
+      }
+      const written = await this.applyRuleLeafPatchTx(
+        tx,
+        {
+          id: write.specId,
+          expectedVersion: write.expectedVersion,
+          extra: write.extra,
+          harness_run: harnessRun,
+          ...(write.status !== undefined ? { status: write.status } : {}),
+          ...(write.changeSummary !== undefined ? { change_summary: write.changeSummary } : {}),
+        },
+        actor,
+        new Date().toISOString(),
+      );
+      if (!written.ok) {
+        await tx.rollback();
+        return written;
+      }
+      await tx.execute({
+        sql: "UPDATE rule_registry SET leaf_doc_id = ?, version = ? WHERE id = ?",
+        args: [write.toLeafId, rowNum(leafRow, "version"), write.ruleId] as InValue[],
+      });
+      await tx.commit();
+      return ok(written.value);
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already closed — safe to ignore.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
   }
 
   /**

@@ -14,9 +14,13 @@
  *
  *   propose <spec> add --leaf <leaf> --statement <s> --example <e>... --enforced-by <v>
  *   propose <spec> modify <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
- *   propose <spec> amend <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
- *       Rewrite THIS spec's own proposed `add` in place (same id and leaf; --example replaces wholesale; must change
- *       something). Refused (exit 4, naming the id) for a live id or one another spec proposes.
+ *   propose <spec> amend <BR-n> [--leaf <leaf>] [--statement <s>] [--example <e>...] [--enforced-by <v>]
+ *       Rewrite THIS spec's own proposed `add` in place (same id; --example replaces wholesale; must change
+ *       something). --leaf moves it to another business leaf (RuleChangeService.proposeAmendOfProposal re-points the
+ *       registry row via repointProposedRuleAndUpdateSpec). Refused (exit 4, naming the id or op) for a live id, one
+ *       another spec proposes, or a modify / retire entry. A flag the op does not take (--leaf on modify / retire /
+ *       withdraw, --note off retire, --statement / --example / --enforced-by on retire / withdraw) is exit 2
+ *       (PROPOSE_FLAG_OPS).
  *   propose <spec> withdraw <BR-n>                       [--correction "<why>" on a locked spec, BR-1069]
  *       Remove THIS spec's own unlanded modify / retire entry (one version, audited); refused for an `add`.
  *   propose <spec> retire <BR-n> --note <why>            [--correction "<why>" on a locked spec, BR-1069]
@@ -56,6 +60,23 @@ import type { ExitReport } from "../cli-exit.js";
 function repeatable(value: unknown): string[] | undefined {
   if (value === undefined) return undefined;
   return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+/** The content flags of `rule propose` and the ops that take each; a flag outside its ops is a usage error (exit 2). */
+const PROPOSE_FLAG_OPS: Readonly<Record<"leaf" | "statement" | "example" | "enforced-by" | "note", readonly string[]>> = {
+  leaf: ["add", "amend"],
+  statement: ["add", "modify", "amend"],
+  example: ["add", "modify", "amend"],
+  "enforced-by": ["add", "modify", "amend"],
+  note: ["retire"],
+};
+
+/** The first content flag given on the command line that `op` does not take, as `--flag`; undefined when every flag is the op's own. */
+function refusedProposeFlag(op: string, args: Record<string, unknown>): string | undefined {
+  for (const [flag, ops] of Object.entries(PROPOSE_FLAG_OPS)) {
+    if (args[flag] !== undefined && !ops.includes(op)) return `--${flag}`;
+  }
+  return undefined;
 }
 
 /** The one line that says what turns a pending revision into the approved version (BR-1338). */
@@ -220,7 +241,7 @@ export default defineLoreCommand({
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
         op: { type: "positional", description: "add | modify | retire | amend | withdraw", required: true },
         rule: { type: "positional", description: "Rule id BR-n (modify | retire | amend | withdraw; amend names an id this spec proposed, withdraw an id this spec modifies or retires)", required: false },
-        leaf: { type: "string", description: "[add] Baseline leaf the rule will land on (ID or slug)" },
+        leaf: { type: "string", description: "[add | amend] Baseline leaf the rule will land on (ID or slug); amend moves a proposed add to it" },
         statement: { type: "string", description: "[add | modify] The behavioural rule, <= 500 chars" },
         example: { type: "string", description: "[add | modify, repeatable, 1-3] A concrete example, <= 300 chars" },
         "enforced-by": { type: "string", description: "[add | modify] guaranteed | both | prompt-only" },
@@ -235,6 +256,8 @@ export default defineLoreCommand({
         const op = args.op as string;
         const examples = repeatable(args.example);
         let input: ProposeRuleChangeInput;
+        const refused = refusedProposeFlag(op, args);
+        if (refused !== undefined) return failUsage(inv.io, `\`${op}\` does not take ${refused}`, json);
         if (op === "add") {
           if (args.rule !== undefined) return failUsage(inv.io, "`add` takes no rule id: the registry allocates it", json);
           if (args.leaf === undefined || args.statement === undefined || args["enforced-by"] === undefined) {
@@ -258,6 +281,7 @@ export default defineLoreCommand({
             input = {
               op,
               id: args.rule as string,
+              ...(op === "amend" && args.leaf !== undefined ? { leaf: args.leaf as string } : {}),
               ...(args.statement !== undefined ? { statement: args.statement as string } : {}),
               ...(examples !== undefined ? { examples } : {}),
               ...(args["enforced-by"] !== undefined
@@ -283,11 +307,11 @@ export default defineLoreCommand({
           }
           printLine(inv.io.stdout, 
             change.op === "add"
-              ? `Reserved ${change.id} (proposed, not in the baseline) for ${change.leaf} in ${doc.slug} (v${doc.version}).`
+              ? op === "amend"
+                ? `Amended ${change.id} (proposed, not in the baseline) in ${doc.slug} (v${doc.version}); id unchanged, leaf ${change.leaf}.`
+                : `Reserved ${change.id} (proposed, not in the baseline) for ${change.leaf} in ${doc.slug} (v${doc.version}).`
               : args.op === "withdraw"
               ? `Withdrew ${change.op} of ${change.id} from ${doc.slug} (v${doc.version}); the rule is no longer reserved by this spec.`
-              : args.op === "amend"
-              ? `Amended ${change.id} (proposed, not in the baseline) in ${doc.slug} (v${doc.version}); id and leaf unchanged.`
               : `Recorded ${change.op} of ${change.id} in ${doc.slug} (v${doc.version}); the baseline is unchanged until the spec lands.`,
           );
         } finally {

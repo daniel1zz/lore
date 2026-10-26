@@ -29,6 +29,8 @@
  *   - Every method returns `Result<_, LoreError>`; a domain refusal never throws.
  *   - `add` reserves the next permanent BR id in registry state `proposed` AND writes the spec in ONE store
  *     transaction (`reserveProposedRuleAndUpdateSpec`): a refused or stale write burns no id; NO leaf is touched.
+ *   - `amend --leaf` moves a proposed `add` to another business leaf and re-points its registry row in ONE
+ *     transaction (`repointProposedRuleAndUpdateSpec`); no leaf document is written.
  *   - `modify` / `retire` name a rule that is `live` in the tree; a rule another spec already modifies or retires
  *     (that spec not deprecated) is refused naming that spec. One spec holds at most one entry per rule id: a
  *     second `modify` / `retire` of the same id replaces its earlier entry.
@@ -78,10 +80,10 @@ export type ProposeRuleChangeInput =
   | { op: "add"; leaf: string; statement: string; examples: string[]; enforced_by: RuleEnforcement }
   | { op: "modify"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
   | { op: "retire"; id: string; note: string }
-  | { op: "amend"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
+  | { op: "amend"; id: string; leaf?: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
   | { op: "withdraw"; id: string };
 
-/** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place. */
+/** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place (`leaf` moves it). */
 type AmendInput = Extract<ProposeRuleChangeInput, { op: "amend" }>;
 
 /** The `withdraw` member of {@link ProposeRuleChangeInput}: removes THIS spec's own unlanded `modify` / `retire` entry. */
@@ -164,7 +166,10 @@ export class RuleChangeService implements RuleChangeLandingPort {
    * @param specRef - Spec id or slug; a non-spec doc → VALIDATION_ERROR.
    * @param input - `add` (reserves the next BR id, `proposed`), `modify` (a live id; at least one field),
    *   `retire` (a live id; a non-blank note) or `amend` (an id THIS spec proposed and has not landed; at least one
-   *   field that differs; rewrites that `add` entry in place, keeping its id and leaf; `examples` replace wholesale).
+   *   field that differs, or a `leaf`; rewrites that `add` entry in place keeping its id; `examples` replace
+   *   wholesale; `amend --leaf` moves the entry to another business leaf (validated by `resolveBusinessLeaf`, as
+   *   `add --leaf` is) and re-points the registry row via `repointProposedRuleAndUpdateSpec` — refused for a
+   *   modify / retire entry, which has no proposed leaf).
    * @param opts.correction - required on a LOCKED spec; a blank reason → VALIDATION_ERROR `correction.reason`.
    * @returns `{ change, doc }` — the stored entry (an `add` carries its reserved id) and the updated spec.
    *   VALIDATION_ERROR for an invalid input, an unknown / non-live id, a rule another spec already changes
@@ -647,7 +652,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
   }
 
   /**
-   * `amend`: rewrite this spec's own proposed `add` entry in place (same id, same leaf). The locked-spec exit is the
+   * `amend`: rewrite this spec's own proposed `add` entry in place (same id; the leaf changes only when `input.leaf`
+   * names another business leaf, in which case {@link writeRepoint} moves the registry row too). The locked-spec exit is the
    * unchanged BR-1069 correction ({@link resolveLockExit}); the entry is re-read on every CAS attempt.
    * @returns VALIDATION_ERROR naming the id when it is not an unlanded `add` of THIS spec (live, proposed by
    *   another spec, unknown, a modify/retire of this spec, landed) or when the amend changes nothing.
@@ -679,8 +685,20 @@ export class RuleChangeService implements RuleChangeLandingPort {
         const verdict = await this.writeAuthority.authorize([leaf.value], "rule-propose", actor);
         if (!verdict.ok) return verdict;
       }
+      // An amend's --leaf is validated exactly as an add's (same lookup, same refusal) and its write authorized too.
+      let target: DocRecord | undefined;
+      if (fields.value.leaf !== undefined) {
+        const resolved = await this.resolveBusinessLeaf(fields.value.leaf);
+        if (!resolved.ok) return resolved;
+        target = resolved.value;
+        if (this.writeAuthority !== undefined) {
+          const verdict = await this.writeAuthority.authorize([target], "rule-propose", actor);
+          if (!verdict.ok) return verdict;
+        }
+      }
       const amended: Extract<RuleChange, { op: "add" }> = {
         ...entry.value,
+        ...(target !== undefined ? { leaf: target.slug } : {}),
         ...(fields.value.statement !== undefined ? { statement: fields.value.statement } : {}),
         ...(fields.value.examples !== undefined ? { examples: fields.value.examples } : {}),
         ...(fields.value.enforced_by !== undefined ? { enforced_by: fields.value.enforced_by } : {}),
@@ -693,11 +711,47 @@ export class RuleChangeService implements RuleChangeLandingPort {
       const summary = correctionReason !== undefined
         ? `Correction: ${correctionReason}`
         : `Rule change proposed: amend ${amended.id}`;
-      const written = await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
+      // A moved leaf re-points the registry row in the SAME transaction as the spec write; otherwise a plain write.
+      const written = target !== undefined && target.slug !== entry.value.leaf
+        ? await this.writeRepoint(spec, next, amended, target, status, summary, actor, correctionReason)
+        : await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
       if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
       return written;
     }
     return err(lastStale ?? staleExhausted(specResult.value.id as string));
+  }
+
+  /** Persist an amend that moves a proposed add to `target`: spec version + audit row + registry `leaf_doc_id`, one write. */
+  private async writeRepoint(
+    spec: DocRecord,
+    next: RuleChange[],
+    change: Extract<RuleChange, { op: "add" }>,
+    target: DocRecord,
+    status: DocStatus,
+    summary: string,
+    actor: string,
+    correctionReason: string | undefined,
+  ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
+    const written = await this.writer.repointProposedRule({
+      write: {
+        specId: spec.id,
+        expectedVersion: spec.version,
+        extra: { ...spec.extra, rule_changes: next },
+        ruleId: change.id,
+        toLeafId: target.id,
+        status,
+        changeSummary: summary,
+      },
+      auditDetails: {
+        operation: "rule-propose",
+        change_op: "amend",
+        ...(correctionReason !== undefined ? { correction: { reason: correctionReason } } : {}),
+      },
+      by: actor,
+      foreignIntent: this.foreignIntent,
+    });
+    if (!written.ok) return written;
+    return ok({ change, doc: written.value });
   }
 
   /**
@@ -843,11 +897,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
   private async authorizeTarget(change: RuleChange, actor: string): Promise<Result<DocRecord | undefined, LoreError>> {
     let leaf: DocRecord | undefined;
     if (change.op === "add") {
-      const resolved = await resolveDoc(this.store, change.leaf);
+      const resolved = await this.resolveBusinessLeaf(change.leaf);
       if (!resolved.ok) return resolved;
-      if (resolved.value.type !== "baseline" || ruleIdPrefixOfNode(resolved.value.extra) !== "BR") {
-        return err(validationError("leaf", `an add lands on a business leaf; '${change.leaf}' is not one`, change.leaf, "BR-1206"));
-      }
       leaf = resolved.value;
     } else {
       const baseline = await this.store.findMany({ type: "baseline" });
@@ -859,6 +910,19 @@ export class RuleChangeService implements RuleChangeLandingPort {
       if (!verdict.ok) return verdict;
     }
     return ok(leaf);
+  }
+
+  /**
+   * The business leaf an `add` lands on — and an `amend --leaf` moves to: one lookup, one refusal (BR-1206).
+   * @param ref - leaf id or slug; unresolvable → DOC_NOT_FOUND; not a business baseline leaf → VALIDATION_ERROR.
+   */
+  private async resolveBusinessLeaf(ref: string): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await resolveDoc(this.store, ref);
+    if (!resolved.ok) return resolved;
+    if (resolved.value.type !== "baseline" || ruleIdPrefixOfNode(resolved.value.extra) !== "BR") {
+      return err(validationError("leaf", `an add lands on a business leaf; '${ref}' is not one`, ref, "BR-1206"));
+    }
+    return ok(resolved.value);
   }
 
   // ── reads ────────────────────────────────────────────────────────────────
@@ -999,12 +1063,16 @@ function shapeAmend(input: AmendInput): Result<AmendInput, LoreError> {
     ));
   }
   const { statement, examples, enforced_by } = parsed.data;
-  if (statement === undefined && examples === undefined && enforced_by === undefined) {
-    return err(validationError("change", "an amend must change at least one of statement, examples, enforced_by", undefined, "BR-1287"));
+  if (input.leaf !== undefined && input.leaf.trim() === "") {
+    return err(validationError("leaf", "an amend's --leaf must name a baseline leaf", input.leaf, "BR-1287"));
+  }
+  if (statement === undefined && examples === undefined && enforced_by === undefined && input.leaf === undefined) {
+    return err(validationError("change", "an amend must change at least one of leaf, statement, examples, enforced_by", undefined, "BR-1287"));
   }
   return ok({
     op: "amend",
     id: parsed.data.id,
+    ...(input.leaf !== undefined ? { leaf: input.leaf } : {}),
     ...(statement !== undefined ? { statement } : {}),
     ...(examples !== undefined ? { examples } : {}),
     ...(enforced_by !== undefined ? { enforced_by } : {}),

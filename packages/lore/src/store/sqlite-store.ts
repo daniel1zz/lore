@@ -79,6 +79,7 @@ import type {
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   SearchHit,
+  ProposedRuleRepointWrite,
   ProposedRuleWrite,
   RuleLeafPatch,
   RuleRegistryRow,
@@ -2862,6 +2863,70 @@ export class SQLiteStore implements StoreInterface {
       actor,
       prefix,
     );
+  }
+
+  /** @see StoreInterface.repointProposedRuleAndUpdateSpec */
+  async repointProposedRuleAndUpdateSpec(
+    write: ProposedRuleRepointWrite,
+    actor: string,
+    harnessRun: string | null = null,
+  ): Promise<Result<DocRecord, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const row = this.db
+        .prepare("SELECT lifecycle FROM rule_registry WHERE id = ?")
+        .get(write.ruleId) as { lifecycle: string } | null;
+      if (row === null) {
+        this.db.run("ROLLBACK");
+        return err({ code: "DOC_NOT_FOUND", id: write.ruleId });
+      }
+      if (row.lifecycle !== "proposed") {
+        this.db.run("ROLLBACK");
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "id",
+          message: `${write.ruleId} is ${row.lifecycle} in the registry; only a proposed id can be re-pointed`,
+          value: write.ruleId,
+        });
+      }
+      const leafVersion = this.readDocVersionSync(write.toLeafId);
+      if (leafVersion === null) {
+        this.db.run("ROLLBACK");
+        return err({ code: "DOC_NOT_FOUND", id: write.toLeafId });
+      }
+      const written = this.applyRuleLeafPatchSync(
+        {
+          id: write.specId,
+          expectedVersion: write.expectedVersion,
+          extra: write.extra,
+          harness_run: harnessRun,
+          ...(write.status !== undefined ? { status: write.status } : {}),
+          ...(write.changeSummary !== undefined ? { change_summary: write.changeSummary } : {}),
+        },
+        actor,
+        new Date().toISOString(),
+      );
+      if (!written.ok) {
+        this.db.run("ROLLBACK");
+        return written;
+      }
+      this.db
+        .prepare("UPDATE rule_registry SET leaf_doc_id = ?, version = ? WHERE id = ?")
+        .run(write.toLeafId, leafVersion, write.ruleId);
+      this.db.run("COMMIT");
+      return ok(written.value);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as allocateRuleCore — ROLLBACK throws only when the transaction is already closed.
+      }
+      return wrapStoreError(e);
+    }
   }
 
   /**

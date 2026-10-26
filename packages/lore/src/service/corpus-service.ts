@@ -83,6 +83,7 @@ import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
   CompanionDocWrite,
+  ProposedRuleRepointWrite,
   ProposedRuleWrite,
   ProvenanceWriteExtras,
   RuleLeafPatch,
@@ -943,6 +944,16 @@ export interface ProposedRuleReserveRequest {
   readonly targets?: readonly DocRecord[];
 }
 
+/** A `proposed` rule id moved to another leaf with its spec's change set, as {@link CorpusService.repointProposedRule} takes it. */
+export interface ProposedRuleRepointRequest {
+  readonly write: ProposedRuleRepointWrite;
+  /** Operation-specific audit `details`; the route adds `rule_id`, `version` and `new_version`. */
+  readonly auditDetails: Readonly<Record<string, unknown>>;
+  readonly by?: string;
+  /** See {@link DocWriteRequest.foreignIntent}. */
+  readonly foreignIntent?: boolean;
+}
+
 /** A store-owned rule move, as {@link CorpusService.moveRule} takes it. */
 export interface RuleMoveRequest {
   readonly ruleId: string;
@@ -972,7 +983,7 @@ export interface RuleAllocateRequest {
  */
 export type DocWritePort = Pick<
   CorpusService,
-  "writeDoc" | "insertDoc" | "assertWritable" | "reserveProposedRule" | "setDocParent" | "appendAudit" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
+  "writeDoc" | "insertDoc" | "assertWritable" | "reserveProposedRule" | "repointProposedRule" | "setDocParent" | "appendAudit" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
 >;
 
 /** The post-patch value of one patched field of `doc`. */
@@ -1571,6 +1582,38 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     });
     if (!audited.ok) return audited;
     return reserved;
+  }
+
+  /**
+   * Route for moving a `proposed` rule id to another leaf inside a spec's change set: foreign-corpus refusal, the
+   * store's ONE transaction (CAS-update the spec, write its version row, re-point the registry row), then the audit
+   * row as the calling actor.
+   *
+   * @param request - See {@link ProposedRuleRepointRequest}.
+   * @returns the updated spec; STALE_VERSION / DOC_NOT_FOUND / VALIDATION_ERROR from the store.
+   */
+  async repointProposedRule(request: ProposedRuleRepointRequest): Promise<Result<DocRecord, LoreError>> {
+    const refusal = await this.refuseIfForeignCorpusWrite<DocRecord>(request.foreignIntent === true);
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const repointed = await this.store.repointProposedRuleAndUpdateSpec(request.write, actor.value);
+    if (!repointed.ok) return repointed;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      actor: actor.value,
+      session_id: repointed.value.id,
+      action: "update",
+      doc_id: repointed.value.id,
+      details: {
+        ...request.auditDetails,
+        rule_id: request.write.ruleId,
+        version: repointed.value.version,
+        new_version: repointed.value.version,
+      },
+    });
+    if (!audited.ok) return audited;
+    return repointed;
   }
 
   /**

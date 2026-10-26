@@ -87,6 +87,7 @@ const STAMPED: Readonly<Record<string, StampedArgs>> = {
   setDocParentWithProvenance: { audit: 2 },
   allocateRuleAndUpdateLeaf: { harnessRunArg: 5 },
   reserveProposedRuleAndUpdateSpec: { harnessRunArg: 3 },
+  repointProposedRuleAndUpdateSpec: { harnessRunArg: 2 },
   moveRule: { patches: [1, 2] },
 };
 

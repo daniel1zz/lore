@@ -40,6 +40,7 @@ import type {
   CalibrationWindowFilter,
   AcCiteRow,
   RuleDependsRow,
+  ProposedRuleRepointWrite,
   ProposedRuleWrite,
   RuleLeafPatch,
   RuleRegistryRow,
@@ -932,6 +933,48 @@ export class InMemoryStore implements StoreInterface {
       actor,
       prefix,
     );
+  }
+
+  /** @see StoreInterface.repointProposedRuleAndUpdateSpec */
+  async repointProposedRuleAndUpdateSpec(
+    write: ProposedRuleRepointWrite,
+    actor: string,
+    harnessRun: string | null = null,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const row = this.ruleRegistry.find((r) => r.id === write.ruleId);
+    if (row === undefined) return err({ code: "DOC_NOT_FOUND", id: write.ruleId });
+    if (row.lifecycle !== "proposed") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "id",
+        message: `${write.ruleId} is ${row.lifecycle} in the registry; only a proposed id can be re-pointed`,
+        value: write.ruleId,
+      });
+    }
+    const leaf = this.docs.get(write.toLeafId);
+    if (leaf === undefined || leaf.deleted_at != null) return err({ code: "DOC_NOT_FOUND", id: write.toLeafId });
+    const versionCount = this.versions.length;
+    const before = this.docs.get(write.specId);
+    const written = this.applyRuleLeafPatchSync(
+      {
+        id: write.specId,
+        expectedVersion: write.expectedVersion,
+        extra: write.extra,
+        harness_run: harnessRun,
+        ...(write.status !== undefined ? { status: write.status } : {}),
+        ...(write.changeSummary !== undefined ? { change_summary: write.changeSummary } : {}),
+      },
+      actor,
+      new Date().toISOString(),
+    );
+    if (!written.ok) {
+      this.restoreDocSnapshot(write.specId, before);
+      this.versions.length = versionCount;
+      return written;
+    }
+    row.leaf_doc_id = write.toLeafId;
+    row.version = leaf.version;
+    return ok(written.value);
   }
 
   /**
