@@ -6,7 +6,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
-import { isContentChange, buildStateChange, type StateChange } from "@lore/core";
+import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
 import { err, ok, DEDICATED_EXTRA_KEYS, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
@@ -1017,7 +1017,8 @@ interface WriteClassification {
  * history must never lose a write.
  */
 function classifyWrite(before: DocRecord, after: DocRecord): WriteClassification {
-  if (isContentChange(before.type, before, after)) return { snapshot: true };
+  // reason: a DocRecord has every `docs` column ContentComparableRow's index signature describes structurally.
+  if (isContentChange(before.type, before as unknown as ContentComparableRow, after as unknown as ContentComparableRow)) return { snapshot: true };
   const stateChange = buildStateChange(before.type, before.extra, after.extra);
   if (stateChange.keys.length === 0) return { snapshot: true };
   return { snapshot: false, stateChange };
