@@ -187,6 +187,7 @@ async function moveTask(store: StoreInterface, task: DocRecord, status: DocRecor
       slug: current.slug,
     },
     { timestamp: now, actor: "plan-progress-test", session_id: current.id, action: "update", doc_id: current.id, details: { version: next, new_version: next } },
+  true,
   );
 }
 
@@ -333,6 +334,7 @@ describe.each(KINDS)("progress written with the task — %s store", (kind) => {
       { expected_version: planNow.version },
       { doc_id: plan.id, version: planNow.version + 1, content: "", extra: planNow.extra, status: "archived", title: plan.title, action: "update", created_at: now, created_by: "plan-progress-test", slug: plan.slug },
       { timestamp: now, actor: "plan-progress-test", session_id: plan.id, action: "update", doc_id: plan.id, details: {} },
+    true,
     );
     expect(archivedPlan.ok).toBe(true);
     const planVersion = (await reload(fx.store, plan.id)).version;
@@ -373,6 +375,7 @@ describe.each(KINDS)("progress written with the task — %s store", (kind) => {
       { expected_version: current.version },
       { doc_id: plan.id, version: next, content: "", extra: { requires_uat: true }, status: current.status, title: plan.title, action: "update", created_at: now, created_by: "plan-progress-test", slug: plan.slug },
       { timestamp: now, actor: "plan-progress-test", session_id: plan.id, action: "update", doc_id: plan.id, details: {} },
+    true,
     );
     expect(edited.ok).toBe(true);
     const after = await reload(fx.store, plan.id);
@@ -448,6 +451,7 @@ describe("progress written with the task — CorpusService write path", () => {
       undefined,
       { doc_id: plan.id, version: 3, content: "", extra: plan.extra, status: "archived", title: plan.title, action: "update", created_at: now, created_by: "plan-progress-test", slug: plan.slug },
       { timestamp: now, actor: "plan-progress-test", session_id: plan.id, action: "update", doc_id: plan.id, details: {} },
+    true,
     );
     expect(archived.ok).toBe(true);
     const refused = await service.insertDoc({
@@ -1192,6 +1196,7 @@ async function archivePlan(store: InMemoryStore, plan: { id: string; slug: strin
     { expected_version: 1 },
     { doc_id: plan.id, version: 2, content: "", extra: plan.extra, status: "archived", title: plan.title, action: "update", created_at: at, created_by: "t", slug: plan.slug } as never,
     { timestamp: at, actor: "t", session_id: plan.id, action: "update", doc_id: plan.id, details: { version: 2, patch: { status: "archived" } } } as never,
+  true,
   );
   if (!moved.ok) throw new Error(JSON.stringify(moved.error));
 }
@@ -1363,6 +1368,7 @@ describe("visible and measured — bootstrap complete line, checks stats time-to
       { expected_version: 1 },
       { doc_id: plan.id, version: 2, content: "", extra: plan.extra, status: "archived", title: plan.title, action: "update", created_at: archivedAt, created_by: "t", slug: plan.slug },
       { timestamp: archivedAt, actor: "t", session_id: plan.id, action: "update", doc_id: plan.id, details: { version: 2, patch: { status: "archived" } } },
+    true,
     );
     expect(moved.ok).toBe(true);
     const report = await service.acceptance(async () => ok([]));

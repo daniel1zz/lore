@@ -233,6 +233,139 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
       });
     });
 
+
+    describe("updateWithProvenance snapshot flag (adr-a-history-entry D1/D3)", () => {
+      async function seed(title: string): Promise<DocRecord> {
+        const doc = makeDoc({ title, content: "seed content" });
+        const result = await store.insertWithProvenance(doc, makeVersion(doc), makeAudit(doc));
+        if (!result.ok) throw new Error(`seed failed: ${JSON.stringify(result.error)}`);
+        return result.value;
+      }
+
+      async function writeMain(doc: DocRecord, snapshot: boolean, expectedVersion: number) {
+        return store.updateWithProvenance(
+          doc.id,
+          { title: "Patched", version: 2 },
+          { expected_version: expectedVersion },
+          makeVersion(doc, { version: 2, title: "Patched", action: "update" }),
+          makeAudit(doc, { action: "update", details: { version: 2 } }),
+          snapshot,
+        );
+      }
+
+      it("HAPPY — snapshot:false raises the version by one, adds NO versions row and exactly one audit row", async () => {
+        const doc = await seed("Working state");
+        const result = await writeMain(doc, false, 1);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.version).toBe(2);
+        const found = await store.find(doc.id);
+        expect(found.ok && found.value?.version).toBe(2);
+        expect(found.ok && found.value?.title).toBe("Patched");
+        const versions = await store.findVersions(doc.id);
+        expect(versions.ok && versions.value).toHaveLength(1);
+        const audits = await store.queryAudit({ doc_id: doc.id, action: "update" });
+        expect(audits.ok && audits.value).toHaveLength(1);
+      });
+
+      it("REGRESSION — snapshot:true adds exactly one versions row and one audit row", async () => {
+        const doc = await seed("Content write");
+        const result = await writeMain(doc, true, 1);
+        expect(result.ok).toBe(true);
+        const versions = await store.findVersions(doc.id);
+        expect(versions.ok && versions.value).toHaveLength(2);
+        const audits = await store.queryAudit({ doc_id: doc.id, action: "update" });
+        expect(audits.ok && audits.value).toHaveLength(1);
+      });
+
+      it("BOUNDARY — snapshot:false with a stale expected_version is refused STALE_VERSION and writes nothing", async () => {
+        const doc = await seed("Stale base");
+        const result = await writeMain(doc, false, 999);
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error.code).toBe("STALE_VERSION");
+        const found = await store.find(doc.id);
+        expect(found.ok && found.value?.version).toBe(1);
+        const audits = await store.queryAudit({ doc_id: doc.id, action: "update" });
+        expect(audits.ok && audits.value).toHaveLength(0);
+      });
+
+      it("STATE — after a snapshot:false write the next write CASes on the raised version", async () => {
+        const doc = await seed("Two writes");
+        expect((await writeMain(doc, false, 1)).ok).toBe(true);
+        const replay = await writeMain(doc, false, 1);
+        expect(replay.ok).toBe(false);
+        if (replay.ok) return;
+        expect(replay.error.code).toBe("STALE_VERSION");
+      });
+
+      it("HAPPY — an also_update companion with snapshot:false rises by one with no versions row and one audit row; the main doc still snapshots", async () => {
+        const primary = await seed("Primary");
+        const companion = await seed("Companion");
+        const result = await store.updateWithProvenance(
+          primary.id,
+          { title: "Primary done", version: 2 },
+          { expected_version: 1 },
+          makeVersion(primary, { version: 2, title: "Primary done", action: "update" }),
+          makeAudit(primary, { action: "update", details: { version: 2 } }),
+          true,
+          {
+            also_update: [
+              {
+                id: companion.id,
+                patch: { title: "Companion done", version: 2 },
+                opts: { expected_version: 1 },
+                version: makeVersion(companion, { version: 2, title: "Companion done", action: "update" }),
+                audit: makeAudit(companion, { action: "update", details: { version: 2 } }),
+                snapshot: false,
+              },
+            ],
+          },
+        );
+        expect(result.ok).toBe(true);
+        const found = await store.find(companion.id);
+        expect(found.ok && found.value?.version).toBe(2);
+        const companionVersions = await store.findVersions(companion.id);
+        expect(companionVersions.ok && companionVersions.value).toHaveLength(1);
+        const companionAudits = await store.queryAudit({ doc_id: companion.id, action: "update" });
+        expect(companionAudits.ok && companionAudits.value).toHaveLength(1);
+        const primaryVersions = await store.findVersions(primary.id);
+        expect(primaryVersions.ok && primaryVersions.value).toHaveLength(2);
+      });
+
+      it("BOUNDARY — a snapshot:false companion with a stale expected_version refuses STALE_VERSION and rolls the primary back", async () => {
+        const primary = await seed("Primary stays");
+        const companion = await seed("Companion stays");
+        const result = await store.updateWithProvenance(
+          primary.id,
+          { title: "Must not persist", version: 2 },
+          { expected_version: 1 },
+          makeVersion(primary, { version: 2, title: "Must not persist", action: "update" }),
+          makeAudit(primary, { action: "update", details: { version: 2 } }),
+          false,
+          {
+            also_update: [
+              {
+                id: companion.id,
+                patch: { title: "Nope", version: 8 },
+                opts: { expected_version: 7 },
+                version: makeVersion(companion, { version: 8, title: "Nope", action: "update" }),
+                audit: makeAudit(companion, { action: "update", details: { version: 8 } }),
+                snapshot: false,
+              },
+            ],
+          },
+        );
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error.code).toBe("STALE_VERSION");
+        const foundPrimary = await store.find(primary.id);
+        expect(foundPrimary.ok && foundPrimary.value?.version).toBe(1);
+        const primaryAudits = await store.queryAudit({ doc_id: primary.id, action: "update" });
+        expect(primaryAudits.ok && primaryAudits.value).toHaveLength(0);
+      });
+    });
+
     // ── updateWithProvenance ────────────────────────────────────────────
 
     describe("updateWithProvenance", () => {
@@ -256,6 +389,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           { expected_version: 1 },
           version,
           audit,
+        true,
         );
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -286,6 +420,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           { expected_version: 999 }, // deliberately stale
           version,
           audit,
+        true,
         );
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -318,6 +453,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           { expected_version: 1 }, // matches the doc's TRUE current version — the doc UPDATE succeeds
           collidingVersion,
           audit,
+        true,
         );
         expect(result.ok).toBe(false);
 
@@ -350,6 +486,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           undefined,
           makeVersion(phantomDoc),
           makeAudit(phantomDoc),
+        true,
         );
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -369,8 +506,9 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
         return result.value;
       }
 
-      function companionOf(doc: DocRecord, title: string, expectedVersion: number) {
+      function companionOf(doc: DocRecord, title: string, expectedVersion: number, snapshot = true) {
         return {
+          snapshot,
           id: doc.id,
           patch: { title, version: expectedVersion + 1 } as Partial<DocRecord>,
           opts: { expected_version: expectedVersion },
@@ -389,6 +527,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           { expected_version: 1 },
           makeVersion(primary, { version: 2, title: "Primary done", action: "update" }),
           makeAudit(primary, { action: "update", details: { version: 2 } }),
+          true,
           { also_update: [companionOf(companion, "Companion done", 1)] },
         );
         expect(result.ok).toBe(true);
@@ -412,6 +551,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           { expected_version: 1 },
           makeVersion(primary, { version: 2, title: "Must not persist", action: "update" }),
           makeAudit(primary, { action: "update", details: { version: 2 } }),
+          true,
           { also_update: [companionOf(companion, "Must not persist either", 7)] }, // wrong CAS base
         );
         expect(result.ok).toBe(false);
@@ -439,6 +579,7 @@ export function runProvenanceWritesSuite(opts: ProvenanceWritesSuiteOpts): void 
           { expected_version: 1 },
           makeVersion(primary, { version: 2, title: "Must not persist", action: "update" }),
           makeAudit(primary, { action: "update", details: { version: 2 } }),
+          true,
           { also_update: [companionOf(phantom, "x", 1)] },
         );
         expect(result.ok).toBe(false);

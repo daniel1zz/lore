@@ -1506,6 +1506,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         // reason: SPEC-035 §2 — `version` is the join key AuditService.verify matches against the version row.
         details: { ...request.auditDetails, version: newVersion, new_version: newVersion },
       },
+      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+
       request.extras,
     );
     if (!written.ok) return written;
@@ -3923,6 +3925,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           ...(retiredInPlan !== undefined ? { retired_in_plan: retiredInPlan } : {}),
         },
       },
+      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+
       abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,
     );
     if (!updateResult.ok) return updateResult;
@@ -3985,6 +3989,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
             doc_id: existing.id,
             details: { auto: "ledger-fast-track", version: refastVersion, reset_version: resetVersion },
           },
+      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+
         );
         if (!refastResult.ok) return refastResult;
         return ok(refastResult.value);
@@ -4192,6 +4198,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           doc_id: doc.id,
           details: { plan_id: plan.id, plan_slug: plan.slug, kind: target.kind, version: newVersion },
         },
+      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+
       );
       if (!writeResult.ok) {
         failed.push({ doc_id: doc.id, slug: doc.slug, reason: `write failed: ${writeResult.error.code}` });
@@ -4280,6 +4288,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         doc_id: doc.id,
         details: { rule, reason, version: newVersion },
       },
+      true, // snapshot: no behaviour change yet; the service decides per write in a later task
+
     );
     if (!writeResult.ok) return writeResult;
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.

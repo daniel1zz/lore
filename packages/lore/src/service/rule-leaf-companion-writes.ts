@@ -31,6 +31,7 @@ export function leafPlansToCompanionWrites(
       id: planned.leaf.id,
       patch: { extra: planned.extra, status: planned.status, version: leafVersion, updated_at: now },
       opts: { expected_version: planned.leaf.version },
+      snapshot: true,
       version: {
         doc_id: planned.leaf.id,
         version: leafVersion,

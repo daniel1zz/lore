@@ -687,6 +687,7 @@ export class InMemoryStore implements StoreInterface {
     opts: UpdateOpts | undefined,
     rawVersion: VersionRecord,
     audit: AuditEntry,
+    snapshot: boolean,
     extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     const before = this.docs.get(id);
@@ -714,17 +715,25 @@ export class InMemoryStore implements StoreInterface {
     const updateResult = await this.update(id, patch, opts);
     if (!updateResult.ok) return updateResult;
 
-    const versionResult = await this.insertVersion(version);
-    if (!versionResult.ok) {
-      this.restoreDocSnapshot(id, before);
-      return versionResult;
+    // reason: snapshot=false is a working-state-only write (ADR D1/D3): version raise + audit row, no versions row.
+    // Rollbacks below remove a versions row only when this call inserted one (a (doc_id, version) match must never
+    // delete a row this call did not write).
+    const removeOwnVersion = (rec: VersionRecord, inserted: boolean): void => {
+      if (inserted) this.removeVersionEntry(rec);
+    };
+    if (snapshot) {
+      const versionResult = await this.insertVersion(version);
+      if (!versionResult.ok) {
+        this.restoreDocSnapshot(id, before);
+        return versionResult;
+      }
     }
 
     const chainLength = this.auditChain.length;
     const auditResult = await this.appendAuditEntry(audit);
     if (!auditResult.ok) {
       this.restoreDocSnapshot(id, before);
-      this.removeVersionEntry(version);
+      removeOwnVersion(version, snapshot);
       return auditResult;
     }
 
@@ -732,7 +741,7 @@ export class InMemoryStore implements StoreInterface {
       const extraResult = await this.appendAuditEntry(extraAudit);
       if (!extraResult.ok) {
         this.restoreDocSnapshot(id, before);
-        this.removeVersionEntry(version);
+        removeOwnVersion(version, snapshot);
         this.auditChain.length = chainLength;
         return extraResult;
       }
@@ -740,16 +749,16 @@ export class InMemoryStore implements StoreInterface {
 
     // reason: BR-1307 — companion doc writes share this write; on any failure every one already applied, the
     // primary write, its version rows and the audit chain are restored, so nothing of the outcome survives.
-    const appliedCompanions: Array<{ id: DocId; before: DocRecord | undefined; version: VersionRecord }> = [];
+    const appliedCompanions: Array<{ id: DocId; before: DocRecord | undefined; version: VersionRecord; snapshot: boolean }> = [];
     for (const companion of extras?.also_update ?? []) {
       const companionBefore = this.docs.get(companion.id);
       const rollback = (): void => {
         for (const done of appliedCompanions) {
           this.restoreDocSnapshot(done.id, done.before);
-          this.removeVersionEntry(done.version);
+          removeOwnVersion(done.version, done.snapshot);
         }
         this.restoreDocSnapshot(id, before);
-        this.removeVersionEntry(version);
+        removeOwnVersion(version, snapshot);
         this.auditChain.length = chainLength;
       };
       const companionUpdate = await this.update(companion.id, companion.patch, companion.opts);
@@ -757,11 +766,13 @@ export class InMemoryStore implements StoreInterface {
         rollback();
         return companionUpdate;
       }
-      appliedCompanions.push({ id: companion.id, before: companionBefore, version: companion.version });
-      const companionVersion = await this.insertVersion(companion.version);
-      if (!companionVersion.ok) {
-        rollback();
-        return companionVersion;
+      appliedCompanions.push({ id: companion.id, before: companionBefore, version: companion.version, snapshot: companion.snapshot });
+      if (companion.snapshot) {
+        const companionVersion = await this.insertVersion(companion.version);
+        if (!companionVersion.ok) {
+          rollback();
+          return companionVersion;
+        }
       }
       const companionAudit = await this.appendAuditEntry(companion.audit);
       if (!companionAudit.ok) {
@@ -774,10 +785,10 @@ export class InMemoryStore implements StoreInterface {
       const progressResult = await this.reconcilePlanProgress(planIdsAffectedBy(before, updateResult.value), version, id);
       if (!progressResult.ok) {
         this.restoreDocSnapshot(id, before);
-        this.removeVersionEntry(version);
+        removeOwnVersion(version, snapshot);
         for (const done of appliedCompanions) {
           this.restoreDocSnapshot(done.id, done.before);
-          this.removeVersionEntry(done.version);
+          removeOwnVersion(done.version, done.snapshot);
         }
         this.auditChain.length = chainLength;
         return progressResult;

@@ -291,6 +291,7 @@ describe("SQLiteStore — insertWithProvenance/updateWithProvenance never throw 
         { expected_version: 1 },
         version,
         audit,
+      true,
       );
     } catch (e) {
       thrown = e;
