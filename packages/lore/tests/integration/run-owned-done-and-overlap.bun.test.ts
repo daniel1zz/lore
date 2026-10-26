@@ -112,13 +112,21 @@ async function createPlanWithTasks(anchorsPerTask: string[][]): Promise<{ planId
 }
 
 function claimAs(taskId: string, by: string, run: RunId | null, worktree?: string) {
-  return withApp((app) =>
-    app.taskWorkflowService.claim(taskId, {
+  return withApp(async (app) => {
+    // reason: BR-1468 — a task that declares file anchors is claimed on a branch; the fixture names one (no repository is
+    // involved: the branch is only a recorded name), and an anchorless task stays a corpus-only no-branch claim.
+    let branch = worktree;
+    if (branch === undefined) {
+      const task = await app.corpusService.get(taskId);
+      const anchors = task.ok ? task.value.doc.extra["file_anchors"] : undefined;
+      if (Array.isArray(anchors) && anchors.length > 0) branch = `run-owned-branch-${taskId.slice(-8).toLowerCase()}`;
+    }
+    return app.taskWorkflowService.claim(taskId, {
       by,
       ...(run !== null ? { harnessRun: run } : {}),
-      ...(worktree !== undefined ? { worktree } : {}),
-    }),
-  );
+      ...(branch !== undefined ? { worktree: branch } : {}),
+    });
+  });
 }
 
 function doneAs(taskId: string, by: string, run: RunId | null) {

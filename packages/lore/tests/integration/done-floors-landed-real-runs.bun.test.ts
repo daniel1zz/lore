@@ -130,14 +130,17 @@ afterEach(() => {
 describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
   it("(a) refuses with exit 4 [floor: not-landed] naming the branch until lore integrate lands it, then archives", () => {
     const task = createTask("Unlanded");
-    git(["checkout", "-q", "-b", "feat-unmerged"], dir);
-    writeFileSync(join(dir, "feature.txt"), "work\n");
-    git(["add", "feature.txt"], dir);
-    git(["commit", "-q", "-m", "feature work"], dir);
+    git(["branch", "feat-unmerged", "main"], dir);
     git(["checkout", "-q", "--detach", "main"], dir);
     installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["claim", task, "--worktree", "feat-unmerged"], dir);
     capturePass(task);
+    // the work comes AFTER the claim: the claim's start is the branch tip at claim time
+    git(["checkout", "-q", "feat-unmerged"], dir);
+    writeFileSync(join(dir, "feature.txt"), "work\n");
+    git(["add", "feature.txt"], dir);
+    git(["commit", "-q", "-m", "feature work"], dir);
+    git(["checkout", "-q", "--detach", "main"], dir);
 
     const refused = runLore(["done", task], dir);
 

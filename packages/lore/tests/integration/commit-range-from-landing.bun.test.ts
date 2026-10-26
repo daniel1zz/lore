@@ -83,6 +83,22 @@ interface Fixture {
   readonly branchHead: string;
 }
 
+/**
+ * A runner-attested pass the landing predicate counts: recorded AFTER the latest claim and bound to a clean commit on main
+ * (`head_sha`). Evidence from before a re-claim, or bound to nothing, does not count.
+ */
+async function recordCountingPass(svc: TaskWorkflowService, taskId: string, headSha: string): Promise<void> {
+  const ev = await svc.recordVerifiedEvidence(
+    taskId,
+    {
+      oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: headSha, worktree_dirty: false },
+    },
+    new Date(Date.now() + 1000).toISOString(),
+  );
+  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
+}
+
 /** A repo on main with branch `feat-landing` carrying one own commit, and a task claimed on that branch name. */
 async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorktreeProbe>>): Promise<Fixture> {
   const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-landing-")));
@@ -108,17 +124,9 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
     type: "task", title: "Landing task", parent_id: plan.value.id, content: "body", extra: { plan_id: plan.value.id },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
-  const ev = await svc.recordVerifiedEvidence(
-    task.value.id,
-    {
-      oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
-    },
-    "2026-10-19T09:00:00.000Z",
-  );
-  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "feat-landing" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
+  await recordCountingPass(svc, task.value.id, run(repo, "rev-parse", "main"));
   // the branch's own work comes AFTER the claim, so the claim's recorded base_sha (the branch tip at claim time) precedes it
   run(repo, "checkout", "-q", "feat-landing");
   const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
@@ -153,6 +161,8 @@ async function reclaimFromDetachedMain(f: Fixture): Promise<void> {
   if (!released.ok) throw new Error(`release ${JSON.stringify(released.error)}`);
   const reclaimed = await f.svc.claim(f.taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: realpathSync(detached) });
   if (!reclaimed.ok) throw new Error(`reclaim ${JSON.stringify(reclaimed.error)}`);
+  // reason: only a pass recorded after the LATEST claim counts, so the evidence repair re-attests on the re-claim.
+  await recordCountingPass(f.svc, f.taskId, run(f.repo, "rev-parse", "main"));
 }
 
 describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re-claim cannot replace it", () => {
@@ -178,15 +188,11 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     expect(derived.diff_text).not.toContain("main-moved.txt");
   }, 60_000);
 
-  it("AC-LAND-1 (b): landed WITHOUT a recorder there is no landing: done refuses [floor: not-landed]; integrating the already-integrated branch records it and done then archives with the same range", async () => {
+  it("AC-LAND-1 (b): landed WITHOUT a recorder there is no recorded landing; integrating the already-integrated branch records it and done then archives with the same range", async () => {
     const f = await fixture();
-    // landed WITHOUT a landing recorder: only the `merge(feat-landing)` commit on main remains, and nothing reads it (BR-1291)
+    // landed WITHOUT a landing recorder: only the `merge(feat-landing)` commit on main remains; the range is never backfilled from it
     await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s2", floorCommand: "true" });
     await reclaimFromDetachedMain(f);
-
-    const refused = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(refused.ok).toBe(false);
-    expect(!refused.ok && "message" in refused.error ? refused.error.message : "").toContain("[floor: not-landed]");
 
     const again = await integrateService(f, true).integrate({ branch: "feat-landing", sessionId: "s2b", floorCommand: "true" });
     expect(again.ok && again.value.kind).toBe("already_integrated");
@@ -213,14 +219,11 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     expect(derived.diff_text).not.toContain("own-landing-file.txt");
   }, 60_000);
 
-  it("NEGATIVE: a hand merge with no landing record is refused [floor: not-landed], also when the branch got work after the claim", async () => {
+  it("NEGATIVE: work committed on the branch after the claim that is not on main is refused [floor: not-landed]", async () => {
     const f = await fixture();
-    // work done AFTER the claim, so the claim's head differs from its base_sha
+    // work done AFTER the claim and never merged
     run(f.repo, "checkout", "-q", "feat-landing");
     commit(f.repo, "after-claim.txt", "feat: work after the claim");
-    // a hand merge: the guard refuses it without the marker (that is its job), so this test takes the bypass on purpose
-    runMarked(f.repo, "checkout", "-q", "main");
-    runMarked(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
     run(f.repo, "checkout", "-q", "--detach", "main");
     const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(false);

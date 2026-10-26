@@ -67,11 +67,22 @@ function statusOf(slug: string): string {
 }
 
 /** A branch holding one commit, main checked out detached afterwards (what `lore integrate` expects of the shared checkout). */
-function makeBranch(name: string): void {
+function makeBranch(name: string, withCommit = true): void {
   git(["checkout", "-q", "-b", name, "main"]);
+  if (withCommit) commitOnCurrentBranch(name);
+  git(["checkout", "-q", "--detach", "main"]);
+}
+
+function commitOnCurrentBranch(name: string): void {
   writeFileSync(join(dir, `${name}.txt`), `${name}\n`);
   git(["add", `${name}.txt`]);
   git(["commit", "-q", "-m", `work on ${name}`]);
+}
+
+/** Work committed AFTER the claim (the claim's start is the branch tip at claim time, so work before it is not the task's). */
+function commitAfterClaim(name: string): void {
+  git(["checkout", "-q", name]);
+  commitOnCurrentBranch(name);
   git(["checkout", "-q", "--detach", "main"]);
 }
 
@@ -132,8 +143,9 @@ afterEach(() => {
 
 describe("AC-LRD-1 — lore done decides from the recorded landing only", () => {
   it("(a) work cherry-picked onto main without lore integrate has no landing: exit 4 [floor: not-landed] naming the branch", () => {
-    makeBranch("feat-picked");
+    makeBranch("feat-picked", false);
     const task = createClaimedTask("Picked", "feat-picked");
+    commitAfterClaim("feat-picked");
     cherryPickOntoMain("feat-picked");
 
     const refused = runLore(["done", task]);
@@ -165,7 +177,7 @@ describe("AC-LRD-1 — lore done decides from the recorded landing only", () => 
     expect(refused.exitCode, refused.text).toBe(4);
     expect(refused.text).toContain("[floor: not-landed]");
     expect(refused.text).toContain("feat-late");
-    expect(refused.text).toContain("1 commit(s) not on main");
+    expect(refused.text).toContain("tip-not-on-main");
     expect(statusOf(task)).not.toBe("archived");
   }, 300_000);
 
@@ -194,8 +206,9 @@ describe("AC-LRD-1 — lore done decides from the recorded landing only", () => 
   }, 300_000);
 
   it("(e) lore set --status archived refuses (a) with the same floor name", () => {
-    makeBranch("feat-set");
+    makeBranch("feat-set", false);
     const task = createClaimedTask("Set route", "feat-set");
+    commitAfterClaim("feat-set");
     cherryPickOntoMain("feat-set");
 
     const viaSet = runLore(["set", task, "--status", "archived"]);

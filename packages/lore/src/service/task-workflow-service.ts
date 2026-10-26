@@ -4462,6 +4462,8 @@ export class TaskWorkflowService {
             },
             facts,
           );
+    // reason: corpus-only work (no branch, no working copy named) in a place git cannot answer (not a repository) has nothing to land.
+    if (verdict.state === "unmeasurable" && branches.length === 0 && worktrees.length === 0) return ok({ armed: false, mode });
     return ok({
       armed: true,
       mode,
