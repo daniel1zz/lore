@@ -69,7 +69,7 @@
  *                      to itself (never this repo's `.lore/`), and both
  *                      `BOOTSTRAP_SCOPE_DECLARATION`/`RESUME_SCOPE_CLOSURE`
  *                      reproduce there by identity.
- *   "manifest parity"  (AC-CP-7) — the embedded manifest's sha256 for both
+ *   "manifest parity"  — the embedded manifest's sha256 for both
  *                      T2/T4-edited assets matches their CURRENT SSOT bytes
  *                      (proves the regeneration actually covers both, not
  *                      just one); `lore setup --claude-dir <throwaway>`
@@ -83,7 +83,7 @@
  *                      verb, asserted byte-identical to the same SSOT.
  *
  * @spec_ref spec-context-provenance-injected-corpus-global-state-and-a
- *   §Design Decisions D1-D6, §Acceptance Criteria AC-CP-4, AC-CP-6, AC-CP-7,
+ *   §Design Decisions D1-D6, §Acceptance Criteria AC-CP-4, AC-CP-6,
  *   AC-CP-9, AC-CP-10. Task task-t5-compiled-e2e-suite-proving-every-surface-from-a.
  */
 
@@ -330,9 +330,9 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
   }, 60_000);
 });
 
-// ─── "manifest parity" (AC-CP-7) ────────────────────────────────────────────
+// ─── "manifest parity" ────────────────────────────────────────────
 
-describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T2/T4-edited assets (D5)", () => {
+describe("manifest parity: embedded manifest + lore setup distribution parity for both T2/T4-edited assets (D5)", () => {
   it("manifest parity — the embedded manifest reflects both edited assets' CURRENT bytes; the hook installs byte-identical; corpus-workflow.md (retired from machine install) is byte-identical via the binary's own governance verb instead", () => {
     const hookSsotBytes = readFileSync(HOOK_SSOT_PATH);
 
