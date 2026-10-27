@@ -87,7 +87,7 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // that would close the shared client the tests keep using.
   const ready = await remoteStore.getAuditHeadId();
   if (!ready.ok) {
-    throw new Error(`sync-push fixture: remote migration chain failed: ${ready.error.message}`);
+    throw new Error(`sync-push fixture: remote migration chain failed: ${JSON.stringify(ready.error)}`);
   }
 
   // ─── Parity guard ────────────────────────────────────────────────────────
