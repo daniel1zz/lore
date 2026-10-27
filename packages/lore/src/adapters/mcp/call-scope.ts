@@ -28,6 +28,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { HARNESS_RUN_ENV, err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
 import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity } from "@lore/core/node";
 import type { App } from "../../app.js";
+import { createRealProcessTablePort } from "../process-table-port.js";
 
 /** What the running call exposes to its handler. */
 export interface CallContext {
@@ -47,6 +48,11 @@ export interface CallAttestation {
 
 function errorResult(error: LoreError): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(error) }], isError: true };
+}
+
+/** The refusal of a call whose run could not be verified; carries the BR-1351 cause text. */
+function refuseCall(error: LoreError): CallToolResult {
+  return errorResult(error);
 }
 
 /**
@@ -159,11 +165,19 @@ export class McpCallScope {
     let app = this.base;
     let scoped: App | undefined;
     if (this.base.forWriteContext !== undefined) {
-      const opened = this.base.forWriteContext({ identity });
+      // reason: the tool server verifies the call's run by process ancestry exactly like the CLI entry (D19, AC-RV-6):
+      // the server process (or one of its ancestors) must be the run's registered harness process.
+      const ancestry = identity.harnessRun !== null ? { table: createRealProcessTablePort({ env: this.server.env, cwd: process.cwd() }), selfPid: process.pid } : undefined;
+      const opened = this.base.forWriteContext({ identity, ...(ancestry === undefined ? {} : { ancestry }) });
       if (!opened.ok) return errorResult(opened.error);
       scoped = opened.value;
       scoped.callerSurface = this.base.callerSurface;
       app = scoped;
+      const verified = await scoped.verifiedInvocationIdentity?.();
+      if (verified !== undefined && !verified.ok) {
+        scoped.close();
+        return refuseCall(verified.error);
+      }
     } else if (input.harness_run !== undefined) {
       return errorResult({
         code: "STORE_ERROR",

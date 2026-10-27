@@ -27,6 +27,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
+import type { RunId } from "@lore/core";
+import { createRealProcessTablePort } from "../../../src/adapters/process-table-port.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 
 const STAMP = "2026-10-08T00:00:00.000Z";
@@ -51,6 +53,7 @@ function makeRun(id: string): Record<string, unknown> {
 async function seedRun(dbPath: string, id: string): Promise<void> {
   const store = actedStore(new SQLiteStore(dbPath)) as unknown as {
     insertRun?: (r: unknown) => Promise<{ ok: boolean; error?: unknown }>;
+    recordRunProcess?: (id: RunId, p: { pid: number | null; startTime: string | null; worktree: string | null }) => Promise<{ ok: boolean; error?: unknown }>;
     close?: () => void;
   };
   try {
@@ -59,6 +62,12 @@ async function seedRun(dbPath: string, id: string): Promise<void> {
     }
     const r = await store.insertRun(makeRun(id));
     if (!r.ok) throw new Error(`insertRun failed: ${JSON.stringify(r.error)}`);
+    // reason: the tool server verifies each call's run by process ancestry (AC-RV-6); the server here is in-process, so
+    // this test process is the run's harness process.
+    const inspected = await createRealProcessTablePort({ env: process.env, cwd: process.cwd() }).inspect(process.pid);
+    if (inspected === null || inspected.startTime === null) throw new Error("cannot read this process's start time");
+    const recorded = await store.recordRunProcess?.(id as RunId, { pid: process.pid, startTime: inspected.startTime, worktree: null });
+    if (recorded === undefined || !recorded.ok) throw new Error(`recordRunProcess failed: ${JSON.stringify(recorded)}`);
   } finally {
     store.close?.();
   }
