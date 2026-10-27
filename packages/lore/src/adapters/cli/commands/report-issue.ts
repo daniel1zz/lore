@@ -102,6 +102,7 @@ import {
   checkReproCommandForInvocation,
   classifyFeedbackUpstream,
   fileGithubIssue,
+  formatRepeatCheckWarning,
   formatReproRefusal,
   resolveConsumerCorpusRoot,
 } from "../report-issue-wiring.js";
@@ -451,6 +452,8 @@ export default defineLoreCommand({
       if (githubResult.value.dedup_degraded) {
         printLine(inv.io.stdout, "Warning: duplicate-report check degraded (advisory search failed) — filed anyway.");
       }
+      const repeatWarning = formatRepeatCheckWarning(githubResult.value);
+      if (repeatWarning !== undefined) printLine(inv.io.stdout, repeatWarning);
       if (githubResult.value.possible_duplicates.length > 0) {
         printLine(inv.io.stdout, `Possible duplicates: ${githubResult.value.possible_duplicates.join(", ")}`);
       }

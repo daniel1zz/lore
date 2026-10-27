@@ -134,7 +134,7 @@ import { checkReproCommand, type ReproCheck } from "../../service/report-issue-r
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
 import { joinIssueStatuses, type IssueStatusRow } from "../../service/github-issue-listing.js";
-import { ReceiptLogV2, type ReceiptV2Entry } from "../../service/receipt-log-v2.js";
+import { ReceiptLogV2, type ReceiptV2Entry, type ReceiptV2ReadResult } from "../../service/receipt-log-v2.js";
 import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
 import type { CliIo } from "./output.js";
 
@@ -487,6 +487,20 @@ export interface GithubFilingContext {
   readonly env: NodeJS.ProcessEnv;
   /** Runs `git <args>` in `cwd` for the origin lookup (injected so a test needs no git); default: the real `git` under `env`. */
   readonly git?: OriginGit;
+  /** Reads the local v2 receipt log for the repeat check (injected so a test needs no unreadable file); default: `ReceiptLogV2.read()`. */
+  readonly readReceiptLog?: (receiptsPath: string) => Result<ReceiptV2ReadResult, LoreError>;
+}
+
+/**
+ * Why the repeat check ran on less than the whole filing log (BR-500): `unreadable` = the log could not be read at
+ * all (nothing was checked); `corrupt_lines` = unparseable lines were skipped (the readable entries were checked).
+ */
+export interface RepeatCheckDegraded {
+  readonly reason: "unreadable" | "corrupt_lines";
+  /** Human-readable cause: the read error's message, or the skipped line numbers. */
+  readonly detail: string;
+  /** How many log lines the check could not use (0 when the whole log was unreadable). */
+  readonly skipped_lines: number;
 }
 
 /** Raw outcome of one git call; `status` is the exit status (non-zero when git is missing or refuses). */
@@ -528,6 +542,43 @@ export interface GithubReportResult {
   readonly dedup_degraded: boolean;
   /** `true` iff this call returned a PRIOR filing's outcome rather than creating a new issue (retry recognition). */
   readonly retried: boolean;
+  /** Set iff the repeat check could not read the whole filing log (BR-500); absent when the log was read cleanly. */
+  readonly repeat_check_degraded?: RepeatCheckDegraded;
+}
+
+/**
+ * Derives the repeat-check degradation of one log read (BR-500).
+ *
+ * @param read - the receipt log read result
+ * @returns the degradation, or `undefined` when the log was read cleanly
+ */
+function describeRepeatCheckDegradation(read: Result<ReceiptV2ReadResult, LoreError>): RepeatCheckDegraded | undefined {
+  if (!read.ok) {
+    // reason: not every LoreError member carries `message`; the code is the stable fallback detail.
+    const detail = "message" in read.error ? read.error.message : read.error.code;
+    return { reason: "unreadable", detail, skipped_lines: 0 };
+  }
+  const corrupt = read.value.corrupt_lines;
+  if (corrupt.length === 0) return undefined;
+  return {
+    reason: "corrupt_lines",
+    detail: `${String(corrupt.length)} unreadable line(s) in the filing log: ${corrupt.join(", ")}`,
+    skipped_lines: corrupt.length,
+  };
+}
+
+/**
+ * The single CLI warning line for a degraded repeat check (BR-500).
+ *
+ * @param result - a filing result
+ * @returns the `Warning: repeat check degraded ...` line, or `undefined` for a clean result
+ */
+export function formatRepeatCheckWarning(result: GithubReportResult): string | undefined {
+  const degraded = result.repeat_check_degraded;
+  if (degraded === undefined) return undefined;
+  // reason: the ending states the OUTCOME, not the cause: only the early already-filed return recognised a repeat.
+  const outcome = result.retried ? "recognised from the readable entries" : "filed anyway";
+  return `Warning: repeat check degraded (${degraded.detail}) — ${outcome}.`;
 }
 
 /**
@@ -749,7 +800,9 @@ export async function fileGithubIssue(
 
   const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });
 
-  const priorReadResult = new ReceiptLogV2(receiptsPath).read();
+  const priorReadResult = (ctx.readReceiptLog ?? ((path) => new ReceiptLogV2(path).read()))(receiptsPath);
+  const repeatCheckDegraded = describeRepeatCheckDegradation(priorReadResult);
+  const degradedField = repeatCheckDegraded === undefined ? {} : { repeat_check_degraded: repeatCheckDegraded };
   if (priorReadResult.ok) {
     const priors = findPriorGithubFilings(priorReadResult.value.entries, input.title);
     const open = priors.length === 0 ? ok(undefined) : await findOpenPriorFiling(runner, cfg.repo, priors);
@@ -763,6 +816,7 @@ export async function fileGithubIssue(
         possible_duplicates: [],
         dedup_degraded: false,
         retried: true,
+        ...degradedField,
       });
     }
   }
@@ -819,5 +873,6 @@ export async function fileGithubIssue(
     possible_duplicates: possibleDuplicates,
     dedup_degraded: dedupDegraded,
     retried: false,
+    ...degradedField,
   });
 }
