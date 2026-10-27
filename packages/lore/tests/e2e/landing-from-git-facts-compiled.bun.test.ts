@@ -137,7 +137,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-landing-compiled-"));
   makeCleanTreeRepo(dir);
   mustLore(["init"]);
-  mustLore(["run", "register", "--harness", "claude-code", "--session", MCP_SESSION]);
+  mustLore(["run", "register", "--harness", "claude-code", "--session", MCP_SESSION, "--harness-pid", String(process.pid)]);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   patchLoreConfig(
     dir,
