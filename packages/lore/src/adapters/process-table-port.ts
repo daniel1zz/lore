@@ -18,7 +18,7 @@
  *   - `signal` never throws: ESRCH -> `gone`, EPERM -> `denied`.
  * Side-effect class: IO (spawns `ps`/`lsof`, reads `/proc`, sends signals).
  */
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
 import type { Measured } from "../service/worktree-removal-test.js";
@@ -170,7 +170,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
   const psPaths = options.psPaths ?? SYSTEM_PS_PATHS;
 
   /** Run `ps` from a fixed system location; the result's `error` is set when none exists or the spawn failed. */
-  const runPs = (args: readonly string[], extra: { maxBuffer?: number } = {}): ReturnType<typeof spawnSync<string>> => {
+  const runPs = (args: readonly string[], extra: { maxBuffer?: number } = {}): SpawnSyncReturns<string> => {
     const binary = psPaths.find((candidate) => existsSync(candidate));
     if (binary === undefined) {
       return {
