@@ -973,23 +973,15 @@ function feedUpstreamSpecCheckpoint(
 /**
  * Renders the `requires_uat`-specific feeding pack (SPEC-058 §Design Decisions
  * D4) — names the concrete requirement (the ancestor spec's configured
- * verification profile demands UAT) and the honest recovery path: `lore set`
- * (CLI) has no dedicated flag for an arbitrary `extra` key yet, so the pack
- * points at the MCP `lore_set` tool's generic `extra` passthrough instead of
- * fabricating a non-existent CLI flag (this codebase's "never a broken
- * recovery command" discipline — SPEC-050's lesson).
+ * verification profile demands UAT) and the recovery: `lore set <plan>
+ * --requires-uat`, which merges `extra.requires_uat: true` into the plan's
+ * existing extra (spec-remove-the-lore-mcp-server D3, AC-RMCP-4).
  *
- * @remarks NON-DESTRUCTIVE recovery only (task-gate-feeding-pack-recovery-via-
- *   lore-set-extra-wholesale, 2026-07-25 incident fix) — the ORIGINAL recovery
- *   text here (`extra: {"requires_uat": true}`) was followed literally over MCP
- *   `lore_set` and REPLACED a plan's whole `extra` object, wiping its 4
- *   `extra.phases` entries (extra has no merge semantics on this write path).
- *   The rewritten instruction below fetches-merges-then-sets the FULL object,
- *   and `CorpusService.set` (`findDroppedStructuredExtraField`,
- *   `corpus-service.ts`) now REJECTS a patch that would drop `extra.phases`
- *   on a plan as a second, independent line of defense — this feeding pack is
- *   the FIRST line (don't tell the caller to do the destructive thing in the
- *   first place).
+ * @remarks History: the pack once pointed at the MCP `lore_set` tool's wholesale
+ *   `extra` replacement, which wiped a plan's `extra.phases` (2026-07-25
+ *   incident). The CLI flag merges, so the destructive path no longer exists;
+ *   `CorpusService.set` (`findDroppedStructuredExtraField`) still rejects a
+ *   patch that drops `extra.phases` as a second line of defense.
  */
 function feedRequiresUat(ctx: GateContext, failures: PredicateResult[]): string {
   const target = ctx.targetIdOrSlug ?? "<plan>";
@@ -998,11 +990,8 @@ function feedRequiresUat(ctx: GateContext, failures: PredicateResult[]): string 
     ruleMarkdown:
       "Required for plan-promote: the ancestor spec's configured verification profile " +
       'requires UAT — this plan must declare `extra.requires_uat: true` before it may be ' +
-      "promoted. Recovery: `extra` REPLACES the whole field wholesale on `lore_set` (it does " +
-      `NOT merge) — first fetch the current extra via \`lore get ${target} --json\` (read ` +
-      '`.extra`), merge `{"requires_uat": true}` into it while KEEPING every existing key ' +
-      "(e.g. `phases`), then call the MCP `lore_set` tool with the FULL merged object as " +
-      `\`extra\` on ${target}. \`lore set\` (CLI) has no dedicated flag for this field yet.`,
+      "promoted. Recovery: run `lore set " + target + " --requires-uat` — it merges " +
+      "`requires_uat: true` into the plan's existing `extra`, keeping every other key (e.g. `phases`).",
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);
