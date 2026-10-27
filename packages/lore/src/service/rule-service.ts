@@ -67,6 +67,7 @@ import {
 import type { CreateDocInput } from "@lore/core";
 import { findWriteSourceFor, resolveWriteActorFor } from "../store/write-context-store.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
+import { judgeRuleEdit } from "./rule-edit-decision.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { refuseLiveCommandRemoval, type MainTreePort } from "./main-tree-guard.js";
 import { resolveDoc } from "./resolve.js";
@@ -183,6 +184,8 @@ export interface NodeWriteOpts {
 /** Marks a `writeLeafExtra` call as decision-gated; `draft` is what the writer supplied (absent when nothing). */
 interface NodeDecisionInput {
   readonly draft: DecisionDraft | undefined;
+  /** Present for `rule set` (BR-1477): the patch and the rule as it reads before it, so the rule-specific gates apply. */
+  readonly ruleEdit?: { readonly patch: SetRulePatch; readonly current: BaselineRule };
 }
 
 /** One `lore baseline map` edit of the commands a leaf answers for (a site's rule is declared in code, BR-1344). */
@@ -300,7 +303,7 @@ export class RuleService {
   async addRule(
     leaf: string,
     input: AddRuleInput,
-    opts?: { by?: string },
+    opts?: { by?: string; decision?: DecisionDraft | undefined },
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
     // reason: first pass validates the rule's own fields only; "AS" is the one family that admits every
@@ -327,6 +330,9 @@ export class RuleService {
     if (!exceptions.ok) return exceptions;
     const gate = await this.authorizeCorpusWrite([target.value], "rule-add", opts?.by);
     if (!gate.ok) return gate;
+    // BR-1476 — an agent's add to a leaf with an approved version carries a decision; refused before the id is reserved.
+    const decided = this.resolveNodeDecision(target.value, opts?.decision);
+    if (!decided.ok) return decided;
     const leafId = target.value.id;
 
     let lastStale: LoreError | undefined;
@@ -355,6 +361,7 @@ export class RuleService {
           ownerLeafId: base.id,
           status: statusFor(base.status, placeholderExtra),
           changeSummary: "Rule added (pending: not live until approved)",
+          ...(decided.value !== undefined ? { decision: decided.value } : {}),
         },
         family,
         auditDetails: { operation: "rule-add", pending: true },
@@ -382,7 +389,7 @@ export class RuleService {
   async setRule(
     ruleId: string,
     patch: SetRulePatch,
-    opts?: { by?: string },
+    opts?: { by?: string; decision?: DecisionDraft | undefined },
   ): Promise<Result<{ rule: BaselineRule; doc: DocRecord; revisionId: string | undefined }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
     if (!ANY_RULE_ID_PATTERN.test(ruleId)) {
@@ -440,6 +447,7 @@ export class RuleService {
           summary: `${patchSummary(patch)} (pending revision of ${ruleId})`,
           details: { rule_id: ruleId, operation: patch.moveTo !== undefined ? "rule-move" : "rule-set", fields: Object.keys(patch), pending: true },
         }),
+        { draft: opts?.decision, ruleEdit: { patch, current } },
       );
       if (!written.ok) {
         if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
@@ -846,11 +854,11 @@ export class RuleService {
     }
     // BR-1476 — an agent's change to a node with an approved version carries a decision; refused here, after every
     // refusal of the change itself and before the write, so nothing is written.
-    // reason: only the node-part verbs pass `decisionInput`; `rule add|set` reach this method too and are gated by their own
-    // task (DR-T2b), so an absent input means "this write is not gated here", never "no decision supplied".
+    // reason: `rule add` is gated before its reservation (it never reaches this method); the node-part verbs and `rule set`
+    // pass `decisionInput`, any other caller passes none and is not gated here.
     let decision: DecisionRecord | undefined;
     if (decisionInput !== undefined) {
-      const judged = this.resolveNodeDecision(doc, decisionInput.draft);
+      const judged = this.resolveNodeDecision(doc, decisionInput.draft, decisionInput.ruleEdit);
       if (!judged.ok) return judged;
       decision = judged.value;
     }
@@ -861,7 +869,11 @@ export class RuleService {
    * The decision of a baseline write (`set-label|depends|glossary|map`): required of an agent when `doc` has an approved
    * version (a node never approved carries the `initial` marker and is a draft); human parties carry none.
    */
-  private resolveNodeDecision(doc: DocRecord, draft: DecisionDraft | undefined): Result<DecisionRecord | undefined, LoreError> {
+  private resolveNodeDecision(
+    doc: DocRecord,
+    draft: DecisionDraft | undefined,
+    ruleEdit?: NodeDecisionInput["ruleEdit"],
+  ): Result<DecisionRecord | undefined, LoreError> {
     const gate = this.decisionGate;
     if (gate === undefined) return ok(undefined);
     const required = writeCarriesDecision({
@@ -869,6 +881,9 @@ export class RuleService {
       targetIsDraft: pendingRevisionsOf(doc).node?.initial === true,
       changesMoreThanStatus: true,
     });
+    if (ruleEdit !== undefined) {
+      return judgeRuleEdit(gate, { carriesDecision: required, current: ruleEdit.current, patch: { ...ruleEdit.patch }, draft });
+    }
     return gate.judge({ required, draft });
   }
 

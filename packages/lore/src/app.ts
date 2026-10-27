@@ -996,6 +996,7 @@ function buildAppFromSqlite(
   // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
   const decisionGate = buildDecisionGate(ambient.cwd);
   corpusService.setDecisionGate(decisionGate);
+  ruleChangeService.setDecisionGate(decisionGate);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
@@ -1097,7 +1098,7 @@ function buildAppFromSqlite(
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService),
+    acService: armDecisionGate(new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService), decisionGate),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
@@ -1439,6 +1440,7 @@ function buildAppFromTurso(
   // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
   const decisionGate = buildDecisionGate(ambient.cwd);
   corpusService.setDecisionGate(decisionGate);
+  ruleChangeService.setDecisionGate(decisionGate);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
@@ -1535,7 +1537,7 @@ function buildAppFromTurso(
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService),
+    acService: armDecisionGate(new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService), decisionGate),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled

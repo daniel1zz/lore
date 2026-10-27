@@ -5,7 +5,7 @@
  * Purpose: ONE definition of the seven flags and their parsing for every command whose write carries a decision
  *   (`lore set`, `lore baseline set-label|depends|glossary|map`, later `rule` and `ac` verbs), so no command re-types a flag
  *   description or a parser.
- * Public surface: {@link DECISION_FLAG_ARGS}, {@link parseDecisionFlags}.
+ * Public surface: {@link DECISION_FLAG_ARGS}, {@link DECISION_FLAG_ARGS_SHARED_REASON}, {@link parseDecisionFlags}.
  * Invariants:
  *   - Parsing is `@lore/core`'s (`parsePremiseFlag`, ...); a malformed flag is a `VALIDATION_ERROR` on field `decision`
  *     naming the flag and reason (exit 4), never a silent drop.
@@ -40,6 +40,14 @@ export const DECISION_FLAG_ARGS = {
   "weight-table": { type: "string", description: "[decision] <slug>@<version> of the weight table the scores use" },
   ref: { type: "string", description: '[decision, repeatable] "<practice>|<how this differs>"' },
 } as const;
+
+const { reason: _ownReason, ...FLAGS_WITHOUT_REASON } = DECISION_FLAG_ARGS;
+
+/**
+ * The decision flags for a verb that already has its own `--reason` (`lore ac supersede`, `lore ac exempt`): that flag doubles
+ * as the decision's reason ({@link parseDecisionFlags} reads `args.reason`), so only the other six are declared here.
+ */
+export const DECISION_FLAG_ARGS_SHARED_REASON = FLAGS_WITHOUT_REASON;
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];

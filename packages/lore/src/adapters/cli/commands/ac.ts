@@ -211,6 +211,9 @@ import { demotionOf, formatDemotionLine, type Demotion } from "../../../service/
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
+import { DECISION_FLAG_ARGS, DECISION_FLAG_ARGS_SHARED_REASON, parseDecisionFlags } from "../decision-flags.js";
+import { buildDecisionGate } from "../../../service/decision-wiring.js";
+import type { DecisionDraft } from "../../../service/decision-gate.js";
 
 /**
  * What the citation gate does with a dangling or inactive cited id, stated once for `ac add`, `ac set`
@@ -231,6 +234,16 @@ function requireAcService(app: App): AcService {
     throw new Error("Internal error: AcService not wired on App");
   }
   return app.acService;
+}
+
+/** The decision flags of one `lore ac` invocation, or the exit code of the malformed-flag refusal (BR-1479; the service decides whether one is required). */
+function decisionOf(inv: Invocation, args: Record<string, unknown>): { draft: DecisionDraft | undefined } | number {
+  const parsed = parseDecisionFlags(args);
+  if (!parsed.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, parsed.error) + "\n");
+    return exitCode(parsed.error);
+  }
+  return { draft: parsed.value };
 }
 
 export default defineLoreCommand({
@@ -326,6 +339,7 @@ export default defineLoreCommand({
           type: "string",
           description: "NOT accepted here — exits 2; a correction fixes ONE existing criterion: `lore ac set --correction`",
         },
+        ...DECISION_FLAG_ARGS,
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -340,6 +354,8 @@ export default defineLoreCommand({
         if (timeoutRefusal !== undefined) return timeoutRefusal;
         const foreignRefusal = refuseModeForeignDetail(inv.io, args);
         if (foreignRefusal !== undefined) return foreignRefusal;
+        const decision = decisionOf(inv, args);
+        if (typeof decision === "number") return decision;
         const { app, dbPath } = loadLoreApp({ inv });
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
@@ -348,7 +364,7 @@ export default defineLoreCommand({
           const result = await requireAcService(app).addCriterion(
             args.spec as string,
             criterion,
-            { ...buildDeclarePathOpts(args, dbPath, inv), onAdvisory: (advisory: string): void => printAdvisory(inv.io, advisory) },
+            { ...buildDeclarePathOpts(args, dbPath, inv), onAdvisory: (advisory: string): void => printAdvisory(inv.io, advisory), decision: decision.draft },
           );
 
           if (!result.ok) {
@@ -437,11 +453,14 @@ export default defineLoreCommand({
         id: { type: "positional", description: "Criterion id to exempt, e.g. AC-FEATURE-1", required: true },
         reason: { type: "string", description: "Why this criterion cannot cite a rule yet (required, non-blank)" },
         expires: { type: "string", description: "ISO 8601 date/time the exemption lapses; must be in the future (required)" },
+        ...DECISION_FLAG_ARGS_SHARED_REASON,
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
+        const decision = decisionOf(inv, args);
+        if (typeof decision === "number") return decision;
         // reason: the exemption table is read/written through a second store handle because `App`
         // does not expose its store (same precedent as `lore status`'s baseline block).
         const { app, dbPath } = loadLoreApp({ inv });
@@ -449,12 +468,16 @@ export default defineLoreCommand({
         try {
           // reason: AC-AU-7 — the grant asks decide() (class ac-exempt) through the decision log on this same store.
           const overrides = createOverrideDecisionPort(new DecisionService({ store, executorRun: null }));
-          const result = await new AcExemptionService(store, undefined, overrides).grant({
+          const exemptions = new AcExemptionService(store, undefined, overrides);
+          exemptions.setDecisionGate(buildDecisionGate(inv.cwd));
+          const result = await exemptions.grant({
             specIdOrSlug: args.spec as string,
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
             by: resolveActor(inv),
+            decision: decision.draft,
+            writerSource: inv.identity.claimedSource,
           });
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -500,6 +523,7 @@ export default defineLoreCommand({
           type: "boolean",
           description: "Remove these ids from the criterion's cites instead of adding them",
         },
+        ...DECISION_FLAG_ARGS,
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -511,6 +535,8 @@ export default defineLoreCommand({
         // `args._` carries EVERY positional token (spec, id, then each rule id) — citty
         // declares only the first `rule`; the rest survive on `_` (see anchor.ts's note).
         const ruleIds = ((args._ ?? []) as string[]).slice(2);
+        const decision = decisionOf(inv, args);
+        if (typeof decision === "number") return decision;
         const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).citeCriterion(
@@ -518,7 +544,7 @@ export default defineLoreCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor(inv) },
+            { by: resolveActor(inv), decision: decision.draft },
           );
 
           if (!result.ok) {
@@ -576,6 +602,7 @@ export default defineLoreCommand({
           type: "string",
           description: "NOT accepted here — exits 2; a correction fixes ONE existing criterion: `lore ac set --correction`",
         },
+        ...DECISION_FLAG_ARGS,
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -586,11 +613,14 @@ export default defineLoreCommand({
         const inv = invocationOf(context);
         const correctionRefusal = refuseCorrectionFlag(inv.io, args, "rm");
         if (correctionRefusal !== undefined) return correctionRefusal;
+        const decision = decisionOf(inv, args);
+        if (typeof decision === "number") return decision;
         const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
             by: resolveActor(inv),
+            decision: decision.draft,
           });
 
           if (!result.ok) {
@@ -629,7 +659,8 @@ export default defineLoreCommand({
           type: "string",
           description: "REQUIRED: the superseding criterion as <spec>:<AC-ID> (spec id or slug)",
         },
-        reason: { type: "string", description: "REQUIRED: why the criterion is superseded (non-empty)" },
+        reason: { type: "string", description: "REQUIRED: why the criterion is superseded (non-empty); also the decision's reason on a spec that is not a draft" },
+        ...DECISION_FLAG_ARGS_SHARED_REASON,
         plan: {
           type: "string",
           description: "The plan slug that owns this retirement when the run claims tasks in several plans (must be one it claims a task in)",
@@ -651,6 +682,8 @@ export default defineLoreCommand({
           inv.io.stderr.write("Error: lore ac supersede requires --by <spec>:<AC-ID>.\n");
           return 2;
         }
+        const decision = decisionOf(inv, args);
+        if (typeof decision === "number") return decision;
         const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).supersedeCriterion(
@@ -658,7 +691,7 @@ export default defineLoreCommand({
             args.id as string,
             { spec: byRaw.slice(0, sep), ac: byRaw.slice(sep + 1) },
             reason,
-            { by: resolveActor(inv), ...(typeof args.plan === "string" ? { plan: args.plan } : {}) },
+            { by: resolveActor(inv), decision: decision.draft, ...(typeof args.plan === "string" ? { plan: args.plan } : {}) },
           );
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
@@ -771,6 +804,7 @@ export default defineLoreCommand({
           type: "string",
           description: "NOT editable — exits 2; use `ac rm --force` then `ac add --mode <new>` instead",
         },
+        ...DECISION_FLAG_ARGS,
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -812,6 +846,8 @@ export default defineLoreCommand({
           }
           correctionOpt = { reason };
         }
+        const decision = decisionOf(inv, args);
+        if (typeof decision === "number") return decision;
 
         const { app, dbPath } = loadLoreApp({ inv });
         try {
@@ -820,6 +856,7 @@ export default defineLoreCommand({
           const setOpts: SetCriterionOpts = {
             ...buildDeclarePathOpts(args, dbPath, inv),
             onAdvisory: (advisory: string): void => printAdvisory(inv.io, advisory),
+            decision: decision.draft,
             ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
           };
           const result = await requireAcService(app).setCriterion(
