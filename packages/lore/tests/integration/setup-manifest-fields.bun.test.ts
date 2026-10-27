@@ -138,13 +138,12 @@ function writeManifest(targetDir: string, manifest: Manifest): void {
   writeFileSync(join(targetDir, MANIFEST_FILENAME), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-/** Fresh `--yes` converge into a never-before-installed `targetDir`. `PATH=""` makes MCP registration fail (exit 1) — file writes still land. */
+/** Fresh `--yes` converge into a never-before-installed `targetDir`. Setup registers no MCP server, so the install exits 0 (task-skill-implement-lore-setup-registers-no-tool-server-and). */
 function freshInstall(scratch: string, targetDir: string): void {
   const install = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-  if (install.exitCode !== 1) {
+  if (install.exitCode !== 0) {
     throw new Error(
-      `freshInstall: expected the seeding install to exit 1 (files written, MCP registration fails under ` +
-        `PATH=""), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
+      `freshInstall: expected the seeding install to exit 0 (task-skill-implement-lore-setup-registers-no-tool-server-and: setup registers no MCP server), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
     );
   }
 }
@@ -189,7 +188,7 @@ describe("lore setup — manifest version fields — NEGATIVE", () => {
     writeManifest(targetDir, manifest);
 
     const converge = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-    expect(converge.exitCode).toBe(1); // MCP still fails under PATH="" — file/manifest work still completes
+    expect(converge.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     const after = readManifest(targetDir);
     expect(typeof after.installed_at).toBe("string");
@@ -211,7 +210,7 @@ describe("lore setup — manifest version fields — BOUNDARY", () => {
     // No --force-diverged: the mutated file is skipped-by-default (AC-076-3), so this
     // converge does NOT achieve a fully-synced state.
     const converge = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-    expect(converge.exitCode).toBe(1); // MCP still fails under PATH=""
+    expect(converge.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     const manifest = readManifest(targetDir);
     expect(manifest.assets_digest).toBeUndefined();
@@ -253,7 +252,7 @@ describe("lore setup — manifest version fields — STATE (zero-write invariant
     const installedAtBefore = readManifest(targetDir).installed_at;
 
     const second = runSetup(["--claude-dir", targetDir, "--yes", "--json"], scratch);
-    expect(second.exitCode).toBe(1); // MCP still fails under PATH="" every run — unrelated to file writes
+    expect(second.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     const payload = JSON.parse(second.stdout) as { data: { written: unknown[]; skipped: string[] } };
     expect(payload.data.written).toEqual([]);

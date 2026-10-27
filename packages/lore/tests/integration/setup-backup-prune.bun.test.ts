@@ -46,13 +46,13 @@ import { join } from "node:path";
 import { ok } from "@lore/core";
 import type { AssetPayload, LoreError, Result } from "@lore/core";
 
-import { SetupService, type AssetSource, type McpAddOutcome, type McpRegistrar } from "../../src/service/setup-service.js";
+import { SetupService, type AssetSource } from "../../src/service/setup-service.js";
 import { RealSetupFsReader, RealSetupFsWriter } from "../../src/adapters/real-setup-fs.js";
 
 const BACKUPS_DIRNAME = ".lore-backups";
 const KEEP = 5;
 
-// ─── Fakes (AssetSource / McpRegistrar) — real fs only for SetupFsReader/Writer ──
+// ─── Fakes (AssetSource) — real fs only for SetupFsReader/Writer ──
 
 /** Always returns the SAME single fresh file — enough to give `install()` at least one successful write. */
 class SingleFreshFileAssetSource implements AssetSource {
@@ -67,15 +67,6 @@ class SingleFreshFileAssetSource implements AssetSource {
         },
       ],
     });
-  }
-}
-
-class OkMcpRegistrar implements McpRegistrar {
-  async add(): Promise<Result<McpAddOutcome, LoreError>> {
-    return ok("added");
-  }
-  async remove(): Promise<Result<void, LoreError>> {
-    return ok(undefined);
   }
 }
 
@@ -127,7 +118,6 @@ async function runInstallOnce(targetDir: string): Promise<void> {
     new SingleFreshFileAssetSource(),
     new RealSetupFsReader(),
     new RealSetupFsWriter(),
-    new OkMcpRegistrar(),
     { env: {}, home: homedir() },
   );
   const result = await service.install(

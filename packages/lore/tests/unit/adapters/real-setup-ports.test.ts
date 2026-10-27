@@ -1,10 +1,11 @@
 // @reads assets/**
 /**
  * Direct-behavior suite for the SPEC-046 P1 real `SetupService` port
- * implementations (`RealAssetSource`, `RealSetupFsReader`/`RealSetupFsWriter`,
- * `RealMcpRegistrar`). `setup-service.test.ts` (a sibling suite) exercises
- * `SetupService` exclusively against FAKE ports — this suite is the only
- * automated oracle these three concrete implementations get.
+ * implementations (`RealAssetSource`, `RealSetupFsReader`/`RealSetupFsWriter`).
+ * `setup-service.test.ts` (a sibling suite) exercises `SetupService`
+ * exclusively against FAKE ports — this suite is the only automated oracle
+ * these concrete implementations get. (The MCP registrar describes were
+ * deleted by task-skill-implement-lore-setup-registers-no-tool-server-and.)
  *
  * ALL fixtures are `mkdtemp` scratch directories or a synthetic recording
  * `claude` shim script — NEVER the real `~/.claude` (mirrors this repo's
@@ -17,10 +18,7 @@
  *   HAPPY:      RealAssetSource enumerates the real repo assets/ tree
  *               correctly (kinds/counts/executable flags) AND a synthetic
  *               mkdtemp tree (path mapping); RealSetupFsWriter.write is
- *               atomic; RealMcpRegistrar.add/remove produce the correct argv
- *               against a recording shim
- *   NEGATIVE:   RealMcpRegistrar with `claude` unreachable (PATH="") returns
- *               err naming the exact manual command — never throws
+ *               atomic
  *   BOUNDARY:   RealAssetSource tolerates an EMPTY declared subdirectory
  *               (zero files, no error)
  *   ERROR:      RealAssetSource surfaces an unreadable/missing subdirectory
@@ -51,12 +49,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildMcpAddArgs, buildMcpRemoveArgs } from "@lore/core";
 import type { LoreError } from "@lore/core";
 
 import { RealAssetSource } from "../../../src/adapters/real-asset-source.js";
 import { RealSetupFsReader, RealSetupFsWriter } from "../../../src/adapters/real-setup-fs.js";
-import { RealMcpRegistrar } from "../../../src/adapters/real-mcp-registrar.js";
 
 // ─── Shared fixtures ────────────────────────────────────────────────────────
 
@@ -821,129 +817,5 @@ describe("RealSetupFsWriter.remove", () => {
     const root = makeScratchDir("fs-writer-remove-missing-");
     const writer = new RealSetupFsWriter();
     await expect(writer.remove(join(root, "does-not-exist"), { boundary: root })).resolves.toBeUndefined();
-  });
-});
-
-// ─── RealMcpRegistrar ───────────────────────────────────────────────────────
-
-/** Writes an executable shim named `claude` that records its argv (one per line) into `recorderPath` and exits 0. */
-function writeClaudeRecorderShim(binDir: string, recorderPath: string): void {
-  const shimPath = join(binDir, "claude");
-  writeFileSync(shimPath, `#!/bin/sh\nprintf '%s\\n' "$@" > "${recorderPath}"\nexit 0\n`);
-  chmodSync(shimPath, 0o755);
-}
-
-function readRecordedArgv(recorderPath: string): string[] {
-  const raw = readFileSync(recorderPath, "utf8");
-  return raw.split("\n").filter((line) => line.length > 0);
-}
-
-describe("RealMcpRegistrar — HAPPY (recording shim)", () => {
-  it("add() invokes claude with buildMcpAddArgs(binPath)'s exact argv", async () => {
-    const root = makeScratchDir("mcp-registrar-add-");
-    const recorderPath = join(root, "recorded-argv.txt");
-    writeClaudeRecorderShim(root, recorderPath);
-
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
-    const binPath = "/usr/local/bin/lore";
-    const result = await registrar.add(binPath);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("added");
-    expect(readRecordedArgv(recorderPath)).toEqual(buildMcpAddArgs(binPath));
-  });
-
-  it("remove() invokes claude with buildMcpRemoveArgs()'s exact argv", async () => {
-    const root = makeScratchDir("mcp-registrar-remove-");
-    const recorderPath = join(root, "recorded-argv.txt");
-    writeClaudeRecorderShim(root, recorderPath);
-
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
-    const result = await registrar.remove();
-
-    expect(result.ok).toBe(true);
-    expect(readRecordedArgv(recorderPath)).toEqual(buildMcpRemoveArgs());
-  });
-});
-
-describe("RealMcpRegistrar — NEGATIVE (claude absent from PATH)", () => {
-  it("add() returns err naming the exact manual command, never throws", async () => {
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: "" }, makeScratchDir("mcp-registrar-no-claude-"));
-    const binPath = "/usr/local/bin/lore";
-
-    // reason: see the AssetSource ERROR test above for why `expect(fn).not.toThrow()` cannot
-    // be used to assert "an async method never throws" — it never awaits the callback.
-    const { value: result, thrown } = await awaitNeverThrows(() => registrar.add(binPath));
-
-    expect(thrown).toBeUndefined();
-    expect(result).toBeDefined();
-    expect(result?.ok).toBe(false);
-    if (result?.ok !== false) return;
-    const error = narrowErrorCode(result.error, "VALIDATION_ERROR");
-    expect(error.message).toContain(`claude mcp add -s user lore -- ${binPath} --mcp-server`);
-  });
-
-  it("remove() returns err naming the exact manual command, never throws", async () => {
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: "" }, makeScratchDir("mcp-registrar-no-claude-"));
-
-    const { value: result, thrown } = await awaitNeverThrows(() => registrar.remove());
-
-    expect(thrown).toBeUndefined();
-    expect(result).toBeDefined();
-    expect(result?.ok).toBe(false);
-    if (result?.ok !== false) return;
-    const error = narrowErrorCode(result.error, "VALIDATION_ERROR");
-    expect(error.message).toContain("claude mcp remove -s user lore");
-  });
-});
-
-/**
- * Writes an executable shim named `claude` that always exits with `exitCode`
- * and writes `stderrText` to stderr — used to simulate `claude mcp add`'s
- * real-world exit-1 "already exists" collision (and a genuinely different
- * exit-1 failure) without a real `claude` install.
- */
-function writeClaudeFailingShim(binDir: string, exitCode: number, stderrText: string): void {
-  const shimPath = join(binDir, "claude");
-  writeFileSync(shimPath, `#!/bin/sh\nprintf '%s' "${stderrText}" >&2\nexit ${exitCode}\n`);
-  chmodSync(shimPath, 0o755);
-}
-
-describe("RealMcpRegistrar — add() idempotency (task-lore-setup-mcp-add-step-is-non-idempotent-already-exists)", () => {
-  it("HAPPY/BOUNDARY: an 'already exists' exit-1 stderr is reclassified as ok('already_registered'), never err", async () => {
-    const root = makeScratchDir("mcp-registrar-already-exists-");
-    writeClaudeFailingShim(root, 1, "MCP server lore already exists in user config");
-
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
-    const result = await registrar.add("/usr/local/bin/lore");
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("already_registered");
-  });
-
-  it("NEGATIVE/REGRESSION: a genuinely different exit-1 stderr still resolves err (never silently swallowed)", async () => {
-    const root = makeScratchDir("mcp-registrar-genuine-failure-");
-    writeClaudeFailingShim(root, 1, "permission denied writing user config");
-
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
-    const { value: result, thrown } = await awaitNeverThrows(() => registrar.add("/usr/local/bin/lore"));
-
-    expect(thrown).toBeUndefined();
-    expect(result?.ok).toBe(false);
-    if (result?.ok !== false) return;
-    const error = narrowErrorCode(result.error, "VALIDATION_ERROR");
-    expect(error.message).toContain("permission denied writing user config");
-    expect(error.message).toContain("claude mcp add -s user lore -- /usr/local/bin/lore --mcp-server");
-  });
-
-  it("ERROR: a case-varied 'ALREADY EXISTS' stderr is still detected (case-insensitive match)", async () => {
-    const root = makeScratchDir("mcp-registrar-already-exists-caps-");
-    writeClaudeFailingShim(root, 1, "Error: MCP server lore ALREADY EXISTS in user config");
-
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
-    const result = await registrar.add("/usr/local/bin/lore");
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe("already_registered");
   });
 });

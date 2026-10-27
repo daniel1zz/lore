@@ -93,7 +93,7 @@ interface Manifest {
 let sandbox: string;
 
 function runSetup(claudeDir: string): { stdout: string; stderr: string; exitCode: number } {
-  // reason: PATH is emptied so the MCP registration step can never reach a real `claude` CLI; bun is spawned by absolute path.
+  // reason: PATH is emptied so no `claude` CLI is reachable; bun is spawned by absolute path.
   const result = spawnSync(BUN_BIN, ["run", INDEX_TS, "setup", "--claude-dir", claudeDir, "--yes"], {
     cwd: sandbox,
     env: { ...process.env, PATH: "", HOME: join(sandbox, "home"), XDG_CONFIG_HOME: join(sandbox, "xdg") },
@@ -102,10 +102,10 @@ function runSetup(claudeDir: string): { stdout: string; stderr: string; exitCode
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
-/** With PATH emptied the MCP registration step cannot find `claude`; the files-written line is the success signal. */
+/** The files-written line is the success signal; setup registers no MCP server, so it exits 0 (task-skill-implement-lore-setup-registers-no-tool-server-and). */
 function expectConverged(run: { stdout: string; stderr: string; exitCode: number }): void {
   expect(run.stdout, run.stderr).toContain("lore setup complete");
-  expect(run.exitCode).toBe(1);
+  expect(run.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 }
 
 function readSettings(claudeDir: string): Settings {

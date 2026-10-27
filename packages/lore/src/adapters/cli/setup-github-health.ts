@@ -266,8 +266,7 @@ function classifyFailureForHealthCheck(error: LoreError): GhHealthRunResult {
  * The `lore setup --check` exit-code decision for each condition — kept
  * here (not in `commands/setup.ts`) so that command file stays a thin
  * caller. `repo-unreadable` intentionally reuses the SAME "ran fine, this
- * one part failed" bucket `commands/setup.ts::mcpOutcomeExitCode` already
- * uses for MCP-registration failure, rather than threading GhRunner's
+ * one part failed" bucket `verify.ts` uses, rather than threading GhRunner's
  * finer-grained transport/rate-limit codes through a second layer — that
  * distinction is GhRunner's own AC-GI-2 surface, already covered there.
  *

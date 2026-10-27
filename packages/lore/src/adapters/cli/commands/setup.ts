@@ -18,7 +18,7 @@
  * Claude Code config directory, conventionally `~/.claude`) and
  * `ProjectSetupService` (per-repo project scaffold, `--project`) to real,
  * `node:fs`/`node:child_process`-backed ports (`RealAssetSource`,
- * `RealSetupFsReader`/`RealSetupFsWriter`, `RealMcpRegistrar`) — the FINAL
+ * `RealSetupFsReader`/`RealSetupFsWriter`) — the FINAL
  * SPEC-046 wiring task, connecting every previously-merged service/port/
  * renderer into a reachable CLI verb (SPEC-046 §Design, task AC-046-E).
  *
@@ -115,11 +115,6 @@
  *       malformed settings.json / unsafe targetDir / manifest validation →
  *       4; STALE_VERSION → 5 — none of `SetupService`'s public methods
  *       currently return 5/6/7, listed for completeness)
- *   1 = the run otherwise succeeded but MCP registration failed
- *       (`SetupReceipt.mcp === "failed"`) — file-asset work still completed;
- *       the rendered/JSON receipt already names the manual
- *       `claude mcp add`/`remove` recovery command (mirrors `verify.ts`'s
- *       "ran fine, one part failed" exit-1 bucket)
  *   `--check` ONLY, from its second (GitHub-channel) section, and only when
  *   the asset-freshness section reported a clean exit (see
  *   `runGitHubChannelHealthCheck`'s own doc for why it never downgrades an
@@ -150,7 +145,7 @@ import { discoverFragmentDocuments } from "../../real-memory-file-probe.js";
 import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "./context.js";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 
-import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
+import { SetupService } from "../../../service/setup-service.js";
 import { ProjectSetupService, checkProjectLedger } from "../../../service/project-setup-service.js";
 import {
   PROJECT_MANIFEST_RELATIVE_PATH,
@@ -174,7 +169,6 @@ import { runContextRefresh } from "../../../flows/context-flow.js";
 import { ClaudeSettingsPort, createRealClaudeSettingsFs, resolveLanguageName } from "../../claude-settings-port.js";
 import { RealAssetSource } from "../../real-asset-source.js";
 import { RealSetupFsReader, RealSetupFsWriter, backupProjectFile, removeProjectPath } from "../../real-setup-fs.js";
-import { RealMcpRegistrar } from "../../real-mcp-registrar.js";
 import {
   renderInstallPlan,
   renderInstallReceipt,
@@ -208,52 +202,6 @@ import type { ExitReport } from "../cli-exit.js";
 
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
-
-// ─── MCP failure-detail capture ──────────────────────────────────────────────
-
-/**
- * Wraps a real `McpRegistrar`, remembering the last `add`/`remove` failure's
- * message so it can be threaded into `SetupRenderCtx.mcpErrorTail` — SPEC-046
- * deliberately keeps `SetupReceipt.mcp` a bare marker with no error
- * detail of its own (see `setup-render.ts`'s module doc), so the CLI adapter
- * is the one place that can hold onto the real `LoreError.message` from the
- * SAME call `SetupService` already made, without a second registration
- * attempt.
- */
-class CapturingMcpRegistrar implements McpRegistrar {
-  private lastErrorMessage: string | undefined;
-
-  constructor(private readonly inner: McpRegistrar) {}
-
-  get lastError(): string | undefined {
-    return this.lastErrorMessage;
-  }
-
-  async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
-    const result = await this.inner.add(binPath);
-    if (!result.ok) this.lastErrorMessage = describeLoreError(result.error);
-    return result;
-  }
-
-  async remove(): Promise<Result<void, LoreError>> {
-    const result = await this.inner.remove();
-    if (!result.ok) this.lastErrorMessage = describeLoreError(result.error);
-    return result;
-  }
-}
-
-/**
- * `LoreError` is a discriminated union — not every member carries `.message`
- * (e.g. `DOC_NOT_FOUND` carries `id`, not `message`). Mirrors `loader.ts`'s
- * own `"message" in error ? error.message : error.code` narrowing.
- */
-function describeLoreError(error: LoreError): string {
-  return "message" in error ? error.message : error.code;
-}
-
-function renderCtx(targetDir: string, binPath: string, mcpErrorTail: string | undefined): SetupRenderCtx {
-  return { targetDir, binPath, ...(mcpErrorTail !== undefined ? { mcpErrorTail } : {}) };
-}
 
 // ─── Confirm-before-mutate (mirrors commands/verify.ts's SPEC-039 §M2 y/N) ──
 
@@ -1004,7 +952,6 @@ function renderCorpusUpgradeNote(inv: Invocation): void {
 
 async function runInstall(inv: Invocation,
   service: SetupService,
-  mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean; inv: Invocation },
 ): Promise<ExitReport> {
   // reason: resolved BEFORE the confirm prompt and any write — an unknown context.language code
@@ -1024,7 +971,7 @@ async function runInstall(inv: Invocation,
       // wasted extra planInstall() read. This closure can't be async, so callers on the
       // prompt path accept a plain textual fallback here; the REAL plan preview a curious
       // user can inspect first is `lore setup --dry-run`.
-      return `This will install lore's skills/agents/hooks/governance into ${opts.targetDir} and register the lore MCP server (binary: ${opts.binPath}). Run \`lore setup --dry-run\` first to preview the exact file plan.`;
+      return `This will install lore's skills/agents/hooks/governance into ${opts.targetDir} (binary: ${opts.binPath}). Run \`lore setup --dry-run\` first to preview the exact file plan.`;
     },
   });
   if (!confirmation.proceed) return confirmation.code;
@@ -1052,7 +999,7 @@ async function runInstall(inv: Invocation,
     return exitCode(result.error);
   }
 
-  const ctx = renderCtx(opts.targetDir, opts.binPath, mcpRegistrar.lastError);
+  const ctx: SetupRenderCtx = { targetDir: opts.targetDir, binPath: opts.binPath };
   if (opts.json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
   } else {
@@ -1060,16 +1007,14 @@ async function runInstall(inv: Invocation,
     renderDivergedSkipSection(inv.io, result.value.skippedDiverged);
     renderCorpusUpgradeNote(inv);
   }
-  const mcpExit = mcpOutcomeExitCode(result.value);
 
   const projected = applyLanguageProjections(languagePlan.value);
   if (!projected.ok) return failWith(opts.inv, projected.error);
-  return combineSetupExit(mcpExit, migrateExit);
+  return combineSetupExit(0, migrateExit);
 }
 
 async function runUninstall(inv: Invocation, 
   service: SetupService,
-  mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean },
 ): Promise<ExitReport> {
   const confirmation = await confirmOrReport(inv.io, {
@@ -1087,24 +1032,13 @@ async function runUninstall(inv: Invocation,
     return exitCode(result.error);
   }
 
-  const ctx = renderCtx(opts.targetDir, opts.binPath, mcpRegistrar.lastError);
+  const ctx: SetupRenderCtx = { targetDir: opts.targetDir, binPath: opts.binPath };
   if (opts.json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
   } else {
     printLine(inv.io.stdout, renderUninstallReceipt(result.value, ctx));
   }
-  return mcpOutcomeExitCode(result.value);
-}
-
-/**
- * MCP registration/de-registration never aborts a run (file-asset work
- * already completed) but the CALLER must still surface a non-zero exit so a
- * CI/scripted caller notices — the manual recovery command is already named
- * in the rendered/JSON receipt's mcp line. Mirrors `verify.ts`'s "ran fine,
- * one part failed" exit-1 bucket.
- */
-function mcpOutcomeExitCode(receipt: SetupReceipt): number {
-  return receipt.mcp === "failed" ? 1 : 0;
+  return 0;
 }
 
 /**
@@ -1333,12 +1267,10 @@ export default defineLoreCommand({
       cwd: inv.cwd,
     });
 
-    const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar(inv.env, inv.cwd));
     const service = new SetupService(
       new RealAssetSource(assetsRoot),
       new RealSetupFsReader(),
       new RealSetupFsWriter(),
-      mcpRegistrar,
       // reason: this adapter opts in to the real `~/.claude` (see the LORE_SETUP_ALLOW_REAL note above), so the guard
       // input carries the flag explicitly instead of reading the process environment back.
       { env: { ...inv.env, LORE_SETUP_ALLOW_REAL: "1" }, home: inv.paths.home },
@@ -1348,9 +1280,9 @@ export default defineLoreCommand({
       return await runDryRun(inv, service, targetDir, binPath, json);
     }
     if (validated.mode === "uninstall") {
-      return await runUninstall(inv, service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
+      return await runUninstall(inv, service, { targetDir, binPath, json, yes: args.yes === true });
     }
-    return await runInstall(inv, service, mcpRegistrar, {
+    return await runInstall(inv, service, {
       targetDir,
       binPath,
       json,

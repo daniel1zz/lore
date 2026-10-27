@@ -9,13 +9,9 @@
  * just unit coverage of the pieces it wires together.
  *
  * SAFETY — this file NEVER lets a subprocess reach the real `claude` CLI on
- * PATH: every mutating (non-`--dry-run`) test that would call
- * `McpRegistrar.add`/`remove` sets `PATH: ""` (mirrors
- * `real-setup-ports.test.ts`'s own "claude absent from PATH" convention) —
- * this repo's own dev machine actually registers a REAL `claude mcp add -s
- * user lore` entry if that guard is missing (discovered empirically while
- * writing this suite; cleaned up via `claude mcp remove -s user lore`
- * afterward). Every test also targets a fresh `mkdtemp` directory via
+ * PATH: every mutating (non-`--dry-run`) test sets `PATH: ""`
+ * (a "claude absent from PATH" convention kept from when setup registered an MCP
+ * server; setup no longer calls `claude` at all — task-skill-implement-lore-setup-registers-no-tool-server-and). Every test also targets a fresh `mkdtemp` directory via
  * `--claude-dir` (or an overridden `$HOME` for the one default-resolution
  * boundary test) — never the real `~/.claude` (2026-07-07 pollution-incident
  * convention).
@@ -90,7 +86,7 @@ interface RunResult {
  * Spawn `bun run <INDEX_TS> setup ...args` in `cwd`. NEVER touches the real
  * `claude` CLI unless `allowRealClaudePath` is explicitly set — every caller
  * that mutates (install/uninstall/project) MUST either pass `--dry-run`
- * (never reaches `McpRegistrar`) or accept the default `PATH: ""` override.
+ * or accept the default `PATH: ""` override.
  *
  * @param envOverrides - additional env vars merged onto the subprocess's own
  *   environment. `PATH` defaults to `""` (forces `claude` ENOENT
@@ -214,14 +210,14 @@ describe("lore setup — HAPPY", () => {
 
     const result = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
 
-    // PATH="" forces `claude` ENOENT — mcp registration fails, exit 1 (files still write).
-    expect(result.exitCode).toBe(1);
+    // task-skill-implement-lore-setup-registers-no-tool-server-and: setup no longer registers an MCP server, so PATH="" cannot fail it — exit 0.
+    expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("lore setup complete");
     expect(existsSync(join(targetDir, "skills", "lore", "SKILL.md"))).toBe(true);
     expect(existsSync(join(targetDir, "agents", "lore-implementer.md"))).toBe(true);
     expect(existsSync(join(targetDir, ".lore-setup-manifest.json"))).toBe(true);
-    // §M2-style manual-recovery guidance must be visible when mcp registration fails.
-    expect(result.stdout).toContain("claude mcp add");
+    // task-skill-implement-lore-setup-registers-no-tool-server-and: no manual `claude mcp add` guidance is printed any more.
+    expect(result.stdout).not.toContain("claude mcp add");
   });
 
   it("AC-046-E.H4: --project scaffolds a throwaway git repo end-to-end (wiring proof)", () => {
@@ -347,14 +343,10 @@ describe("lore setup — STATE", () => {
     const targetDir = join(scratch, ".claude");
 
     const installResult = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-    expect(installResult.exitCode).toBe(1); // mcp fails under PATH="", files still write
+    expect(installResult.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: setup registers no MCP server, so install exits 0
     expect(existsSync(join(targetDir, "skills", "lore", "SKILL.md"))).toBe(true);
 
-    // reason: the preceding install's OWN mcp registration attempt already failed (PATH=""),
-    // so it never wrote a `kind: "mcp"` manifest entry to reverse (SetupService only tracks
-    // an mcp entry after a SUCCESSFUL add) — uninstall therefore finds no tracked mcp entry
-    // and reports `mcp: "skipped"` (exit 0), not "failed" (exit 1). This is SetupService's
-    // own documented "no previously registered entry to de-register" case, not a test bug.
+    // task-skill-implement-lore-setup-registers-no-tool-server-and: uninstall de-registers nothing and exits 0.
     const uninstallResult = runSetup(["--uninstall", "--claude-dir", targetDir, "--yes"], scratch);
     expect(uninstallResult.exitCode).toBe(0);
     expect(uninstallResult.stdout).toContain("lore setup uninstalled");
@@ -485,7 +477,7 @@ describe("lore setup — REGRESSION", () => {
     const targetDir = join(scratch, ".claude");
 
     const installResult = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-    expect(installResult.exitCode).toBe(1);
+    expect(installResult.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     const dryRunResult = runSetup(["--dry-run", "--claude-dir", targetDir], scratch);
     expect(dryRunResult.exitCode).toBe(0);
