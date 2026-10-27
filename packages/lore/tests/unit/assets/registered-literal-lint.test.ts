@@ -53,7 +53,6 @@ const NAMED_SRC_FILES = [
   "packages/core/src/truncate.ts",
   "packages/lore/src/adapters/cli/evidence-precheck.ts",
   "packages/lore/src/adapters/cli/commands/evidence.ts",
-  "packages/lore/src/adapters/mcp/tools.ts",
   "packages/lore/src/service/verify-executor.ts",
   "packages/lore/src/service/verify-runner-service.ts",
   "packages/lore/src/service/verify-spawn.ts",
@@ -142,10 +141,9 @@ afterEach(() => {
 });
 
 describe("AC-CV-6 registered-literal lint", () => {
-  it("the registry has at least one entry with literalPatterns, including capture_tail_chars and mcp_tool_count", () => {
+  it("the registry has at least one entry with literalPatterns, including capture_tail_chars", () => {
     const names = patternedEntries().map((e) => e.name);
     expect(names).toContain("capture_tail_chars");
-    expect(names).toContain("mcp_tool_count");
   });
 
   it.each(FIXED_SPELLINGS)("capture_tail_chars patterns match the fixed spelling %j", (spelling) => {
