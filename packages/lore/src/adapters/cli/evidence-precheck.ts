@@ -629,7 +629,7 @@ export function findFilteredPassProofGap(input: {
  */
 const MATCHED_COUNT_REPAIR_HINT =
   "Re-run the command, capture the runner's summary lines, and pass them via " +
-  "--output-tail (or --output-tail-file; MCP: output_tail); or record the run " +
+  "--output-tail (or --output-tail-file); or record the run " +
   "honestly with --result fail / expected-fail.";
 
 /** Per-gap diagnosis, in the operator's words. */
