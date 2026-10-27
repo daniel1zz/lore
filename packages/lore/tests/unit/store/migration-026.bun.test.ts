@@ -43,6 +43,11 @@ function versionRows(store: SQLiteStore): unknown[] {
   return store.getDatabase().query("SELECT * FROM versions ORDER BY version").all();
 }
 
+/** Rows as a schema-41 file reads them: migration 041 adds `versions.decision`, NULL on every older row. */
+function withDecisionColumn(rows: unknown[]): unknown[] {
+  return rows.map((row) => ({ ...(row as Record<string, unknown>), decision: null }));
+}
+
 function insertAction(store: SQLiteStore, version: number, action: string): void {
   store
     .getDatabase()
@@ -69,7 +74,7 @@ describe("migration 026 versions.action admits 'undelete'", () => {
 
     const upgraded = new SQLiteStore(dbPath, { migrate: true });
     try {
-      expect(versionRows(upgraded)).toEqual(before);
+      expect(versionRows(upgraded)).toEqual(withDecisionColumn(before));
       const user = (upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version;
       expect(user).toBe(LATEST_SCHEMA_VERSION);
       const indexes = (upgraded.getDatabase().query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'versions'").all() as { name: string }[]).map((r) => r.name);
@@ -112,7 +117,7 @@ describe("migration 026 versions.action admits 'undelete'", () => {
 
     const reopened = new SQLiteStore(dbPath, { migrate: true });
     try {
-      expect(versionRows(reopened)).toEqual(before);
+      expect(versionRows(reopened)).toEqual(withDecisionColumn(before));
       expect((reopened.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
     } finally {
       reopened.close();
