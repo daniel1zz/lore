@@ -126,6 +126,24 @@ describe("AC-DR-7 file premises", () => {
     expect(findings.map((f) => f.kind)).toEqual(["unverifiable"]);
   });
 
+  it("AC-DR-7 gate and score evidence with a stored quote is compared with that quote: a wrong quote is wrong-when-written, a right one is no finding", async () => {
+    const evidence = `file:registry.ts:59@${shaA}`;
+    const stored = (quote: string) => ({ kind: "file" as const, path: "registry.ts", lines: [59, 59] as [number, number], sha: shaA, quote });
+    const record = decisionOf([], {
+      gates: [
+        { id: "g-wrong", verdict: "pass", evidence, evidence_source: stored("const LIMIT = 60000;"), computed: false },
+        { id: "g-right", verdict: "pass", evidence, evidence_source: stored("const LIMIT = 180000;"), computed: false },
+      ],
+      scores: [{ option: "o", dimension: "d1", value: 1, evidence, evidence_source: stored("const LIMIT = 60000;") }],
+    });
+    const findings = await recheck(record);
+    expect(findings.map((f) => [f.part, f.kind])).toEqual([
+      ["gate g-wrong", "wrong-when-written"],
+      ["score o/d1", "wrong-when-written"],
+    ]);
+    expect(findings[0]?.fact).toContain("180000");
+  });
+
   describe("after main moves on", () => {
     beforeAll(() => {
       const edited = registryLines("500000");

@@ -3,12 +3,15 @@
  *
  * Purpose: render the plan's landed diff, documents, attested task evidence, cited-rule state and the milestone
  *   decisions into a seven-dimension review request whose answer parses with `llmMilestoneOutputSchema`.
- * Public surface: MILESTONE_REVIEW_PROMPT_VERSION, MilestoneReviewPromptInput, buildMilestoneReviewPrompt.
+ * Public surface: MILESTONE_REVIEW_PROMPT_VERSION, MilestoneReviewPromptInput, buildMilestoneReviewPrompt,
+ *   JudgedDecisionInput, judgedDecisionsAnswerSchema.
  * Invariants:
  *   - The prompt names all seven dimensions from `MILESTONE_DIMENSIONS` (the single list), never a restated copy.
  *   - A diff over `maxDiffChars` is cut by file (`truncateDiffByFile`), and the prompt says so: a judge told nothing
  *     about a cut would read a partial diff as a complete one.
  *   - A diff that is absent is said to be absent, with the reason; the judge is told to judge from the documents.
+ *   - The recorded decisions are a section of their own (premise quotes, alternatives, old and new rule statement); the
+ *     judge answers them in a top-level `decisions` array beside `dimensions`, and only when the section lists some.
  * Side-effect class: pure.
  *
  * Reference: Kayenta automated canary analysis (several metrics judged separately; promotion needs all to pass) and
@@ -16,12 +19,13 @@
  * judgment-only-at-milestones Part D; adr-ai-decision-standard-four-checks-references-from-excellent.
  */
 
+import { z } from "zod";
 import { MILESTONE_DIMENSIONS, type MilestoneDecisionRef } from "@lore/core";
 import { truncateDiffByFile } from "./diff-truncation.js";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
 
 /** Stamped on every stored review (`prompt_version`). */
-export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-4";
+export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-5";
 
 /** One task's evidence row as the judge sees it. */
 export interface MilestoneEvidenceLine {
@@ -42,6 +46,32 @@ export interface MilestoneTaskInput {
   readonly evidence: readonly MilestoneEvidenceLine[];
 }
 
+/** One decision the judge re-reads: what its write said it rested on, what it passed over, and a rule rewording's two statements. */
+export interface JudgedDecisionInput {
+  /** `<slug>@<version>` of the version row that recorded it. */
+  readonly address: string;
+  readonly reason: string;
+  /** One entry per premise, in recorded order; `evidence` is the stored quote (file) or the source as recorded. */
+  readonly premises: readonly { readonly claim: string; readonly tier: string; readonly evidence: string }[];
+  readonly alternatives: readonly { readonly option: string; readonly why_rejected: string }[];
+  /** A `rule set` statement change: the rule, the statement replaced and the statement now. */
+  readonly rule?: { readonly id: string; readonly before: string; readonly after: string };
+  /** `before` was recorded but no rule of the document carries that statement as its prior one. */
+  readonly unlocatedBefore?: string;
+  /** Live criteria that cite `rule` (empty without a rule); re-run by the milestone after a statement change. */
+  readonly citing: readonly { readonly spec: string; readonly ac: string }[];
+}
+
+/** One decision's answer: `premises_supported` has one entry per premise; `meaning_unchanged` is required for a rule rewording. */
+export const judgedDecisionAnswerSchema = z.object({
+  decision: z.string().min(1),
+  premises_supported: z.array(z.boolean()),
+  meaning_unchanged: z.boolean().nullish(),
+  better_option: z.string().nullish(),
+  reason: z.string().nullish(),
+});
+export const judgedDecisionsAnswerSchema = z.array(judgedDecisionAnswerSchema);
+
 /** Everything the prompt renders. */
 export interface MilestoneReviewPromptInput {
   readonly plan: { readonly slug: string; readonly title: string; readonly content: string };
@@ -49,6 +79,8 @@ export interface MilestoneReviewPromptInput {
   readonly tasks: readonly MilestoneTaskInput[];
   readonly citedRules: readonly CitedRuleStateRow[];
   readonly decisions: readonly MilestoneDecisionRef[];
+  /** The plan's recorded decisions to judge (spec D6); absent or empty = none to judge. */
+  readonly recordedDecisions?: readonly JudgedDecisionInput[];
   /** The plan's landed diff, or `undefined` when none could be derived. */
   readonly diffText?: string;
   /** Human-readable account of how the diff was obtained (or why it is absent). */
@@ -90,6 +122,27 @@ function renderEvidence(lines: readonly MilestoneEvidenceLine[]): string {
         (e.ac_ref !== undefined ? ` (ac ${e.ac_ref})` : ""),
     )
     .join("\n");
+}
+
+function renderRecordedDecision(d: JudgedDecisionInput): string {
+  const premises = d.premises.map((p, i) => `  premise ${String(i + 1)} [tier ${p.tier}]: ${p.claim}\n    source: ${p.evidence}`).join("\n");
+  const alternatives = d.alternatives.map((a) => `  - ${a.option} (rejected: ${a.why_rejected})`).join("\n");
+  const rule =
+    d.rule === undefined
+      ? ""
+      : `\n  rule ${d.rule.id} reworded.\n    old statement: ${d.rule.before}\n    new statement: ${d.rule.after}`;
+  return `## ${d.address}\n  reason: ${d.reason}\n${premises.length > 0 ? premises : "  (no premises)"}\n  alternatives passed over:\n${alternatives.length > 0 ? alternatives : "  (none)"}${rule}`;
+}
+
+function renderRecordedDecisions(input: MilestoneReviewPromptInput): string {
+  const listed = input.recordedDecisions ?? [];
+  if (listed.length === 0) return "None.";
+  return [
+    "Judge each decision below. For each: is every premise supported by the source quoted for it (not merely related to it)?",
+    "For a rule rewording: is the meaning unchanged? Is there an alternative, or an option not listed, that was clearly better?",
+    "",
+    listed.map(renderRecordedDecision).join("\n\n"),
+  ].join("\n");
 }
 
 function renderDiff(input: MilestoneReviewPromptInput): string {
@@ -142,7 +195,12 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "# Output",
     'Reply with ONE JSON object and nothing else: {"dimensions": {' +
       MILESTONE_DIMENSIONS.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}`).join(", ") +
-      "}}",
+      "}" +
+      ((input.recordedDecisions ?? []).length > 0
+        ? ', "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
+          '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]'
+        : "") +
+      "}",
     "",
     `# Plan ${input.plan.slug}: ${input.plan.title}`,
     input.plan.content,
@@ -160,6 +218,9 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
     "# Milestone decisions awaiting this review",
     decisions,
+    "",
+    "# Recorded decisions (judge each; answer in `decisions`)",
+    renderRecordedDecisions(input),
     "",
     "# Landed diff",
     renderDiff(input),
