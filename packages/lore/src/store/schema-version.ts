@@ -35,5 +35,5 @@
  * originally sited alongside).
  */
 
-/** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`; 040 = released pre-#356 claims without a tip marked unrecoverable; 039 = landing kind and claim start_head back-filled, then required). */
-export const LATEST_SCHEMA_VERSION = 40;
+/** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`; 041 = versions.decision (a decision-carrying write's DecisionRecord as JSON, NULL when none); 040 = released pre-#356 claims without a tip marked unrecoverable; 039 = landing kind and claim start_head back-filled, then required). */
+export const LATEST_SCHEMA_VERSION = 41;

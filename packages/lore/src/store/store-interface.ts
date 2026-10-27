@@ -25,7 +25,7 @@ import type {
   Slug,
   VersionRecord,
 } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import type { DecisionRecord, LoreError, Result } from "@lore/core";
 import type { AuditChainEntry } from "./store-shared.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 
@@ -456,6 +456,8 @@ export interface RuleLeafPatch {
   status?: DocStatus;
   /** `change_summary` of the `action: "update"` version row; absent = none. */
   change_summary?: string;
+  /** The DecisionRecord stored on that version row (migration-041); absent = none. */
+  decision?: DecisionRecord;
 }
 
 /**
@@ -475,6 +477,8 @@ export interface ProposedRuleWrite {
   status?: DocStatus;
   /** `change_summary` of the spec's version row. */
   changeSummary?: string;
+  /** The DecisionRecord stored on the spec's version row (migration-041); absent = none. */
+  decision?: DecisionRecord;
 }
 
 /**
@@ -496,6 +500,8 @@ export interface ProposedRuleRepointWrite {
   status?: DocStatus;
   /** `change_summary` of the spec's version row. */
   changeSummary?: string;
+  /** The DecisionRecord stored on the spec's version row (migration-041); absent = none. */
+  decision?: DecisionRecord;
 }
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -894,6 +900,7 @@ export interface StoreInterface {
    *   each family numbers from 1 independently (migration-015). Defaults to `BR`, the original family.
    * @param harnessRun - Harness run stamped on the leaf's version row (migration-016); absent/null = unattested.
    *   Supplied only by `withWriteContext`.
+   * @param decision - The DecisionRecord stored on the leaf's version row (migration-041); absent/null = none.
    * @returns `{ ruleId, doc }` (the updated leaf) or a loud error; never a duplicate id.
    */
   allocateRuleAndUpdateLeaf(
@@ -903,6 +910,7 @@ export interface StoreInterface {
     actor: string,
     prefix?: RuleIdPrefix,
     harnessRun?: string | null,
+    decision?: DecisionRecord | null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
 
   /**

@@ -54,7 +54,7 @@ import {
   KNOWLEDGE_SUB_TYPES,
   knowledgeSubTypeSchema,
 } from "@lore/core";
-import type { KnowledgeSubType, RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, KnowledgeSubType, RuleIdPrefix } from "@lore/core";
 import type {
   CreateDocInput,
   DocPatch,
@@ -836,6 +836,11 @@ export interface DocWriteRequest {
   readonly action: VersionAction;
   /** `VersionRecord.change_summary`. */
   readonly changeSummary?: string;
+  /**
+   * The decision this write records on the version row it creates (migration-041, `versions.decision`). Stored as given:
+   * the refusal of a decision-carrying write that lacks one belongs to the service entries (a later task), not this route.
+   */
+  readonly decision?: DecisionRecord;
   /** `AuditEntry.action`. */
   readonly auditAction: string;
   /** Operation-specific audit `details`; the route adds `version` / `new_version`. */
@@ -1516,6 +1521,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       ...(request.changeSummary !== undefined ? { change_summary: request.changeSummary } : {}),
       // reason: SPEC-072 D4 — a write never changes the slug, so the snapshot carries the doc's current one.
       slug: doc.slug,
+      ...(request.decision !== undefined ? { decision: request.decision } : {}),
     };
     const written = await this.store.updateWithProvenance(
       doc.id,
