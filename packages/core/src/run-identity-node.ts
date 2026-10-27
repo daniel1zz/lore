@@ -202,7 +202,10 @@ export async function verifyRunAncestry(input: {
     }
     const startTime = await table.startTimeOf(visited.pid);
     if (startTime === null) {
-      return refuseAncestry("process-table-unreadable", `process table unreadable: the start time of harness process ${harnessPid} could not be read`);
+      // reason: the table returns null ONLY for "no such process" (an unreadable table throws, caught below). The pid was
+      // seen as an ancestor moments ago, so it exited during the walk. The spec's cause list (AC-RV-3) has no
+      // "harness-exited"; the closest is harness-not-ancestor: the registered harness no longer is anyone's ancestor.
+      return refuseAncestry("harness-not-ancestor", `run ${run}'s harness process ${harnessPid} has exited; restart or resume the session so it re-registers`);
     }
     if (startTime !== registeredStart) {
       return refuseAncestry(

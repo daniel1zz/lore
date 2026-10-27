@@ -36,6 +36,34 @@ const { existsSync, readFileSync, statSync } = createRequire(import.meta.url)("n
 /** The per-call environment value that carries a lore call's run (same spelling as core's `HARNESS_RUN_ENV`; spelled out for the cycle reason above). */
 export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
 
+/** Start time of `pid` as `ps -o lstart=` reads it (ISO-8601, second precision), or `null` when there is no such process / it does not parse. */
+function startTimeOfPid(pid: number): string | null {
+  const run = realSpawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+  const parsed = run.status === 0 && (run.stdout ?? "").trim() !== "" ? new Date((run.stdout ?? "").trim()) : null;
+  return parsed === null || Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/** True when `pid` still is the process that started at `registeredStart` (a reused pid, or a gone one, is not). */
+function isSameLiveProcess(pid: number, registeredStart: string | null): boolean {
+  const start = startTimeOfPid(pid);
+  return start !== null && (registeredStart === null || start === registeredStart);
+}
+
+/**
+ * The session id of the OUTER Claude Code session this test process was started from, captured at load. It is never a
+ * test's own writer: a test run's identity must not derive from the session that happens to be running the suite.
+ */
+const OUTER_SESSION_ID = (process.env["CLAUDE_CODE_SESSION_ID"] ?? process.env["CLAUDE_SESSION_ID"] ?? "").trim();
+
+/**
+ * The session id `env` names for a TEST writer (how fixtures name one: `sessionEnvFor`), or `null` when it names none.
+ * The outer session's own id (inherited through `process.env`) counts as none.
+ */
+export function testSessionOf(env: Readonly<Record<string, string | undefined>>): string | null {
+  const session = (env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"] ?? "").trim();
+  return session === "" || session === OUTER_SESSION_ID ? null : session;
+}
+
 // reason: the REAL `child_process` through `createRequire`, like `fs` above (the aliased module is this file's importer).
 const { spawnSync: realSpawnSync } = createRequire(import.meta.url)("node:child_process") as typeof import("node:child_process");
 
@@ -83,8 +111,8 @@ type EnvBag = Readonly<Record<string, string | undefined>>;
 export function testRunIdFor(_args: readonly string[], env: EnvBag): string {
   const carried = env[HARNESS_RUN_ENV];
   if (carried !== undefined && carried.trim() !== "") return carried;
-  const session = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
-  return session !== undefined && session.trim() !== "" ? `cc:${session}` : DEFAULT_TEST_RUN;
+  const session = testSessionOf(env);
+  return session !== null ? `cc:${session}` : DEFAULT_TEST_RUN;
 }
 
 /** Nearest ancestor of `cwd` (itself included) holding `.lore/lore.db`, or `null`. */
@@ -172,12 +200,25 @@ export function registerRunInDb(dbPath: string, runId: string): boolean {
       JSON.stringify({ schemaVersion: 1, fragments: [] }),
       new Date().toISOString(),
     );
-    // reason: the run's harness process is THIS test process (newest registration wins, like `recordRunProcess`): a spawned
-    // `lore` descends from it and verifies by ancestry. A corpus older than migration 021 has no columns; the registry
-    // row alone is then all there is.
+    // reason: the run's harness process is THIS test process: a spawned `lore` descends from it and verifies by ancestry.
+    // But a registration NEVER moves a run whose recorded harness is still a live process other than this one: a
+    // short-lived subprocess (a `bun -e` seed script calling `liveInvocation()`) that re-registered the shared run
+    // with its own pid would leave every later spawn of the long-lived worker pointing at a dead pid (the worker's
+    // memo skips re-registering). Only an unset, own, dead or pid-reused harness is replaced.
+    // A corpus older than migration 021 has no columns; the registry row alone is then all there is.
     const startTime = startTimeOfThisProcess();
     if (startTime !== null && db.query("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'harness_pid'").get() !== null) {
-      db.query("UPDATE runs SET harness_pid = ?, harness_pid_start = ? WHERE id = ?").run(process.pid, startTime, runId);
+      const current = db.query("SELECT harness_pid, harness_pid_start FROM runs WHERE id = ?").get(runId) as
+        | { harness_pid: number | null; harness_pid_start: string | null }
+        | null;
+      const heldByOtherLiveProcess =
+        current !== null &&
+        current.harness_pid !== null &&
+        current.harness_pid !== process.pid &&
+        isSameLiveProcess(current.harness_pid, current.harness_pid_start);
+      if (!heldByOtherLiveProcess) {
+        db.query("UPDATE runs SET harness_pid = ?, harness_pid_start = ? WHERE id = ?").run(process.pid, startTime, runId);
+      }
     }
     REGISTERED.add(memoKey);
     return true;

@@ -16,7 +16,12 @@
  *   - selfPid: where the walk starts (production passes process.pid)
  *   - `cause` is a stable machine name; `error` is the human text with the wording the spec's table names.
  */
-import { describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createRealProcessTablePort, ProcessTableUnreadableError } from "../../../src/adapters/process-table-port.js";
 
 type Verdict = { ok: true } | { ok: false; cause: string; error: string };
 
@@ -154,5 +159,79 @@ describe("AC-RV-3: verifyRunAncestry over a fake process table", () => {
     expect((await verify({ run: "cc:S", record: legacy, table: chain(), selfPid: 500 })).ok).toBe(false);
     const reRegistered = row({ process: { pid: 300, startTime: T0, worktree: null } });
     expect(await verify({ run: "cc:S", record: reRegistered, table: chain(), selfPid: 500 })).toEqual({ ok: true });
+  });
+});
+
+describe("verifyRunAncestry: a harness that exited during the walk (no such process) vs an unreadable table", () => {
+  // reason: the spec's cause list has no "harness-exited"; the closest existing cause, harness-not-ancestor, carries it.
+  it("REFUSED as exited (not as an unreadable table) when the harness pid was an ancestor but its start time is gone", async () => {
+    const verify = await loadVerify();
+    const table: FakeTable = { parentOf: chain().parentOf, startTimeOf: async () => null };
+    const verdict = await verify({ run: "cc:S", record: row(), table, selfPid: 500 });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.cause).toBe("harness-not-ancestor");
+      expect(verdict.error).toContain("has exited");
+      expect(verdict.error).not.toContain("process table unreadable");
+    }
+  });
+
+  it("a ps that cannot run (startTimeOf throws) stays process-table-unreadable", async () => {
+    const verify = await loadVerify();
+    const table: FakeTable = {
+      parentOf: chain().parentOf,
+      startTimeOf: async () => {
+        throw new Error("process table unreadable: ps could not run (spawn failed)");
+      },
+    };
+    const verdict = await verify({ run: "cc:S", record: row(), table, selfPid: 500 });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.cause).toBe("process-table-unreadable");
+  });
+});
+
+describe("real process-table port: ps comes from fixed system locations, never PATH", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "ps-port-"));
+    dirs.push(dir);
+    return dir;
+  };
+
+  it("ignores a fake `ps` on PATH that prints a forged parent", async () => {
+    const dir = scratch();
+    writeFileSync(join(dir, "ps"), "#!/bin/sh\necho '99999 Mon Jan  1 00:00:00 2001'\n");
+    chmodSync(join(dir, "ps"), 0o755);
+    const port = createRealProcessTablePort({ env: { PATH: dir }, cwd: dir });
+    expect(await port.parentOf(process.pid)).toBe(process.ppid);
+  });
+
+  it("a stub-only PATH still reads the table", async () => {
+    const dir = scratch();
+    const port = createRealProcessTablePort({ env: { PATH: dir }, cwd: dir });
+    expect(await port.startTimeOf(process.pid)).not.toBeNull();
+  });
+
+  it("fails loud with the unreadable cause when no fixed ps exists (never falls back to PATH)", async () => {
+    const dir = scratch();
+    writeFileSync(join(dir, "ps"), "#!/bin/sh\necho '1 Mon Jan  1 00:00:00 2001'\n");
+    chmodSync(join(dir, "ps"), 0o755);
+    const port = createRealProcessTablePort({ env: { PATH: dir }, cwd: dir, psPaths: [join(dir, "absent", "ps")] });
+    await expect(port.parentOf(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    await expect(port.startTimeOf(process.pid)).rejects.toThrow(/process table unreadable/);
+    expect((await port.snapshot()).ok).toBe(false);
+  });
+
+  it("an exited pid is gone (null), distinct from the unreadable table", async () => {
+    const dir = scratch();
+    const child = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+    const pid = child.pid as number;
+    await new Promise((resolve) => child.on("exit", resolve));
+    const port = createRealProcessTablePort({ env: process.env, cwd: dir });
+    expect(await port.startTimeOf(pid)).toBeNull();
+    expect(await port.parentOf(pid)).toBeNull();
   });
 });

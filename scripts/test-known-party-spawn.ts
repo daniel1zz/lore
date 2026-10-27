@@ -19,7 +19,7 @@
  *
  * Side-effect class: IO (one `INSERT OR IGNORE` into the registry of the corpus under `cwd`).
  */
-import { DEFAULT_TEST_RUN, HARNESS_RUN_ENV, registerTestRun } from "../packages/lore/tests/helpers/test-run-identity";
+import { DEFAULT_TEST_RUN, HARNESS_RUN_ENV, registerTestRun, testSessionOf } from "../packages/lore/tests/helpers/test-run-identity";
 
 /** Env variable a test sets to `none` to start `lore` with no run injected. */
 export const KNOWN_PARTY_OPT_OUT_ENV = "LORE_TEST_IDENTITY";
@@ -90,8 +90,9 @@ export function rewriteLoreStart(argv: readonly string[], options: { cwd?: unkno
   // reason: a start that already carries a run value is the test's own business and is never touched.
   if (loreArgs.includes("--mcp-server") || (env[HARNESS_RUN_ENV] ?? "") !== "") return undefined;
 
-  const session = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
-  const run = session !== undefined && session.trim() !== "" ? `cc:${session}` : DEFAULT_TEST_RUN;
+  // reason: the outer Claude Code session's own id (inherited in process.env) never names a test writer.
+  const session = testSessionOf(env);
+  const run = session !== null ? `cc:${session}` : DEFAULT_TEST_RUN;
   const cwd = typeof options.cwd === "string" ? options.cwd : process.cwd();
   registerTestRun(cwd, run);
   // reason: the run travels as the per-call environment value, exactly as the Bash hook hands it to a real agent call
