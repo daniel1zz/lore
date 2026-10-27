@@ -1,6 +1,6 @@
 // @spawns packages/lore/src/index.ts
 /**
- * @spec_ref spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and AC-RV-8 (permission half), BR-1218, BR-840
+ * @spec_ref spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and BR-1218, BR-840
  *
  * `lore setup` writes exactly one allow rule for the per-call export line into settings.json, lists it in the
  * setup manifest, and `lore setup --uninstall` removes exactly that rule and keeps every user rule.
@@ -47,7 +47,7 @@ const settingsOf = (dir: string): Record<string, any> => JSON.parse(readFileSync
 const manifestOf = (dir: string): Record<string, any> =>
   JSON.parse(readFileSync(join(dir, ".lore-setup-manifest.json"), "utf8"));
 
-describe("lore setup export allow rule (AC-RV-8)", () => {
+describe("lore setup export allow rule", () => {
   it("HAPPY: fresh install adds exactly one allow rule and records it in the manifest", () => {
     const dir = scratch();
     expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(MCP_FAILS_EXIT);
