@@ -8,11 +8,10 @@
  * persistent store kind (a SQLite file, and a Turso store in `file:` mode):
  *   - HTTP: while `GET /api/audit/verify` runs, every concurrent `GET /api/auth/me` completes and the slowest
  *     one takes < 1000 ms (the old code held the loop for 2-7 s)
- *   - MCP: the same for a concurrent cheap `lore_get` while `lore_audit {verify: true}` runs
  * One attempt, no retries. The bound separates "verify holds the loop" (seconds) from "it does not" (tens to a
  * few hundred ms of scheduling noise on a loaded machine); the measured p95 is printed for information only.
- * and, on a small real corpus, that the HTTP and MCP verdicts carry the SAME anchor status the CLI reports
- * once `.lore/audit-anchor.json` exists (the HTTP route and MCP tool used to never pass the anchor).
+ * and, on a small real corpus, that the HTTP verdict carries the SAME anchor status the CLI reports
+ * once `.lore/audit-anchor.json` exists (the HTTP route used to never pass the anchor).
  *
  * Latency is measured from each request's INTENDED start on a fixed grid (constant-rate sampling, no
  * coordinated omission): a blocked loop shows up as every grid slot inside the stall being late, not as
@@ -27,10 +26,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { NoOpTelemetry } from "@lore/core";
-import { liveAmbient, liveInvocation, liveIo, actedStore } from "../../live-invocation.js";
+import { liveAmbient, liveIo, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -43,7 +40,6 @@ import { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { SessionStore } from "../../../src/adapters/http/sessions.js";
 import { startHttpServer } from "../../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../../src/adapters/http/machine-auth.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { createApp, type App } from "../../../src/app.js";
 import { seedAuditVerifyCorpus, REPO_SHAPE } from "../support/audit-verify-fixture.js";
 
@@ -111,10 +107,6 @@ function expectNotBlocked(m: Measurement<unknown>): void {
   expect(m.samples.length).toBeGreaterThanOrEqual(5);
   expect(Math.max(...m.samples)).toBeLessThan(STALL_CEILING_MS);
 }
-
-type McpInternal = {
-  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
-};
 
 interface Rig {
   readonly app: App;
@@ -203,28 +195,6 @@ describe.each(["sqlite", "turso"] as const)("audit verify does not block the ser
     expect(m.result.body.data?.chain.checked).toBeGreaterThanOrEqual(58_000);
     expectNotBlocked(m);
   }, 300_000);
-
-  it("MCP: every concurrent lore_get completes in < 1000 ms while lore_audit {verify: true} runs", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, rig.app, undefined, liveInvocation());
-    const tools = (server as unknown as McpInternal)._registeredTools;
-    const call = async (name: string, args: Record<string, unknown>): Promise<CallToolResult> => {
-      const tool = tools[name];
-      if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-      return tool.handler(args, {});
-    };
-    const get = (): Promise<CallToolResult> => call("lore_get", { id_or_slug: "fixture-doc-1" });
-    const warm = await get();
-    expect(warm.isError).not.toBe(true);
-    for (let i = 0; i < 20; i++) await get();
-
-    const m = await measureDuring(`[${kind}] MCP`, get, () => call("lore_audit", { verify: true }));
-    expect(m.result.isError).not.toBe(true);
-    const first = m.result.content[0];
-    if (first === undefined || first.type !== "text") throw new Error("expected text content");
-    expect((JSON.parse(first.text) as { clean: boolean }).clean).toBe(true);
-    expectNotBlocked(m);
-  }, 300_000);
 });
 
 // ─── The real worker: the verdict it returns, and its failure ───────────────
@@ -286,7 +256,7 @@ describe("the worker runner (real Worker)", () => {
   }, 60_000);
 });
 
-// ─── Anchor parity: HTTP and MCP report what the CLI reports ────────────────
+// ─── Anchor parity: HTTP reports what the CLI reports ───────────────────────
 
 function runLore(args: string[], cwd: string): { stdout: string; stderr: string; exitCode: number } {
   const proc = spawnSync("bun", ["run", INDEX_TS, ...args], {
@@ -297,7 +267,7 @@ function runLore(args: string[], cwd: string): { stdout: string; stderr: string;
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.status ?? 1 };
 }
 
-describe("anchor parity: HTTP and MCP verdicts carry the anchor status the CLI reports", () => {
+describe("anchor parity: the HTTP verdict carries the anchor status the CLI reports", () => {
   let dir: string;
   let app: App;
   let server: ReturnType<typeof Bun.serve>;
@@ -339,45 +309,31 @@ describe("anchor parity: HTTP and MCP verdicts carry the anchor status the CLI r
     return ((await res.json()) as { data: { anchor: { status: string } } }).data.anchor;
   }
 
-  async function mcpAnchor(): Promise<{ status: string }> {
-    const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app, undefined, liveInvocation());
-    const tool = (server as unknown as McpInternal)._registeredTools["lore_audit"];
-    if (tool === undefined) throw new Error("lore_audit not registered");
-    const r = await tool.handler({ verify: true }, {});
-    const first = r.content[0];
-    if (first === undefined || first.type !== "text") throw new Error("expected text content");
-    return (JSON.parse(first.text) as { anchor: { status: string } }).anchor;
-  }
-
   function cliAnchor(): { status: string } {
     const out = runLore(["audit", "--verify", "--json"], dir);
     return (JSON.parse(out.stdout) as { data: { anchor: { status: string } } }).data.anchor;
   }
 
-  it("no anchor file: all three surfaces say absent", async () => {
+  it("no anchor file: both surfaces say absent", async () => {
     expect(cliAnchor().status).toBe("absent");
     expect((await httpAnchor()).status).toBe("absent");
-    expect((await mcpAnchor()).status).toBe("absent");
   }, 120_000);
 
-  it("anchor file present: HTTP and MCP report the CLI's status, and it is not absent", async () => {
+  it("anchor file present: HTTP reports the CLI's status, and it is not absent", async () => {
     const anchored = runLore(["audit", "anchor"], dir);
     expect(anchored.exitCode).toBe(0);
     const cli = cliAnchor();
     expect(cli.status).toBe("clean");
     expect(await httpAnchor()).toEqual(cli);
-    expect(await mcpAnchor()).toEqual(cli);
   }, 120_000);
 
-  it("a rewritten anchored row: all three surfaces report anchor_mismatch", async () => {
+  it("a rewritten anchored row: both surfaces report anchor_mismatch", async () => {
     const db = new Database(join(dir, ".lore", "lore.db"));
     db.exec(`UPDATE audit SET entry_hash = '${"0".repeat(64)}' WHERE id = (SELECT MAX(id) FROM audit)`);
     db.close();
     const cli = cliAnchor();
     expect(cli.status).toBe("anchor_mismatch");
     expect((await httpAnchor()).status).toBe("anchor_mismatch");
-    expect((await mcpAnchor()).status).toBe("anchor_mismatch");
   }, 120_000);
 
   it("a malformed anchor file fails loud on HTTP instead of reading as absent", async () => {

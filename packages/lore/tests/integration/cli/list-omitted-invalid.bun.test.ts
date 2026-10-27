@@ -1,37 +1,21 @@
 // @spawns packages/lore/src/index.ts
 /**
- * AC-CRIT-6 — `lore list` / MCP `lore_list` report how many invalidated docs the
+ * AC-CRIT-6 — `lore list` reports how many invalidated docs the
  * default validity filter hid (`omitted_invalid`), instead of hiding them silently.
  *
  * CLI runs in SOURCE mode against a THROWAWAY corpus (`mkdtemp` + `lore init`) — never
- * the repo's own `.lore/`. MCP runs the real `registerTools` against an InMemoryStore.
+ * the repo's own `.lore/`.
  *
  *   HAPPY:      default list -> total 1, omitted_invalid 1, text footer "1 invalidated hidden"
  *   BOUNDARY:   --include-invalid -> total 2, omitted_invalid 0, no footer note
  *   NEGATIVE:   a type with nothing invalidated -> omitted_invalid 0, no footer note
  *   REGRESSION: BR-745 — the invalidated doc stays excluded from the default rows
- *   MCP:        lore_list result carries omitted_invalid
  */
-import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { NoOpTelemetry, ok } from "@lore/core";
-import type { CreateDocInput } from "@lore/core";
-import { InMemoryStore } from "../../../src/store/in-memory-store.js";
-import { CorpusService } from "../../../src/service/corpus-service.js";
-import { RecordLockService } from "../../../src/service/record-lock-service.js";
-import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { ValidityService } from "../../../src/service/validity-service.js";
-import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
-import type { App } from "../../../src/app.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
-
-import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 
@@ -122,63 +106,5 @@ describe("AC-CRIT-6: lore list reports omitted_invalid (CLI)", () => {
     expect(out.data.omitted_invalid).toBe(0);
     const r = runLore(["list", "--type", "prd"], tmpDir);
     expect(r.stdout).not.toContain("invalidated hidden");
-  });
-});
-
-describe("AC-CRIT-6: MCP lore_list carries omitted_invalid", () => {
-  it("AC-CRIT-6 lore_list reports omitted_invalid=1 by default and 0 with include_invalid", async () => {
-    const store = actedStore(new InMemoryStore());
-    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const validityService = new ValidityService(store);
-    const app = {
-      corpusService,
-      validityService,
-      taskWorkflowService: new TaskWorkflowService(
-        store,
-        new NoOpTelemetry(),
-        { claimTtlMinutes: 120 },
-        async () => ok(new Set()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
-      ),
-      callerSurface: "mcp" as const,
-      telemetry: new NoOpTelemetry(),
-      close: () => undefined,
-    } as unknown as App;
-    const mk = async (title: string) => {
-      const r = await corpusService.create({
-        type: "knowledge",
-        title,
-        content: `# ${title}\n\nBody.`,
-        extra: { sub_type: "reference" },
-      } as CreateDocInput);
-      if (!r.ok) throw new Error(JSON.stringify(r.error));
-      return r.value;
-    };
-    await mk("Live");
-    const dead = await mk("Dead");
-    const inv = await validityService.invalidate(dead.slug, { reason: "r" } as never);
-    if (!inv.ok) throw new Error(JSON.stringify(inv.error));
-
-    const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app, undefined, liveInvocation());
-    const tool = (
-      server as unknown as {
-        _registeredTools: Record<
-          string,
-          { handler: (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult> }
-        >;
-      }
-    )._registeredTools["lore_list"];
-    const call = async (args: Record<string, unknown>) => {
-      const res = await tool!.handler(args, {});
-      const c = res.content[0];
-      if (!c || c.type !== "text") throw new Error("expected text");
-      return JSON.parse(c.text) as { total: number; omitted_invalid: number };
-    };
-    const def = await call({ type: "knowledge" });
-    expect(def.total).toBe(1);
-    expect(def.omitted_invalid).toBe(1);
-    const all = await call({ type: "knowledge", include_invalid: true });
-    expect(all.total).toBe(2);
-    expect(all.omitted_invalid).toBe(0);
   });
 });

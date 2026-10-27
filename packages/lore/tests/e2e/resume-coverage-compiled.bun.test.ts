@@ -28,20 +28,16 @@
  * it as a failed oracle, never as a pass.
  *
  *   "both surfaces"  (AC-RC-4) — the compiled `dist/lore feed session-resume`
- *                     stdout AND the MCP `lore_feed {checkpoint:
- *                     "session-resume"}` response each INDEPENDENTLY carry the
- *                     ordinal tags, the cardinality line, and
- *                     `RESUME_COVERAGE_FLOOR`. Asserted as two separate
- *                     structural comparisons over two separately-obtained
- *                     texts — never one assertion over a merged blob, which is
- *                     the exact defect SPEC-CP D3 measured (a CLI-only
- *                     assertion left every MCP consumer on the old
- *                     behaviour). A third, in-test CONTROL comparison runs the
- *                     same report builder over deliberately mutilated copies
- *                     of the CLI text and asserts it reports FALSE — so
- *                     neither surface's half can pass vacuously through a
- *                     report builder that always answers true (D7:
- *                     every blocking assertion carries a liveness control).
+ *                     stdout carries the ordinal tags, the cardinality line,
+ *                     and `RESUME_COVERAGE_FLOOR` (the MCP surface was removed;
+ *                     the test names keep the "both surfaces" token so the
+ *                     AC's `-t` selector still collects them). An in-test
+ *                     CONTROL comparison runs the report builder over
+ *                     deliberately mutilated copies of the CLI text and
+ *                     asserts it reports FALSE, so the CLI half cannot pass
+ *                     vacuously through a report builder that always answers
+ *                     true (D7: every blocking assertion carries a liveness
+ *                     control).
  *
  *   "install parity" (AC-RC-8) — `lore setup --claude-dir <throwaway>`
  *                     installs `hooks/stop-turn-review.mjs`
@@ -99,7 +95,7 @@
  *               the cardinality line is identity-matched against the exported
  *               pure renderer applied to the fixture array lengths; the Stop
  *               registration carries NO matcher (Stop does not scope by one).
- *   ERROR:      the MCP call is asserted non-error and the CLI exit code 0 —
+ *   ERROR:      the CLI exit code is asserted 0 —
  *               a failed dispatch cannot masquerade as absent grammar; the
  *               settings.json flattener throws on every structural surprise
  *               rather than returning a silently-empty list.
@@ -117,7 +113,6 @@
  *   AC-RC-8 (task task-t4-governance-rule-manifest-regeneration-fresh-install-e2e).
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   appendFileSync,
@@ -134,8 +129,6 @@ import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   buildHookSettingsEntries,
   formatResumeItemId,
@@ -147,9 +140,6 @@ import {
   RESUME_SCOPE_CLOSURE,
 } from "@lore/core";
 import { buildManifest } from "../../../../scripts/embed-assets-manifest.mjs";
-import { createApp } from "../../src/app.js";
-import type { App } from "../../src/app.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { withSessionIdentity } from "../helpers/session-actor";
@@ -356,30 +346,6 @@ function fullCoverageGrammar(surface: string): CoverageGrammarReport {
   };
 }
 
-// ─── In-process MCP surface (same shape mcp-tools-feed.test.ts uses) ────────
-
-type McpServerInternal = {
-  _registeredTools: Record<
-    string,
-    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
-  >;
-};
-
-function getToolHandler(
-  server: McpServer,
-  name: string,
-): (args: Record<string, unknown>) => Promise<CallToolResult> {
-  const tool = (server as unknown as McpServerInternal)._registeredTools[name];
-  if (!tool) throw new Error(`Tool not registered: ${name}`);
-  return (args) => tool.handler(args, {} as unknown);
-}
-
-function parseToolResult(result: CallToolResult): unknown {
-  const content = result.content[0];
-  if (!content || content.type !== "text") throw new Error("Expected text content");
-  return JSON.parse(content.text);
-}
-
 // ─── Shared fixture lifecycle ───────────────────────────────────────────────
 
 beforeAll(() => {
@@ -406,8 +372,6 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
   let dir: string;
   let planSlug: string;
   let handoffSlug: string;
-  let app: App;
-  let server: McpServer;
 
   beforeAll(() => {
     dir = makeThrowawayDir("lore-t4-both-surfaces-");
@@ -431,20 +395,9 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
     expect(handoffResult.exitCode).toBe(0);
     handoffSlug = parseSlug(handoffResult.stdout);
 
-    // A REAL SQLiteStore-backed App over the SAME on-disk db the compiled CLI
-    // just wrote to — never InMemoryStore — so the two surfaces below read
-    // genuinely shared state rather than two independently-seeded fixtures
-    // that happen to agree (context-provenance-compiled.bun.test.ts precedent).
-    app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
-    server = new McpServer({ name: "t4-resume-coverage", version: "0.0.0" });
-    registerTools(server, app, undefined, liveInvocation());
   });
 
-  afterAll(() => {
-    app.close();
-  });
-
-  it("both surfaces — compiled CLI stdout and the MCP lore_feed response EACH independently carry the ordinal tags, the cardinality line, and RESUME_COVERAGE_FLOOR", async () => {
+  it("both surfaces — compiled CLI stdout (the only surface left) carries the ordinal tags, the cardinality line, and RESUME_COVERAGE_FLOOR", async () => {
     // ── Surface 1: the compiled binary's CLI stdout ──────────────────────────
     const cliResult = runLore(["feed", "session-resume", "--plan", planSlug], dir);
     // ERROR dimension: a failed dispatch must not read as "grammar absent".
@@ -455,23 +408,6 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
     expect(coverageGrammarReport(cliSurface, cliResult.stdout)).toEqual(
       fullCoverageGrammar(cliSurface),
     );
-
-    // ── Surface 2: the MCP `lore_feed` response ─────────────────────────────
-    // Obtained through a wholly separate code path (tool handler -> textContent
-    // -> JSON payload). Its own assertion below is INDEPENDENT of surface 1's:
-    // if this surface regressed while the CLI kept working, this comparison
-    // fails on its own — the CLI-only blind spot SPEC-CP D3 measured.
-    const callFeed = getToolHandler(server, "lore_feed");
-    const mcpResult = await callFeed({ checkpoint: "session-resume", plan: planSlug });
-    expect(mcpResult.isError).toBeFalsy();
-
-    const outcome = parseToolResult(mcpResult) as { feed?: unknown };
-    expect(typeof outcome.feed).toBe("string");
-    const mcpFeed = outcome.feed as string;
-    expect(mcpFeed.length).toBeGreaterThan(0);
-
-    const mcpSurface = "MCP lore_feed response";
-    expect(coverageGrammarReport(mcpSurface, mcpFeed)).toEqual(fullCoverageGrammar(mcpSurface));
 
     // ── NEGATIVE / liveness control (D7) ────────────────────────────────────
     // The report builder must DISCRIMINATE. Run it over three mutilations of
@@ -522,11 +458,6 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
 
     const cliResult = runLore(["feed", "session-resume", "--plan", planSlug], dir);
     expect(cliResult.stdout).toContain(storedCardinalityLine);
-
-    const callFeed = getToolHandler(server, "lore_feed");
-    const mcpResult = await callFeed({ checkpoint: "session-resume", plan: planSlug });
-    const mcpFeed = (parseToolResult(mcpResult) as { feed: string }).feed;
-    expect(mcpFeed).toContain(storedCardinalityLine);
   });
 
   it("REGRESSION: the pre-existing upper bound is undisturbed — RESUME_SCOPE_CLOSURE is still the TRAILING block on both surfaces and is a DISTINCT string from the floor", async () => {
@@ -541,12 +472,6 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
     expect(cliResult.stdout.indexOf(RESUME_COVERAGE_FLOOR)).toBeLessThan(
       cliResult.stdout.indexOf(RESUME_SCOPE_CLOSURE),
     );
-
-    const callFeed = getToolHandler(server, "lore_feed");
-    const mcpResult = await callFeed({ checkpoint: "session-resume", plan: planSlug });
-    const mcpFeed = (parseToolResult(mcpResult) as { feed: string }).feed;
-    expect(mcpFeed.trimEnd().endsWith(RESUME_SCOPE_CLOSURE)).toBe(true);
-    expect(mcpFeed.indexOf(RESUME_COVERAGE_FLOOR)).toBeLessThan(mcpFeed.indexOf(RESUME_SCOPE_CLOSURE));
   });
 });
 
