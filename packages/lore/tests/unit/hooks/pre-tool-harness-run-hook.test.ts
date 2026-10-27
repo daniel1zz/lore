@@ -5,7 +5,7 @@
  * RED (TDD role) for `assets/hooks/pre-tool-harness-run.mjs` — spec
  * spec-run-identity-slice-1-harness-attested-runs-attested, D10 (the hook owns NO grammar:
  * it only checks whether a Bash command contains the word `lore`
- * (no MCP branch since AC-RMCP-6), then pipes the payload to `lore run attest-input` and relays its hook JSON
+ * (no MCP branch since spec-remove-the-lore-mcp-server#AC-RMCP-6), then pipes the payload to `lore run attest-input` and relays its hook JSON
  * verbatim), D7 (fail-open), BR-1030. The hook does not exist yet, so every test here fails
  * on the missing script.
  *
@@ -219,7 +219,7 @@ describe("pre-tool-harness-run.mjs — lore call: blind pipe + verbatim relay (D
     expect(stub.calls()).toHaveLength(1);
   });
 
-  it("AC-RMCP-6: an mcp__lore__lore_get input passes through unchanged (not spawned); a Bash lore input is still rewritten", () => {
+  it("spec-remove-the-lore-mcp-server#AC-RMCP-6: an mcp__lore__lore_get input passes through unchanged (not spawned); a Bash lore input is still rewritten", () => {
     const stub = makeStub({ stdout: REWRITTEN_A });
     const mcpPayload = JSON.stringify({
       hook_event_name: "PreToolUse",

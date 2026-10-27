@@ -73,7 +73,7 @@ describe("lore run attest-input", () => {
     expect(out.hookSpecificOutput.updatedInput["command"]).toBe("echo x && lore --harness-run cc:S1:A9 get y");
   }, 120_000);
 
-  it("NEGATIVE (AC-RMCP-6): an mcp__lore__ tool input is left alone — prints nothing and exits 0", () => {
+  it("NEGATIVE (spec-remove-the-lore-mcp-server#AC-RMCP-6): an mcp__lore__ tool input is left alone — prints nothing and exits 0", () => {
     const r = runLore(
       ["run", "attest-input"],
       payload({ tool_name: "mcp__lore__lore_claim", tool_input: { task: "t" } }),
