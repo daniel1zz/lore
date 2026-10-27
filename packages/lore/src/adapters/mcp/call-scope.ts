@@ -28,6 +28,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { HARNESS_RUN_ENV, err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
 import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity } from "@lore/core/node";
 import type { App } from "../../app.js";
+import { createRealProcessTablePort } from "../process-table-port.js";
 
 /** What the running call exposes to its handler. */
 export interface CallContext {
@@ -47,6 +48,11 @@ export interface CallAttestation {
 
 function errorResult(error: LoreError): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(error) }], isError: true };
+}
+
+/** The refusal of a call whose run could not be verified; carries the BR-1351 cause text. */
+function refuseCall(error: LoreError): CallToolResult {
+  return errorResult(error);
 }
 
 /**
@@ -143,6 +149,22 @@ export class McpCallScope {
     });
   }
 
+  /** Verify `identity`'s run against the registry and the process ancestry of THIS server process; a call with no run passes (its writes are refused later, BR-1351). */
+  private async verifyAncestry(open: NonNullable<App["forWriteContext"]>, identity: InvocationIdentity): Promise<Result<undefined, LoreError>> {
+    if (identity.harnessRun === null) return ok(undefined);
+    const probeApp = open({
+      identity,
+      ancestry: { table: createRealProcessTablePort({ env: this.server.env, cwd: process.cwd() }), selfPid: process.pid },
+    });
+    if (!probeApp.ok) return err(probeApp.error);
+    try {
+      const verified = await probeApp.value.verifiedInvocationIdentity?.();
+      return verified !== undefined && !verified.ok ? err(verified.error) : ok(undefined);
+    } finally {
+      probeApp.value.close();
+    }
+  }
+
   /**
    * Run `body` as ONE attested call: build the identity, open the call-scoped App, verify the run once, run, close.
    * @returns the body's result, or an error result when the identity/App could not be established.
@@ -159,6 +181,11 @@ export class McpCallScope {
     let app = this.base;
     let scoped: App | undefined;
     if (this.base.forWriteContext !== undefined) {
+      // reason: the tool server verifies the call's run by process ancestry exactly like the CLI entry (D19, AC-RV-6):
+      // the server process (or one of its ancestors) must be the run's registered harness process. The stamping App
+      // below carries no probe, so this check is the one place the ancestry is enforced.
+      const verified = await this.verifyAncestry(this.base.forWriteContext, identity);
+      if (!verified.ok) return refuseCall(verified.error);
       const opened = this.base.forWriteContext({ identity });
       if (!opened.ok) return errorResult(opened.error);
       scoped = opened.value;
