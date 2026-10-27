@@ -84,12 +84,13 @@ export const invocationResolvers: InvocationResolvers = {
 };
 
 /**
- * Read the running process ONCE into an {@link Invocation}: argv (minus the harness-owned `--harness-run`),
- * cwd, env, home, claude/user-config dirs, project root, temp dir, host, exec path, run identity, stdio.
+ * Read the running process ONCE into an {@link Invocation}: argv as typed, cwd, env, home,
+ * claude/user-config dirs, project root, temp dir, host, exec path, run identity (the per-call
+ * `LORE_HARNESS_RUN` exported by the hook before each Bash call, verified by process ancestry), stdio.
  * Called by the program entries only (`src/index.ts`, each `scripts/*.ts`).
  *
  * @param rawArgv - `process.argv.slice(2)` as typed
- * @throws {RunIdentityArgumentError} on an empty or valueless `--by` / `--harness-run`
+ * @throws {RunIdentityArgumentError} on an empty or valueless `--by`, or on the retired run-identity command-line flag (exit 2)
  */
 export async function resolveEntryInvocation(rawArgv: readonly string[]): Promise<Invocation> {
   const { resolveInvocation } = await import("@lore/core/node");

@@ -21,7 +21,7 @@
  *
  * ## Invariant: this file holds no grammar (spec D10)
  *
- * The flag spelling, the run id, and the shape of the rewritten input all belong
+ * The per-call `LORE_HARNESS_RUN` export, the run id, and the shape of the updated input all belong
  * to the verb. This hook neither builds nor inspects its output, and it never
  * adds a permission decision of its own (spec D12): a relayed answer is exactly
  * what the verb printed.
@@ -29,7 +29,7 @@
  * ## Invariant: fail-open (spec D7)
  *
  * Every fault — bad stdin, lore absent, non-zero child — exits 0 with nothing
- * on stdout, so the tool call proceeds un-rewritten; a lore write in it carries no
+ * on stdout, so the tool call proceeds without the run export; a lore write in it carries no
  * run and is then refused (no known party).
  * A failed child's stdout is never relayed, since it may be partial.
  *

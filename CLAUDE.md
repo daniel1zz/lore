@@ -60,7 +60,7 @@ Folders with their own memory file — read it before working there:
 - [`packages/lore/src/service`](packages/lore/src/service/CLAUDE.md) — Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`.
 - [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape.
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
-<!-- lore:managed section=command-table hash=884be12a -->
+<!-- lore:managed section=command-table hash=92aff227 -->
 Documented commands (package.json `lore.documentedScripts`):
 - `dev`: `bun run packages/lore/src/index.ts` — Run the lore CLI from source; arguments after the script name go to lore.
 - `build`: `bun run scripts/build.ts` — Compile the standalone binary to dist/lore.
@@ -69,7 +69,7 @@ Documented commands (package.json `lore.documentedScripts`):
 - `test`: `bun scripts/oracle-lock.ts bun scripts/run-chain.ts` — Take the checkout's oracle lock, then run each check script and test:vitest in a fixed order; every step runs and a per-step exit table prints.
 - `test:changed`: `bun scripts/changed-tests.ts` — Select and run the tests a change can affect, printing a reason per file; --list previews, an optional ref sets the diff base.
 - `test:file`: `bun scripts/test-file.ts` — Run the named test files, each on the runner that collects it (Bun, or Node for files in vitest.node-files.ts); -t <name> and other flags pass through.
-- `check:floor`: `bun scripts/run-chain.ts --floor` — Install, build and typecheck (the integrate floor); --list prints the step names.
+- `check:floor`: `bun scripts/run-chain.ts --floor` — Install, build, typecheck and the two diff-scoped :changed checks (the integrate floor); --list prints the step names.
 - `check:plan-close`: `bun scripts/run-chain.ts --plan-close` — Run every check: script the integrate floor does not (the plan-close chain); --list prints the names.
 - `check:memory-files`: `bun run packages/lore/src/index.ts context refresh --check` — Run `lore context refresh --check`: exit 1 when CLAUDE.md or a lore rules file differs from a fresh refresh, or the root file is over its ceiling.
 <!-- lore:managed section=governance-pointer hash=760d2396 -->

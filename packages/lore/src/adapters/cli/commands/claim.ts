@@ -118,7 +118,7 @@ export default defineLoreCommand({
       const claimOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6 — the claimant's run is passed EXPLICITLY (services that decide on
-        // identity never read ambient state); `--harness-run` was stripped and resolved once at the CLI entry.
+        // identity never read ambient state); the per-call `LORE_HARNESS_RUN` was verified (process ancestry) and resolved once at the CLI entry.
         harnessRun: verifiedRun,
         ...(typeof args.branch === "string" ? { branch: args.branch } : {}),
         machine,
