@@ -5,11 +5,12 @@
  *
  * Purpose: a test that drives the CLI in a throwaway corpus needs its writes to be made by someone. This helper does
  * what the Claude Code hooks do in production: it names an AGENT RUN (`cc:<session>`), REGISTERS that run in the
- * corpus's registry, and hands back the `--harness-run <id>` flag. The writer's name is then derived from the run
- * exactly as production derives it (`agent:session-<8>`), so `sessionActorFor(label)` still predicts the name.
+ * corpus's registry with THIS test process as the run's harness process, and hands back the per-call `LORE_HARNESS_RUN`
+ * value. The writer's name is then derived from the run exactly as production derives it (`agent:session-<8>`), so
+ * `sessionActorFor(label)` still predicts the name.
  *
- * Public surface: {@link DEFAULT_TEST_RUN}, {@link hasHarnessRunFlag}, {@link testRunIdFor}, {@link registerTestRun},
- * {@link withTestRun}, {@link scrubIdentityEnv}.
+ * Public surface: {@link DEFAULT_TEST_RUN}, {@link HARNESS_RUN_ENV}, {@link testRunIdFor}, {@link registerTestRun},
+ * {@link withTestRunEnv}, {@link scrubIdentityEnv}.
  *
  * Invariants:
  *   - Registration writes ONLY the `runs` registry of the corpus at the project root found from `cwd`
@@ -31,10 +32,7 @@ const { existsSync, readFileSync, statSync } = createRequire(import.meta.url)("n
 
 // reason: spelled out here, NOT imported from `@lore/core`: this module is loaded by the test run's own child_process
 // wrapper (scripts/test-read-log.ts -> scripts/test-known-party-spawn.ts), and `@lore/core` itself imports
-// `child_process` through that wrapper, so importing it here would be a load cycle. `core/tests/run-identity-node.test.ts`
-// pins this value to core's `HARNESS_RUN_FLAG`.
-export const HARNESS_RUN_FLAG = "--harness-run";
-
+// `child_process` through that wrapper, so importing it here would be a load cycle.
 /** The per-call environment value that carries a lore call's run (same spelling as core's `HARNESS_RUN_ENV`; spelled out for the cycle reason above). */
 export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
 
@@ -76,21 +74,15 @@ const IDENTITY_ENV_VARS = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSI
 
 type EnvBag = Readonly<Record<string, string | undefined>>;
 
-/** Whether `args` already carry a harness run (flag form `--harness-run <id>` or `--harness-run=<id>`). */
-export function hasHarnessRunFlag(args: readonly string[]): boolean {
-  return args.some((token) => token === HARNESS_RUN_FLAG || token.startsWith(`${HARNESS_RUN_FLAG}=`));
-}
-
 /**
- * The run a test's command runs as: its own `--harness-run`, else the run of the session its env names
- * (`CLAUDE_CODE_SESSION_ID`, how fixtures name a writer: `sessionEnvFor`), else {@link DEFAULT_TEST_RUN}.
+ * The run a test's command runs as: the per-call value its env already carries, else the run of the session its env
+ * names (`CLAUDE_CODE_SESSION_ID`, how fixtures name a writer: `sessionEnvFor`), else {@link DEFAULT_TEST_RUN}.
+ *
+ * @param _args - the command's argv; kept so every caller keeps one call shape (the argv no longer names a run)
  */
-export function testRunIdFor(args: readonly string[], env: EnvBag): string {
-  for (let i = 0; i < args.length; i++) {
-    const token = args[i] as string;
-    if (token === HARNESS_RUN_FLAG) return args[i + 1] ?? DEFAULT_TEST_RUN;
-    if (token.startsWith(`${HARNESS_RUN_FLAG}=`)) return token.slice(HARNESS_RUN_FLAG.length + 1);
-  }
+export function testRunIdFor(_args: readonly string[], env: EnvBag): string {
+  const carried = env[HARNESS_RUN_ENV];
+  if (carried !== undefined && carried.trim() !== "") return carried;
   const session = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
   return session !== undefined && session.trim() !== "" ? `cc:${session}` : DEFAULT_TEST_RUN;
 }

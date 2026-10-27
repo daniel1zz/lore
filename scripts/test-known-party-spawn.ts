@@ -3,9 +3,9 @@
  *
  * Purpose: a write made by `lore` needs a known party and an unregistered run is refused. The tests that start `lore`
  * (`bun run packages/lore/src/index.ts`, `dist/lore`) to drive a throwaway corpus are not an agent session with hooks, so
- * the installed hooks' job is done here, once, for every such start: the start gets `--harness-run cc:<session>` (the
- * session id its env names, else {@link DEFAULT_TEST_RUN}) and that run is registered in the corpus under its `cwd`, exactly
- * as the SessionStart hook registers a real run. The writer's name then derives from the run (`agent:session-<8>`), so a
+ * the installed hooks' job is done here, once, for every such start: the start gets `LORE_HARNESS_RUN=cc:<session>` in
+ * its env (the session id its env names, else {@link DEFAULT_TEST_RUN}) and that run is registered in the corpus under its
+ * `cwd` with the test process as its harness process, exactly as the SessionStart hook registers a real run. The writer's name then derives from the run (`agent:session-<8>`), so a
  * test that named its writer through `CLAUDE_CODE_SESSION_ID` still sees the same name.
  *
  * Public surface: {@link rewriteLoreStart}, {@link KNOWN_PARTY_OPT_OUT_ENV}.
@@ -13,20 +13,20 @@
  * Invariants:
  *   - Opt-out: a start whose env carries `LORE_TEST_IDENTITY=none` is left exactly as written (the variable is removed from
  *     the child's env). A test of the REFUSAL, of a human session, or of the unregistered-run rule uses it.
- *   - A start that already names `--harness-run`, starts the MCP server, or is not a `lore` start is never touched.
+ *   - A start whose env already carries a run value, starts the MCP server, or is not a `lore` start is never touched.
  *   - Only under the Bun runtime (registration needs `bun:sqlite`); the few files vitest runs under Node are untouched.
  *   - Registration writes only the `runs` registry of the corpus found from `cwd`, and nothing when there is no corpus yet.
  *
  * Side-effect class: IO (one `INSERT OR IGNORE` into the registry of the corpus under `cwd`).
  */
-import { DEFAULT_TEST_RUN, HARNESS_RUN_ENV, hasHarnessRunFlag, registerTestRun } from "../packages/lore/tests/helpers/test-run-identity";
+import { DEFAULT_TEST_RUN, HARNESS_RUN_ENV, registerTestRun } from "../packages/lore/tests/helpers/test-run-identity";
 
 /** Env variable a test sets to `none` to start `lore` with no run injected. */
 export const KNOWN_PARTY_OPT_OUT_ENV = "LORE_TEST_IDENTITY";
 
 /**
  * The `lore` entry as a spawn names it: the source entry of any checkout, the compiled binary, or an operator script that
- * resolves its identity through `resolveEntryInvocation` exactly as `lore` does (and so accepts `--harness-run`).
+ * resolves its identity through `resolveEntryInvocation` exactly as `lore` does (and so reads the per-call run value).
  */
 const LORE_ENTRY = /(?:packages\/lore\/src\/index\.ts|\/dist\/lore|\/scripts\/seed-write-spec-rule\.ts)$/;
 
@@ -87,9 +87,8 @@ export function rewriteLoreStart(argv: readonly string[], options: { cwd?: unkno
   }
 
   const loreArgs = argv.slice(entryIndex + 1);
-  // reason: a start that already carries a run value (or names the retired flag, which the binary then refuses) is the
-  // test's own business and is never touched.
-  if (hasHarnessRunFlag(loreArgs) || loreArgs.includes("--mcp-server") || (env[HARNESS_RUN_ENV] ?? "") !== "") return undefined;
+  // reason: a start that already carries a run value is the test's own business and is never touched.
+  if (loreArgs.includes("--mcp-server") || (env[HARNESS_RUN_ENV] ?? "") !== "") return undefined;
 
   const session = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
   const run = session !== undefined && session.trim() !== "" ? `cc:${session}` : DEFAULT_TEST_RUN;

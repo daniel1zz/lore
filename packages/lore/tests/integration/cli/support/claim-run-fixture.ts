@@ -71,7 +71,7 @@ function cleanEnv(dir: string, actor?: string): Record<string, string | undefine
 
 /**
  * Spawns the real CLI as a KNOWN PARTY (every write needs one, BR-1351). `run` is passed as the global
- * `--harness-run <id>` flag (D1), placed before the verb; a call naming no run runs as the agent run of the session
+ * `LORE_HARNESS_RUN` env value; a call naming no run runs as the agent run of the session
  * `actor` names (`cc:<session>`), else as {@link DEFAULT_TEST_RUN}. The run is registered in the corpus first
  * (what the installed hooks do), unless the corpus does not exist yet (`lore init`).
  */

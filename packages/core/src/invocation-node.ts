@@ -9,7 +9,7 @@
  *     holds copies, so a later `process.env` change is not seen through it. The computer user name is never read.
  *   - Policy lives in the injected {@link InvocationResolvers} (the lore package owns the BR-813 / BR-1012
  *     path rules and the human-session token file); core imports nothing from lore.
- *   - The run comes from `LORE_HARNESS_RUN` in the env; the retired `--harness-run` flag (and a malformed value)
+ *   - The run comes from `LORE_HARNESS_RUN` in the env; the retired run flag (and a malformed value)
  *     throws `RunIdentityArgumentError` for the entry to report (exit 2).
  *   - The returned Invocation asks the store layer to verify the run by process ancestry (`verifyAncestry`).
  * Side-effect class: IO (ambient process reads; the injected resolvers may probe the filesystem).
@@ -87,7 +87,7 @@ function homeFrom(env: EnvBag): string {
  * @param rawArgv - arguments after the program name, as typed
  * @param resolvers - injected path/identity policy, see {@link InvocationResolvers}
  * @returns the immutable {@link Invocation}
- * @throws {RunIdentityArgumentError} on the retired `--harness-run` flag or a `LORE_HARNESS_RUN` that is not an agent run
+ * @throws {RunIdentityArgumentError} on the retired run flag or a `LORE_HARNESS_RUN` that is not an agent run
  */
 export function resolveInvocation(rawArgv: readonly string[], resolvers: InvocationResolvers): Invocation {
   const cwd = process.cwd();

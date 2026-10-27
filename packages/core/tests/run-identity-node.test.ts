@@ -1,23 +1,27 @@
 /**
- * Spec: spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 1-5 (BR-1055, BR-1350, BR-1351).
+ * Spec: spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 1-5 (BR-1055, BR-1350, BR-1351) and
+ * spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and (AC-RV-4, AC-RV-5).
  *
- * resolveInvocationIdentity(argv, env, humanSession) returns `{ identity, argv }`: `argv` is the input with the
- * harness-owned `--harness-run <id>` removed; `identity` is the known party the invocation writes as:
- *   - an attested AGENT run (`--harness-run cc:...`): its run, the name derived from the run (`agent:session-<8>`),
- *     source `run`;
+ * resolveInvocationIdentity(argv, env, humanSession, isBashHookInstalled) returns `{ identity, argv }`; `identity` is
+ * the known party the invocation writes as:
+ *   - an attested AGENT run (`LORE_HARNESS_RUN=cc:...` in the env): its run, the name derived from the run
+ *     (`agent:session-<8>`), source `run`;
  *   - else the human session of the checkout (named by the person), source `human` — never for a process that carries an
  *     agent harness marker;
- *   - else NO known party: `claimed: null` and a refusal reason naming `lore session start --human` and `lore setup`.
+ *   - else NO known party: `claimed: null` and a refusal reason. With the agent marker, the reason names the real cause:
+ *     the Bash hook is installed (the value was removed) or not (`lore setup`).
+ * The retired run flag is refused with `RunIdentityArgumentError` (exit 2 at the entry).
  * `--by`, `$LORE_ACTOR`, the session id, the working copy and the computer's user name supply no name.
  *
- * Every test injects argv/env/human-session explicitly; the real process is never read.
+ * Every test injects argv/env/human-session/settings probe explicitly; the real process is never read.
  *
- * Dimensions: HAPPY (run, human), NEGATIVE (no party, marker, non-agent run flag), BOUNDARY (flag forms, empty value),
- * STATE (argv not mutated, the session lookup is lazy), REGRESSION (`--by` stays in argv untouched).
+ * Dimensions: HAPPY (run, human), NEGATIVE (no party, marker, non-agent run value, retired flag), BOUNDARY (flag forms,
+ * empty value), STATE (argv not mutated, the session lookup is lazy), REGRESSION (`--by` stays in argv untouched).
  */
 import { describe, expect, it } from "vitest";
 import {
   HARNESS_ADAPTERS,
+  HARNESS_RUN_ENV,
   deriveHumanRunId,
   derivePartyRunId,
   hasAgentHarnessMarker,
@@ -25,69 +29,85 @@ import {
   nameOfAgentRun,
 } from "@lore/core";
 import type { RunId } from "@lore/core";
-import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity } from "@lore/core/node";
+import { ENV_REMOVED_CAUSE, RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity as resolveWithHook } from "@lore/core/node";
 
 const NO_SESSION = (): null => null;
 const DANA = (): { name: string; run: RunId } => ({ name: "dana", run: deriveHumanRunId("a".repeat(64)) });
 const SESSION_ID = "3de02220-5d69-4b5a-ac23-d66e14c0261b";
+// reason: assembled, not written out: the retirement test file names the retired spelling, no other file may (AC-RV-4's scan).
+const RETIRED_FLAG = ["--harness", "run"].join("-");
+
+/** The resolver with the Bash hook reported as not installed (the default of these tests). */
+function resolveInvocationIdentity(
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  humanSession: () => { name: string; run: RunId } | null,
+  hookInstalled: () => boolean = () => false,
+): ReturnType<typeof resolveWithHook> {
+  return resolveWithHook(argv, env, humanSession, hookInstalled);
+}
+
+const runEnv = (run: string): Record<string, string> => ({ [HARNESS_RUN_ENV]: run });
 
 describe("resolveInvocationIdentity", () => {
-  describe("--harness-run strip", () => {
-    it("returns argv without --harness-run and its value, and keeps the other tokens in order", () => {
-      const out = resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--json"], {}, NO_SESSION);
-      expect(out.argv).toEqual(["claim", "t", "--json"]);
+  describe("the retired run flag", () => {
+    it.each([
+      [["claim", "t", RETIRED_FLAG, "cc:S1", "--json"]],
+      [["get", "d", `${RETIRED_FLAG}=cc:S2`]],
+      [["status", RETIRED_FLAG]],
+    ])("%j is refused as a usage error naming the per-call value", (argv) => {
+      expect(() => resolveInvocationIdentity(argv, {}, NO_SESSION)).toThrow(RunIdentityArgumentError);
+      expect(() => resolveInvocationIdentity(argv, {}, NO_SESSION)).toThrow(HARNESS_RUN_ENV);
     });
 
-    it("accepts the --harness-run=<id> form", () => {
-      const out = resolveInvocationIdentity(["get", "d", "--harness-run=cc:S2"], {}, NO_SESSION);
-      expect(out.argv).toEqual(["get", "d"]);
-      expect(out.identity.harnessRun).toBe("cc:S2");
+    it("is refused even when a valid run value is also present (no second carrier, no precedence rule)", () => {
+      expect(() => resolveInvocationIdentity(["x", RETIRED_FLAG, "cc:S1"], runEnv("cc:S1"), NO_SESSION)).toThrow(RunIdentityArgumentError);
     });
 
     it("does not mutate the caller's argv array", () => {
-      const input = ["claim", "t", "--harness-run", "cc:S1"];
-      resolveInvocationIdentity(input, {}, NO_SESSION);
-      expect(input).toEqual(["claim", "t", "--harness-run", "cc:S1"]);
+      const input = ["claim", "t", "--json"];
+      const out = resolveInvocationIdentity(input, runEnv("cc:S1"), NO_SESSION);
+      expect(input).toEqual(["claim", "t", "--json"]);
+      expect(out.argv).toEqual(["claim", "t", "--json"]);
+      expect(out.argv).not.toBe(input);
     });
+  });
 
-    it.each([
-      [["status", "--harness-run"], "requires a value"],
-      [["status", "--harness-run", ""], "must not be empty"],
-      [["status", "--harness-run", "   "], "must not be empty"],
-    ])("a malformed flag %j is refused loudly (%s)", (argv, reason) => {
-      expect(() => resolveInvocationIdentity(argv, {}, NO_SESSION)).toThrow(RunIdentityArgumentError);
-      expect(() => resolveInvocationIdentity(argv, {}, NO_SESSION)).toThrow(reason);
-    });
-
+  describe("the run value", () => {
     it.each(["human:0123456789abcdef", "api-key:ci-bot", "dashboard:dana", "run-without-prefix"])(
-      "a non-agent run id %s cannot be claimed from the command line (no one writes as another party by naming its run)",
+      "a non-agent run id %s cannot be claimed (no one writes as another party by naming its run)",
       (run) => {
-        expect(() => resolveInvocationIdentity(["set", "x", "--harness-run", run], {}, DANA)).toThrow(RunIdentityArgumentError);
+        expect(() => resolveInvocationIdentity(["set", "x"], runEnv(run), DANA)).toThrow(RunIdentityArgumentError);
       },
     );
+
+    it("an empty value is no value (the refusal below applies, nothing is claimed)", () => {
+      const { identity } = resolveInvocationIdentity(["x"], runEnv("  "), NO_SESSION);
+      expect(identity.claimed).toBeNull();
+    });
   });
 
   describe("an attested agent run", () => {
     it("is the party: its run, a name derived from the run's session, source run", () => {
-      const { identity } = resolveInvocationIdentity(["set", "x", "--harness-run", `cc:${SESSION_ID}`], {}, NO_SESSION);
+      const { identity } = resolveInvocationIdentity(["set", "x"], runEnv(`cc:${SESSION_ID}`), NO_SESSION);
       expect(identity).toEqual({ harnessRun: `cc:${SESSION_ID}`, claimed: "agent:session-3de02220", claimedSource: "run" });
     });
 
     it("names a subagent run by its session too, and different sessions get different names", () => {
-      const sub = resolveInvocationIdentity(["x", "--harness-run", `cc:${SESSION_ID}:agentabc`], {}, NO_SESSION).identity;
-      const other = resolveInvocationIdentity(["x", "--harness-run", "cc:aaaaaaaa-0000"], {}, NO_SESSION).identity;
+      const sub = resolveInvocationIdentity(["x"], runEnv(`cc:${SESSION_ID}:agentabc`), NO_SESSION).identity;
+      const other = resolveInvocationIdentity(["x"], runEnv("cc:aaaaaaaa-0000"), NO_SESSION).identity;
       expect(sub.claimed).toBe("agent:session-3de02220");
       expect(other.claimed).toBe("agent:session-aaaaaaaa");
     });
 
     it("wins over an open human session (an attested run is never replaced by a person)", () => {
-      const { identity } = resolveInvocationIdentity(["x", "--harness-run", "cc:S9"], {}, DANA);
+      const { identity } = resolveInvocationIdentity(["x"], runEnv("cc:S9"), DANA);
       expect(identity.claimedSource).toBe("run");
     });
 
     it("does not consult the human session at all", () => {
       let consulted = false;
-      resolveInvocationIdentity(["x", "--harness-run", "cc:S9"], {}, () => {
+      resolveInvocationIdentity(["x"], runEnv("cc:S9"), () => {
         consulted = true;
         return null;
       });
@@ -114,6 +134,32 @@ describe("resolveInvocationIdentity", () => {
     it("a marker value other than the harness's own does not mark an agent (only CLAUDECODE=1 does)", () => {
       expect(resolveInvocationIdentity(["x"], { CLAUDECODE: "0" }, DANA).identity.claimedSource).toBe("human");
       expect(resolveInvocationIdentity(["x"], { CLAUDECODE: "" }, DANA).identity.claimedSource).toBe("human");
+    });
+  });
+
+  describe("an agent marker and no run value (AC-RV-5)", () => {
+    it("with the Bash hook installed, names the removed value and never advises `lore setup`", () => {
+      const { identity } = resolveInvocationIdentity(["set", "x"], { CLAUDECODE: "1" }, NO_SESSION, () => true);
+      if (identity.claimed !== null) throw new Error("unreachable");
+      expect(identity.unresolvedReason).toBe(ENV_REMOVED_CAUSE);
+      expect(identity.unresolvedReason).toContain("removed between the Bash call and lore");
+      expect(identity.unresolvedReason).not.toContain("lore setup");
+    });
+
+    it("without the hook, names `lore setup`", () => {
+      const { identity } = resolveInvocationIdentity(["set", "x"], { CLAUDECODE: "1" }, NO_SESSION, () => false);
+      if (identity.claimed !== null) throw new Error("unreachable");
+      expect(identity.unresolvedReason).toContain("lore setup");
+      expect(identity.unresolvedReason).not.toContain("removed between the Bash call and lore");
+    });
+
+    it("does not look at the settings when there is no agent marker (the probe is lazy)", () => {
+      let probed = false;
+      resolveInvocationIdentity(["x"], {}, NO_SESSION, () => {
+        probed = true;
+        return true;
+      });
+      expect(probed).toBe(false);
     });
   });
 

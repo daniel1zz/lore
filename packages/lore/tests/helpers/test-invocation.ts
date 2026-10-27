@@ -25,7 +25,7 @@ import { withTestRunEnv } from "./test-run-identity";
 
 /** What a test names to build an Invocation. */
 export interface TestInvocationInput {
-  /** Arguments after the program name, as typed (a `--harness-run` is resolved into the identity). */
+  /** Arguments after the program name, as typed (the run comes from `env`'s `LORE_HARNESS_RUN`, never from argv). */
   readonly argv: readonly string[];
   /** Working directory of the run. */
   readonly cwd: string;
@@ -44,7 +44,7 @@ export interface TestInvocationInput {
 }
 
 /**
- * @throws {RunIdentityArgumentError} on an empty, valueless or non-agent `--harness-run`
+ * @throws {RunIdentityArgumentError} on the retired run flag or a `LORE_HARNESS_RUN` that is not an agent run
  */
 export function buildTestInvocation(input: TestInvocationInput): Invocation {
   const { env, home } = input;
