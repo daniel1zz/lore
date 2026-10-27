@@ -34,52 +34,7 @@ import { join } from "node:path";
 import { createClient, type Client } from "@libsql/client";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { DocRecord, LinkRecord, VersionRecord, AuditEntry } from "@lore/core";
-import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
-import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.js";
-import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.js";
-import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
-import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
-import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
-import { MIGRATION_007_SQL } from "../../../src/store/migrations/migration-007.js";
-import {
-  MIGRATION_008_ADD_COLUMNS_SQL,
-  MIGRATION_008_FTS_REBUILD_SQL,
-} from "../../../src/store/migrations/migration-008.js";
-import {
-  MIGRATION_009_ADD_COLUMNS_SQL,
-  MIGRATION_009_FINALIZE_SQL,
-} from "../../../src/store/migrations/migration-009.js";
-import { MIGRATION_010_SQL } from "../../../src/store/migrations/migration-010.js";
-import { MIGRATION_011_SQL } from "../../../src/store/migrations/migration-011.js";
-import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
-import { MIGRATION_013_SQL } from "../../../src/store/migrations/migration-013.js";
-import { MIGRATION_014_SQL } from "../../../src/store/migrations/migration-014.js";
-import { MIGRATION_015_SQL } from "../../../src/store/migrations/migration-015.js";
-import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "../../../src/store/migrations/migration-016.js";
-import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "../../../src/store/migrations/migration-017.js";
-import { MIGRATION_018_SQL } from "../../../src/store/migrations/migration-018.js";
-import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "../../../src/store/migrations/migration-019.js";
-import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.js";
-import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "../../../src/store/migrations/migration-021.js";
-import { MIGRATION_022_SQL } from "../../../src/store/migrations/migration-022.js";
-import { MIGRATION_023_SQL } from "../../../src/store/migrations/migration-023.js";
-import { MIGRATION_024_SQL } from "../../../src/store/migrations/migration-024.js";
-import { MIGRATION_025_SQL } from "../../../src/store/migrations/migration-025.js";
-import { MIGRATION_026_SQL } from "../../../src/store/migrations/migration-026.js";
-import { MIGRATION_027_SQL } from "../../../src/store/migrations/migration-027.js";
-import { MIGRATION_028_SQL } from "../../../src/store/migrations/migration-028.js";
-import { MIGRATION_029_SQL } from "../../../src/store/migrations/migration-029.js";
-import { MIGRATION_030_ADD_COLUMNS, MIGRATION_030_SQL } from "../../../src/store/migrations/migration-030.js";
-import { MIGRATION_031_SQL } from "../../../src/store/migrations/migration-031.js";
-import { MIGRATION_032_SQL } from "../../../src/store/migrations/migration-032.js";
-import { MIGRATION_033_SQL } from "../../../src/store/migrations/migration-033.js";
-import { MIGRATION_034_SQL } from "../../../src/store/migrations/migration-034.js";
-import { MIGRATION_035_SQL } from "../../../src/store/migrations/migration-035.js";
-import { MIGRATION_036_SQL } from "../../../src/store/migrations/migration-036.js";
-import { MIGRATION_037_SQL } from "../../../src/store/migrations/migration-037.js";
-import { MIGRATION_038_SQL } from "../../../src/store/migrations/migration-038.js";
-import { MIGRATION_039_SQL } from "../../../src/store/migrations/migration-039.js";
-import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
+import { TursoStore } from "../../../src/store/turso-store.js";
 import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -115,225 +70,27 @@ function makeDoc(overrides: Partial<DocRecord> = {}): DocRecord {
 }
 
 // ─── Apply Schema to a libsql Client ────────────────────────────────────────
-// MOCK RISK: we hand-apply the FULL migration chain (same order
-// SQLiteStore.runMigrations() applies internally) to the remote fixture DB.
-// This mirrors the real TursoStore setup but bypasses its constructor logic.
-// Every new migration.ts added to src/store/migrations/ MUST get a matching
-// step here: a pure-SQL migration (like 001-007) needs one
-// `await client.executeMultiple(MIGRATION_00N_SQL)` line; a migration with a
-// JS-level transform phase (like 008's CJK bigram backfill) needs its full
-// SQL + JS-loop sequence mirrored from turso-store.ts's initSchema() (the
-// real production TursoStore handling for that migration), not just a single
-// executeMultiple call. The parity guard below turns a forgotten/incomplete
-// step into a loud fixture-setup failure instead of a wall of confusing
-// per-row INSERT/column-mismatch errors.
+// The remote fixture is built by the store's OWN migration chain: a TursoStore
+// opened over the libsql client runs initSchema() (the production Turso entry),
+// so a new migration needs no edit here. The parity guard below still compares
+// the result with the local SQLiteStore so a chain divergence fails loudly at
+// fixture setup rather than via per-row INSERT errors.
 
 async function applyMigrationsToClient(client: Client, localStore: SQLiteStore): Promise<void> {
-  await client.executeMultiple(MIGRATION_001_SQL);
-  await client.executeMultiple(MIGRATION_002_SQL);
-  await client.executeMultiple(MIGRATION_003_SQL);
-  await client.executeMultiple(MIGRATION_004_SQL);
-  await client.executeMultiple(MIGRATION_005_SQL);
-  await client.executeMultiple(MIGRATION_006_SQL);
-  await client.executeMultiple(MIGRATION_007_SQL);
-
-  // migration-008 is a THREE-PHASE sequence (ADD COLUMN -> JS per-row CJK
-  // bigram backfill -> docs_fts drop/recreate + rebuild), NOT a single
-  // self-contained SQL string like migrations 001-007 — see
-  // migration-008.ts's module JSDoc. This mirrors turso-store.ts's
-  // initSchema() handling verbatim (same client.transaction("write")
-  // interactive-transaction API, same tx.executeMultiple/tx.execute calls),
-  // since this fixture stands in for the real TursoStore setup.
-  const tx008 = await client.transaction("write");
-  try {
-    await tx008.executeMultiple(MIGRATION_008_ADD_COLUMNS_SQL);
-
-    const rs008 = await tx008.execute("SELECT id, title, content, tags FROM docs");
-    for (const row of rs008.rows) {
-      const shadow = computeFtsShadowValues(
-        String(row["title"]),
-        String(row["content"]),
-        String(row["tags"]),
-      );
-      await tx008.execute({
-        sql: "UPDATE docs SET fts_title = ?, fts_content = ?, fts_tags = ? WHERE id = ?",
-        args: [shadow.fts_title, shadow.fts_content, shadow.fts_tags, String(row["id"])],
-      });
-    }
-
-    await tx008.executeMultiple(MIGRATION_008_FTS_REBUILD_SQL);
-    await tx008.commit();
-  } catch (e) {
-    try {
-      await tx008.rollback();
-    } catch {
-      // reason: rollback throws only when the transaction is already
-      // closed — safe to ignore, `e` below is what the caller needs
-      // (mirrors turso-store.ts's identical rollback guard).
-    }
-    throw e;
-  } finally {
-    tx008.close();
+  // `migrate: true` lets initSchema() upgrade the empty remote file.
+  const remoteStore = new TursoStore(
+    { localPath: "sync-push-fixture-remote", migrate: true },
+    client,
+  );
+  // initSchema() runs eagerly in the constructor; any public call awaits it and
+  // surfaces a migration failure as a Result error. Never close remoteStore:
+  // that would close the shared client the tests keep using.
+  const ready = await remoteStore.getAuditHeadId();
+  if (!ready.ok) {
+    throw new Error(`sync-push fixture: remote migration chain failed: ${JSON.stringify(ready.error)}`);
   }
-
-  // migration-009 is likewise a THREE-PHASE sequence (ADD COLUMN -> JS
-  // per-row audit hash-chain backfill -> PRAGMA user_version bump) — see
-  // migration-009.ts's module JSDoc. This mirrors turso-store.ts's
-  // initSchema() `currentVersion < 9` block verbatim (same
-  // client.transaction("write") interactive-transaction API, same
-  // executeMultiple/execute calls, same id-ASC prevHash threading with a ""
-  // genesis for the first row / a no-op on an empty table).
-  const tx009 = await client.transaction("write");
-  try {
-    await tx009.executeMultiple(MIGRATION_009_ADD_COLUMNS_SQL);
-
-    const rs009 = await tx009.execute(
-      "SELECT id, timestamp, actor, session_id, action, doc_id, details FROM audit ORDER BY id ASC",
-    );
-    let prevHash = "";
-    for (const row of rs009.rows) {
-      const docId = row["doc_id"] === null ? null : String(row["doc_id"]);
-      const entry: AuditEntry = {
-        timestamp: String(row["timestamp"]),
-        actor: String(row["actor"]),
-        session_id: String(row["session_id"]),
-        action: String(row["action"]),
-        ...(docId !== null ? { doc_id: docId } : {}),
-        details: JSON.parse(String(row["details"] ?? "{}")) as Record<string, unknown>,
-      };
-      const entryHash = computeAuditEntryHash(entry, prevHash);
-      await tx009.execute({
-        sql: "UPDATE audit SET prev_hash = ?, entry_hash = ? WHERE id = ?",
-        args: [prevHash, entryHash, Number(row["id"])],
-      });
-      prevHash = entryHash;
-    }
-
-    await tx009.executeMultiple(MIGRATION_009_FINALIZE_SQL);
-    await tx009.commit();
-  } catch (e) {
-    try {
-      await tx009.rollback();
-    } catch {
-      // reason: rollback throws only when the transaction is already
-      // closed — safe to ignore, `e` below is what the caller needs
-      // (mirrors migration-008's identical rollback guard, tx008 above).
-    }
-    throw e;
-  } finally {
-    tx009.close();
-  }
-
-  // migration-010 (SPEC-084 docs.ordinal + partial unique index) is a
-  // SINGLE self-contained SQL string (mirrors migration-007's shape, no
-  // JS-level backfill loop needed) — a plain executeMultiple call, same as
-  // migrations 001-007 above.
-  await client.executeMultiple(MIGRATION_010_SQL);
-
-  // migration-011 (SPEC-102 trace_events + its four indexes) is pure
-  // additive CREATE TABLE/INDEX IF NOT EXISTS — mirrors migration-001..003's
-  // un-wrapped shape, a plain executeMultiple call. NOTE: trace_events is
-  // NEVER added to sync-push.ts's own REPLICATED_TABLES set (SPEC-102 D3) —
-  // this fixture mirrors SQLiteStore's full migration CHAIN for the
-  // user_version parity guard below, which is a separate concern from "which
-  // tables sync-push actually replicates."
-  await client.executeMultiple(MIGRATION_011_SQL);
-
-  // migration-012 (spec-issue-closure-loop-computed-resolution-agent-reachable,
-  // widen links.link_type CHECK to accept "resolves") is a `links`
-  // table-recreate, same shape as migration-004's "governs" widening — a
-  // plain executeMultiple call, same as migrations 001-007/010 above.
-  await client.executeMultiple(MIGRATION_012_SQL);
-
-  // migration-013 (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations
-  // §C2: widen docs.type CHECK to accept 'baseline' via a docs table-recreate,
-  // plus the rule_registry table) is a SINGLE self-contained SQL string with
-  // its own BEGIN/COMMIT and foreign_keys toggle — same shape as
-  // migration-006's docs rebuild, a plain executeMultiple call. rule_registry
-  // is NEVER in sync-push.ts's REPLICATED_TABLES; it is mirrored here only for
-  // the user_version parity guard below.
-  await client.executeMultiple(MIGRATION_013_SQL);
-
-  // migration-014 (spec-baseline-slice-2-completeness-census-per-branch-citation
-  // §C5: rule_registry lifecycle/version, ac_cites, rule_depends, ac_exemptions
-  // + the docs_idx_* triggers) is a SINGLE self-contained SQL string — a plain
-  // executeMultiple call. Its tables are NEVER in sync-push.ts's
-  // REPLICATED_TABLES (they are derived from docs, which are replicated); the
-  // docs_idx_* triggers DO fire on the remote when sync-push upserts docs, so
-  // the remote keeps the indexes in step like any other store. Mirrored here
-  // for the user_version parity guard below.
-  await client.executeMultiple(MIGRATION_014_SQL);
-  await client.executeMultiple(MIGRATION_015_SQL);
-
-  // migration-016 (spec-run-identity-slice-1: `runs` table + nullable `harness_run`
-  // columns on audit/versions) is TWO-PHASE like turso-store.ts's own chain: add each
-  // column only where `PRAGMA table_info` lacks it (no ADD COLUMN IF NOT EXISTS), then
-  // one BEGIN/COMMIT string creates `runs` and bumps user_version. Mirrored for the parity guard.
-  for (const { table, column, ddl } of MIGRATION_016_ADD_COLUMNS) {
-    const info = await client.execute(`PRAGMA table_info(${table})`);
-    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
-  }
-  await client.executeMultiple(MIGRATION_016_SQL);
-
-  // migration-017 (spec-run-only-write-identity-and-run-end-claim-release: nullable `runs.ended_at` /
-  // `runs.end_reason`) is two-phase like 016. Mirrored here for the parity guard.
-  for (const { table, column, ddl } of MIGRATION_017_ADD_COLUMNS) {
-    const info = await client.execute(`PRAGMA table_info(${table})`);
-    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
-  }
-  await client.executeMultiple(MIGRATION_017_SQL);
-  // migration-018 (rule_registry state 'proposed') is one BEGIN/COMMIT string rebuilt via rule_registry_new, like 015.
-  await client.executeMultiple(MIGRATION_018_SQL);
-  // migration-019 (nullable `review_judgments.truncated` / `.truncation`) is two-phase like 017.
-  for (const { table, column, ddl } of MIGRATION_019_ADD_COLUMNS) {
-    const info = await client.execute(`PRAGMA table_info(${table})`);
-    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
-  }
-  await client.executeMultiple(MIGRATION_019_SQL);
-  // migration-020 (decision_log + append-only triggers) is one BEGIN/COMMIT string; never replicated, mirrored for the parity guard.
-  await client.executeMultiple(MIGRATION_020_SQL);
-  // migration-021 (runs.harness_pid / harness_pid_start / worktree) is two-phase like 017/019; runs is not replicated, mirrored for the parity guard.
-  for (const { table, column, ddl } of MIGRATION_021_ADD_COLUMNS) {
-    const info = await client.execute(`PRAGMA table_info(${table})`);
-    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
-  }
-  await client.executeMultiple(MIGRATION_021_SQL);
-  // migration-022 (autonomy_thresholds) is one BEGIN/COMMIT string; local-only, mirrored for the parity guard.
-  await client.executeMultiple(MIGRATION_022_SQL);
-  // migration-023 (decision_log verdict CHECK widened to admit superseded) is one BEGIN/COMMIT string; mirrored for the parity guard.
-  await client.executeMultiple(MIGRATION_023_SQL);
-  await client.executeMultiple(MIGRATION_024_SQL);
-  await client.executeMultiple(MIGRATION_025_SQL);
-  await client.executeMultiple(MIGRATION_026_SQL);
-  await client.executeMultiple(MIGRATION_027_SQL);
-  // reason: 028 and 029 convert / promote baseline nodes row by row (turso-store.ts runs them in an interactive
-  // transaction); the remote fixture holds no baseline node, so only their user_version bumps apply here.
-  await client.executeMultiple(MIGRATION_028_SQL);
-  await client.executeMultiple(MIGRATION_029_SQL);
-  for (const { table, column, ddl } of MIGRATION_030_ADD_COLUMNS) {
-    const info = await client.execute(`PRAGMA table_info(${table})`);
-    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
-  }
-  await client.executeMultiple(MIGRATION_030_SQL);
-  await client.executeMultiple(MIGRATION_031_SQL);
-  await client.executeMultiple(MIGRATION_032_SQL);
-  await client.executeMultiple(MIGRATION_033_SQL);
-  await client.executeMultiple(MIGRATION_034_SQL);
-  await client.executeMultiple(MIGRATION_035_SQL);
-  await client.executeMultiple(MIGRATION_036_SQL);
-  await client.executeMultiple(MIGRATION_037_SQL);
-  // reason: migration 038 is a plan-data conversion plus a link-type rebuild; the fixture holds no known-defect link, so its SQL half is the whole step.
-  await client.executeMultiple(MIGRATION_038_SQL);
-  // reason: migration 039 back-fills landing kind and claim start_head on existing task rows; the fixture holds none, so its SQL half (the version pragma) is the whole step.
-  await client.executeMultiple(MIGRATION_039_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
-  // Assert the remote fixture's PRAGMA user_version matches the REAL
-  // SQLiteStore's — the two schemas are hand-kept in lockstep above. If they
-  // ever diverge (a migration added to SQLiteStore.runMigrations() but not
-  // mirrored in the executeMultiple() calls above), fail loudly HERE, at
-  // fixture setup, rather than via opaque per-row remote-INSERT failures
-  // scattered across every test in this file.
   const localVersionRow = localStore
     .getDatabase()
     .query("PRAGMA user_version")
@@ -346,8 +103,8 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
     throw new Error(
       "sync-push fixture drift: remote fixture migration chain diverged from " +
         `SQLiteStore — local PRAGMA user_version=${localVersionRow.user_version}, ` +
-        `remote PRAGMA user_version=${remoteVersion}. Add the missing ` +
-        "MIGRATION_00N here (applyMigrationsToClient in sync-push.bun.test.ts).",
+        `remote PRAGMA user_version=${remoteVersion}. Both stores must run the ` +
+        "same migration chain (SQLiteStore vs TursoStore initSchema).",
     );
   }
 }
