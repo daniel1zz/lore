@@ -5,17 +5,12 @@
  *   - types for runs, invocation identity and the claim decision;
  *   - the harness registry that derives a run id from harness ids (D2);
  *   - the single claim-conflict predicate used by task and phase claim paths (D6);
- *   - the command / MCP-input rewrite that carries the run (D10), with ONE
- *     implementation of the shell scan shared by insertion and stripping.
+ *   - the per-call carrier of the run: one export line in front of a Bash command (D14) and the
+ *     MCP-input rewrite (D10).
  *
  * @invariant No Node builtins, no I/O, no clock: every function is a pure
  *   function of its arguments (core barrel must stay browser-safe).
- * @invariant `--harness-run` is owned by the harness: any caller-written
- *   occurrence on a lore command is removed before the harness's own is inserted.
- *
- * Known limits of the shell scan (a missed command is stored unattested, never
- * mangled): `lore` behind a wrapper (`sudo lore`, `env lore`, a path), inside
- * backticks, or inside a quoted string passed to `bash -c` is not rewritten.
+ * @invariant A Bash command is never parsed or altered: the carrier only prepends one line.
  */
 import { z } from "zod";
 import { sessionActorFromId } from "./session-actor.js";
@@ -240,180 +235,28 @@ export function hasClaimConflict(holder: ClaimHolder, claimant: ClaimParty): Cla
 }
 
 // ---------------------------------------------------------------------------
-// Command / MCP input rewrite (D10)
+// Per-call run carrier (D14) and MCP input rewrite (D10)
 // ---------------------------------------------------------------------------
 
+/** The environment variable that carries the per-call run into every lore process of one Bash call. */
+export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
+
+/** Retired spelling of the carrier; only the refusal of it and the callers still being migrated name it. */
 export const HARNESS_RUN_FLAG = "--harness-run";
 
 const SAFE_RUN_PATTERN = /^[A-Za-z0-9:._-]+$/;
-const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const isSpace = (c: string): boolean => c === " " || c === "\t" || c === "\r";
-const isOperatorChar = (c: string): boolean => c === ";" || c === "&" || c === "|" || c === "(" || c === ")";
-
-interface Edit {
-  start: number;
-  end: number;
-  text: string;
-}
-
-/** End index of the shell word starting at `from` (quotes and backslash escapes included). */
-function wordEnd(cmd: string, from: number): number {
-  let i = from;
-  while (i < cmd.length) {
-    const c = cmd.charAt(i);
-    if (c === "\n" || isSpace(c) || isOperatorChar(c) || c === "<" || c === ">") break;
-    if (c === "\\") {
-      i += 2;
-    } else if (c === "'") {
-      const close = cmd.indexOf("'", i + 1);
-      i = close === -1 ? cmd.length : close + 1;
-    } else if (c === '"') {
-      i++;
-      while (i < cmd.length && cmd.charAt(i) !== '"') i += cmd.charAt(i) === "\\" ? 2 : 1;
-      i++;
-    } else {
-      i++;
-    }
-  }
-  return Math.min(i, cmd.length);
-}
-
-/** Heredoc delimiter text with its quoting removed. */
-function unquote(raw: string): string {
-  return raw.replace(/\\(.)|'([^']*)'|"([^"]*)"/g, (_m, esc, sq, dq) => esc ?? sq ?? dq);
-}
-
-/** Index just past the heredoc body that starts at `from` (first char of the first body line). */
-function skipHeredocBody(cmd: string, from: number, delimiter: string, stripTabs: boolean): number {
-  let i = from;
-  while (i < cmd.length) {
-    const nl = cmd.indexOf("\n", i);
-    const lineEnd = nl === -1 ? cmd.length : nl;
-    const line = stripTabs ? cmd.slice(i, lineEnd).replace(/^\t+/, "") : cmd.slice(i, lineEnd);
-    i = nl === -1 ? cmd.length : nl + 1;
-    if (line === delimiter) break;
-  }
-  return i;
-}
 
 /**
- * The one shell scan. Strips caller-written `--harness-run <v>` / `--harness-run=<v>`
- * from every lore command; when `run` is given, also inserts the flag right after
- * each command-position `lore` word. Never touches quoted text, comments or heredoc bodies.
+ * Put one export line in front of a Bash command: the whole result is the line, a newline, then `command` byte for
+ * byte. No shell scan: the command is never parsed, so no shell form can hide a lore call from the carrier.
+ *
+ * @throws {Error} when `run` is not shell-safe (`[A-Za-z0-9:._-]+`).
  */
-function transform(command: string, run: RunId | null): string {
-  const edits: Edit[] = [];
-  const pending: Array<{ delimiter: string; stripTabs: boolean }> = [];
-  let atCommand = true;
-  let inLore = false;
-  let i = 0;
-
-  while (i < command.length) {
-    const c = command.charAt(i);
-    if (c === "\n") {
-      i++;
-      for (const h of pending) i = skipHeredocBody(command, i, h.delimiter, h.stripTabs);
-      pending.length = 0;
-      atCommand = true;
-      inLore = false;
-      continue;
-    }
-    if (isSpace(c)) {
-      i++;
-      continue;
-    }
-    if (c === "#") {
-      const nl = command.indexOf("\n", i);
-      i = nl === -1 ? command.length : nl;
-      continue;
-    }
-    if (c === ")") {
-      atCommand = false;
-      inLore = false;
-      i++;
-      continue;
-    }
-    if (isOperatorChar(c)) {
-      atCommand = true;
-      inLore = false;
-      i++;
-      continue;
-    }
-    if (c === "<" || c === ">") {
-      if (command.startsWith("<<", i) && !command.startsWith("<<<", i)) {
-        i += 2;
-        const stripTabs = command.charAt(i) === "-";
-        if (stripTabs) i++;
-        while (i < command.length && isSpace(command.charAt(i))) i++;
-        const end = wordEnd(command, i);
-        pending.push({ delimiter: unquote(command.slice(i, end)), stripTabs });
-        i = end;
-      } else {
-        while (i < command.length && (command.charAt(i) === "<" || command.charAt(i) === ">")) i++;
-        if (command.charAt(i) === "&") i++;
-        while (i < command.length && isSpace(command.charAt(i))) i++;
-        i = wordEnd(command, i); // redirection target is not a command word
-      }
-      continue;
-    }
-
-    const start = i;
-    const end = wordEnd(command, i);
-    i = end > start ? end : start + 1;
-    const word = command.slice(start, end);
-    if (/^[0-9]+$/.test(word) && (command.charAt(end) === "<" || command.charAt(end) === ">")) continue; // fd prefix of a redirection
-
-    if (atCommand) {
-      if (ASSIGNMENT_WORD.test(word)) continue;
-      atCommand = false;
-      inLore = word === "lore";
-      if (inLore && run !== null) edits.push({ start: end, end, text: ` ${HARNESS_RUN_FLAG} ${run}` });
-      continue;
-    }
-    if (!inLore) continue;
-    if (word === HARNESS_RUN_FLAG) {
-      let removeStart = start;
-      while (removeStart > 0 && isSpace(command.charAt(removeStart - 1))) removeStart--;
-      let removeEnd = end;
-      let j = end;
-      while (j < command.length && isSpace(command.charAt(j))) j++;
-      if (j < command.length && command.charAt(j) !== "\n" && !isOperatorChar(command.charAt(j))) {
-        removeEnd = wordEnd(command, j);
-        i = removeEnd;
-      }
-      edits.push({ start: removeStart, end: removeEnd, text: "" });
-    } else if (word.startsWith(`${HARNESS_RUN_FLAG}=`)) {
-      let removeStart = start;
-      while (removeStart > 0 && isSpace(command.charAt(removeStart - 1))) removeStart--;
-      edits.push({ start: removeStart, end, text: "" });
-    }
-  }
-
-  // Insertions are zero-width and share a start with a following removal: apply insert first.
-  edits.sort((a, b) => a.start - b.start || (a.end - a.start) - (b.end - b.start));
-  let out = "";
-  let cursor = 0;
-  for (const e of edits) {
-    out += command.slice(cursor, e.start) + e.text;
-    cursor = e.end;
-  }
-  return out + command.slice(cursor);
-}
-
-/** Remove every caller-written `--harness-run` flag from lore commands in `command`. */
-export function stripHarnessRunFlag(command: string): string {
-  return transform(command, null);
-}
-
-/**
- * Put `--harness-run <run>` right after every command-position `lore` word,
- * replacing any caller-written one. Idempotent; never edits quoted text or heredoc bodies.
- */
-export function rewriteBashCommand(command: string, run: RunId): string {
+export function prefixRunExport(command: string, run: RunId): string {
   if (!SAFE_RUN_PATTERN.test(run)) {
     throw new Error(`Run id ${JSON.stringify(run)} is not shell-safe; expected [A-Za-z0-9:._-]+`);
   }
-  return transform(command, run);
+  return `export ${HARNESS_RUN_ENV}='${run}'\n${command}`;
 }
 
 /** Return a copy of an MCP tool input carrying `harness_run: run`, overwriting any caller value. */

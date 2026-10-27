@@ -4,7 +4,7 @@
  * whether a call is worth asking about, then relays the verb's answer verbatim.
  *
  * Purpose: let `lore run attest-input` vouch for the run behind every lore call
- * (Bash `lore ...` or an `mcp__<server>__lore_<verb>` tool).
+ * (every Bash call, or an `mcp__<server>__lore_<verb>` tool).
  *
  * Public surface: none. Executable script, no exports.
  * Side-effect class: IO — reads stdin, spawns at most one child process, writes
@@ -14,7 +14,7 @@
  *
  *   1. unparseable stdin -> exit 0 silently, nothing spawned
  *   2. trigger test on the payload alone: tool `Bash` whose `tool_input.command`
- *      contains the word lore, or a tool name shaped `mcp__<server>__lore_<verb>`;
+ *      is a string, or a tool name shaped `mcp__<server>__lore_<verb>`;
  *      otherwise exit 0 silently, nothing spawned
  *   3. spawn `lore run attest-input` with the raw stdin bytes piped in; on exit
  *      0 write its stdout byte-for-byte; on any failure write nothing
@@ -48,7 +48,7 @@ const VERB_BINARY = 'lore';
 /** The verb this hook pipes to; it reads the payload from stdin. */
 const VERB_ARGV = ['run', 'attest-input'];
 
-/** Tool whose `tool_input.command` is searched for the word lore. */
+/** Tool whose every call carries the per-call run export (spec D14): no command text is inspected. */
 const SHELL_TOOL_NAME = 'Bash';
 
 /**
@@ -60,9 +60,6 @@ const SHELL_TOOL_NAME = 'Bash';
  * so the shape cannot be imported) — change both together.
  */
 const LORE_MCP_TOOL = /^mcp__.+__lore_\w+$/;
-
-/** "The word lore": a word boundary on both sides, so `explore` and `folklore` do not match. */
-const LORE_WORD = /\blore\b/;
 
 /** Explicit ceiling so an overrun surfaces as `error` (fail-open) rather than silent truncation. */
 const CHILD_OUTPUT_BYTE_CEILING = 16 * 1024 * 1024;
@@ -87,8 +84,7 @@ const toolName = payload.tool_name;
 const command = payload.tool_input?.command;
 const triggered =
   typeof toolName === 'string' &&
-  ((toolName === SHELL_TOOL_NAME && typeof command === 'string' && LORE_WORD.test(command)) ||
-    LORE_MCP_TOOL.test(toolName));
+  ((toolName === SHELL_TOOL_NAME && typeof command === 'string') || LORE_MCP_TOOL.test(toolName));
 
 if (!triggered) process.exit(0);
 

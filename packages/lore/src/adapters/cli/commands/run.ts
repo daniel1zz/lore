@@ -55,7 +55,7 @@ import { defineLoreCommand } from "../cli-exit.js";
 import { z } from "zod";
 import {
   deriveRunId,
-  rewriteBashCommand,
+  prefixRunExport,
   rewriteMcpInput,
   type CompositionRecord,
   type RunId,
@@ -410,24 +410,27 @@ const preToolUsePayloadSchema =z.object({
   tool_input: z.record(z.string(), z.unknown()),
 });
 
+type PreToolUsePayload = z.infer<typeof preToolUsePayloadSchema>;
+
+/** The run of the call a payload describes: `cc:<session>` on the main thread, `cc:<session>:<agent_id>` in a helper. */
+function runOfPayload(payload: PreToolUsePayload): RunId {
+  return deriveRunId(CLAUDE_CODE_HARNESS, {
+    sessionId: payload.session_id,
+    ...(payload.agent_id !== undefined ? { agentId: payload.agent_id } : {}),
+  });
+}
+
 /** The updated tool input, or null when there is nothing to rewrite or the payload is unusable. */
 function computeUpdatedInput(raw: string): Record<string, unknown> | null {
-  let payload: z.infer<typeof preToolUsePayloadSchema>;
-  let run: RunId;
   try {
-    payload = preToolUsePayloadSchema.parse(JSON.parse(raw));
-    run = deriveRunId(CLAUDE_CODE_HARNESS, {
-      sessionId: payload.session_id,
-      ...(payload.agent_id !== undefined ? { agentId: payload.agent_id } : {}),
-    });
+    const payload = preToolUsePayloadSchema.parse(JSON.parse(raw));
+    if (LORE_MCP_TOOL.test(payload.tool_name)) return rewriteMcpInput(payload.tool_input, runOfPayload(payload));
+    const command = payload.tool_input["command"];
+    if (payload.tool_name !== "Bash" || typeof command !== "string") return null;
+    return { ...payload.tool_input, command: prefixRunExport(command, runOfPayload(payload)) };
   } catch {
     return null; // reason: D10 fail-open — the hook passes the call through on a payload we cannot attest
   }
-  if (LORE_MCP_TOOL.test(payload.tool_name)) return rewriteMcpInput(payload.tool_input, run);
-  const command = payload.tool_input["command"];
-  if (payload.tool_name !== "Bash" || typeof command !== "string") return null;
-  const rewritten = rewriteBashCommand(command, run);
-  return rewritten === command ? null : { ...payload.tool_input, command: rewritten };
 }
 
 /** Read the whole of `input` as UTF-8 text. */

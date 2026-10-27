@@ -4,8 +4,8 @@
  *
  * RED (TDD role) for `assets/hooks/pre-tool-harness-run.mjs` — spec
  * spec-run-identity-slice-1-harness-attested-runs-attested, D10 (the hook owns NO grammar:
- * it only checks whether a Bash command contains the word `lore`, or the tool is
- * `mcp__lore__*`, then pipes the payload to `lore run attest-input` and relays its hook JSON
+ * it pipes every Bash call (spec D14: the run export prefixes every command) and every
+ * `mcp__<server>__lore_<verb>` tool call, then pipes the payload to `lore run attest-input` and relays its hook JSON
  * verbatim), D7 (fail-open), BR-1030. The hook does not exist yet, so every test here fails
  * on the missing script.
  *
@@ -13,9 +13,7 @@
  *
  *   stdin : PreToolUse payload {"hook_event_name":"PreToolUse","tool_name":...,"tool_input":{...},...}
  *   Trigger (decided from the payload alone, no grammar):
- *     - tool_name "Bash" AND tool_input.command contains the WORD `lore` (word boundary:
- *       `explore`, `folklore` do not count; only tool_input.command is inspected, so a
- *       `description` mentioning lore does not count)
+ *     - tool_name "Bash" with a string tool_input.command (no command text is inspected)
  *     - tool_name starts with `mcp__lore__`
  *   Not triggered: exit 0, EMPTY stdout, `lore` never spawned.
  *   Triggered: spawn `lore run attest-input` with the raw stdin payload piped in
@@ -129,36 +127,31 @@ const bashPayload = (command: string, extra: Record<string, unknown> = {}) =>
 const REWRITTEN_A = JSON.stringify({
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
-    updatedInput: { command: "lore claim t --harness-run cc:sess-1" },
+    updatedInput: { command: "export LORE_HARNESS_RUN='cc:sess-1'\nlore claim t" },
   },
 });
-const REWRITTEN_B = `{"hookSpecificOutput": {"hookEventName":"PreToolUse",  "updatedInput":{"command":"lore evidence x --harness-run cc:sess-2:ag"}}}`;
+const REWRITTEN_B = `{"hookSpecificOutput": {"hookEventName":"PreToolUse",  "updatedInput":{"command":"export LORE_HARNESS_RUN='cc:sess-2:ag'\\nlore evidence x"}}}`;
 
-describe("pre-tool-harness-run.mjs — not a lore call: costs nothing", () => {
-  it("Bash command without the word lore: exit 0, empty stdout", () => {
+describe("pre-tool-harness-run.mjs — every Bash call is piped (D14); other tools cost nothing", () => {
+  it("Bash command without the word lore: spawns `lore run attest-input` and relays its answer", () => {
     const stub = makeStub({ stdout: REWRITTEN_A });
     const run = runHook(bashPayload("ls -la /tmp"), stub.dir);
     expect(run.status).toBe(0);
-    expect(run.stdout).toBe("");
+    expect(run.stdout).toBe(REWRITTEN_A);
+    expect(stub.calls().map((c) => c.argv)).toEqual([["run", "attest-input"]]);
   });
 
-  it("Bash command without the word lore: lore is NOT spawned", () => {
+  it("`explore` / `folklore` commands are piped too: the hook inspects no command text", () => {
     const stub = makeStub({ stdout: REWRITTEN_A });
-    runHook(bashPayload("git status && echo done"), stub.dir);
-    expect(stub.calls()).toHaveLength(0);
+    runHook(bashPayload("ls explore folklore"), stub.dir);
+    expect(stub.calls()).toHaveLength(1);
   });
 
-  it("`explore` contains the letters but not the word lore: not spawned", () => {
+  it("lore only in the description, not in the command: still piped, payload byte-identical", () => {
     const stub = makeStub({ stdout: REWRITTEN_A });
-    const run = runHook(bashPayload("ls explore folklore"), stub.dir);
-    expect(run.stdout).toBe("");
-    expect(stub.calls()).toHaveLength(0);
-  });
-
-  it("lore only in the description, not in the command: not spawned", () => {
-    const stub = makeStub({ stdout: REWRITTEN_A });
-    runHook(bashPayload("ls", { description: "check the lore corpus" }), stub.dir);
-    expect(stub.calls()).toHaveLength(0);
+    const payload = bashPayload("ls", { description: "check the lore corpus" });
+    runHook(payload, stub.dir);
+    expect(stub.first().stdin).toBe(payload);
   });
 
   it("an mcp tool of another server: not spawned", () => {
