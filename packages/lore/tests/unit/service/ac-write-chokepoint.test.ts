@@ -4,14 +4,13 @@
  *
  * SPEC (C3): every write that changes `extra.acceptance_criteria` passes through ONE service
  * function. The sanctioned paths are the AcService verbs, create (inline criteria are additions,
- * validated + wording-gated), restore and v1 import. A WHOLESALE set (CLI / MCP lore_set / HTTP
+ * validated + wording-gated), restore and v1 import. A WHOLESALE set (CLI / HTTP
  * PATCH) that changes the array is refused with `AC_WRITE_NOT_VIA_AC_VERB` unless byte-identical.
  * Re-baselined per spec Amendment log (2026-10-08): create is sanctioned, no longer refused.
  *
  * PINNED CONTRACT for C3 (the implementer must satisfy exactly this surface):
  *  1. Refusal code string is `AC_WRITE_NOT_VIA_AC_VERB`, returned as `Result.error.code` by
- *     `CorpusService.set`; surfaced verbatim by the MCP `lore_set`
- *     handler (error text carries the code) and by HTTP PATCH `/api/docs/:id`
+ *     `CorpusService.set`; surfaced verbatim by HTTP PATCH `/api/docs/:id`
  *     (`{ ok: false, error: { code } }`). A refused write leaves the doc (extra, version,
  *     status) byte-for-byte unchanged.
  *  2. "Byte-identical" = the `acceptance_criteria` value in the patch/extra serialises
@@ -20,18 +19,16 @@
  *     cite: 5th arg opts) and write that string as the audit row's `actor` instead of the
  *     hard-coded "system".
  *
- * Dimensions: HAPPY (identical array accepted; verbs accepted), NEGATIVE (3 wholesale entry
+ * Dimensions: HAPPY (identical array accepted; verbs accepted), NEGATIVE (the wholesale entry
  * points refuse; create gated by the wording check), BOUNDARY (reordered / one-char-changed / removed array is a change),
- * STATE (refused write leaves the doc untouched), REGRESSION (the stale MCP comment claim).
+ * STATE (refused write leaves the doc untouched), REGRESSION (the stale comment claim).
  *
  * @spec_ref AC-BLS2-1
  */
 
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { actedStore } from "../../live-invocation.js";
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { describe, it, expect } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -44,7 +41,6 @@ import { applyAcChange } from "../../../src/service/ac-write-chokepoint.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import type { App } from "../../../src/app.js";
 import type { ActorContext } from "../../../src/adapters/http/auth.js";
@@ -98,10 +94,10 @@ async function fingerprint(store: InMemoryStore, specId: string): Promise<string
 
 const CHANGED = [AC("AC-W-1", "A different statement"), AC("AC-W-2", "Second thing")];
 
-// ─── MCP / HTTP harness (same wiring as mcp-tools.test.ts / http/routes.test.ts) ──
+// ─── HTTP harness (same wiring as http/routes.test.ts) ──
 
 function appFor(cs: CorpusService): App {
-  // MOCK RISK: every service other than corpusService is a null-cast stub; lore_set / PATCH only
+  // MOCK RISK: every service other than corpusService is a null-cast stub; PATCH only
   // reach corpusService, so this hides nothing about the path under test.
   return {
     corpusService: cs,
@@ -110,27 +106,6 @@ function appFor(cs: CorpusService): App {
     resolveAiDefault: () => ({ ai: false, source: "cli_flag" as const }),
     close: () => undefined,
   } as unknown as App;
-}
-
-type McpServerInternal = {
-  _registeredTools: Record<
-    string,
-    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
-  >;
-};
-
-function mcpSet(cs: CorpusService) {
-  const server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, appFor(cs), undefined, liveInvocation());
-  const tool = (server as unknown as McpServerInternal)._registeredTools["lore_set"];
-  if (!tool) throw new Error("lore_set not registered");
-  return (args: Record<string, unknown>) => tool.handler(args, {} as unknown);
-}
-
-function mcpText(r: CallToolResult): string {
-  const c = r.content[0];
-  if (!c || c.type !== "text") throw new Error("Expected text content");
-  return c.text;
 }
 
 const HTTP_ACTOR: ActorContext = { name: "http-agent", session_id: "s" };
@@ -162,20 +137,6 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
     const { store, cs, specId } = await setup();
     const before = await fingerprint(store, specId);
     await cs.set(specId, { extra: { acceptance_criteria: CHANGED } });
-    expect(await fingerprint(store, specId)).toBe(before);
-  });
-
-  it("MCP lore_set with changed criteria is refused with the same code", async () => {
-    const { cs, specId } = await setup();
-    const res = await mcpSet(cs)({ id_or_slug: specId, extra: { acceptance_criteria: CHANGED } });
-    expect(res.isError).toBe(true);
-    expect(mcpText(res)).toContain(REFUSAL);
-  });
-
-  it("a refused MCP lore_set leaves the spec unchanged", async () => {
-    const { store, cs, specId } = await setup();
-    const before = await fingerprint(store, specId);
-    await mcpSet(cs)({ id_or_slug: specId, extra: { acceptance_criteria: CHANGED } });
     expect(await fingerprint(store, specId)).toBe(before);
   });
 
@@ -295,16 +256,6 @@ describe("AC write chokepoint — byte-identical criteria accepted (AC-BLS2-1)",
     await cs.set(specId, { extra: { acceptance_criteria: current, ac_scope: ["x"] } });
     const after = await stored(store, specId);
     expect(JSON.stringify(after.extra["acceptance_criteria"])).toBe(JSON.stringify(current));
-  });
-
-  it("MCP lore_set with byte-identical criteria and a different extra key is accepted", async () => {
-    const { store, cs, specId } = await setup();
-    const current = (await stored(store, specId)).extra["acceptance_criteria"];
-    const res = await mcpSet(cs)({
-      id_or_slug: specId,
-      extra: { acceptance_criteria: current, ac_scope: ["packages/other"] },
-    });
-    expect(res.isError).toBeFalsy();
   });
 });
 

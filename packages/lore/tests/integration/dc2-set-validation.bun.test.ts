@@ -5,33 +5,27 @@
  * the same way on every route.
  *
  * One throwaway corpus (mkdtemp + createApp; never the repo's own `.lore/`) backs:
- *   - MCP  -> `registerTools` on an in-process McpServer (the reported route)
  *   - CLI  -> `bun run src/index.ts` subprocess with cwd in the throwaway corpus
  *   - HTTP -> a real `startHttpServer` on an ephemeral port (port 0) with a bearer key
  *
  * Dimension mapping:
- *   HAPPY:      resending the unchanged `extra.uat` is accepted (MCP)
  *   NEGATIVE:   whitespace-only title refused on set/create; changed `extra.uat.verdict` refused
- *   BOUNDARY:   "" and "   " titles; unchanged resend vs changed verdict
- *   ERROR:      CLI exit 4 naming `title`; MCP isError naming `lore uat record`
+ *   BOUNDARY:   "" and "   " titles
+ *   ERROR:      CLI exit 4 naming `title`; HTTP 4xx naming `lore uat record`
  *   STATE:      version unchanged after every refusal; `lore uat show` still prints accept
- *   REGRESSION: other extra edits on a NON-uat knowledge doc stay settable
  *
  * @spec_ref spec-defect-clusters-round-2-part-a-sessions-seats-setup-init#AC-DC2-8
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, liveIo } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 import { createApp, type App } from "../../src/app.js";
 import { startHttpServer } from "../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapters/http/machine-auth.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
 
 const SPEC_AC = "spec-defect-clusters-round-2-part-a-sessions-seats-setup-init#AC-DC2-8";
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -46,11 +40,6 @@ let bearer: string;
 let planSlug: string;
 let uatDoc: DocRecord;
 let plainDoc: DocRecord;
-
-type McpInternal = {
-  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
-};
-let tools: McpInternal["_registeredTools"];
 
 const ACCEPT_VERDICT = {
   verdict: "accept",
@@ -74,16 +63,6 @@ function runLore(args: string[]): { stdout: string; stderr: string; exitCode: nu
   delete env["LORE_SURFACE"];
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], { cwd: dir, env: env as Record<string, string> });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
-}
-
-async function callMcp(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> {
-  const tool = tools[name];
-  if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-  // reason: an MCP write names its known party (`harness_run`, BR-1351); the live test run is registered by the app shim.
-  const res = await tool.handler({ harness_run: LIVE_TEST_RUN, ...args }, {});
-  const first = res.content[0];
-  if (first === undefined || first.type !== "text") throw new Error("expected text content");
-  return { isError: res.isError === true, text: first.text };
 }
 
 async function versionOf(id: string): Promise<number> {
@@ -123,10 +102,6 @@ beforeAll(async () => {
   uatDoc = (await must(app.corpusService.get(found.id))).doc;
   if (uatDoc.extra["sub_type"] !== "uat") throw new Error("recorded doc is not a uat doc");
 
-  const mcp = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(mcp, app, undefined, liveInvocation());
-  tools = (mcp as unknown as McpInternal)._registeredTools;
-
   machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-dc2-8-machine-")) });
   const key = await app.apiKeyStore.create("agent-key", "agent");
   if (!key.ok) throw new Error("bearer key creation failed");
@@ -161,14 +136,6 @@ describe(`${SPEC_AC} (a) blank titles are refused`, () => {
     }, 60_000);
   }
 
-  it(`${SPEC_AC} MCP lore_set with a whitespace-only title is an error and writes nothing`, async () => {
-    const before = await versionOf(plainDoc.id);
-    const res = await callMcp("lore_set", { id_or_slug: plainDoc.id, title: "   " });
-    expect(res.isError).toBe(true);
-    expect(res.text).toContain("title");
-    expect(await versionOf(plainDoc.id)).toBe(before);
-  });
-
   it(`${SPEC_AC} HTTP PATCH with a whitespace-only title is refused and writes nothing`, async () => {
     const before = await versionOf(plainDoc.id);
     const res = await httpPatch(plainDoc.id, { title: "   " }, before);
@@ -181,38 +148,17 @@ describe(`${SPEC_AC} (a) blank titles are refused`, () => {
     const res = runLore(["create", "knowledge", "--title", "   ", "--sub-type", "reference", "--content", "x"]);
     expect(res.exitCode).toBe(4);
   }, 60_000);
-
-  it(`${SPEC_AC} a real title still renames (regression: the schema did not over-reject)`, async () => {
-    const res = await callMcp("lore_set", { id_or_slug: plainDoc.id, title: "DC2-8 plain reference renamed" });
-    expect(res.isError).toBe(false);
-  });
 });
 
 describe(`${SPEC_AC} (b) writer-owned extra.uat is protected on every route`, () => {
   const flipped = { ...ACCEPT_VERDICT, verdict: "reject" };
 
-  it(`${SPEC_AC} MCP lore_set changing extra.uat.verdict is refused naming lore uat record`, async () => {
-    const before = await versionOf(uatDoc.id);
-    const res = await callMcp("lore_set", {
-      id_or_slug: uatDoc.id,
-      extra: { sub_type: "uat", uat: flipped },
-    });
-    expect(res.isError).toBe(true);
-    expect(res.text).toContain("lore uat record");
-    expect(await versionOf(uatDoc.id)).toBe(before);
-    expect(await currentUatVerdict()).toBe("accept");
+  it(`${SPEC_AC} lore uat show still prints accept after the refused attempts`, () => {
     const shown = runLore(["uat", "show", planSlug]);
     expect(shown.exitCode).toBe(0);
     expect(shown.stdout.toLowerCase()).toContain("accept");
     expect(shown.stdout.toLowerCase()).not.toContain("reject");
   }, 60_000);
-
-  it(`${SPEC_AC} MCP lore_set dropping extra.uat entirely is refused too`, async () => {
-    const res = await callMcp("lore_set", { id_or_slug: uatDoc.id, extra: { sub_type: "uat" } });
-    expect(res.isError).toBe(true);
-    expect(res.text).toContain("lore uat record");
-    expect(await currentUatVerdict()).toBe("accept");
-  });
 
   it(`${SPEC_AC} HTTP PATCH changing extra.uat.verdict is refused the same way`, async () => {
     const before = await versionOf(uatDoc.id);
@@ -235,18 +181,4 @@ describe(`${SPEC_AC} (b) writer-owned extra.uat is protected on every route`, ()
     expect(await currentUatVerdict()).toBe("accept");
   }, 60_000);
 
-  it(`${SPEC_AC} resending the unchanged extra.uat is accepted`, async () => {
-    const current = (await must(app.corpusService.get(uatDoc.id))).doc;
-    const res = await callMcp("lore_set", { id_or_slug: uatDoc.id, extra: current.extra, tags: ["dc2-8-resend"] });
-    expect(res.isError).toBe(false);
-    expect(await currentUatVerdict()).toBe("accept");
-  });
-
-  it(`${SPEC_AC} other extra edits on a non-uat knowledge doc stay allowed (guard is sub_type scoped)`, async () => {
-    const res = await callMcp("lore_set", {
-      id_or_slug: plainDoc.id,
-      extra: { sub_type: "reference", note: "free-form here" },
-    });
-    expect(res.isError).toBe(false);
-  });
 });

@@ -1,12 +1,12 @@
 // @spawns packages/lore/src/index.ts
 /**
  * Baseline-root navigation (Baseline slice 3a, AC-BLS3-3 / BR-981 / BR-982), driven through the
- * real CLI plus the real HTTP route dispatcher and MCP tool handler, all over a throwaway SQLite corpus.
+ * real CLI plus the real HTTP route dispatcher, all over a throwaway SQLite corpus.
  *
  * Spec: spec-baseline-slice-3a-architecture-tree-baseline-root (Navigation, BL-6 steps 1-3):
  *   - with a baseline root, `lore bootstrap` prints `Root: <baseline root>` and, on a separate line,
  *     `Strategy: <PRD>`;
- *   - `lore tree` / HTTP `/api/tree` / MCP `lore_tree` default to the baseline root and accept the PRD as an
+ *   - `lore tree` / HTTP `/api/tree` default to the baseline root and accept the PRD as an
  *     explicit root;
  *   - with NO baseline root every one of these outputs is byte-identical to before;
  *   - the "first PRD" lookup has ONE ordering, used by every caller.
@@ -20,7 +20,7 @@
  *       `data.strategy` = {slug,title} of the first PRD. With no baseline root the `strategy` key is ABSENT
  *       (not null) so the JSON stays byte-identical to before.
  *   C4. `lore fragments pointers` renders `Corpus root:` from `data.root`, so it names the baseline root.
- *   C5. HTTP and MCP surfaces are driven in-process (`handleApiRoute`, `registerTools`) against the SAME
+ *   C5. The HTTP surface is driven in-process (`handleApiRoute`) against the SAME
  *       SQLite corpus the CLI wrote, opened through the real `loadLoreApp`.
  *   C6. An explicit root (slug) is never redirected: PRD slug -> that PRD, an unknown slug -> the existing
  *       not-found outcome (CLI exit 3, HTTP 404), never a silent fall back to the baseline root.
@@ -42,13 +42,10 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../../src/app.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import type { ActorContext } from "../../../src/adapters/http/auth.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
 
 setDefaultTimeout(300_000);
 
@@ -159,7 +156,7 @@ function treeText(c: Corpus, root?: string): string {
   return mustRun(root === undefined ? ["tree"] : ["tree", root], c.dir).stdout;
 }
 
-// ─── In-process HTTP + MCP over the same corpus ──────────────────────────────
+// ─── In-process HTTP over the same corpus ──────────────────────────────
 
 const HTTP_ACTOR: ActorContext = { name: "bc-nav-http", session_id: "bc-nav-session" };
 
@@ -187,24 +184,6 @@ async function httpTree(c: Corpus, query = ""): Promise<{ status: number; body: 
     if (res === null) throw new Error("/api/tree not routed");
     const raw = await res.text();
     return { status: res.status, body: JSON.parse(raw) as { ok: boolean; data?: TreeNodeLite; error?: { code: string } }, raw };
-  });
-}
-
-type McpServerInternal = {
-  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
-};
-
-async function mcpTree(c: Corpus, args: Record<string, unknown> = {}): Promise<{ isError: boolean; raw: string; tree?: TreeNodeLite }> {
-  return withApp(c.dir, async (app) => {
-    const server = new McpServer({ name: "bc-nav", version: "0.0.0" });
-    registerTools(server, app, undefined, liveInvocation());
-    const tool = (server as unknown as McpServerInternal)._registeredTools["lore_tree"];
-    if (!tool) throw new Error("lore_tree not registered");
-    const result = await tool.handler(args, {});
-    const first = result.content[0];
-    if (!first || first.type !== "text") throw new Error("expected text content");
-    const parsed = JSON.parse(first.text) as { tree?: TreeNodeLite };
-    return { isError: result.isError === true, raw: first.text, ...(parsed.tree !== undefined ? { tree: parsed.tree } : {}) };
   });
 }
 
@@ -397,39 +376,6 @@ describe("baseline root navigation (BL-6)", () => {
     });
   });
 
-  describe("MCP lore_tree", () => {
-    it("defaults to the baseline root with its branch below it", async () => {
-      const r = await mcpTree(withBaseline);
-      expect(r.isError).toBe(false);
-      expect(r.tree?.doc.slug).toBe(withBaseline.baselineRoot as string);
-      expect(r.tree ? flatten(r.tree) : []).toHaveLength(2);
-    });
-
-    it("root=<first PRD> returns the PRD with the baseline root beneath it", async () => {
-      const r = await mcpTree(withBaseline, { root: withBaseline.prds[0] });
-      expect(r.tree?.doc.slug).toBe(withBaseline.prds[0] as string);
-      expect(r.tree ? flatten(r.tree) : []).toContain(withBaseline.baselineRoot as string);
-    });
-
-    it("root=<non-first PRD> returns that PRD, not the baseline root", async () => {
-      const r = await mcpTree(withBaseline, { root: withBaseline.prds[1] });
-      expect(r.tree?.doc.slug).toBe(withBaseline.prds[1] as string);
-    });
-
-    it("root=<unknown> is an error result, never the baseline root", async () => {
-      const r = await mcpTree(withBaseline, { root: "no-such-doc" });
-      expect(r.isError).toBe(true);
-      expect(r.raw).not.toContain("BL Root");
-    });
-
-    it("without a baseline root the default result is byte-identical to the explicit-PRD result", async () => {
-      const dflt = await mcpTree(control);
-      const explicit = await mcpTree(control, { root: control.prds[0] });
-      expect(dflt.isError).toBe(false);
-      expect(dflt.raw).toBe(explicit.raw);
-    });
-  });
-
   describe("the 'first PRD' lookup has one ordering used by every caller", () => {
     // Alpha PRD was created first, Beta PRD second: created_at ASC -> Alpha, updated_at DESC -> Beta.
     it("bootstrap Root (no baseline) is the oldest PRD", () => {
@@ -443,11 +389,6 @@ describe("baseline root navigation (BL-6)", () => {
     it("HTTP /api/tree default (no baseline) is the same PRD bootstrap names", async () => {
       const r = await httpTree(twoPrds);
       expect(r.body.data?.doc.slug).toBe(twoPrds.prds[0] as string);
-    });
-
-    it("MCP lore_tree default (no baseline) is the same PRD bootstrap names", async () => {
-      const r = await mcpTree(twoPrds);
-      expect(r.tree?.doc.slug).toBe(twoPrds.prds[0] as string);
     });
 
     it("project pointers (no baseline) name the same PRD bootstrap names", () => {
