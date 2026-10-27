@@ -576,7 +576,8 @@ function describeRepeatCheckDegradation(read: Result<ReceiptV2ReadResult, LoreEr
 export function formatRepeatCheckWarning(result: GithubReportResult): string | undefined {
   const degraded = result.repeat_check_degraded;
   if (degraded === undefined) return undefined;
-  const outcome = degraded.reason === "unreadable" ? "filed anyway" : "recognised from the readable entries";
+  // reason: the ending states the OUTCOME, not the cause: only the early already-filed return recognised a repeat.
+  const outcome = result.retried ? "recognised from the readable entries" : "filed anyway";
   return `Warning: repeat check degraded (${degraded.detail}) — ${outcome}.`;
 }
 
