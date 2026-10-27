@@ -98,9 +98,9 @@ describe("registering an ended run reopens it (spec-run-only-write-identity-and-
   it("contrast: a claim taken by a run that stays ended is not owned — a clean ended run yields at once", async () => {
     const run = register(freshSession());
     const rival = register(freshSession());
-    expect(endRun(corpus.dir, run).exitCode).toBe(0);
     const task = await corpus.newTarget("task");
     expect(claimAs(corpus.dir, task, run, { worktree: makeWorktree({ dirty: false }) }).exitCode).toBe(0);
+    expect(endRun(corpus.dir, run).exitCode).toBe(0);
 
     expect(claimAs(corpus.dir, task, rival).exitCode).toBe(0);
 
