@@ -180,6 +180,11 @@ export default defineLoreCommand({
       // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work, so the output names that worktree.
       const writtenClaim = taskClaimSchema.safeParse(result.value.extra["claim"]);
       const inheritedWorktree = writtenClaim.success ? writtenClaim.data.inherited_dirty_worktree : undefined;
+      // reason: #457 / AC-RV-10 — taking over an ended run's claim names that run as ended.
+      const tookOverEndedRun = writtenClaim.success ? writtenClaim.data.took_over_ended_run : undefined;
+      if (tookOverEndedRun !== undefined) {
+        printLine(inv.io.stdout, `Took over the claim of ${tookOverEndedRun} (its run ended)`);
+      }
       if (inheritedWorktree !== undefined) {
         printLine(inv.io.stdout, `Inherited dirty worktree: ${inheritedWorktree} (uncommitted changes from the ended run's claim)`);
       }
