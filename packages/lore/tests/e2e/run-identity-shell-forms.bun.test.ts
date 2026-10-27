@@ -154,7 +154,6 @@ beforeAll(() => {
   mustLore(["init"]);
   // The run's harness process is THIS process: every bash below descends from it.
   if (!registerRunInDb(join(corpus, ".lore", "lore.db"), RUN)) throw new Error("run registration found no runs table");
-  mustLore(["create", "prd", "--title", "E2E Root", "--content", "root", "--no-ai"]);
 });
 
 afterAll(() => {
