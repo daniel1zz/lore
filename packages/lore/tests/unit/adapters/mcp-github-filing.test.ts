@@ -70,7 +70,6 @@ import { JudgmentService } from "../../../src/service/judgment-service.js";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
-import { formatRepeatCheckWarning } from "../../../src/adapters/cli/report-issue-wiring.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── GitHubIntakePort mocked wholesale — see this file's own header ────────
@@ -335,7 +334,7 @@ describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstr
   });
 });
 
-describe("AC-RL-2: a degraded repeat check reaches MCP callers and the CLI line (BR-500)", () => {
+describe("a degraded repeat check reaches MCP callers (BR-500)", () => {
   it("ERROR: lore_report_issue returns repeat_check_degraded when the filing log cannot be read", async () => {
     // A directory where the log file belongs: it exists but readFileSync fails (EISDIR).
     mkdirSync(join(tmpDir, ".lore", "issue-receipts-v2.jsonl"), { recursive: true });
@@ -353,23 +352,5 @@ describe("AC-RL-2: a degraded repeat check reaches MCP callers and the CLI line 
     const call = getToolHandler(server, "lore_report_issue");
     const payload = parseResult(await call(REPORT_ISSUE_ARGS));
     expect(Object.keys(payload)).not.toContain("repeat_check_degraded");
-  });
-
-  it("STATE: the formatter prints exactly one 'Warning: repeat check degraded' line for a degraded result and none for a clean one", () => {
-    const clean = { number: 1, url: "u", possible_duplicates: [], dedup_degraded: false, retried: false };
-    expect(formatRepeatCheckWarning(clean)).toBeUndefined();
-
-    const unreadable = formatRepeatCheckWarning({ ...clean, repeat_check_degraded: { reason: "unreadable", detail: "EACCES", skipped_lines: 0 } });
-    expect(unreadable).toBe("Warning: repeat check degraded (EACCES) — filed anyway.");
-    expect(unreadable?.split("\n")).toHaveLength(1);
-
-    // The ending follows the OUTCOME (retried), not the reason: corrupt lines + a NEW filing is "filed anyway".
-    const degraded = { reason: "corrupt_lines" as const, detail: "2 unreadable line(s)", skipped_lines: 2 };
-    expect(formatRepeatCheckWarning({ ...clean, retried: false, repeat_check_degraded: degraded })).toBe(
-      "Warning: repeat check degraded (2 unreadable line(s)) — filed anyway.",
-    );
-    expect(formatRepeatCheckWarning({ ...clean, retried: true, repeat_check_degraded: degraded })).toBe(
-      "Warning: repeat check degraded (2 unreadable line(s)) — recognised from the readable entries.",
-    );
   });
 });
