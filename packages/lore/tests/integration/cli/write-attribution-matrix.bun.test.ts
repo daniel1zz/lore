@@ -59,7 +59,6 @@ import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import { sessionEnvFor } from "../../helpers/session-actor";
-import { withTestRun } from "../../helpers/test-run-identity";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
@@ -521,8 +520,8 @@ function cleanEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
 
 function lore(args: string[], cwd: string, extra: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
   const env = cleanEnv({ HOME: cwd, ...extra });
-  // reason: every write needs a known party; a spawn that names no `--harness-run` runs as the agent run of the session its env names.
-  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...withTestRun(args, env, cwd)], { cwd, env });
+  // reason: every write needs a known party; the spawn shim (scripts/test-known-party-spawn.ts) gives the child the run of the session its env names.
+  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 

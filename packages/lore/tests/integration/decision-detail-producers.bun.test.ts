@@ -170,6 +170,8 @@ function scriptedProcesses(entries: { pid: number; ppid: number; startTime: stri
     signal: async () => "gone" as const,
     sleep: async () => undefined,
     resolveHarnessPid: async () => null,
+    parentOf: async () => null,
+    startTimeOf: async () => null,
   };
 }
 

@@ -19,7 +19,7 @@
  *
  * Side-effect class: IO (one `INSERT OR IGNORE` into the registry of the corpus under `cwd`).
  */
-import { DEFAULT_TEST_RUN, hasHarnessRunFlag, registerTestRun } from "../packages/lore/tests/helpers/test-run-identity";
+import { DEFAULT_TEST_RUN, HARNESS_RUN_ENV, hasHarnessRunFlag, registerTestRun } from "../packages/lore/tests/helpers/test-run-identity";
 
 /** Env variable a test sets to `none` to start `lore` with no run injected. */
 export const KNOWN_PARTY_OPT_OUT_ENV = "LORE_TEST_IDENTITY";
@@ -62,7 +62,8 @@ export function rewriteNodeSpawnArgs(args: readonly unknown[]): unknown[] | unde
   if (rewritten === undefined) return undefined;
   // reason: the opt-out variable is stripped from the env the child gets; an options value that is not an object (an
   // encoding string, undefined) carries no env to strip and is passed on as it was.
-  const nextOptions = rewritten.env === undefined || typeof options !== "object" || options === null ? options : { ...optionBag, env: rewritten.env };
+  // reason: the rewritten start always carries an env (the run value rides in it), also when the test passed no options.
+  const nextOptions = rewritten.env === undefined ? options : { ...optionBag, env: rewritten.env };
   const tail = hasArgsArray ? rest : args.slice(2);
   return [rewritten.argv[0], rewritten.argv.slice(1), ...(nextOptions === undefined && tail.length === 0 ? [] : [nextOptions]), ...tail];
 }
@@ -86,11 +87,16 @@ export function rewriteLoreStart(argv: readonly string[], options: { cwd?: unkno
   }
 
   const loreArgs = argv.slice(entryIndex + 1);
-  if (hasHarnessRunFlag(loreArgs) || loreArgs.includes("--mcp-server")) return undefined;
+  // reason: a start that already carries a run value (or names the retired flag, which the binary then refuses) is the
+  // test's own business and is never touched.
+  if (hasHarnessRunFlag(loreArgs) || loreArgs.includes("--mcp-server") || (env[HARNESS_RUN_ENV] ?? "") !== "") return undefined;
 
   const session = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
   const run = session !== undefined && session.trim() !== "" ? `cc:${session}` : DEFAULT_TEST_RUN;
   const cwd = typeof options.cwd === "string" ? options.cwd : process.cwd();
   registerTestRun(cwd, run);
-  return { argv: [...argv.slice(0, entryIndex + 1), "--harness-run", run, ...loreArgs], env: providedEnv };
+  // reason: the run travels as the per-call environment value, exactly as the Bash hook hands it to a real agent call
+  // (spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and); the spawned lore descends from this test process,
+  // which `registerTestRun` recorded as the run's harness process, so ancestry verification accepts it.
+  return { argv: [...argv], env: { ...env, [HARNESS_RUN_ENV]: run } };
 }

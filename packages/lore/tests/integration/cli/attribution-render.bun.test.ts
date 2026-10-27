@@ -33,7 +33,6 @@ import { join } from "node:path";
 import type { AuditEntry, DocRecord, VersionRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { RunSeeder } from "./fixtures/run-seeder.js";
-import { withTestRun } from "../../helpers/test-run-identity.js";
 
 setDefaultTimeout(300_000);
 
@@ -64,8 +63,8 @@ function lore(args: string[], cwd: string, actor: string | null = "agent:session
   }
   // reason: a write needs a known party; the writer `actor` names is the agent run of that session, registered first.
   // `actor === null` means no identity at all (a read).
-  const argv = actor === null ? args : withTestRun(args, env, cwd);
-  const p = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd, env: env as Record<string, string> });
+  // The spawn shim (scripts/test-known-party-spawn.ts) hands the session's run to the child as its per-call value.
+  const p = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env: env as Record<string, string> });
   return { stdout: p.stdout.toString(), stderr: p.stderr.toString(), exitCode: p.exitCode ?? 1 };
 }
 function mustLore(args: string[], cwd: string, actor: string | null = "agent:session-4e17de01"): Run {

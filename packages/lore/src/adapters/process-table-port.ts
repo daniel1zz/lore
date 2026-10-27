@@ -60,6 +60,25 @@ export interface ProcessTablePort {
    * wrapper (`sh -c "node hook.mjs"`). `null` when nothing sensible can be named (pid <= 1, process gone).
    */
   resolveHarnessPid(pid: number): Promise<number | null>;
+  /**
+   * Parent pid of `pid` (the ancestry walk of `verifyRunAncestry`); `null` when `pid` does not exist or is pid 1.
+   * @throws {ProcessTableUnreadableError} when `ps` itself cannot run: never "no such process" (never fail-open).
+   */
+  parentOf(pid: number): Promise<number | null>;
+  /**
+   * Start time of `pid` (ISO-8601, second precision, same reading as {@link ProcessInspection.startTime}); `null`
+   * when `pid` does not exist or its `lstart` did not parse.
+   * @throws {ProcessTableUnreadableError} when `ps` itself cannot run.
+   */
+  startTimeOf(pid: number): Promise<string | null>;
+}
+
+/** `ps` could not be run, so the process table is unmeasurable (distinct from "this pid does not exist"). */
+export class ProcessTableUnreadableError extends Error {
+  constructor(reason: string) {
+    super(`process table unreadable: ${reason}`);
+    this.name = "ProcessTableUnreadableError";
+  }
 }
 
 const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/;
@@ -150,7 +169,30 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
     return { zombie: (match[1] as string).startsWith("Z"), startTime: parseLstart(match[2] as string) };
   };
 
+  /** `ps -o ppid=,lstart= -p <pid>`: the row of one pid, `null` when it does not exist; throws when `ps` cannot run. */
+  const readRow = (pid: number): { ppid: number; startTime: string | null } | null => {
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    const run = spawnSync("ps", ["-o", "ppid=,lstart=", "-p", String(pid)], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env) });
+    if (run.error !== undefined) throw new ProcessTableUnreadableError(`ps could not run (${run.error.message})`);
+    // reason: `ps -p <absent pid>` exits 1 with an empty listing; any other non-zero exit with output text is a failure.
+    const text = (run.stdout ?? "").trim();
+    if (run.status !== 0) {
+      if (text === "" && (run.stderr ?? "").trim() === "") return null;
+      throw new ProcessTableUnreadableError(`ps exited ${String(run.status ?? "abnormally")}`);
+    }
+    const match = /^(\d+)\s+(.*)$/.exec(text);
+    if (match === null) return null;
+    return { ppid: Number.parseInt(match[1] as string, 10), startTime: parseLstart(match[2] as string) };
+  };
+
   return {
+    async parentOf(pid) {
+      if (pid <= 1) return null;
+      return readRow(pid)?.ppid ?? null;
+    },
+    async startTimeOf(pid) {
+      return readRow(pid)?.startTime ?? null;
+    },
     async snapshot() {
       const ps = spawnSync("ps", ["-axo", "pid=,ppid=,stat=,lstart=,command="], {
         cwd: options.cwd,

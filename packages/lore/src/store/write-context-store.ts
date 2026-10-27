@@ -40,7 +40,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { refusalNamingHowToBecomeKnown, UnknownPartyError } from "@lore/core/node";
-import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
+import { verifyInvocationIdentity, type RunAncestryProbe } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
 /**
@@ -305,6 +305,7 @@ export function ensureVerifiedIdentity(store: StoreInterface): Promise<Result<In
  * request's already-registered party and does not wait on the server process's own identity.
  *
  * @param onVerified - Called once with the verified identity (the CLI uses it to replace its process slot).
+ * @param ancestry - When given (the real program entry), an agent run must also descend from its harness process.
  */
 export function withVerifiedWriteContext(
   store: StoreInterface,
@@ -314,12 +315,13 @@ export function withVerifiedWriteContext(
   // landed — still passes it positionally at its two call sites; drop it with that call-site edit.
   _retiredWarn: (line: string) => void,
   onVerified?: (verified: InvocationIdentity) => void,
+  ancestry?: RunAncestryProbe,
 ): StoreInterface {
   const live: { identity: InvocationIdentity } = { identity };
   const inner = withWriteContext(store, live);
   let verified: Promise<Result<InvocationIdentity, LoreError>> | undefined;
   const verifyOnce = (): Promise<Result<InvocationIdentity, LoreError>> => {
-    verified ??= verifyInvocationIdentity(store, identity).then((result) => {
+    verified ??= verifyInvocationIdentity(store, identity, ancestry).then((result) => {
       if (result.ok) {
         live.identity = result.value;
         onVerified?.(result.value);

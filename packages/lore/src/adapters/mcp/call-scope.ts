@@ -25,7 +25,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
+import { HARNESS_RUN_ENV, err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
 import { RunIdentityArgumentError, UnknownPartyError, resolveInvocationIdentity } from "@lore/core/node";
 import type { App } from "../../app.js";
 
@@ -55,9 +55,14 @@ function errorResult(error: LoreError): CallToolResult {
  * say nothing about the caller, and a human session is never consulted (an MCP server is no person's terminal).
  */
 export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env">): Result<InvocationIdentity, LoreError> {
-  const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
+  // reason: the call's structured `harness_run` is the per-call run value; it is handed to the resolver the way the CLI
+  // hands `LORE_HARNESS_RUN`, over the server's own env WITHOUT its inherited value (the server's run is not the call's).
+  const { [HARNESS_RUN_ENV]: _serverRun, ...serverEnv } = server.env;
+  const callEnv = input.harness_run !== undefined ? { ...serverEnv, [HARNESS_RUN_ENV]: input.harness_run } : serverEnv;
   try {
-    const { identity } = resolveInvocationIdentity(argv, server.env, () => null);
+    // reason: a missing `harness_run` keeps the generic refusal naming `lore setup` (BR-1351): the tool path has no
+    // Bash hook whose removal could be blamed, so the hook probe answers "not installed".
+    const { identity } = resolveInvocationIdentity([], callEnv, () => null, () => false);
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {

@@ -21,7 +21,7 @@ import { hostname, tmpdir } from "node:os";
 import { resolveInvocationIdentity } from "@lore/core/node";
 import type { Invocation } from "@lore/core";
 import { invocationResolvers } from "../../src/adapters/cli/run-cli";
-import { withTestRun } from "./test-run-identity";
+import { withTestRunEnv } from "./test-run-identity";
 
 /** What a test names to build an Invocation. */
 export interface TestInvocationInput {
@@ -54,14 +54,17 @@ export function buildTestInvocation(input: TestInvocationInput): Invocation {
   const projectRoot = invocationResolvers.projectRoot(cwd);
   // reason: a test run is a KNOWN PARTY by default, as an installed agent integration makes it (BR-1351): the run its
   // argv / env names, registered in the corpus under `cwd`. `identity: "none"` resolves as the binary would.
-  const argvIn = input.identity === "none" ? input.argv : withTestRun(input.argv, env, cwd);
-  const resolution = resolveInvocationIdentity(argvIn, { ...env }, () =>
-    projectRoot === null ? null : invocationResolvers.humanSession({ env, home, projectRoot }),
+  const envIn = input.identity === "none" ? env : withTestRunEnv(input.argv, env, cwd);
+  const resolution = resolveInvocationIdentity(
+    input.argv,
+    { ...envIn },
+    () => (projectRoot === null ? null : invocationResolvers.humanSession({ env, home, projectRoot })),
+    () => false,
   );
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   return Object.freeze({
     cwd,
-    env: Object.freeze({ ...env }),
+    env: Object.freeze({ ...envIn }),
     argv,
     paths: Object.freeze({
       home,

@@ -35,6 +35,27 @@ const { existsSync, readFileSync, statSync } = createRequire(import.meta.url)("n
 // pins this value to core's `HARNESS_RUN_FLAG`.
 export const HARNESS_RUN_FLAG = "--harness-run";
 
+/** The per-call environment value that carries a lore call's run (same spelling as core's `HARNESS_RUN_ENV`; spelled out for the cycle reason above). */
+export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
+
+// reason: the REAL `child_process` through `createRequire`, like `fs` above (the aliased module is this file's importer).
+const { spawnSync: realSpawnSync } = createRequire(import.meta.url)("node:child_process") as typeof import("node:child_process");
+
+let ownStartTime: string | null | undefined;
+
+/**
+ * The start time of THIS process as lore's process-table port reads it (`ps -o lstart=`, ISO-8601, second precision),
+ * or `null` when `ps` cannot say. A test process registers itself as the harness of its runs: every `lore` it spawns
+ * descends from it, and an in-process run starts its ancestry walk at it.
+ */
+function startTimeOfThisProcess(): string | null {
+  if (ownStartTime !== undefined) return ownStartTime;
+  const run = realSpawnSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+  const parsed = run.status === 0 ? new Date((run.stdout ?? "").trim()) : null;
+  ownStartTime = parsed === null || Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  return ownStartTime;
+}
+
 // reason: `bun:sqlite` is required LAZILY, inside the one function that writes the registry: this module is imported by
 // the spawn shim of EVERY test run (scripts/test-known-party-spawn.ts), including the few files vitest runs under Node,
 // where a top-level `import "bun:sqlite"` would fail at load. Under Node, registering is simply unavailable.
@@ -159,6 +180,13 @@ export function registerRunInDb(dbPath: string, runId: string): boolean {
       JSON.stringify({ schemaVersion: 1, fragments: [] }),
       new Date().toISOString(),
     );
+    // reason: the run's harness process is THIS test process (newest registration wins, like `recordRunProcess`): a spawned
+    // `lore` descends from it and verifies by ancestry. A corpus older than migration 021 has no columns; the registry
+    // row alone is then all there is.
+    const startTime = startTimeOfThisProcess();
+    if (startTime !== null && db.query("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'harness_pid'").get() !== null) {
+      db.query("UPDATE runs SET harness_pid = ?, harness_pid_start = ? WHERE id = ?").run(process.pid, startTime, runId);
+    }
     REGISTERED.add(memoKey);
     return true;
   } catch (error) {
@@ -187,17 +215,17 @@ function isInside(parent: string, child: string): boolean {
 }
 
 /**
- * `args` as a known party runs them: with `--harness-run <run>` in front (unless the caller already gave one), the run
- * registered in the corpus holding `cwd`.
+ * `env` as a known party runs: carrying the per-call run value (`LORE_HARNESS_RUN`, unless the caller already set one),
+ * the run registered in the corpus holding `cwd` with this test process as its harness.
  *
  * @param args - argv after the program name
  * @param env - the run's environment (a session id in it names the writer)
  * @param cwd - the run's working directory (where the corpus is found)
  */
-export function withTestRun(args: readonly string[], env: EnvBag, cwd: string): string[] {
+export function withTestRunEnv(args: readonly string[], env: EnvBag, cwd: string): Record<string, string | undefined> {
   const runId = testRunIdFor(args, env);
   registerTestRun(cwd, runId);
-  return hasHarnessRunFlag(args) ? [...args] : [HARNESS_RUN_FLAG, runId, ...args];
+  return (env[HARNESS_RUN_ENV] ?? "") !== "" ? { ...env } : { ...env, [HARNESS_RUN_ENV]: runId };
 }
 
 /** `env` with every variable that could name a writer or mark an agent harness removed (a refusal test spawns with this). */

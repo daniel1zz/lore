@@ -78,8 +78,7 @@ function cleanEnv(dir: string, actor?: string): Record<string, string | undefine
 export function runLore(args: string[], dir: string, run?: string, actor?: string): RunResult {
   const runId = run ?? (actor !== undefined ? `cc:${sessionIdOfActor(actor)}` : DEFAULT_TEST_RUN);
   registerTestRun(dir, runId);
-  const argv = ["--harness-run", runId, ...args];
-  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd: dir, env: cleanEnv(dir, actor) });
+  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd: dir, env: { ...cleanEnv(dir, actor), LORE_HARNESS_RUN: runId } as Record<string, string> });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 

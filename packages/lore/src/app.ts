@@ -98,6 +98,7 @@ import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createReadSessionHeartbeat, createWriteSessionHeartbeat } from "./adapters/session-heartbeat-port.js";
 import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
 import { createRealProcessTablePort } from "./adapters/process-table-port.js";
+import type { RunAncestryProbe } from "./service/run-identity-verify.js";
 import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
@@ -711,6 +712,8 @@ export interface AppWriteContext {
   readonly warn?: (line: string) => void;
   /** Called once with the identity after its run was verified against the registry (unknown run → null). */
   readonly onVerified?: (verified: InvocationIdentity) => void;
+  /** When present (the real program entry), an agent run must also descend from its registered harness process. */
+  readonly ancestry?: RunAncestryProbe;
 }
 
 /**
@@ -1982,7 +1985,7 @@ function createAppUnscoped(
     const sqliteStore =
       writeContext === undefined
         ? baseSqliteStore
-        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnSinkOf(ambient.io.stderr), writeContext.onVerified) as SQLiteStore);
+        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnSinkOf(ambient.io.stderr), writeContext.onVerified, writeContext.ancestry) as SQLiteStore);
     // reason: SPEC-102 — local-only mode has no separate replica file; trace
     // writes route through the SAME sqliteStore every other corpus write
     // uses. `undefined` when trace.enabled resolves false — every
@@ -2103,7 +2106,7 @@ function createAppUnscoped(
     const store =
       writeContext === undefined
         ? baseTursoStore
-        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnSinkOf(ambient.io.stderr), writeContext.onVerified) as TursoStore);
+        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnSinkOf(ambient.io.stderr), writeContext.onVerified, writeContext.ancestry) as TursoStore);
     // reason: SPEC-102 D3 — trace writes in Turso mode go through a SEPARATE
     // local `bun:sqlite` handle on the SAME replica file `apiKeyDb`/
     // `sessionStore` already open (`buildAppFromTurso`'s identical

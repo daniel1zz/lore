@@ -23,7 +23,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerTestRun, scrubIdentityEnv } from "./test-run-identity.js";
-import { HARNESS_RUN_FLAG } from "@lore/core";
+import { HARNESS_RUN_ENV } from "@lore/core";
 
 const ENTRY = join(new URL("../../", import.meta.url).pathname, "src", "index.ts");
 
@@ -82,10 +82,10 @@ function spawnLore(dir: string, home: string, args: readonly string[], party: Pa
     LORE_STATE_HOME: join(home, "state"),
     ...extraEnv,
   };
-  let argv = [...args];
+  const argv = [...args];
   if (party.kind === "run") {
     registerTestRun(dir, party.run);
-    argv = [HARNESS_RUN_FLAG, party.run, ...argv];
+    env[HARNESS_RUN_ENV] = party.run;
   } else {
     // reason: the test run's spawn rewrite (scripts/test-known-party-spawn.ts) gives every `lore` start a registered
     // agent run; these parties are exactly the ones that must NOT have one, so the start opts out of it.

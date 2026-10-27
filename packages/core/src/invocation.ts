@@ -50,7 +50,7 @@ export interface InvocationPaths {
 export type Invocation = Readonly<{
   cwd: string;
   env: Readonly<Record<string, string | undefined>>;
-  /** Arguments after the program name, with the harness-owned `--harness-run <id>` already removed. */
+  /** Arguments after the program name. */
   argv: readonly string[];
   paths: InvocationPaths;
   host: string;
@@ -59,6 +59,11 @@ export type Invocation = Readonly<{
   isCompiled: boolean;
   /** Who this invocation is (the known party's run and name, or why there is none); unverified until the store verifies its run. */
   identity: InvocationIdentity;
+  /**
+   * True when the identity's run must also be verified against this process's ancestry (set by the real program
+   * entry; absent for in-process runs, whose test process is not a harness child). The store layer reads it.
+   */
+  verifyAncestry?: boolean;
   /** The run's streams: the two writers, the input, and whether the input is an interactive terminal (resolved once at the entry). */
   io: Readonly<{ stdout: InvocationWriter; stderr: InvocationWriter; stdin: InvocationReader; stdinIsTTY: boolean }>;
 }>;
