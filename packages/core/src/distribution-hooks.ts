@@ -179,7 +179,7 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // subagent-trail.mjs — measures an isolated helper's changes at its end (spec-session-trail D13). timeout 10 s: it runs git against the helper's working copy.
   { file: "subagent-trail.mjs", runner: "node", event: "SubagentStop", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
 
-  // pre-tool-harness-run.mjs — rewrites each lore call to carry `--harness-run <run>` (updatedInput only, never a permissionDecision — D12); covers raw Bash and every lore MCP tool.
+  // pre-tool-harness-run.mjs — pipes each Bash call (and every lore MCP tool call) through `lore run attest-input`, which puts one `export LORE_HARNESS_RUN='<run>'` line in front of the unchanged command (updatedInput only, never a permissionDecision — D12/D14). `lore` believes that per-call value only when it runs inside the named run's own harness process (verified by process ancestry), so a copied value cannot name another session's run. Keep the Bash matcher entry verbatim: AC-RV-8's falsifier mutates it.
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
 
