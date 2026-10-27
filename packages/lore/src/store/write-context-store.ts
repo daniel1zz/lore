@@ -216,6 +216,17 @@ export function findTraceActorFor(store: StoreInterface): string | undefined {
   return effectiveIdentity(context).claimed ?? undefined;
 }
 
+/**
+ * The name source (`run | human | api-key | dashboard`) of the party writing through `store` right now — the request's
+ * under HTTP, else the context's own — or `undefined` when the store has no write context or the identity names no
+ * source. A pure read; the decision gate asks it whether the writer is an agent run (`"run"`).
+ */
+export function findWriteSourceFor(store: StoreInterface): string | undefined {
+  const context = readWriteContext(store);
+  if (context === undefined) return undefined;
+  return effectiveIdentity(context).claimedSource ?? undefined;
+}
+
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {
   return { ...record, ...stamp };
 }

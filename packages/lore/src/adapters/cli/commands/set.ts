@@ -119,6 +119,7 @@ import {
 } from "../decision-status-validation.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 
 /**
  * Advisory text printed when `CorpusService.set`'s internal approved→draft
@@ -199,6 +200,7 @@ export default defineLoreCommand({
         "task, a closed plan). Bypasses the record-edit gate, writes exactly one version and keeps the " +
         "status; the reason is stored in the version and the audit trail. Must be non-empty.",
     },
+    ...DECISION_FLAG_ARGS,
     plan: {
       type: "string",
       description:
@@ -341,6 +343,15 @@ export default defineLoreCommand({
       }
     }
 
+    // BR-1476 — the decision flags are parsed before the app loads; whether this write NEEDS a decision is the
+    // service's call (CorpusService.set), so a draft edit with no flags is untouched.
+    const decisionFlags = parseDecisionFlags(args);
+    if (!decisionFlags.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, decisionFlags.error) + "\n");
+      return exitCode(decisionFlags.error);
+    }
+    const decisionOpt = decisionFlags.value;
+
     const resolvedActor = resolveActor(inv);
     const { app, defaults } = loadLoreApp({ inv });
     try {
@@ -460,7 +471,11 @@ export default defineLoreCommand({
         const setResult = await app.corpusService.set(
           args.id,
           { content: newContent },
-          { by: resolvedActor, ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}) },
+          {
+            by: resolvedActor,
+            ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
+            ...(decisionOpt !== undefined ? { decision: decisionOpt } : {}),
+          },
         );
 
         if (!setResult.ok) {
@@ -670,6 +685,7 @@ export default defineLoreCommand({
         by: resolvedActor,
         ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
         ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
+        ...(decisionOpt !== undefined ? { decision: decisionOpt } : {}),
       });
 
       if (!result.ok) {
