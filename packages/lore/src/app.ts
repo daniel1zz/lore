@@ -50,7 +50,8 @@ import {
   type VerifyEnvConfig,
   AiConfigSchema,
 } from "@lore/core";
-import { err, ok, type Result, type LoreError } from "@lore/core";
+import { err, ok, type DecisionFinding, type PlanBundle, type Result, type LoreError } from "@lore/core";
+import { createWorktreeCommandRunner, recheckPlanDecisions } from "./service/decision-recheck.js";
 import type { CallerSurface, AiDefaultSource, InvocationIdentity, Invocation } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
@@ -1122,6 +1123,7 @@ function buildAppFromSqlite(
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       mainRedLedger: buildMainRedLedger(store, corpusService),
+      recheckDecisions: buildDecisionRechecker(store, ambient),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1555,6 +1557,7 @@ function buildAppFromTurso(
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       mainRedLedger: buildMainRedLedger(store, corpusService),
+      recheckDecisions: buildDecisionRechecker(store, ambient),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1687,6 +1690,14 @@ function buildAppFromTurso(
  * and appends through `CorpusService.appendAudit` (the audit write route: foreign-corpus refusal, caller attribution,
  * serialized hash-chain append).
  */
+function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bundle: PlanBundle) => Promise<Result<DecisionFinding[], LoreError>> {
+  // reason: built lazily (git root resolved on the first review) so an app that never assesses a plan never spawns git.
+  return (bundle) => {
+    const root = resolveGitRoot(ambient.cwd);
+    return recheckPlanDecisions({ store, git: new SpawnGitPort(root), runner: createWorktreeCommandRunner(root, ambient.env) }, bundle);
+  };
+}
+
 function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService): MainRedLedgerPort {
   return {
     now: () => new Date().toISOString(),

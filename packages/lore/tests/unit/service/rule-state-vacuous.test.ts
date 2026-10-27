@@ -26,6 +26,7 @@ const git: GitPort = {
   isAncestor: () => ok(true),
   changedSince: () => ok(false),
   changedPaths: () => ok([]),
+  showFile: () => ok({ state: "unreachable" as const }),
 };
 
 let seq = 0;
