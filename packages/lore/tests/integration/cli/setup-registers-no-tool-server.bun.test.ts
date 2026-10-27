@@ -143,7 +143,8 @@ describe("lore setup registers no tool server (AC-RMCP-2)", () => {
       hooks?: { PostToolUse?: unknown[] };
     };
     expect(settings.theme).toBe("user-owned-theme");
-    expect(JSON.stringify(settings.hooks?.PostToolUse)).toBe(JSON.stringify([USER_HOOK]));
+    // lore appends its own matcher groups next to the user's; the user's group stays byte-identical and first.
+    expect(JSON.stringify(settings.hooks?.PostToolUse?.[0])).toBe(JSON.stringify(USER_HOOK));
   });
 
   it("AC-RMCP-2: an unchanged re-install exits 0, writes no file and calls no claude", () => {
