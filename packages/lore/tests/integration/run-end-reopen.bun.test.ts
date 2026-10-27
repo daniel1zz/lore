@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { CLAIM_CONFLICT_EXIT, createCorpus, getClaim, runLore, type Corpus } from "./cli/support/claim-run-fixture.js";
-import { claimAs, cleanupWorktrees, endRun, getRunRow, makeWorktree } from "./support/run-end-fixture.js";
+import { claimAs, cleanupWorktrees, commitAll, endRun, getRunRow, makeWorktree } from "./support/run-end-fixture.js";
 
 setDefaultTimeout(180_000);
 
@@ -99,8 +99,10 @@ describe("registering an ended run reopens it (spec-run-only-write-identity-and-
     const run = register(freshSession());
     const rival = register(freshSession());
     const task = await corpus.newTarget("task");
-    expect(claimAs(corpus.dir, task, run, { worktree: makeWorktree({ dirty: false }) }).exitCode).toBe(0);
+    const wt = makeWorktree({ dirty: true });
+    expect(claimAs(corpus.dir, task, run, { worktree: wt }).exitCode).toBe(0);
     expect(endRun(corpus.dir, run).exitCode).toBe(0);
+    commitAll(wt);
 
     expect(claimAs(corpus.dir, task, rival).exitCode).toBe(0);
 

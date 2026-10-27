@@ -63,9 +63,9 @@ describe("ended run + clean worktree is stale at once (spec-run-only-write-ident
   it("lets a plain claim take a FRESH claim of an ended run whose worktree is clean", async () => {
     const run = freshRun();
     const rival = freshRun();
-    const task = await corpus.newTarget("task");
-    expect(claimAs(corpus.dir, task, run, { worktree: makeWorktree({ dirty: false }) }).exitCode).toBe(0);
-    expect(endRun(corpus.dir, run).exitCode).toBe(0);
+    const wt = makeWorktree({ dirty: true });
+    const task = await orphanedDirtyTask(run, wt);
+    commitAll(wt);
 
     const r = claimAs(corpus.dir, task, rival);
 
@@ -90,9 +90,11 @@ describe("ended run + clean worktree is stale at once (spec-run-only-write-ident
     const open = freshRun();
     const endedTask = await corpus.newTarget("task");
     const openTask = await corpus.newTarget("task");
-    expect(claimAs(corpus.dir, endedTask, ended, { worktree: makeWorktree({ dirty: false }) }).exitCode).toBe(0);
+    const endedWt = makeWorktree({ dirty: true });
+    expect(claimAs(corpus.dir, endedTask, ended, { worktree: endedWt }).exitCode).toBe(0);
     expect(claimAs(corpus.dir, openTask, open, { worktree: makeWorktree({ dirty: false }) }).exitCode).toBe(0);
     expect(endRun(corpus.dir, ended).exitCode).toBe(0);
+    commitAll(endedWt);
 
     expect(readyClaimStale(corpus.dir, endedTask)).toBe(true);
     expect(readyClaimStale(corpus.dir, openTask)).toBe(false);
