@@ -1,6 +1,6 @@
 // @reads packages/lore/src/**
 /**
- * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write AC-CP-5
+ * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write#AC-CP-5
  *   ("THE ADAPTER MATRIX IS ASSERTED, INCLUDING ITS EXEMPTION")
  *
  * Two halves, each pinned to a MECHANISM rather than "it returned 200":
@@ -18,10 +18,10 @@
  *       invokes the predicate ZERO times — demonstrating that "the write
  *       succeeded" alone can never distinguish "predicate saw null" from
  *       "predicate never ran", which is the exact false-oracle class
- *       AC-CP-5(c) exists to close.
+ *       half (c) exists to close.
  *
  * A PRODUCTION-WIRING CENSUS over the source tree
- * (`task-the-http-exemption-is-conditional-on-where-lore-serve-was`). AC-CP-5(c)
+ * (`task-the-http-exemption-is-conditional-on-where-lore-serve-was`). Half (c)
  * above observes the predicate on a bare `CorpusService`, whose constructor
  * default is `{provenance: null, enabled: true}` — null BY CONSTRUCTION, so
  * that block alone can never go red when the COMPOSITION ROOT wires something
@@ -59,7 +59,7 @@ import {
 
 // ─── Module mock — a typed spy over the REAL implementation ───────────────
 // `vi.fn(actual.X)` preserves the real behaviour; only OBSERVABILITY is added. `vi.mocked(...)` at each call site
-// is what makes this a "typed" spy (AC-CP-5(c)'s own requirement): a future signature change on the wrapped
+// is what makes this a "typed" spy (half (c)'s own requirement): a future signature change on the wrapped
 // function breaks this file's `.mock.calls[...]` accesses at COMPILE time, never silently.
 
 vi.mock("../../../src/service/foreign-corpus-write-guard.js", async (importOriginal) => {
@@ -73,9 +73,9 @@ beforeEach(() => {
   guardSpy.mockClear();
 });
 
-// ─── AC-CP-5(c) THE HTTP EXEMPTION IS OBSERVED AT THE PREDICATE BOUNDARY ──
+// ─── half (c) THE HTTP EXEMPTION IS OBSERVED AT THE PREDICATE BOUNDARY ──
 
-describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a typed spy", () => {
+describe("half (c) HTTP EXEMPTION — observed at the predicate boundary via a typed spy", () => {
   it("an HTTP-adapter write (via auth.ts's resolveDocWriteOpts) invokes the predicate EXACTLY ONCE with provenance EXACTLY null, and the write lands", async () => {
     // Bare CorpusService construction — NEVER calls setForeignCorpusWriteContext,
     // so its ambient context stays the documented default {provenance: null,
@@ -103,13 +103,13 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
     expect(opts).toEqual({ by: "agent-http-key" });
 
     guardSpy.mockClear();
-    const result = await httpCorpusService.create({ type: "prd", title: "AC-CP-5c HTTP write" }, opts);
+    const result = await httpCorpusService.create({ type: "prd", title: "CP5c HTTP write" }, opts);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
       const fetched = await httpCorpusService.get(result.value.id);
       expect(fetched.ok).toBe(true);
-      if (fetched.ok) expect(fetched.value.doc.title).toBe("AC-CP-5c HTTP write");
+      if (fetched.ok) expect(fetched.value.doc.title).toBe("CP5c HTTP write");
     }
 
     // The predicate-boundary assertion itself — typed via vi.mocked, so a
@@ -127,7 +127,7 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
     const controlCorpusService = new CorpusService(controlStore, new RecordLockService(controlStore, new GateEnforcer(undefined)));
 
     guardSpy.mockClear();
-    const result = await controlCorpusService.createHandoffDoc({ type: "prd", title: "AC-CP-5c bypass control" });
+    const result = await controlCorpusService.createHandoffDoc({ type: "prd", title: "CP5c bypass control" });
 
     // The write genuinely succeeds — "the write succeeded" alone tells you
     // NOTHING about whether the predicate ran.
