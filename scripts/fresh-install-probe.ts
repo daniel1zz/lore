@@ -90,9 +90,6 @@ function collectInstalledFiles(project: string, claudeHome: string): ScannedFile
 
 const FIXTURE_SESSION = "probe-session-0001";
 const FIRST_WRITE_STEP = "first-write-attested";
-/** The spec writes the MCP matcher two ways (`mcp__lore__*` vs `mcp__.*lore_.*`); this asserts the regex form, the form every
- *  existing lore gate hook already registers in HOOK_REGISTRATIONS (spec open item S4). */
-const MCP_MATCHER = "mcp__.*lore_.*";
 
 interface HookEntry {
   readonly matcher: string | undefined;
@@ -147,7 +144,6 @@ function firstWriteAttested(bin: string, root: string, project: string, claudeHo
   const sessionStart = find("SessionStart", "run-register.mjs", undefined);
   find("SubagentStart", "run-register.mjs", undefined);
   const preBash = find("PreToolUse", "pre-tool-harness-run.mjs", "Bash");
-  find("PreToolUse", "pre-tool-harness-run.mjs", MCP_MATCHER);
   if (missing.length > 0 || sessionStart === undefined || preBash === undefined) {
     return { exit: "-", verdict: { pass: false, reason: `installed settings lack hook registration(s): ${missing.join("; ")}` } };
   }

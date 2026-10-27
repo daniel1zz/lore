@@ -415,8 +415,3 @@ export function rewriteBashCommand(command: string, run: RunId): string {
   }
   return transform(command, run);
 }
-
-/** Return a copy of an MCP tool input carrying `harness_run: run`, overwriting any caller value. */
-export function rewriteMcpInput<T extends object>(input: T, run: RunId): T & { harness_run: RunId } {
-  return { ...input, harness_run: run };
-}

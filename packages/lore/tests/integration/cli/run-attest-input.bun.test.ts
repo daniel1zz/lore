@@ -73,13 +73,12 @@ describe("lore run attest-input", () => {
     expect(out.hookSpecificOutput.updatedInput["command"]).toBe("echo x && lore --harness-run cc:S1:A9 get y");
   }, 120_000);
 
-  it("HAPPY: an mcp__lore__ tool gets harness_run in its input", () => {
+  it("NEGATIVE (AC-RMCP-6): an mcp__lore__ tool input is left alone — prints nothing and exits 0", () => {
     const r = runLore(
       ["run", "attest-input"],
       payload({ tool_name: "mcp__lore__lore_claim", tool_input: { task: "t" } }),
     );
-    const out = JSON.parse(r.stdout) as HookOut;
-    expect(out.hookSpecificOutput.updatedInput).toEqual({ task: "t", harness_run: "cc:S1" });
+    expect({ code: r.exitCode, out: r.stdout }).toEqual({ code: 0, out: "" });
   }, 120_000);
 
   it("BOUNDARY: a caller-forged --harness-run is replaced by the derived run", () => {
@@ -92,7 +91,7 @@ describe("lore run attest-input", () => {
     const payloads = [
       payload({ tool_input: { command: "lore claim t" } }),
       payload({ agent_id: "A9", tool_input: { command: "lore claim t && rm -rf x" } }),
-      payload({ tool_name: "mcp__lore__lore_get", tool_input: { id: "x" } }),
+      payload({ agent_id: "A2", tool_input: { command: "lore get x" } }),
     ];
     for (const p of payloads) {
       const r = runLore(["run", "attest-input"], p);

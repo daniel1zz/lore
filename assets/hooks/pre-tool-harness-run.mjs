@@ -4,7 +4,7 @@
  * whether a call is worth asking about, then relays the verb's answer verbatim.
  *
  * Purpose: let `lore run attest-input` vouch for the run behind every lore call
- * (Bash `lore ...` or an `mcp__<server>__lore_<verb>` tool).
+ * (a Bash `lore ...` command).
  *
  * Public surface: none. Executable script, no exports.
  * Side-effect class: IO — reads stdin, spawns at most one child process, writes
@@ -14,8 +14,7 @@
  *
  *   1. unparseable stdin -> exit 0 silently, nothing spawned
  *   2. trigger test on the payload alone: tool `Bash` whose `tool_input.command`
- *      contains the word lore, or a tool name shaped `mcp__<server>__lore_<verb>`;
- *      otherwise exit 0 silently, nothing spawned
+ *      contains the word lore; otherwise exit 0 silently, nothing spawned
  *   3. spawn `lore run attest-input` with the raw stdin bytes piped in; on exit
  *      0 write its stdout byte-for-byte; on any failure write nothing
  *
@@ -51,16 +50,6 @@ const VERB_ARGV = ['run', 'attest-input'];
 /** Tool whose `tool_input.command` is searched for the word lore. */
 const SHELL_TOOL_NAME = 'Bash';
 
-/**
- * A lore MCP tool under ANY registered server name: `mcp__<server>__lore_<verb>`.
- * reason: the server name is user-configurable (`mcp__lore-dev__...`), so a fixed
- * `mcp__lore__` prefix missed renamed servers (#146, BR-1093); requiring the `__lore_`
- * verb segment keeps `mcp__mylore__get_issue` and other servers' tools out. Twin of
- * `LORE_MCP_TOOL` in packages/lore/src/adapters/cli/commands/run.ts (this file is standalone,
- * so the shape cannot be imported) — change both together.
- */
-const LORE_MCP_TOOL = /^mcp__.+__lore_\w+$/;
-
 /** "The word lore": a word boundary on both sides, so `explore` and `folklore` do not match. */
 const LORE_WORD = /\blore\b/;
 
@@ -86,9 +75,7 @@ if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) p
 const toolName = payload.tool_name;
 const command = payload.tool_input?.command;
 const triggered =
-  typeof toolName === 'string' &&
-  ((toolName === SHELL_TOOL_NAME && typeof command === 'string' && LORE_WORD.test(command)) ||
-    LORE_MCP_TOOL.test(toolName));
+  toolName === SHELL_TOOL_NAME && typeof command === 'string' && LORE_WORD.test(command);
 
 if (!triggered) process.exit(0);
 

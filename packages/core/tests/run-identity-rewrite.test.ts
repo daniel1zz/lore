@@ -18,7 +18,6 @@ import {
   HARNESS_RUN_FLAG,
   deriveRunId,
   rewriteBashCommand,
-  rewriteMcpInput,
   type RunId,
 } from "@lore/core";
 
@@ -28,7 +27,6 @@ const R2 = "cc:sess-R2" as RunId;
 describe("run-identity exports exist", () => {
   it("exports the rewrite functions and the flag constant", () => {
     expect(typeof rewriteBashCommand).toBe("function");
-    expect(typeof rewriteMcpInput).toBe("function");
     expect(HARNESS_RUN_FLAG).toBe("--harness-run");
   });
 });
@@ -144,28 +142,6 @@ describe("rewriteBashCommand: caller-written flag and idempotence", () => {
   it("replaces the run when re-rewritten with a different run", () => {
     const first = rewriteBashCommand("lore claim t", R);
     expect(rewriteBashCommand(first, R2)).toBe(rewriteBashCommand("lore claim t", R2));
-  });
-});
-
-describe("rewriteMcpInput", () => {
-  it("overwrites a caller-supplied harness_run and keeps other fields", () => {
-    const out = rewriteMcpInput({ by: "a", harness_run: "X" }, R);
-    expect(out).toEqual({ by: "a", harness_run: "cc:sess-R" });
-  });
-
-  it("adds harness_run when the caller gave none", () => {
-    const out = rewriteMcpInput({ id: "t", by: "b" }, R2);
-    expect(out).toEqual({ id: "t", by: "b", harness_run: "cc:sess-R2" });
-  });
-
-  it("works on an input with no by", () => {
-    expect(rewriteMcpInput({ id: "t" }, R)).toEqual({ id: "t", harness_run: "cc:sess-R" });
-  });
-
-  it("does not mutate the input object", () => {
-    const input = { by: "a", harness_run: "X" };
-    rewriteMcpInput(input, R);
-    expect(input).toEqual({ by: "a", harness_run: "X" });
   });
 });
 
