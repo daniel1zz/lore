@@ -459,7 +459,13 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
     // `ai.providers.<name>.timeout_ms` override to built-in defaults with zero warning).
-    printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, configResult.error)); // CLI surface
+    // reason: an `ai`-block violation names the offending key but not WHICH file holds it (a global and a project
+    // config both exist); the file is appended so a removed key (e.g. `ai.default_per_surface.mcp`) is findable.
+    const shown: LoreError =
+      configResult.error.code === "VALIDATION_ERROR" && isAiConfigValidationError(configResult.error)
+        ? { ...configResult.error, message: `${configResult.error.message} (in ${join(dirname(dbPath), "config.yaml")})` }
+        : configResult.error;
+    printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, shown)); // CLI surface
     exitCli(exitCode(configResult.error));
   } else {
     // reason: BR-926 — a project config that exists but does not parse or fails the schema used to be dropped whole,

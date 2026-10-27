@@ -138,7 +138,7 @@ describe("AC-061-11 — filtered --result pass carrying no output tail", () => {
     expect(refusal.message).toContain("matched-count proof");
     expect(refusal.message).toContain("--output-tail");
     expect(refusal.message).toContain("--output-tail-file");
-    expect(refusal.message).toContain("output_tail");
+    expect(refusal.field).toBe("output_tail");
   });
 
   it("AC-061-11 BOUNDARY: an empty-string output tail is no proof either", () => {
