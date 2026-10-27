@@ -1,7 +1,6 @@
 /**
  * RED table for the run-identity carrier functions: rewriteBashCommand,
- * rewriteMcpInput, HARNESS_RUN_FLAG, and run id derivation through the
- * harness registry.
+ * HARNESS_RUN_FLAG, and run id derivation through the harness registry.
  *
  * Dimensions: HAPPY (flag inserted after each command-position lore word),
  * NEGATIVE (quoted text / heredoc body / `echo lore` untouched), BOUNDARY
