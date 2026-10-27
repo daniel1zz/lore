@@ -1,13 +1,11 @@
 /**
  * Doc-code drift oracle orchestration flow (SPEC-045 §Design Decisions D5, D7 —
- * memory hygiene part 3). CLI (`lore status --check-drift`, `lore bootstrap`) and
- * MCP (`lore_status {check_drift: true}`, `lore_bootstrap`) both call these
- * functions instead of each re-deriving the `code_drift` JSON shape or the
+ * memory hygiene part 3). CLI (`lore status --check-drift`, `lore bootstrap`)
+ * calls these functions instead of re-deriving the `code_drift` JSON shape or the
  * store-only "declared anchor count" line — mirrors `staleness-flow.ts`'s
  * narrow-injected-deps shape (never the full `App`; `App` (`app.ts`)
  * top-level-imports `bun:sqlite` and this module must stay vitest-resolvable —
- * its own coverage lives in `mcp-drift.test.ts`/`spec-projection-anchors.test.ts`,
- * both plain vitest suites, not `.bun.test.ts`).
+ * its own coverage lives in plain vitest suites, not `.bun.test.ts`).
  *
  * Public surface:
  *   buildDriftFlowDeps(app, driftCheckService) — the ONE adaptation site from a
@@ -16,10 +14,10 @@
  *   buildListSpecs(app) — the narrower "list every non-deleted spec" binder alone
  *     — used by countArmedSpecs, which needs NO DriftCheckService at all (a
  *     store-only declared-count read, zero fs probing, D5).
- *   runDrift(deps, probe) — runs checkDrift and shapes the CodeDriftPayload BOTH
- *     CLI --json (`data.code_drift`) and MCP (`lore_status`'s `code_drift`) return.
+ *   runDrift(deps, probe) — runs checkDrift and shapes the CodeDriftPayload the
+ *     CLI --json (`data.code_drift`) returns.
  *   disabledCodeDriftPayload() — the `workflow.drift.enabled: false` LOUD-skip
- *     payload (D8) — a single derivation site so CLI/MCP never hand-roll the same
+ *     payload (D8) — a single derivation site so no caller hand-rolls the same
  *     literal object twice.
  *   countArmedSpecs(listSpecs) — store-only "N specs declare code_anchors" count,
  *     ZERO fs probing — the shared helper `lore status` (plain) and `lore
@@ -71,7 +69,7 @@ export interface DriftFlowDeps {
  * `countArmedSpecs` callers that need NO `DriftCheckService` at all (plain
  * `lore status`/`lore bootstrap`'s store-only declared-count line, D5).
  *
- * @param app - A wired `App` instance (CLI/MCP adapters only)
+ * @param app - A wired `App` instance (CLI adapter only)
  */
 export function buildListSpecs(app: App): () => Promise<Result<DocRecord[], LoreError>> {
   return () => app.corpusService.listFull({ type: "spec" }).then((r) => (r.ok ? ok(r.value.docs) : r));
@@ -85,7 +83,7 @@ export function buildListSpecs(app: App): () => Promise<Result<DocRecord[], Lore
  * already-narrowed, non-optional instance here keeps this binder simple and
  * throw-free, rather than duplicating the undefined check internally.
  *
- * @param app - A wired `App` instance (CLI/MCP adapters only)
+ * @param app - A wired `App` instance (CLI adapter only)
  * @param driftCheckService - `app.driftCheckService`, already undefined-checked
  *   by the caller
  * @example
@@ -123,8 +121,8 @@ export interface CodeDriftPayload {
 
 /**
  * The `workflow.drift.enabled: false` LOUD-skip payload (D8) — a single
- * derivation site so the CLI (`commands/status.ts`) and MCP (`tools.ts`) never
- * hand-roll the same literal object twice. Returns a FRESH object each call
+ * derivation site so the CLI (`commands/status.ts`) never
+ * hand-rolls the same literal object twice. Returns a FRESH object each call
  * (never a shared mutable constant).
  */
 export function disabledCodeDriftPayload(): CodeDriftPayload {
@@ -160,7 +158,7 @@ export function sortDrifts(drifts: readonly DriftRow[]): DriftRow[] {
  * Runs the doc-code drift scan (assumes `workflow.drift.enabled` is `true` —
  * callers check the config brake themselves and short-circuit to
  * {@link disabledCodeDriftPayload} when it is `false`, D8) and shapes the result
- * into the {@link CodeDriftPayload} BOTH CLI `--json` and MCP `lore_status` return
+ * into the {@link CodeDriftPayload} the CLI `--json` returns
  * — the single derivation site (review S8).
  *
  * @param deps - See {@link DriftFlowDeps}
@@ -185,7 +183,7 @@ export async function runDrift(deps: DriftFlowDeps, probe: FsProbe): Promise<Res
 /**
  * The literal `lore anchor rm` repair command for one drift row (D5, review U5)
  * — CLI text-rendering-only (the JSON payload's `DriftRow` carries no `fix`
- * field; MCP callers construct their own command from `doc_slug`/`anchor` if
+ * field; other callers construct their own command from `doc_slug`/`anchor` if
  * they want one).
  *
  * @param row - One `DriftRow` from a `CodeDriftPayload.drifts` entry

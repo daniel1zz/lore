@@ -126,7 +126,7 @@ function isCreateBlockedType(docType: DocType): boolean {
 /**
  * Maps a raw Zod validation issue to user-facing copy.
  * Purpose: `createDocInputSchema`'s `parent_id is required for type '<type>'` message
- *   (packages/core/src/schemas.ts) is a CLI/MCP contract string, not UI copy — it names
+ *   (packages/core/src/schemas.ts) is a CLI contract string, not UI copy — it names
  *   the internal field (`parent_id`) rather than explaining what the user needs to do.
  *   This is the ONLY special-cased message; every other issue passes through verbatim
  *   so server-side / other Zod errors keep their original text (D6, AC-37-9).

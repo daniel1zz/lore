@@ -12,8 +12,7 @@
  * a WRITE with no signal that a boundary was crossed. This module is the
  * pure decision half of that fix: it never touches a filesystem or spawns
  * git itself, so it is fully unit-testable and reusable from every adapter
- * that can supply these facts (CLI today; MCP's `caller_cwd` parameter
- * later).
+ * that can supply these facts (the CLI today).
  *
  * Public surface:
  *   - CorpusProvenance — the three routes a resolution can have taken.
@@ -45,7 +44,7 @@
  * Invariants:
  *   - PURE: no IO, no `process.cwd()`/`process.exit()`, no git shell-outs,
  *     no `fs`/`path`/`os`/`child_process` imports. `probeExists` and
- *     `gitFacts` are supplied by the CALLER (the CLI/MCP adapter), same
+ *     `gitFacts` are supplied by the CALLER (the CLI adapter), same
  *     division of labor as `resolveVerifyExecutionRoot`.
  *   - FAIL-SAFE, NEVER GUESS: an unresolved git probe
  *     (`gitFacts.resolved === false`) with no hit inside the caller's own
@@ -151,7 +150,7 @@ export interface ResolveCorpusProvenanceInput {
   /** The caller's current working directory. */
   cwd: string;
   /**
-   * Injected path-existence predicate — the caller (CLI/MCP adapter) owns
+   * Injected path-existence predicate — the caller (CLI adapter) owns
    * the real `existsSync` walk; this module never touches the filesystem.
    */
   probeExists: (path: string) => boolean;

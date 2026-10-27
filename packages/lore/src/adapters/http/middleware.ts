@@ -63,7 +63,7 @@ export function loreErrorToStatus(error: LoreError): number {
     // reason: WRITE_CONTENTION is the same family one layer down (SQLite refused the
     // write because another process held the corpus past the declared bound) — 409, and
     // the caller's correct response is identical: re-issue the request. No HTTP route
-    // produces it today (`lore report-issue` is CLI/MCP-only), but the mapping is stated
+    // produces it today (`lore report-issue` is CLI-only), but the mapping is stated
     // here rather than left to the 500 catch-all, which would read as "the store broke".
     // Source: spec-report-issue-has-no-specified-concurrency-contract-ac-072 §Contract Details.
     case "WRITE_CONTENTION":
@@ -97,12 +97,12 @@ export function loreErrorToStatus(error: LoreError): number {
     case "INVALID_PARENT_TYPE":
       return 422;
     // reason: NEEDS_APPROVAL (SPEC-039 M2) has no HTTP route today (`lore verify` is
-    // CLI/MCP-only) — mapped alongside the other request-rejected-as-invalid codes for
+    // CLI-only) — mapped alongside the other request-rejected-as-invalid codes for
     // when/if a verify route is added. Source: SPEC-039 §M2.
     case "NEEDS_APPROVAL":
       return 422;
     // reason: GhRunner's three error codes (spec-the-defect-channel-reaches-no-machine-
-    // but-its-own-github, AC-GI-2) have no HTTP route today (gh is CLI/MCP-only, same
+    // but-its-own-github, AC-GI-2) have no HTTP route today (gh is CLI-only, same
     // status as NEEDS_APPROVAL/AI_PROVIDER_ERROR above) — mapped to their nearest HTTP
     // status semantics for when/if a gh-backed route is added, rather than left to the
     // 500 catch-all.

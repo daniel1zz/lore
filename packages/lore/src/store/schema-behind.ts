@@ -2,7 +2,7 @@
  * Schema-behind vocabulary: the one definition of "this corpus needs `lore migrate schema`".
  *
  * Purpose: a corpus schema upgrade runs ONLY through the explicit `lore migrate schema` command. Every other opener
- * (CLI, MCP server, `lore serve`, hooks) refuses an older corpus instead of rewriting it as a side effect, and all of
+ * (CLI, `lore serve`, hooks) refuses an older corpus instead of rewriting it as a side effect, and all of
  * them name the same facts and the same command, built here.
  * Public surface: {@link MIGRATE_SCHEMA_COMMAND}, {@link isSchemaBehind}, {@link schemaBehindMessage},
  * {@link SchemaBehindError}, {@link pendingMigrationVersions}.

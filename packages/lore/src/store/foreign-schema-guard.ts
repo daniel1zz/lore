@@ -2,7 +2,7 @@
  * Behind-schema guard: refuses to open a corpus that is older than this binary's schema, naming `lore migrate schema`.
  *
  * Purpose: a corpus upgrade runs ONLY through the explicit `lore migrate schema` command. This guard runs BEFORE
- * `new SQLiteStore` on every adapter/composition path that opens a discovered corpus (CLI loader, MCP server and
+ * `new SQLiteStore` on every adapter/composition path that opens a discovered corpus (CLI loader and
  * `lore serve` through it, `createApp`, the gate's audit open), so a read-only command, a hook or a linked worktree
  * can never rewrite a shared corpus as a side effect. The `SQLiteStore` constructor refuses too (the last line of
  * defence); this guard exists so the refusal is a validation error (exit 4) naming both versions and the command,

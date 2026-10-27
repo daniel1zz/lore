@@ -13,8 +13,7 @@
  * (comma-separated) is likewise GitHub-path-only. `--list` against this
  * shape DELEGATES (spec-a-github-filed-defect-must-be-claimable-one-ingest-
  * seam, AC-GR-1/2/10/12) to `commands/issues.ts::runGithubIssuesListing` —
- * reached via a lazy `await import("./issues.js")` (mirrors `adapters/mcp/
- * tools.ts`'s own lazy import of this file) so `lore report-issue`'s cold
+ * reached via a lazy `await import("./issues.js")` so `lore report-issue`'s cold
  * start does not also pull in `lore issues`'s module. `lore issues` is the
  * canonical read verb this command's `--list` flag now points to (both its
  * own help text and `meta.description` below name it); this command holds
@@ -66,9 +65,8 @@
  * (`classifyFeedbackUpstream(config).kind === "unconfigured"`, see below),
  * this command returns `@lore/core`'s exported
  * `buildUnconfiguredUpstreamRemedy()` — the SAME actionable error for BOTH
- * the filing path and `--list` (single wording SSOT, AC-OOB-1), and now ALSO
- * the identical error the MCP `lore_report_issue` tool returns on the same
- * condition (spec-governance-defaults-must-ship-and-every-recorded-gap-must
+ * the filing path and `--list` (single wording SSOT, AC-OOB-1)
+ * (spec-governance-defaults-must-ship-and-every-recorded-gap-must
  * D3, AC-GD-2). Collapsing onto that ONE shared, imported builder is what
  * makes "the CLI's remedy" and every other surface's remedy the same remedy
  * BY CONSTRUCTION, not by two literals that happen to read alike today.
@@ -80,7 +78,7 @@
  * path) a target/auth failure from `GitHubIntakePort`.
  *
  * Source: SPEC-072 §4 Public Interface, §5 check sequence, §11 Downstream
- * Handoff; task-skill-implement-t5-wiring-cli-report-issue-mcp-lore-report;
+ * Handoff; task-skill-implement-t5-wiring-cli-report-issue;
  * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4.
  */
 
@@ -358,8 +356,7 @@ export default defineLoreCommand({
       // filed-defect-must-be-claimable-one-ingest-seam, AC-GR-1/2/10/12) —
       // this file holds NO second listing implementation. A LAZY
       // `import("./issues.js")` keeps this command's own cold start from
-      // also pulling in `lore issues`'s module (mirrors `adapters/mcp/
-      // tools.ts`'s existing lazy import of THIS file). `--open`/
+      // also pulling in `lore issues`'s module. `--open`/
       // `--resolved`/`--all`/`--severity`/`--category`/`--verify` are not
       // flags on this command at all, so this branch always runs the plain,
       // unfiltered GitHub listing of every issue whatever its status — the

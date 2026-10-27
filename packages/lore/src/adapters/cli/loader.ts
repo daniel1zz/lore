@@ -90,8 +90,7 @@ import {
 // (report-issue-wiring.ts) DOES value-import bun:sqlite transitively (probeUpstreamDb/
 // ReceiptLog/LATEST_SCHEMA_VERSION) — but this file already imports "../../app.js"
 // (bun:sqlite via createApp), so it is bun-only already and never vitest-reachable;
-// no lazy-import indirection is needed here (contrast the MCP tools.ts precedent,
-// which DOES need one because that file is NOT already bun-only).
+// no lazy-import indirection is needed here.
 import { buildReportIssueHint } from "./report-issue-hint.js";
 import { setProcessAuditSurface } from "../../store/audit-surface.js";
 import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
@@ -108,7 +107,7 @@ import type { CliIo } from "./output.js";
  *   - none of the above   → "cli" (human terminal, SPEC-017 default)
  *
  * reason: env vars read at process startup (before any command dispatch) ensure surface
- * is stable for the entire request. MCP/HTTP use in-process flags instead — see SPEC-024 §9.2.
+ * is stable for the entire request. HTTP uses in-process flags instead — see SPEC-024 §9.2.
  *
  * @param env - the entry's environment (`ambient.env`)
  * @returns CallerSurface — "cli" or "agent"
@@ -163,7 +162,7 @@ export interface LoadLoreAppOptions {
   readonly surface?: LoreAppBootSurface;
   /**
    * The Invocation to compose against (env, home, temp dir, identity): a CLI command passes `invocationOf(context)`,
-   * the MCP server and the HTTP boot the one they resolved at start, tests `liveInvocation()`. Required: there is no
+   * the HTTP boot the one it resolved at start, tests `liveInvocation()`. Required: there is no
    * process-reading fallback.
    */
   readonly inv: Invocation;
@@ -193,21 +192,6 @@ export interface LoadLoreAppOptions {
  *     production-wiring census proving no `startHttpServer` mount silently
  *     relies on the `"cli"` default. That default is the only reason this
  *     defect could recur, so the census is what makes it safe.
- *
- * ⛔ DISCLOSED RESIDUAL — the MCP boot (`packages/lore/src/index.ts`'s
- * `--mcp-server` branch) still passes no surface and therefore still resolves
- * this process's frozen startup cwd into the AMBIENT `CorpusService` context.
- * MCP's own PER-CALL check (`adapters/mcp/tools.ts`, derived from the
- * `caller_cwd` tool parameter) is unaffected and correct, but the ambient
- * second layer under it carries the same boot-cwd defect this function fixes
- * for HTTP. Left as-is deliberately: §D5's adapter matrix names exactly ONE
- * exemption (the HTTP row), and `packages/lore/src/index.ts` is outside the
- * declared scope of `task-the-http-exemption-is-conditional-on-where-lore-
- * serve-was`. Disclosed by that task's implementer, not silently carried: the
- * fix is one `{surface: "mcp"}`-shaped argument at `index.ts`'s `loadLoreApp()`
- * call plus the matching enum member here, and it needs its own AC because
- * removing the ambient layer under MCP's per-call check is a real behaviour
- * change, not a refactor.
  *
  * @param bootSurface - See {@link LoreAppBootSurface}.
  * @param cwd - the entry's working directory (`ambient.cwd`).
@@ -262,8 +246,8 @@ async function readTaskClaimLease(app: App, idOrSlug: string): Promise<TaskClaim
  * Resolves the project directory one level up from a discovered `.lore/lore.db`
  * path and loads `.lore/config.yaml` via `@lore/core/node`'s `loadConfig` — the
  * ONE parse both {@link loadLoreApp} (one-time CLI startup) and
- * {@link loadProjectConfig} (per-call MCP re-read, SPEC-070 F6) build on, so a
- * long-lived MCP server observing config edits without restart never grows a
+ * {@link loadProjectConfig} (per-call re-read, SPEC-070 F6) build on, so a
+ * long-lived server observing config edits without restart never grows a
  * second, independently-drifting YAML-parsing implementation.
  *
  * @param dbPath - An already-discovered `.lore/lore.db` path (`findLoreDbPath()`).
@@ -350,13 +334,13 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  * Re-resolves `.lore/lore.db` (`findLoreDbPath`) and re-loads `.lore/config.yaml`
  * (`resolveProjectConfigResult`) fresh on every call, sync section stripped — the
  * SAME canonical parse {@link loadLoreApp} performs at CLI startup, reused here so
- * a long-lived caller (the MCP server's per-call `getConfig` getter, SPEC-070 F6)
+ * a long-lived caller (a per-call `getConfig` getter, SPEC-070 F6)
  * observes `.lore/config.yaml` edits without a restart, exactly as a CLI
  * invocation naturally would (a fresh process per call).
  *
  * Deliberately narrower than `loadLoreApp`: no App construction, no global-config
  * merge, and no `process.exit` on an invalid `ai` block (AC-HJ-3's loud-exit is a
- * ONE-TIME CLI-startup concern — a live MCP server's per-call config re-read must
+ * ONE-TIME CLI-startup concern — a live server's per-call config re-read must
  * never abort the process mid-request). Every parse failure, `ai`-block-invalid
  * included, degrades to `undefined` here — the caller's pre-existing "no config"
  * fallback path (e.g. `resolveTaskStartBudgets(undefined)` returning `{}`) — but a
@@ -573,7 +557,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
 
   // SPEC-024 §9.1: set callerSurface from env vars before any command dispatch.
   // reason: must happen here (not inside each command) so the surface is stable
-  // for the entire CLI invocation. MCP sets "mcp" in adapters/mcp/index.ts; HTTP
+  // for the entire CLI invocation. HTTP
   // resolves per-request in ActorContext — see SPEC-024 §9.2.
   app.callerSurface = detectCliSurface(ambient.env);
   setProcessAuditSurface(app.callerSurface);
@@ -589,8 +573,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   //
   // ⛔ The `provenance` half is keyed on the BOOT SURFACE, never on this
   // process's cwd alone — `resolveForeignWriteProvenance` owns that decision
-  // and documents why (the HTTP lockout it closes, and the MCP residual it
-  // does not). On the `"cli"` branch it calls `resolveCorpus()` a second time:
+  // and documents why (the HTTP lockout it closes). On the `"cli"` branch it calls `resolveCorpus()` a second time:
   // `findLoreDbPath()` above already computed the IDENTICAL resolution
   // internally, deterministically, from the same cwd, but neither
   // `findLoreDbPath` nor `findLoreDbPathQuiet` exposes the `provenance` they
@@ -622,8 +605,8 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   app.acService?.setCorpusWriteContext(corpusWriteAuthority);
 
   // SPEC-102 §Migration Strategy — opportunistic bounded-batch trace
-  // retention prune, fired ONCE per CLI invocation (not MCP/HTTP — those are
-  // long-lived processes, not a per-invocation "startup"). Absent when
+  // retention prune, fired ONCE per CLI invocation (not HTTP — that is a
+  // long-lived process, not a per-invocation "startup"). Absent when
   // trace.enabled resolves false (createApp never wires this port then).
   // Fire-and-forget: never awaited, so it adds ZERO latency to command
   // dispatch — the CLI process's own event loop keeps it running until it

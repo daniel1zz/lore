@@ -46,7 +46,7 @@ import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 /**
  * What the decorator reads from a write context. Structurally satisfied by core's `WriteContext`
  * (`harnessRun: RunId | null` is assignable to `string | null`); declared as plain strings so a caller holding a
- * run id as an unbranded string (tests, MCP arguments) needs no cast.
+ * run id as an unbranded string (tests, raw arguments) needs no cast.
  */
 export interface StampingContext {
   readonly identity: {
