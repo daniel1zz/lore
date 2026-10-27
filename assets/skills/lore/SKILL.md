@@ -22,7 +22,7 @@ Every command supports `--json` for machine-readable output. Errors print to std
 
 ## AI defaults (SPEC-024)
 
-Lore detects the caller surface: human CLI → AI assist on; agent contexts (`CLAUDECODE=1` / `CI=true` / `LORE_AI_DEFAULT=off`) and MCP → AI off, so `lore create` never triggers a nested Claude call. Override per call with `--ai` / `--no-ai` (mutually exclusive; both → exit 2). Exception: `lore assess` and `lore review` ARE the AI intent — they default AI-on on every surface and have no non-AI mode (`--no-ai` always exits 2).
+Lore detects the caller surface: human CLI → AI assist on; agent contexts (`CLAUDECODE=1` / `CI=true` / `LORE_AI_DEFAULT=off`) → AI off, so `lore create` never triggers a nested Claude call. Override per call with `--ai` / `--no-ai` (mutually exclusive; both → exit 2). Exception: `lore assess` and `lore review` ARE the AI intent — they default AI-on on every surface and have no non-AI mode (`--no-ai` always exits 2).
 
 ## Retrieval (do this before creating)
 
@@ -46,7 +46,7 @@ Always search first — duplicating an existing doc fragments team knowledge. Li
 | adr | `--decision-status proposed\|accepted\|deprecated\|superseded` |
 | knowledge | `--sub-type ideation\|retro\|research\|reference\|assessment` |
 
-All six types are CLI-creatable. The MCP interface (`lore --mcp-server`) remains the path for arbitrary `extra` fields beyond these flags.
+All six types are CLI-creatable. `requires_uat` on a plan is set with `lore set <plan> --requires-uat`.
 
 Flags: `--title --parent --content --content-file <path> --priority critical|high|medium|low --tags a,b --json`.
 
@@ -73,7 +73,7 @@ lore ready <plan> [--json]     # computed readiness over blocks links — never 
 
 A recorded `--output-tail` is bounded: only the last {{lore:capture_tail_chars}} characters are kept.
 
-Identity: a write is attested by the agent integration's registered run alone — no write command takes `--by`, and no MCP write tool takes `by`. Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
+Identity: a write is attested by the agent integration's registered run alone — no write command takes `--by`. Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
 
 ## Review workflow
 
@@ -121,7 +121,6 @@ lore sync-docs [--from <dir>] [--dry-run]    # backfill disk .md spec files → 
 
 ## Agent/service integration
 
-- MCP (preferred for agents): `lore --mcp-server` — {{lore:mcp_tool_count}} `lore_*` tools: full-field CRUD, review/judgment (`lore_review`, `lore_pending` with `include_judgments`), task workflow (`lore_claim` / `lore_release` / `lore_evidence_add` / `lore_ready` — `by` is required explicitly), `lore_assess`, `lore_audit`. 
 - HTTP API: `lore serve` + `lore agent create --name <agent>` to issue API keys (`lore agent list|revoke`).
 
 ## Who can write
