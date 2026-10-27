@@ -59,6 +59,7 @@ import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import { sessionEnvFor } from "../../helpers/session-actor";
+import { registerTestRun } from "../../helpers/test-run-identity";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
@@ -553,6 +554,8 @@ async function registerInCorpus(dir: string, identity: Identity): Promise<void> 
   } finally {
     store.close();
   }
+  // reason: the per-call run value is verified by process ancestry, so this test process becomes the run's harness.
+  registerTestRun(dir, identity.harnessRun);
 }
 
 async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
@@ -564,7 +567,7 @@ async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
   }
 }
 
-describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the session tier) stamps the audit row at the composition root", () => {
+describe("CLI chokepoint: `LORE_HARNESS_RUN=R lore <write>` (name N from the session tier) stamps the audit row at the composition root", () => {
   /** The writer name ID_A's run derives — the only way a CLI/MCP write is named (BR-1055). */
   const NAME_A = ID_A.claimed;
 
@@ -581,7 +584,7 @@ describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the sessio
   it("claim named through the session tier leaves an audit row with harness_run R, author N and the source session", async () => {
     await registerInCorpus(dir, ID_A);
     const since = new Date().toISOString();
-    mustLore(["--harness-run", ID_A.harnessRun, "claim", task, "--worktree", dir], dir, sessionEnvFor(ID_A.claimed));
+    mustLore(["claim", task, "--worktree", dir], dir, { ...sessionEnvFor(ID_A.claimed), LORE_HARNESS_RUN: ID_A.harnessRun });
     const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
@@ -590,8 +593,8 @@ describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the sessio
     }
   });
 
-  it("the harness-run flag is consumed by the entry: it never reaches the command as an unknown flag", () => {
-    const r = lore(["--harness-run", ID_A.harnessRun, "get", task, "--json"], dir, sessionEnvFor("agent:matrix-reader"));
+  it("the run value is consumed by the entry: it never reaches the command as an argument or unknown flag", () => {
+    const r = lore(["get", task, "--json"], dir, { ...sessionEnvFor("agent:matrix-reader"), LORE_HARNESS_RUN: ID_A.harnessRun });
     expect(r.exitCode).toBe(0);
     expect(r.stderr).not.toContain("Unknown flag");
   });
@@ -605,9 +608,9 @@ describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the sessio
     vcs(dir, ["commit", "-q", "-m", "fixture state"]);
     const since = new Date().toISOString();
     mustLore(
-      ["--harness-run", ID_A.harnessRun, "evidence", task, "--oracle", "manual", "--command", "inspect fixture", "--result", "pass", "--output-tail", "1 passed"],
+      ["evidence", task, "--oracle", "manual", "--command", "inspect fixture", "--result", "pass", "--output-tail", "1 passed"],
       dir,
-      sessionEnvFor(ID_A.claimed),
+      { ...sessionEnvFor(ID_A.claimed), LORE_HARNESS_RUN: ID_A.harnessRun },
     );
     const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
     expect(rows.length).toBeGreaterThan(0);

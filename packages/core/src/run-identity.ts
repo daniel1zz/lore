@@ -241,9 +241,6 @@ export function hasClaimConflict(holder: ClaimHolder, claimant: ClaimParty): Cla
 /** The environment variable that carries the per-call run into every lore process of one Bash call. */
 export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
 
-/** Retired spelling of the carrier; only the refusal of it and the callers still being migrated name it. */
-export const HARNESS_RUN_FLAG = "--harness-run";
-
 const SAFE_RUN_PATTERN = /^[A-Za-z0-9:._-]+$/;
 
 /**

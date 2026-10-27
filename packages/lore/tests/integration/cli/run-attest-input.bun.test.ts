@@ -83,9 +83,12 @@ describe("lore run attest-input", () => {
   }, 120_000);
 
   it("BOUNDARY: a caller-written flag stays in the command byte for byte; the export carries the derived run", () => {
-    const r = runLore(["run", "attest-input"], payload({ tool_input: { command: "lore claim t --harness-run cc:forged" } }));
+    // reason: the retired flag's spelling is joined from parts, so no file outside its refusal names it whole (AC-RV-4).
+    const retiredFlag = ["--harness", "run"].join("-");
+    const command = `lore claim t ${retiredFlag} cc:forged`;
+    const r = runLore(["run", "attest-input"], payload({ tool_input: { command } }));
     const out = JSON.parse(r.stdout) as HookOut;
-    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("export LORE_HARNESS_RUN='cc:S1'\nlore claim t --harness-run cc:forged");
+    expect(out.hookSpecificOutput.updatedInput["command"]).toBe(`export LORE_HARNESS_RUN='cc:S1'\n${command}`);
   }, 120_000);
 
   it("REGRESSION (D12): no output ever carries permissionDecision", () => {

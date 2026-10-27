@@ -61,13 +61,14 @@ function childEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { ...e, ...extra };
 }
 
-function lore(args: string[]): Out {
-  const p = spawnSync(LORE_BIN, args, { cwd: corpus, env: childEnv(), encoding: "utf8" });
+/** `run` is the per-call run value (`LORE_HARNESS_RUN`), as the Bash hook hands it to a real call; its harness is this test process. */
+function lore(args: string[], run?: string): Out {
+  const p = spawnSync(LORE_BIN, args, { cwd: corpus, env: childEnv(run === undefined ? {} : { LORE_HARNESS_RUN: run }), encoding: "utf8" });
   return { stdout: p.stdout, stderr: p.stderr, exitCode: p.status ?? 1 };
 }
 
-function mustLore(args: string[]): Out {
-  const r = lore(args);
+function mustLore(args: string[], run?: string): Out {
+  const r = lore(args, run);
   if (r.exitCode !== 0) throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
   return r;
 }
@@ -146,7 +147,7 @@ describe("AC-MA-4: installed hook -> built dist/lore -> bootstrap shows the hold
     const start = runHook({ session_id: SESSION, hook_event_name: "SessionStart", source: "startup" }, "/tmp/e2e/7.sock");
     expect(start.exitCode).toBe(0);
     expect(start.stdout).toBe("");
-    mustLore(["claim", tasks.main, "--harness-run", MAIN_RUN]);
+    mustLore(["claim", tasks.main], MAIN_RUN);
     expect(addressHolding(tasks.main)).toBe("uds:/tmp/e2e/7.sock");
   });
 
@@ -161,7 +162,7 @@ describe("AC-MA-4: installed hook -> built dist/lore -> bootstrap shows the hold
 
   it("NEGATIVE: a session registered with no socket lists a null address", () => {
     runHook({ session_id: OTHER_SESSION, hook_event_name: "SessionStart", source: "startup" });
-    mustLore(["claim", tasks.other, "--harness-run", OTHER_RUN]);
+    mustLore(["claim", tasks.other], OTHER_RUN);
     expect(addressHolding(tasks.other)).toBeNull();
   });
 

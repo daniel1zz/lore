@@ -4,7 +4,7 @@
  *
  * Drives the real CLI (`bun run src/index.ts`) against a mkdtemp corpus (`lore init`) and a mkdtemp state
  * base (`CLAUDE_STATE_BASE_OVERRIDE`); never the real `~/.claude` or this repo's `.lore/`. The caller's run
- * is attested through `--harness-run <id>` after `lore run register`, exactly as the PreToolUse hook rewrites it.
+ * is attested through the per-call `LORE_HARNESS_RUN` value after `lore run register`, exactly as the PreToolUse hook rewrites it.
  *
  * Fixture session S: turn t1 (measured: a.ts run main, b.ts vcs, c.ts unknown), turn t2 (measured: d.ts run
  * helper A), turn t3 (changes.json absent -> unmeasured), helper A with an isolated measured change.
@@ -33,7 +33,7 @@ let corpus: string;
 let stateBase: string;
 
 function lore(args: string[], run?: string): Run {
-  const argv = run === undefined ? args : ["--harness-run", run, ...args];
+  const argv = args;
   const env: Record<string, string | undefined> = {
     ...process.env,
     HOME: corpus,
@@ -42,6 +42,8 @@ function lore(args: string[], run?: string): Run {
   };
   // The ambient identity of whoever runs this suite must never decide a verdict.
   for (const name of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) delete env[name];
+  // The run rides in the per-call env value, as the Bash hook hands it to a real call.
+  if (run !== undefined) env["LORE_HARNESS_RUN"] = run;
   const p = spawnSync("bun", ["run", ENTRY, ...argv], { cwd: corpus, encoding: "utf8", env });
   return { stdout: p.stdout ?? "", stderr: p.stderr ?? "", exitCode: p.status ?? 1 };
 }
@@ -105,12 +107,14 @@ beforeAll(() => {
   mkdirSync(corpus, { recursive: true });
   mkdirSync(stateBase, { recursive: true });
   must(lore(["init"]), "lore init");
-  must(lore(["run", "register", "--harness", "claude-code", "--session", SESSION]), "register main");
+  // reason: this test process is the harness of every run it registers, so a spawned `lore` verifies by ancestry.
+  const harnessPid = String(process.pid);
+  must(lore(["run", "register", "--harness", "claude-code", "--session", SESSION, "--harness-pid", harnessPid]), "register main");
   must(
-    lore(["run", "register", "--harness", "claude-code", "--session", SESSION, "--agent-id", "A", "--agent-type", "lore-implementer"]),
+    lore(["run", "register", "--harness", "claude-code", "--session", SESSION, "--agent-id", "A", "--agent-type", "lore-implementer", "--harness-pid", harnessPid]),
     "register helper",
   );
-  must(lore(["run", "register", "--harness", "claude-code", "--session", "no-such-sess"]), "register absent-trail session");
+  must(lore(["run", "register", "--harness", "claude-code", "--session", "no-such-sess", "--harness-pid", harnessPid]), "register absent-trail session");
   seedTrail();
 }, 120_000);
 

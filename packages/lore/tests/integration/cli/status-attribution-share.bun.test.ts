@@ -66,7 +66,8 @@ function lore(args: string[], cwd: string, frozen = true): Run {
   if (frozen) env.LORE_TEST_FROZEN_NOW = FROZEN_NOW;
   // reason: every write needs a known party; this suite's writer is a registered agent run (the `init` that creates the corpus has none to register yet).
   registerTestRun(cwd, TEST_RUN);
-  const argv = frozen ? ["bun", "run", "--preload", PRELOAD, ENTRY, "--harness-run", TEST_RUN, ...args] : ["bun", "run", ENTRY, "--harness-run", TEST_RUN, ...args];
+  env["LORE_HARNESS_RUN"] = TEST_RUN;
+  const argv = frozen ? ["bun", "run", "--preload", PRELOAD, ENTRY, ...args] : ["bun", "run", ENTRY, ...args];
   const p = Bun.spawnSync(argv, { cwd, env: env as Record<string, string> });
   return { stdout: p.stdout.toString(), stderr: p.stderr.toString(), exitCode: p.exitCode ?? 1 };
 }

@@ -28,13 +28,15 @@
 import type { LoreError } from "./errors.js";
 import {
   HARNESS_RUN_ENV,
-  HARNESS_RUN_FLAG,
   hasAgentHarnessMarker,
   isAgentRunId,
   nameOfAgentRun,
   type InvocationIdentity,
   type RunId,
 } from "./run-identity.js";
+
+/** Retired spelling of the run carrier: named only here, to refuse it (AC-RV-4); no other module knows it. */
+const RETIRED_RUN_FLAG = "--harness-run";
 
 /** An invocation's run carrier was refused as a usage error (the retired flag, or a value that is not an agent run). */
 export class RunIdentityArgumentError extends Error {
@@ -103,7 +105,7 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  */
 export function harnessRunFlagRetired(): RunIdentityArgumentError {
   return new RunIdentityArgumentError(
-    HARNESS_RUN_FLAG,
+    RETIRED_RUN_FLAG,
     `is retired. A lore call's run now travels in the per-call environment value ${HARNESS_RUN_ENV}, which the agent integration's hook sets for every Bash call; do not pass it by hand.`,
   );
 }
@@ -237,7 +239,7 @@ export function resolveInvocationIdentity(
   isBashHookInstalled: () => boolean,
 ): InvocationResolution {
   for (let i = 0; i < argv.length; i++) {
-    const runFlag = readFlagAt(argv, i, HARNESS_RUN_FLAG);
+    const runFlag = readFlagAt(argv, i, RETIRED_RUN_FLAG);
     if (runFlag !== null) throw harnessRunFlagRetired();
   }
   // reason: `--by` stays in the returned argv untouched — a few commands give it their own meaning (`ac supersede`,

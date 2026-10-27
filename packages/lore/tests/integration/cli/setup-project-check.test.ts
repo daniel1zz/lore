@@ -81,12 +81,12 @@ function envFor(repoDir: string): NodeJS.ProcessEnv {
 function runSetup(args: string[], cwd: string): RunResult {
   // reason: spawn bun by absolute path — PATH is emptied above so the child can never reach a real `claude` CLI.
   // reason: a read-only `--check` makes no write, so it needs no known party. The test spawn shim registers a run in the
-  // corpus under `cwd` before every `lore` start that names no `--harness-run` (a SQLite open that checkpoints
-  // lore.db-wal), and this suite asserts the tree is byte-identical. A start that already names the flag is left
-  // untouched (test-known-party-spawn.ts invariants), so the check names one and the shim writes nothing. (The
+  // corpus under `cwd` before every `lore` start whose env carries no run value (a SQLite open that checkpoints
+  // lore.db-wal), and this suite asserts the tree is byte-identical. A start whose env already carries a run value is left
+  // untouched (test-known-party-spawn.ts invariants), so the check carries one and the shim writes nothing. (The
   // LORE_TEST_IDENTITY=none opt-out does not hold here: the shim runs twice under Bun, and the second pass no longer sees it.)
-  const harnessRun = args.includes("--check") ? ["--harness-run", "cc:setup-check-readonly"] : [];
-  const result = spawnSync(BUN_BIN, ["run", INDEX_TS, ...harnessRun, "setup", ...args], { cwd, env: envFor(cwd), encoding: "utf8" });
+  const env = args.includes("--check") ? { ...envFor(cwd), LORE_HARNESS_RUN: "cc:setup-check-readonly" } : envFor(cwd);
+  const result = spawnSync(BUN_BIN, ["run", INDEX_TS, "setup", ...args], { cwd, env, encoding: "utf8" });
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 

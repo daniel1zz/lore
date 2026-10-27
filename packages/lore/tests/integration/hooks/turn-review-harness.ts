@@ -119,8 +119,8 @@ export function disableGates(repo: string): void {
   ].join("\n"));
 }
 
-export function runLore(cwd: string, args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync("lore", args, { cwd, encoding: "utf8" });
+export function runLore(cwd: string, args: string[], env?: NodeJS.ProcessEnv): { status: number | null; stdout: string; stderr: string } {
+  const r = spawnSync("lore", args, { cwd, encoding: "utf8", ...(env === undefined ? {} : { env }) });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
@@ -131,9 +131,10 @@ export function initLoreWithAnchoredSpec(repo: string, anchors: string[]): strin
   disableGates(repo);
   // a write is made by a known party (BR-1351): the fixture spec is written by a registered test run, as an installed hook would register it
   registerTestRun(repo, DEFAULT_TEST_RUN);
-  const args = ["--harness-run", DEFAULT_TEST_RUN, "create", "spec", "--title", "Anchored fixture spec", "--kind", "feature", "--no-ai", "--content", "## Overview\n\nBody.", "--json"];
+  const args = ["create", "spec", "--title", "Anchored fixture spec", "--kind", "feature", "--no-ai", "--content", "## Overview\n\nBody.", "--json"];
   for (const a of anchors) args.push("--code-anchor", a);
-  const created = runLore(repo, args);
+  // the run rides in the per-call env value; this test process is its harness (registerTestRun above)
+  const created = runLore(repo, args, { ...process.env, LORE_HARNESS_RUN: DEFAULT_TEST_RUN });
   if (created.status !== 0) throw new Error(`lore create spec failed: ${created.stderr}${created.stdout}`);
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 }

@@ -180,8 +180,8 @@ function firstWriteAttested(bin: string, root: string, project: string, claudeHo
   } catch {
     rewritten = undefined;
   }
-  if (rewritten === undefined || !rewritten.includes("--harness-run")) {
-    return { exit: 0, verdict: { pass: false, reason: `hook did not rewrite the command with --harness-run: ${pre.stdout.slice(0, 160)}` } };
+  if (rewritten === undefined || !rewritten.includes("export LORE_HARNESS_RUN=")) {
+    return { exit: 0, verdict: { pass: false, reason: `hook did not prefix the command with the per-call run export: ${pre.stdout.slice(0, 160)}` } };
   }
 
   const claim = spawnSync("sh", ["-c", rewritten], { cwd: project, env: hookEnv, encoding: "utf8", timeout: STEP_TIMEOUT_MS });
