@@ -40,6 +40,9 @@ class FakeGit {
   changedPaths(s: string, paths: string[]): Result<string[], LoreError> {
     return ok(this.changed.has(s) ? [...paths] : []);
   }
+  showFile(): Result<{ state: "unreachable" }, LoreError> {
+    return ok({ state: "unreachable" });
+  }
 }
 
 let seq = 0;

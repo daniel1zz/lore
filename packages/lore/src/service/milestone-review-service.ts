@@ -29,6 +29,7 @@ import {
   overallMilestoneVerdict,
   renderMilestoneReviewContent,
   type CreateDocInput,
+  type DecisionFinding,
   type DocRecord,
   type LinkType,
   type LlmMilestoneOutput,
@@ -55,6 +56,7 @@ import {
   type CitedRuleStateRow,
   type MainRedLedgerPort,
 } from "./milestone-review.js";
+import { applyDecisionFindings } from "./decision-recheck.js";
 import {
   applyRegressionFloor,
   applySnapshotRule,
@@ -84,6 +86,11 @@ export interface MilestoneReviewDeps {
    * always wires it, and a service without it records nothing.
    */
   readonly mainRedLedger?: MainRedLedgerPort;
+  /**
+   * The deterministic re-check of the plan's recorded decisions (`decision-recheck.ts`). Optional like the other
+   * measured ports: a service without it records no decision findings.
+   */
+  readonly recheckDecisions?: (bundle: PlanBundle) => Promise<Result<DecisionFinding[], LoreError>>;
 }
 
 /** Per-run inputs the adapter measured. */
@@ -288,13 +295,21 @@ export class MilestoneReviewService {
     if (!judged.ok) return judged;
     // reason: both measured inputs are applied AFTER the judge so it cannot waive them (Part D): an attributed
     // failing test file fails regression; snapshot_accuracy fails only on a contradicted cited rule.
-    const dimensions = applySnapshotRule(
-      applyRegressionFloor(
-        applyDeterministicDimensionRules(judged.value.dimensions),
-        attribution,
-        opts.suite?.status === "measured" ? opts.suite.commit : undefined,
+    const decisionFindingsResult = this.deps.recheckDecisions !== undefined ? await this.deps.recheckDecisions(bundle) : ok<DecisionFinding[]>([]);
+    if (!decisionFindingsResult.ok) return decisionFindingsResult;
+    const decisionFindings = decisionFindingsResult.value;
+    // reason: a wrong-when-written decision premise fails snapshot_accuracy AFTER the cited-rule rule so neither the judge
+    // nor that rule can turn it back into a pass or an n/a (spec D5).
+    const dimensions = applyDecisionFindings(
+      applySnapshotRule(
+        applyRegressionFloor(
+          applyDeterministicDimensionRules(judged.value.dimensions),
+          attribution,
+          opts.suite?.status === "measured" ? opts.suite.commit : undefined,
+        ),
+        citedRulesResult.value,
       ),
-      citedRulesResult.value,
+      decisionFindings,
     );
     // reason: optional port so hand-built services (unit tests, MCP stubs) stay valid; `app.ts` always wires it.
     const retiredResult = this.deps.listRetiredAcs !== undefined ? await this.deps.listRetiredAcs(bundle) : ok<RetiredAcRef[]>([]);
@@ -315,6 +330,7 @@ export class MilestoneReviewService {
       overall: overallMilestoneVerdict(dimensions),
       dimensions,
       decisions,
+      ...(decisionFindings.length > 0 ? { decision_findings: decisionFindings } : {}),
       prompt_version: MILESTONE_REVIEW_PROMPT_VERSION,
       diff_source: opts.diffSource,
     };

@@ -187,7 +187,7 @@ import { applyMigration040 } from "./migrations/migration-040.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
-import type { DecisionSubjectKey } from "./store-interface.js";
+import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
 
 // ─── SQLiteStore ─────────────────────────────────────────────────────────────
 
@@ -2262,6 +2262,27 @@ export class SQLiteStore implements StoreInterface {
               .prepare(`SELECT * FROM versions WHERE created_at >= ? ORDER BY created_at ASC`)
               .all(since) as VersionRow[])
           : (this.db.prepare(`SELECT * FROM versions ORDER BY created_at ASC`).all() as VersionRow[]);
+      return ok(rows.map(rowToVersionRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listDecisionVersions(query: DecisionVersionQuery): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+    const clauses: string[] = [];
+    const args: (string)[] = [];
+    if (query.docIds.length > 0) {
+      clauses.push(`doc_id IN (${query.docIds.map(() => "?").join(", ")})`);
+      args.push(...query.docIds);
+    }
+    for (const w of query.windows) {
+      clauses.push(w.to === undefined ? `(harness_run = ? AND created_at >= ?)` : `(harness_run = ? AND created_at >= ? AND created_at <= ?)`);
+      args.push(w.run, w.from, ...(w.to === undefined ? [] : [w.to]));
+    }
+    if (clauses.length === 0) return ok([]);
+    const sql = `SELECT * FROM versions WHERE decision IS NOT NULL AND (${clauses.join(" OR ")}) ORDER BY created_at ASC, doc_id ASC, version ASC`;
+      const rows = this.db.prepare(sql).all(...args) as VersionRow[];
       return ok(rows.map(rowToVersionRecord));
     } catch (e) {
       return wrapStoreError(e);

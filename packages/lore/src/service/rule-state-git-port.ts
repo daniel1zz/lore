@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import { gitDiffChangedPaths, gitDiffChangedSince } from "./git-diff-since.js";
-import type { GitPort } from "./rule-state-service.js";
+import { showFileAtRevision, type GitPort, type ShownFile } from "./rule-state-service.js";
 
 interface GitRun {
   status: number | null;
@@ -78,6 +78,10 @@ export class SpawnGitPort implements GitPort {
 
   changedPaths(sha: string, paths: string[]): Result<string[], LoreError> {
     return gitDiffChangedPaths(this.repoRoot, sha, paths);
+  }
+
+  showFile(rev: string, path: string): Result<ShownFile, LoreError> {
+    return showFileAtRevision((args) => this.run([...args]), rev, path);
   }
 
   private run(args: string[]): GitRun {

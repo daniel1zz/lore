@@ -33,6 +33,7 @@ const git = {
   isAncestor: (): Result<boolean, LoreError> => ok(true),
   changedSince: (): Result<boolean, LoreError> => ok(false),
   changedPaths: (): Result<string[], LoreError> => ok([]),
+  showFile: () => ok({ state: "unreachable" as const }),
 };
 
 let seq = 0;

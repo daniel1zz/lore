@@ -234,6 +234,15 @@ export interface StoreFilters {
   offset?: number;
 }
 
+/**
+ * Which decision-carrying version rows {@link StoreInterface.listDecisionVersions} selects: every version of a doc in
+ * `docIds`, plus every version written by `run` between `from` and `to` (inclusive ISO 8601; `to` absent = still open).
+ */
+export interface DecisionVersionQuery {
+  readonly docIds: readonly DocId[];
+  readonly windows: readonly { readonly run: string; readonly from: string; readonly to?: string }[];
+}
+
 export interface AuditFilters {
   doc_id?: DocId;
   actor?: string;
@@ -1167,6 +1176,13 @@ export interface StoreInterface {
    * @see PLAN task D (SPEC-035) — audit surface
    */
   listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
+
+  /**
+   * Version rows whose `decision` is non-null and that match `query` (a doc in `docIds`, or a `harness_run` inside a
+   * window), oldest first. Each row carries its parsed DecisionRecord; a stored value that no longer parses fails loud.
+   * Empty `docIds` and `windows` answer `ok([])` without a query.
+   */
+  listDecisionVersions(query: DecisionVersionQuery): Promise<Result<VersionRecord[], LoreError>>;
 
   /**
    * The narrow twin of {@link listAllVersions} for {@link AuditService.verify}'s completeness join: only the four
