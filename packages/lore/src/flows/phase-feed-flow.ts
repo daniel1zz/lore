@@ -27,11 +27,11 @@
  *     use); a clipped section's key is recorded in `truncated[]` — never silent.
  *     `budgets` accepts a `Partial<PhaseStartBudgets>` override (merged over the
  *     defaults) so this stays config-schema-agnostic — resolving `workflow.phase_feed.*`
- *     into a full `PhaseStartBudgets` is the CLI/MCP adapter's job, mirroring
+ *     into a full `PhaseStartBudgets` is the CLI adapter's job, mirroring
  *     `ai.assess.*`/`truncateSection`'s "budget resolution vs. budget application"
  *     split.
  *   - `buildPhaseStartPack` is deterministic for identical deps+args — the
- *     CLI/MCP deep-equal foundation for AC-P-4.
+ *     deep-equal foundation for AC-P-4.
  *
  * `CHECKPOINT_PRODUCED_TYPE["phase-start"]` is registered in `feed-flow.ts`'s SSOT
  * map (this module's sibling export), NOT a parallel dispatch path — `lore feed
@@ -132,7 +132,7 @@ const KNOWLEDGE_POINTER_LIMIT = 20;
  */
 export const PHASE_START_CHECKPOINT = "phase-start";
 
-/** The assembled phase-start pack — the shape both CLI `lore feed phase-start` and MCP `lore_feed` render/return. */
+/** The assembled phase-start pack — the shape CLI `lore feed phase-start` renders/returns. */
 export interface PhaseStartPack {
   readonly phase_id: string;
   readonly sections: {

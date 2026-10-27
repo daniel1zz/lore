@@ -86,11 +86,11 @@
  *     `opts.diffSource` verbatim, into `_finalizeAssessment`, which runs `verifyFindingPaths`
  *     on the (grounding-)suppressed `typedGaps` — withdrawing any finding with an absent
  *     declared path into `unverifiable_findings[]`, tallying `paths_verified`, and NEVER
- *     recomputing `overall_score`. `opts.diffSource` is supplied by both production callers,
- *     `adapters/cli/commands/assess.ts` and `adapters/mcp/tools.ts` (each passes its
+ *     recomputing `overall_score`. `opts.diffSource` is supplied by its production caller,
+ *     `adapters/cli/commands/assess.ts` (which passes its
  *     resolved `diffSource` local into `assessPlan`; closed by
  *     task-thread-diff-source-through-the-cli-and-mcp-assess-adapters), so a live
- *     `lore assess` / `lore_assess` run verifies declared paths against the assessed commit.
+ *     `lore assess` run verifies declared paths against the assessed commit.
  *     A caller that omits it still gets `paths_verified.unchecked`, never a silent pass.
  *
  * Side-effect class: IO (delegates to AIProvider.generate, Telemetry.emit, and — D2,
@@ -435,7 +435,7 @@ export class AIProviderService {
 
     // Truncate content to prevent runaway prompt cost (SPEC-019 §9.4)
     // reason: truncation happens here (service), not in the CLI, so the boundary is
-    // consistent regardless of which adapter (CLI / future MCP) calls refineContent.
+    // consistent regardless of which adapter calls refineContent.
     const truncatedContent = doc.content.length > this._refineMaxInputChars
       ? doc.content.slice(0, this._refineMaxInputChars)
       : doc.content;
@@ -665,7 +665,7 @@ export class AIProviderService {
     }
 
     // Both attempts malformed → AI_PROVIDER_ERROR with a raw-output prefix.
-    // No judgment is returned — the caller (CLI/MCP) only calls JudgmentService.record
+    // No judgment is returned — the caller (CLI) only calls JudgmentService.record
     // after an ok() return.
     const rawPrefix = (second.rawContent ?? "").slice(0, 500);
     const doubleFailure = err({
@@ -685,7 +685,7 @@ export class AIProviderService {
    * Judge whether a single document still holds true (SPEC-044 §Design Decisions D5).
    * Used by `StalenessProbeService` (never called directly by an adapter — mirrors
    * `judgeDoc`'s role in the review pipeline, but this is invoked per-candidate from
-   * `StalenessProbeService`'s batch orchestration, not from the CLI/MCP layer directly).
+   * `StalenessProbeService`'s batch orchestration, not from the CLI layer directly).
    *
    * Flow: build the judge prompt (materials truncated per `config.ai.staleness.*`
    * budgets) → invoke the provider → extract JSON from the raw response → validate

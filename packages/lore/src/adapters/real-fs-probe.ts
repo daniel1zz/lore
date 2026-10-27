@@ -1,11 +1,10 @@
 /**
  * Real filesystem probe (SPEC-045 §Design Decisions D4) — the `FsProbe`
- * implementation `DriftCheckService.checkDrift` is injected with by the CLI/MCP
- * adapters, backed by synchronous `node:fs` calls resolved against a repo root
+ * implementation `DriftCheckService.checkDrift` is injected with by the CLI
+ * adapter, backed by synchronous `node:fs` calls resolved against a repo root
  * (the SAME `process.cwd()` assumption `lore status --check-tree`'s blueprint
  * lookup already makes). Shared by `adapters/cli/commands/status.ts` (CLI
- * `--check-drift`) and `adapters/mcp/tools.ts` (`lore_status {check_drift: true}`)
- * — one implementation, never two independently-written probes.
+ * `--check-drift`) — one implementation, never two independently-written probes.
  *
  * Public surface:
  *   buildRealFsProbe(repoRoot?) — constructs an `FsProbe` rooted at `repoRoot`

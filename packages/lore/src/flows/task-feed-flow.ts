@@ -42,7 +42,7 @@
  *     records section keys in `truncated[]` when a section itself overflows its
  *     configured budget.
  *   - `buildTaskStartPack` is deterministic for identical deps+args (AC-070-1) —
- *     the CLI `--json` / MCP deep-equal foundation.
+ *     the CLI `--json` deep-equal foundation.
  *   - **SPEC-070 AC-070-11 (review finding F2)**: the wiring's fail-evidence
  *     extraction is PER-ENTRY tolerant (a documented divergence from
  *     `extractEvidence`'s whole-array fail-closed contract, which stays
@@ -358,7 +358,7 @@ const defaultNow = (): string => new Date().toISOString();
  */
 export const TASK_START_CHECKPOINT = "task-start";
 
-/** The assembled task-start pack — the shape both CLI `lore feed task-start` and (a future) MCP `lore_feed` render/return. */
+/** The assembled task-start pack — the shape CLI `lore feed task-start` renders/returns. */
 export interface TaskStartPack {
   readonly task_id: string;
   readonly sections: {
@@ -422,7 +422,7 @@ function describeError(error: LoreError): string {
  * @param task - The retracted task, verbatim from the bundle (its `slug` is the stable
  *   identity carried on `value`, never the caller's raw id-or-slug input)
  * @param validity - The SSOT projection's verdict for this task
- * @returns A `VALIDATION_ERROR` on `extra.validity` → CLI exit 4, MCP `isError: true`
+ * @returns A `VALIDATION_ERROR` on `extra.validity` → CLI exit 4
  */
 function retractedTaskRefusal(task: DocRecord, validity: ValidityStatus): LoreError {
   // reason: an `invalidated: true` verdict entails a stored `invalid_at` (the projection's

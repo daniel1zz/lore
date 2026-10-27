@@ -1,10 +1,10 @@
 /**
  * Computed `validity_state` payload — the SPEC-043 §Design Decisions D6 structured
- * signal for agent-facing surfaces that return JSON (MCP `lore_get`, the HTTP doc
+ * signal for agent-facing surfaces that return JSON (the HTTP doc
  * route) rather than a rendered markdown banner (CLI `get`/export-docs/`lore feed`
  * use `renderDocMarkdown`/`resolveValidityBanner` instead — see `feed-flow.ts` and
  * `outline-service.ts`). Surface-neutral shared helper (mirrors `calibration-hook.ts`/
- * `supersede-flow.ts`'s placement in `flows/`) so MCP and HTTP never diverge on this
+ * `supersede-flow.ts`'s placement in `flows/`) so no surface diverges on this
  * computation.
  *
  * Public surface:

@@ -183,7 +183,7 @@ export interface StoreFilters {
   /**
    * A `knowledge` document's `extra.sub_type`, as a RETRIEVAL predicate —
    * surfaced as `lore list --sub-type <v>` / `lore search --sub-type <v>` and
-   * the matching MCP `lore_list`/`lore_search` fields.
+   * the matching HTTP fields.
    *
    * ⛔ **Every implementation MUST apply this IN THE QUERY, never as a filter
    * over already-fetched rows.** `sub_type` lives in the untyped `extra` JSON
@@ -198,7 +198,7 @@ export interface StoreFilters {
    * built to fail.
    *
    * @remarks Only `knowledge` docs ever carry `extra.sub_type`, so this
-   *   composes with `type: "knowledge"`; the CLI/MCP surfaces REFUSE it
+   *   composes with `type: "knowledge"`; the CLI surface REFUSES it
    *   alongside any other `type` (usage error, exit 2) rather than returning a
    *   silently empty set. The store layer itself applies no such cross-field
    *   rule — it is a pure column predicate here, and a caller pairing it with
@@ -578,7 +578,7 @@ export interface StoreInterface {
    * Directly assigns the EXACT `ordinal` value passed in — the ONLY store
    * write path that does NOT compute `MAX(ordinal)+1` (SPEC-084 D7: "repair
    * migration uses an internal store path"). Deliberately NOT exposed via
-   * CLI/MCP/HTTP and not for any other caller — `insertWithAllocatedOrdinal`/
+   * CLI/HTTP and not for any other caller — `insertWithAllocatedOrdinal`/
    * `allocateOrdinalForExisting` remain the only two ALLOCATION sites (Plan
    * Invariant 2); this is a distinct, sanctioned TARGETED-ASSIGNMENT path
    * used exclusively by `OrdinalMigrationService`'s one-shot repair, whose
