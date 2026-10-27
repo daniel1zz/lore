@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "25d81c3a0b0fd170c038758b3ffe7bc6b3d05ecf16e5a8546aeb48199091c87c",
+  tree_digest: "af2361b6d643e75c400a210ba8f965c9324b0fadfa6f014abbd3850c250c0ad2",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -74,7 +74,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "4a5cd0e1551a21ec0c2ccd6ef6d17fc18fd48ec7e03b67a39eef69fe07a8adc3" },
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "034fb1c717e72f84a2f2bac0fd8077368de4707b5be4106e983350112d1499d6" },
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "f1b2d5ac2039720f9b5f1fc50686a291e0c3cfaca6d7e3ccd9483c3264efcf7f" },
-  { path: "hooks/pre-edit-anchor-gate.mjs", kind: "hook", ownership: "managed", sha256: "344288b7f8bbfa4b57f86ec0dc644a328347ada12dd6cb3efef6b4eb9466e848" },
+  { path: "hooks/pre-edit-anchor-gate.mjs", kind: "hook", ownership: "managed", sha256: "66448a57627a9a9c55a4703e4efe3a0db6b282395835a7198f4b5fb0af75d7e9" },
   { path: "hooks/pre-helper-foreign-working-copy-gate.mjs", kind: "hook", ownership: "managed", sha256: "ad18721f18395d3fa41f57eb17246766e872ed5db967ea03ac7518252ae9da97" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "8c25ad69e356ed696cb5ee3d33697adbef354a1fc6181442b83ee56bfea7a451" },
   { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "6bde25c59c3fe8605808d0e16edca4a63820b1335a010c95021c7a46d6210b5f" },
