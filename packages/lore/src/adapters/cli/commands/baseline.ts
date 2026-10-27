@@ -72,12 +72,21 @@ import { adoptCommand } from "./baseline-adopt.js";
 import { runFidelity } from "../../../service/fidelity-sample.js";
 import type { FidelityRecord } from "../../../service/fidelity-sample.js";
 import { printLine } from "../output.js";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
+import type { DecisionDraft } from "../../../service/decision-gate.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+/** The decision flags of a node-part verb, or the exit code of the refusal to report (BR-1476; the service decides whether one is required). */
+function decisionOf(inv: Invocation, args: Record<string, unknown>, json: boolean): { draft: DecisionDraft | undefined } | ExitReport {
+  const parsed = parseDecisionFlags(args);
+  if (!parsed.ok) return reportFailure(inv, parsed.error, json);
+  return { draft: parsed.value };
 }
 
 /** What turns the node's pending revision into its approved version (BR-1338). */
@@ -559,13 +568,16 @@ export default defineLoreCommand({
       args: {
         node: { type: "positional", description: "Baseline node ID or slug", required: true },
         label: { type: "positional", description: "New label", required: true },
+        ...DECISION_FLAG_ARGS,
         ...commonArgs,
       },
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
         return await withRuleService(inv, async (svc): Promise<number> => {
-          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv) });
+          const decision = decisionOf(inv, args, args.json === true);
+          if (typeof decision === "number") return decision;
+          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv), decision: decision.draft });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           const isPending = approvedLabelOf(result.value) !== args.label;
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label, pending: isPending, status: result.value.status } }, null, 2));
@@ -580,16 +592,19 @@ export default defineLoreCommand({
         leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
         add: { type: "string", description: "[repeatable] Rule id (BR-n) to depend on; must exist" },
         remove: { type: "string", description: "[repeatable] Rule id (BR-n) to stop depending on" },
+        ...DECISION_FLAG_ARGS,
         ...commonArgs,
       },
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
         return await withRuleService(inv, async (svc): Promise<number> => {
+          const decision = decisionOf(inv, args, args.json === true);
+          if (typeof decision === "number") return decision;
           const result = await svc.setDependsOn(
             args.leaf as string,
             { add: repeatable(args.add), remove: repeatable(args.remove) },
-            { by: resolveActor(inv) },
+            { by: resolveActor(inv), decision: decision.draft },
           );
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           const dependsOn = effectiveNodePart(result.value).depends_on;
@@ -611,6 +626,7 @@ export default defineLoreCommand({
             term: { type: "string", description: "The term", required: true },
             meaning: { type: "string", description: "What it means in this product", required: true },
             note: { type: "string", description: "Optional clarification" },
+            ...DECISION_FLAG_ARGS,
             ...commonArgs,
           },
           async run(context) {
@@ -622,7 +638,9 @@ export default defineLoreCommand({
                 meaning: args.meaning as string,
                 ...(args.note !== undefined ? { note: args.note as string } : {}),
               };
-              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(inv) });
+              const decision = decisionOf(inv, args, args.json === true);
+              if (typeof decision === "number") return decision;
+              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(inv), decision: decision.draft });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
               const isPending = !(approvedGlossaryOf(result.value) as Array<{ term?: unknown }>).some((g) => g.term === entry.term);
               if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term, pending: isPending, status: result.value.status } }, null, 2));
@@ -636,13 +654,16 @@ export default defineLoreCommand({
           args: {
             node: { type: "positional", description: "Baseline root|branch ID or slug", required: true },
             term: { type: "string", description: "The exact term to remove", required: true },
+            ...DECISION_FLAG_ARGS,
             ...commonArgs,
           },
           async run(context) {
             const { args } = context;
             const inv = invocationOf(context);
             return await withRuleService(inv, async (svc): Promise<number> => {
-              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv) });
+              const decision = decisionOf(inv, args, args.json === true);
+              if (typeof decision === "number") return decision;
+              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv), decision: decision.draft });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
               const isPending = (approvedGlossaryOf(result.value) as Array<{ term?: unknown }>).some((g) => g.term === args.term);
               if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term, pending: isPending, status: result.value.status } }, null, 2));
@@ -659,6 +680,7 @@ export default defineLoreCommand({
         leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
         command: { type: "string", description: "[repeatable] CLI command name (e.g. 'ac add') this leaf answers for" },
         "remove-command": { type: "string", description: "[repeatable] Command name to drop" },
+        ...DECISION_FLAG_ARGS,
         ...commonArgs,
       },
       async run(context) {
@@ -681,7 +703,9 @@ export default defineLoreCommand({
             else printLine(inv.io.stdout, `${slug}: command write authorized; nothing to record (pass --command/--remove-command to change the declared commands).`);
             return 0;
           }
-          const result = await svc.setCommands(args.leaf as string, change, { by });
+          const decision = decisionOf(inv, args, json);
+          if (typeof decision === "number") return decision;
+          const result = await svc.setCommands(args.leaf as string, change, { by, decision: decision.draft });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const commands = effectiveNodePart(result.value).commands;
           const approvedCommands = approvedCommandsOf(result.value);
