@@ -97,7 +97,7 @@ function createTask(title: string): string {
     ["create", "task", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
     tmpDir,
   );
-  expect(r.exitCode).toBe(0);
+  expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
   return slugOf(r.stdout);
 }
 
