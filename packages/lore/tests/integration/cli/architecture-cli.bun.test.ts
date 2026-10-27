@@ -38,6 +38,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 import { LoreBaselineAddSchema, LoreRuleAddSchema, LoreRuleSetSchema, registerTools } from "../../../src/adapters/mcp/tools.js";
 
 setDefaultTimeout(300_000);
@@ -162,7 +163,7 @@ describe("lore rule add on architecture nodes", () => {
     const r = runLore(
       ["rule", "add", standard, "--statement", "Services return Result", ...RULE,
         "--current-reality", "some services throw", "--target-rule", "all return Result",
-        "--current-exception", "AD-1", "--migration", "convert per module", "--json"],
+        "--current-exception", "AD-1", "--migration", "convert per module", "--json", ...DECIDED_FLAGS],
       dir,
     );
     expect(r.exitCode).toBe(0);
@@ -189,7 +190,7 @@ describe("lore rule add on architecture nodes", () => {
 
   it("--current-exceptions-none stores an empty exception list; combined with --current-exception exits 2", () => {
     const four = ["--current-reality", "r", "--target-rule", "t", "--migration", "m"];
-    const none = runLore(["rule", "add", standard, "--statement", "Clean standard", ...RULE, ...four, "--current-exceptions-none"], dir);
+    const none = runLore(["rule", "add", standard, "--statement", "Clean standard", ...RULE, ...four, "--current-exceptions-none", ...DECIDED_FLAGS], dir);
     expect(none.exitCode).toBe(0);
     expect(none.stdout).toContain("Added AS-");
     const both = runLore(["rule", "add", standard, "--statement", "Both", ...RULE, ...four, "--current-exceptions-none", "--current-exception", "AD-1"], dir);
@@ -206,7 +207,7 @@ describe("lore rule add on architecture nodes", () => {
 
 describe("lore rule set edits the four parts", () => {
   it("updates current_reality and migration on AS-1, leaving target_rule", () => {
-    const r = runLore(["rule", "set", "AS-1", "--current-reality", "reality v2", "--migration", "migration v2", "--json"], dir);
+    const r = runLore(["rule", "set", "AS-1", "--current-reality", "reality v2", "--migration", "migration v2", "--json", ...DECIDED_FLAGS], dir);
     expect(r.exitCode).toBe(0);
     const rule = (JSON.parse(r.stdout) as { data: { rule: { current_reality: string; migration: string; target_rule: string } } }).data.rule;
     expect(rule.current_reality).toBe("reality v2");
@@ -216,7 +217,7 @@ describe("lore rule set edits the four parts", () => {
 
   it("replaces current_exceptions; a non-live id exits 4", () => {
     expect(runLore(["rule", "set", "AS-1", "--current-exception", "AD-99"], dir).exitCode).toBe(4);
-    expect(runLore(["rule", "set", "AS-1", "--current-exception", "AD-1"], dir).exitCode).toBe(0);
+    expect(runLore(["rule", "set", "AS-1", "--current-exception", "AD-1", ...DECIDED_FLAGS], dir).exitCode).toBe(0);
   });
 });
 
@@ -267,7 +268,10 @@ describe("MCP tools accept the architecture fields", () => {
       expect(added.isError).toBeFalsy();
       expect((added.content[0] as { text: string }).text).toContain("AS-");
       const set = await tools["lore_rule_set"]!.handler({ harness_run: LIVE_TEST_RUN, rule: "AS-1", by: ACTOR, migration: "mcp migration" }, {});
-      expect(set.isError).toBeFalsy();
+      // reason: BR-1476 — AS-1 sits on a node with an approved version, and an MCP caller cannot supply a decision, so the
+      // service refuses the edit; the CLI half above covers the `rule set` of the four parts with its decision.
+      expect(set.isError).toBe(true);
+      expect((set.content[0] as { text: string }).text).toContain("decision");
     } finally {
       app.close();
       process.chdir(prevCwd);

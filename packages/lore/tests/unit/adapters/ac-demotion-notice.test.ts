@@ -55,6 +55,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
 import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -201,7 +202,7 @@ describe("demotion-blast-radius — ac add/set print the approved-to-draft demot
       expect(getStatus(tmpDir, zeroSpecSlug)).toBe("approved");
 
       const zeroResult = runLore(
-        ["ac", "set", zeroSpecSlug, "AC-1", "--statement", "Rejects malformed input with an exact field name"],
+        ["ac", "set", zeroSpecSlug, "AC-1", "--statement", "Rejects malformed input with an exact field name", ...DECIDED_FLAGS],
         tmpDir,
       );
       expect(zeroResult.exitCode).toBe(0);
@@ -220,7 +221,7 @@ describe("demotion-blast-radius — ac add/set print the approved-to-draft demot
       expect(getStatus(tmpDir, specSlug)).toBe("approved");
 
       const result = runLore(
-        ["ac", "set", specSlug, "AC-1", "--statement", "Rejects malformed input with an exact field name"],
+        ["ac", "set", specSlug, "AC-1", "--statement", "Rejects malformed input with an exact field name", ...DECIDED_FLAGS],
         tmpDir,
       );
       expect(result.exitCode).toBe(0);
@@ -272,7 +273,7 @@ describe("demotion-blast-radius — ac add/set print the approved-to-draft demot
       approveDoc(tmpDir, specSlug);
 
       const first = runLore(
-        ["ac", "set", specSlug, "AC-1", "--statement", "Rejects malformed input with an exact field name"],
+        ["ac", "set", specSlug, "AC-1", "--statement", "Rejects malformed input with an exact field name", ...DECIDED_FLAGS],
         tmpDir,
       );
       expect(first.exitCode).toBe(0);
@@ -330,6 +331,7 @@ describe("demotion-blast-radius — ac add/set print the approved-to-draft demot
           "AC-1",
           "--statement",
           "Rejects malformed input with an exact field name",
+          ...DECIDED_FLAGS,
           "--json",
         ],
         tmpDir,

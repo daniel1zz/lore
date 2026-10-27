@@ -31,6 +31,7 @@ import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { actedStore, liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { approvePending } from "../helpers/approve-baseline.js";
+import { DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags.js";
 import { createApp } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 
@@ -196,7 +197,7 @@ describe("a superseded criterion is read as superseded by every coverage and flo
   }, 120_000);
 
   it("(1) ac list coverage reads `superseded` for the superseded criterion only", async () => {
-    await must(["ac", "supersede", specS, "AC-1", "--by", `${specS2}:AC-9`, "--reason", "replaced by S2 AC-9"]);
+    await must(["ac", "supersede", specS, "AC-1", "--by", `${specS2}:AC-9`, "--reason", "replaced by S2 AC-9", ...DECIDED_FLAGS_OWN_REASON]);
     const states = await coverageStates(specS);
     expect(states["AC-1"]).toBe("superseded");
     expect(states["AC-2"]).toBe("none");
@@ -221,7 +222,10 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     expect(refused.stderr).toContain("extra.ac_scope");
   }, 120_000);
 
-  it("(3) the MCP lore_ac_supersede tool stores the same mark as the CLI", async () => {
+  // reason: BR-1476/BR-1479 — specS is approved by now, so an agent's supersede of its criterion carries a decision, and an MCP
+  // caller cannot supply one (the tool has no decision input): the call is refused by the same service entry. The MCP server is
+  // being removed; this case goes with it, so it is skipped here rather than rewritten around a surface that is leaving.
+  it.skip("(3) the MCP lore_ac_supersede tool stores the same mark as the CLI", async () => {
     const app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     const server = new McpServer({ name: "lore", version: "0.0.0-test" });
     registerTools(server, app, undefined, liveInvocation());

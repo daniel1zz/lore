@@ -32,6 +32,7 @@ import { createApp } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
 import { registerTestRun } from "../helpers/test-run-identity.js";
+import { DECIDED_FLAGS, DECIDED_STATEMENT_FLAGS } from "../helpers/decision-flags.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -153,7 +154,7 @@ describe(`${SPEC_QUALIFIED} (a) rule add and rule set no longer demote a baselin
   it("rule add on an approved leaf records a pending add: one version, no demotion line, derived status draft", () => {
     const { leaf } = approvedLeaf();
     const before = versionOf(leaf);
-    const r = runLore(["rule", "add", leaf, "--statement", "added to an approved leaf", ...RULE_FLAGS]);
+    const r = runLore(["rule", "add", leaf, "--statement", "added to an approved leaf", ...RULE_FLAGS, ...DECIDED_FLAGS]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain("is now draft");
     expect(r.stdout).toContain("pending add");
@@ -164,7 +165,7 @@ describe(`${SPEC_QUALIFIED} (a) rule add and rule set no longer demote a baselin
 
   it("rule add --json carries no data.demoted and says it is pending", () => {
     const { leaf } = approvedLeaf();
-    const r = runLore(["rule", "add", leaf, "--statement", "json add", ...RULE_FLAGS, "--json"]);
+    const r = runLore(["rule", "add", leaf, "--statement", "json add", ...RULE_FLAGS, ...DECIDED_FLAGS, "--json"]);
     expect(r.exitCode).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { demoted?: DemotedPayload; pending?: boolean } }).data;
     expect(data.demoted).toBeUndefined();
@@ -174,14 +175,14 @@ describe(`${SPEC_QUALIFIED} (a) rule add and rule set no longer demote a baselin
   it("rule set on an approved leaf records a pending revision: no demotion line, no data.demoted, one version", () => {
     const text = approvedLeaf();
     const textBefore = versionOf(text.leaf);
-    const r = runLore(["rule", "set", text.rule, "--statement", "edited on an approved leaf"]);
+    const r = runLore(["rule", "set", text.rule, "--statement", "edited on an approved leaf", ...DECIDED_STATEMENT_FLAGS]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain("is now draft");
     expect(r.stdout).toContain("pending revision");
     expect(versionOf(text.leaf)).toBe(textBefore + 1);
 
     const json = approvedLeaf();
-    const j = runLore(["rule", "set", json.rule, "--statement", "json edit", "--json"]);
+    const j = runLore(["rule", "set", json.rule, "--statement", "json edit", ...DECIDED_STATEMENT_FLAGS, "--json"]);
     expect(j.exitCode).toBe(0);
     const data = (JSON.parse(j.stdout) as { data: { demoted?: DemotedPayload; pending?: boolean } }).data;
     expect(data.demoted).toBeUndefined();
@@ -190,7 +191,10 @@ describe(`${SPEC_QUALIFIED} (a) rule add and rule set no longer demote a baselin
 });
 
 describe(`${SPEC_QUALIFIED} (a) MCP lore_rule_add results carry no demoted`, () => {
-  it("lore_rule_add on an approved leaf returns a result without demoted", async () => {
+  // reason: BR-1476 — an agent's rule add to a leaf with an approved version carries a decision, and an MCP caller cannot supply one
+  // (the tool has no decision input), so the service refuses the call. The MCP server is being removed; the CLI half of AC-DC2-18
+  // above covers the same "no demoted" claim, so this case is skipped rather than rewritten around a surface that is leaving.
+  it.skip("lore_rule_add on an approved leaf returns a result without demoted", async () => {
     const { leaf } = approvedLeaf();
     const config = LoreConfigSchema.parse({
       project: { name: "dc2-18", author: "tester" },
@@ -226,14 +230,14 @@ describe(`${SPEC_QUALIFIED} (b)(c) ac set announces, ac add does not demote`, ()
   it("(b) ac set on an approved spec prints the same line on stdout, and --json carries demoted", () => {
     const spec = approvedSpec();
     const before = versionOf(spec);
-    const r = runLore(["ac", "set", spec, "AC-1", "--statement", "x"]);
+    const r = runLore(["ac", "set", spec, "AC-1", "--statement", "x", ...DECIDED_FLAGS]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain(demotionLine(spec, before + 1));
     expect(statusOf(spec)).toBe("draft");
 
     const jsonSpec = approvedSpec();
     const jsonBefore = versionOf(jsonSpec);
-    const j = runLore(["ac", "set", jsonSpec, "AC-1", "--statement", "y", "--json"]);
+    const j = runLore(["ac", "set", jsonSpec, "AC-1", "--statement", "y", ...DECIDED_FLAGS, "--json"]);
     expect(j.exitCode).toBe(0);
     const demoted = (JSON.parse(j.stdout) as { data: { demoted?: DemotedPayload } }).data.demoted;
     expect(demoted).toEqual({ slug: jsonSpec, from: "approved", to: "draft", version: jsonBefore + 1 });
@@ -241,7 +245,7 @@ describe(`${SPEC_QUALIFIED} (b)(c) ac set announces, ac add does not demote`, ()
 
   it("(c) ac add on an approved spec prints no demotion line and the spec stays approved", () => {
     const spec = approvedSpec();
-    const r = runLore(["ac", "add", spec, "AC-2", "--statement", "another", "--mode", "human", "--note", "n"]);
+    const r = runLore(["ac", "add", spec, "AC-2", "--statement", "another", "--mode", "human", "--note", "n", ...DECIDED_FLAGS]);
     expect(r.exitCode).toBe(0);
     expect(`${r.stdout}${r.stderr}`).not.toContain("is now draft");
     expect(statusOf(spec)).toBe("approved");

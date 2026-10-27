@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store";
 import { specCitesLiveRuleInCorpus } from "../../src/service/spec-approval-citation";
 import { APPROVED_STATEMENT, RULE_ARGS, createItemsCorpus, type ItemsCorpus } from "../helpers/baseline-items-corpus";
+import { DECIDED_FLAGS, DECIDED_STATEMENT_FLAGS } from "../helpers/decision-flags";
 
 const TIMEOUT_MS = 120_000;
 const REVISED = "The revised statement Y of the first rule.";
@@ -44,7 +45,7 @@ async function citesLive(ruleId: string): Promise<boolean> {
 
 beforeAll(async () => {
   corpus = await createItemsCorpus("bia-1");
-  await corpus.must(["rule", "add", corpus.leaf, "--statement", SECOND, ...RULE_ARGS]);
+  await corpus.must(["rule", "add", corpus.leaf, "--statement", SECOND, ...RULE_ARGS, ...DECIDED_FLAGS]);
   await corpus.approveAll(corpus.leaf);
 }, TIMEOUT_MS);
 
@@ -53,7 +54,7 @@ afterAll(() => corpus.cleanup());
 describe("AC-BIA-1: a rule revision is pending while the approved version governs", () => {
   it("HAPPY: rule set records a pending revision of BR-1 only; the other items stay approved", async () => {
     const before = corpus.node(corpus.leaf);
-    const set = await corpus.lore(["rule", "set", "BR-1", "--statement", REVISED]);
+    const set = await corpus.lore(["rule", "set", "BR-1", "--statement", REVISED, ...DECIDED_STATEMENT_FLAGS]);
     expect(set.exitCode).toBe(0);
     expect(set.stdout).toContain("pending revision of BR-1");
 
@@ -92,7 +93,7 @@ describe("AC-BIA-1: a rule revision is pending while the approved version govern
     const byPending = await corpus.lore(["rule", "find", "--text", "revised statement Y"]);
     expect(byPending.stdout).toContain("No matching rules");
     // a pending retirement of BR-2 does not stop it being live: a criterion citing it is still citable
-    const retire = await corpus.lore(["rule", "set", "BR-2", "--lifecycle", "retired", "--note", "no longer true"]);
+    const retire = await corpus.lore(["rule", "set", "BR-2", "--lifecycle", "retired", "--note", "no longer true", ...DECIDED_FLAGS]);
     expect(retire.exitCode).toBe(0);
     expect(await citesLive("BR-2")).toBe(true);
     const tree = JSON.parse((await corpus.lore(["baseline", "tree", corpus.leaf, "--json"])).stdout) as {
@@ -106,7 +107,7 @@ describe("AC-BIA-1: a rule revision is pending while the approved version govern
   }, TIMEOUT_MS);
 
   it("BOUNDARY: setting a statement back to the approved text leaves no revision of that rule", async () => {
-    const back = await corpus.lore(["rule", "set", "BR-1", "--statement", APPROVED_STATEMENT]);
+    const back = await corpus.lore(["rule", "set", "BR-1", "--statement", APPROVED_STATEMENT, ...DECIDED_STATEMENT_FLAGS]);
     expect(back.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
     expect(Object.keys(node.extra.pending?.rules ?? {})).toEqual(["BR-2"]);
@@ -118,7 +119,7 @@ describe("AC-BIA-1: a rule revision is pending while the approved version govern
   }, TIMEOUT_MS);
 
   it("STATE: approving the leaf after a review makes Y the approved version", async () => {
-    await corpus.must(["rule", "set", "BR-1", "--statement", REVISED]);
+    await corpus.must(["rule", "set", "BR-1", "--statement", REVISED, ...DECIDED_STATEMENT_FLAGS]);
     expect(corpus.node(corpus.leaf).status).toBe("draft");
     await corpus.approveAll(corpus.leaf);
     const node = corpus.node(corpus.leaf);
