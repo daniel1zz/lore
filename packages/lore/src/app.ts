@@ -89,6 +89,7 @@ import { RuleReadService } from "./service/rule-read-service.js";
 import { ImpactService } from "./service/impact-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
+import { armDecisionGate, buildDecisionGate } from "./service/decision-wiring.js";
 import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
@@ -990,6 +991,10 @@ function buildAppFromSqlite(
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
   corpusService.setRuleChangeLanding(ruleChangeService);
+  // reason: BR-1476 — an agent's decision-carrying write is refused without its decision in the service layer, so CLI, MCP
+  // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
+  const decisionGate = buildDecisionGate(ambient.cwd);
+  corpusService.setDecisionGate(decisionGate);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
@@ -1100,7 +1105,7 @@ function buildAppFromSqlite(
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
-    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
+    ruleService: armDecisionGate(armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot), decisionGate),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
@@ -1428,6 +1433,10 @@ function buildAppFromTurso(
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
   corpusService.setRuleChangeLanding(ruleChangeService);
+  // reason: BR-1476 — an agent's decision-carrying write is refused without its decision in the service layer, so CLI, MCP
+  // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
+  const decisionGate = buildDecisionGate(ambient.cwd);
+  corpusService.setDecisionGate(decisionGate);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
@@ -1533,7 +1542,7 @@ function buildAppFromTurso(
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
-    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
+    ruleService: armDecisionGate(armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot), decisionGate),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
