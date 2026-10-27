@@ -9,18 +9,20 @@
  * corpus in a mkdtemp dir. Both runs are registered with the test process as their harness, so the tests stay valid once
  * run ancestry is verified. No new symbol is imported.
  *
- * Not covered here (reported in the task hand-off): the plain release by the ended run's session, and an ended run whose
- * worktree still has uncommitted changes (exit 5, BR-1057), which need a real git worktree.
+ * The worktree cases use a real git repository and a real linked worktree, and call the task service directly so the
+ * refusal is checked through the CLI's own exit-code mapping (`exitCode`): a clean or gone worktree of an ended run is
+ * claimable and releasable without a steal or force (exit 0); a dirty worktree that still exists stays protected (exit 5).
  */
 import { Database } from "bun:sqlite";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { CreateDocInput, RunId } from "@lore/core";
+import { readClaimRecord, type CreateDocInput, type RunId } from "@lore/core";
+import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { createApp, type App } from "../../../src/app.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { createRealProcessTablePort } from "../../../src/adapters/process-table-port.js";
@@ -30,6 +32,14 @@ import { actedStore, liveAmbient, liveInvocation, liveWriteContext } from "../..
 const STAMP = "2026-10-27T00:00:00.000Z";
 const R1 = "cc:ended-claim-r1";
 const R2 = "cc:ended-claim-r2";
+const BY_R1 = "agent:ended-claim-r1";
+const BY_R2 = "agent:ended-claim-r2";
+
+/** Runs git with Bun.spawnSync (node:child_process.spawnSync is patched twice under Bun); fails loud on a non-zero exit. */
+function git(cwd: string, args: string[]): void {
+  const proc = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed (${proc.exitCode}): ${proc.stderr.toString()}`);
+}
 
 interface ToolResult {
   isError?: boolean;
@@ -156,5 +166,91 @@ describe("AC-RV-10: a claim ends with its run", () => {
     expect(second.isError).toBe(true);
     expect(textOf(second)).toContain(R1);
     expect(claimedBy()).toBe(R1);
+  });
+
+  describe("with a real git worktree recorded on the claim", () => {
+    let repoDir: string;
+    let worktreeDir: string;
+
+    async function claimInWorktree(): Promise<void> {
+      const claimed = await app.taskWorkflowService.claim(taskSlug, { by: BY_R1, harnessRun: R1 as RunId, worktree: worktreeDir });
+      if (!claimed.ok) throw new Error(`claim failed: ${JSON.stringify(claimed.error)}`);
+    }
+
+    async function heldRun(): Promise<string | null> {
+      const doc = await app.corpusService.get(taskSlug);
+      if (!doc.ok) throw new Error(`get failed: ${JSON.stringify(doc.error)}`);
+      return readClaimRecord(doc.value.doc)?.harness_run ?? null;
+    }
+
+    beforeEach(() => {
+      repoDir = join(tmpRoot, "repo");
+      worktreeDir = join(tmpRoot, "wt");
+      mkdirSync(repoDir, { recursive: true });
+      git(repoDir, ["init", "-q", "-b", "main"]);
+      git(repoDir, ["config", "user.email", "t@example.com"]);
+      git(repoDir, ["config", "user.name", "t"]);
+      writeFileSync(join(repoDir, "a.txt"), "one\n");
+      git(repoDir, ["add", "."]);
+      git(repoDir, ["commit", "-q", "-m", "init"]);
+      git(repoDir, ["worktree", "add", "-q", "-b", "feat-ended", worktreeDir]);
+    });
+
+    it("(i) R1 ends with a clean worktree: another run releases without force (exit 0) and R1 itself releases too", async () => {
+      await claimInWorktree();
+      await endRun(R1);
+
+      const byOther = await app.taskWorkflowService.release(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      expect(byOther.ok, JSON.stringify(byOther)).toBe(true);
+      expect(await heldRun()).toBeNull();
+
+      await claimInWorktree();
+      const bySelf = await app.taskWorkflowService.release(taskSlug, { by: BY_R1, harnessRun: R1 as RunId });
+      expect(bySelf.ok, JSON.stringify(bySelf)).toBe(true);
+    });
+
+    it("(i) a LIVE run's claim cannot be released by another run without force (exit 5)", async () => {
+      await claimInWorktree();
+      const refused = await app.taskWorkflowService.release(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) expect(exitCode(refused.error)).toBe(5);
+      expect(await heldRun()).toBe(R1);
+    });
+
+    it("(ii) R1 ends with uncommitted changes in a worktree that still exists: claim and release both refuse (exit 5), BR-1057", async () => {
+      await claimInWorktree();
+      writeFileSync(join(worktreeDir, "a.txt"), "dirty\n");
+      await endRun(R1);
+
+      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      expect(claim.ok).toBe(false);
+      if (!claim.ok) expect(exitCode(claim.error)).toBe(5);
+
+      const release = await app.taskWorkflowService.release(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      expect(release.ok).toBe(false);
+      if (!release.ok) expect(exitCode(release.error)).toBe(5);
+      expect(await heldRun()).toBe(R1);
+    });
+
+    it("(iii) R1 ends and its recorded worktree directory is gone: another run claims without a steal (exit 0)", async () => {
+      await claimInWorktree();
+      rmSync(worktreeDir, { recursive: true, force: true });
+      expect(existsSync(worktreeDir)).toBe(false);
+      await endRun(R1);
+
+      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      expect(claim.ok, JSON.stringify(claim)).toBe(true);
+      expect(await heldRun()).toBe(R2);
+    });
+
+    it("(iii) R1 ends and its worktree is gone: another run releases without force (exit 0)", async () => {
+      await claimInWorktree();
+      rmSync(worktreeDir, { recursive: true, force: true });
+      await endRun(R1);
+
+      const release = await app.taskWorkflowService.release(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      expect(release.ok, JSON.stringify(release)).toBe(true);
+      expect(await heldRun()).toBeNull();
+    });
   });
 });
