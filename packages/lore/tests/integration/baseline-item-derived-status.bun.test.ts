@@ -25,6 +25,12 @@ import { createItemsCorpus, type ItemsCorpus, type StoredNode } from "../helpers
 
 const TIMEOUT_MS = 180_000;
 
+/**
+ * The decision an agent's write to a node with an approved version carries (BR-1476). This suite is about derived status, not
+ * decisions, so every gated write below appends the same complete decision.
+ */
+const DECIDED = ["--reason", "exercise the pending revision", "--premise", "the suite drives it|issue:#1|A", "--alt", "write nothing|nothing to observe"];
+
 let corpus: ItemsCorpus;
 let otherLeaf = "";
 
@@ -56,7 +62,7 @@ afterAll(() => corpus.cleanup());
 describe("AC-BIA-5: node status is derived from its items", () => {
   it("HAPPY: set-label records ONE pending revision of the node part; the approved label stays", async () => {
     const before = corpus.node(corpus.leaf);
-    const set = await corpus.lore(["baseline", "set-label", corpus.leaf, "A new label"]);
+    const set = await corpus.lore(["baseline", "set-label", corpus.leaf, "A new label", ...DECIDED]);
     expect(set.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
     expect(node.extra["label"]).toBe("Leaf");
@@ -71,7 +77,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("HAPPY: depends records ONE pending revision holding only depends_on", async () => {
-    const set = await corpus.lore(["baseline", "depends", corpus.leaf, "--add", "BR-1"]);
+    const set = await corpus.lore(["baseline", "depends", corpus.leaf, "--add", "BR-1", ...DECIDED]);
     expect(set.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
     expect(node.extra["depends_on"]).toBeUndefined();
@@ -82,7 +88,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("HAPPY: a glossary entry records ONE pending revision of the branch holding only the glossary", async () => {
-    const set = await corpus.lore(["baseline", "glossary", "add", corpus.branch, "--term", "widget", "--meaning", "a small gadget"]);
+    const set = await corpus.lore(["baseline", "glossary", "add", corpus.branch, "--term", "widget", "--meaning", "a small gadget", ...DECIDED]);
     expect(set.exitCode).toBe(0);
     const node = corpus.node(corpus.branch);
     expect(node.extra["glossary"]).toBeUndefined();
@@ -93,7 +99,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("HAPPY/REGRESSION: map --command records ONE pending revision; coverage reads the approved commands until it is approved", async () => {
-    const set = await corpus.lore(["baseline", "map", corpus.leaf, "--command", "ac add"]);
+    const set = await corpus.lore(["baseline", "map", corpus.leaf, "--command", "ac add", ...DECIDED]);
     expect(set.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
     expect(node.extra["commands"]).toBeUndefined();
@@ -111,7 +117,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
 
   it("HAPPY/NEGATIVE: a body edit records ONE pending revision; the stored body and title stay approved", async () => {
     const before = corpus.node(corpus.leaf);
-    const set = await corpus.lore(["set", corpus.leaf, "--content", "A rewritten body that nobody has approved."]);
+    const set = await corpus.lore(["set", corpus.leaf, "--content", "A rewritten body that nobody has approved.", ...DECIDED]);
     expect(set.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
     expect(node.content).toBe(before.content);
@@ -125,8 +131,8 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("BOUNDARY: several own-part writes share the node's one pending item", async () => {
-    await corpus.must(["baseline", "set-label", corpus.leaf, "Second label"]);
-    await corpus.must(["set", corpus.leaf, "--title", "A second title"]);
+    await corpus.must(["baseline", "set-label", corpus.leaf, "Second label", ...DECIDED]);
+    await corpus.must(["set", corpus.leaf, "--title", "A second title", ...DECIDED]);
     const node = corpus.node(corpus.leaf);
     expect(nodeFields(node).sort()).toEqual(["label", "title"]);
     expect(await treeLine(corpus.leaf)).toContain("draft (1 pending)");
@@ -187,7 +193,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("REGRESSION: an export mirror shows the approved text, never the pending revision as if it were approved", async () => {
-    await corpus.must(["set", corpus.leaf, "--content", "PENDING-BODY-NOBODY-APPROVED"]);
+    await corpus.must(["set", corpus.leaf, "--content", "PENDING-BODY-NOBODY-APPROVED", ...DECIDED]);
     await corpus.must(["rule", "add", corpus.leaf, "--statement", "PENDING-RULE-NOBODY-APPROVED", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e"]);
     const exported = await corpus.lore(["export-docs", "--type", "baseline", "--force"]);
     expect(exported.exitCode).toBe(0);
@@ -204,7 +210,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("NEGATIVE: lore set --status approved|draft on a baseline node exits 4; a clean node prints approved", async () => {
-    await corpus.must(["baseline", "set-label", corpus.leaf, "Pending again"]);
+    await corpus.must(["baseline", "set-label", corpus.leaf, "Pending again", ...DECIDED]);
     expect(corpus.node(corpus.leaf).status).toBe("draft");
     const approve = await corpus.lore(["set", corpus.leaf, "--status", "approved"]);
     expect(approve.exitCode).toBe(4);
