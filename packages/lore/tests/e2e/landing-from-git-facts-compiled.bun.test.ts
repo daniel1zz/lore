@@ -201,7 +201,7 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
   it("AC-ND-8 plan close passes: every task of the plan is landed and archived", () => {
     const closed = lore(["set", plan, "--status", "archived"]);
 
-    expect(closed.exitCode).toBe(0);
+    expect(closed.exitCode, closed.text).toBe(0);
     expect(docOf(plan).status).toBe("archived");
   }, 300_000);
 
