@@ -535,8 +535,7 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     // A virgin target — nothing pre-existing could be mistaken for an install.
     expect(existsSync(targetDir)).toBe(false);
 
-    // `PATH: ""` forces `claude` ENOENT deterministically (MCP registration
-    // fails), so this never touches the dev machine's real `claude` CLI;
+    // `PATH: ""` keeps setup from reaching any tool on the dev machine's PATH;
     // asset files still write (setup.test.ts's established convention).
     const setupResult = Bun.spawnSync([LORE_BIN, "setup", "--claude-dir", targetDir, "--yes"], {
       cwd: scratch,

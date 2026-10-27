@@ -360,8 +360,7 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     const scratch = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-setup-")));
     const targetDir = join(scratch, ".claude");
 
-    // PATH="" forces `claude` ENOENT deterministically (mcp registration
-    // fails, exit 1) — never reaches this dev machine's real `claude` CLI
+    // PATH="" keeps setup from reaching any tool on this dev machine's PATH
     // (setup.test.ts's own established convention). Files still write.
     const setupResult = Bun.spawnSync([LORE_BIN, "setup", "--claude-dir", targetDir, "--yes"], {
       cwd: scratch,
