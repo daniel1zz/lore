@@ -5,6 +5,7 @@
 
 import type { SpecKind } from "./spec-kind.js";
 import type { Validity } from "./validity.js";
+import type { DecisionRecord } from "./decision-record.js";
 
 // ─── Primitive Aliases ─────────────────────────────────────────────────────
 
@@ -153,6 +154,8 @@ export interface VersionRecord {
   slug?: string;
   /** The harness run that vouched for this write (migration-016); null/absent = unattested or pre-016 row */
   harness_run?: string | null;
+  /** The decision a decision-carrying write recorded on this version (migration-041); null/absent = none or pre-041 row */
+  decision?: DecisionRecord | null;
 }
 
 /** Append-only audit log entry. */

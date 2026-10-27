@@ -82,6 +82,7 @@ import {
   computeAuditEntryHash,
   detectParentCycleViaAncestry,
   emptyKindsError,
+  withoutNullDecision,
   withoutNullHarnessRun,
 } from "./store-shared.js";
 import {
@@ -95,7 +96,7 @@ import { stampAuditSurface } from "./audit-surface.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
-import type { RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
@@ -903,6 +904,7 @@ export class InMemoryStore implements StoreInterface {
       ...(patch.change_summary !== undefined ? { change_summary: patch.change_summary } : {}),
       slug: updated.slug,
       harness_run: patch.harness_run ?? null,
+      ...(patch.decision != null ? { decision: patch.decision } : {}),
     });
     return ok(updated);
   }
@@ -915,9 +917,10 @@ export class InMemoryStore implements StoreInterface {
     actor: string,
     prefix: RuleIdPrefix = "BR",
     harnessRun: string | null = null,
+    decision: DecisionRecord | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     return this.allocateRuleSync(
-      { docId: leafId, expectedVersion, buildExtra, harnessRun },
+      { docId: leafId, expectedVersion, buildExtra, harnessRun, ...(decision !== null ? { decision } : {}) },
       { ownerDocId: leafId, proposed: false },
       actor,
       prefix,
@@ -939,6 +942,7 @@ export class InMemoryStore implements StoreInterface {
         harnessRun,
         ...(write.status !== undefined ? { status: write.status } : {}),
         ...(write.changeSummary !== undefined ? { changeSummary: write.changeSummary } : {}),
+        ...(write.decision !== undefined ? { decision: write.decision } : {}),
       },
       { ownerDocId: write.ownerLeafId, proposed: true },
       actor,
@@ -974,6 +978,7 @@ export class InMemoryStore implements StoreInterface {
         harness_run: harnessRun,
         ...(write.status !== undefined ? { status: write.status } : {}),
         ...(write.changeSummary !== undefined ? { change_summary: write.changeSummary } : {}),
+        ...(write.decision !== undefined ? { decision: write.decision } : {}),
       },
       actor,
       new Date().toISOString(),
@@ -1000,6 +1005,7 @@ export class InMemoryStore implements StoreInterface {
       harnessRun: string | null;
       status?: DocStatus;
       changeSummary?: string;
+      decision?: DecisionRecord;
     },
     registry: { ownerDocId: DocId; proposed: boolean },
     actor: string,
@@ -1023,6 +1029,7 @@ export class InMemoryStore implements StoreInterface {
           harness_run: doc.harnessRun,
           ...(doc.status !== undefined ? { status: doc.status } : {}),
           ...(doc.changeSummary !== undefined ? { change_summary: doc.changeSummary } : {}),
+          ...(doc.decision !== undefined ? { decision: doc.decision } : {}),
         },
         actor,
         nowIso,
@@ -1436,7 +1443,7 @@ export class InMemoryStore implements StoreInterface {
   // ── Versions ──────────────────────────────────────────────────────────────
 
   async insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>> {
-    this.versions.push(withoutNullHarnessRun({ ...version }));
+    this.versions.push(withoutNullDecision(withoutNullHarnessRun({ ...version })));
     return ok(version);
   }
 

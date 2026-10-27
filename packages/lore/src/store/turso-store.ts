@@ -43,6 +43,7 @@ import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
+import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -122,7 +123,7 @@ import {
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
-import type { RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AuditEntry,
@@ -193,6 +194,7 @@ import {
   allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
+  decisionToColumn,
   detectParentCycleViaAncestry,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
@@ -495,6 +497,7 @@ function libsqlRowToVersionRow(row: Row): VersionRow {
     change_summary: rowStrOrNull(row, "change_summary"),
     slug: rowStrOrNull(row, "slug"),
     harness_run: rowStrOrNull(row, "harness_run"),
+    decision: rowStrOrNull(row, "decision"),
   };
 }
 
@@ -1229,6 +1232,16 @@ export class TursoStore implements StoreInterface {
           tx.close();
         }
       }
+
+      if (currentVersion < 41) {
+        // reason: migration-041 is two-phase like 016/030 (see migration-041.ts's module JSDoc): the nullable `versions.decision`
+        // column is added only where `PRAGMA table_info` lacks it, then one BEGIN/COMMIT string bumps user_version.
+        for (const { table, column, ddl } of MIGRATION_041_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_041_SQL);
+      }
     })();
 
     return this._schemaInitPromise;
@@ -1652,8 +1665,8 @@ export class TursoStore implements StoreInterface {
         await tx.execute({
           sql: `INSERT INTO versions
                  (doc_id, version, content, extra, status, title,
-                  action, created_at, created_by, change_summary, slug, harness_run)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  action, created_at, created_by, change_summary, slug, harness_run, decision)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             v.doc_id,
             v.version,
@@ -1667,6 +1680,7 @@ export class TursoStore implements StoreInterface {
             v.change_summary ?? null,
             v.slug ?? null,
             v.harness_run ?? null,
+            decisionToColumn(v.decision),
           ] as InValue[],
         });
         await this.appendAuditEntryTx(tx, provenance.audit);
@@ -2137,8 +2151,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug, harness_run)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -2152,6 +2166,7 @@ export class TursoStore implements StoreInterface {
           version.change_summary ?? null,
           version.slug ?? null,
           version.harness_run ?? null,
+          decisionToColumn(version.decision),
         ] as InValue[],
       });
 
@@ -2282,8 +2297,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug, harness_run)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -2297,6 +2312,7 @@ export class TursoStore implements StoreInterface {
           version.change_summary ?? null,
           version.slug ?? null,
           version.harness_run ?? null,
+          decisionToColumn(version.decision),
         ] as InValue[],
       });
 
@@ -2484,8 +2500,8 @@ export class TursoStore implements StoreInterface {
         await tx.execute({
           sql: `INSERT INTO versions
                  (doc_id, version, content, extra, status, title,
-                  action, created_at, created_by, change_summary, slug, harness_run)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  action, created_at, created_by, change_summary, slug, harness_run, decision)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             version.doc_id,
             version.version,
@@ -2499,6 +2515,7 @@ export class TursoStore implements StoreInterface {
             version.change_summary ?? null,
             version.slug ?? null,
             version.harness_run ?? null,
+            decisionToColumn(version.decision),
           ] as InValue[],
         });
       }
@@ -2567,8 +2584,8 @@ export class TursoStore implements StoreInterface {
           await tx.execute({
             sql: `INSERT INTO versions
                    (doc_id, version, content, extra, status, title,
-                    action, created_at, created_by, change_summary, slug, harness_run)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    action, created_at, created_by, change_summary, slug, harness_run, decision)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [
               companion.version.doc_id,
               companion.version.version,
@@ -2582,6 +2599,7 @@ export class TursoStore implements StoreInterface {
               companion.version.change_summary ?? null,
               companion.version.slug ?? null,
               companion.version.harness_run ?? null,
+              decisionToColumn(companion.version.decision),
             ] as InValue[],
           });
         }
@@ -2647,8 +2665,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug, harness_run)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -2662,6 +2680,7 @@ export class TursoStore implements StoreInterface {
           version.change_summary ?? null,
           version.slug ?? null,
           version.harness_run ?? null,
+          decisionToColumn(version.decision),
         ] as InValue[],
       });
 
@@ -2742,8 +2761,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug, harness_run)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -2757,6 +2776,7 @@ export class TursoStore implements StoreInterface {
           version.change_summary ?? null,
           version.slug ?? null,
           version.harness_run ?? null,
+          decisionToColumn(version.decision),
         ] as InValue[],
       });
       await this.appendAuditEntryTx(tx, write.audit);
@@ -3171,8 +3191,8 @@ export class TursoStore implements StoreInterface {
       await this.client.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug, harness_run)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -3186,6 +3206,7 @@ export class TursoStore implements StoreInterface {
           version.change_summary ?? null,
           version.slug ?? null,
           version.harness_run ?? null,
+          decisionToColumn(version.decision),
         ] as InValue[],
       });
       return ok(version);
@@ -3498,8 +3519,8 @@ export class TursoStore implements StoreInterface {
     await tx.execute({
       sql: `INSERT INTO versions
              (doc_id, version, content, extra, status, title,
-              action, created_at, created_by, change_summary, slug, harness_run)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              action, created_at, created_by, change_summary, slug, harness_run, decision)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         updated.id,
         updated.version,
@@ -3513,6 +3534,7 @@ export class TursoStore implements StoreInterface {
         patch.change_summary ?? null,
         updated.slug,
         patch.harness_run ?? null,
+        decisionToColumn(patch.decision),
       ] as InValue[],
     });
     return ok(updated);
@@ -3553,10 +3575,11 @@ export class TursoStore implements StoreInterface {
     actor: string,
     prefix: RuleIdPrefix = "BR",
     harnessRun: string | null = null,
+    decision: DecisionRecord | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     return this.serializeRuleWrite(() =>
       this.allocateRuleSerialized(
-        { docId: leafId, expectedVersion, buildExtra, harnessRun },
+        { docId: leafId, expectedVersion, buildExtra, harnessRun, ...(decision !== null ? { decision } : {}) },
         { ownerDocId: leafId, proposed: false },
         actor,
         prefix,
@@ -3580,6 +3603,7 @@ export class TursoStore implements StoreInterface {
           harnessRun,
           ...(write.status !== undefined ? { status: write.status } : {}),
           ...(write.changeSummary !== undefined ? { changeSummary: write.changeSummary } : {}),
+          ...(write.decision !== undefined ? { decision: write.decision } : {}),
         },
         { ownerDocId: write.ownerLeafId, proposed: true },
         actor,
@@ -3642,6 +3666,7 @@ export class TursoStore implements StoreInterface {
           harness_run: harnessRun,
           ...(write.status !== undefined ? { status: write.status } : {}),
           ...(write.changeSummary !== undefined ? { change_summary: write.changeSummary } : {}),
+          ...(write.decision !== undefined ? { decision: write.decision } : {}),
         },
         actor,
         new Date().toISOString(),
@@ -3679,6 +3704,7 @@ export class TursoStore implements StoreInterface {
       expectedVersion: number;
       buildExtra: (ruleId: string) => Record<string, unknown>;
       harnessRun: string | null;
+      decision?: DecisionRecord;
       status?: DocStatus;
       changeSummary?: string;
     },
@@ -3708,6 +3734,7 @@ export class TursoStore implements StoreInterface {
           expectedVersion: doc.expectedVersion,
           extra: doc.buildExtra(ruleId),
           harness_run: doc.harnessRun,
+          ...(doc.decision !== undefined ? { decision: doc.decision } : {}),
           ...(doc.status !== undefined ? { status: doc.status } : {}),
           ...(doc.changeSummary !== undefined ? { change_summary: doc.changeSummary } : {}),
         },

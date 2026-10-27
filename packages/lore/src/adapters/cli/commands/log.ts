@@ -6,7 +6,7 @@ import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg } from "../utils.js";
-import type { DocId } from "@lore/core";
+import { renderDecisionRecord, type DocId } from "@lore/core";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { resolveDocId } from "../../../service/resolve.js";
 import { formatAttributionLabels, loadVersionAttributions, type WriteAttribution } from "../../../service/attribution-report.js";
@@ -99,6 +99,14 @@ export default defineLoreCommand({
 
       printLine(inv.io.stdout, `Version history for ${args.id}:`);
       printLine(inv.io.stdout, formatTable(headers, rows));
+      // reason: a decision belongs to ONE version, so it prints under that version's address (`<doc>@<version>`),
+      // never merged into the table's Summary cell (spec-a-decision-carrying-write-records-its-decision-on-its, Display).
+      for (const e of entries) {
+        if (e.decision === undefined) continue;
+        printLine(inv.io.stdout, "");
+        printLine(inv.io.stdout, `Decision at ${args.id}@${e.version}:`);
+        printLine(inv.io.stdout, renderDecisionRecord(e.decision));
+      }
     } finally {
       attributionStore.close();
       app.close();
