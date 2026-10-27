@@ -477,7 +477,7 @@ describe("lore setup — REGRESSION", () => {
     const targetDir = join(scratch, ".claude");
 
     const installResult = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-    expect(installResult.exitCode).toBe(1);
+    expect(installResult.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     const dryRunResult = runSetup(["--dry-run", "--claude-dir", targetDir], scratch);
     expect(dryRunResult.exitCode).toBe(0);
