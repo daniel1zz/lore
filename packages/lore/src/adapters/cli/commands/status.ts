@@ -267,7 +267,6 @@ const ATTRIBUTION_WINDOW_DAYS = 14;
 const ALL_SURFACES:ReadonlyArray<CallerSurface> = [
   "cli",
   "agent",
-  "mcp",
   "http_cookie",
   "http_token",
 ] as const;

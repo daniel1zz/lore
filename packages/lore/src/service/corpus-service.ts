@@ -281,7 +281,7 @@ export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
  * writes an audit-trail `actor` and/or a `created_by` field (`create`/`set`/`delete`).
  *
  * - `by` — explicit actor value threaded from the caller's own resolution (CLI's
- *   `resolveActor`, an MCP tool's required `by` arg, or an HTTP bearer token's
+ *   `resolveActor`, an adapter-supplied actor, or an HTTP bearer token's
  *   API-key name). `undefined` falls through to `resolveWriteActor`'s env chain
  *   (`resolveActorWithSource`: session tier → OS username).
  * - `attributeCreatedBy` — when `true`, the SAME resolved actor ALSO stamps
@@ -2222,7 +2222,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         field: "extra.sub_type",
         message:
           'knowledge sub_type "handoff" may only be created via `lore handoff` — ' +
-          "direct creation through `lore create` / `lore_create` is not permitted",
+          "direct creation through `lore create` is not permitted",
         value: "handoff",
         rule: "BR-704",
       });
@@ -2243,7 +2243,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         field: "extra.sub_type",
         message:
           'knowledge sub_type "uat" may only be created via `lore uat record` — ' +
-          "direct creation through `lore create` / `lore_create` is not permitted",
+          "direct creation through `lore create` is not permitted",
         value: "uat",
         rule: "BR-705",
       });
@@ -2276,7 +2276,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         field: "extra.sub_type",
         message:
           'knowledge sub_type "milestone-review" may only be created by `lore assess` — ' +
-          "direct creation through `lore create` / `lore_create` is not permitted",
+          "direct creation through `lore create` is not permitted",
         value: MILESTONE_REVIEW_SUB_TYPE,
         rule: "BR-1372",
       });

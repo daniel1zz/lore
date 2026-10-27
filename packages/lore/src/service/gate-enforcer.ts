@@ -7,7 +7,7 @@
  * agent/CI hook shells out to as a pre-flight check (`../adapters/cli/commands/gate.ts`,
  * wired into `.claude/settings.json` PreToolUse hooks). A caller going straight at
  * `CorpusService.create` / `ReviewService.approve` / `TaskWorkflowService.claim` — an
- * MCP tool, an HTTP dashboard route, or a test/script calling the service directly —
+ * adapter, an HTTP dashboard route, or a test/script calling the service directly —
  * never invoked `lore gate` at all and therefore bypassed every checkpoint entirely.
  * `GateEnforcer` closes that gap by moving the "run a checkpoint's predicates, then
  * translate a blocked verdict into a `LoreError`" step INTO the service layer, so it
@@ -494,7 +494,7 @@ export function describeBypassBoundaryNote(
     `\n\nNote: ${LORE_GATE_BYPASS_ENV_VAR}=1 is set, but it does not apply here — ` +
     `it only short-circuits the \`lore gate ${checkpoint}\` pre-flight command (a ` +
     `diagnostic surface, ../adapters/cli/commands/gate.ts), never a write path like ` +
-    `this one (CLI create/set, MCP, or the HTTP dashboard) — an env var on a long-lived ` +
+    `this one (CLI create/set, or the HTTP dashboard) — an env var on a long-lived ` +
     `\`lore serve\` process would otherwise disarm gates for every remote caller ` +
     `sharing that process's environment. To disable "${checkpoint}" for real writes ` +
     `instead, set \`workflow.gates.${checkpoint}.enabled: false\` in .lore/config.yaml.`

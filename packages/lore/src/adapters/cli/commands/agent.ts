@@ -77,8 +77,8 @@ const agentCreate = defineLoreCommand({
       printLine(inv.io.stdout, `  API Key: ${rawKey}`);
       printLine(inv.io.stdout, `  Owner:   ${record.owner}`);
       printLine(inv.io.stdout, "");
-      printLine(inv.io.stdout, "Configure in .mcp.json:");
-      printLine(inv.io.stdout, `  "env": { "LORE_API_KEY": "${rawKey}" }`);
+      printLine(inv.io.stdout, "Use it as an HTTP bearer token (Authorization header) against `lore serve`:");
+      printLine(inv.io.stdout, `  Authorization: Bearer ${rawKey}`);
       printLine(inv.io.stdout, "");
       printLine(inv.io.stdout, "Store this key securely — it cannot be retrieved again.");
     } finally {

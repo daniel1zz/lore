@@ -12,7 +12,7 @@
  *   recordVerifiedEvidence(idOrSlug, entry, nowIso) → append a RUNNER-ATTESTED record —
  *                                             the SOLE injection point for `attestation`
  *                                             (SPEC-039 §2 D2); NOT registered on any
- *                                             CLI/MCP surface, VerifyRunnerService-only
+ *                                             CLI surface, VerifyRunnerService-only
  *   claim(idOrSlug, opts, now?)            → acquire/refresh/steal the advisory lease
  *   release(idOrSlug, opts, now?)          → clear the advisory lease
  *   done(idOrSlug, opts, now?)             → evidence-validated atomic lifecycle walk
@@ -81,7 +81,7 @@
  *   assembles candidate objects in). `addEvidence` therefore runs an EXPLICIT runtime
  *   `hasOwnProperty` check on the raw input and fails loud with VALIDATION_ERROR — it
  *   never silently strips the key. `recordVerifiedEvidence` is the only method that
- *   accepts `attestation`, and it is never wired to a CLI/MCP surface (VerifyRunnerService
+ *   accepts `attestation`, and it is never wired to a CLI surface (VerifyRunnerService
  *   is its sole caller, bound in app.ts the same way `resolveDeclaredAcIds` is bound).
  * @invariant `capture_attestation` (SPEC-143 AC-CT-2) is the ONE measured channel through
  *   which a PUBLIC write may reach `attestation`, and it does NOT weaken the invariant
@@ -243,7 +243,7 @@
  *   defaulted, no env-var form. A blank/whitespace-only reason is refused
  *   VALIDATION_ERROR here too (belt-and-suspenders — `commands/done.ts` already
  *   refuses it as a CLI usage error, exit 2, before this service is ever called;
- *   this second check protects any OTHER caller, e.g. a test or a future MCP tool,
+ *   this second check protects any OTHER caller, e.g. a test or a future adapter,
  *   that constructs `DoneOpts` directly). `overrideReason` is silently IGNORED
  *   (never checked, never persisted) when an attested pass already satisfies the
  *   floor above — the escape hatch is for tasks that structurally cannot attest,
@@ -505,7 +505,7 @@ export interface ClaimOpts {
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
-   * Caller-surface discriminator (e.g. "cli", "mcp") embedded in the emitted telemetry
+   * Caller-surface discriminator (e.g. "cli", "agent", "http_token") embedded in the emitted telemetry
    * event's meta.source. Not part of SPEC-025 §8.2's literal ClaimOpts shape — added
    * because TaskWorkflowService's ratified constructor has no App/callerSurface
    * dependency, so AC-WF-11's "carrying the caller-surface source discriminator"
@@ -867,7 +867,7 @@ export type EvidenceInput = Omit<
 
 /**
  * Evidence input for {@link TaskWorkflowService.recordVerifiedEvidence} — the ONLY shape
- * that may carry `attestation` (SPEC-039 §2 D2). Never exported to any CLI/MCP surface;
+ * that may carry `attestation` (SPEC-039 §2 D2). Never exported to any CLI surface;
  * `VerifyRunnerService.verifyPlan` is the sole production caller. `capture_source` is
  * REQUIRED here too (task-capture-source-is-optional-at-the-evidence-write-boundary) —
  * mirrors {@link EvidenceInput}'s own requiredness so `appendEvidenceEntry`'s shared
@@ -1870,8 +1870,7 @@ export function rejectMissingNonPassOutputTail(
     message:
       `a self-reported result "${result}" must carry a non-empty output_tail — with no ` +
       "runner-observed exit code, the tail is the only evidence this run actually failed. " +
-      "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
-      "MCP: output_tail).",
+      "Capture the real failure output and retry with --output-tail (or --output-tail-file).",
     value: outputTail,
     rule: "BR-149",
   });
@@ -2697,7 +2696,7 @@ export class TaskWorkflowService {
 
   /**
    * SOLE injection point for `EvidenceEntry.attestation` (SPEC-039 §2 D2). NOT
-   * registered on any CLI/MCP surface — the only production caller is
+   * registered on any CLI surface — the only production caller is
    * `VerifyRunnerService.verifyPlan`, bound in `app.ts` the same way
    * `resolveDeclaredAcIds` is bound onto this service's own port. Shares
    * `appendEvidenceEntry`'s cap-check / schema-validation / ac_ref cross-entity

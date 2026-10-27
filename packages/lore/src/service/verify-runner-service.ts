@@ -1176,7 +1176,7 @@ export class VerifyRunnerService {
               `lore verify aborted at AC "${criterion.id}" — command is new/changed and was ` +
               `not approved. ${completedAcIds.length} AC(s) already recorded before the abort: ` +
               `${completedAcIds.length > 0 ? completedAcIds.join(", ") : "none"}. ` +
-              "Pass --allow-new-commands (CLI) / allow_new_commands: true (MCP) to approve " +
+              "Pass --allow-new-commands to approve " +
               "automatically, or run interactively (TTY, no --json) to confirm.",
             command: criterion.verify.command,
             ac_id: criterion.id,
