@@ -104,7 +104,9 @@ async function world(recorded: DecisionRecord, opts: { citedRule?: string; extra
     });
     if (!written.ok) throw new Error(JSON.stringify(written.error));
   }
-  return { store, bundle: { plan: planDoc.value, spec: spec.value, tasks: [] } as unknown as PlanBundle, leaf: leaf.value };
+  const task = await store.insert(doc("task", "t", {}, "archived"));
+  if (!task.ok) throw new Error(JSON.stringify(task.error));
+  return { store, bundle: { plan: planDoc.value, spec: spec.value, tasks: [task.value] } as unknown as PlanBundle, leaf: leaf.value };
 }
 
 const DIMS = Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, { verdict: "pass", reason: `${d} holds`, reference: "Google engineering code review guide" }]));
