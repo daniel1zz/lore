@@ -263,3 +263,58 @@ describe("GS-T7: fileGithubIssue never writes the corpus", () => {
     expect(fileIssueMock).not.toHaveBeenCalled();
   });
 });
+
+describe("AC-RL-1: a repeat check that could not read the whole filing log says so (BR-500)", () => {
+  const priorLines = (): string[] => [
+    JSON.stringify({ phase: "intent", idempotency_key: "01PRIORKEY0000000000000A", title: INPUT.title, at: "2026-08-01T00:00:00.000Z" }),
+    JSON.stringify({ phase: "outcome", idempotency_key: "01PRIORKEY0000000000000A", number: 99, url: "https://github.com/acme/widget/issues/99", at: "2026-08-01T00:00:01.000Z" }),
+  ];
+
+  it("ERROR: a failing log read files the issue and reports repeat_check_degraded.reason 'unreadable'", async () => {
+    const context: GithubFilingContext = {
+      ...makeContext(makeCorpusService().service),
+      readReceiptLog: () => err({ code: "STORE_ERROR", message: "failed to read receipt log: EACCES", rule: "BR-500" }),
+    };
+    const result = await fileGithubIssue(INPUT, CFG, context);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.retried).toBe(false);
+    expect(fileIssueMock).toHaveBeenCalledTimes(1);
+    expect(result.value.repeat_check_degraded).toMatchObject({ reason: "unreadable", skipped_lines: 0 });
+    expect(result.value.repeat_check_degraded?.detail).toContain("EACCES");
+  });
+
+  it("STATE: corrupt lines still recognise a repeat of an open issue; the early result carries 'corrupt_lines' and the count", async () => {
+    mkdirSync(join(corpusRoot, ".lore"), { recursive: true });
+    writeFileSync(join(corpusRoot, ".lore", "issue-receipts-v2.jsonl"), ["{not json", ...priorLines(), "{\"truncated\":"].join("\n") + "\n");
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.retried).toBe(true);
+    expect(result.value.number).toBe(99);
+    expect(fileIssueMock).not.toHaveBeenCalled();
+    expect(result.value.repeat_check_degraded).toMatchObject({ reason: "corrupt_lines", skipped_lines: 2 });
+  });
+
+  it("STATE: corrupt lines with no open prior file a new issue and still report 'corrupt_lines'", async () => {
+    mkdirSync(join(corpusRoot, ".lore"), { recursive: true });
+    writeFileSync(join(corpusRoot, ".lore", "issue-receipts-v2.jsonl"), "{not json\n");
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+
+    expect(result.ok && result.value.retried).toBe(false);
+    expect(result.ok && result.value.repeat_check_degraded).toMatchObject({ reason: "corrupt_lines", skipped_lines: 1 });
+  });
+
+  it("HAPPY: a clean log (and a missing log) sets no degradation", async () => {
+    const missing = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+    expect(missing.ok && "repeat_check_degraded" in missing.value).toBe(false);
+
+    mkdirSync(join(corpusRoot, ".lore"), { recursive: true });
+    writeFileSync(join(corpusRoot, ".lore", "issue-receipts-v2.jsonl"), priorLines().join("\n") + "\n");
+    const clean = await fileGithubIssue(INPUT, CFG, makeContext(makeCorpusService().service));
+    expect(clean.ok && clean.value.retried).toBe(true);
+    expect(clean.ok && "repeat_check_degraded" in clean.value).toBe(false);
+  });
+});
