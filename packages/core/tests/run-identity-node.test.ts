@@ -137,7 +137,7 @@ describe("resolveInvocationIdentity", () => {
     });
   });
 
-  describe("an agent marker and no run value (AC-RV-5)", () => {
+  describe("an agent marker and no run value", () => {
     it("with the Bash hook installed, names the removed value and never advises `lore setup`", () => {
       const { identity } = resolveInvocationIdentity(["set", "x"], { CLAUDECODE: "1" }, NO_SESSION, () => true);
       if (identity.claimed !== null) throw new Error("unreachable");

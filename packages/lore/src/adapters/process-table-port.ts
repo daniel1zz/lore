@@ -18,8 +18,8 @@
  *   - `signal` never throws: ESRCH -> `gone`, EPERM -> `denied`.
  * Side-effect class: IO (spawns `ps`/`lsof`, reads `/proc`, sends signals).
  */
-import { spawnSync } from "node:child_process";
-import { readdirSync, readlinkSync } from "node:fs";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
 import type { Measured } from "../service/worktree-removal-test.js";
 
@@ -67,8 +67,8 @@ export interface ProcessTablePort {
   parentOf(pid: number): Promise<number | null>;
   /**
    * Start time of `pid` (ISO-8601, second precision, same reading as {@link ProcessInspection.startTime}); `null`
-   * when `pid` does not exist or its `lstart` did not parse.
-   * @throws {ProcessTableUnreadableError} when `ps` itself cannot run.
+   * ONLY when `pid` does not exist (the process is gone).
+   * @throws {ProcessTableUnreadableError} when `ps` cannot run or its `lstart` did not parse.
    */
   startTimeOf(pid: number): Promise<string | null>;
 }
@@ -153,15 +153,42 @@ export interface RealProcessTableOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Working directory of every `ps` / `lsof` child (the invocation's `cwd`): no child inherits the process's. */
   readonly cwd: string;
+  /** Absolute `ps` candidates, first existing wins. Default {@link SYSTEM_PS_PATHS}; never searched on PATH. */
+  readonly psPaths?: readonly string[];
 }
+
+/**
+ * Fixed system locations of `ps`. reason: `ps` answers "who is my ancestor" for run verification, so it must never be
+ * resolved from the caller's PATH (a planted `ps` would forge ancestry); see
+ * spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and.
+ */
+export const SYSTEM_PS_PATHS: readonly string[] = ["/bin/ps", "/usr/bin/ps"];
 
 /** The production {@link ProcessTablePort}. */
 export function createRealProcessTablePort(options: RealProcessTableOptions): ProcessTablePort {
   const procDir = options.procDir ?? "/proc";
+  const psPaths = options.psPaths ?? SYSTEM_PS_PATHS;
+
+  /** Run `ps` from a fixed system location; the result's `error` is set when none exists or the spawn failed. */
+  const runPs = (args: readonly string[], extra: { maxBuffer?: number } = {}): SpawnSyncReturns<string> => {
+    const binary = psPaths.find((candidate) => existsSync(candidate));
+    if (binary === undefined) {
+      return {
+        error: new Error(`no ps at ${psPaths.join(" or ")} (ps is never resolved from PATH)`),
+        status: null,
+        stdout: "",
+        stderr: "",
+        pid: 0,
+        output: [],
+        signal: null,
+      };
+    }
+    return spawnSync(binary, [...args], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env), ...extra });
+  };
 
   const inspect = async (pid: number): Promise<ProcessInspection | null> => {
     if (!Number.isInteger(pid) || pid <= 0) return null;
-    const run = spawnSync("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env) });
+    const run = runPs(["-o", "stat=,lstart=", "-p", String(pid)]);
     if (run.error !== undefined || run.status !== 0) return null;
     const text = (run.stdout ?? "").trim();
     const match = /^(\S+)\s+(.*)$/.exec(text);
@@ -172,7 +199,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
   /** `ps -o ppid=,lstart= -p <pid>`: the row of one pid, `null` when it does not exist; throws when `ps` cannot run. */
   const readRow = (pid: number): { ppid: number; startTime: string | null } | null => {
     if (!Number.isInteger(pid) || pid <= 0) return null;
-    const run = spawnSync("ps", ["-o", "ppid=,lstart=", "-p", String(pid)], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env) });
+    const run = runPs(["-o", "ppid=,lstart=", "-p", String(pid)]);
     if (run.error !== undefined) throw new ProcessTableUnreadableError(`ps could not run (${run.error.message})`);
     // reason: `ps -p <absent pid>` exits 1 with an empty listing; any other non-zero exit with output text is a failure.
     const text = (run.stdout ?? "").trim();
@@ -191,15 +218,13 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
       return readRow(pid)?.ppid ?? null;
     },
     async startTimeOf(pid) {
-      return readRow(pid)?.startTime ?? null;
+      const row = readRow(pid);
+      if (row === null) return null; // reason: an absent pid = the process is gone, distinct from an unreadable table
+      if (row.startTime === null) throw new ProcessTableUnreadableError(`the start time of pid ${String(pid)} did not parse`);
+      return row.startTime;
     },
     async snapshot() {
-      const ps = spawnSync("ps", ["-axo", "pid=,ppid=,stat=,lstart=,command="], {
-        cwd: options.cwd,
-        encoding: "utf8",
-        env: psEnv(options.env),
-        maxBuffer: MAX_OUTPUT_BYTES,
-      });
+      const ps = runPs(["-axo", "pid=,ppid=,stat=,lstart=,command="], { maxBuffer: MAX_OUTPUT_BYTES });
       if (ps.error !== undefined) return { ok: false, reason: `ps could not run (${ps.error.message})` };
       if (ps.status !== 0) return { ok: false, reason: `ps exited ${String(ps.status ?? "abnormally")}` };
       const entries: ProcessEntry[] = [];
@@ -229,7 +254,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
       let current = pid;
       for (let hop = 0; hop <= MAX_SHELL_HOPS; hop++) {
         if (!Number.isInteger(current) || current <= 1) return null;
-        const run = spawnSync("ps", ["-o", "ppid=,comm=", "-p", String(current)], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env) });
+        const run = runPs(["-o", "ppid=,comm=", "-p", String(current)]);
         if (run.error !== undefined || run.status !== 0) return null;
         const match = /^\s*(\d+)\s+(.*)$/.exec((run.stdout ?? "").trim());
         if (match === null) return null;
