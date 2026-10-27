@@ -26,16 +26,16 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AuditEntry, CallerSurface } from "@lore/core";
+import type { AuditEntry, WritableCallerSurface } from "@lore/core";
 
-const requestSurface = new AsyncLocalStorage<CallerSurface>();
-let processSurface: CallerSurface | undefined;
+const requestSurface = new AsyncLocalStorage<WritableCallerSurface>();
+let processSurface: WritableCallerSurface | undefined;
 
 /**
  * Declare the surface for every write this process makes outside a
  * request-scoped {@link runWithAuditSurface} (CLI invocation).
  */
-export function setProcessAuditSurface(surface: CallerSurface): void {
+export function setProcessAuditSurface(surface: WritableCallerSurface): void {
   processSurface = surface;
 }
 
@@ -51,7 +51,7 @@ export function clearProcessAuditSurface(): void {
 }
 
 /** Run `fn` (and everything it awaits) with `surface` as the request-scoped audit surface. */
-export function runWithAuditSurface<T>(surface: CallerSurface, fn: () => T): T {
+export function runWithAuditSurface<T>(surface: WritableCallerSurface, fn: () => T): T {
   return requestSurface.run(surface, fn);
 }
 
@@ -59,7 +59,7 @@ export function runWithAuditSurface<T>(surface: CallerSurface, fn: () => T): T {
  * The surface a write made right now would be recorded under, or `undefined`
  * when no adapter declared one.
  */
-export function currentAuditSurface(): CallerSurface | undefined {
+export function currentAuditSurface(): WritableCallerSurface | undefined {
   return requestSurface.getStore() ?? processSurface;
 }
 

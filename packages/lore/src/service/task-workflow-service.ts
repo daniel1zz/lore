@@ -133,7 +133,7 @@
  *   summary containing a runner-summary-looking substring passes any shape check
  *   cleanly). REQUIRED on both {@link EvidenceInput} and {@link VerifiedEvidenceInput}
  *   (task-capture-source-is-optional-at-the-evidence-write-boundary) — every
- *   caller (`commands/evidence.ts`, `adapters/mcp/tools.ts`, `VerifyRunnerService`,
+ *   caller (`commands/evidence.ts`, `VerifyRunnerService`,
  *   `PhaseWorkflowService`) passes the value it can actually PROVE; omission is a
  *   compile error, not a runtime default. `appendEvidenceEntry` additionally
  *   FORCES `"runner"` whenever `attestation !== undefined` regardless of whatever
@@ -814,8 +814,8 @@ export interface DoneResult {
  * `.optional()` from the base schema. Omission is now a compile error: the ONLY
  * way this field is silently missing is data written before this invariant armed
  * (read tolerance, `evidenceEntrySchema.capture_source` itself stays `.optional()`
- * — see that field's own JSDoc). Both production adapters (`commands/evidence.ts`,
- * `adapters/mcp/tools.ts`) already derive and pass a real value on every write —
+ * — see that field's own JSDoc). The production adapter (`commands/evidence.ts`)
+ * already derives and passes a real value on every write —
  * the fix that used to defer this to "follow-up work" (a nullish-coalescing
  * self-report default in `appendEvidenceEntry`) is exactly the mechanism this
  * task removes: a required-for-correctness field defaulted to its own SAFE

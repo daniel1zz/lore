@@ -179,7 +179,7 @@ function makeApp(): App {
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
     auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
-    callerSurface: "mcp" as const,
+    callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),
     close: () => undefined,

@@ -1,7 +1,7 @@
 // @reads packages/lore/src/**
 /**
  * `lore evidence` filtered-pass matched-count guard — SPEC-061 AC-061-11 …
- * AC-061-14, AC-061-17.
+ * AC-061-14.
  *
  * Defect closed (task-lore-evidence-must-refuse-a-t-filtered-pass-with-no):
  * `lore evidence --result pass` stored whatever the caller asserted. When
@@ -13,7 +13,7 @@
  *
  * Binding decision: `adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own`
  * — the proof is the RUNNER'S OWN summary line delivered via
- * `--output-tail`/`--output-tail-file` (MCP `output_tail`), parsed by the
+ * `--output-tail`/`--output-tail-file`, parsed by the
  * shared `@lore/core` classifier. Deliberately NO `--matched <n>` flag: a bare
  * integer is as easy to fabricate as the false `--result pass` it would gate.
  * Fail-CLOSED on a missing/unparseable tail (unlike `judgeCompleteness`'s
@@ -28,59 +28,33 @@
  *     end-to-end wiring is pinned by AC-061-16's compiled-binary suite
  *     (`tests/e2e/evidence-completeness-guard-compiled.bun.test.ts`).
  *   - AC-061-14 is a source scan (single definition site).
- *   - AC-061-17 drives the REAL MCP `lore_evidence_add` handler, extracted from
- *     `McpServer._registeredTools` (the `mcp-tools-task-workflow.test.ts`
- *     precedent) — gate parity is asserted by BEHAVIOUR plus byte-identical
- *     refusal message, never by inspecting imports.
  *
  * Coverage:
  *   HAPPY:      a filtered pass whose tail parses to N>0 matched cases is
- *               accepted (AC-061-13); an unfiltered pass records unchanged
- *               through the real MCP handler (AC-061-13, AC-061-17 control)
+ *               accepted (AC-061-13)
  *   NEGATIVE:   filtered pass with no tail (AC-061-11); with a zero-matched
  *               tail (AC-061-12)
  *   BOUNDARY:   empty-string tail; `--testNamePattern=` equals form; a tail
  *               with a file-summary line but no matched-CASE line (truncated)
  *   ERROR:      every refusal is `VALIDATION_ERROR` mapping to exit code 4
  *               through the SAME `exitCode()` the CLI uses
- *   STATE:      a refused MCP call writes NO evidence row; the following
- *               unfiltered call on the same task writes exactly one
  *   REGRESSION: unfiltered commands, non-`pass` results and out-of-scope
  *               oracle kinds are untouched — zero new friction (AC-061-13)
  *
- * @spec_ref AC-061-11 AC-061-12 AC-061-13 AC-061-14 AC-061-17
+ * @spec_ref AC-061-11 AC-061-12 AC-061-13 AC-061-14
  */
 
-import { liveInvocation, actedStore } from "../../live-invocation.js";
-import { RecordLockService } from "../../../src/service/record-lock-service.js";
-import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { NoOpTelemetry, ok } from "@lore/core";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CreateDocInput, DocRecord, LoreError } from "@lore/core";
-import { InMemoryStore } from "../../../src/store/in-memory-store.js";
-import { CorpusService } from "../../../src/service/corpus-service.js";
-import { ReviewService } from "../../../src/service/review-service.js";
-import { VersionService } from "../../../src/service/version-service.js";
-import { OutlineService } from "../../../src/service/outline-service.js";
-import { MigrationService } from "../../../src/service/migration-service.js";
-import { TreeCheckService } from "../../../src/service/tree-check-service.js";
-import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
-import type { App } from "../../../src/app.js";
-import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
+import type { LoreError } from "@lore/core";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
-import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 import {
   findFilteredPassProofGap,
   findFilteredPassRefusal,
 } from "../../../src/adapters/cli/evidence-precheck.js";
 
-import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixture command strings ────────────────────────────────────────────────
 
 /**
@@ -341,224 +315,5 @@ describe("AC-061-14 — one definition site for filter detection and summary par
     )[1];
     expect(guardSection).toBeDefined();
     expect(stripCommentLines(guardSection ?? "").join("\n")).not.toMatch(/=\s*\/[^/*]/);
-  });
-});
-
-// ─── AC-061-17: MCP gate parity ─────────────────────────────────────────────
-
-const stubApiKeyStore = {} as ApiKeyStore;
-
-let store: InMemoryStore;
-let corpusService: CorpusService;
-
-/** Mirrors `mcp-tools-task-workflow.test.ts`'s fixture App verbatim. */
-function makeApp(): App {
-  store = actedStore(new InMemoryStore());
-  corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  return {
-    warn: () => undefined,
-    corpusService,
-    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    outlineService: new OutlineService(store),
-    migrationService: new MigrationService(store),
-    treeCheckService: new TreeCheckService(store),
-    apiKeyStore: stubApiKeyStore,
-    aiProviderService: null as unknown as App["aiProviderService"],
-    syncDocsService: null as unknown as App["syncDocsService"],
-    exportDocsService: null as unknown as App["exportDocsService"],
-    phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(
-      store,
-      new NoOpTelemetry(),
-      { claimTtlMinutes: 120 },
-      async () => ok(new Set<string>()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
-    ),
-    specKindService: null as unknown as App["specKindService"],
-    judgmentService: null as unknown as App["judgmentService"],
-    auditService: null as unknown as App["auditService"],
-    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
-    callerSurface: "mcp" as const,
-    resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
-    telemetry: new NoOpTelemetry(),
-    close: () => undefined,
-  };
-}
-
-type McpServerInternal = {
-  _registeredTools: Record<
-    string,
-    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
-  >;
-};
-
-function getToolHandler(
-  server: McpServer,
-  name: string,
-): (args: Record<string, unknown>) => Promise<CallToolResult> {
-  const internal = server as unknown as McpServerInternal;
-  const tool = internal._registeredTools[name];
-  if (!tool) throw new Error(`Tool not registered: ${name}`);
-  return (args) => tool.handler(args, {} as unknown);
-}
-
-function parseResult(result: CallToolResult): unknown {
-  const text = result.content[0];
-  if (!text || text.type !== "text") throw new Error("Expected text content");
-  return JSON.parse(text.text);
-}
-
-async function createTaskDoc(): Promise<string> {
-  const plan = await corpusService.create({
-    type: "plan",
-    title: "Guard Parity Plan",
-    content: "body",
-  } as CreateDocInput);
-  if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
-  const task = await corpusService.create({
-    type: "task",
-    title: "Guard Parity Task",
-    parent_id: plan.value.id,
-    content: "body",
-    extra: { plan_id: plan.value.id },
-  } as CreateDocInput);
-  if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
-  return task.value.id;
-}
-
-async function readEvidenceCount(taskId: string): Promise<number> {
-  const doc = await corpusService.get(taskId);
-  if (!doc.ok) throw new Error(`get failed: ${JSON.stringify(doc.error)}`);
-  const evidence = doc.value.doc.extra["verification_evidence"];
-  return Array.isArray(evidence) ? evidence.length : 0;
-}
-
-let app: App;
-let server: McpServer;
-
-beforeEach(() => {
-  app = makeApp();
-  server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app, undefined, liveInvocation());
-});
-
-describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refuses", () => {
-  const call = () => getToolHandler(server, "lore_evidence_add");
-
-  it("AC-061-17 refuses a filtered pass with no output_tail, byte-identically to the shared decision", async () => {
-    const taskId = await createTaskDoc();
-
-    const result = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: FILTERED_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-    });
-
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as ValidationError;
-    const shared = expectRefusedWithExitFour(refuseFiltered({}));
-    // Byte-identical message + code + field: the handler cannot be running a
-    // second, independently-worded copy of the rule.
-    expect(error.code).toBe(shared.code);
-    expect(error.field).toBe(shared.field);
-    expect(error.message).toBe(shared.message);
-  });
-
-  it("AC-061-17 refuses a zero-matched tail through the MCP surface, naming zero_match", async () => {
-    const taskId = await createTaskDoc();
-
-    const result = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: FILTERED_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-      output_tail: TAIL_ZERO_MATCHED,
-    });
-
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as ValidationError;
-    expect(error.message).toContain("zero_match");
-    expect(error.message).toBe(
-      expectRefusedWithExitFour(refuseFiltered({ outputTail: TAIL_ZERO_MATCHED })).message,
-    );
-  });
-
-  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
-  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) — the
-  // "accepted" call below used to satisfy AC-061's filtered-pass matched-count
-  // proof (a hand-typed but genuinely PARSEABLE vitest summary) and record
-  // cleanly. D5 raises a SEPARATE, later-running guard
-  // (rejectMissingPassOutputTail) that refuses ANY self-reported oracle-"test"
-  // pass lacking capture_source:"runner" — satisfying AC-061's narrower proof
-  // requirement is necessary but no longer sufficient. Both calls below now
-  // write zero rows; STATE is instead proven by a THIRD call using
-  // capture_source's only reachable self-report escape ("manual") once
-  // AC-061's own filtered-pass guard is out of scope for that oracle.
-  it("AC-061-17 STATE SUPERSEDED: a filtered-pass proof tail is still refused by D5 without --capture; writes zero rows either way", async () => {
-    const taskId = await createTaskDoc();
-    expect(await readEvidenceCount(taskId)).toBe(0);
-
-    const refused = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: FILTERED_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-    });
-    expect(refused.isError).toBe(true);
-    expect(await readEvidenceCount(taskId)).toBe(0);
-
-    // Even WITH AC-061's own matched-count proof tail, D5 still refuses —
-    // proving the filtered-pass guard's satisfaction is necessary but no
-    // longer sufficient on its own.
-    const stillRefused = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: FILTERED_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-      output_tail: TAIL_THREE_MATCHED,
-    });
-    expect(stillRefused.isError).toBe(true);
-    const error = parseResult(stillRefused) as { message: string };
-    expect(error.message).toContain("--capture");
-    expect(await readEvidenceCount(taskId)).toBe(0);
-  });
-
-  // reason: SUPERSEDED again (task-raise-the-evidence-tail-guard-s-predicate-
-  // to-its-own, D5) — this test's PREVIOUS supersession (cited below) proved
-  // an unfiltered pass is exempt from the FILTERED-pass guard specifically,
-  // while still needing SOME non-empty tail to satisfy the separate pass-tail
-  // guard. D5 raises THAT separate guard further: a hand-authored tail no
-  // longer counts as "some tail" for oracle "test" — this exact shape (an
-  // UNFILTERED command, no `-t`, a plausible-looking hand-typed summary) is
-  // the primary defect D5 closes (measured 2026-08-10, 2 of 3 agents fooled a
-  // guard identical in shape to this one). The unfiltered-command exemption
-  // from the FILTERED-pass guard specifically is now proven by the refusal
-  // being D5's message (naming --capture), never findFilteredPassRefusal's.
-  //
-  // Prior text (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-
-  // the): this test originally proved an UNFILTERED pass records with NO
-  // output_tail at all, i.e. that `findFilteredPassRefusal`'s guard does not
-  // widen into unfiltered commands.
-  it("AC-061-17 CONTROL SUPERSEDED: an UNFILTERED pass is exempt from the filtered-pass guard, but D5 still refuses a hand-typed tail without --capture", async () => {
-    const taskId = await createTaskDoc();
-
-    const result = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: UNFILTERED_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-      output_tail: "ok",
-    });
-
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as { message: string };
-    expect(error.message).toContain("--capture");
-    expect(await readEvidenceCount(taskId)).toBe(0);
   });
 });

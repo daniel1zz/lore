@@ -38,8 +38,7 @@
  *                handoff ticket is found via the ORDINARY derivation path (no
  *                `--handoff` flag), and `spec-create`/`phase-start` output stays
  *                closure-free — this is the CLI-stdout half of AC-CP-4's
- *                "both surfaces" requirement (MCP half:
- *                `tests/unit/adapters/mcp-session-tools.test.ts`; pure
+ *                requirement (pure
  *                render-function mechanics:
  *                `tests/unit/flows/feed-flow-resume-closure.test.ts`).
  *

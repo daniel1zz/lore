@@ -7,8 +7,7 @@
  * Covers: `lore set --content` / `lore restore` / `lore ac add` on an approved spec exit exactly 4 (stderr names
  * 'locked record' and 'lore reopen'); `lore set --correction` exits 0 and `lore get` then shows 'Standing: record',
  * 'locked (approved)', 'Corrections: 1', a newer relates-to spec under 'Later changed by'; a knowledge reference
- * shows 'Standing: living'; `lore reopen` on an evidence-free approved spec exits 0 and `get` shows draft; over
- * the MCP stdio server `lore_set` and `lore_batch set` return gate:record-edit and `lore_reopen` succeeds.
+ * shows 'Standing: living'; `lore reopen` on an evidence-free approved spec exits 0 and `get` shows draft.
  *
  * bun test (not vitest): spawns `dist/lore` against `mkdtemp` + `lore init` (cwd AND HOME inside it) — never the
  * repo's own `.lore/`. `assertFreshBinary` fails loud on a stale `dist/lore`.
@@ -24,8 +23,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
@@ -42,9 +39,6 @@ const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/
 const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 let dir = "";
-
-/** The run the MCP calls name (BR-1351): the same session the CLI calls run as, which the test spawn rewrite registers in this corpus. */
-const MCP_RUN = "cc:a77e57e1-aaaa-bbbb-cccc-222222222222";
 
 function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {};
@@ -88,26 +82,9 @@ function docIdOf(slug: string): string {
   return payload.data.doc.id;
 }
 
-async function withMcp<T>(fn: (c: Client) => Promise<T>): Promise<T> {
-  const transport = new StdioClientTransport({ command: LORE_BIN, args: ["--mcp-server"], cwd: dir, env: cleanEnv() });
-  const client = new Client({ name: "record-lock-compiled", version: "0.0.0" });
-  await client.connect(transport);
-  try {
-    return await fn(client);
-  } finally {
-    await client.close();
-  }
-}
-
-function textOf(result: unknown): string {
-  const content = (result as { content?: Array<{ text?: string }> }).content ?? [];
-  return content.map((c) => c.text ?? "").join("\n");
-}
-
 let lockedSpec = "";
 let newerSpec = "";
 let reopenCliSpec = "";
-let reopenMcpSpec = "";
 
 describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => {
   beforeAll(() => {
@@ -126,7 +103,6 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     );
     mustLore(["link", newerSpec, lockedSpec, "--type", "relates-to"]);
     reopenCliSpec = createApprovedSpec("Reopen Cli Spec", "AC-RC-1");
-    reopenMcpSpec = createApprovedSpec("Reopen Mcp Spec", "AC-RM-1");
   });
 
   afterAll(() => {
@@ -191,26 +167,5 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     const out = mustLore(["get", reopenCliSpec]);
     expect(out).toContain("Status: draft");
     expect(out).toContain("Standing: record · not locked");
-  });
-
-  it("MCP lore_set and lore_batch set on the locked spec return gate:record-edit; lore_reopen succeeds on a third spec", async () => {
-    await withMcp(async (c) => {
-      const single = await c.callTool({
-        name: "lore_set",
-        arguments: { harness_run: MCP_RUN, id_or_slug: lockedSpec, content: "## Overview\n\nMcp rewrite.\n" },
-      });
-      expect(single.isError).toBe(true);
-      expect(textOf(single)).toContain("gate:record-edit");
-
-      const batch = await c.callTool({
-        name: "lore_batch",
-        arguments: { harness_run: MCP_RUN, operations: [{ op: "set", args: { id_or_slug: lockedSpec, content: "## Overview\n\nBatch rewrite.\n" } }] },
-      });
-      expect(textOf(batch)).toContain("gate:record-edit");
-
-      const reopen = await c.callTool({ name: "lore_reopen", arguments: { harness_run: MCP_RUN, id_or_slug: reopenMcpSpec, reason: "r" } });
-      expect(reopen.isError ?? false).toBe(false);
-    });
-    expect(mustLore(["get", reopenMcpSpec])).toContain("Status: draft");
   });
 });

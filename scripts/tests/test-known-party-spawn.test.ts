@@ -4,7 +4,7 @@
  * BR-1351).
  *
  * Dimensions: HAPPY (source entry and compiled binary get a run; the run is registered), NEGATIVE (opt-out, explicit run,
- * MCP server, not-lore starts are untouched), BOUNDARY (session env names the run; entry depth; no corpus yet),
+ * not-lore starts are untouched), BOUNDARY (session env names the run; entry depth; no corpus yet),
  * STATE (registration is idempotent), REGRESSION (the harness flag spelling matches core's).
  */
 import { afterAll, describe, expect, it } from "vitest";
@@ -90,7 +90,6 @@ describe("rewriteLoreStart", () => {
   it.each([
     ["an explicit --harness-run", ["bun", "run", ENTRY, "--harness-run", "cc:mine", "claim", "t"]],
     ["an explicit --harness-run=<id>", ["bun", "run", ENTRY, "--harness-run=cc:mine", "claim", "t"]],
-    ["the MCP server", ["bun", "run", ENTRY, "--mcp-server"]],
     ["a program that is not lore", ["git", "status"]],
     ["a lore entry deeper than the search depth", ["a", "b", "c", "d", "e", "f", "g", "h", ENTRY, "list"]],
   ])("NEGATIVE: %s is never rewritten", (_label, argv) => {

@@ -52,7 +52,7 @@ import {
 } from "@lore/core";
 import { err, ok, type DecisionFinding, type PlanBundle, type Result, type LoreError } from "@lore/core";
 import { createWorktreeCommandRunner, recheckPlanDecisions } from "./service/decision-recheck.js";
-import type { CallerSurface, AiDefaultSource, InvocationIdentity, Invocation } from "@lore/core";
+import type { WritableCallerSurface, AiDefaultSource, InvocationIdentity, Invocation } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
 import { NoOpTelemetry, type Telemetry } from "@lore/core";
@@ -677,12 +677,11 @@ export interface App {
    * Current caller surface — set once at adapter startup before any command dispatch.
    * Adapters set this immediately after receiving the App:
    *   - CLI/loader.ts: "cli" or "agent" (from env vars CLAUDECODE, CI, LORE_AI_DEFAULT)
-   *   - MCP/index.ts: "mcp" (in-process flag, not env var — see SPEC-024 §9.2)
    *   - HTTP: not set on App; per-request via ActorContext.callerSurface
    * Default: "cli" (safest — AI on, no change from SPEC-017 behavior).
    * Source: SPEC-024 §9.1
    */
-  callerSurface: CallerSurface;
+  callerSurface: WritableCallerSurface;
   /**
    * Resolve whether AI generation should run for the current call.
    * Delegates to resolveAiDefault() with this.callerSurface + config defaults.
@@ -694,13 +693,6 @@ export interface App {
    */
   /** @lore-site BR-539 */
   resolveAiDefault(explicit: boolean | undefined): { ai: boolean; source: AiDefaultSource };
-  /**
-   * Build a sibling App over the same corpus whose store is wrapped for ONE invocation identity
-   * (spec-run-identity-slice-1 D3). For adapters that serve many callers from one process (MCP): the caller
-   * runs one call against the returned App and `close()`s it. Present on every App `createApp` returns; absent on
-   * hand-built test stubs, which an adapter must then treat as "cannot attest" rather than guess.
-   */
-  forWriteContext?: (writeContext: AppWriteContext) => Result<App, LoreError>;
   close(): void;
 }
 
@@ -785,7 +777,7 @@ export function buildStateBindingOccupancyPort(writer: DocWritePort): StateBindi
  *   (get/search) — `gateEnforcer` above already carries its OWN reference to
  *   the SAME instance (constructed in `createApp` before `gateEnforcer`
  *   itself, since `GateEnforcer`'s constructor needs it too).
- * @param surfaceBox - The SAME mutable `{current: CallerSurface}` box
+ * @param surfaceBox - The SAME mutable `{current: WritableCallerSurface}` box
  *   `createApp` constructed `traceRecorder`'s `getSurface` closure over
  *   (SPEC-102) — this function's `App.callerSurface` getter/setter read/write
  *   THIS box directly (replacing the previous function-local `let
@@ -835,7 +827,7 @@ function buildAppFromSqlite(
   requirementQuantifiableEnabled: boolean = true,
   attestationMinRatio: number | null = resolveAttestationMinRatio(undefined),
   traceRecorder: TraceRecorder | undefined,
-  surfaceBox: { current: CallerSurface } = { current: "cli" },
+  surfaceBox: { current: WritableCallerSurface } = { current: "cli" },
   pruneTrigger: (() => void) | undefined,
   // SPEC-103 §Mechanisms M1/M2 — resolved config values (`resolveLedgerAutoApprove`/
   // `resolveJudgmentRequiredTypes`, `@lore/core`), threaded the SAME way every other
@@ -1223,8 +1215,8 @@ function buildAppFromSqlite(
     // `surfaceBox` directly (SPEC-102) so a `TraceRecorder` built in `createApp`
     // BEFORE this function ran still observes the surface an adapter sets AFTER
     // `createApp` returns (see this function's `surfaceBox` param JSDoc).
-    get callerSurface(): CallerSurface { return surfaceBox.current; },
-    set callerSurface(s: CallerSurface) { surfaceBox.current = s; },
+    get callerSurface(): WritableCallerSurface { return surfaceBox.current; },
+    set callerSurface(s: WritableCallerSurface) { surfaceBox.current = s; },
     resolveAiDefault(explicit: boolean | undefined) {
       return resolveAiDefault(explicit, surfaceBox.current, aiDefaultPerSurface);
     },
@@ -1303,7 +1295,7 @@ function buildAppFromTurso(
   requirementQuantifiableEnabled: boolean = true,
   attestationMinRatio: number | null = resolveAttestationMinRatio(undefined),
   traceRecorder: TraceRecorder | undefined,
-  surfaceBox: { current: CallerSurface } = { current: "cli" },
+  surfaceBox: { current: WritableCallerSurface } = { current: "cli" },
   localTraceStore: SQLiteStore | undefined,
   pruneTrigger: (() => void) | undefined,
   // SPEC-103 §Mechanisms M1/M2 — resolved config values (`resolveLedgerAutoApprove`/
@@ -1647,8 +1639,8 @@ function buildAppFromTurso(
     telemetry,
     // SPEC-024: callerSurface getter/setter + resolveAiDefault — see
     // buildAppFromSqlite's identical `surfaceBox` comment.
-    get callerSurface(): CallerSurface { return surfaceBox.current; },
-    set callerSurface(s: CallerSurface) { surfaceBox.current = s; },
+    get callerSurface(): WritableCallerSurface { return surfaceBox.current; },
+    set callerSurface(s: WritableCallerSurface) { surfaceBox.current = s; },
     resolveAiDefault(explicit: boolean | undefined) {
       return resolveAiDefault(explicit, surfaceBox.current, aiDefaultPerSurface);
     },
@@ -1797,7 +1789,7 @@ function openTursoReplicaStore(config: TursoConfig): TursoStore {
 }
 
 // reason: spec-defect-clusters-round-2-part-c-criterion-data-demotion D22 — with `sync.enabled` EVERY route (CLI,
-// `lore serve`, `lore --mcp-server`, dashboard mounts) builds its store through `createApp`'s one replica branch.
+// `lore serve`, dashboard mounts) builds its store through `createApp`'s one replica branch.
 // Those routes reach `createApp` through 198 `loadLoreApp({ inv })` call sites and the mount registry, none of which
 // can carry a per-call port, so the store-selection seam is one process-level slot. Production never installs
 // anything; the default opens the real replica.
@@ -1831,17 +1823,7 @@ export function createApp(
   ambient: AppAmbient,
   writeContext?: AppWriteContext,
 ): App | Result<App, LoreError> {
-  const built = createAppUnscoped(dbPath, config, ambient, writeContext);
-  const app = "corpusService" in built ? built : built.ok ? built.value : undefined;
-  if (app === undefined) return built;
-  // reason: spec-run-identity-slice-1 D3 — an MCP server is one long-lived App serving many callers, each call
-  // carrying its own identity. The call-scoped App is built by the SAME composition path (same store selection,
-  // same wrapping chokepoint) over the same corpus file, so no service can write outside the call's context.
-  app.forWriteContext = (callContext) => {
-    const scoped = createApp(dbPath, config, ambient, callContext);
-    return "corpusService" in scoped ? ok(scoped) : scoped;
-  };
-  return built;
+  return createAppUnscoped(dbPath, config, ambient, writeContext);
 }
 
 /**
@@ -1982,7 +1964,7 @@ function createAppUnscoped(
   // too — see `buildAppFromSqlite`'s `surfaceBox` param JSDoc for the full
   // sequencing rationale (a TraceRecorder needs this box to exist before
   // either build function's own local surface state does).
-  const surfaceBox: { current: CallerSurface } = { current: "cli" };
+  const surfaceBox: { current: WritableCallerSurface } = { current: "cli" };
 
   // Trace recording/pruning config (SPEC-102 §Scope) — resolved once here,
   // read by BOTH store branches below.

@@ -3,7 +3,7 @@
  * @spec_ref BR-926
  *
  * A project `.lore/config.yaml` that does not parse (a duplicate top-level key) or fails the schema
- * is REFUSED on every route — CLI, MCP server, `lore serve` — with exit 4, naming the file and the
+ * is REFUSED on every route — CLI, `lore serve` — with exit 4, naming the file and the
  * parser's own detail. It never falls back to built-in defaults in silence.
  *
  * This file writes a deliberately BROKEN config with raw bytes; that is the one legitimate raw write
@@ -11,7 +11,7 @@
  *
  * Six-dimension coverage:
  *   NEGATIVE:   duplicate key -> `lore list` exit 4, names the file and the key, writes nothing
- *   ERROR:      MCP server and `lore serve` refuse to start with the same message
+ *   ERROR:      `lore serve` refuses to start with the same message
  *   BOUNDARY:   an absent config and an empty config still run on defaults (exit 0)
  *   STATE:      schema-invalid (not just unparsable) config is refused too
  *   REGRESSION: a valid patched config (via the helper) still loads (exit 0)
@@ -39,7 +39,7 @@ function runLore(args: string[], cwd: string): RunResult {
     cwd,
     env: { ...process.env, HOME: cwd },
     stdin: "ignore",
-    // reason: without the fix `serve` / `--mcp-server` START and never exit; the bound turns that into a red
+    // reason: without the fix `serve` STARTS and never exit; the bound turns that into a red
     // assertion (exit code null -> 1... reported as -1 below) instead of a hung runner.
     timeout: SPAWN_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -103,14 +103,6 @@ describe("an unparsable project config is refused loudly (BR-926)", () => {
     expect(result.stderr).toContain("workflow");
     expect(result.stdout).toBe("");
     expect(snapshotTree(join(dir, ".lore"))).toBe(before);
-  }, TEST_TIMEOUT_MS);
-
-  it("the MCP server refuses to start with the same message", () => {
-    breakWithDuplicateWorkflowKey();
-    const result = runLore(["--mcp-server"], dir);
-    expect(result.exitCode).toBe(4);
-    expect(result.stderr).toContain(".lore/config.yaml");
-    expect(result.stderr).toContain("Map keys must be unique");
   }, TEST_TIMEOUT_MS);
 
   it("lore serve refuses to start with the same message", () => {
