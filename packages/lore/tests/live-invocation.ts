@@ -13,7 +13,7 @@ import { declareWriteActorForTests } from "../src/store/write-context-store.js";
 import type { StoreInterface } from "../src/store/store-interface.js";
 import { CliExit } from "../src/adapters/cli/cli-exit.js";
 import { warnSinkOf, type WarnSink } from "../src/service/warn-sink.js";
-import { LIVE_TEST_RUN as LIVE_TEST_RUN_ID, registerTestRun } from "./helpers/test-run-identity.js";
+import { LIVE_TEST_RUN as LIVE_TEST_RUN_ID, registerTestRun, testSessionOf } from "./helpers/test-run-identity.js";
 
 /**
  * The agent run every live-process test writes as: an attested run of a fixed fake session. A test that WRITES through
@@ -46,8 +46,8 @@ export function liveInvocation(): Invocation {
     // The run is the one the process's CURRENT session id names (`asSessionActor` switches it between calls, so one test can
     // be two callers), else {@link LIVE_TEST_RUN}; its name derives from the run exactly as production derives it.
     get identity() {
-      const session = process.env["CLAUDE_CODE_SESSION_ID"] ?? process.env["CLAUDE_SESSION_ID"];
-      const run = (session !== undefined && session.trim() !== "" ? `cc:${session}` : LIVE_TEST_RUN) as RunId;
+      const session = testSessionOf(process.env);
+      const run = (session !== null ? `cc:${session}` : LIVE_TEST_RUN) as RunId;
       registerRunInCurrentCorpus(run);
       return { harnessRun: run, claimed: nameOfAgentRun(run), claimedSource: "run" as const };
     },

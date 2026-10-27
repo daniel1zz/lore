@@ -51,6 +51,7 @@ import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, RunId, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
+import { testSessionOf } from "../helpers/test-run-identity.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -68,8 +69,8 @@ function currentActor(): string {
  * written under it and the pre-flight made in the same environment are ONE holder (claims compare runs, BR-1056).
  */
 function currentRun(): RunId {
-  const session = process.env["CLAUDE_CODE_SESSION_ID"] ?? process.env["CLAUDE_SESSION_ID"];
-  return (session !== undefined && session.trim() !== "" ? `cc:${session}` : LIVE_TEST_RUN) as RunId;
+  const session = testSessionOf(process.env);
+  return (session !== null ? `cc:${session}` : LIVE_TEST_RUN) as RunId;
 }
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;

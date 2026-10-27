@@ -137,7 +137,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-landing-compiled-"));
   makeCleanTreeRepo(dir);
   mustLore(["init"]);
-  mustLore(["run", "register", "--harness", "claude-code", "--session", MCP_SESSION]);
+  mustLore(["run", "register", "--harness", "claude-code", "--session", MCP_SESSION, "--harness-pid", String(process.pid)]);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   patchLoreConfig(
     dir,
@@ -201,7 +201,7 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
   it("AC-ND-8 plan close passes: every task of the plan is landed and archived", () => {
     const closed = lore(["set", plan, "--status", "archived"]);
 
-    expect(closed.exitCode).toBe(0);
+    expect(closed.exitCode, closed.text).toBe(0);
     expect(docOf(plan).status).toBe("archived");
   }, 300_000);
 

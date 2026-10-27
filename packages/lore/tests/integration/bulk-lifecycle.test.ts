@@ -24,6 +24,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-t
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 import { liveInvocation, liveAmbient, actedStore, liveWriteContext } from "../live-invocation.js";
+import { registerRunInDb } from "../helpers/test-run-identity.js";
 import { createApp, type App } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
@@ -96,7 +97,7 @@ function createTask(title: string): string {
     ["create", "task", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
     tmpDir,
   );
-  expect(r.exitCode).toBe(0);
+  expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
   return slugOf(r.stdout);
 }
 
@@ -367,6 +368,8 @@ describe("bulk lifecycle: mcp parity", () => {
     } finally {
       store.close?.();
     }
+    // the run's harness is this test process (pid + start time): the tool server verifies a call's run by process ancestry
+    if (!registerRunInDb(dbPath, RUN)) throw new Error("registerRunInDb: no runs table in the fixture corpus");
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
     app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     const server = new McpServer({ name: "lore", version: "0.0.0-test" });
