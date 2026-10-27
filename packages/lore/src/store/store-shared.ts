@@ -21,6 +21,7 @@ import type {
   CheckResult,
   DocRecord,
   DocStatus,
+  DecisionRecord,
   DocType,
   LinkRecord,
   LinkType,
@@ -35,6 +36,7 @@ import type {
   VersionRecord,
 } from "@lore/core";
 import {
+  decisionRecordSchema,
   err,
   extractValidity,
   ok,
@@ -142,6 +144,15 @@ export function withoutNullHarnessRun<T extends { harness_run?: string | null }>
   return record;
 }
 
+/**
+ * Drop an explicit `decision: null` so InMemoryStore reads back the same shape the SQL stores' row mappers produce
+ * (a pre-041 row or a decision-less write omits the key). Returns its argument, mutated.
+ */
+export function withoutNullDecision<T extends { decision?: DecisionRecord | null }>(record: T): T {
+  if (record.decision == null) delete record.decision;
+  return record;
+}
+
 /** The refusal every store returns for `countAttributedWrites(_, [])` — one definition, three stores. */
 export function emptyKindsError(): Result<never, LoreError> {
   return err({
@@ -215,6 +226,8 @@ export interface VersionRow {
   slug: string | null;
   /** migration-016 — which harness run vouched for the write; NULL = unattested / pre-016 row. */
   harness_run: string | null;
+  /** migration-041 — the write's DecisionRecord as JSON text; NULL = no decision / pre-041 row. */
+  decision: string | null;
 }
 
 export interface AuditRow {
@@ -605,7 +618,18 @@ export function rowToVersionRecord(row: VersionRow): VersionRecord {
     ...(row.slug !== null ? { slug: row.slug } : {}),
     // reason: migration-016 — same absence-tolerant shape as `slug`: an unattested / pre-016 row omits the key.
     ...(row.harness_run != null ? { harness_run: row.harness_run } : {}),
+    // reason: migration-041 — same absence-tolerant shape; a stored decision that no longer parses fails loud (never dropped).
+    ...(row.decision != null ? { decision: decisionRecordSchema.parse(JSON.parse(row.decision)) } : {}),
   };
+}
+
+/**
+ * The JSON text a store writes into `versions.decision`: NULL when the version carries none.
+ *
+ * @param decision - the record on the VersionRecord, if any
+ */
+export function decisionToColumn(decision: DecisionRecord | null | undefined): string | null {
+  return decision == null ? null : JSON.stringify(decision);
 }
 
 export function rowToAuditEntry(row: AuditRow): AuditEntry {

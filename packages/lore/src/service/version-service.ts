@@ -5,7 +5,7 @@
  */
 
 import { createTwoFilesPatch } from "diff";
-import type { DocId, DocRecord, DocStatus, VersionAction, VersionRecord } from "@lore/core";
+import type { DecisionRecord, DocId, DocRecord, DocStatus, VersionAction, VersionRecord } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDocId } from "./resolve.js";
@@ -27,6 +27,8 @@ export interface VersionEntry {
    * MUST degrade by omission, not print "unknown".
    */
   slug?: string;
+  /** The decision recorded on this version (migration-041); absent when the write carried none. */
+  decision?: DecisionRecord;
 }
 
 export interface FieldChange {
@@ -125,6 +127,7 @@ export class VersionService {
       // SPEC-072 D3 — absence-tolerant: a legacy row with no slug omits the
       // key entirely, never a placeholder.
       ...(v.slug !== undefined ? { slug: v.slug } : {}),
+      ...(v.decision != null ? { decision: v.decision } : {}),
     }));
 
     return ok(entries);

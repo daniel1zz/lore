@@ -69,7 +69,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import type { RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AcCiteRow,
@@ -139,6 +139,7 @@ import {
   allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
+  decisionToColumn,
   detectParentCycleViaAncestry,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
@@ -183,6 +184,7 @@ import { MIGRATION_037_SQL } from "./migrations/migration-037.js";
 import { applyMigration038 } from "./migrations/migration-038.js";
 import { applyMigration039 } from "./migrations/migration-039.js";
 import { applyMigration040 } from "./migrations/migration-040.js";
+import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -1006,6 +1008,26 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-040 marks released pre-#356 claims holding neither start_head nor end_tip unrecoverable (#473) in ONE
       // BEGIN IMMEDIATE transaction; it reads no git and a failure rolls back and leaves schema 39.
       applyMigration040(this.db, this.corpusPath, this.migrationActor);
+    }
+
+    if (currentVersion < 41 && 41 <= ceiling) {
+      // reason: migration-041 is two-phase like 016/030 (see migration-041.ts's module JSDoc): the nullable `versions.decision`
+      // column is added only where `PRAGMA table_info` lacks it (SQLite has no ADD COLUMN IF NOT EXISTS), then one
+      // BEGIN/COMMIT string bumps user_version; a second run changes nothing.
+      try {
+        for (const { table, column, ddl } of MIGRATION_041_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_041_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-030 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
     }
   }
 
@@ -2183,8 +2205,8 @@ export class SQLiteStore implements StoreInterface {
         .prepare(
           `INSERT INTO versions
              (doc_id, version, content, extra, status, title,
-              action, created_at, created_by, change_summary, slug, harness_run)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              action, created_at, created_by, change_summary, slug, harness_run, decision)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           version.doc_id,
@@ -2199,6 +2221,7 @@ export class SQLiteStore implements StoreInterface {
           version.change_summary ?? null,
           version.slug ?? null,
           version.harness_run ?? null,
+          decisionToColumn(version.decision),
         );
       return ok(version);
     } catch (e) {
@@ -2835,6 +2858,7 @@ export class SQLiteStore implements StoreInterface {
       ...(patch.change_summary !== undefined ? { change_summary: patch.change_summary } : {}),
       slug: updated.value.slug,
       harness_run: patch.harness_run ?? null,
+      ...(patch.decision != null ? { decision: patch.decision } : {}),
     });
     if (!versionResult.ok) return versionResult;
     return updated;
@@ -2855,9 +2879,10 @@ export class SQLiteStore implements StoreInterface {
     actor: string,
     prefix: RuleIdPrefix = "BR",
     harnessRun: string | null = null,
+    decision: DecisionRecord | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     return this.allocateRuleCore(
-      { docId: leafId, expectedVersion, buildExtra, harnessRun },
+      { docId: leafId, expectedVersion, buildExtra, harnessRun, ...(decision !== null ? { decision } : {}) },
       { ownerDocId: leafId, proposed: false },
       actor,
       prefix,
@@ -2879,6 +2904,7 @@ export class SQLiteStore implements StoreInterface {
         harnessRun,
         ...(write.status !== undefined ? { status: write.status } : {}),
         ...(write.changeSummary !== undefined ? { changeSummary: write.changeSummary } : {}),
+        ...(write.decision !== undefined ? { decision: write.decision } : {}),
       },
       { ownerDocId: write.ownerLeafId, proposed: true },
       actor,
@@ -2927,6 +2953,7 @@ export class SQLiteStore implements StoreInterface {
           harness_run: harnessRun,
           ...(write.status !== undefined ? { status: write.status } : {}),
           ...(write.changeSummary !== undefined ? { change_summary: write.changeSummary } : {}),
+          ...(write.decision !== undefined ? { decision: write.decision } : {}),
         },
         actor,
         new Date().toISOString(),
@@ -2963,6 +2990,7 @@ export class SQLiteStore implements StoreInterface {
       harnessRun: string | null;
       status?: DocStatus;
       changeSummary?: string;
+      decision?: DecisionRecord;
     },
     registry: { ownerDocId: DocId; proposed: boolean },
     actor: string,
@@ -2987,6 +3015,7 @@ export class SQLiteStore implements StoreInterface {
           harness_run: doc.harnessRun,
           ...(doc.status !== undefined ? { status: doc.status } : {}),
           ...(doc.changeSummary !== undefined ? { change_summary: doc.changeSummary } : {}),
+          ...(doc.decision !== undefined ? { decision: doc.decision } : {}),
         },
         actor,
         nowIso,

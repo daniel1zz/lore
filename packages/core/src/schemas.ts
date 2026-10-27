@@ -18,6 +18,7 @@ import { prdRequirementsSchema } from "./requirement.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
+import { WEIGHT_TABLE_KINDS } from "./decision-record.js";
 import { validitySchema } from "./validity.js";
 import { acScopeArraySchema, phaseExtraSchema } from "./phase.js";
 import { baselineExtraSchema } from "./baseline.js";
@@ -178,11 +179,33 @@ export const skillExtraSchema = z.object({
 /** Derived TypeScript type for `extra.skill` on a `sub_type: "skill"` knowledge doc. */
 export type SkillExtra = z.infer<typeof skillExtraSchema>;
 
+/**
+ * `extra.weight_table` of a knowledge `reference` doc: the dimension weights a decision's scores are weighed with.
+ * Every weight > 0 and the weights sum to 1 within 1e-9. Written only by `lore weights set`.
+ */
+export const weightTableSchema = z
+  .object({
+    kind: z.enum(WEIGHT_TABLE_KINDS),
+    dimensions: z.record(z.string().min(1), z.number().positive()),
+  })
+  .superRefine((table, ctx) => {
+    const weights = Object.values(table.dimensions);
+    if (weights.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["dimensions"], message: "a weight table needs at least one dimension" });
+      return;
+    }
+    const sum = weights.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 1) > 1e-9) ctx.addIssue({ code: "custom", path: ["dimensions"], message: `weights must sum to 1, got ${sum}` });
+  });
+export type WeightTable = z.infer<typeof weightTableSchema>;
+
 export const knowledgeExtraSchema = z
   .object({
     sub_type: knowledgeSubTypeSchema,
     /** Present iff sub_type === "milestone-review" — the stored seven-dimension review (BR-1372). */
     milestone_review: milestoneReviewSchema.optional(),
+    /** Present only on a `reference` doc used as a decision weight table (written only by `lore weights set`). */
+    weight_table: weightTableSchema.optional(),
     /** Present only for sub_type === "prompt"; optional even then (see schema JSDoc). */
     prompt: promptExtraSchema.optional(),
     /** Present only for sub_type === "skill"; optional even then (see schema JSDoc). */

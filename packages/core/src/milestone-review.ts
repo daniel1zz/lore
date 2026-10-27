@@ -120,6 +120,26 @@ export const reviewCausesSchema = z.object({
 });
 export type ReviewCauses = z.infer<typeof reviewCausesSchema>;
 
+/** One finding of the recorded-decision re-check (spec-a-decision-carrying-write-records-its-decision-on-its). */
+export const decisionFindingSchema = z.object({
+  /** The decision's address, `<slug>@<version>`. */
+  decision: z.string().min(1),
+  /** Which part was checked: a premise, gate id or score dimension. */
+  part: z.string().min(1),
+  /** The finding kind, e.g. `wrong-when-written`, `stale-since`, `unverifiable`, `not-rerunnable`. */
+  kind: z.string().min(1),
+  fact: z.string().min(1),
+});
+export type DecisionFinding = z.infer<typeof decisionFindingSchema>;
+
+/** A traced escaped defect: the issue that exposed it, the decision that let it through, and the part at fault. */
+export const tracedDecisionSchema = z.object({
+  issue: z.number().int().min(1),
+  decision: z.string().min(1),
+  part: z.string().min(1),
+});
+export type TracedDecision = z.infer<typeof tracedDecisionSchema>;
+
 /** The stored review (`extra.milestone_review` of a knowledge doc with sub_type `milestone-review`). */
 export const milestoneReviewSchema = z.object({
   plan_id: z.string().min(1),
@@ -132,6 +152,10 @@ export const milestoneReviewSchema = z.object({
   retired_acs: z.array(retiredAcRefSchema).optional(),
   /** Measured root causes of the failed findings (absent on a review stored before BR-1379 grouping). */
   causes: reviewCausesSchema.optional(),
+  /** Findings of the recorded-decision re-check, each naming `<slug>@<version>`; written only by the milestone assess (absent = none recorded). */
+  decision_findings: z.array(decisionFindingSchema).optional(),
+  /** Escaped defects traced to a decision; written only by `lore decision trace`, idempotent by the triple. */
+  traced_decisions: z.array(tracedDecisionSchema).optional(),
   prompt_version: z.string().min(1),
   /** How the diff was obtained, e.g. `auto_derived:derived` or `none`. */
   diff_source: z.string().min(1),
