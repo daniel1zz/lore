@@ -14,6 +14,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Invocation } from "@lore/core";
 import { createProductionHumanChannelPorts } from "../../../src/adapters/real-human-channel-port.js";
@@ -79,6 +80,21 @@ describe("AC-RV-11: spawned lore children inherit the verified run", () => {
     );
     expect(commands).toHaveLength(1);
     expect(commands[0]).not.toContain(CALLER_FLAG);
+  });
+
+  it("integrate's migrate step: the child shell's environment carries LORE_HARNESS_RUN (the floor runner's shell form)", () => {
+    const seenEnv = join(root, "migrate-env.txt");
+    // the same shape the production floor runner has: `sh -c <command>` with an ambient env that names no run
+    const runner = (command: string, cwd: string) => {
+      const result = spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", env: { PATH: process.env["PATH"] } });
+      return { status: result.status ?? 1, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+    };
+    const report = '{"ok":true,"data":{"upgraded":false,"from":1,"to":1}}';
+    // the trailing `#` keeps the appended ` --json` out of the shell command
+    const migrate = `printenv LORE_HARNESS_RUN > '${seenEnv}'; echo '${report}' #`;
+    const outcome = runSchemaMigration(runner, migrate, root, join(root, "corpus"), RUN);
+    expect(outcome.state).toBe("current");
+    expect(readFileSync(seenEnv, "utf8").trim()).toBe(RUN);
   });
 
   it("human channel: the argv surfaced to the channel check names no run flag for an agent run", () => {
