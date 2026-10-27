@@ -18,7 +18,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { isatty } from "node:tty";
-import { isAgentRunId, type Invocation } from "@lore/core";
+import type { Invocation } from "@lore/core";
 import { generateNonce, type HumanChannelOutcome, type HumanChannelPorts, type HumanTerminal, type ProcessEntry } from "../service/human-channel.js";
 
 const MAX_PS_BYTES = 64 * 1024 * 1024;
@@ -88,7 +88,7 @@ export function openControllingTerminal(): HumanTerminal | null {
 /**
  * Production ports. `overrides` replaces individual ports for in-process callers only.
  *
- * @param inv - the run's Invocation: the environment, argv and harness-run identity the channel check reads (AS-26)
+ * @param inv - the run's Invocation: the environment (including the per-call run value) and argv the channel check reads (AS-26)
  * @param overrides - ports to replace (in-process callers only)
  */
 export function createProductionHumanChannelPorts(inv: Invocation, overrides: Partial<HumanChannelPorts> = {}): HumanChannelPorts {
@@ -96,16 +96,8 @@ export function createProductionHumanChannelPorts(inv: Invocation, overrides: Pa
     stdinIsTty: () => isatty(0),
     stdoutIsTty: () => isatty(1),
     env: () => inv.env,
-    argv: () => {
-      // reason: the entry strips `--harness-run <id>` from argv and keeps it in the invocation identity;
-      // an agent run identity must still be visible to the channel check, so it is re-surfaced here.
-      const args = inv.argv;
-      // reason: the UNVERIFIED id is deliberate here; surfacing an unregistered run makes the channel refuse, the safe direction (BR-1035).
-      const harnessRun = inv.identity.harnessRun;
-      // reason: only an AGENT run is an agent identity; a person's own run (`human:...` of their open session) is exactly who
-      // answers this channel, so surfacing it would refuse every human (BR-1350).
-      return harnessRun != null && isAgentRunId(String(harnessRun)) ? [...args, "--harness-run", String(harnessRun)] : args;
-    },
+    // reason: an agent run reaches the channel check through the LORE_HARNESS_RUN value in env(), never through argv (AC-RV-11)
+    argv: () => inv.argv,
     selfPid: () => process.pid,
     readProcessTable: () => readLiveProcessTable(inv.cwd),
     newNonce: generateNonce,

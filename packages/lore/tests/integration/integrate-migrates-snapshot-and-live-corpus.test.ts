@@ -348,6 +348,6 @@ describe("integrate migrates the floor's snapshot and then the live corpus, only
     expect(spawned).toEqual([]);
     const good = runSchemaMigration((cmd) => { spawned.push(cmd); return { status: 1, output: "" }; }, "lore migrate schema", fx.repo, join(fx.repo, ".lore"), "cc:sess-run");
     expect(good.state).toBe("failed");
-    expect(spawned).toEqual(["lore migrate schema --json --harness-run cc:sess-run"]);
+    expect(spawned).toEqual(["export LORE_HARNESS_RUN='cc:sess-run'\nlore migrate schema --json"]);
   }, 240_000);
 });
