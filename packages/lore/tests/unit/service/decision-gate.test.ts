@@ -193,6 +193,43 @@ describe("DecisionGate.judge: file premises (AC-DR-6)", () => {
     expect(error.message).toContain("inside the repository");
   });
 
+  describe("gate and score evidence that is a file source", () => {
+    const git = () => fakeGit({ files: { "src/registry.ts": lines }, dirty: ["src/dirty.ts"] });
+    const gateWith = (evidence: string) => ({ id: "meaning-unchanged", verdict: "pass", evidence, computed: false }) as const;
+    const scoreWith = (evidence: string) => ({ option: "A", dimension: "cost", value: 1, evidence }) as const;
+
+    it("a gate's file evidence is quoted and pinned like a premise; the typed text is kept", () => {
+      const result = new DecisionGate(git()).judge({ required: true, draft: { ...COMPLETE, gates: [gateWith("file:src/registry.ts:2-3")] } });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      expect(result.value?.gates?.[0]?.evidence).toBe("file:src/registry.ts:2-3");
+      expect(result.value?.gates?.[0]?.evidence_source).toEqual({ kind: "file", path: "src/registry.ts", lines: [2, 3], sha: HEAD, quote: "beta\ngamma" });
+    });
+
+    it("a score's file evidence is quoted and pinned at the named commit", () => {
+      const pinned = fakeGit({ atSha: { [`${OLD}:src/registry.ts`]: ["old"] } });
+      const result = new DecisionGate(pinned).judge({ required: true, draft: { ...COMPLETE, scores: [scoreWith(`file:src/registry.ts:1@${OLD}`)] } });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      expect(result.value?.scores?.[0]?.evidence_source).toMatchObject({ sha: OLD, quote: "old" });
+    });
+
+    it("plain-prose evidence stays unquoted and asks git nothing", () => {
+      const fake = git();
+      const result = new DecisionGate(fake).judge({ required: true, draft: { ...COMPLETE, gates: [gateWith("the sentence says the same")], scores: [scoreWith("measured by hand")] } });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      expect(result.value?.gates?.[0]?.evidence_source).toBeUndefined();
+      expect(result.value?.scores?.[0]?.evidence_source).toBeUndefined();
+      expect(fake.asked).toEqual([]);
+    });
+
+    it("a dirty file and no sha, or lines absent, refuse the write naming the gate evidence", () => {
+      const dirty = refusalOf(new DecisionGate(git()).judge({ required: true, draft: { ...COMPLETE, gates: [gateWith("file:src/dirty.ts:1")] } }));
+      expect(dirty.message).toContain("gate \"meaning-unchanged\" evidence");
+      expect(dirty.message).toContain("uncommitted");
+      const absent = refusalOf(new DecisionGate(git()).judge({ required: true, draft: { ...COMPLETE, scores: [scoreWith("file:src/registry.ts:9")] } }));
+      expect(absent.message).toContain("absent");
+    });
+  });
+
   it("a leading ./ is dropped so the same file is asked for under one name", () => {
     const git = fakeGit({ files: { "src/registry.ts": lines } });
     const result = new DecisionGate(git).judge({ required: true, draft: draftWith(filePremise({ path: "./src/registry.ts", lines: [1, 1] })) });

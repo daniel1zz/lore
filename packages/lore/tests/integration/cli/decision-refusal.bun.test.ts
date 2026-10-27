@@ -1,16 +1,15 @@
 // @spawns packages/lore/src/index.ts
 /**
  * AC-DR-2 — an agent's write to a non-draft target is refused without its decision (exit 4, naming each missing part, no
- * version written), on every surface that reaches the service: the CLI (`lore set`, `lore baseline set-label|depends|
- * glossary|map`), MCP `lore_set` and a direct `CorpusService.set` call; a draft spec edit, a status-only write and the same
- * write as a human party succeed and record no decision.
+ * version written), on the CLI (`lore set`, `lore baseline set-label|depends|glossary|map`) and on a direct
+ * `CorpusService.set` call (the service every adapter reaches, so the service-layer proof); a draft spec edit, a
+ * status-only write and the same write as a human party succeed and record no decision.
  * (spec-a-decision-carrying-write-records-its-decision-on-its, "Which writes carry a decision", "Refusal", D2; BR-1476)
  *
  * Real CLI against a throwaway corpus (`createPartyCorpus`: an attested agent run, and the person whose human session is
- * opened in it), real MCP server over an in-memory transport for the MCP and direct-call cases. Never the repo's own `.lore/`.
+ * opened in it); the direct-call cases use a real App over a temp corpus file. Never the repo's own `.lore/`.
  *
- * `lore_bulk` has no verb that changes more than status (archive|deprecate|close|done), so by D2 it is never gated: the
- * MCP case below pins that a bulk archive of an approved ADR by an agent still succeeds with no decision.
+ * No test here calls an MCP tool handler: the MCP server is being removed, and its writes reach the same service.
  *
  * Dimensions: HAPPY (decision recorded on the version row and printed by `lore log`), NEGATIVE (each target and verb, each
  * missing part, weak-tier premise), BOUNDARY (draft spec, status-only), STATE (no version written on refusal), REGRESSION
@@ -28,13 +27,9 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
-import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../../live-invocation.js";
+import { liveAmbient, liveWriteContext, LIVE_TEST_RUN } from "../../live-invocation.js";
 import { registerTestRun } from "../../helpers/test-run-identity.js";
 import { createPartyCorpus, type LoreRun, type Party, type PartyCorpus } from "../../helpers/known-party-corpus.js";
 
@@ -252,22 +247,11 @@ describe("AC-DR-2: the CLI refuses an agent's non-draft write without its decisi
   });
 });
 
-interface ToolResult {
-  isError?: boolean;
-  content: { type: string; text: string }[];
-}
-const textOf = (r: ToolResult): string => r.content.map((c) => c.text).join("\n");
-
-describe("AC-DR-2: MCP lore_set, a direct CorpusService.set call and lore_bulk (the same service)", () => {
+describe("AC-DR-2: a direct CorpusService.set call (the service every adapter reaches)", () => {
   let tmpRoot: string;
   let dbPath: string;
   let app: App;
-  let client: Client;
   let adrId: string;
-  let adrSlug: string;
-
-  const call = async (name: string, args: Record<string, unknown>): Promise<ToolResult> =>
-    (await client.callTool({ name, arguments: args })) as unknown as ToolResult;
 
   const versionCount = (id: string): number => {
     const db = new Database(dbPath, { readonly: true });
@@ -279,20 +263,19 @@ describe("AC-DR-2: MCP lore_set, a direct CorpusService.set call and lore_bulk (
   };
 
   beforeAll(async () => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "lore-dr2-mcp-"));
+    tmpRoot = mkdtempSync(join(tmpdir(), "lore-dr2-direct-"));
     mkdirSync(join(tmpRoot, ".lore"), { recursive: true });
     dbPath = join(tmpRoot, ".lore", "lore.db");
     app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     registerTestRun(tmpRoot, LIVE_TEST_RUN);
     const created = await app.corpusService.create({
       type: "adr",
-      title: "MCP ADR",
+      title: "Direct ADR",
       content: "# Decision\n\nwe chose A",
       extra: { decision_status: "accepted" },
     } as CreateDocInput);
     if (!created.ok) throw new Error(`adr: ${JSON.stringify(created.error)}`);
     adrId = created.value.id;
-    adrSlug = created.value.slug;
     // reason: approving an ADR needs a review judgment (a gate this suite is not about); the status is seeded, as the CLI half does.
     const seed = new Database(dbPath);
     try {
@@ -302,38 +285,24 @@ describe("AC-DR-2: MCP lore_set, a direct CorpusService.set call and lore_bulk (
     }
     const approved = await app.corpusService.get(adrId);
     if (!approved.ok || approved.value.doc.status !== "approved") throw new Error(`approve fixture failed: ${JSON.stringify(approved)}`);
-
-    const server = new McpServer({ name: "lore", version: "0.0.0-test" });
-    registerTools(server, app, undefined, liveInvocation());
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-    client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(clientTransport);
   });
 
-  afterAll(async () => {
-    await client.close();
+  afterAll(() => {
     app.close();
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it("MCP lore_set on an approved ADR with a correction and no decision is refused naming the parts; no version written", async () => {
-    const before = versionCount(adrId);
-    const res = await call("lore_set", { id_or_slug: adrSlug, content: "# Decision\n\nwe chose B", correction: { reason: "typo" }, harness_run: LIVE_TEST_RUN });
-    expect(res.isError).toBe(true);
-    const text = textOf(res);
-    expect(text).toContain("decision");
-    expect(text).toContain("reason");
-    expect(text).toContain("premise of tier S..C");
-    expect(text).toContain("alternative");
-    expect(versionCount(adrId)).toBe(before);
-  });
-
-  it("a direct CorpusService.set call by an agent refuses the same way", async () => {
+  it("an agent's correction with no decision is refused naming each missing part, and writes no version", async () => {
     const before = versionCount(adrId);
     const res = await app.corpusService.set(adrId, { content: "# Decision\n\nwe chose C" }, { correction: { reason: "typo" } });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatchObject({ code: "VALIDATION_ERROR", field: "decision" });
+    if (!res.ok) {
+      expect(res.error).toMatchObject({ code: "VALIDATION_ERROR", field: "decision" });
+      const message = (res.error as { message: string }).message;
+      expect(message).toContain("reason");
+      expect(message).toContain("premise of tier S..C");
+      expect(message).toContain("alternative");
+    }
     expect(versionCount(adrId)).toBe(before);
   });
 
@@ -360,11 +329,8 @@ describe("AC-DR-2: MCP lore_set, a direct CorpusService.set call and lore_bulk (
     }
   });
 
-  it("lore_bulk archive (status only) of the approved ADR by an agent succeeds with no decision: no bulk verb changes more than status", async () => {
-    const res = await call("lore_bulk", { ids: [adrSlug], verb: "archive", apply: true, reason: "superseded by a newer record", harness_run: LIVE_TEST_RUN });
-    expect(res.isError, textOf(res)).not.toBe(true);
-    const rows = (JSON.parse(textOf(res)) as { rows: { outcome?: string; ok?: boolean }[] }).rows;
-    expect(rows).toHaveLength(1);
-    expect(JSON.stringify(rows[0])).not.toContain("decision");
+  it("a status-only direct call by the agent (what a bulk archive does) needs no decision", async () => {
+    const res = await app.corpusService.set(adrId, { status: "archived" });
+    expect(res.ok, JSON.stringify(res.ok ? "" : res.error)).toBe(true);
   });
 });

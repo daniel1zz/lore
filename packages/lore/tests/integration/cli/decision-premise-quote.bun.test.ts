@@ -193,6 +193,73 @@ describe("AC-DR-6: file premises are quoted and pinned at write time", () => {
     expect(versionCount()).toBe(before);
   });
 
+  describe("gate and score evidence that is a file source", () => {
+    interface StoredDecision {
+      gates?: { evidence: string; evidence_source?: StoredSource }[];
+      scores?: { evidence: string; evidence_source?: StoredSource }[];
+    }
+    const storedDecision = (): StoredDecision => {
+      const db = new Database(join(corpus.dir, ".lore", "lore.db"), { readonly: true });
+      try {
+        const row = db
+          .query("SELECT v.decision AS decision FROM versions v JOIN docs d ON d.id = v.doc_id WHERE d.slug = ? ORDER BY v.version DESC LIMIT 1")
+          .get(adr) as { decision: string };
+        return JSON.parse(row.decision) as StoredDecision;
+      } finally {
+        db.close();
+      }
+    };
+    const correctWithEvidence = (gate: string, score?: string) => {
+      writes += 1;
+      return corpus.lore(
+        [
+          "set", adr, "--content", `# Decision\n\nrevision ${writes}`, "--correction", "typo", "--reason", "the constant moved",
+          "--premise", "the ttl is stated|issue:#41|A", "--alt", "leave it|the record would stay wrong", "--gate", gate,
+          ...(score !== undefined ? ["--score", score] : []),
+        ],
+        AGENT,
+      );
+    };
+
+    it("a gate's file evidence is quoted and pinned to HEAD like a premise; the typed text is kept", () => {
+      const run = correctWithEvidence("meaning-unchanged|pass|file:src/registry.ts:2-3");
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      const gate = storedDecision().gates?.[0];
+      expect(gate?.evidence).toBe("file:src/registry.ts:2-3");
+      expect(gate?.evidence_source).toEqual({ kind: "file", path: "src/registry.ts", lines: [2, 3], sha: secondSha, quote: `${V2[1]}\n${V2[2]}` });
+    });
+
+    it("a score's file evidence at a named commit is quoted at that commit", () => {
+      const run = correctWithEvidence("meaning-unchanged|pass|prose evidence", `A|cost|1|file:src/registry.ts:1@${firstSha}`);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(storedDecision().scores?.[0]?.evidence_source).toMatchObject({ sha: firstSha, quote: V1[0] });
+    });
+
+    it("plain-prose evidence stays unquoted", () => {
+      const run = correctWithEvidence("meaning-unchanged|pass|the words are the same");
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(storedDecision().gates?.[0]?.evidence_source).toBeUndefined();
+    });
+
+    it("gate evidence naming lines absent at the commit exits 4 and writes no version", () => {
+      const before = versionCount();
+      const run = correctWithEvidence("meaning-unchanged|pass|file:src/registry.ts:40-41");
+      expect(run.exitCode).toBe(4);
+      expect(run.stderr).toContain("gate");
+      expect(run.stderr).toContain("absent");
+      expect(versionCount()).toBe(before);
+    });
+
+    it("gate evidence naming an untracked file and no sha exits 4, and writes no version", () => {
+      writeFileSync(join(corpus.dir, "src", "evidence-untracked.ts"), "const y = 2;\n");
+      const before = versionCount();
+      const run = correctWithEvidence("meaning-unchanged|pass|file:src/evidence-untracked.ts:1");
+      expect(run.exitCode).toBe(4);
+      expect(run.stderr).toContain("uncommitted");
+      expect(versionCount()).toBe(before);
+    });
+  });
+
   it("a premise whose source is not a file is stored as typed (no quote is invented)", () => {
     const run = correctWith("issue:#41", "A");
     expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);

@@ -32,6 +32,9 @@ import {
   hasStrongPremise,
   isStrongTier,
   ok,
+  parseDecisionSource,
+  type DecisionSourceDraft,
+  type FileSource,
   type DecisionAlternative,
   type DecisionGate as StoredGate,
   type DecisionRecord,
@@ -147,12 +150,24 @@ export class DecisionGate {
       if (!resolved.ok) return resolved;
       quoted.push(resolved.value);
     }
+    const gates: StoredGate[] = [];
+    for (const gate of draft?.gates ?? []) {
+      const pinned = this.pinEvidence(gate.evidence, `gate "${gate.id}" evidence`);
+      if (!pinned.ok) return pinned;
+      gates.push(pinned.value === undefined ? gate : { ...gate, evidence_source: pinned.value });
+    }
+    const scores: DecisionScore[] = [];
+    for (const score of draft?.scores ?? []) {
+      const pinned = this.pinEvidence(score.evidence, `score ${score.option}/${score.dimension} evidence`);
+      if (!pinned.ok) return pinned;
+      scores.push(pinned.value === undefined ? score : { ...score, evidence_source: pinned.value });
+    }
     const record = {
       reason,
       premises: quoted,
       alternatives: [...alternatives],
-      ...(draft?.gates !== undefined && draft.gates.length > 0 ? { gates: [...draft.gates] } : {}),
-      ...(draft?.scores !== undefined && draft.scores.length > 0 ? { scores: [...draft.scores] } : {}),
+      ...(gates.length > 0 ? { gates } : {}),
+      ...(scores.length > 0 ? { scores } : {}),
       ...(draft?.weightTable !== undefined ? { weight_table: draft.weightTable } : {}),
       ...(draft?.refs !== undefined && draft.refs.length > 0 ? { refs: [...draft.refs] } : {}),
     };
@@ -169,9 +184,28 @@ export class DecisionGate {
   private quotePremise(premise: PremiseDraft): Result<Premise, LoreError> {
     const { source } = premise;
     if (source.kind !== "file") return ok({ claim: premise.claim, tier: premise.tier, source });
+    const pinned = this.pinFile(source, `file premise "${premise.claim}"`);
+    if (!pinned.ok) return pinned;
+    return ok({ claim: premise.claim, tier: premise.tier, source: pinned.value });
+  }
+
+  /**
+   * Gate or score evidence: when the text parses as a file source it is quoted and pinned exactly like a premise (the
+   * milestone re-check needs the stored quote to tell wrong-when-written from stale-since); plain prose, and any other
+   * source kind, stays as typed and yields `undefined`.
+   */
+  private pinEvidence(evidence: string, what: string): Result<FileSource | undefined, LoreError> {
+    if (!evidence.startsWith("file:")) return ok(undefined);
+    const parsed = parseDecisionSource(evidence);
+    if (!parsed.ok || parsed.source.kind !== "file") return ok(undefined);
+    return this.pinFile(parsed.source, what);
+  }
+
+  /** A file source with `sha` and `quote` filled from the repository, or the refusal naming why it cannot be. */
+  private pinFile(source: Extract<DecisionSourceDraft, { kind: "file" }>, subject: string): Result<FileSource, LoreError> {
     const path = this.repoRelative(source.path);
     if (!path.ok) return path;
-    const label = `file premise "${premise.claim}" (${source.path}:${source.lines[0]}-${source.lines[1]})`;
+    const label = `${subject} (${source.path}:${source.lines[0]}-${source.lines[1]})`;
 
     let sha = source.sha;
     if (sha === undefined) {
@@ -192,11 +226,7 @@ export class DecisionGate {
     if (to > lines.value.length) {
       return err(refuse(`${label}: lines ${from}-${to} are absent at ${sha}; the file has ${lines.value.length} line(s) there. Nothing was written.`));
     }
-    return ok({
-      claim: premise.claim,
-      tier: premise.tier,
-      source: { kind: "file", path: path.value, lines: [from, to], sha, quote: lines.value.slice(from - 1, to).join("\n") },
-    });
+    return ok({ kind: "file", path: path.value, lines: [from, to], sha, quote: lines.value.slice(from - 1, to).join("\n") });
   }
 
   /** The repo-root-relative form of a premise path; a path outside the repository is refused. */
