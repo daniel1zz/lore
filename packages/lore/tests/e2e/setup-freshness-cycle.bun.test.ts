@@ -108,7 +108,7 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-/** Spawns the COMPILED `dist/lore setup ...args` directly. `PATH` defaults to `""` (forces `claude` MCP-registration ENOENT deterministically on any `--yes` run) unless overridden. */
+/** Spawns the COMPILED `dist/lore setup ...args` directly. `PATH` defaults to `""` (no `claude` is reachable; setup no longer calls it, task-skill-implement-lore-setup-registers-no-tool-server-and) unless overridden. */
 function runSetup(args: string[], cwd: string, envOverrides: Record<string, string> = {}): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, "setup", ...args], {
     cwd,
@@ -155,13 +155,12 @@ const MANIFEST_FILENAME = ".lore-setup-manifest.json";
 const WATCHED_MANAGED_FILE = "agents/lore-implementer.md";
 const MUTATED_BYTES = "MUTATED BYTES — not the embedded content, this is a user-made edit (T9 e2e)\n";
 
-/** Fresh `--yes` converge into a never-before-installed `targetDir`. MCP registration fails under `PATH=""` (exit 1) — file writes still land. */
+/** Fresh `--yes` converge into a never-before-installed `targetDir`. Setup registers no MCP server, so the install exits 0 (task-skill-implement-lore-setup-registers-no-tool-server-and). */
 function freshInstall(scratch: string, targetDir: string): void {
   const install = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-  if (install.exitCode !== 1) {
+  if (install.exitCode !== 0) {
     throw new Error(
-      `freshInstall: expected the seeding install to exit 1 (files written, MCP registration fails under ` +
-        `PATH=""), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
+      `freshInstall: expected the seeding install to exit 0 (task-skill-implement-lore-setup-registers-no-tool-server-and: setup registers no MCP server), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
     );
   }
   if (!existsSync(join(targetDir, WATCHED_MANAGED_FILE))) {
@@ -258,7 +257,7 @@ describe("AC-076-10: compiled dist/lore setup-freshness cycle — STATE", () => 
 
     const expectedSha = sha256OfFile(join(REPO_ASSETS_ROOT, WATCHED_MANAGED_FILE));
     const force = runSetup(["--claude-dir", targetDir, "--yes", "--force-diverged", "--json"], scratch);
-    expect(force.exitCode).toBe(1); // MCP registration still fails under PATH=""
+    expect(force.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     // Bytes restored to the embedded target — never left at the mutated value.
     expect(sha256OfFile(mutatedFullPath)).toBe(expectedSha);

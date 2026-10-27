@@ -38,8 +38,8 @@
  *     assets) so the oracle survives the asset being moved or deleted.
  *
  * Isolation: every sandbox is a mkdtemp tree holding HOME, XDG_CONFIG_HOME
- * and a throwaway `lore init` corpus (cwd); a `claude` stub on PATH keeps
- * `lore setup` MCP registration from touching the real CLI; PATH resolves
+ * and a throwaway `lore init` corpus (cwd); a `claude` stub on PATH is kept from
+ * when setup registered an MCP server (task-skill-implement-lore-setup-registers-no-tool-server-and); PATH resolves
  * `lore` to THIS worktree's dist/lore. Never touches the repo's `.lore/` or
  * the real `~/.claude`.
  *

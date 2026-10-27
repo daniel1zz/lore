@@ -238,7 +238,7 @@ beforeAll(async () => {
     binSymlinkPath,
     ["setup", "--dry-run", "--claude-dir", setupDryRunTargetDir, "--json"],
     installPrefix,
-    sanitizedEnv({ PATH: "" }), // forces `claude` ENOENT deterministically; --dry-run never reaches McpRegistrar anyway (setup.test.ts convention)
+    sanitizedEnv({ PATH: "" }), // no `claude` reachable; setup registers no MCP server (task-skill-implement-lore-setup-registers-no-tool-server-and)
     60_000,
   );
   setupDryRunJson = JSON.parse(setupDryRunResult.stdout);

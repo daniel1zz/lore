@@ -112,6 +112,15 @@ export const setupEntryKindSchema = z.enum(SETUP_ENTRY_KINDS);
 export type SetupEntryKind = z.infer<typeof setupEntryKindSchema>;
 
 /**
+ * The kinds the installer may write or plan: every {@link SetupEntryKind} except `"mcp"` (`lore setup` registers no
+ * tool server, so no asset or manifest row it produces can be `mcp`; the parsed manifest keeps `"mcp"` to read old files).
+ */
+export const writtenSetupEntryKindSchema = setupEntryKindSchema.exclude(["mcp"]);
+
+/** Derived TypeScript union for {@link writtenSetupEntryKindSchema}. */
+export type WrittenSetupEntryKind = z.infer<typeof writtenSetupEntryKindSchema>;
+
+/**
  * The closed set of ownership zones a file/entry can belong to (SPEC-076 §C1
  * D8) — how an update should treat this path when its on-disk bytes diverge
  * from what lore last wrote:
@@ -135,8 +144,8 @@ export const assetOwnershipSchema = z.enum(ASSET_OWNERSHIPS);
 export type AssetOwnership = z.infer<typeof assetOwnershipSchema>;
 
 /**
- * One row of the setup manifest — a single path `lore setup` has written (or,
- * for `kind: "mcp"`, a registration it performed with no corresponding file).
+ * One row of the setup manifest — a single path `lore setup` has written (an old
+ * manifest may still hold a `kind: "mcp"` row, a registration a pre-removal binary made with no file).
  *
  * @invariant `sha256` is the digest of the FINAL on-disk bytes (post-merge for
  *   `settings-hook`), never the raw payload. See module invariants above.
@@ -163,6 +172,13 @@ export const setupEntrySchema = z.object({
 
 /** Derived TypeScript type for one manifest row. */
 export type SetupEntry = z.infer<typeof setupEntrySchema>;
+
+/**
+ * A manifest row the installer may WRITE: {@link SetupEntry} with `kind` narrowed to exclude `"mcp"`.
+ * `lore setup` registers no tool server, so it never writes an `mcp` row (ADR decision 3 of
+ * spec-remove-the-lore-mcp-server); the parsed {@link SetupEntry} keeps `"mcp"` so an old manifest still reads.
+ */
+export type WrittenSetupEntry = Omit<SetupEntry, "kind"> & { kind: WrittenSetupEntryKind };
 
 /**
  * What a project setup replaced OUTSIDE the files it owns, so `lore setup --project --uninstall` can put it back
@@ -244,7 +260,7 @@ export type SetupManifest = z.infer<typeof setupManifestSchema>;
  * existence implies — this function itself is silent and pure.
  *
  * @param kind - A manifest entry's `SetupEntryKind`, as produced by
- *   `RealAssetSource` (or `SetupService`'s own synthetic `"mcp"` entry).
+ *   `RealAssetSource` (or a legacy `"mcp"` entry read from an old manifest).
  * @returns The best-effort {@link AssetOwnership} for that kind.
  * @throws Never.
  * @example

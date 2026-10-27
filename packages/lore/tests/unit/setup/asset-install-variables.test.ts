@@ -61,7 +61,7 @@ function walk(dir: string): string[] {
 beforeAll(() => {
   home = mkdtempSync(join(tmpdir(), "lore-asset-install-home-"));
   cwd = mkdtempSync(join(tmpdir(), "lore-asset-install-cwd-"));
-  // PATH="" keeps the install from reaching a real `claude` CLI (MCP registration fails, file writes still land).
+  // PATH="" keeps any `claude` CLI unreachable; setup registers no MCP server (task-skill-implement-lore-setup-registers-no-tool-server-and).
   installExit = runSetup(["--yes"], "").exitCode;
 }, 150_000);
 
