@@ -116,6 +116,6 @@ After all 5 agents return, synthesize into unified test strategy:
 
 ## Phase 4: Persist
 
-- `lore create knowledge --sub-type reference --title "Test Plan: <feature>" --content ...` with full test plan
+- `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title "Test Plan: <feature>" --content ...` with full test plan
 - Link to PRD/feature-spec via `lore link <test-plan-slug> <spec-slug> --type=relates-to`
 - Output linked tasks for each test mode needed

@@ -121,7 +121,7 @@ After completing any mode's work, update operational documentation:
 3. **SLO changes** → update `docs/ops/slo-definitions.md`, notify stakeholders
 4. **Incident learnings** → add to `docs/troubleshooting/incident-history.md`
 
-Tools: `lore: lore create knowledge --sub-type reference, lore set, lore link` | `serena: create_text_file`
+Tools: `lore: lore create knowledge --parent <spec or prd it concerns> --sub-type reference, lore set, lore link` | `serena: create_text_file`
 
 ## Step 3: Verify & Report
 
@@ -170,7 +170,7 @@ Tools: `lore: lore create knowledge --sub-type reference, lore set, lore link` |
 | implement skill | Bug fixes from incidents, automation requests from toil | lore task (`lore create task`) with root cause analysis |
 | deploy skill | Scaling requirements, infra changes, config updates | lore knowledge doc (`--sub-type reference`, ops-change) |
 | test skill | Chaos experiment results, failure modes to test | `[CHAOS_RESULTS]` with findings |
-| lore corpus | Runbook updates, SLO status, incident reports | `lore create knowledge` / `lore set` |
+| lore corpus | Runbook updates, SLO status, incident reports | `lore create knowledge --parent <spec or prd it concerns>` / `lore set` |
 
 ### Handoff Protocols
 

@@ -132,7 +132,7 @@ Based on project type and existing assets, determine the skill chain.
 | CLI tool / library | `research:sdk` → `design:api` → `plan:create` |
 | Bot (Slack/Telegram/etc.) | `research:sdk` → `design:module` → `plan:create` |
 
-Persist chain outputs into the corpus as you go: research conclusions → `lore create adr --decision-status proposed`; architecture → `lore create spec --kind tech`; plans → `lore create plan --parent <spec>` + `lore phase add` + `lore create task --parent <plan> --plan-id <plan> --anchor <path>`.
+Persist chain outputs into the corpus as you go: research conclusions → `lore create adr --parent <spec it governs> --decision-status proposed`; architecture → `lore create spec --kind tech`; plans → `lore create plan --parent <spec>` + `lore phase add` + `lore create task --parent <plan> --plan-id <plan> --anchor <path>`.
 
 ### Scaffold Recommendation
 

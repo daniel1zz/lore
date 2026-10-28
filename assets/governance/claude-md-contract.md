@@ -61,7 +61,7 @@ misplaced. That is a silent SSOT violation manufactured by the budget itself.
    mechanism walkthroughs, per-change narratives, measurements, rejected
    alternatives. Not the rule it illustrates.
 2. Move it, verbatim, into a corpus doc
-   (`lore create knowledge --sub-type reference`).
+   (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`).
 3. Leave **one line** in the memory file: what was evicted, and the slug
    that now holds it. That pointer must resolve — a pointer to a doc that
    does not exist is the same defect class as a dangling code anchor.

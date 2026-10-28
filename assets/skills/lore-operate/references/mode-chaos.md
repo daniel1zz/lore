@@ -39,7 +39,7 @@ Select and design the experiment following the chaos engineering methodology in 
 
 Output: `[CHAOS_EXPERIMENT] target: {service} | failure: {type} | duration: {min} | blast_radius: {scope} | abort_conditions: {list}`
 
-Tools: `lore: lore create knowledge --sub-type reference` (experiment spec) | `serena: execute_shell_command` (verify rollback mechanism)
+Tools: `lore: lore create knowledge --parent <spec or prd it concerns> --sub-type reference` (experiment spec) | `serena: execute_shell_command` (verify rollback mechanism)
 
 ### Step 3: Pre-Flight
 
@@ -89,7 +89,7 @@ Document result:
 
 Output: `[CHAOS_RESULT] experiment: {name} | result: CONFIRMED/DISPROVED/INCONCLUSIVE | findings: {N} | actions: {N}`
 
-Tools: `lore: lore create knowledge --sub-type retro` (experiment report) | `lore phase add <plan> "Chaos Remediation"` + `lore create task --parent <plan> --plan-id <plan> --phase "Chaos Remediation"` (action items for gaps — create leaf tasks under a "Chaos Remediation" phase, or a new remediation plan via `lore create plan` if one does not yet exist)
+Tools: `lore: lore create knowledge --sub-type retro` (experiment report) | `lore phase add <plan> "Chaos Remediation"` + `lore create task --parent <plan> --plan-id <plan> --phase "Chaos Remediation"` (action items for gaps — create leaf tasks under a "Chaos Remediation" phase, or a new remediation plan via `lore create plan --parent <spec it implements>` if one does not yet exist)
 
 ### Step 6: Action Items
 
@@ -139,7 +139,7 @@ Mode is COMPLETE when ALL of:
 - [ ] Experiment executed with real-time observations documented
 - [ ] Results analyzed against hypothesis: `[CHAOS_RESULT]`
 - [ ] Action items created for any gaps found (with owners and priority)
-- [ ] Experiment report stored in lore (`lore create knowledge --sub-type retro`)
+- [ ] Experiment report stored in lore (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro`)
 - [ ] Runbook updated with any new failure modes discovered
 - [ ] Report: `[CHAOS_COMPLETE] experiments: {N} | confirmed: {N} | disproved: {N} | actions: {N} | next_game_day: {date}`
 

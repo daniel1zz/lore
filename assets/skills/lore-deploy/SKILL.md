@@ -124,7 +124,7 @@ See `references/methodology-rollback.md` for full procedures.
 3. Data migrations — maintain old+new paths until verified, then cleanup
 4. Always test rollback path in staging before production
 
-**Post-rollback**: Re-run Phase 4 verification. Create incident doc via lore (`lore create knowledge --sub-type retro --title ... --content ...`). Hand off to `operate` skill if extended investigation needed.
+**Post-rollback**: Re-run Phase 4 verification. Create incident doc via lore (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro --title ... --content ...`). Hand off to `operate` skill if extended investigation needed.
 
 ---
 
@@ -227,7 +227,7 @@ A mode is COMPLETE only when ALL exit criteria are met. Report as checklist.
 | **Compliance** | Regulated environment (SOC2, HIPAA, PCI) | Audit trail, approval gates, change management ticket linked, data residency verified |
 | **Cost** | Infrastructure changes | Cost estimate before apply (Infracost / cloud pricing calculator), right-sizing review, resource tagging |
 | **Supply Chain** | New dependencies, new base images | SBOM generation (Syft/Trivy), provenance verification (SLSA), pinned versions with hash |
-| **Incident Response** | Post-deploy failure detected | Auto-link to operate skill, create incident doc via lore (`lore create knowledge --sub-type retro`), trigger rollback if criteria met |
+| **Incident Response** | Post-deploy failure detected | Auto-link to operate skill, create incident doc via lore (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro`), trigger rollback if criteria met |
 | **Data Privacy** | PII handling, new data stores | Encryption at rest/transit verified, retention policy applied, access audit enabled |
 
 ---
@@ -280,6 +280,6 @@ A mode is COMPLETE only when ALL exit criteria are met. Report as checklist.
 
 ## Persist
 
-- Create/update runbook: `lore create knowledge --sub-type reference --title ... --content ...` or `lore set <runbook> --content ...`
+- Create/update runbook: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title ... --content ...` or `lore set <runbook> --content ...`
 - Link to upstream specs: `lore link <runbook> <tech-spec> --type=implements`, `lore link <runbook> <adr> --type=relates-to`
 - Update task: `lore evidence <task> --oracle build --command "<cmd>" --result pass --capture` then `lore release <task>`

@@ -101,4 +101,4 @@ This is the universal pattern for any non-trivial schema change in a zero-downti
 
 - `serena`: create_text_file (migration files), execute_shell_command (run migrations)
 - `context7`: Prisma/Flyway/Alembic docs for migration syntax
-- `lore`: `lore create knowledge --sub-type reference --title ...` for migration procedures, `lore search "<q>" --type knowledge --json` for existing runbooks
+- `lore`: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title ...` for migration procedures, `lore search "<q>" --type knowledge --json` for existing runbooks

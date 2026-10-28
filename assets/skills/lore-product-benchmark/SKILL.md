@@ -91,7 +91,7 @@ The matrix is an **input**, not a decision. Route it:
 
 ```bash
 lore search "{category} benchmark" --json          # may already exist — update instead
-lore create knowledge --sub-type research \
+lore create knowledge --parent <spec or prd it concerns> --sub-type research \
   --title '{category} Benchmark Teardown' --content ...
 ```
 

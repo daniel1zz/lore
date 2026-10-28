@@ -96,7 +96,7 @@ Each row above the line becomes one requirement, inheriting its provenance:
 ## Persist (MANDATORY)
 
 ```bash
-lore create knowledge --sub-type research --title '{solution} Story Map' --content ...
+lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{solution} Story Map' --content ...
 lore link <map> <validation-ledger> --type=implements
 ```
 

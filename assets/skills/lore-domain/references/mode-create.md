@@ -25,7 +25,7 @@ Path: `docs/domain/{domain}/`
 | expert-lenses.md | Expert evaluation frameworks |
 | index.yaml | Domain metadata (including `strategic_type`) |
 
-Tools: serena create_text_file; register in lore: `lore create knowledge --sub-type reference --title "Domain — {domain}"` + `lore link <from> <to> --type relates-to`
+Tools: serena create_text_file; register in lore: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title "Domain — {domain}"` + `lore link <from> <to> --type relates-to`
 Templates: See [domain-docs-template.md] and `~/.claude/templates/domain-*.md`
 
 ### 2a. Create Aggregate Documentation
@@ -52,7 +52,7 @@ Per lens, define: identity, priorities (ordered), checklist (specific evaluation
 
 Key principle: **specificity over generality**. Not "consider safety" but "check allergen cross-reactivity for infants under 12mo". The more concrete, the more authentic the AI's expert perspective.
 
-Confirm lens list with user before generating. Store in `expert-lenses.md` + register in lore (`lore create knowledge --sub-type reference`).
+Confirm lens list with user before generating. Store in `expert-lenses.md` + register in lore (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`).
 
 ### 2c. Create Ubiquitous Language Glossary
 
@@ -60,7 +60,7 @@ Confirm lens list with user before generating. Store in `expert-lenses.md` + reg
 2. Extract terms from PRD/user stories via `lore search "<term>" --type prd`
 3. For each term: definition, code symbol, bounded context scope, synonyms, anti-terms
 4. Cross-reference code vs business terminology — flag mismatches
-5. Persist in `docs/domain/{domain}/glossary.md` + register in lore (`lore create knowledge --sub-type reference`)
+5. Persist in `docs/domain/{domain}/glossary.md` + register in lore (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`)
 
 ### 2d. Event Storm Documentation (optional, for analyzed domains)
 
@@ -71,7 +71,7 @@ If Event Storming was performed in analyze mode, persist results:
 4. Aggregate clusters
 5. Hotspot register
 6. Pivotal events list
-Persist in `docs/domain/{domain}/event-storm.md` + register in lore (`lore create knowledge --sub-type reference`).
+Persist in `docs/domain/{domain}/event-storm.md` + register in lore (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`).
 
 ### 3. Create Skill + Command
 
