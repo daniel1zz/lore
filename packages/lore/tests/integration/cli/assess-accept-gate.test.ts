@@ -28,7 +28,9 @@ import { DecisionGate, type DecisionDraft } from "../../../src/service/decision-
 import { GateAcceptanceService } from "../../../src/service/gate-acceptance-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { IssueFilingService } from "../../../src/service/issue-filing-service.js";
-import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../../src/service/milestone-review.js";
+import { DecisionOutcomeService } from "../../../src/service/decision-outcome-service.js";
+import { selectPlanDecisions } from "../../../src/service/decision-recheck.js";
+import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview } from "../../../src/service/milestone-review.js";
 import { REVIEW_BATCH_LEASE_NAME, ReviewBatchLease } from "../../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner } from "../../../src/service/review-batch-service.js";
 import { issueTitleOf, rootCauseOf } from "../../../src/service/root-cause-fingerprint.js";
@@ -381,5 +383,67 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     const run = await w.runBatch();
     expect(run.outcome).not.toBe("accepted-with-known-defects");
     expect((await w.reload()).status).toBe("approved");
+  });
+});
+
+describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
+  /** Stores a newer review of the same plan state whose `dimension` failure cites `cite` instead (another root cause). */
+  async function reReviewWithOtherCause(w: World, dimension: "security" | "regression", cite: string): Promise<void> {
+    const docs = await w.corpus.listMilestoneReviewDocs(w.plan.id);
+    if (!docs.ok) throw new Error(JSON.stringify(docs.error));
+    const latest = selectLatestMilestoneReview(docs.value);
+    if (latest === undefined) throw new Error("no review");
+    const review: MilestoneReview = { ...latest.review, dimensions: { ...latest.review.dimensions, [dimension]: { ...latest.review.dimensions[dimension], cites: [cite] } } };
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const doc = await w.corpus.createMilestoneReviewDoc({ type: "knowledge", title: "Later review", parent_id: w.plan.id, extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review }, content: renderMilestoneReviewContent(review) });
+    if (!doc.ok) throw new Error(JSON.stringify(doc.error));
+    const informs = await w.corpus.link(doc.value.id, w.plan.id, "informs");
+    if (!informs.ok) throw new Error(JSON.stringify(informs.error));
+  }
+
+  it("AC-AF-7 STATE: a later review whose security failure has a different root-cause fingerprint keeps the plan open, by hand and in the batch", async () => {
+    const w = await worldWith({ security: "fail" });
+    expect((await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION)).ok).toBe(true);
+    const accepted = readKnownDefects((await w.reload()).extra)[0];
+    expect(accepted).toMatchObject({ dimension: "security", gate_accepted: true });
+
+    await reReviewWithOtherCause(w, "security", "src/another-flaw.ts");
+    const hand = await w.corpus.set(w.plan.id, { status: "archived" }, { by: "t" });
+    expect(hand.ok).toBe(false);
+    if (!hand.ok) {
+      expect(hand.error).toMatchObject({ code: "VALIDATION_ERROR", field: "gate:plan-close" });
+      expect(JSON.stringify(hand.error)).toContain("security");
+    }
+    expect((await w.reload()).status).toBe("approved");
+    // the stored acceptance still names the OLD failure: nothing re-flagged it
+    expect(readKnownDefects((await w.reload()).extra)).toEqual([accepted]);
+  });
+
+  it("AC-AF-7 STATE: the same failure re-reviewed (same cites, other wording) stays accepted and closes", async () => {
+    const w = await worldWith({ security: "fail" });
+    expect((await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION)).ok).toBe(true);
+    await reReviewWithOtherCause(w, "security", "src/security.ts");
+    expect((await w.corpus.set(w.plan.id, { status: "archived" }, { by: "t" })).ok).toBe(true);
+    expect((await w.reload()).status).toBe("archived");
+  });
+
+  it("AC-AF-7 REGRESSION: the accept-gate decision is on the plan's version row where `lore decision rates` and the re-check read it", async () => {
+    const w = await worldWith({ security: "fail" });
+    expect((await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION)).ok).toBe(true);
+    const bundle = await w.corpus.getPlanBundle(w.plan.id);
+    if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
+    const selected = await selectPlanDecisions({ store: w.store }, bundle.value);
+    expect(selected).toMatchObject({ ok: true });
+    if (!selected.ok) return;
+    expect(selected.value.map((d) => d.address)).toEqual([`${w.plan.slug}@${String((await w.reload()).version)}`]);
+
+    const outcome = new DecisionOutcomeService({
+      store: w.store,
+      writer: w.corpus,
+      listMilestoneReviewDocs: (planId) => w.corpus.listMilestoneReviewDocs(planId),
+      getPlanBundle: (planId) => w.corpus.getPlanBundle(planId),
+    });
+    const rates = await outcome.rates({ kind: "document revision" });
+    expect(rates).toMatchObject({ ok: true, value: { decisions: 1, decisionsInNoPlan: 0 } });
   });
 });

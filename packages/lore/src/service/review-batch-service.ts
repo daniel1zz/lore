@@ -33,7 +33,8 @@
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-3, AC-PCR-4, AC-PCR-5, BR-1379)
  */
 
-import { acceptedGateDimensions, blockingGates, filableDimensions, milestoneReviewSchema, ok, readKnownDefects, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
+import { acceptedGatesOf } from "./gate-acceptance-service.js";
+import { blockingGates, filableDimensions, milestoneReviewSchema, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
@@ -402,7 +403,7 @@ export class ReviewBatchRunner {
     }
     // reason: spec "Verdict and close" — a gate that failed or is not-measured keeps the plan open (its issue is filed above);
     // only a gate the plan accepted with a decision (`lore assess --accept-gate`, a gate_accepted known defect) may close.
-    const acceptedGates = acceptedGateDimensions(readKnownDefects(bundle.plan.extra));
+    const acceptedGates = acceptedGatesOf(bundle.plan, latest);
     const blockers = blockingGates(review.dimensions).filter((gate) => !acceptedGates.includes(gate));
     const issueNumbers = [...new Set(issues)].sort((a, b) => a - b);
     if (blockers.length > 0) {
