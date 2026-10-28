@@ -11,14 +11,16 @@
  *   - Only runner-attested (`attestation` present), conclusive (`pass` | `fail`) rows count; self-reported rows and
  *     `expected-fail` / `inconclusive` rows are ignored. The latest per (spec, criterion) wins (ties: later offer).
  *   - Evidence -> spec: a plan-member task resolves to its plan's parent spec (a lineage that names no known spec
- *     attributes nothing); a task with no plan lineage resolves a row's `ac_ref` only when exactly ONE spec declares
+ *     attributes nothing); an ad-hoc task that RECORDED its governing spec (`extra.governing_spec`, BR-1495)
+ *     resolves to that spec, so two specs declaring the same criterion id never collide; a task with no plan
+ *     lineage and no recorded spec resolves a row's `ac_ref` only when exactly ONE spec declares
  *     that criterion id, otherwise the row is counted in `ambiguousAcRef` and attributed to nothing.
  * Side-effect class: pure.
  * Source: rule-state-service.ts (BR-665 attribution rules, moved here unchanged); spec-a-spec-carries-its-rule-
  *   changes-the-baseline-takes-them (D2).
  */
 
-import { extractEvidence, type DocRecord, type EvidenceEntry } from "@lore/core";
+import { extractEvidence, extractGoverningSpecRef, type DocRecord, type EvidenceEntry } from "@lore/core";
 
 /** An attested row whose result is `pass` or `fail`. */
 export type ConclusiveAttestedEntry = EvidenceEntry & { result: "pass" | "fail" };
@@ -77,8 +79,13 @@ export function indexLatestAttestedRuns(input: {
     const planId = task.extra["plan_id"];
     const hasLineage = typeof planId === "string";
     const lineageSpecId = hasLineage ? (plansById.get(planId)?.parent_id as string | null | undefined) ?? null : null;
+    const recordedSpecId = hasLineage ? undefined : extractGoverningSpecRef(task);
     for (const entry of extractEvidence(task)) {
       if (entry.ac_ref === undefined || !isConclusiveAttested(entry)) continue;
+      if (recordedSpecId !== undefined) {
+        if (specIds.has(recordedSpecId)) offer(recordedSpecId, entry, task);
+        continue;
+      }
       if (hasLineage) {
         if (lineageSpecId !== null && specIds.has(lineageSpecId)) offer(lineageSpecId, entry, task);
         continue;

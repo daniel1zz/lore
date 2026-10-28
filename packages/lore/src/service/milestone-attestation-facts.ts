@@ -28,6 +28,7 @@
 
 import {
   extractEvidence,
+  extractGoverningSpecRef,
   isAcSuperseded,
   ok,
   specAcceptanceCriteriaSchema,
@@ -125,7 +126,7 @@ export function planCriterionScopes(spec: DocRecord | undefined, tasks: readonly
 /**
  * Every runner-attested, conclusive, stamped evidence row of the corpus attributed to a (spec, criterion), by the same
  * rules as `attested-ac-runs.ts`: a plan member counts for its plan's spec; a task with no plan lineage counts only for
- * the one spec that declares the criterion id.
+ * the spec it recorded as governing (`extra.governing_spec`, BR-1495), else the one spec that declares the criterion id.
  *
  * @param specs - every spec of the corpus
  * @param plans - every plan (its `parent_id` is the governing spec)
@@ -144,7 +145,7 @@ export function attestationRowsOf(specs: readonly DocRecord[], plans: readonly D
   const rows: AttestationRow[] = [];
   for (const task of tasks) {
     const planId = task.extra["plan_id"];
-    const lineageSpecId = typeof planId === "string" ? ((plansById.get(planId)?.parent_id as string | null | undefined) ?? null) : undefined;
+    const lineageSpecId = typeof planId === "string" ? ((plansById.get(planId)?.parent_id as string | null | undefined) ?? null) : extractGoverningSpecRef(task);
     for (const entry of extractEvidence(task)) {
       const stamp = entry.attestation?.state_stamp;
       if (entry.ac_ref === undefined || stamp === undefined) continue;

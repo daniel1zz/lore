@@ -230,6 +230,13 @@ describe("AC-AF-3 readers of the corpus", () => {
     const twin = doc({ id: "S2", slug: "spec-two", type: "spec", extra: { acceptance_criteria: [{ id: "AC-1", statement: "s", verify: { mode: "human" } }] } });
     expect(attestationRowsOf([spec, twin], [plan], [adhoc])).toHaveLength(0);
   });
+
+  it("AC-AF-3 STATE: an ad-hoc task that recorded its governing spec counts for that spec only, even when another spec declares the same id (BR-1495)", () => {
+    const twin = doc({ id: "S2", slug: "spec-two", type: "spec", extra: { acceptance_criteria: [{ id: "AC-1", statement: "s", verify: { mode: "human" } }] } });
+    const recorded = doc({ id: "T3", slug: "adhoc-recorded", type: "task", extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: twin.id, verification_evidence: [evidence("AC-1", true)] } });
+    const rows = attestationRowsOf([spec, twin], [plan], [recorded]);
+    expect(rows.map((r) => r.spec_slug)).toEqual(["spec-two"]);
+  });
 });
 
 describe("AC-AF-3 the post-landing batch attests landed criteria", () => {

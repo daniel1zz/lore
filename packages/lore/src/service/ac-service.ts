@@ -73,12 +73,11 @@
  *   to ad-hoc-governed tasks (see the next invariant) — a NAMED follow-up gap, since
  *   this method's own safety check is currently scoped to child-plan tasks only.
  * @invariant `listCriteria`'s coverage additionally folds in `--adhoc` tasks whose
- *   declared `ac_scope` resolves UNAMBIGUOUSLY to this spec (task-an-ad-hoc-task-s-
- *   attested-evidence-cannot-carry-ac-ref) — `findAdhocGovernedTasks` reuses the SAME
- *   `resolveGoverningSpecByAcScope` search (`@lore/core`) `VerifyRunnerService.
- *   verifyAdhocTask`/`CorpusService.resolveDeclaredAcIdsForAdhocTask` run, never a
- *   bare string match on `ac_ref` (AC ids are unique only WITHIN one spec, never
- *   globally — a coincidental cross-spec id collision must not double-count).
+ *   recorded THIS spec as their governing spec (`extra.governing_spec`, BR-1495) —
+ *   `findAdhocGovernedTasks` reads the same recorded field `VerifyRunnerService.
+ *   verifyAdhocTask`/`CorpusService.resolveDeclaredAcIdsForAdhocTask` resolve through,
+ *   never a bare string match on `ac_ref` (AC ids are unique only WITHIN one spec,
+ *   never globally — a coincidental cross-spec id collision must not double-count).
  * @invariant Writes are CAS-guarded (`store.update`'s `expected_version`) and produce
  *   exactly one `insertVersion` snapshot + one `appendAuditEntry` (action "update",
  *   actor = the calling `opts.by`, else the session/OS-user chain — never "system") — same shape as `CorpusService.set`'s spec-extra write path, so
@@ -150,10 +149,9 @@ export interface AcListResult {
   /**
    * Pass/fail coverage facts, one per declared criterion — present iff the spec has
    * at least one child plan (regardless of whether that plan has any tasks yet) OR
-   * at least one `--adhoc` task whose declared `ac_scope` resolves UNAMBIGUOUSLY to
-   * this spec (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref — an
-   * ad-hoc task has no structural plan/spec link, SPEC-069 D2, so its evidence is
-   * folded in via `resolveGoverningSpecByAcScope`, never a child-plan walk).
+   * at least one `--adhoc` task that recorded this spec as its governing spec
+   * (`extra.governing_spec`, BR-1495 — an ad-hoc task has no structural plan/spec link,
+   * SPEC-069 D2, so its evidence is folded in through that record, never a child-plan walk).
    * `null` means "nothing to aggregate against", NOT "zero coverage" — a spec with a
    * plan that has zero tasks (or an ad-hoc match with zero evidence) yields
    * `[]`-shaped facts (0 pass, 0 fail), not `null`.

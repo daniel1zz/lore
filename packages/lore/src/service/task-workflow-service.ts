@@ -319,7 +319,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
-import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
+import { err, ok, checkScopeDeclaredOnSpec, extractGoverningSpecRef, governingSpecMissingError, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { AuditEntry, LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
@@ -3053,9 +3053,9 @@ export class TaskWorkflowService {
         // to be a `plan`) can NEVER succeed for it. Resolves the governing spec
         // via the task's own declared ac_scope instead, through the injected
         // `resolveAdhocGoverningAcIds` port (→ `CorpusService.
-        // resolveDeclaredAcIdsForAdhocTask` → shared `resolveGoverningSpecByAcScope`,
-        // the SAME search `VerifyRunnerService.verifyAdhocTask` runs) — the two
-        // surfaces can never disagree about which spec governs this task.
+        // resolveDeclaredAcIdsForAdhocTask` → `resolveRecordedGoverningSpec`, the
+        // spec the task recorded in `extra.governing_spec`, BR-156/BR-1495) — the
+        // same lookup `VerifyRunnerService.verifyAdhocTask` runs.
         const declaredResult = await this.resolveAdhocGoverningAcIds(task);
         if (!declaredResult.ok) return declaredResult;
         const declared = declaredResult.value;
@@ -5607,6 +5607,12 @@ export class TaskWorkflowService {
     if (!editResult.ok) return editResult;
     const next = editResult.value;
 
+    // BR-1495: ids added to an ad-hoc task's scope must be declared on the spec it recorded.
+    if (op === "add" && task.extra["adhoc"] === true) {
+      const checked = await this.checkAdhocScopeAgainstRecordedSpec(task, next);
+      if (!checked.ok) return checked;
+    }
+
     const nowIso = now();
     const newExtra: Record<string, unknown> = { ...task.extra, ac_scope: next };
     return this.writeTaskExtra(
@@ -5617,6 +5623,86 @@ export class TaskWorkflowService {
       `Declared ac_scope ${op === "add" ? "extended" : "reduced"} by ${by} (${next.length} id(s))`,
       "update",
       { by, scope_op: op, count: next.length },
+    );
+  }
+
+  /**
+   * Checks `scope` against the spec `task` recorded as governing (BR-1495). An empty scope needs no
+   * spec; a non-empty one without a recorded spec is refused naming `lore scope spec`.
+   */
+  private async checkAdhocScopeAgainstRecordedSpec(
+    task: DocRecord,
+    scope: readonly string[],
+  ): Promise<Result<undefined, LoreError>> {
+    if (scope.length === 0) return ok(undefined);
+    const ref = extractGoverningSpecRef(task);
+    if (ref === undefined) return err(governingSpecMissingError(task.slug));
+    const specResult = await resolveDoc(this.store, ref);
+    if (!specResult.ok) return specResult;
+    if (specResult.value.type !== "spec") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "governing_spec",
+        message: `"${ref}" is a ${specResult.value.type}, not a spec`,
+        value: ref,
+        rule: "BR-1495",
+      });
+    }
+    return checkScopeDeclaredOnSpec(scope, specResult.value, `ad-hoc task "${task.slug}"`);
+  }
+
+  /**
+   * Records the spec that governs an ad-hoc task's criteria (`extra.governing_spec`, BR-1495) — the
+   * `lore scope spec` verb. Works on any ad-hoc task, locked (claimed) or archived: it is a repair of
+   * a reference, one version and one audit entry, never a change of body, title or status.
+   *
+   * @param idOrSlug - Ad-hoc task id or slug
+   * @param specIdOrSlug - The governing spec's id or slug
+   * @returns The updated task
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not an ad-hoc task / target not a spec / a scope id the
+   *   spec does not declare), STALE_VERSION
+   */
+  async setGoverningSpec(
+    idOrSlug: string,
+    specIdOrSlug: string,
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+    if (task.extra["adhoc"] !== true) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "adhoc",
+        message: `task "${task.slug}" is not an ad-hoc task; a plan member takes its criteria from its plan's spec`,
+        value: task.slug,
+        rule: "BR-1495",
+      });
+    }
+    const specResult = await resolveDoc(this.store, specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    if (spec.type !== "spec") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "spec",
+        message: `Expected a spec document; got type '${spec.type}'`,
+        value: spec.type,
+        rule: "BR-1495",
+      });
+    }
+    const checked = checkScopeDeclaredOnSpec(extractDeclaredAcScope(task) ?? [], spec, `ad-hoc task "${task.slug}"`);
+    if (!checked.ok) return checked;
+
+    return this.writeTaskExtra(
+      task,
+      { ...task.extra, governing_spec: spec.id },
+      now(),
+      opts.by,
+      `Recorded governing spec ${spec.slug} by ${opts.by}`,
+      "update",
+      { by: opts.by, governing_spec: spec.id },
     );
   }
 

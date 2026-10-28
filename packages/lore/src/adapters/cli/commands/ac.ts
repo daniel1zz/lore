@@ -1310,8 +1310,7 @@ async function reportDemotionIfAny(io: CliIo,
  * already documents on itself ("NOT (yet) extended to ad-hoc-governed tasks...
  * a NAMED follow-up gap"): an `--adhoc` task's membership in a spec's coverage
  * is resolved through a materially more expensive search
- * (`resolveGoverningSpecByAcScope` over every spec in the corpus,
- * `AcService.findAdhocGovernedTasks`) that this CLI-side advisory deliberately
+ * (`AcService.findAdhocGovernedTasks`, a corpus-wide task scan) that this CLI-side advisory deliberately
  * does not re-implement — doing so here would duplicate that resolution
  * outside `AcService`, which this task's file anchors forbid editing.
  *

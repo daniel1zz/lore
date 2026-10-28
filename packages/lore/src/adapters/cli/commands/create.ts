@@ -129,6 +129,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "requires-uat": ["plan"],
   adhoc: ["task"],
   linkage: ["task"],
+  spec: ["task"],
 };
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -208,7 +209,7 @@ export default defineLoreCommand({
     "ac-scope": {
       type: "string",
       description:
-        "[task only, repeatable] Declare an extra.ac_scope entry — an acceptance-criterion id on the governing spec that THIS task claims (e.g. AC-VS-9). Pass an explicit empty value (--ac-scope \"\") to declare this task claims NONE, storing an empty array (distinct from omitting the flag entirely). Required (may be empty) on BOTH task branches: when the parent plan's spec declares >= 1 script-mode AC (spec-declaring-ac-scope-is-required-at-task-creation-so-the), and ALWAYS with --adhoc, whose absent plan lineage that first trigger can never see (task-an-ad-hoc-task-can-never-reach-the-attestation-path-that). Consumed by `lore verify`'s declared-scope intersection — for an --adhoc task it is also how `lore verify --task` finds the governing spec at all; edit later with `lore scope add|rm` (there is no `lore set --ac-scope`).",
+        "[task only, repeatable] Declare an extra.ac_scope entry — an acceptance-criterion id on the governing spec that THIS task claims (e.g. AC-VS-9). Pass an explicit empty value (--ac-scope \"\") to declare this task claims NONE, storing an empty array (distinct from omitting the flag entirely). Required (may be empty) on BOTH task branches: when the parent plan's spec declares >= 1 script-mode AC (spec-declaring-ac-scope-is-required-at-task-creation-so-the), and ALWAYS with --adhoc, whose absent plan lineage that first trigger can never see (task-an-ad-hoc-task-can-never-reach-the-attestation-path-that). Consumed by `lore verify`'s declared-scope intersection; an --adhoc task with ids here must also pass --spec (its governing spec); edit later with `lore scope add|rm` (there is no `lore set --ac-scope`).",
     },
     "code-anchor": {
       type: "string",
@@ -224,6 +225,11 @@ export default defineLoreCommand({
       type: "boolean",
       description:
         "[task only] Create a planless task (extra.adhoc = true), parented to the corpus root PRD instead of a plan. Makes --plan-id/--parent both optional; mutually exclusive with --plan-id, --phase, and --linkage. Source: SPEC-069 D2",
+    },
+    spec: {
+      type: "string",
+      description:
+        "[task only, with --adhoc] The spec that governs this ad-hoc task's --ac-scope ids (stored as extra.governing_spec). REQUIRED whenever --ac-scope names at least one id (exit 4 without it); every id must be declared on that spec (exit 4 naming the declared ids). Criterion ids are unique only within one spec, so the spec is recorded, never looked up by id. Record it later with `lore scope spec <task> <spec>`. Source: BR-118, BR-1495",
     },
     linkage: {
       type: "string",
@@ -345,6 +351,12 @@ export default defineLoreCommand({
         phase: args.phase,
         linkage: args.linkage as string | undefined,
       };
+      if (args.spec !== undefined && args.adhoc !== true) {
+        inv.io.stderr.write(
+          "Error: --spec applies only with --adhoc (a plan member takes its criteria from its plan's spec).\n",
+        );
+        exitCli(2);
+      }
       const adhocConflicts = checkTaskCreateAdhocConflicts(taskCreateFlags);
       if (adhocConflicts.length > 0) {
         inv.io.stderr.write(formatTaskCreateAdhocConflictError(adhocConflicts) + "\n");
@@ -543,6 +555,7 @@ export default defineLoreCommand({
         args.adhoc as boolean | undefined,
         args.linkage as string | undefined,
         acScope,
+        args.spec as string | undefined,
       );
       const extra = issueRefs.length > 0 ? { ...(baseExtra ?? {}), issues: issueRefs } : baseExtra;
 
@@ -726,6 +739,7 @@ function buildExtra(
   adhoc?: boolean,
   linkage?: string,
   acScope?: ResolvedAcScope,
+  governingSpec?: string,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -737,6 +751,8 @@ function buildExtra(
     const extra: Record<string, unknown> = {};
     if (planId !== undefined) extra["plan_id"] = planId;
     if (adhoc === true) extra["adhoc"] = true;
+    // BR-1495: the service (CorpusService._createImpl) checks and normalizes it; the CLI only forwards.
+    if (adhoc === true && governingSpec !== undefined) extra["governing_spec"] = governingSpec;
     if (linkage !== undefined) extra["linkage"] = linkage;
     if (phase !== undefined) {
       extra["phase"] = phase.trim();

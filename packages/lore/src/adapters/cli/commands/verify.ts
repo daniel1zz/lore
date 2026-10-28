@@ -152,9 +152,9 @@
  * resolves the named task + every corpus spec directly via `app.corpusService`
  * (no new constructor port on `VerifyRunnerService` — the same "adapter
  * resolves IO, service decides" split `getPlanBundle` itself already uses) and
- * calls `VerifyRunnerService.verifyAdhocTask`, which searches for the ONE spec
- * whose `acceptance_criteria` fully declares the task's `extra.ac_scope` ids —
- * zero or multiple matches refuse loud, never guessed. Every step after that
+ * calls `VerifyRunnerService.verifyAdhocTask`, which resolves the spec the task
+ * RECORDED (`extra.governing_spec`, set by `--spec` at create or `lore scope spec`;
+ * BR-1495) — none recorded refuses loud, nothing is searched by criterion id. Every step after that
  * (declared-scope selection, M2 approval, execution, attested evidence write)
  * is the IDENTICAL shared pipeline `<PLAN>`-mode runs — a GENUINE runner
  * attestation (real command execution, real `attestation.runner`/`exit_code`/
