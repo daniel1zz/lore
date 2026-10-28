@@ -27,6 +27,22 @@
 
 import { test, expect, type Page } from "@playwright/test";
 
+const API_ORIGIN = "http://localhost:8787";
+
+/**
+ * Create a requirements document out-of-band and return its slug: the parent a plan created through the
+ * New doc form must name (BR-709 refuses a plan without one). The page must already carry the session cookie.
+ */
+async function createParentPrdSlug(page: Page, label: string): Promise<string> {
+  const response = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
+    headers: { "Content-Type": "application/json" },
+    data: { type: "prd", title: `E2E Parent PRD ${label} ${Date.now()}` },
+  });
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as { ok: true; data: { doc: { slug: string } } };
+  return body.data.doc.slug;
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("SPEC-031 dashboard read flow", () => {
@@ -74,8 +90,10 @@ test.describe("SPEC-031 dashboard read flow", () => {
     const dialog = page.getByRole("dialog", { name: "Create new document" });
     await expect(dialog).toBeVisible();
 
-    // "plan" needs no parent_id / extra fields — keeps seeding focused on the search term.
+    // A plan names its parent (BR-709); a PRD created out-of-band keeps seeding focused on the search term.
+    const parentSlug = await createParentPrdSlug(page, "read-flow");
     await dialog.locator("#doc-type").selectOption("plan");
+    await dialog.locator("#parent-id").fill(parentSlug);
     await dialog.locator("#doc-title").fill(searchableTitle);
     await dialog.getByRole("button", { name: "Create" }).click();
 

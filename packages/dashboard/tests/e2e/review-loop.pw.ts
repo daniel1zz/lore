@@ -48,6 +48,20 @@ import { test, expect, type Page } from "@playwright/test";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const API_ORIGIN = "http://localhost:8787";
+
+/**
+ * Create a requirements document out-of-band and return its slug: the parent a plan created through the
+ * New doc form must name (BR-709 refuses a plan without one). The page must already carry the session cookie.
+ */
+async function createParentPrdSlug(page: Page, label: string): Promise<string> {
+  const response = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
+    headers: { "Content-Type": "application/json" },
+    data: { type: "prd", title: `E2E Parent PRD ${label} ${Date.now()}` },
+  });
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as { ok: true; data: { doc: { slug: string } } };
+  return body.data.doc.slug;
+}
 const SEED_JUDGMENT_SCRIPT = join(__dirname, "seed-judgment.ts");
 const READ_CALIBRATION_SCRIPT = join(__dirname, "read-calibration.ts");
 
@@ -189,7 +203,9 @@ test.describe("SPEC-033 dashboard feedback-loop", () => {
     await page.goto("/library");
     await page.getByRole("button", { name: "New doc" }).click();
     const dialog = page.getByRole("dialog", { name: "Create new document" });
+    const triageParent = await createParentPrdSlug(page, "triage");
     await dialog.locator("#doc-type").selectOption("plan");
+    await dialog.locator("#parent-id").fill(triageParent);
     await dialog.locator("#doc-title").fill(triageDocTitle);
     await dialog.getByRole("button", { name: "Create" }).click();
     await expect(page.getByText(`Created plan-`, { exact: false })).toBeVisible();
@@ -242,7 +258,9 @@ test.describe("SPEC-033 dashboard feedback-loop", () => {
     await page.goto("/library");
     await page.getByRole("button", { name: "New doc" }).click();
     const dialog = page.getByRole("dialog", { name: "Create new document" });
+    const calibrateParent = await createParentPrdSlug(page, "calibrate");
     await dialog.locator("#doc-type").selectOption("plan");
+    await dialog.locator("#parent-id").fill(calibrateParent);
     await dialog.locator("#doc-title").fill(calibrateDocTitle);
     await dialog.getByRole("button", { name: "Create" }).click();
     await expect(page.getByText(`Created plan-`, { exact: false })).toBeVisible();

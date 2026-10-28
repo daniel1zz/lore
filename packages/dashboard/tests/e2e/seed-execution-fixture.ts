@@ -81,10 +81,16 @@ async function main(): Promise<void> {
   );
 
   const planTitle = `E2E Execution Plan ${runId}`;
+  // reason: BR-709 - a plan is refused without a parent, so it is filed under a fixture PRD.
+  const prd = await unwrap(
+    corpus.create({ type: "prd", title: `E2E Execution PRD ${runId}`, content: "## Overview\n\nSPEC-077 fixture root." } as CreateDocInput),
+    "create prd",
+  );
   const plan = await unwrap(
     corpus.create({
       type: "plan",
       title: planTitle,
+      parent_id: prd.id,
       content: "## Plan\n\nSPEC-077 execution-page e2e fixture.",
     } as CreateDocInput),
     "create plan",

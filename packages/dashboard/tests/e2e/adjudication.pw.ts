@@ -111,9 +111,16 @@ test.describe("SPEC-075 dashboard adjudication workbench", () => {
   test("seed: in-review task with evidence + a matching-version approve judgment", async () => {
     taskTitle = `E2E Adjudication Task ${runId}`;
 
+    // reason: BR-709 - a plan is refused without a parent, so it is filed under a fixture PRD.
+    const prdRes = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
+      headers: { "Content-Type": "application/json" },
+      data: { type: "prd", title: `E2E Adjudication PRD ${runId}` },
+    });
+    expect(prdRes.ok()).toBe(true);
+    const prdBody = (await prdRes.json()) as { ok: true; data: { doc: { id: string } } };
     const planRes = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
       headers: { "Content-Type": "application/json" },
-      data: { type: "plan", title: `E2E Adjudication Plan ${runId}` },
+      data: { type: "plan", title: `E2E Adjudication Plan ${runId}`, parent_id: prdBody.data.doc.id },
     });
     expect(planRes.ok()).toBe(true);
     const planBody = (await planRes.json()) as { ok: true; data: { doc: { id: string } } };

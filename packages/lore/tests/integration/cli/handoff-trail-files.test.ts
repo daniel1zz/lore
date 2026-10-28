@@ -12,6 +12,7 @@
  * file in and out of trail) / ERROR (unusable run id) / STATE (removed + unmeasured parts).
  */
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -90,6 +91,8 @@ beforeAll(() => {
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}${init.stdout}`);
   registerRun(RUN);
   registerRun("cc:trail-gaps");
+  // reason: BR-709 — a handoff is filed under the requirements document when it names no plan, so the corpus needs one.
+  ensureRequirementsDocSlug((args) => lore(args, RUN));
 
   // Session trail-s1: 6 distinct files over 2 turns; src/b.ts appears in both turns with two sources.
   writeTurn("trail-s1", "turn-1", 200, RUN_FILES);

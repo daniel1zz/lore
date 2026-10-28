@@ -133,8 +133,9 @@ describe("lore gate spec-create", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("main");
     initCorpus(tmpDir);
-    seedRuleDoc(tmpDir);
+    // reason: BR-709 - the seed files the rule doc under the corpus requirements document, so the PRD comes first.
     prdSlug = createPrd(tmpDir, "main-prd");
+    seedRuleDoc(tmpDir);
   });
 
   afterEach(() => cleanupDir(tmpDir));
@@ -289,8 +290,9 @@ describe("lore gate spec-create — AC-Quantifiability Gate CLI parity", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("acq");
     initCorpus(tmpDir);
-    seedRuleDoc(tmpDir);
+    // reason: BR-709 - the seed files the rule doc under the corpus requirements document, so the PRD comes first.
     prdSlug = createPrd(tmpDir, "acq-prd");
+    seedRuleDoc(tmpDir);
   });
 
   afterEach(() => cleanupDir(tmpDir));

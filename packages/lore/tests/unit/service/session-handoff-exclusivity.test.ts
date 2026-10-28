@@ -60,6 +60,7 @@ describe("CorpusService — handoff writer-identity guard (AC-SL-4)", () => {
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const result = await corpusService.createHandoffDoc({
+      parent_id: await ensureRequirementsDocId(corpusService),
       type: "knowledge",
       title: "x",
       content: "# x",
