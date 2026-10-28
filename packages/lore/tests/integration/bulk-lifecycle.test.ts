@@ -98,7 +98,7 @@ function addAttestedPass(taskSlug: string): void {
     ["evidence", taskSlug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
     tmpDir,
   );
-  expect(r.exitCode).toBe(0);
+  expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
 }
 
 beforeEach(() => {
