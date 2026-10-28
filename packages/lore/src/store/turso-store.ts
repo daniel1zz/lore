@@ -3274,6 +3274,20 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        since !== undefined
+          ? { sql: `SELECT * FROM versions WHERE decision IS NOT NULL AND created_at >= ? ORDER BY created_at ASC, doc_id ASC, version ASC`, args: [since] }
+          : { sql: `SELECT * FROM versions WHERE decision IS NOT NULL ORDER BY created_at ASC, doc_id ASC, version ASC`, args: [] },
+      );
+      return ok(rs.rows.map((row) => rowToVersionRecord(libsqlRowToVersionRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>> {
     try {
       await this.ensureReady();

@@ -1484,6 +1484,13 @@ export class InMemoryStore implements StoreInterface {
     return ok(matching.map((v) => ({ ...v })));
   }
 
+  async listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    const matching = this.versions
+      .filter((v) => v.decision != null && (since === undefined || v.created_at >= since))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return ok(matching.map((v) => ({ ...v })));
+  }
+
   async listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>> {
     const matching = this.versions
       .filter((v) => since === undefined || v.created_at >= since)

@@ -164,6 +164,9 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // weights (spec-a-decision-carrying-write-records-its-decision-on-its, "Weight tables") — dedicated writer of a
     // reference document's `extra.weight_table`; `lore set` is refused on that key. See commands/weights.ts.
     weights: () => import("./commands/weights.js"),
+    // decision (spec-a-decision-carrying-write-records-its-decision-on-its, "Outcome link and rates") — `trace` is the sole
+    // writer of a milestone review's `traced_decisions`; `rates` reads them. See commands/decision.ts.
+    decision: () => import("./commands/decision.js"),
     anchor: () => import("./commands/anchor.js"),
     // rule / baseline (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C3) —
     // dedicated writers of a baseline doc's verb-owned `extra` keys (rules, label, depends_on,

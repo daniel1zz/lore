@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "2c3f1e67762ec8fbdac460351299164e1c578d913357e93d99c5bce500748329",
+  tree_digest: "f1b87689bf4e719038d56ffd725b35debb59206060ea02448c028e4ceec02ce5",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -57,7 +57,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "b1e5c2a2b782cf6e7c62c3aa06797c12690ed815c96fa9fd79d6f079b22bbbe4" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "0f40b65d7dff99a67f662da8bba69d2a416945b21ad817b816776c089bb5d1dd" },
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "d4370a61d6a4a34a317c0bce87ba09f661553c609e807c4447cc5e4f9c35bd4b" },
-  { path: "context/decision-records.md", kind: "context", ownership: "managed", sha256: "135b9f65a436c9d9efe2f89dac6af97467e19141e26b475a5073d0ab0ff39414" },
+  { path: "context/decision-records.md", kind: "context", ownership: "managed", sha256: "f1995a527c7492926125751659b1e1c12012782f2d88d4ca9bc71f40ccc74d51" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "e748d87ff02b7748e65bfeec898e333aa7e7af99dca25467f60e1c2cd0cf6f01" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "1f346093405fc4931c45aea88eeb848dc40ebac3ab8a0141e23e786224f69ce9" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "4916cddccb5a6204c8cab4d01f6b58d2e32250637898428316969ee1e94eb534" },

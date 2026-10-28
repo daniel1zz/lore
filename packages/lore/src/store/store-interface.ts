@@ -1185,6 +1185,15 @@ export interface StoreInterface {
   listDecisionVersions(query: DecisionVersionQuery): Promise<Result<VersionRecord[], LoreError>>;
 
   /**
+   * Every version row whose `decision` is non-null and whose `created_at >= since` (omit `since` for all), oldest first.
+   * The population `lore decision rates` counts; each row carries its parsed DecisionRecord (a stored value that no
+   * longer parses fails loud).
+   *
+   * @param since - ISO 8601 lower bound, inclusive
+   */
+  listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
+
+  /**
    * The narrow twin of {@link listAllVersions} for {@link AuditService.verify}'s completeness join: only the four
    * columns the join uses — `(doc_id, version, action, created_at)` — for every version row with
    * `created_at >= since`, oldest first. A versions row stores its full `content` and `extra` snapshot, which the

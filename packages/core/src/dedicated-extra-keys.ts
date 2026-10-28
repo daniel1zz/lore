@@ -22,6 +22,11 @@ export interface DedicatedExtraKey {
    * (a knowledge doc's `uat` key is the verdict; other sub_types may use `uat` freely).
    */
   readonly subType?: string;
+  /**
+   * When set, `key` is a field INSIDE the object stored under `extra[within]` (a review's `traced_decisions` lives in
+   * `extra.milestone_review`), and only that field is guarded: the rest of the object stays writable.
+   */
+  readonly within?: string;
 }
 
 /**
@@ -48,5 +53,9 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
     // reason: BR-1482 — a weight table is the scale every scored decision is weighed on; only `lore weights set` writes it
     // (it checks the sum, the one-table-per-kind rule and, for an approved table, the decision citing a drill-down).
     { key: "weight_table", writer: "lore weights set", subType: "reference" },
+    // reason: BR-1481 — an outcome link is evidence of an escaped defect; only `lore decision trace` appends one (idempotent,
+    // compare-and-swap), and the re-check findings are the milestone assess's own measurement, never hand-written.
+    { key: "traced_decisions", writer: "lore decision trace", subType: "milestone-review", within: "milestone_review" },
+    { key: "decision_findings", writer: "lore assess", subType: "milestone-review", within: "milestone_review" },
   ],
 };
