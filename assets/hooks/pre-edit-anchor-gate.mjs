@@ -3,7 +3,7 @@
  * pre-edit-anchor-gate.mjs — PreToolUse hook on Write|Edit|MultiEdit|NotebookEdit|Bash.
  *
  * A helper's edit outside the anchors of its claimed task is declared (one lore command, overlap-checked) or
- * denied BEFORE it happens, instead of being found by the turn-end review after the work.
+ * denied BEFORE it happens, instead of being found at `lore integrate` (own-diff judgment, BR-1346) after the work.
  *
  * Public surface: none. Executable script, no exports.
  * Side-effect class: IO — reads stdin, the trail record, the scope file, the edited file, git metadata; spawns
@@ -14,7 +14,7 @@
  *
  *   - Only a call made BY A HELPER (payload carries `agent_id`). The main session is never affected.
  *   - Only a target inside the helper's own working copy. A path in no working copy (scratchpad, mktemp) is not an
- *     anchorable repository path; the foreign-working-copy gate and the turn-end review keep those.
+ *     anchorable repository path; the foreign-working-copy gate and integrate's own-diff judgment (BR-1346) keep those.
  *   - The helper's working copy is the trail record's `working_copy` (SubagentStart), NOT the drifting payload
  *     `cwd`; the payload cwd is the fallback only when no record carries one.
  *
@@ -51,11 +51,18 @@
  *
  * ## Bash (BR-1092: refuse only what lands on someone else and cannot be undone)
  *
- * A helper's shell write whose targets are readable from the command text (`sed -i f`, `> f`, `tee f`, python
+ * A helper's shell write whose targets are readable from the command text (`sed -i f`, `> f`, `tee f`, `cp a f`, python
  * `open(f, 'w')`, see lib/shell-writes.mjs) goes through steps 1-3 as a whole-file touch. It is REFUSED only when
  * another live claim holds the file (declare's `held-by-other-claim`) or the target is the scope file. Everything else
- * (no claim, ambiguous claim, lore unavailable, an unreadable target) is allowed: the harm is the helper's own and
- * the turn-end helper-scope review reports it. A free file outside the anchors is auto-declared, never refused.
+ * (no claim, ambiguous claim, lore unavailable) is allowed: the harm is the helper's own and integrate's own-diff
+ * judgment (BR-1346) reports it. A free file outside the anchors is auto-declared, never refused.
+ *
+ * A write the text shows but does not place (`unmeasured`: a variable path, `sed -i "$f"`, `python3 -c "$CODE"`) is
+ * refused (BR-1493) when a live claim held by ANOTHER run holds a path anywhere in the project (one
+ * `lore anchor scope --all` read, spawned only then), allowed otherwise; an unreadable read is refused too. A command the
+ * parser cannot segment is not refused, and neither is an unmeasured target whose literal prefix is outside the
+ * working copy or in a git-ignored directory of it (`rm -f /tmp/*.log`, `rm -rf dist/*`), the places a measured target is
+ * already allowed. Only LIVE claims (fresh lease) of another run count. A program in a script file is out of scope: BR-1346 judges it at integrate.
  *
  * ## Invariant: the overlap rule lives in lore, not here
  *
@@ -264,12 +271,71 @@ if (typeof payload.agent_id !== 'string' || payload.agent_id === '') process.exi
 
 const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : process.cwd();
 
+/** A refusal names at most this many unmeasured entries, then counts the rest. */
+const MAX_NAMED_ENTRIES = 10;
+
+/**
+ * Whether an unmeasured entry's literal prefix (`within`, an absolute directory the shell-writes module read from the
+ * text) is a place this gate already allows for a measured target: outside the helper's own working copy, or a directory
+ * git ignores in it. An entry with no `within` (it starts with an expansion) could be anywhere and is never skipped.
+ */
+function landsWhereTheGateDoesNotLook(entry) {
+  if (typeof entry.within !== 'string') return false;
+  const workingCopy = findWorkingCopyRoot(trailWorkingCopy(payload) ?? cwd);
+  if (workingCopy === null) return false;
+  const within = canonicalize(entry.within);
+  if (within !== workingCopy && !within.startsWith(workingCopy + sep)) return true;
+  const probe = spawnSync('git', ['-C', nearestExistingDir(within), 'check-ignore', '-q', '--', join(within, '.lore-gate-probe')], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+  return probe.status === 0;
+}
+
+/**
+ * BR-1493: a helper's shell write the text shows but does not place (`unmeasured`, other than an unsegmentable command)
+ * is refused while a live claim held by ANOTHER run holds a path anywhere in the project; with no such claim the harm
+ * can only be the helper's own and integrate's own-diff judgment (BR-1346) stays the check. When the project's claims
+ * cannot be read the call is refused too (fail closed): whether another run holds a path is unknown.
+ * Exits the process on a refusal, returns otherwise.
+ */
+function refuseUnreadableWrites(allEntries) {
+  const entries = allEntries.filter((entry) => !landsWhereTheGateDoesNotLook(entry));
+  if (entries.length === 0) return;
+  const named = entries.slice(0, MAX_NAMED_ENTRIES).map((entry) => entry.text).join('; ') +
+    (entries.length > MAX_NAMED_ENTRIES ? `; +${entries.length - MAX_NAMED_ENTRIES} more` : '');
+  const advice = 'Use Edit/Write on the file, or a command whose target is a literal path.';
+  let run;
+  try {
+    run = deriveClaudeCodeRunId(payload);
+  } catch (err) {
+    deny(`a shell write whose target cannot be read (${named}) was attempted and the helper's run id could not be derived (${err.message}), so whether another run holds a path is unknown. ${advice}`);
+  }
+  let claims;
+  try {
+    const read = runLore(trailWorkingCopy(payload) ?? cwd, ['anchor', 'scope', '--all', '--json'], run);
+    if (read.status !== 0) throw `\`lore anchor scope --all\` exited ${read.status}: ${(read.stderr || read.stdout).trim().split('\n')[0]}`;
+    const data = JSON.parse(read.stdout)?.data;
+    if (!Array.isArray(data?.claims)) throw '`lore anchor scope --all --json` did not return {claims}';
+    claims = data.claims;
+  } catch (err) {
+    deny(`a shell write whose target cannot be read (${named}) was attempted and the project's claims could not be read, so whether another run holds a path is unknown: ${typeof err === 'string' ? err : `\`lore anchor scope --all\` output was not readable (${err?.message ?? err})`}. ${advice}`);
+  }
+  const others = claims.filter((claim) => claim?.holder_run !== run && Array.isArray(claim.anchors) && claim.anchors.length > 0);
+  if (others.length === 0) return;
+  deny(
+    `shell write whose target cannot be read from the command text: ${named}. Another run holds paths (${others.map((c) => c.task).join(', ')}), ` +
+      `so this write could land on a file it holds. ${advice} (BR-1493)`,
+  );
+}
+
 // The targets: one file for a write tool, every readable shell-write target for Bash.
 let rawTargets;
 if (isBash) {
   const command = payload.tool_input?.command;
   if (typeof command !== 'string' || !mayWriteFiles(command)) process.exit(0);
-  rawTargets = extractShellWriteTargets(command, { cwd: resolve(cwd), env: process.env }).paths;
+  const extracted = extractShellWriteTargets(command, { cwd: resolve(cwd), env: process.env });
+  rawTargets = extracted.paths;
+  // reason: an unsegmentable command is reported but never refused (BR-1493): its writes are unknown in kind as well as
+  // target, and refusing it would refuse arbitrary complex read-only commands.
+  refuseUnreadableWrites(extracted.unmeasured.filter((entry) => entry.kind !== 'unsegmentable'));
   if (rawTargets.length === 0) process.exit(0);
 } else {
   const rawTarget = payload.tool_input?.[pathField];
@@ -277,7 +343,7 @@ if (isBash) {
   rawTargets = [isAbsolute(rawTarget) ? rawTarget : resolve(cwd, rawTarget)];
 }
 
-/** Bash refuses only what lands on someone else; every other problem is the helper's own and is left to the turn-end review. */
+/** Bash refuses only what lands on someone else; every other problem is the helper's own and is left to integrate's own-diff judgment (BR-1346). */
 function refuse(why) {
   if (isBash) process.exit(0);
   deny(why);

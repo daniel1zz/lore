@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @layer hook AC-USW-5 (hook-process half; the AC's owner file is packages/lore/tests/unit/hooks/shell-writes.test.ts)
 // @spawns assets/hooks/pre-edit-anchor-gate.mjs
 /**
  * Edit-time anchor gate, symbol scope (task-skill-fix-the-edit-time-gate-locks-whole-files-so-disjoint).
@@ -17,6 +18,8 @@
  *   AC-ESS-3 NEGATIVE  a whole-file hold denies any edit (Edit and Write)
  *   AC-ESS-4 HAPPY     a directory anchor holds only the files its holder touched (declared, or changed in its worktree)
  *   AC-ESS-5 NEGATIVE  `sed -i` through the Bash hook on a file A holds is denied naming A; on an unclaimed file it auto-declares
+ *   AC-USW-2 NEGATIVE  a shell write whose target cannot be read is refused only while another run holds a path (BR-1493)
+ *   AC-USW-5 NEGATIVE  `cp` onto a held file is denied; onto a free file it auto-declares the destination
  *   BOUNDARY           in-anchor symbol edit writes nothing; a non-writing command and the main session are never governed
  *   REGRESSION         `path#Symbol` anchors are accepted by the task-anchor grammar and rejected when malformed
  */
@@ -168,6 +171,8 @@ interface HookCall {
   readonly input: Record<string, unknown>;
   readonly agent?: string | null;
   readonly actor?: string;
+  /** Directory holding the `lore` the hook finds first on PATH (default: the real-CLI wrapper). */
+  readonly wrapperBin?: string;
 }
 
 function runHook(call: HookCall): HookResult {
@@ -178,7 +183,7 @@ function runHook(call: HookCall): HookResult {
   env["CLAUDECODE"] = "1";
   env["CLAUDE_STATE_BASE_OVERRIDE"] = fx.stateBase;
   env["CLAUDE_CODE_SESSION_ID"] = sessionIdOfActor(call.actor ?? ACTOR_B);
-  env["PATH"] = `${fx.wrapperBin}:${process.env["PATH"] ?? ""}`;
+  env["PATH"] = `${call.wrapperBin ?? fx.wrapperBin}:${process.env["PATH"] ?? ""}`;
   const payload: Record<string, unknown> = {
     hook_event_name: "PreToolUse",
     session_id: SESSION,
@@ -361,8 +366,125 @@ describe("shell writes through the Bash hook", () => {
     expect(bashAsB("sed -i 's/x/y/' src/whole.ts", null).status).toBe(0);
   });
 
-  it("a target that cannot be read from the text is not refused (the turn-end review is the backstop)", () => {
-    expect(bashAsB('sed -i "s/x/y/" "$(pick_file)"').status).toBe(0);
+  it("AC-USW-5: `cp` onto a file A holds is denied naming A; onto a free file it auto-declares the destination (never the source)", () => {
+    const held = bashAsB("cp free/unclaimed.ts src/whole.ts");
+    expect(held.status, held.stderr).toBe(2);
+    expect(held.stderr).toContain(fx.taskA);
+    const free = bashAsB("cp free/unclaimed.ts free/copied.ts");
+    expect(free.status, free.stderr).toBe(0);
+    expect(anchorsOf(fx.taskB)).toContain("free/copied.ts");
+    const asSource = bashAsB("cp src/whole.ts free/from-whole.ts");
+    expect(asSource.status, asSource.stderr).toBe(0);
+    expect(anchorsOf(fx.taskB)).not.toContain("src/whole.ts");
+  });
+});
+
+describe("a shell write whose target cannot be read is refused only while another run holds a path (BR-1493)", () => {
+  const PY_VARIABLE_TARGET = "python3 - <<'EOF'\np = 'free/py.ts'\nopen(p, 'a').write('x')\nEOF";
+
+  it("AC-USW-2: a python heredoc writing through a variable is denied, naming the entry, A's task and Edit/Write", () => {
+    const r = bashAsB(PY_VARIABLE_TARGET);
+    expect(r.status, r.stderr).toBe(2);
+    expect(r.stderr).toContain("open(p");
+    expect(r.stderr).toContain(fx.taskA);
+    expect(r.stderr).toContain("Edit/Write");
+  });
+
+  it('AC-USW-2: sed -i "s/x/y/" "$(pick_file)" and python3 -c "$CODE" and cp onto "$D" follow the same refusal', () => {
+    for (const command of ['sed -i "s/x/y/" "$(pick_file)"', 'python3 -c "$CODE"', 'cp free/unclaimed.ts "$D"']) {
+      const r = bashAsB(command);
+      expect(r.status, `${command}: ${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(fx.taskA);
+      expect(r.stderr, command).toContain("Edit/Write");
+    }
+  });
+
+  it("AC-USW-2: when `lore anchor scope --all` cannot be read the call is refused naming the read failure and the entry", () => {
+    const failing = join(fx.base, "bin-failing-lore");
+    mkdirSync(failing, { recursive: true });
+    writeFileSync(join(failing, "lore"), "#!/bin/sh\necho scope-read-boom >&2\nexit 1\n");
+    chmodSync(join(failing, "lore"), 0o755);
+    const r = runHook({ cwd: fx.wtB, tool: "Bash", input: { command: PY_VARIABLE_TARGET }, wrapperBin: failing });
+    expect(r.status, r.stderr).toBe(2);
+    expect(r.stderr).toContain("anchor scope");
+    expect(r.stderr).toContain("open(p");
+  });
+
+  it("AC-USW-2: the same command is allowed when the only live claim is the helper's own", () => {
+    // release refuses a worktree with uncommitted changes (A's earlier shell write to held/dirty.ts), so commit them first.
+    git(fx.wtA, "add", "-A");
+    git(fx.wtA, "commit", "-qm", "A wip", "--allow-empty");
+    mustLore(["release", fx.taskA], fx.wtA, RUN_A, ACTOR_A);
+    try {
+      const r = bashAsB(PY_VARIABLE_TARGET);
+      expect(r.status, r.stderr).toBe(0);
+      const sed = bashAsB('sed -i "s/x/y/" "$(pick_file)"');
+      expect(sed.status, sed.stderr).toBe(0);
+    } finally {
+      mustLore(["claim", fx.taskA, "--worktree", fx.wtA], fx.wtA, RUN_A, ACTOR_A);
+    }
+  });
+
+  it("AC-USW-2: negative controls are never refused while another run holds a path", () => {
+    const controls = [
+      "cat src/whole.ts | grep x",
+      "(cd src && ls)",
+      'grep ">" src/whole.ts',
+      'python3 -c "print(1)"',
+      "python3 tool.py",
+      "node x.js",
+      `python3 -c "open('src/whole.ts','w')`,
+      "python3 - <<'EOF'\nprint(open('src/whole.ts').read())\nEOF",
+    ];
+    for (const command of controls) {
+      const r = bashAsB(command);
+      expect(r.status, `${command}: ${r.stderr}`).toBe(0);
+    }
+  });
+
+  it("AC-USW-2: an unmeasured target whose literal prefix is outside the working copy or in a git-ignored directory is not counted", () => {
+    expect(bashAsB(`rm -f ${join(fx.base, "elsewhere")}/*.log`).status).toBe(0);
+    expect(bashAsB("rm -rf .scratch/*").status).toBe(0);
+    const inside = bashAsB("rm -rf free/*");
+    expect(inside.status, inside.stderr).toBe(2);
+    expect(inside.stderr).toContain(fx.taskA);
+    expect(bashAsB(`rm "$f"`).status).toBe(2);
+  });
+
+  it("AC-USW-2: a claim whose lease has expired does not cause a refusal (BR-1493 says LIVE claim)", () => {
+    const dbPath = join(fx.repo, ".lore", "lore.db");
+    const read = new Database(dbPath, { readonly: true });
+    const original = (read.query("SELECT extra FROM docs WHERE slug = ?").get(fx.taskA) as { extra: string }).extra;
+    read.close();
+    const extra = JSON.parse(original) as { claim: { at: string } };
+    extra.claim.at = "2020-01-01T00:00:00.000Z";
+    const write = new Database(dbPath);
+    write.query("UPDATE docs SET extra = ? WHERE slug = ?").run(JSON.stringify(extra), fx.taskA);
+    write.close();
+    try {
+      const expired = bashAsB(PY_VARIABLE_TARGET);
+      expect(expired.status, expired.stderr).toBe(0);
+    } finally {
+      const restore = new Database(dbPath);
+      restore.query("UPDATE docs SET extra = ? WHERE slug = ?").run(original, fx.taskA);
+      restore.close();
+    }
+    expect(bashAsB(PY_VARIABLE_TARGET).status).toBe(2);
+  });
+
+  it("AC-USW-2: the refusal lists at most ten entries and counts the rest", () => {
+    const words = Array.from({ length: 13 }, (_, i) => `"$v${i}"`).join(" ");
+    const r = bashAsB(`rm ${words}`);
+    expect(r.status, r.stderr).toBe(2);
+    expect(r.stderr).toContain("+3 more");
+    expect(r.stderr).not.toContain("$v12");
+  });
+
+  it("AC-USW-2: the main session is never governed, and a literal-path write keeps its own decision", () => {
+    expect(bashAsB(PY_VARIABLE_TARGET, null).status).toBe(0);
+    const literal = bashAsB("python3 - <<'EOF'\nopen('src/whole.ts', 'a').write('x')\nEOF");
+    expect(literal.status, literal.stderr).toBe(2);
+    expect(literal.stderr).toContain(fx.taskA);
   });
 });
 

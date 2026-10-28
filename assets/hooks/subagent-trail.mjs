@@ -4,7 +4,7 @@
  * working copy and records them in helpers/<agent_id>.json (spec
  * spec-session-trail-a-session-local-record-of-what-each-run-4, Design > Helper measurement).
  *
- * Not registered in the shipped roster here (a later task owns distribution-hooks.ts); tests
+ * Registered on SubagentStop in the shipped roster (`distribution-hooks.ts`); tests
  * call it with `node`. Fires more than once per helper when another SubagentStop hook blocks:
  * each firing overwrites the measurement and increments end_count.
  *

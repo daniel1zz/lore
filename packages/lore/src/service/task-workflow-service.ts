@@ -1089,7 +1089,30 @@ export async function resolveEffectiveClaimStaleness(
 }
 
 /**
- * Effective staleness of every claimed doc in `docs`, keyed by doc id (see {@link resolveEffectiveClaimStaleness}).
+ * Whether `task` holds a LIVE claim: a held claim (`extractHeldClaim`; a terminal task holds none) that is not
+ * effectively stale. THE one predicate every consumer uses for "a fresh claim": the sibling gate context
+ * ({@link applyEffectiveSiblingStaleness} via {@link resolveEffectiveStalenessByDoc}) and `lore anchor scope --all`
+ * (BR-1493). Reads only the claim's own task document and, for a claim with a run, that run's end record.
+ *
+ * @param endedRuns - per-call memo of `run id -> ended` (see {@link resolveEffectiveClaimStaleness}).
+ * @returns ok(live); err when the run lookup fails (never a silent "live" or "not live").
+ */
+export async function claimIsLive(
+  store: StoreInterface,
+  task: DocRecord,
+  nowIso: string,
+  ttlMinutes: number,
+  endedRuns: Map<string, boolean>,
+): Promise<Result<boolean, LoreError>> {
+  const claim = extractHeldClaim(task);
+  if (claim === undefined) return ok(false);
+  const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns);
+  if (!stale.ok) return stale;
+  return ok(!stale.value);
+}
+
+/**
+ * Effective staleness of every claimed doc in `docs`, keyed by doc id (see {@link claimIsLive}).
  */
 export async function resolveEffectiveStalenessByDoc(
   store: StoreInterface,
@@ -1101,11 +1124,10 @@ export async function resolveEffectiveStalenessByDoc(
   const endedRuns = new Map<string, boolean>();
   for (const doc of docs) {
     // reason: a terminal task holds no claim (one definition: `extractHeldClaim`).
-    const claim = extractHeldClaim(doc);
-    if (claim === undefined) continue;
-    const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns);
-    if (!stale.ok) return stale;
-    staleByDoc.set(doc.id, stale.value);
+    if (extractHeldClaim(doc) === undefined) continue;
+    const live = await claimIsLive(store, doc, nowIso, ttlMinutes, endedRuns);
+    if (!live.ok) return live;
+    staleByDoc.set(doc.id, !live.value);
   }
   return ok(staleByDoc);
 }
@@ -6335,6 +6357,11 @@ export class TaskWorkflowService {
     nowIso: string,
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
     return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes);
+  }
+
+  /** {@link claimIsLive} bound to this service's store and TTL (BR-1493's "live claim" for `lore anchor scope --all`). */
+  isClaimLive(task: DocRecord, nowIso: string, endedRuns: Map<string, boolean>): Promise<Result<boolean, LoreError>> {
+    return claimIsLive(this.store, task, nowIso, this.claimTtlMinutes, endedRuns);
   }
 
   /**
