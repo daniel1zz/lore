@@ -84,7 +84,7 @@ For each bounded context, extract and document the ubiquitous language:
    - Same name, different meanings across contexts → acceptable (bounded context isolation)
    - Code uses technical jargon instead of domain term → rename candidate
 
-4. **Persist**: `docs/domain/{domain}/glossary.md` → register in lore (`lore create knowledge --sub-type reference`)
+4. **Persist**: `docs/domain/{domain}/glossary.md` → register in lore (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`)
 
 ## Output
 
@@ -93,4 +93,4 @@ For each bounded context, extract and document the ubiquitous language:
 - Aggregate design summary (boundaries, invariants, consistency choices)
 - Ubiquitous Language glossary per context
 - Recommended domain list + interaction diagram
-- Artifact: `docs/domain/DOMAIN-MAP.md` → register in lore (`lore create knowledge --sub-type reference`)
+- Artifact: `docs/domain/DOMAIN-MAP.md` → register in lore (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`)

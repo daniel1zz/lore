@@ -168,7 +168,7 @@ adr_compliance:
 
   step_3_decision_tracking:
     action: "If review reveals an undocumented architecture decision, flag it"
-    output: "Suggest creating ADR via `lore create adr --title ... --decision-status proposed`"
+    output: "Suggest creating ADR via `lore create adr --parent <spec it governs> --title ... --decision-status proposed`"
 ```
 
 ---

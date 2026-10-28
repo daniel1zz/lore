@@ -137,7 +137,7 @@ State the chosen branch, the rejected branches, and the reason for each rejectio
 ## Persist (MANDATORY)
 
 ```bash
-lore create knowledge --sub-type research --title '{outcome} Opportunity Solution Tree' --content ...
+lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{outcome} Opportunity Solution Tree' --content ...
 lore link <ost-doc> <benchmark-or-discovery-doc> --type=implements
 ```
 

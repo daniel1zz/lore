@@ -232,7 +232,7 @@ If gate fails → fix or document as known issue with justification. Never silen
 
 ### Step 9: PERSIST — lore Integration
 
-- **strategy mode**: `lore create knowledge --sub-type reference --title "Test Plan: <feature>" --content ...` + link to PRD/feature-spec via `lore link <test-plan-slug> <spec-slug> --type=relates-to`
+- **strategy mode**: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title "Test Plan: <feature>" --content ...` + link to PRD/feature-spec via `lore link <test-plan-slug> <spec-slug> --type=relates-to`
 - **Other modes after execution**: update existing test-plan knowledge doc with results section (`lore set <test-plan-slug> --content ...`):
   ```
   ## Test Results — {mode} ({date})

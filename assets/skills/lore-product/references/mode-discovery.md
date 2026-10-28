@@ -140,7 +140,7 @@ Discovery is complete when:
 - [ ] Clear recommendation provided: Opportunity / Validate / Pivot / No-go
 
 ## Persist Output
-- Artifact: `lore create knowledge --sub-type research --title '{topic} Discovery' --content ...`
+- Artifact: `lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{topic} Discovery' --content ...`
 - Link to upstream ideation doc if exists: `lore link <discovery> <ideation-doc> --type=implements`
 
 ## Triggers

@@ -4,7 +4,7 @@ Plans and tasks are BOTH typed lore docs addressed by slug (e.g. `plan-user-auth
 
 ## Plan Document Content Structure
 
-The plan doc's content (`lore create plan --content-file ...`) contains:
+The plan doc's content (`lore create plan --parent <spec it implements> --content-file ...`) contains:
 
 ```markdown
 # [Title]

@@ -31,7 +31,7 @@
 
 Output: `[MAINT_PLAN] task: {name} | risk: {level} | window: {datetime} | rollback: {strategy} | approvals: {status}`
 
-Tools: `lore: lore create knowledge --sub-type reference` (maintenance RFC) | `serena: execute_shell_command` (traffic analysis)
+Tools: `lore: lore create knowledge --parent <spec or prd it concerns> --sub-type reference` (maintenance RFC) | `serena: execute_shell_command` (traffic analysis)
 
 ### Step 2: Pre-Checks (MANDATORY)
 
@@ -94,7 +94,7 @@ After successful maintenance:
 3. **Update automation**: If manual steps can be automated, create ticket
 4. **Schedule next occurrence** (if recurring)
 
-Tools: `lore: lore set, lore create knowledge --sub-type reference` | `serena: create_text_file`
+Tools: `lore: lore set, lore create knowledge --parent <spec or prd it concerns> --sub-type reference` | `serena: create_text_file`
 
 ## Common Maintenance Procedures
 

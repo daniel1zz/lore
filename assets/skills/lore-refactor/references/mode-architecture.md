@@ -117,7 +117,7 @@ steps:
 lore_integration:
   create_adr_if_architectural:
     condition: "Refactoring involves architectural decisions"
-    tool: "lore create adr --title 'Refactoring Decision: {description}' --decision-status proposed --tags 'refactor,{component}' --content '{rationale, owned by {team}}'"
+    tool: "lore create adr --parent <spec it governs> --title 'Refactoring Decision: {description}' --decision-status proposed --tags 'refactor,{component}' --content '{rationale, owned by {team}}'"
     link_to_existing:
       tool: "lore link {adr_id} {design_spec_id} --type=supersedes"
 ```

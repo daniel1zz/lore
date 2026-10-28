@@ -187,7 +187,7 @@ Use ONLY when:
 
 ## Rollback Plan Template
 
-Document this BEFORE every deployment. Store in lore as part of the deployment runbook (`lore create knowledge --sub-type reference`).
+Document this BEFORE every deployment. Store in lore as part of the deployment runbook (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`).
 
 ```markdown
 ## Rollback Plan: {deployment name} — {date}
@@ -219,7 +219,7 @@ Document this BEFORE every deployment. Store in lore as part of the deployment r
 
 ### Post-Rollback
 1. Re-run verification protocol (Phase 4)
-2. Create incident doc in lore (`lore create knowledge --sub-type retro`)
+2. Create incident doc in lore (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro`)
 3. Notify stakeholders
 4. Schedule post-mortem within 48 hours
 

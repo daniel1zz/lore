@@ -78,7 +78,7 @@ executing anything (fix mode included):
 | Tree drift (orphan/misplaced) | `lore status --check-tree --fix` (auto-fixes orphan/misplaced classes; residual rows need manual re-parenting via `lore link`/`lore set`) |
 | Code-anchor drift | Per row, EITHER the rendered `lore anchor rm <spec-slug> '<anchor>'` (anchor is truly dead) OR update the path/export in the spec via `lore anchor add`/`rm` (code moved). Decide per row from git history — removing an anchor silently un-arms the drift oracle. |
 | Stale candidate (from `--list` or probes) | The probe-rendered literal command: `lore invalidate <slug> --reason "..." [--superseded-by <ref>]` — report-only escalations, doctor runs them only in fix mode after user sees them |
-| Invalidated feeding source | Author a replacement skill doc (`lore create knowledge ... --supersedes <old>`) or `lore invalidate <old> --undo` if the invalidation was wrong |
+| Invalidated feeding source | Author a replacement skill doc (`lore create knowledge --parent <spec or prd it concerns> ... --supersedes <old>`) or `lore invalidate <old> --undo` if the invalidation was wrong |
 | Orphan doc | `lore link <parent> <orphan> --type=<relates|governs|implements>` per blueprint, then `lore status --check-tree --fix` reconciles parent_id ↔ link table; never delete |
 | Stuck draft | Triage: `lore review <doc>` (AI judgment) then human `lore approve <doc>` / `lore reject <doc>` — doctor NEVER auto-approves |
 | Stale claim lease | `lore release <task> --force --reason "doctor: stale lease"` — ONLY when the lease is computed stale AND no session is actually working (check `sessions[]` first) |

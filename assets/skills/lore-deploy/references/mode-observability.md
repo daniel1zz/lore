@@ -169,4 +169,4 @@ groups:
 
 - `serena`: create_text_file (configs, dashboards), execute_shell_command (deploy configs)
 - `context7`: OpenTelemetry, Prometheus, Grafana docs
-- `lore`: `lore search --type knowledge` for existing monitoring runbooks, `lore create knowledge --sub-type reference` for the observability runbook
+- `lore`: `lore search --type knowledge` for existing monitoring runbooks, `lore create knowledge --parent <spec or prd it concerns> --sub-type reference` for the observability runbook

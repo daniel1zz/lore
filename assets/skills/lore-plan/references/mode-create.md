@@ -80,7 +80,7 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 # Check 3b: Does the change introduce new technology or alter architecture?
 #   YES → Verify relevant ADRs reflect the change. If an ADR is outdated →
 #         invoke Skill("design") to create the successor
-#         (lore create adr --supersedes <old-adr> invalidates the old one loudly).
+#         (lore create adr --parent <spec it governs> --supersedes <old-adr> invalidates the old one loudly).
 #   NO  → proceed to step 2.
 #
 # Gate summary:
@@ -148,7 +148,7 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #   3. Record: library name, version, fit, decision (USE/REJECT + reason)
 #   4. Record the USE/REJECT decision in the plan's Decisions Log (shown in S4)
 #   5. Only AFTER research → create the phase's task docs
-#   6. Non-trivial conclusions worth reuse → lore create knowledge --sub-type research
+#   6. Non-trivial conclusions worth reuse → lore create knowledge --parent <spec or prd it concerns> --sub-type research
 #
 # Domain-specific research checklist:
 #   □ Utility functions → Lodash / Radash / Remeda

@@ -19,8 +19,8 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 | `get_doc` / `get_topic_context` | `lore get <id-or-slug>` (+ `--resolve-mdx`); `lore tree [<plan>]` |
 | `create_intent` | `lore create prd --title ... --content ...` |
 | `create_spec` | `lore feed spec-create` FIRST, then `lore create spec --title ... [--kind feature\|tech\|design]`; ACs via `lore ac add <spec> ... --cite BR-<n>` (a spec takes no parent; cite rules with `lore ac cite <spec> <AC> BR-<n>`; no approval without a citing criterion, BR-1007) |
-| `create_decision` | `lore create adr --title ... --decision-status proposed` |
-| `create_knowledge` | `lore create knowledge --sub-type ideation\|retro\|research\|reference\|assessment\|prompt\|skill\|handoff` |
+| `create_decision` | `lore create adr --parent <spec it governs> --title ... --decision-status proposed` |
+| `create_knowledge` | `lore create knowledge --parent <spec or prd it concerns> --sub-type ideation\|retro\|research\|reference\|assessment\|prompt\|skill\|handoff` |
 | `create_architecture` / `init_*` / `get_module` / `update_module` | RETIRED — module context lives in layered CLAUDE.md files (`zz-init-context` skill) |
 | `update_doc` | `lore set <doc> --title/--content/--status ...` (editing an approved doc auto-resets to draft) |
 | `manage_links` | `lore link <from> <to> --type=parent\|implements\|informs\|supersedes\|relates-to\|blocks\|governs` / `lore unlink` |
@@ -34,8 +34,8 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 | `validate_plan` | pre-exec: `lore ready <plan> --json` + gates; post-exec: `lore assess <plan>` (LLM-as-judge vs spec ACs) |
 | `assert_doc_chain` | `lore status --check-tree [--fix]` (blueprint `lore.tree.yaml`) + `--check-drift` (code anchors) |
 | review queue / approve | `lore pending [--escalated]`; `lore review <doc>` (AI judgment); `lore approve <doc>` / `lore reject <doc>` |
-| `session_retrospective` | `lore create knowledge --sub-type retro` |
-| `prepare_for_next_session` / handoff | `lore create knowledge --sub-type handoff --title "Handoff — <actor>"`; next session consumes via `lore feed session-resume` |
+| `session_retrospective` | `lore create knowledge --parent <plan or spec it reviews> --sub-type retro` |
+| `prepare_for_next_session` / handoff | `lore create knowledge --parent <spec or prd it concerns> --sub-type handoff --title "Handoff — <actor>"`; next session consumes via `lore feed session-resume` |
 | stale/wrong knowledge cleanup | `lore invalidate <doc> [--superseded-by <new>] [--reason "..."]`; probes: `lore review --staleness [--list]` |
 | `reindex` / `think_about_docs` | n/a (FTS5 is automatic; no equivalent needed) |
 | docman-hub cross-project aggregation / telemetry dashboards | RETIRED — no lore equivalent (per-corpus `lore status` only) |

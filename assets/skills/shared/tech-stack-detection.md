@@ -21,7 +21,7 @@ Detect project tech stack from `package.json` and load SDK playbooks.
 ## SDK Playbook Lookup
 1. `lore search "{sdk_name}" --type knowledge --json` (sub_type: research/reference) — lore corpus first
 2. If missing → `context7.resolve-library-id` + `query-docs` / `mcp-deepwiki.ask_question`
-3. If valuable findings → `lore create knowledge --sub-type reference --title '{sdk_name} playbook' --content '...'` to persist (draft status by default)
+3. If valuable findings → `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title '{sdk_name} playbook' --content '...'` to persist (draft status by default)
 
 ### Name Normalization
 `@reduxjs/toolkit` → "redux", `@tanstack/react-query` → "tanstack-query", `@prisma/client` → "prisma", `next-auth`/`@auth/core` → "auth-js"

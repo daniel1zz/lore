@@ -107,7 +107,7 @@ Identify events that represent major phase transitions in the domain:
 2. **Aggregate Candidates**: List of aggregate clusters with their invariants
 3. **Hotspot Register**: Unresolved questions requiring stakeholder input
 4. **Pivotal Event List**: Phase-transition events suggesting context boundaries
-5. Persist to: `docs/domain/{domain}/event-storm.md` → register in lore (`lore create knowledge --sub-type reference`)
+5. Persist to: `docs/domain/{domain}/event-storm.md` → register in lore (`lore create knowledge --parent <spec or prd it concerns> --sub-type reference`)
 
 ## Integration with Other Skill Steps
 

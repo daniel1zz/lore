@@ -28,11 +28,11 @@ Review the session transcript yourself (no bootstrap tool — reflection is your
 
 | Signal | lore persistence |
 |---|---|
-| Technical / architecture decision | `lore create adr --title "..." --decision-status accepted` (or `proposed` if not yet ratified) |
-| Business rule / domain invariant | `lore create adr` (decision framing: context, constraint, reason) |
-| Bug pattern / retro learning | `lore create knowledge --sub-type retro` |
-| Research finding / benchmark | `lore create knowledge --sub-type research` |
-| SDK gotcha / reusable reference | `lore create knowledge --sub-type reference` |
+| Technical / architecture decision | `lore create adr --parent <spec it governs> --title "..." --decision-status accepted` (or `proposed` if not yet ratified) |
+| Business rule / domain invariant | `lore create adr --parent <spec it governs>` (decision framing: context, constraint, reason) |
+| Bug pattern / retro learning | `lore create knowledge --parent <plan or spec it reviews> --sub-type retro` |
+| Research finding / benchmark | `lore create knowledge --parent <spec or prd it concerns> --sub-type research` |
+| SDK gotcha / reusable reference | `lore create knowledge --parent <spec or prd it concerns> --sub-type reference` |
 | Feature requirements discovered | Real spec: `lore feed spec-create` first, then `lore create spec --kind feature` + `lore ac add` |
 | Existing doc now inaccurate | UPDATE it: `lore set <doc> --content ...` (approved doc auto-resets to draft) |
 | Superseded / disproven knowledge | INVALIDATE — see step 5 |
@@ -62,7 +62,7 @@ Never leave superseded docs standing. For each thing the session proved wrong:
 lore invalidate <old-slug> --superseded-by <new-slug> --reason "..."
 
 # Or create + invalidate in ONE command:
-lore create adr --title "..." --decision-status accepted --supersedes <old-slug>
+lore create adr --parent <spec it governs> --title "..." --decision-status accepted --supersedes <old-slug>
 # Half-failure (create ok, invalidate failed) exits nonzero and prints the exact
 # repair command — run it, never leave the old doc un-invalidated silently.
 
