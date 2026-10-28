@@ -145,6 +145,19 @@ export interface RegisterRunInput {
   readonly messageAddress?: string;
 }
 
+/** Input of {@link RunService.registerDelegated}: the pieces `delegated-run.ts` derived from a verified caller and a spawned job. */
+export interface RegisterDelegatedRunInput {
+  readonly harness: string;
+  readonly sessionId: string;
+  readonly agentId: string;
+  /** The job name. */
+  readonly agentType: string;
+  /** The verified caller's run. */
+  readonly parentRunId: string;
+  /** The job process: its own pid and measured start time. */
+  readonly process: RunProcessRecord;
+}
+
 /** Input of {@link RunService.registerParty}: a person (with their session token's hash) or an HTTP key / login by name. */
 export type RegisterPartyRunInput =
   | { readonly harness: "human"; readonly name: string; readonly tokenHash: string }
@@ -262,6 +275,29 @@ export class RunService {
       return err(validationError("run", `run ${id} was inserted but cannot be read back`, id));
     }
     return ok(stored.value);
+  }
+
+  /**
+   * Register the child run of a delegated detached job (`delegated-run.ts`, AC-DJ-1): a subagent run whose harness
+   * process is the job process itself and whose parent is the VERIFIED caller's run. A thin wrapper over
+   * {@link RunService.register}: ONLY `delegated-run.ts::registerDelegatedRun` calls it, after checking that the caller
+   * verified, and no CLI command or HTTP route reaches it (spec invariant I1).
+   *
+   * @returns what {@link RunService.register} returns; VALIDATION_ERROR when the job's process facts are incomplete.
+   */
+  async registerDelegated(input: RegisterDelegatedRunInput): Promise<Result<RunRecord, LoreError>> {
+    if (input.process.pid === null || input.process.startTime === null) {
+      return err(validationError("process", "a delegated run records its job's pid and start time", input.process));
+    }
+    return this.register({
+      harness: input.harness,
+      sessionId: input.sessionId,
+      agentId: input.agentId,
+      agentType: input.agentType,
+      parentRunId: input.parentRunId,
+      composition: { schemaVersion: 1, fragments: [] },
+      process: input.process,
+    });
   }
 
   /**

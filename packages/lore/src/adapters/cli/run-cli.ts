@@ -26,8 +26,9 @@
  */
 
 import type { CommandDef } from "citty";
-import type { Invocation } from "@lore/core";
+import { HARNESS_RUN_ENV, type Invocation } from "@lore/core";
 import { UnknownPartyError } from "@lore/core/node";
+import { DELEGATED_JOB_ENV, awaitStartGate, endDelegatedJobRun } from "../../service/delegated-run.js";
 import type { InvocationResolvers } from "@lore/core/node";
 import { CliExit } from "./cli-exit.js";
 import { resolveHumanSessionBinding } from "./human-session-file.js";
@@ -197,6 +198,40 @@ async function dispatch(inv: Invocation, main: CommandDef<any>, reported: { code
  * @returns the exit code of the run (see the module header for how it is decided)
  */
 export async function runCli(inv: Invocation, options: RunCliOptions = {}): Promise<number> {
+  const job = inv.env[DELEGATED_JOB_ENV];
+  if (job === undefined || job === "") return runCliCommand(inv, options);
+  // reason: #501 — a delegated detached job (the post-integrate review batch) is its own harness under a child run its verified
+  // caller registers AFTER spawning it. It does nothing, not even verify its identity, until the caller sends the gate line;
+  // stdin ending without it means the caller aborted: exit 0 having written nothing (spec-a-detached-lore-job-writes-under-a-child-run-delegated-by I3).
+  if (!(await awaitStartGate(inv.io.stdin))) return 0;
+  try {
+    return await runCliCommand(inv, options);
+  } finally {
+    // reason: I4 — the child run ends when the job exits; a SIGKILLed job never gets here and the run-reap service ends its run (dead harness pid).
+    await endDelegatedJobRunOfInvocation(inv, job);
+  }
+}
+
+/** Ends the child run a delegated job carried (`LORE_HARNESS_RUN`); a failure is printed, never swallowed. */
+async function endDelegatedJobRunOfInvocation(inv: Invocation, job: string): Promise<void> {
+  const run = inv.env[HARNESS_RUN_ENV];
+  if (run === undefined || run === "") return;
+  try {
+    const { loadLoreApp } = await import("./loader.js");
+    const { app } = loadLoreApp({ inv });
+    try {
+      if (app.runService === undefined) throw new Error("App was built without a runService");
+      const ended = await endDelegatedJobRun(app.runService, run, job);
+      if (!ended.ok) printLine(inv.io.stderr, `Error: could not end delegated run ${run}: ${ended.error.code}: ${"message" in ended.error ? ended.error.message : ""}`);
+    } finally {
+      app.close();
+    }
+  } catch (error) {
+    printLine(inv.io.stderr, `Error: could not end delegated run ${run}: ${error instanceof CliExit ? `exit ${String(error.code)}` : error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function runCliCommand(inv: Invocation, options: RunCliOptions): Promise<number> {
   const reported: { code: ExitReport } = { code: 0 };
   const { buildMain } = await import("./index.js");
   const main = buildMain(inv, {

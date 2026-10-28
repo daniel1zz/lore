@@ -105,7 +105,7 @@ export interface ReviewTriggerDeps {
   /** True when a live lease is held (reads only). */
   readonly isLeaseLive: () => Promise<Result<boolean, LoreError>>;
   /** Starts the detached batch process; returns once it is spawned (never waits for it). */
-  readonly spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError>;
+  readonly spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
 }
 
 /** The trigger set: the plans that need work, with what they need. */
@@ -241,7 +241,8 @@ export class ReviewTriggerService {
     const live = await this.deps.isLeaseLive();
     if (!live.ok) return live;
     if (live.value) return ok({ state: "lease-live", triggered: set.value.length });
-    const spawned = this.deps.spawnBatch();
+    // reason: the spawn registers the batch's child run before it returns (#501), so it is awaited
+    const spawned = await this.deps.spawnBatch();
     if (!spawned.ok) return spawned;
     return ok({ state: "started", triggered: set.value.length, pid: spawned.value.pid });
   }

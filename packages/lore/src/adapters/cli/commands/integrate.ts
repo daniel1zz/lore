@@ -273,7 +273,9 @@ export default defineLoreCommand({
           execPath: inv.execPath,
           isCompiled: inv.isCompiled,
           env: inv.env,
-          harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
+          // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
+          runService: app.runService,
+          caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
         }),
       );
       const service = new IntegrateService({
