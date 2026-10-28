@@ -12,7 +12,7 @@ import { err, ok, type DocRecord, type LoreError, type Result } from "@lore/core
 import { readEditScope, type EditScopeDeps } from "../../../src/service/edit-scope.js";
 import { claimIsLive } from "../../../src/service/task-workflow-service.js";
 import type { OpenProjectClaim } from "../../../src/service/run-service.js";
-import type { StoreInterface } from "../../../src/store/interface.js";
+import type { StoreInterface } from "../../../src/store/store-interface.js";
 
 const NOW = "2026-10-28T12:00:00.000Z";
 const TTL_MINUTES = 120;

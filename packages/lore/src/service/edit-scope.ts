@@ -72,6 +72,8 @@ export interface ProjectEditScopeReport {
 export interface EditScopeDeps {
   /** Every open claim of the project, whatever working copy it names ({@link readEditScope} with `{all: true}`). */
   openClaimsOfProject(): Promise<Result<readonly OpenProjectClaim[], LoreError>>;
+  /** `claimIsLive` bound to the store and claim TTL: whether `task` holds a claim that is not effectively stale. */
+  claimIsLive(task: DocRecord, nowIso: string, endedRuns: Map<string, boolean>): Promise<Result<boolean, LoreError>>;
   openClaimsOfWorkingCopy(workingCopy: string): Promise<Result<OpenClaimsOfWorkingCopy, LoreError>>;
   getTask(slug: string): Promise<Result<DocRecord, LoreError>>;
   /** Every task document (the sibling universe). */
@@ -197,27 +199,20 @@ export async function readEditScope(
   if (typeof target !== "string") {
     const open = await deps.openClaimsOfProject();
     if (!open.ok) return open;
-    // reason: BR-1493 says LIVE claim. A claim whose lease expired (or whose run ended) holds nothing, by the same
-    // run-aware staleness the declare path and integrate's own-diff judgment (BR-1346) use for "a fresh claim".
-    const live = new Set<string>();
-    if (open.value.length > 0) {
-      const all = await deps.listTasks();
-      if (!all.ok) return all;
-      const first = all.value[0];
-      if (first !== undefined) {
-        // The candidate is a stand-in excluded from its own siblings by id; only the siblings' staleness is read.
-        const standIn: DocRecord = { ...first, id: `${first.id}-scope-all` as DocRecord["id"] };
-        const context = await deps.buildSiblingContext("lore-scope-all", standIn, all.value, deps.now());
-        if (!context.ok) return context;
-        for (const sibling of context.value.siblingClaims ?? []) if (!sibling.stale) live.add(sibling.slug);
-      }
+    // reason: BR-1493 says LIVE claim. Each claim is judged by `claimIsLive`, the one run-aware predicate behind the
+    // sibling gate context and integrate's "a fresh claim" (BR-1346); it reads only that claim's own task document, so
+    // no other task is needed and an unreadable answer is an error, never an omission.
+    const now = deps.now();
+    const endedRuns = new Map<string, boolean>();
+    const claims: ProjectEditScopeClaim[] = [];
+    for (const row of open.value) {
+      const task = await deps.getTask(row.slug);
+      if (!task.ok) return task;
+      const live = await deps.claimIsLive(task.value, now, endedRuns);
+      if (!live.ok) return live;
+      if (!live.value) continue;
+      claims.push({ task: row.slug, anchors: row.file_anchors, holder_run: row.holder_run, working_copy: row.working_copy ?? null });
     }
-    const claims: ProjectEditScopeClaim[] = open.value.filter((row) => live.has(row.slug)).map((row) => ({
-      task: row.slug,
-      anchors: row.file_anchors,
-      holder_run: row.holder_run,
-      working_copy: row.working_copy ?? null,
-    }));
     return ok({ working_copy: null, claims, not_measured: [] });
   }
   const workingCopy = target;
