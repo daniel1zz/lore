@@ -45,6 +45,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import { z } from "zod";
 import type { AcExemptionRow, RunLifecycle, VersionKey } from "./store-interface.js";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
@@ -400,6 +401,113 @@ export interface CheckOutcomeInput {
   readonly outcome: CheckOutcomeKind;
   /** ISO 8601 time the check ran. */
   readonly ts: string;
+}
+
+// ─── Suite results (migration-043, BR-1497) ────────────────────────────────
+
+const suiteResultCommandSchema = z.object({ command: z.string().min(1), exit_code: z.number().int(), output_tail: z.string() });
+const suiteResultSkippedSchema = z.object({ command: z.string().min(1), reason: z.string().min(1) });
+const suiteResultFailingFileSchema = z.object({ file: z.string().min(1), imports: z.array(z.string()) });
+
+/**
+ * One stored full-suite result of one commit (`suite_results`). `measured` = the commands ran to the end (red or green is
+ * read from `commands` / `failing_test_files`); `unrunnable` = the run could not complete, `cause` says why and `attempt`
+ * counts the tries at this commit (the next lookup retries with `attempt + 1` and a new id).
+ */
+export interface SuiteResultRecord {
+  readonly id: string;
+  readonly commit_sha: string;
+  readonly tree_sha: string;
+  readonly status: "measured" | "unrunnable";
+  readonly attempt: number;
+  /** Why the run did not complete; `null` exactly when `status` is `measured`. */
+  readonly cause: string | null;
+  readonly commands: readonly { readonly command: string; readonly exit_code: number; readonly output_tail: string }[];
+  readonly skipped: readonly { readonly command: string; readonly reason: string }[];
+  readonly failing_test_files: readonly { readonly file: string; readonly imports: readonly string[] }[];
+  readonly duration_ms: number;
+  /** ISO 8601 time the run finished. */
+  readonly measured_at: string;
+}
+
+/** One named test file re-run at a commit, attached to a suite result (`suite_file_runs`). */
+export interface SuiteFileRunRecord {
+  readonly suite_result_id: string;
+  readonly commit_sha: string;
+  readonly file: string;
+  readonly exit_code: number;
+  readonly output_tail: string;
+  readonly duration_ms: number;
+  readonly measured_at: string;
+}
+
+/** Raw `suite_results` row. */
+export interface SuiteResultRow {
+  id: string;
+  commit_sha: string;
+  tree_sha: string;
+  status: string;
+  attempt: number | bigint;
+  cause: string | null;
+  commands: string;
+  skipped: string;
+  failing_files: string;
+  duration_ms: number | bigint;
+  measured_at: string;
+}
+
+/** Raw `suite_file_runs` row. */
+export interface SuiteFileRunRow {
+  suite_result_id: string;
+  commit_sha: string;
+  file: string;
+  exit_code: number | bigint;
+  output_tail: string;
+  duration_ms: number | bigint;
+  measured_at: string;
+}
+
+/** The JSON texts a store writes for a suite result's three JSON columns. */
+export function suiteResultJsonColumns(record: SuiteResultRecord): { commands: string; skipped: string; failing_files: string } {
+  return {
+    commands: JSON.stringify(record.commands),
+    skipped: JSON.stringify(record.skipped),
+    failing_files: JSON.stringify(record.failing_test_files),
+  };
+}
+
+/**
+ * Maps a raw `suite_results` row to a record. A JSON column or status that no longer parses throws (the caller's
+ * `wrapStoreError` turns it into STORE_ERROR): a corrupt stored result is never read as "no result".
+ */
+export function rowToSuiteResult(row: SuiteResultRow): SuiteResultRecord {
+  if (row.status !== "measured" && row.status !== "unrunnable") throw new Error(`suite_results ${row.id}: unknown status "${row.status}"`);
+  return {
+    id: row.id,
+    commit_sha: row.commit_sha,
+    tree_sha: row.tree_sha,
+    status: row.status,
+    attempt: Number(row.attempt),
+    cause: row.cause,
+    commands: z.array(suiteResultCommandSchema).parse(JSON.parse(row.commands)),
+    skipped: z.array(suiteResultSkippedSchema).parse(JSON.parse(row.skipped)),
+    failing_test_files: z.array(suiteResultFailingFileSchema).parse(JSON.parse(row.failing_files)),
+    duration_ms: Number(row.duration_ms),
+    measured_at: row.measured_at,
+  };
+}
+
+/** Maps a raw `suite_file_runs` row to a record (`Number()` for libsql bigint). */
+export function rowToSuiteFileRun(row: SuiteFileRunRow): SuiteFileRunRecord {
+  return {
+    suite_result_id: row.suite_result_id,
+    commit_sha: row.commit_sha,
+    file: row.file,
+    exit_code: Number(row.exit_code),
+    output_tail: row.output_tail,
+    duration_ms: Number(row.duration_ms),
+    measured_at: row.measured_at,
+  };
 }
 
 /** Per-check aggregate over `check_outcomes`. */

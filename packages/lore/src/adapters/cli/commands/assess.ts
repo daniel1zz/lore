@@ -49,7 +49,8 @@ import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow } from "
 import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
 import { err, ok, type DocId } from "@lore/core";
 import type { App } from "../../../app.js";
-import { createGitSuiteRunner } from "../assess-suite-runner.js";
+import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
+import { suiteRunOfResult } from "../../../service/suite-result-service.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
@@ -259,8 +260,13 @@ export default defineLoreCommand({
                   inv.io.stderr.write(`Warning: could not re-verify ${failure.acIds.join(", ")} for ${failure.plan}: ${failure.message}\n`);
                 }
               };
-        const measured = await createGitSuiteRunner(inv.cwd, inv.env, refreshStale).run();
-        return measured.ok ? measured.value : { status: "not_measured", reason: formatErrorFor(inv, measured.error) };
+        // reason: BR-1497 — main's HEAD is looked up in the suite-result store first; the suite runs only when that
+        // commit has no measured result, so a second batch at the same commit runs nothing (the stale-cited-rule refresh
+        // rides a fresh run only). Per-landing scheduling is the post-landing batch's job (A6).
+        const suiteResults = app.suiteResultService;
+        if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
+        const looked = await suiteResults.lookupOrRun("main", createGitCommitSuiteRunner(inv.cwd, inv.env), refreshStale);
+        return looked.ok ? suiteRunOfResult(looked.value) : { status: "not_measured", reason: formatErrorFor(inv, looked.error) };
       };
 
       const filingCtx = {
