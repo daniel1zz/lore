@@ -214,7 +214,7 @@ async function resolveCallerSession(
   }
   const callerRun = verified?.value?.harnessRun ?? null;
   if (callerRun === null) {
-    return { ok: false, code: refuseTrailAccess(inv.io, "no attested run: pass --harness-run or call from an attested harness") };
+    return { ok: false, code: refuseTrailAccess(inv.io, "no attested run: call from an attested harness, whose Bash hook sets LORE_HARNESS_RUN for each call") };
   }
   try {
     return { ok: true, session: sessionOfRun(callerRun) };

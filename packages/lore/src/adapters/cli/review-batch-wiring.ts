@@ -7,7 +7,7 @@
  * Invariants:
  *   - The spawn is detached with no inherited streams; its output goes to `<corpus>/review-batch.log` (append), so a
  *     failure of the unattended batch stays readable. The landing never waits for the child.
- *   - The child runs as the CALLER's attested run (`--harness-run <run>`); with no plain run id nothing is spawned
+ *   - The child runs as the CALLER's attested run (`LORE_HARNESS_RUN=<run>` in its environment); with no plain run id nothing is spawned
  *     and the start fails loud (an unattested batch's writes would be refused mid-run).
  *   - The binary spawned is the running one (compiled: `execPath`; source: `execPath` + `Bun.main`), never a PATH lookup.
  * Side-effect class: IO (process spawn, log file append, App reads).
@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok, type LoreError, type PlanBundle, type Result } from "@lore/core";
+import { HARNESS_RUN_ENV, err, ok, type LoreError, type PlanBundle, type Result } from "@lore/core";
 import type { App } from "../../app.js";
 import { ReviewBatchLease } from "../../service/review-batch-lease.js";
 import type { ListCompletePlans } from "../../service/check-stats-service.js";
@@ -63,9 +63,10 @@ export function spawnDetachedReviewBatch(opts: {
   }
   const log = openSync(join(opts.corpusDir, "review-batch.log"), "a");
   try {
-    const child = spawn(opts.execPath, [...(entry as string[]), ...REVIEW_BATCH_ARGS, "--harness-run", opts.harnessRun], {
+    const child = spawn(opts.execPath, [...(entry as string[]), ...REVIEW_BATCH_ARGS], {
       cwd: opts.cwd,
-      env: Object.fromEntries(Object.entries(opts.env).filter((kv): kv is [string, string] => kv[1] !== undefined)),
+      // reason: the caller's run travels in the child's environment, never argv (AC-RV-11); the child descends from the caller, so its ancestry check passes
+      env: { ...Object.fromEntries(Object.entries(opts.env).filter((kv): kv is [string, string] => kv[1] !== undefined)), [HARNESS_RUN_ENV]: opts.harnessRun },
       detached: true,
       stdio: ["ignore", log, log],
     });

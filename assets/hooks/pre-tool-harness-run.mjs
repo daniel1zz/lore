@@ -4,7 +4,7 @@
  * whether a call is worth asking about, then relays the verb's answer verbatim.
  *
  * Purpose: let `lore run attest-input` vouch for the run behind every lore call
- * (a Bash `lore ...` command).
+ * (every Bash call).
  *
  * Public surface: none. Executable script, no exports.
  * Side-effect class: IO — reads stdin, spawns at most one child process, writes
@@ -14,13 +14,13 @@
  *
  *   1. unparseable stdin -> exit 0 silently, nothing spawned
  *   2. trigger test on the payload alone: tool `Bash` whose `tool_input.command`
- *      contains the word lore; otherwise exit 0 silently, nothing spawned
+ *      is a string; otherwise exit 0 silently, nothing spawned
  *   3. spawn `lore run attest-input` with the raw stdin bytes piped in; on exit
  *      0 write its stdout byte-for-byte; on any failure write nothing
  *
  * ## Invariant: this file holds no grammar (spec D10)
  *
- * The flag spelling, the run id, and the shape of the rewritten input all belong
+ * The per-call `LORE_HARNESS_RUN` export, the run id, and the shape of the updated input all belong
  * to the verb. This hook neither builds nor inspects its output, and it never
  * adds a permission decision of its own (spec D12): a relayed answer is exactly
  * what the verb printed.
@@ -28,7 +28,7 @@
  * ## Invariant: fail-open (spec D7)
  *
  * Every fault — bad stdin, lore absent, non-zero child — exits 0 with nothing
- * on stdout, so the tool call proceeds un-rewritten; a lore write in it carries no
+ * on stdout, so the tool call proceeds without the run export; a lore write in it carries no
  * run and is then refused (no known party).
  * A failed child's stdout is never relayed, since it may be partial.
  *
@@ -47,11 +47,9 @@ const VERB_BINARY = 'lore';
 /** The verb this hook pipes to; it reads the payload from stdin. */
 const VERB_ARGV = ['run', 'attest-input'];
 
-/** Tool whose `tool_input.command` is searched for the word lore. */
+/** Tool whose every call carries the per-call run export (spec D14): no command text is inspected. */
 const SHELL_TOOL_NAME = 'Bash';
 
-/** "The word lore": a word boundary on both sides, so `explore` and `folklore` do not match. */
-const LORE_WORD = /\blore\b/;
 
 /** Explicit ceiling so an overrun surfaces as `error` (fail-open) rather than silent truncation. */
 const CHILD_OUTPUT_BYTE_CEILING = 16 * 1024 * 1024;
@@ -75,7 +73,7 @@ if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) p
 const toolName = payload.tool_name;
 const command = payload.tool_input?.command;
 const triggered =
-  toolName === SHELL_TOOL_NAME && typeof command === 'string' && LORE_WORD.test(command);
+  toolName === SHELL_TOOL_NAME && typeof command === 'string';
 
 if (!triggered) process.exit(0);
 

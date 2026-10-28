@@ -8,7 +8,7 @@
  * `run-owned-done-and-overlap.bun.test.ts` proves the service. That is not enough: `DoneOpts.harnessRun` and the
  * gate's candidate run are only real if the shipped command passes the invocation's verified run. This file
  * spawns the real CLI (`bun run src/index.ts`) against its own mkdtemp corpus, naming the writer through the
- * session tier (`CLAUDE_CODE_SESSION_ID`) and the run through `--harness-run`, so two runs share ONE derived
+ * session tier (`CLAUDE_CODE_SESSION_ID`) and the run through the per-call `LORE_HARNESS_RUN` value, so two runs share ONE derived
  * name exactly as two real sessions can.
  *
  * Coverage: NEGATIVE (other run refused and the holder named; second run's overlapping claim refused; unattested

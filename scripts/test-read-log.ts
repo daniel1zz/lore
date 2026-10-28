@@ -207,7 +207,7 @@ export function wrapChildProcessModule<T extends object>(real: T): T {
     if (typeof original !== "function") return;
     const fn = original as AnyFn;
     const replacement: AnyFn = function (this: unknown, ...originalArgs: unknown[]) {
-      // reason: a `lore` start gets a known party (a registered `--harness-run`), see scripts/test-known-party-spawn.ts;
+      // reason: a `lore` start gets a known party (a registered run in its env), see scripts/test-known-party-spawn.ts;
       // shell-string starts are never rewritten.
       const args = (shell ? undefined : rewriteNodeSpawnArgs(originalArgs)) ?? originalArgs;
       const [command, second, third] = args;

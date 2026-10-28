@@ -838,6 +838,11 @@ export const taskClaimSchema = z.object({
    */
   inherited_dirty_worktree: z.string().min(1).optional(),
   /**
+   * Set on the claim written by a takeover of a claim whose run had ended (#457, AC-RV-10): the ended run's id, so the
+   * output names it. Informational; never decides anything.
+   */
+  took_over_ended_run: z.string().min(1).optional(),
+  /**
    * The commit the claimed work started from: a branch claim's `base_sha`, or main's head for a no-branch claim.
    * Carried forward on a same-holder refresh (the work did not restart). The landing predicate (`landing.ts`) reads it.
    */
@@ -1013,19 +1018,25 @@ export function isClaimStale(claim: TaskClaim, nowIso: string, ttlMinutes: numbe
 export interface ClaimRunLiveness {
   readonly runEnded: boolean;
   readonly worktreeClean: boolean | null;
+  /**
+   * `true` only when nothing is left to protect: the recorded directory no longer exists, or the claim recorded no
+   * worktree at all. A directory that exists but cannot be read is NOT gone (it stays protected, BR-1057).
+   */
+  readonly worktreeGone: boolean;
 }
 
 /**
  * Staleness of a claim once the holder's run end is taken into account (BR-1058):
  *   - an `orphaned_dirty` claim is exempt from age: stale iff its worktree is now MEASURED clean;
- *   - a claim whose run ended and whose worktree is MEASURED clean is stale at once;
- *   - anything else (open run, unmeasured worktree, ended run with a dirty worktree) falls back to
+ *   - a claim whose run ended and whose worktree is MEASURED clean, or gone (missing, or never recorded), is stale
+ *     at once; an ended run's worktree that still exists and is dirty stays protected (BR-1057);
+ *   - anything else (open run, unreadable worktree, ended run with a dirty worktree) falls back to
  *     {@link isClaimStale}'s TTL — the crash/kill fallback.
  *
  * Pure: the caller does the git and run lookups and passes the facts in (module invariant: no IO).
  *
  * @example
- * isClaimStaleForRun({ by: "a", at: "2026-07-02T10:00:00.000Z" }, "2026-07-02T10:01:00.000Z", 120, { runEnded: true, worktreeClean: true });
+ * isClaimStaleForRun({ by: "a", at: "2026-07-02T10:00:00.000Z" }, "2026-07-02T10:01:00.000Z", 120, { runEnded: true, worktreeClean: true, worktreeGone: false });
  * // => true (ended run, clean worktree) although only 1 minute old
  */
 export function isClaimStaleForRun(
@@ -1034,8 +1045,9 @@ export function isClaimStaleForRun(
   ttlMinutes: number,
   liveness: ClaimRunLiveness,
 ): boolean {
-  if (claim.orphaned_dirty !== undefined) return liveness.worktreeClean === true;
-  if (liveness.runEnded && liveness.worktreeClean === true) return true;
+  // reason: an orphaned-dirty claim's dirty work is gone with its directory, so a gone worktree ends it too (#457).
+  if (claim.orphaned_dirty !== undefined) return liveness.worktreeClean === true || liveness.worktreeGone === true;
+  if (liveness.runEnded && (liveness.worktreeClean === true || liveness.worktreeGone === true)) return true;
   return isClaimStale(claim, nowIso, ttlMinutes);
 }
 

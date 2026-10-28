@@ -88,7 +88,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, prefixRunExport, type LoreError, type Result, type RunId } from "@lore/core";
 import { z } from "zod";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
@@ -280,7 +280,7 @@ export interface IntegrateRequest {
   /** `workflow.integrate.migrate_command`: the branch binary's `lore migrate schema` (see the file header); `undefined` = not configured (both migrate steps are reported skipped). */
   readonly migrateCommand?: string | undefined;
   /**
-   * The CALLER's attested run: the party the migrate child of both migrate steps runs as (`--harness-run <run>` is appended
+   * The CALLER's attested run: the party the migrate child of both migrate steps runs as (the run is exported as LORE_HARNESS_RUN
    * to `migrate_command`), so its `migrate_schema` audit row names the caller and the child is not refused as a run-less
    * write. Required whenever `migrateCommand` is set; absent (or not a plain run id) then = integrate is refused before
    * anything moves.
@@ -893,7 +893,7 @@ export class IntegrateService {
 }
 
 /**
- * Runs `<command> --json --harness-run <run>` in `cwd` through the injected runner and reads the report. The child is a write
+ * Runs `<command> --json` with LORE_HARNESS_RUN=<run> exported in its shell, in `cwd`, through the injected runner and reads the report. The child is a write
  * made by the caller's party, so it carries the caller's attested run (see {@link IntegrateRequest.harnessRun}); a run that is
  * not a plain run id is `failed` without spawning anything. A non-zero exit, or an exit 0
  * whose output carries no readable `--json` report (a migrate whose result cannot be named must not read as success),
@@ -903,13 +903,14 @@ export class IntegrateService {
  * @param command - `workflow.integrate.migrate_command`, the full `lore migrate schema` command line
  * @param cwd - the directory whose corpus is migrated (the integration worktree for the snapshot, the shared checkout for the live corpus)
  * @param corpus - the `.lore/` directory the run is expected to touch, named in a failure
- * @param harnessRun - the caller's attested run, appended as `--harness-run <run>`
+ * @param harnessRun - the caller's attested run, exported as LORE_HARNESS_RUN for the child
  */
 export function runSchemaMigration(runner: FloorRunner, command: string, cwd: string, corpus: string, harnessRun: string | undefined): SchemaMigration {
   if (!isChildRunId(harnessRun)) {
     return { state: "failed", exit_status: 0, output_tail: "the migrate child has no attested caller run to run as; nothing was spawned", corpus, command: `${command} --json` };
   }
-  const full = `${command} --json --harness-run ${harnessRun}`;
+  // reason: the run travels in the migrate shell's environment (an export line), never argv (AC-RV-11)
+  const full = prefixRunExport(`${command} --json`, harnessRun as RunId);
   const ran = runner(full, cwd);
   const tail = ran.output.slice(-FLOOR_TAIL_CHARS);
   if (ran.status !== 0) return { state: "failed", exit_status: ran.status, output_tail: tail, corpus, command: full };

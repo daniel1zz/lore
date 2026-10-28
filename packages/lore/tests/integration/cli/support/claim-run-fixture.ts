@@ -71,15 +71,14 @@ function cleanEnv(dir: string, actor?: string): Record<string, string | undefine
 
 /**
  * Spawns the real CLI as a KNOWN PARTY (every write needs one, BR-1351). `run` is passed as the global
- * `--harness-run <id>` flag (D1), placed before the verb; a call naming no run runs as the agent run of the session
+ * `LORE_HARNESS_RUN` env value; a call naming no run runs as the agent run of the session
  * `actor` names (`cc:<session>`), else as {@link DEFAULT_TEST_RUN}. The run is registered in the corpus first
  * (what the installed hooks do), unless the corpus does not exist yet (`lore init`).
  */
 export function runLore(args: string[], dir: string, run?: string, actor?: string): RunResult {
   const runId = run ?? (actor !== undefined ? `cc:${sessionIdOfActor(actor)}` : DEFAULT_TEST_RUN);
   registerTestRun(dir, runId);
-  const argv = ["--harness-run", runId, ...args];
-  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd: dir, env: cleanEnv(dir, actor) });
+  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd: dir, env: { ...cleanEnv(dir, actor), LORE_HARNESS_RUN: runId } as Record<string, string> });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 

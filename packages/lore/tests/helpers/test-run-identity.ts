@@ -5,11 +5,12 @@
  *
  * Purpose: a test that drives the CLI in a throwaway corpus needs its writes to be made by someone. This helper does
  * what the Claude Code hooks do in production: it names an AGENT RUN (`cc:<session>`), REGISTERS that run in the
- * corpus's registry, and hands back the `--harness-run <id>` flag. The writer's name is then derived from the run
- * exactly as production derives it (`agent:session-<8>`), so `sessionActorFor(label)` still predicts the name.
+ * corpus's registry with THIS test process as the run's harness process, and hands back the per-call `LORE_HARNESS_RUN`
+ * value. The writer's name is then derived from the run exactly as production derives it (`agent:session-<8>`), so
+ * `sessionActorFor(label)` still predicts the name.
  *
- * Public surface: {@link DEFAULT_TEST_RUN}, {@link hasHarnessRunFlag}, {@link testRunIdFor}, {@link registerTestRun},
- * {@link withTestRun}, {@link scrubIdentityEnv}.
+ * Public surface: {@link DEFAULT_TEST_RUN}, {@link HARNESS_RUN_ENV}, {@link testRunIdFor}, {@link registerTestRun},
+ * {@link withTestRunEnv}, {@link scrubIdentityEnv}.
  *
  * Invariants:
  *   - Registration writes ONLY the `runs` registry of the corpus at the project root found from `cwd`
@@ -31,9 +32,93 @@ const { existsSync, readFileSync, statSync } = createRequire(import.meta.url)("n
 
 // reason: spelled out here, NOT imported from `@lore/core`: this module is loaded by the test run's own child_process
 // wrapper (scripts/test-read-log.ts -> scripts/test-known-party-spawn.ts), and `@lore/core` itself imports
-// `child_process` through that wrapper, so importing it here would be a load cycle. `core/tests/run-identity-node.test.ts`
-// pins this value to core's `HARNESS_RUN_FLAG`.
-export const HARNESS_RUN_FLAG = "--harness-run";
+// `child_process` through that wrapper, so importing it here would be a load cycle.
+/** The per-call environment value that carries a lore call's run (same spelling as core's `HARNESS_RUN_ENV`; spelled out for the cycle reason above). */
+export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
+
+/** What one `ps -o lstart= -p <pid>` read says: a start time, the process is gone, or the table could not be read. */
+type LstartRead = { readonly kind: "ok"; readonly iso: string } | { readonly kind: "gone" } | { readonly kind: "unreadable"; readonly reason: string };
+
+// Same rule as adapters/process-table-port.ts (#418), duplicated on purpose: that adapter imports `child_process`, which
+// this module's importer wraps, so importing it here would be a load cycle.
+const PS_TIMEOUT_MS = 5000;
+const PS_EMPTY_READ_ATTEMPTS = 3;
+
+function isProcessAlive(pid: number): boolean | "unknown" {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    return code === "EPERM" ? true : "unknown";
+  }
+}
+
+/**
+ * Read the start time of `pid`: up to 3 reads while `ps` exits 0 with empty output, 5s SIGKILL timeout per read; still
+ * empty -> `kill(pid, 0)` decides: ESRCH is "gone", anything else is "unreadable" (never "gone").
+ */
+function readLstart(pid: number): LstartRead {
+  for (let attempt = 0; attempt < PS_EMPTY_READ_ATTEMPTS; attempt += 1) {
+    const run = realSpawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      timeout: PS_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    if (run.error !== undefined) return { kind: "unreadable", reason: `ps could not run (${run.error.message})` };
+    const text = (run.stdout ?? "").trim();
+    if (run.status === 0 && text !== "") {
+      const parsed = new Date(text);
+      return Number.isNaN(parsed.getTime()) ? { kind: "unreadable", reason: `lstart "${text}" did not parse` } : { kind: "ok", iso: parsed.toISOString() };
+    }
+    if (run.status !== 0 && (run.stderr ?? "").trim() === "" && text === "") return { kind: "gone" }; // ps exit 1, no output: no such pid
+    if (run.status !== 0) return { kind: "unreadable", reason: `ps exited ${String(run.status)}` };
+  }
+  return isProcessAlive(pid) === false ? { kind: "gone" } : { kind: "unreadable", reason: `ps printed nothing for live pid ${String(pid)}` };
+}
+
+/** True when `pid` still is the process that started at `registeredStart` (a reused pid, or a gone one, is not). An unreadable table never displaces a recorded harness. */
+function isSameLiveProcess(pid: number, registeredStart: string | null): boolean {
+  const read = readLstart(pid);
+  if (read.kind === "unreadable") return true;
+  return read.kind === "ok" && (registeredStart === null || read.iso === registeredStart);
+}
+
+/**
+ * The session id of the OUTER Claude Code session this test process was started from, captured at load. It is never a
+ * test's own writer: a test run's identity must not derive from the session that happens to be running the suite.
+ */
+const OUTER_SESSION_ID = (process.env["CLAUDE_CODE_SESSION_ID"] ?? process.env["CLAUDE_SESSION_ID"] ?? "").trim();
+
+/**
+ * The session id `env` names for a TEST writer (how fixtures name one: `sessionEnvFor`), or `null` when it names none.
+ * The outer session's own id (inherited through `process.env`) counts as none.
+ */
+export function testSessionOf(env: Readonly<Record<string, string | undefined>>): string | null {
+  const session = (env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"] ?? "").trim();
+  return session === "" || session === OUTER_SESSION_ID ? null : session;
+}
+
+// reason: the REAL `child_process` through `createRequire`, like `fs` above (the aliased module is this file's importer).
+const { spawnSync: realSpawnSync } = createRequire(import.meta.url)("node:child_process") as typeof import("node:child_process");
+
+let ownStartTime: string | null | undefined;
+
+/**
+ * The start time of THIS process as lore's process-table port reads it (`ps -o lstart=`, ISO-8601, second precision),
+ * or `null` when `ps` cannot say. A test process registers itself as the harness of its runs: every `lore` it spawns
+ * descends from it, and an in-process run starts its ancestry walk at it.
+ */
+function startTimeOfThisProcess(): string | null {
+  if (ownStartTime !== undefined) return ownStartTime;
+  const read = readLstart(process.pid);
+  // reason: an unreadable table is never cached as "no start time" (and this process is alive, so "gone" is also a read failure).
+  if (read.kind !== "ok") throw new Error(`test-run-identity: cannot read this process's start time: ${read.kind === "unreadable" ? read.reason : "ps reports it gone"}`);
+  ownStartTime = read.iso;
+  return ownStartTime;
+}
 
 // reason: `bun:sqlite` is required LAZILY, inside the one function that writes the registry: this module is imported by
 // the spawn shim of EVERY test run (scripts/test-known-party-spawn.ts), including the few files vitest runs under Node,
@@ -55,23 +140,17 @@ const IDENTITY_ENV_VARS = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSI
 
 type EnvBag = Readonly<Record<string, string | undefined>>;
 
-/** Whether `args` already carry a harness run (flag form `--harness-run <id>` or `--harness-run=<id>`). */
-export function hasHarnessRunFlag(args: readonly string[]): boolean {
-  return args.some((token) => token === HARNESS_RUN_FLAG || token.startsWith(`${HARNESS_RUN_FLAG}=`));
-}
-
 /**
- * The run a test's command runs as: its own `--harness-run`, else the run of the session its env names
- * (`CLAUDE_CODE_SESSION_ID`, how fixtures name a writer: `sessionEnvFor`), else {@link DEFAULT_TEST_RUN}.
+ * The run a test's command runs as: the per-call value its env already carries, else the run of the session its env
+ * names (`CLAUDE_CODE_SESSION_ID`, how fixtures name a writer: `sessionEnvFor`), else {@link DEFAULT_TEST_RUN}.
+ *
+ * @param _args - the command's argv; kept so every caller keeps one call shape (the argv no longer names a run)
  */
-export function testRunIdFor(args: readonly string[], env: EnvBag): string {
-  for (let i = 0; i < args.length; i++) {
-    const token = args[i] as string;
-    if (token === HARNESS_RUN_FLAG) return args[i + 1] ?? DEFAULT_TEST_RUN;
-    if (token.startsWith(`${HARNESS_RUN_FLAG}=`)) return token.slice(HARNESS_RUN_FLAG.length + 1);
-  }
-  const session = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
-  return session !== undefined && session.trim() !== "" ? `cc:${session}` : DEFAULT_TEST_RUN;
+export function testRunIdFor(_args: readonly string[], env: EnvBag): string {
+  const carried = env[HARNESS_RUN_ENV];
+  if (carried !== undefined && carried.trim() !== "") return carried;
+  const session = testSessionOf(env);
+  return session !== null ? `cc:${session}` : DEFAULT_TEST_RUN;
 }
 
 /** Nearest ancestor of `cwd` (itself included) holding `.lore/lore.db`, or `null`. */
@@ -159,6 +238,26 @@ export function registerRunInDb(dbPath: string, runId: string): boolean {
       JSON.stringify({ schemaVersion: 1, fragments: [] }),
       new Date().toISOString(),
     );
+    // reason: the run's harness process is THIS test process: a spawned `lore` descends from it and verifies by ancestry.
+    // But a registration NEVER moves a run whose recorded harness is still a live process other than this one: a
+    // short-lived subprocess (a `bun -e` seed script calling `liveInvocation()`) that re-registered the shared run
+    // with its own pid would leave every later spawn of the long-lived worker pointing at a dead pid (the worker's
+    // memo skips re-registering). Only an unset, own, dead or pid-reused harness is replaced.
+    // A corpus older than migration 021 has no columns; the registry row alone is then all there is.
+    const startTime = startTimeOfThisProcess();
+    if (startTime !== null && db.query("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'harness_pid'").get() !== null) {
+      const current = db.query("SELECT harness_pid, harness_pid_start FROM runs WHERE id = ?").get(runId) as
+        | { harness_pid: number | null; harness_pid_start: string | null }
+        | null;
+      const heldByOtherLiveProcess =
+        current !== null &&
+        current.harness_pid !== null &&
+        current.harness_pid !== process.pid &&
+        isSameLiveProcess(current.harness_pid, current.harness_pid_start);
+      if (!heldByOtherLiveProcess) {
+        db.query("UPDATE runs SET harness_pid = ?, harness_pid_start = ? WHERE id = ?").run(process.pid, startTime, runId);
+      }
+    }
     REGISTERED.add(memoKey);
     return true;
   } catch (error) {
@@ -187,17 +286,17 @@ function isInside(parent: string, child: string): boolean {
 }
 
 /**
- * `args` as a known party runs them: with `--harness-run <run>` in front (unless the caller already gave one), the run
- * registered in the corpus holding `cwd`.
+ * `env` as a known party runs: carrying the per-call run value (`LORE_HARNESS_RUN`, unless the caller already set one),
+ * the run registered in the corpus holding `cwd` with this test process as its harness.
  *
  * @param args - argv after the program name
  * @param env - the run's environment (a session id in it names the writer)
  * @param cwd - the run's working directory (where the corpus is found)
  */
-export function withTestRun(args: readonly string[], env: EnvBag, cwd: string): string[] {
+export function withTestRunEnv(args: readonly string[], env: EnvBag, cwd: string): Record<string, string | undefined> {
   const runId = testRunIdFor(args, env);
   registerTestRun(cwd, runId);
-  return hasHarnessRunFlag(args) ? [...args] : [HARNESS_RUN_FLAG, runId, ...args];
+  return (env[HARNESS_RUN_ENV] ?? "") !== "" ? { ...env } : { ...env, [HARNESS_RUN_ENV]: runId };
 }
 
 /** `env` with every variable that could name a writer or mark an agent harness removed (a refusal test spawns with this). */

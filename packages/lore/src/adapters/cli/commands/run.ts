@@ -55,7 +55,7 @@ import { defineLoreCommand } from "../cli-exit.js";
 import { z } from "zod";
 import {
   deriveRunId,
-  rewriteBashCommand,
+  prefixRunExport,
   type CompositionRecord,
   type RunId,
   type RunRecord,
@@ -66,7 +66,7 @@ import { writeAllSync } from "../stdio-sync.js";
 import type { RunService } from "../../../service/run-service.js";
 import type { ReapReport } from "../../../service/run-reap-service.js";
 import type { RunProcessRecord } from "../../../store/store-interface.js";
-import { createRealProcessTablePort } from "../../process-table-port.js";
+import { createRealProcessTablePort, ProcessTableUnreadableError } from "../../process-table-port.js";
 import { runFragmentsRender } from "../../../flows/fragments-flow.js";
 import { detectWorktreeBranch } from "../../real-git-port.js";
 import { buildFlowDeps } from "./fragments.js";
@@ -143,12 +143,20 @@ async function computeComposition(agentType: string | undefined, inv: Invocation
  * command ran in. `undefined` when the caller named no pid (nothing is measured, nothing is overwritten); a pid that
  * cannot be probed records a null pair (a legacy-style run) with a stderr note — registration itself never fails on it.
  */
-async function measureRunProcess(io: CliIo, rawPid: string | undefined, cwd: string, env: Invocation["env"]): Promise<RunProcessRecord | undefined | { error: string }> {
+async function measureRunProcess(io: CliIo, rawPid: string | undefined, cwd: string, env: Invocation["env"]): Promise<RunProcessRecord | undefined | { error: string } | { unreadable: string }> {
   if (rawPid === undefined) return undefined;
   if (!/^[0-9]+$/.test(rawPid)) return { error: `--harness-pid must be a positive integer (got "${rawPid}")` };
   const port = createRealProcessTablePort({ env, cwd });
-  const pid = await port.resolveHarnessPid(Number.parseInt(rawPid, 10));
-  const inspected = pid === null ? null : await port.inspect(pid);
+  let pid: number | null;
+  let inspected: Awaited<ReturnType<typeof port.inspect>> = null;
+  try {
+    pid = await port.resolveHarnessPid(Number.parseInt(rawPid, 10));
+    inspected = pid === null ? null : await port.inspect(pid);
+  } catch (error) {
+    // reason: an unreadable table is not "no such process": registering now would store a run with no harness (#418).
+    if (error instanceof ProcessTableUnreadableError) return { unreadable: `process-table-unreadable: ${error.message}` };
+    throw error;
+  }
   const startTime = inspected === null || inspected.zombie ? null : inspected.startTime;
   if (pid === null || startTime === null) {
     io.stderr.write(`Note: harness pid ${rawPid} could not be probed; the run is registered without a recorded process\n`);
@@ -222,6 +230,10 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   }
   const runProcess = await measureRunProcess(inv.io, stringArg(args, "harness-pid"), inv.cwd, inv.env);
   if (runProcess !== undefined && "error" in runProcess) return usageError(inv.io, runProcess.error);
+  if (runProcess !== undefined && "unreadable" in runProcess) {
+    inv.io.stderr.write(`Error: ${runProcess.unreadable}; no run was registered\n`);
+    return VALIDATION_EXIT;
+  }
 
   return await withRunService(inv, async (service): Promise<number> => {
     const result = await service.register({
@@ -402,23 +414,26 @@ const preToolUsePayloadSchema =z.object({
   tool_input: z.record(z.string(), z.unknown()),
 });
 
+type PreToolUsePayload = z.infer<typeof preToolUsePayloadSchema>;
+
+/** The run of the call a payload describes: `cc:<session>` on the main thread, `cc:<session>:<agent_id>` in a helper. */
+function runOfPayload(payload: PreToolUsePayload): RunId {
+  return deriveRunId(CLAUDE_CODE_HARNESS, {
+    sessionId: payload.session_id,
+    ...(payload.agent_id !== undefined ? { agentId: payload.agent_id } : {}),
+  });
+}
+
 /** The updated tool input, or null when there is nothing to rewrite or the payload is unusable. */
 function computeUpdatedInput(raw: string): Record<string, unknown> | null {
-  let payload: z.infer<typeof preToolUsePayloadSchema>;
-  let run: RunId;
   try {
-    payload = preToolUsePayloadSchema.parse(JSON.parse(raw));
-    run = deriveRunId(CLAUDE_CODE_HARNESS, {
-      sessionId: payload.session_id,
-      ...(payload.agent_id !== undefined ? { agentId: payload.agent_id } : {}),
-    });
+    const payload = preToolUsePayloadSchema.parse(JSON.parse(raw));
+    const command = payload.tool_input["command"];
+    if (payload.tool_name !== "Bash" || typeof command !== "string") return null;
+    return { ...payload.tool_input, command: prefixRunExport(command, runOfPayload(payload)) };
   } catch {
     return null; // reason: D10 fail-open — the hook passes the call through on a payload we cannot attest
   }
-  const command = payload.tool_input["command"];
-  if (payload.tool_name !== "Bash" || typeof command !== "string") return null;
-  const rewritten = rewriteBashCommand(command, run);
-  return rewritten === command ? null : { ...payload.tool_input, command: rewritten };
 }
 
 /** Read the whole of `input` as UTF-8 text. */

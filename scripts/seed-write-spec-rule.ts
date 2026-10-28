@@ -156,8 +156,8 @@ export async function seedWriteSpecRule(app: App): Promise<SeedResult> {
 
 // CLI surface — direct invocation seeds the corpus at the resolved dbPath and exits.
 if (import.meta.main) {
-  // reason: the identity flag (`--harness-run <run>`, a known party: BR-1351) is consumed by `resolveEntryInvocation`, so the
-  // positional dbPath is read from the invocation's argv AFTER that strip, wherever the flag sat.
+  // reason: the identity (the per-call `LORE_HARNESS_RUN` value, a known party: BR-1351) is resolved by `resolveEntryInvocation`,
+  // so the positional dbPath is read from the invocation's argv, which that resolution has already normalised.
   const inv = await resolveEntryInvocation(process.argv.slice(2));
   const dbPath = inv.argv[0] ?? process.env["LORE_DB_PATH"] ?? join(process.cwd(), ".lore", "lore.db");
   const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });

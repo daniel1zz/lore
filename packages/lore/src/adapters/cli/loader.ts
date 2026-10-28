@@ -95,6 +95,7 @@ import { buildReportIssueHint } from "./report-issue-hint.js";
 import { setProcessAuditSurface } from "../../store/audit-surface.js";
 import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
 import { printLine } from "./output.js";
+import { createRealProcessTablePort } from "../process-table-port.js";
 import type { CliIo } from "./output.js";
 
 /**
@@ -539,7 +540,13 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // reason: D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) — the FULL config goes to the
     // composition root: with `sync.enabled` the store is the embedded replica, and a missing address/token or an
     // unreachable remote comes back as the error Result handled below (exit 1), never as the local file.
-    appOrResult = createAppWithWriteContext(dbPath, rawConfig, ambient, { identity: composedInvocation.identity });
+    // reason: the real program entry (`verifyAncestry`) also verifies the run by process ancestry (D19); an in-process run
+    // has no harness-child test process to walk to, so it is checked against the registry only.
+    const ancestry =
+      composedInvocation.verifyAncestry === true
+        ? { table: createRealProcessTablePort({ env: ambient.env, cwd: ambient.cwd }), selfPid: process.pid }
+        : undefined;
+    appOrResult = createAppWithWriteContext(dbPath, rawConfig, ambient, { identity: composedInvocation.identity, ...(ancestry === undefined ? {} : { ancestry }) });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     printLine(composedInvocation.io.stderr, `Error: Storage failure: ${message}`); // CLI surface

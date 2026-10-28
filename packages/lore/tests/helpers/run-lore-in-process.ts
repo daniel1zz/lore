@@ -51,7 +51,7 @@ export interface InProcessRunOptions {
   readonly transformCommand?: (name: string, command: CommandDef<any>) => CommandDef<any> | Promise<CommandDef<any>>;
   /**
    * Who the run is. `"test-run"` (default): an agent run, registered in the corpus under `cwd` first, exactly what the
-   * installed hooks do (the run is the one the run's `--harness-run` / `CLAUDE_CODE_SESSION_ID` names, else
+   * installed hooks do (the run is the one the run's `LORE_HARNESS_RUN` / `CLAUDE_CODE_SESSION_ID` names, else
    * `DEFAULT_TEST_RUN`). `"none"`: the run carries no run and resolves its identity as the binary would (a human
    * session under `home`, else no known party): what a test of the REFUSAL, or of a human session, uses.
    */

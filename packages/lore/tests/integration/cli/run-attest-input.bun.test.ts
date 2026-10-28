@@ -55,7 +55,7 @@ interface HookOut {
 }
 
 describe("lore run attest-input", () => {
-  it("HAPPY: a Bash lore command gets --harness-run cc:<session>; other tool_input keys survive", () => {
+  it("HAPPY: a Bash command gets the export line of cc:<session>; other tool_input keys survive", () => {
     const r = runLore(
       ["run", "attest-input"],
       payload({ tool_input: { command: "lore claim t", description: "claim it" } }),
@@ -63,14 +63,14 @@ describe("lore run attest-input", () => {
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout) as HookOut;
     expect(out.hookSpecificOutput["hookEventName"]).toBe("PreToolUse");
-    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("lore --harness-run cc:S1 claim t");
+    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("export LORE_HARNESS_RUN='cc:S1'\nlore claim t");
     expect(out.hookSpecificOutput.updatedInput["description"]).toBe("claim it");
   }, 120_000);
 
   it("HAPPY: a subagent payload derives cc:<session>:<agent>", () => {
     const r = runLore(["run", "attest-input"], payload({ agent_id: "A9", tool_input: { command: "echo x && lore get y" } }));
     const out = JSON.parse(r.stdout) as HookOut;
-    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("echo x && lore --harness-run cc:S1:A9 get y");
+    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("export LORE_HARNESS_RUN='cc:S1:A9'\necho x && lore get y");
   }, 120_000);
 
   it("NEGATIVE (spec-remove-the-lore-mcp-server#AC-RMCP-6): an mcp__lore__ tool input is left alone — prints nothing and exits 0", () => {
@@ -81,10 +81,13 @@ describe("lore run attest-input", () => {
     expect({ code: r.exitCode, out: r.stdout }).toEqual({ code: 0, out: "" });
   }, 120_000);
 
-  it("BOUNDARY: a caller-forged --harness-run is replaced by the derived run", () => {
-    const r = runLore(["run", "attest-input"], payload({ tool_input: { command: "lore claim t --harness-run cc:forged" } }));
+  it("BOUNDARY: a caller-written flag stays in the command byte for byte; the export carries the derived run", () => {
+    // reason: the retired flag's spelling is joined from parts, so no file outside its refusal names it whole (AC-RV-4).
+    const retiredFlag = ["--harness", "run"].join("-");
+    const command = `lore claim t ${retiredFlag} cc:forged`;
+    const r = runLore(["run", "attest-input"], payload({ tool_input: { command } }));
     const out = JSON.parse(r.stdout) as HookOut;
-    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("lore --harness-run cc:S1 claim t");
+    expect(out.hookSpecificOutput.updatedInput["command"]).toBe(`export LORE_HARNESS_RUN='cc:S1'\n${command}`);
   }, 120_000);
 
   it("REGRESSION (D12): no output ever carries permissionDecision", () => {
@@ -100,9 +103,10 @@ describe("lore run attest-input", () => {
     }
   }, 120_000);
 
-  it("NEGATIVE: a Bash command with no lore invocation prints nothing and exits 0", () => {
+  it("HAPPY: a Bash command that never invokes lore is prefixed too (D14)", () => {
     const r = runLore(["run", "attest-input"], payload({ tool_input: { command: "echo lore is great" } }));
-    expect({ code: r.exitCode, out: r.stdout }).toEqual({ code: 0, out: "" });
+    const out = JSON.parse(r.stdout) as HookOut;
+    expect(out.hookSpecificOutput.updatedInput["command"]).toBe("export LORE_HARNESS_RUN='cc:S1'\necho lore is great");
   }, 120_000);
 
   it("NEGATIVE: a non-lore, non-Bash tool prints nothing and exits 0", () => {

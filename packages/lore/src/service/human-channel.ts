@@ -27,6 +27,7 @@
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { basename } from "node:path";
+import { HARNESS_RUN_ENV, isAgentRunId } from "@lore/core";
 
 /** Exit code of every `lore decide` refusal (same bucket as rejected input). */
 export const HUMAN_CHANNEL_REFUSAL_EXIT = 4;
@@ -84,7 +85,7 @@ export interface HumanChannelPorts {
   stdoutIsTty(): boolean;
   /** @lore-site BR-1249 */
   env(): Readonly<Record<string, string | undefined>>;
-  /** argv after the program name, as the OS delivered it (before any harness-run flag stripping). */
+  /** argv after the program name, as the OS delivered it (informational; an agent run is read from the environment). */
   /** @lore-site BR-1249 */
   argv(): readonly string[];
   /** @lore-site BR-1249 */
@@ -205,8 +206,10 @@ export function checkHumanChannelPreconditions(ports: HumanChannelPorts): HumanC
   if (marker !== null) {
     return refusal("agent-ancestry", `the environment carries an agent identity (${marker}); a human answers from their own shell`);
   }
-  if (ports.argv().some((token) => token === "--harness-run" || token.startsWith("--harness-run="))) {
-    return refusal("agent-ancestry", "the invocation carries an agent run identity (--harness-run)");
+  // reason: only an AGENT run is an agent identity; a person's own `human:...` run is exactly who answers this channel (BR-1350)
+  const carriedRun = ports.env()[HARNESS_RUN_ENV];
+  if (carriedRun !== undefined && carriedRun !== "" && isAgentRunId(carriedRun)) {
+    return refusal("agent-ancestry", `the environment carries an agent run identity (${HARNESS_RUN_ENV})`);
   }
   const table = ports.readProcessTable();
   if (!table.ok) {

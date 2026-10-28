@@ -316,7 +316,7 @@
 
 import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
 import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
@@ -1081,6 +1081,9 @@ export async function resolveEffectiveClaimStaleness(
     // reason: only a MEASURED clean worktree counts as clean — not-measured is `null`, never `true` (BR-1057).
     worktreeClean:
       cleanliness.status === "measured-clean" ? true : cleanliness.status === "measured-dirty" ? false : null,
+    // reason: #457 — a missing directory, or a claim that recorded no worktree, has nothing to protect; an
+    // unreadable existing path (`not-measured-not-a-repo`) is NOT gone and stays protected.
+    worktreeGone: cleanliness.status === "not-measured-gone" || cleanliness.status === "not-measured-no-worktree",
   };
   return ok(isClaimStaleForRun(claim, nowIso, ttlMinutes, liveness));
 }
@@ -2219,6 +2222,8 @@ export type WorktreeCleanlinessStatus =
   | "measured-clean"
   | "measured-dirty"
   | "not-measured-no-worktree"
+  /** The recorded path does not exist, or is not a directory: nothing is left to protect (#457). */
+  | "not-measured-gone"
   | "not-measured-not-a-repo";
 
 /**
@@ -2233,6 +2238,19 @@ export interface WorktreeCleanlinessCheck {
 
 /** Wall-clock budget for the `git` subprocesses this guard shells — generous enough for a cold-cache `status --porcelain` on a large tree, bounded so a hung/unreachable filesystem (e.g. a stale network mount) cannot hang an evidence/release call indefinitely. */
 const WORKTREE_GIT_TIMEOUT_MS = 10_000;
+
+/**
+ * `true` iff `path` exists and is a directory. Only ENOENT / ENOTDIR (and a non-directory) count as "not there";
+ * any other failure (e.g. EACCES) is reported as existing, so an unreadable path is never read as gone.
+ */
+function isExistingDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    return !(code === "ENOENT" || code === "ENOTDIR");
+  }
+}
 
 /**
  * Measures whether `worktree` (a claim's recorded `extra.claim.worktree`, or
@@ -2264,6 +2282,11 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
   // working directory by the child spawn; there is no base to resolve it against here, so it cannot be measured.
   if (!isAbsolute(worktree)) {
     return { status: "not-measured-not-a-repo", paths: [] };
+  }
+  // reason: #457 — an absolute path that is missing or not a directory has nothing to protect; it is distinct from a
+  // path that exists but cannot be read (which stays not-a-repo, i.e. unmeasurable and protected).
+  if (!isExistingDirectory(worktree)) {
+    return { status: "not-measured-gone", paths: [] };
   }
 
   try {
@@ -3250,6 +3273,7 @@ export class TaskWorkflowService {
     const claimant = buildClaimParty(opts);
     let carryForward = false;
     let inheritedDirtyWorktree: string | undefined;
+    let endedHolderRun: string | undefined;
 
     if (existingClaim !== undefined) {
       // reason: BR-1058 — staleness reads the holder run's end and an `orphaned_dirty` mark, measured lazily
@@ -3269,6 +3293,12 @@ export class TaskWorkflowService {
       // (first acquire, steal) starts fresh with no inherited branch/machine/
       // worktree — staleness deliberately breaks session continuity.
       carryForward = decision.kind === "refresh";
+      // reason: #457 — a takeover of an ended run's claim names that run as ended in the history and the output.
+      if (decision.kind === "takeover") {
+        const endedRun = await this.findEndedHolderRun(existingClaim, stale);
+        if (!endedRun.ok) return endedRun;
+        endedHolderRun = endedRun.value ?? undefined;
+      }
       // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work; the output must name it.
       if (decision.kind === "conflict") inheritedDirtyWorktree = existingClaim.orphaned_dirty?.worktree;
     }
@@ -3343,10 +3373,11 @@ export class TaskWorkflowService {
         value: builtClaim.branch,
       });
     }
-    const newClaim: TaskClaim =
-      inheritedDirtyWorktree !== undefined
-        ? { ...builtClaim, inherited_dirty_worktree: inheritedDirtyWorktree }
-        : builtClaim;
+    const newClaim: TaskClaim = {
+      ...builtClaim,
+      ...(inheritedDirtyWorktree !== undefined ? { inherited_dirty_worktree: inheritedDirtyWorktree } : {}),
+      ...(endedHolderRun !== undefined ? { took_over_ended_run: endedHolderRun } : {}),
+    };
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
     const previousHolderRun = existingClaim === undefined ? undefined : (existingClaim.harness_run ?? null);
@@ -3357,7 +3388,8 @@ export class TaskWorkflowService {
           ? ` (run ${claimant.harnessRun})`
           : "";
     const inheritedNote = inheritedDirtyWorktree !== undefined ? `; inherited dirty worktree ${inheritedDirtyWorktree}` : "";
-    const summary = `Claimed by ${opts.by}${takeoverNote}${inheritedNote}`;
+    const endedHolderNote = endedHolderRun !== undefined ? `; holder run ${endedHolderRun} ended` : "";
+    const summary = `Claimed by ${opts.by}${takeoverNote}${endedHolderNote}${inheritedNote}`;
 
     // reason: issue #106 / BR-961 — the worktree HEAD at claim time is the "base" that defines a
     // task's OWN commits (branch commits beyond it). Recorded on the claim AUDIT row (which survives
@@ -3670,11 +3702,17 @@ export class TaskWorkflowService {
 
     const nowIso = now();
     const releaser = buildClaimParty(opts);
-    // reason: BR-1043 — stale=false: a stale holder still releases by its own identity; staleness only
-    // unlocks takeover by a CLAIM. Only a `refresh` verdict (the SAME run) is the holder; a name is never one.
+    // reason: #457 — release reads the SAME effective staleness a claim does (ended run with a clean or gone worktree,
+    // BR-1058): a stale holder is released by any run without force; a dirty worktree that still exists stays protected.
+    // BR-1043 still holds: only a `refresh` verdict (the SAME run) is the holder; a name is never one.
+    const staleResult = await this.isClaimEffectivelyStale(existingClaim, nowIso, new Map());
+    if (!staleResult.ok) return staleResult;
+    // The holder verdict is judged with stale=false (a stale holder run still IS the holder); staleness only lifts the
+    // conflict gate below, so a release by the ended run itself keeps its plain "released by the holder" history.
     const holder = buildClaimHolder(existingClaim, false);
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
-    if (!isHolder && opts.force !== true) {
+    const staleHolder = staleResult.value;
+    if (!isHolder && !staleHolder && opts.force !== true) {
       return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
     }
 
@@ -3692,9 +3730,16 @@ export class TaskWorkflowService {
     delete newExtra["claim"];
 
     const heldRunNote = `, run ${describeClaimRun(holder.harnessRun)}`;
-    const forcedNote = !isHolder
-      ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
-      : "";
+    const endedRunResult = await this.findEndedHolderRun(existingClaim, staleHolder);
+    if (!endedRunResult.ok) return endedRunResult;
+    const endedNote = endedRunResult.value === null ? "" : `; holder run ${endedRunResult.value} ended`;
+    const forcedNote = isHolder
+      ? endedNote === ""
+        ? ""
+        : ` (${endedNote.slice(2)})`
+      : opts.force === true && !staleHolder
+        ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
+        : ` (stale holder: ${existingClaim.by}${heldRunNote}${endedNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`;
     const runNote = isHolder && releaser.harnessRun !== null ? ` (run ${releaser.harnessRun})` : "";
     const reasonNote = opts.reason !== undefined ? `: ${opts.reason}` : "";
     const summary = `Released by ${opts.by}${runNote}${forcedNote}${reasonNote}`;
@@ -3741,6 +3786,18 @@ export class TaskWorkflowService {
     endedRuns: Map<string, boolean>,
   ): Promise<Result<boolean, LoreError>> {
     return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns);
+  }
+
+  /**
+   * The holder run that ended (#457): its id when `stale` and the claim's run has an end recorded, else `null`.
+   * A failed run lookup fails loud, like the staleness check that precedes it.
+   */
+  private async findEndedHolderRun(claim: TaskClaim, stale: boolean): Promise<Result<string | null, LoreError>> {
+    const run = claim.harness_run ?? null;
+    if (!stale || run === null) return ok(null);
+    const endState = await this.store.getRunEnd(run as RunId);
+    if (!endState.ok) return endState;
+    return ok(endState.value !== null && endState.value.endedAt !== null ? run : null);
   }
 
   /** Effective staleness of every claimed task in `tasks`, keyed by task id (see {@link isClaimEffectivelyStale}). */

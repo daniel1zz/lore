@@ -427,7 +427,9 @@ describe("AC-CF-5 language projection to Claude Code settings, user and project 
     const after = readJson(join(sb.home, ".claude", "settings.json"));
     expect(after["language"]).toBe("Chinese");
     for (const [k, v] of Object.entries(SEED)) {
-      expect(JSON.stringify(after[k])).toBe(JSON.stringify(v));
+      // BR-1218: setup appends its single export allow rule after the user's own allow rules.
+      const expected = k === "permissions" ? { allow: [...SEED.permissions.allow, "Bash(export LORE_HARNESS_RUN=*)"] } : v;
+      expect(JSON.stringify(after[k])).toBe(JSON.stringify(expected));
     }
     const stray = Object.keys(after).filter((k) => !(k in SEED) && k !== "language" && k !== "hooks");
     expect(stray).toEqual([]);

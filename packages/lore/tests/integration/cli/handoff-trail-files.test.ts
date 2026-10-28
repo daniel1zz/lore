@@ -39,14 +39,15 @@ function lore(args: string[], run?: string): CliResult {
     CLAUDE_CODE_SESSION_ID: "handoff-trail-author",
   };
   for (const name of ["LORE_ACTOR", "CLAUDE_SESSION_ID", "LORE_GATE_BYPASS"]) delete env[name];
-  const argv = run === undefined ? args : ["--harness-run", run, ...args];
-  const proc = spawnSync("bun", ["run", ENTRY, ...argv], { cwd: dir, env, encoding: "utf8" });
+  // The run rides in the per-call env value, as the Bash hook hands it to a real call.
+  if (run !== undefined) env["LORE_HARNESS_RUN"] = run;
+  const proc = spawnSync("bun", ["run", ENTRY, ...args], { cwd: dir, env, encoding: "utf8" });
   return { stdout: proc.stdout ?? "", stderr: proc.stderr ?? "", exitCode: proc.status ?? 1 };
 }
 
 function registerRun(run: string): void {
   const [, session] = run.split(":");
-  const r = lore(["run", "register", "--harness", "claude-code", "--session", session!]);
+  const r = lore(["run", "register", "--harness", "claude-code", "--session", session!, "--harness-pid", String(process.pid)]);
   if (r.exitCode !== 0) throw new Error(`run register failed: ${r.stderr}${r.stdout}`);
 }
 

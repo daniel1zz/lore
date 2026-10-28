@@ -34,7 +34,7 @@ import { collectRecordedRanges } from "../../src/service/task-commit-range.js";
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const DIST_LORE = join(PROJECT_ROOT, "dist", "lore");
 const ACTOR = "agent:landing-compiled-e2e";
-/** The run the agent integration vouches for on the close (normally passed by its pre-tool hook). */
+/** The run the agent integration vouches for on the close (normally exported by its pre-tool hook; the run's harness is this test process, so ancestry verifies it). */
 const DONE_SESSION = "a77e57e1-aaaa-bbbb-cccc-333333333333";
 const DONE_RUN = `cc:${DONE_SESSION}`;
 
@@ -56,8 +56,8 @@ function loreEnv(): Record<string, string> {
 
 let dir = "";
 
-function lore(args: string[]): Run {
-  const proc = Bun.spawnSync([DIST_LORE, ...args], { cwd: dir, env: loreEnv() });
+function lore(args: string[], extraEnv: Record<string, string> = {}): Run {
+  const proc = Bun.spawnSync([DIST_LORE, ...args], { cwd: dir, env: { ...loreEnv(), ...extraEnv } });
   const stdout = proc.stdout.toString();
   const stderr = proc.stderr.toString();
   return { exitCode: proc.exitCode ?? -1, stdout, stderr, text: `${stdout}\n${stderr}` };
@@ -123,7 +123,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-landing-compiled-"));
   makeCleanTreeRepo(dir);
   mustLore(["init"]);
-  mustLore(["run", "register", "--harness", "claude-code", "--session", DONE_SESSION]);
+  mustLore(["run", "register", "--harness", "claude-code", "--session", DONE_SESSION, "--harness-pid", String(process.pid)]);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   patchLoreConfig(
     dir,
@@ -175,7 +175,7 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
   }, 300_000);
 
   it("AC-ND-8 lore done through the CLI archives the no-change task, and lore get shows `Landing: no-change`", () => {
-    const result = lore(["done", noChangeTask, "--declare-no-new-tests", "read-only", "--harness-run", DONE_RUN]);
+    const result = lore(["done", noChangeTask, "--declare-no-new-tests", "read-only"], { LORE_HARNESS_RUN: DONE_RUN });
 
     expect(result.exitCode, result.text).toBe(0);
     const doc = docOf(noChangeTask);
@@ -187,7 +187,7 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
   it("AC-ND-8 plan close passes: every task of the plan is landed and archived", () => {
     const closed = lore(["set", plan, "--status", "archived"]);
 
-    expect(closed.exitCode).toBe(0);
+    expect(closed.exitCode, closed.text).toBe(0);
     expect(docOf(plan).status).toBe("archived");
   }, 300_000);
 

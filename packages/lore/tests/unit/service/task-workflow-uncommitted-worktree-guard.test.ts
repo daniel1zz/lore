@@ -297,9 +297,9 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
     });
   });
 
-  it("measureWorktreeCleanliness(<nonexistent path>) => not-measured-not-a-repo", () => {
+  it("measureWorktreeCleanliness(<nonexistent path>) => not-measured-gone (#457: nothing is left to protect)", () => {
     expect(measureWorktreeCleanliness("/definitely/does/not/exist/anywhere")).toEqual({
-      status: "not-measured-not-a-repo",
+      status: "not-measured-gone",
       paths: [],
     });
   });

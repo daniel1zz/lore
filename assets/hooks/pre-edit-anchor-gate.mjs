@@ -219,9 +219,13 @@ function readScopeFile(workingCopy) {
   }
 }
 
-/** Runs lore; returns { status, stdout, stderr } or throws a reason string on spawn failure / timeout. */
-function runLore(cwd, args) {
-  const child = spawnSync(LORE_BINARY, args, { cwd, encoding: 'utf8', timeout: LORE_TIMEOUT_MS });
+/**
+ * Runs lore as `run`; returns { status, stdout, stderr } or throws a reason string on spawn failure / timeout.
+ * reason: the run travels as the per-call value LORE_HARNESS_RUN (the flag is retired); this hook is a harness child, so
+ * lore verifies the run by ancestry (spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and).
+ */
+function runLore(cwd, args, run) {
+  const child = spawnSync(LORE_BINARY, args, { cwd, encoding: 'utf8', timeout: LORE_TIMEOUT_MS, env: { ...process.env, LORE_HARNESS_RUN: run } });
   if (child.error) throw `\`lore\` could not run (${child.error.message})`;
   if (child.status === null) throw `\`lore ${args[0]} ${args[1]}\` did not exit (${child.signal ?? 'no signal'})`;
   return { status: child.status, stdout: child.stdout ?? '', stderr: child.stderr ?? '' };
@@ -344,7 +348,7 @@ try {
 // 2. The working copy's open claims: the scope file read above, else one lore read.
 if (scope === undefined) {
   try {
-    const read = runLore(workingCopy, ['anchor', 'scope', '--worktree', workingCopy, '--json', '--harness-run', run]);
+    const read = runLore(workingCopy, ['anchor', 'scope', '--worktree', workingCopy, '--json'], run);
     if (read.status !== 0) refuse(`\`lore anchor scope\` exited ${read.status}: ${(read.stderr || read.stdout).trim().split('\n')[0]}`);
     scope = JSON.parse(read.stdout)?.data;
   } catch (err) {
@@ -378,7 +382,7 @@ if (chosen === undefined) {
 for (const unit of uncovered) {
   const name = unitName(unit);
   try {
-    const declared = runLore(workingCopy, ['anchor', 'declare', String(chosen.task), name, '--worktree', workingCopy, '--harness-run', run]);
+    const declared = runLore(workingCopy, ['anchor', 'declare', String(chosen.task), name, '--worktree', workingCopy], run);
     if (declared.status === 0) continue;
     const reason = (declared.stderr || declared.stdout).trim();
     // reason: BR-1092 — a shell write is refused only when another live claim holds the target.

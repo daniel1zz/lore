@@ -133,7 +133,8 @@ export default defineLoreCommand({
     // write needs a known party. A person has no human session yet at `init` (`lore session start` needs the corpus
     // this command creates), so init does NOT arm for an invocation with no known party and says so, exactly as it
     // does outside git; `lore audit arm --confirm` arms it once a session is open.
-    // The integration that vouched for the run named on the command line (`--harness-run cc:<session>`) can only
+    // The integration that vouched for the run (the per-call `LORE_HARNESS_RUN=cc:<session>`, verified by process
+    // ancestry) can only
     // register it in a corpus that exists, and this command is what creates it: registering that MAIN run here keeps
     // every later write of the same session from being refused as unknown. A subagent run is left to the hook /
     // `lore run register`.

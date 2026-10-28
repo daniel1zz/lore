@@ -195,8 +195,8 @@ export default defineLoreCommand({
         return 1;
       }
 
-      // reason: session-trail D16 — the trail read is keyed by the run lore VERIFIED (an unregistered or absent
-      // `--harness-run` verifies to null), never the raw flag; the service reads that run's session trail.
+      // reason: session-trail D16 — the trail read is keyed by the run lore VERIFIED (an unregistered, unverifiable or absent
+      // `LORE_HARNESS_RUN` verifies to null), never the raw env value; the service reads that run's session trail.
       const identity = await app.verifiedInvocationIdentity?.();
       if (identity !== undefined && !identity.ok) {
         inv.io.stderr.write(formatErrorFor(inv, identity.error) + "\n");

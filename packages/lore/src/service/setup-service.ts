@@ -191,6 +191,8 @@ import {
   planUpdate,
   setupManifestSchema,
   mergeSettings,
+  removeAllowRules,
+  RUN_EXPORT_ALLOW_RULE,
 } from "@lore/core";
 import type {
   AssetFile,
@@ -546,11 +548,13 @@ export class SetupService {
     const payloadResult = await this.assetSource.load();
     if (!payloadResult.ok) return payloadResult;
 
+    const allowAddedThisRun: string[] = [];
     const resolvedResult = await resolvePayload(
       opts.targetDir,
       payloadResult.value,
       this.reader,
       opts.settingsLanguage,
+      allowAddedThisRun,
     );
     if (!resolvedResult.ok) return resolvedResult;
     const resolvedPayload = resolvedResult.value;
@@ -726,6 +730,9 @@ export class SetupService {
     const keptRetiredEntries = (current?.entries ?? []).filter((e) => keptRetiredSet.has(e.path));
     // reason: an `mcp` entry from an old manifest is never carried forward (BR-815) — only file entries and kept retired files.
     const manifestEntries = [...fileEntries, ...keptRetiredEntries];
+    // BR-1218: the allow rules lore itself added — carried forward from the previous manifest, so a re-install
+    // (which finds its own rule already present and adds nothing) still lists it for uninstall.
+    const recordedAllow = [...new Set([...(current?.permissions?.allow ?? []), ...allowAddedThisRun])];
     const manifest: SetupManifest = {
       version: MANIFEST_VERSION,
       claude_dir: opts.targetDir,
@@ -741,6 +748,7 @@ export class SetupService {
       // stamping it unconditionally would let a later `--check`'s digest short-circuit
       // wrongly report full sync despite a known, un-repaired divergence.
       ...(skippedDiverged.length === 0 ? { assets_digest: EMBEDDED_ASSETS_MANIFEST.tree_digest } : {}),
+      ...(recordedAllow.length > 0 ? { permissions: { allow: recordedAllow } } : {}),
     };
 
     const manifestValidation = setupManifestSchema.safeParse(manifest);
@@ -897,6 +905,23 @@ export class SetupService {
         }
       }
 
+      // BR-1218 / BR-840: remove exactly the allow rules the ledger lists. A restored backup may carry them
+      // (it was taken from an earlier lore install), so this runs after the reversal loop; user rules stay.
+      const listedAllow = current.permissions?.allow ?? [];
+      if (listedAllow.length > 0) {
+        for (const entry of current.entries) {
+          if (entry.kind !== "settings-hook") continue;
+          const settingsPath = path.join(opts.targetDir, entry.path);
+          const settingsRaw = await this.reader.read(settingsPath);
+          if (settingsRaw === null) continue;
+          const stripped = removeAllowRules(settingsRaw, listedAllow);
+          if (!stripped.ok) throw new Error(`cannot remove the allow rule from "${settingsPath}": ${JSON.stringify(stripped.error)}`);
+          if (stripped.value.changed) {
+            await this.writer.write(settingsPath, `${JSON.stringify(stripped.value.merged, null, 2)}\n`);
+          }
+        }
+      }
+
       await this.writer.remove(path.join(opts.targetDir, BACKUPS_DIRNAME), { boundary: opts.targetDir });
 
       // AC-046-F: prune now-empty directories our removed entries leave behind — see
@@ -1021,6 +1046,7 @@ async function resolvePayload(
   payload: AssetPayload,
   reader: SetupFsReader,
   settingsLanguage?: string,
+  allowAdded?: string[],
 ): Promise<Result<AssetPayload, LoreError>> {
   const resolvedFiles: AssetFile[] = [];
 
@@ -1074,8 +1100,15 @@ async function resolvePayload(
       // own doc.
       const trimmedTargetDir = targetDir.endsWith("/") ? targetDir.slice(0, -1) : targetDir;
       const hooksPathPrefix = `${trimmedTargetDir}/hooks/`;
-      const mergeResult = mergeSettings({ existingRaw, loreEntries, hooksPathPrefix });
+      const mergeResult = mergeSettings({
+        existingRaw,
+        loreEntries,
+        hooksPathPrefix,
+        allowRules: [RUN_EXPORT_ALLOW_RULE],
+      });
       if (!mergeResult.ok) return mergeResult;
+      // reason: BR-1218 — the rules THIS run appended are reported so the manifest lists exactly what lore added.
+      allowAdded?.push(...mergeResult.value.allowAdded);
 
       // reason: `language` is set on the merged object (appended when absent, replaced in place when
       // present) so the sha below covers the final bytes; `ClaudeSettingsPort.mergeLanguage` run after

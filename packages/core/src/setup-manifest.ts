@@ -237,6 +237,11 @@ export const setupManifestSchema = z.object({
   assets_digest: z.string().min(1).optional(),
   /** OPTIONAL — earlier values a project setup replaced; see {@link projectPriorsSchema}. Project ledger only. */
   project_priors: projectPriorsSchema.optional(),
+  /**
+   * OPTIONAL — permission rules lore added to the settings file (BR-1218), so uninstall removes exactly those.
+   * A rule that was already in the user's file before the first install is never listed here.
+   */
+  permissions: z.object({ allow: z.array(z.string().min(1)) }).optional(),
 });
 
 /** Derived TypeScript type for the whole manifest document. */

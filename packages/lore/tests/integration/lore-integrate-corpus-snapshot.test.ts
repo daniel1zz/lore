@@ -122,7 +122,7 @@ class Fixture {
         // an older corpus is upgraded only by the explicit command (the snapshot is this worktree's own corpus)
         // reason: the floor is a plain shell, so its `lore` carries no run of its own: this write names the test run (BR-1351)
         // that the spawned `integrate` registered in the corpus the snapshot was copied from
-        `bun run ${JSON.stringify(INDEX_TS)} --harness-run ${DEFAULT_TEST_RUN} migrate schema`,
+        `LORE_HARNESS_RUN=${DEFAULT_TEST_RUN} bun run ${JSON.stringify(INDEX_TS)} migrate schema`,
         `bun run ${JSON.stringify(INDEX_TS)} get ${JSON.stringify(this.docSlug)} > floor-read.out`,
         `grep -q "present in the shared corpus" floor-read.out`,
         `bun run ${JSON.stringify(toolPath)} marker .lore/lore.db`,

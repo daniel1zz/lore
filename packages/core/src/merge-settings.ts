@@ -106,6 +106,11 @@ export interface MergeSettingsInput {
    * "Orphan pruning" invariant.
    */
   hooksPathPrefix?: string;
+  /**
+   * OPTIONAL — `permissions.allow` rules that must be present after the merge. A rule already present is left where
+   * it is; an absent one is appended. No other permission key is touched.
+   */
+  allowRules?: string[];
 }
 
 /** Output of a successful {@link mergeSettings} call. */
@@ -121,7 +126,15 @@ export interface MergeSettingsResult {
    * prune).
    */
   prunedCount: number;
+  /** The `allowRules` this call appended (absent from the input document before). Empty when none were requested. */
+  allowAdded: string[];
 }
+
+/**
+ * The single permission allow rule lore installs (BR-1218): it lets the per-call export prefix line
+ * (`export LORE_HARNESS_RUN='<run>'`) run. It is a candidate form, pinned by the live-session criterion AC-RV-12.
+ */
+export const RUN_EXPORT_ALLOW_RULE = "Bash(export LORE_HARNESS_RUN=*)";
 
 /** One Claude Code `hooks[event][]` matcher-group, in its on-disk shape. */
 interface HookGroup {
@@ -226,7 +239,7 @@ function groupLoreEntries(entries: SettingsHookEntry[]): Record<string, HookGrou
  * // => err({ code: "VALIDATION_ERROR", field: "existingRaw", ... })
  */
 export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsResult, LoreError> {
-  const { existingRaw, loreEntries, hooksPathPrefix } = input;
+  const { existingRaw, loreEntries, hooksPathPrefix, allowRules = [] } = input;
 
   let parsed: Record<string, unknown>;
   if (existingRaw === null || existingRaw.trim() === "") {
@@ -355,6 +368,97 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
     delete merged["hooks"];
   }
 
+  const allowAdded: string[] = [];
+  if (allowRules.length > 0) {
+    const permsResult = readPermissions(parsed);
+    if (!permsResult.ok) return permsResult;
+    const { permissions, allow } = permsResult.value;
+    for (const rule of allowRules) {
+      if (!allow.includes(rule) && !allowAdded.includes(rule)) allowAdded.push(rule);
+    }
+    if (allowAdded.length > 0) {
+      merged["permissions"] = { ...permissions, allow: [...allow, ...allowAdded] };
+    }
+  }
+
   const after = JSON.stringify(merged);
-  return ok({ merged, changed: before !== after, prunedCount });
+  return ok({ merged, changed: before !== after, prunedCount, allowAdded });
+}
+
+/** Reads `permissions` and `permissions.allow` from a parsed settings object; fails loud on a wrong shape. */
+function readPermissions(
+  parsed: Record<string, unknown>,
+): Result<{ permissions: Record<string, unknown>; allow: unknown[] }, LoreError> {
+  const rawPermissions = parsed["permissions"];
+  if (rawPermissions === undefined) return ok({ permissions: {}, allow: [] });
+  if (!isPlainObject(rawPermissions)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "permissions",
+      message: "existing settings.json 'permissions' key must be a JSON object",
+      value: rawPermissions,
+      rule: "BR-820",
+    });
+  }
+  const rawAllow = rawPermissions["allow"];
+  if (rawAllow === undefined) return ok({ permissions: rawPermissions, allow: [] });
+  if (!Array.isArray(rawAllow)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "permissions.allow",
+      message: "existing settings.json 'permissions.allow' must be an array",
+      value: rawAllow,
+      rule: "BR-820",
+    });
+  }
+  return ok({ permissions: rawPermissions, allow: rawAllow });
+}
+
+/**
+ * Removes exactly the given `permissions.allow` rules from a settings document and leaves every other key and every
+ * other rule unchanged (BR-840). An `allow` array or `permissions` object that this removal leaves empty is dropped,
+ * so a document lore created reverts to what it was. Never throws.
+ *
+ * @param existingRaw - Raw `settings.json` content.
+ * @param rules - The rules to remove (exact string match).
+ * @returns `ok({merged, changed})`, or `err(VALIDATION_ERROR)` for invalid JSON or a wrong `permissions` shape.
+ */
+export function removeAllowRules(
+  existingRaw: string,
+  rules: string[],
+): Result<{ merged: Record<string, unknown>; changed: boolean }, LoreError> {
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(existingRaw);
+  } catch (cause) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "existingRaw",
+      message: `existing settings.json is not valid JSON: ${(cause as Error).message}`,
+      value: existingRaw.slice(0, 200),
+      rule: "BR-820",
+    });
+  }
+  if (!isPlainObject(candidate)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "existingRaw",
+      message: "existing settings.json must parse to a JSON object at the top level",
+      value: candidate,
+      rule: "BR-820",
+    });
+  }
+  const permsResult = readPermissions(candidate);
+  if (!permsResult.ok) return permsResult;
+  const { permissions, allow } = permsResult.value;
+  const kept = allow.filter((rule) => !(typeof rule === "string" && rules.includes(rule)));
+  if (kept.length === allow.length) return ok({ merged: candidate, changed: false });
+
+  const merged: Record<string, unknown> = { ...candidate };
+  const nextPermissions: Record<string, unknown> = { ...permissions };
+  if (kept.length > 0) nextPermissions["allow"] = kept;
+  else delete nextPermissions["allow"];
+  if (Object.keys(nextPermissions).length > 0) merged["permissions"] = nextPermissions;
+  else delete merged["permissions"];
+  return ok({ merged, changed: true });
 }

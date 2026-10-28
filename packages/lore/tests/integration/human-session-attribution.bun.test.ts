@@ -141,9 +141,9 @@ describe("AC-HID-2: a registered person is the writer", () => {
       expect(corpus.counts()).toEqual(before);
     });
 
-    it("a person cannot be impersonated by naming their run on the command line (exit 2, nothing written)", () => {
+    it("a person cannot be impersonated by naming their run in the per-call run value (exit 2, nothing written)", () => {
       const before = corpus.counts();
-      const result = corpus.lore(["--harness-run", danaRun, "set", prd, "--title", "Forged"], { kind: "nobody" });
+      const result = corpus.lore(["set", prd, "--title", "Forged"], { kind: "nobody" }, { LORE_HARNESS_RUN: danaRun });
       expect(result.exitCode).toBe(2);
       expect(result.stderr).toContain("agent run");
       expect(corpus.counts()).toEqual(before);

@@ -413,7 +413,8 @@ describe("AC-AU-3 human channel units (injectable seams)", () => {
     expect(refusal({ stdoutIsTty: false })).toBe("tty-required");
     expect(refusal({ stdinIsTty: false, env: { CLAUDECODE: "1" } })).toBe("tty-required"); // TTY rule first
     expect(refusal({ env: { CLAUDECODE: "1" } })).toBe("agent-ancestry");
-    expect(refusal({ argv: ["decide", "3", "--accept", "--harness-run", "cc:S1"] })).toBe("agent-ancestry");
+    expect(refusal({ env: { LORE_HARNESS_RUN: "cc:S1" } })).toBe("agent-ancestry"); // the per-call run value, read from the environment
+    expect(refusal({ env: { LORE_HARNESS_RUN: "human:abc123" } })).toBeNull(); // a person's own run is who answers this channel
     expect(refusal({ parentCommand: "claude" })).toBe("agent-ancestry");
   });
 

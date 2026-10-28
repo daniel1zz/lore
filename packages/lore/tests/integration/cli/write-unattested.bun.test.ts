@@ -5,12 +5,12 @@
  * (spec-run-identity-slice-1-harness-attested-runs-attested D7 / D11; rules BR-1035, BR-1030, BR-1033).
  *
  * Expected behaviour (from the spec, before the implementation was read):
- *   - A write whose `--harness-run` names an id with no registered run SUCCEEDS (exit 0), stores
+ *   - A write whose per-call run value (`LORE_HARNESS_RUN`) names an id with no registered run SUCCEEDS (exit 0), stores
  *     `harness_run` NULL on its audit row and version row(s), keeps the name lore resolved for it
  *     (a session id -> `agent:session-<id8>` with source "session"; `$LORE_ACTOR` is never read, BR-1055), and prints EXACTLY ONE
  *     stderr line that names the unknown id (D7: "one stderr warning naming the id"), even when the
  *     command writes several rows (`lore done` walks several lifecycle steps).
- *   - A write with no `--harness-run` succeeds with `harness_run` NULL and prints NO run warning.
+ *   - A write with no run value succeeds with `harness_run` NULL and prints NO run warning.
  *   - No run is ever filled in for an unattested write: with a run registered in the corpus, a write
  *     without the flag still stores NULL (never "the latest run", never "the only run").
  *   - A write that names a REGISTERED run is stamped and prints no warning (the warning is specific
@@ -40,6 +40,7 @@ import { join } from "node:path";
 import type { AuditEntry, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
+import { registerTestRun } from "../../helpers/test-run-identity.js";
 
 setDefaultTimeout(300_000);
 
@@ -54,7 +55,7 @@ const REGISTERED = "cc:registered-session-1";
 const NAME_SESSION_ID = "0a3e0001-aaaa-bbbb-cccc-111111111111";
 const NAME = "agent:session-0a3e0001";
 const NAME_ENV = { CLAUDE_CODE_SESSION_ID: NAME_SESSION_ID };
-/** The run a session-tier write is attributed to when no --harness-run is named (the session's own run). */
+/** The run a session-tier write is attributed to when no run value is named (the session's own run). */
 const SESSION_RUN = `cc:${NAME_SESSION_ID}`;
 // BR-1055: LORE_ACTOR is ignored; a writer without --by is named through the session tier.
 const SESSION_ID = "5e55100a-aaaa-bbbb-cccc-111111111111";
@@ -85,6 +86,9 @@ function mustLore(args: string[], cwd: string, extra: Record<string, string> = {
   if (r.exitCode !== 0) throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
   return r;
 }
+
+/** The per-call run value (`LORE_HARNESS_RUN`) a Bash call carries; added to a spawn's extra env. */
+const asRun = (run: string): Record<string, string> => ({ LORE_HARNESS_RUN: run });
 
 const scratch: string[] = [];
 
@@ -128,6 +132,8 @@ async function registerRun(dir: string, id: string): Promise<void> {
     });
     if (r.ok === false) throw new Error(`insertRun refused: ${JSON.stringify(r.error)}`);
   });
+  // reason: the per-call run value is verified by process ancestry, so this test process becomes the run's harness.
+  registerTestRun(dir, id);
 }
 
 async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
@@ -162,7 +168,7 @@ async function writtenSince(dir: string, since: string): Promise<{ audit: AuditE
   return { audit: await auditSince(dir, since), versions: await versionsSince(dir, since) };
 }
 
-describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-1): --harness-run naming an unregistered run id is refused", () => {
+describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-1): a run value naming an unregistered run id is refused", () => {
   let dir = "";
   let task = "";
 
@@ -172,14 +178,14 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
   });
 
   it("a claim is refused (exit 4): an unknown run id is never downgraded to an unattested write", () => {
-    const r = lore(["--harness-run", GHOST_A, "claim", task], dir, NAME_ENV);
+    const r = lore(["claim", task], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
   });
 
   it("the refused claim writes no audit row and no version, and the task stays unclaimed", async () => {
     const t2 = newTask(dir, "Unattested claim two");
     const since = new Date().toISOString();
-    const r = lore(["--harness-run", GHOST_A, "claim", t2], dir, NAME_ENV);
+    const r = lore(["claim", t2], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
     const written = await writtenSince(dir, since);
     expect(written.audit).toEqual([]);
@@ -190,7 +196,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("stderr names the unknown id and both remedies", () => {
     const t4 = newTask(dir, "Unattested claim four");
-    const r = lore(["--harness-run", GHOST_A, "claim", t4], dir, NAME_ENV);
+    const r = lore(["claim", t4], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
     expect(warningLinesNaming(r.stderr, GHOST_A).length).toBeGreaterThan(0);
     expect(r.stderr).toContain("lore session start --human");
@@ -199,7 +205,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("a different unknown id is named in its own refusal (the message is not a hardcoded id)", () => {
     const t5 = newTask(dir, "Unattested claim five");
-    const r = lore(["--harness-run", GHOST_B, "claim", t5], dir, NAME_ENV);
+    const r = lore(["claim", t5], dir, { ...NAME_ENV, ...asRun(GHOST_B) });
     expect(r.exitCode).toBe(4);
     expect(warningLinesNaming(r.stderr, GHOST_B).length).toBeGreaterThan(0);
     expect(r.stderr).not.toContain(GHOST_A);
@@ -207,7 +213,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("a doc create under an unknown run id is refused and writes nothing under either name ($LORE_ACTOR is ignored)", async () => {
     const since = new Date().toISOString();
-    const r = lore(["--harness-run", GHOST_A, "create", "knowledge", "--sub-type", "reference", "--title", "Unattested via session", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME });
+    const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Unattested via session", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
     const written = await writtenSince(dir, since);
     expect(written.audit).toEqual([]);
@@ -218,7 +224,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
     const t6 = newTask(dir, "Unattested multi-row done");
     mustLore(["claim", t6], dir, NAME_ENV);
     const since = new Date().toISOString();
-    const r = lore(["--harness-run", GHOST_A, "done", t6], dir, NAME_ENV);
+    const r = lore(["done", t6], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode, r.stderr + r.stdout).toBe(4);
     expect(warningLinesNaming(r.stderr, GHOST_A).length).toBeGreaterThan(0);
     const written = await writtenSince(dir, since);
@@ -230,7 +236,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
     await registerRun(dir, REGISTERED);
     const t7 = newTask(dir, "Registered control");
     const since = new Date().toISOString();
-    const r = lore(["--harness-run", REGISTERED, "claim", t7], dir, NAME_ENV);
+    const r = lore(["claim", t7], dir, { ...NAME_ENV, ...asRun(REGISTERED) });
     expect(r.exitCode, r.stderr).toBe(0);
     expect(warningLinesNaming(r.stderr, REGISTERED)).toHaveLength(0);
     const rows = (await auditSince(dir, since)).filter((row) => harnessRunOf(row) === REGISTERED);
@@ -241,7 +247,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
 // ─── No flag at all: unattested, silent, never guessed ───────────────────────
 
-describe("AC-RID-8: no --harness-run at all", () => {
+describe("AC-RID-8: no run value at all", () => {
   let dir = "";
 
   beforeAll(() => {
@@ -302,10 +308,11 @@ describe("AC-RID-8: no --harness-run at all", () => {
     for (const v of await versionsSince(dir, since)) expect(v.created_by).not.toBe(os);
   });
 
-  it("an empty --harness-run value is not accepted as a run id and never stamps a blank run", async () => {
+  it("an empty run value is not accepted as a run id and never stamps a blank run", async () => {
     const t = newTask(dir, "Empty flag target");
     const since = new Date().toISOString();
-    lore(["--harness-run", "", "claim", t], dir, NAME_ENV);
+    // reason: LORE_TEST_IDENTITY=none keeps the test spawn shim from filling the empty value with a default run.
+    lore(["claim", t], dir, { ...NAME_ENV, ...asRun(""), LORE_TEST_IDENTITY: "none" });
     for (const row of await auditSince(dir, since)) {
       expect(harnessRunOf(row) ?? null).toBeNull();
     }
@@ -353,7 +360,7 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
 
 // ─── Regression: an unregistered run decides a claim as UNATTESTED, one answer for the whole operation ───
 
-describe("AC-RID-8 regression (spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-1): a claim by an unregistered --harness-run is refused, then the same session claims on its own run", () => {
+describe("AC-RID-8 regression (spec-every-write-is-made-by-a-known-party-an-attested-agent-run#AC-HID-1): a claim by an unregistered run value is refused, then the same session claims on its own run", () => {
   let dir = "";
 
   beforeAll(() => {
@@ -362,7 +369,7 @@ describe("AC-RID-8 regression (spec-every-write-is-made-by-a-known-party-an-atte
 
   it("the refused claim stores no claim, and the same session's own-run claim afterwards succeeds and refreshes (BR-1040)", () => {
     const task = newTask(dir, "Unregistered run claim");
-    const first = lore(["--harness-run", GHOST_A, "claim", task], dir, NAME_ENV);
+    const first = lore(["claim", task], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(first.exitCode).toBe(4);
     const readClaim = (): Record<string, unknown> | undefined => {
       const got = (JSON.parse(mustLore(["get", task, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: Record<string, unknown> } }; extra?: { claim?: Record<string, unknown> } } }).data;

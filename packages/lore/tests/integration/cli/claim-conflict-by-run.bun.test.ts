@@ -3,8 +3,8 @@
  * Claim conflicts are decided by harness RUN ONLY, on BOTH the task and the phase claim path.
  *
  * @spec_ref AC-RID-12
- *   spec-run-identity-slice-1-harness-attested-runs-attested D1 (global `--harness-run <id>`
- *   flag, stripped at the CLI entry) / D2 (run ids `cc:<session>`) / D6 (`hasClaimConflict`:
+ *   spec-run-identity-slice-1-harness-attested-runs-attested D1 (the run named by the per-call
+ *   `LORE_HARNESS_RUN` value, resolved at the CLI entry) / D2 (run ids `cc:<session>`) / D6 (`hasClaimConflict`:
  *   two different runs => conflict; same run => refresh; stale => takeover) / D11; BR-1040, BR-1041.
  * @spec_ref spec-every-write-is-made-by-a-known-party-an-attested-agent-run (end state 4: claims compare runs only)
  *   spec-every-write-is-made-by-a-known-party-an-attested-agent-run end state 4: claims compare runs, never names
