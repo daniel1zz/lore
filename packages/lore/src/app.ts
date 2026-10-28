@@ -1053,7 +1053,7 @@ function buildAppFromSqlite(
     }, corpusService),
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
-    driftCheckService: new DriftCheckService(store, corpusService),
+    driftCheckService: armDecisionGate(new DriftCheckService(store, corpusService), decisionGate),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1498,7 +1498,7 @@ function buildAppFromTurso(
     }, corpusService),
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
-    driftCheckService: new DriftCheckService(store, corpusService),
+    driftCheckService: armDecisionGate(new DriftCheckService(store, corpusService), decisionGate),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.

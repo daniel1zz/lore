@@ -94,6 +94,7 @@ import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 import { invocationOf } from "../command-invocation.js";
 import { declareEditPath, readEditScope } from "../../../service/edit-scope.js";
 import { buildEditScopeDeps, refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 
@@ -313,10 +314,18 @@ export default defineLoreCommand({
           type: "boolean",
           description: "Output result as JSON",
         },
+        ...DECISION_FLAG_ARGS,
       },
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
+        // BR-1491: an agent's removal on a spec / knowledge doc that is not a draft carries a decision; the service
+        // decides whether one is required, so the flags are only parsed here.
+        const decisionFlags = parseDecisionFlags(args);
+        if (!decisionFlags.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, decisionFlags.error) + "\n");
+          return exitCode(decisionFlags.error);
+        }
         const { app } = loadLoreApp({ inv });
         try {
           const targetId = args.target as string;
@@ -355,7 +364,9 @@ export default defineLoreCommand({
               inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
               return 1;
             }
-            const result = await app.driftCheckService.removeCodeAnchors(targetId, paths);
+            const result = await app.driftCheckService.removeCodeAnchors(targetId, paths, undefined, {
+              ...(decisionFlags.value !== undefined ? { decision: decisionFlags.value } : {}),
+            });
 
             if (!result.ok) {
               inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
