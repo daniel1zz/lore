@@ -122,7 +122,7 @@ describe("AC-AF-3 correctness from bound evidence", () => {
     expect(facts.rows[0]?.subject).toBe("spec-one:AC-1");
     expect(facts.deciding_ids).toEqual([]);
     const dim = factsDimensions({ attestation: facts.rows }, []).correctness_vs_acs;
-    expect(dim.verdict).toBe("na");
+    expect(dim.verdict).toBe("not-measured");
     expect(dim.reason).toContain("spec-one:AC-1");
     expect(dim.reason).toContain("spec-one:AC-2");
   });
@@ -196,21 +196,22 @@ describe("AC-AF-3 readers of the corpus", () => {
       acceptance_criteria: [
         { id: "AC-1", statement: "s", verify: { mode: "script", oracle: "test", command: "true" } },
         { id: "AC-2", statement: "s", verify: { mode: "ai", rubric: "r" } },
-        { id: "AC-3", statement: "s", verify: { mode: "script", oracle: "test", command: "true" }, superseded_by: { spec: "other", ac: "AC-3", at: "2026-10-29T10:00:00.000Z", by: "x" } },
+        { id: "AC-3", statement: "s", verify: { mode: "script", oracle: "test", command: "true" }, superseded_by: { spec: "other", ac: "AC-3", reason: "moved", at: "2026-10-29T10:00:00.000Z", by: "x" } },
       ],
     },
   });
   const plan = doc({ id: "P1", slug: "plan-one", type: "plan", parent_id: "S1" as never, extra: {} });
-  const landing = { branch: "b", branch_head: W, main_before: B, main_after: L, landing_commit: L, recorded_at: "2026-10-29T10:00:00.000Z", kind: "commits" };
-  const task = doc({
+  // reason: the shas exist only after beforeAll, so the task is built lazily inside each test.
+  const landing = (): Record<string, string> => ({ branch: "b", branch_head: W, main_before: B, main_after: L, landing_commit: L, recorded_at: "2026-10-29T10:00:00.000Z", kind: "commits" });
+  const taskDoc = (): DocRecord => doc({
     id: "T1",
     slug: "task-one",
     type: "task",
-    extra: { plan_id: "P1", ac_scope: ["AC-1", "AC-2", "AC-3"], landing, verification_evidence: [evidence("AC-1", true), evidence("AC-1", false, "fail")] },
+    extra: { plan_id: "P1", ac_scope: ["AC-1", "AC-2", "AC-3"], landing: landing(), verification_evidence: [evidence("AC-1", true), evidence("AC-1", false, "fail")] },
   });
 
   it("AC-AF-3 HAPPY: scopes keep live criteria in scope with the landing; superseded ones are dropped", () => {
-    const scopes = planCriterionScopes(spec, [task]);
+    const scopes = planCriterionScopes(spec, [taskDoc()]);
     expect(scopes.map((s) => [s.ac_id, s.mode, s.holders[0]?.landing_commit])).toEqual([
       ["AC-1", "script", L],
       ["AC-2", "ai", L],
@@ -218,7 +219,7 @@ describe("AC-AF-3 readers of the corpus", () => {
   });
 
   it("AC-AF-3 NEGATIVE: only stamped, conclusive attested rows are read; an unstamped one never decides", () => {
-    const rows = attestationRowsOf([spec], [plan], [task]);
+    const rows = attestationRowsOf([spec], [plan], [taskDoc()]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ spec_slug: "spec-one", ac_id: "AC-1", head_sha: L, result: "pass" });
   });
