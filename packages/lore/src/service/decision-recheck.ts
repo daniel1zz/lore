@@ -20,6 +20,16 @@
  *   - The judged half (spec D6) adds findings of kinds `premise-not-supported`, `meaning-changed`, `better-option`
  *     (the judge's objections) and `criterion-fails` (a criterion citing a reworded rule fails when re-run); like
  *     the other non-wrong-when-written kinds they are listed and change no verdict.
+ * Command allowlist (CLOSED, issue #482): an agent-written `cmd:` premise is re-run at the milestone, so a flag that
+ *   runs a program or writes a file is code execution at review time. Only these are re-run; argv is parsed without a
+ *   shell (shell metacharacters rejected), every flag must be listed, anything else is `not-rerunnable`:
+ *   - grep: -n -i -l -c -w -F -E -r -R -h -H -o -q, -e <p>, --include=<glob>
+ *   - rg: -n -i -l -c -w -F --fixed-strings --no-heading --line-number, -e <p>, -g/--glob <g>, -t/--type <t>
+ *     (no --pre, --pre-glob, -z, --search-zip)
+ *   - git show|log|diff: --stat --name-only --name-status --oneline --no-color --no-ext-diff --no-textconv, -n/--max-count <k>
+ *   - git grep: -n -i -w -F -E -l -c --no-color, -e <p> (no -O, --open-files-in-pager, --no-index)
+ *   - git: NO option before the subcommand (-c, -C, --git-dir, --exec-path, --work-tree)
+ *   - lore get|list|search|tree|log|rule show|rule find|ac list: --json, --limit/--offset/--type <v>
  * Side-effect class: reads the store and git; the command runner (injected) is the only process spawner.
  *
  * Source: spec-a-decision-carrying-write-records-its-decision-on-its, Scope "Milestone re-check", D4, D5; BR-1480.
@@ -79,10 +89,43 @@ export interface SelectedDecision {
 }
 
 const SHELL_META = /[;&|<>`$(){}\\\n\r]/;
+/** A permitted flag set: `bare` flags take no value, `valued` flags consume one (`--flag=v`, `--flag v`, `-e v`). */
+interface FlagSpec {
+  readonly bare: ReadonlySet<string>;
+  readonly valued: ReadonlySet<string>;
+}
+
+const flagSpec = (bare: readonly string[], valued: readonly string[] = []): FlagSpec => ({ bare: new Set(bare), valued: new Set(valued) });
+
+// reason: closed per-command flag lists (issue #482); a flag not listed here is never run, because many read-only
+// commands have flags that run a program or write a file (rg --pre, git grep -O, git diff --output).
+const GREP_FLAGS = flagSpec(["-n", "-i", "-l", "-c", "-w", "-F", "-E", "-r", "-R", "-h", "-H", "-o", "-q"], ["-e", "--include"]);
+const RG_FLAGS = flagSpec(["-n", "-i", "-l", "-c", "-w", "-F", "--fixed-strings", "--no-heading", "--line-number"], ["-e", "-g", "-t", "--glob", "--type"]);
+const GIT_LOG_FLAGS = flagSpec(["--stat", "--name-only", "--name-status", "--oneline", "--no-color", "--no-ext-diff", "--no-textconv"], ["-n", "--max-count"]);
+const GIT_GREP_FLAGS = flagSpec(["-n", "-i", "-w", "-F", "-E", "-l", "-c", "--no-color"], ["-e"]);
+const LORE_FLAGS = flagSpec(["--json"], ["--limit", "--offset", "--type"]);
+const GIT_FLAGS: Readonly<Record<string, FlagSpec>> = { show: GIT_LOG_FLAGS, log: GIT_LOG_FLAGS, diff: GIT_LOG_FLAGS, grep: GIT_GREP_FLAGS };
 const LORE_READ_VERBS = new Set(["get", "list", "search", "tree", "log"]);
-const GIT_READ_VERBS = new Set(["show", "log", "grep", "diff"]);
-// reason: these flags make an otherwise read-only command write a file or run another program.
-const FORBIDDEN_FLAG = /^--(output|pre|exec|ext-diff|textconv)\b/;
+
+/** Whether every word of `args` is a positional or a flag of `spec` (a valued flag consumes the next word). */
+function argsWithinSpec(args: readonly string[], spec: FlagSpec): boolean {
+  for (let i = 0; i < args.length; i += 1) {
+    const word = args[i] as string;
+    if (!word.startsWith("-") || word === "-") continue;
+    const eq = word.indexOf("=");
+    const name = eq === -1 ? word : word.slice(0, eq);
+    if (spec.valued.has(name)) {
+      if (eq === -1) {
+        i += 1;
+        if (i >= args.length) return false;
+      }
+      continue;
+    }
+    if (eq === -1 && spec.bare.has(name)) continue;
+    return false;
+  }
+  return true;
+}
 
 function describeError(error: LoreError): string {
   return "message" in error && typeof error.message === "string" ? error.message : error.code;
@@ -100,15 +143,20 @@ function storeFailure(message: string): LoreError {
  */
 export function isRerunnableCommand(command: string): boolean {
   if (SHELL_META.test(command)) return false;
-  const words = command.trim().split(/\s+/);
-  if (words.some((w) => FORBIDDEN_FLAG.test(w))) return false;
-  const [program, first, second] = words;
-  if (program === "grep" || program === "rg") return true;
-  if (program === "git") return first !== undefined && GIT_READ_VERBS.has(first);
+  const [program, ...args] = command.trim().split(/\s+/);
+  const [first, second] = args;
+  if (program === "grep") return argsWithinSpec(args, GREP_FLAGS);
+  if (program === "rg") return argsWithinSpec(args, RG_FLAGS);
+  if (program === "git") {
+    // reason: any option before the subcommand (-c, -C, --git-dir, --exec-path) makes `first` not a subcommand name.
+    const spec = first === undefined ? undefined : GIT_FLAGS[first];
+    return spec !== undefined && argsWithinSpec(args.slice(1), spec);
+  }
   if (program === "lore") {
     if (first === undefined) return false;
-    if (LORE_READ_VERBS.has(first)) return true;
-    return (first === "rule" && (second === "show" || second === "find")) || (first === "ac" && second === "list");
+    if (LORE_READ_VERBS.has(first)) return argsWithinSpec(args.slice(1), LORE_FLAGS);
+    const twoWord = (first === "rule" && (second === "show" || second === "find")) || (first === "ac" && second === "list");
+    return twoWord && argsWithinSpec(args.slice(2), LORE_FLAGS);
   }
   return false;
 }
