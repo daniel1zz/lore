@@ -441,6 +441,44 @@ describe("a shell write whose target cannot be read is refused only while anothe
     }
   });
 
+  it("AC-USW-2: an unmeasured target whose literal prefix is outside the working copy or in a git-ignored directory is not counted", () => {
+    expect(bashAsB(`rm -f ${join(fx.base, "elsewhere")}/*.log`).status).toBe(0);
+    expect(bashAsB("rm -rf .scratch/*").status).toBe(0);
+    const inside = bashAsB("rm -rf free/*");
+    expect(inside.status, inside.stderr).toBe(2);
+    expect(inside.stderr).toContain(fx.taskA);
+    expect(bashAsB(`rm "$f"`).status).toBe(2);
+  });
+
+  it("AC-USW-2: a claim whose lease has expired does not cause a refusal (BR-1493 says LIVE claim)", () => {
+    const dbPath = join(fx.repo, ".lore", "lore.db");
+    const read = new Database(dbPath, { readonly: true });
+    const original = (read.query("SELECT extra FROM docs WHERE slug = ?").get(fx.taskA) as { extra: string }).extra;
+    read.close();
+    const extra = JSON.parse(original) as { claim: { at: string } };
+    extra.claim.at = "2020-01-01T00:00:00.000Z";
+    const write = new Database(dbPath);
+    write.query("UPDATE docs SET extra = ? WHERE slug = ?").run(JSON.stringify(extra), fx.taskA);
+    write.close();
+    try {
+      const expired = bashAsB(PY_VARIABLE_TARGET);
+      expect(expired.status, expired.stderr).toBe(0);
+    } finally {
+      const restore = new Database(dbPath);
+      restore.query("UPDATE docs SET extra = ? WHERE slug = ?").run(original, fx.taskA);
+      restore.close();
+    }
+    expect(bashAsB(PY_VARIABLE_TARGET).status).toBe(2);
+  });
+
+  it("AC-USW-2: the refusal lists at most ten entries and counts the rest", () => {
+    const words = Array.from({ length: 13 }, (_, i) => `"$v${i}"`).join(" ");
+    const r = bashAsB(`rm ${words}`);
+    expect(r.status, r.stderr).toBe(2);
+    expect(r.stderr).toContain("+3 more");
+    expect(r.stderr).not.toContain("$v12");
+  });
+
   it("AC-USW-2: the main session is never governed, and a literal-path write keeps its own decision", () => {
     expect(bashAsB(PY_VARIABLE_TARGET, null).status).toBe(0);
     const literal = bashAsB("python3 - <<'EOF'\nopen('src/whole.ts', 'a').write('x')\nEOF");

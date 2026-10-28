@@ -103,6 +103,13 @@ describe("lore anchor scope --all", () => {
     expect(b?.working_copy).toBe(wtB);
   });
 
+  it("AC-USW-3 (NEGATIVE): --all together with --worktree is refused as conflicting (exit 2)", () => {
+    const refused = runLore(["anchor", "scope", "--all", "--worktree", wtB, "--json"], repo, RUN_B, ACTOR_B);
+    expect(refused.exitCode).toBe(2);
+    expect(refused.stderr).toContain("--all");
+    expect(refused.stderr).toContain("--worktree");
+  });
+
   it("AC-USW-3 (NEGATIVE): without --all only the named working copy's claim is listed; neither flag is refused", () => {
     const data = scopeJson(["--worktree", wtB]);
     expect(data.claims.map((c) => c.task)).toEqual([taskB]);

@@ -12,7 +12,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,6 +20,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 interface UnmeasuredEntry {
   readonly kind: "unsegmentable" | "non-literal-target" | "non-literal-program";
   readonly text: string;
+  /** Absolute directory the entry's literal prefix names, when it has one. */
+  readonly within?: string;
 }
 interface Extracted {
   readonly paths: string[];
@@ -38,6 +40,7 @@ beforeAll(async () => {
   mod = (await import(pathToFileURL(join(REPO_ROOT, "assets", "hooks", "lib", "shell-writes.mjs")).href)) as ShellWritesModule;
   root = realpathSync(mkdtempSync(join(tmpdir(), "usw-unit-")));
   mkdirSync(join(root, "dir"));
+  symlinkSync(join(root, "dir"), join(root, "dlink"));
 });
 
 afterAll(() => {
@@ -296,5 +299,149 @@ describe("AC-USW-5: file commands write their destination only", () => {
       expect(mod.mayWriteFiles(command), command).toBe(true);
     }
     expect(mod.mayWriteFiles("cat a | grep x")).toBe(false);
+  });
+});
+
+describe("AC-USW-5: destination options (review round 1)", () => {
+  it("AC-USW-5: -t with an attached value and --target-directory=dst give dst/<basename>", () => {
+    expect(rel(extract("cp -tdst a b")).sort()).toEqual(["dst/a", "dst/b"]);
+    expect(rel(extract("cp --target-directory=dst a b")).sort()).toEqual(["dst/a", "dst/b"]);
+    expect(rel(extract("cp -t dst -- a b")).sort()).toEqual(["dst/a", "dst/b"]);
+    expect(rel(extract("install -m 644 -t dst a b")).sort()).toEqual(["dst/a", "dst/b"]);
+  });
+
+  it("AC-USW-5: -T / --no-target-directory / ln -n treat an existing directory (or symlink to one) as the file itself", () => {
+    expect(rel(extract("cp -rT d dir"))).toEqual(["dir"]);
+    expect(rel(extract("mv -T a dir"))).toEqual(["dir"]);
+    expect(rel(extract("mv --no-target-directory a dir"))).toEqual(["dir"]);
+    expect(rel(extract("ln -sfn d2 dlink"))).toEqual(["dlink"]);
+    expect(rel(extract("ln -sf d2 dlink"))).toEqual(["dlink/d2"]);
+  });
+
+  it("AC-USW-5: value-taking options never shift the operands, and -- ends the options", () => {
+    expect(rel(extract("install -o u -g g -m 644 a b"))).toEqual(["b"]);
+    expect(rel(extract("cp -S suf a b"))).toEqual(["b"]);
+    expect(rel(extract("cp --suffix .bak a b"))).toEqual(["b"]);
+    expect(rel(extract("cp -- -a b"))).toEqual(["b"]);
+    expect(rel(extract("ln -S .bak -s a b"))).toEqual(["b"]);
+  });
+
+  it("AC-USW-5: the working-copy root and an empty operand are never a target", () => {
+    expect(extract("rm -rf .").paths).toEqual([]);
+    expect(extract("touch ''").paths).toEqual([]);
+  });
+});
+
+describe("AC-USW-5: commands behind a prefix or a loop keyword (review round 1)", () => {
+  it("AC-USW-5: a write command after do/then/{/while-do with a non-literal operand is one unmeasured entry", () => {
+    for (const command of [`for f in x; do cp a "$D"; done`, `if true; then cp a "$D"; fi`, `while true; do rm "$f"; done`, `{ cp a "$D"; }`]) {
+      const result = extract(command);
+      expect(result.paths, command).toEqual([]);
+      expect(result.unmeasured.map((u) => u.kind), command).toEqual(["non-literal-target"]);
+    }
+  });
+
+  it("AC-USW-5: time, env, sudo, command, exec and nohup are looked through", () => {
+    expect(rel(extract("time cp a b"))).toEqual(["b"]);
+    expect(rel(extract("env X=1 cp a b"))).toEqual(["b"]);
+    expect(rel(extract("sudo cp a b"))).toEqual(["b"]);
+    expect(rel(extract("sudo -u me cp a b"))).toEqual(["b"]);
+    expect(rel(extract("command cp a b"))).toEqual(["b"]);
+    expect(rel(extract("exec cp a b"))).toEqual(["b"]);
+    expect(rel(extract("X=1 cp a b"))).toEqual(["b"]);
+    expect(extract(`nohup python3 -c "open(p,'w')"`).unmeasured).toHaveLength(1);
+    expect(extract("command -v cp").paths).toEqual([]);
+  });
+
+  it("AC-USW-5: xargs and find -exec running a write command give one unmeasured entry (targets come from input); readers give none", () => {
+    for (const command of ["ls | xargs sed -i 's/a/b/'", "ls | xargs -n1 cp a", "find . -name x -exec cp a {} \\;", "find . -exec rm {} +", "find . -execdir touch {} \\;"]) {
+      const result = extract(command);
+      expect(result.paths, command).toEqual([]);
+      expect(result.unmeasured.map((u) => u.kind), command).toEqual(["non-literal-target"]);
+    }
+    for (const command of ["ls | xargs cat", "find . -exec grep x {} \\;", "ls | xargs -n1 echo"]) {
+      const result = extract(command);
+      expect(result.paths, command).toEqual([]);
+      expect(result.unmeasured, command).toEqual([]);
+    }
+  });
+});
+
+describe("AC-USW-1: review round 1 — comments, strings, Path objects, BSD sed, heredocs, bounds", () => {
+  it("AC-USW-1: a call named inside a string literal or a comment is not a call", () => {
+    const quiet = [
+      `python3 -c "s='open(\\"y\\",\\"w\\")'"`,
+      `python3 -c "# open('y','w')"`,
+      pythonHeredoc("# open('y','w')"),
+      pythonHeredoc("s = \"\"\"open('y','w')\"\"\""),
+      nodeHeredoc("// fs.writeFileSync('y','x')"),
+      nodeHeredoc("/* fs.writeFileSync('y','x') */"),
+      nodeHeredoc("console.log(\"fs.writeFileSync('y','x')\")"),
+    ];
+    for (const command of quiet) {
+      const result = extract(command);
+      expect(result.paths, command).toEqual([]);
+      expect(result.unmeasured, command).toEqual([]);
+    }
+    expect(rel(extract(pythonHeredoc("# don't stop\nopen('out.txt', 'w')")))).toEqual(["out.txt"]);
+    expect(rel(extract(nodeHeredoc("// don't stop\nfs.writeFileSync('out.txt', 'x')")))).toEqual(["out.txt"]);
+  });
+
+  it("AC-USW-1: BSD `sed -i ''` consumes the empty backup suffix; the root is never a target", () => {
+    expect(rel(extract("sed -i '' 's/a/b/' f.txt"))).toEqual(["f.txt"]);
+    expect(rel(extract("sed -i '' -e 's/a/b/' f.txt"))).toEqual(["f.txt"]);
+    expect(rel(extract("sed -i .bak 's/a/b/' f.txt"))).toEqual(["f.txt"]);
+    expect(rel(extract("sed -i 's/a/b/' f.txt"))).toEqual(["f.txt"]);
+    expect(rel(extract("sed -i.bak 's/a/b/' f.txt"))).toEqual(["f.txt"]);
+  });
+
+  it("AC-USW-1: a Path method on a receiver that is not Path('<literal>') is unmeasured; Path('<literal>').open() is read by mode", () => {
+    for (const program of ["p = Path('x')\np.write_text('a')", "(Path('d') / 'x').write_text('a')", "Path('d').joinpath('x').touch()", "q.unlink()"]) {
+      const result = extract(pythonHeredoc(program));
+      expect(result.paths, program).toEqual([]);
+      expect(result.unmeasured.map((u) => u.kind), program).toEqual(["non-literal-target"]);
+    }
+    expect(rel(extract(pythonHeredoc("Path('x').open('w')")))).toEqual(["x"]);
+    expect(rel(extract(pythonHeredoc("Path('x').open(mode='a')")))).toEqual(["x"]);
+    expect(extract(pythonHeredoc("Path('x').open('r')")).paths).toEqual([]);
+    expect(extract(pythonHeredoc("Path('x').open()")).paths).toEqual([]);
+    expect(rel(extract(pythonHeredoc("io.open('x', 'w')")))).toEqual(["x"]);
+    expect(rel(extract(pythonHeredoc("codecs.open('x', 'w', 'utf8')")))).toEqual(["x"]);
+    expect(extract(pythonHeredoc("os.unlink('x')")).unmeasured).toEqual([]);
+  });
+
+  it("AC-USW-1: with two heredocs on one command the shell feeds the LAST body, so only that one is read", () => {
+    const result = extract(`python3 - <<'A' <<'B'\nopen('a.txt','w')\nA\nopen('b.txt','w')\nB`);
+    expect(rel(result)).toEqual(["b.txt"]);
+  });
+
+  it("AC-USW-1: an unclosed or over-long call is an unmeasured entry, and a 400 KB program is classified in under a second", () => {
+    const unclosed = extract(pythonHeredoc(`x = open('a.txt', 'w'${" ".repeat(5000)}`));
+    expect(unclosed.paths).toEqual([]);
+    expect(unclosed.unmeasured).toHaveLength(1);
+    const programs = ["open(".repeat(80_000), "print(1)\n".repeat(45_000), "open('a.txt', 'w'\n".repeat(25_000), "fs.writeFileSync(".repeat(25_000)];
+    for (const program of programs) {
+      const command = program.startsWith("fs.") ? nodeHeredoc(program) : pythonHeredoc(program);
+      const startedAt = performance.now();
+      const result = extract(command);
+      const elapsed = performance.now() - startedAt;
+      expect(elapsed, program.slice(0, 20)).toBeLessThan(1000);
+      if (!program.startsWith("print")) expect(result.unmeasured.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+describe("AC-USW-2: the literal prefix of an unmeasured target (`within`) lets the gate skip other places", () => {
+  it("AC-USW-2: a non-literal operand carries the directory its literal prefix names, absolute", () => {
+    expect(extract("rm -f /tmp/*.log").unmeasured[0]?.within).toBe("/tmp");
+    expect(extract("rm -rf dist/*").unmeasured[0]?.within).toBe(join(root, "dist"));
+    expect(extract("rm -f out/$name/x").unmeasured[0]?.within).toBe(join(root, "out"));
+    expect(extract("rm *.log").unmeasured[0]?.within).toBe(root);
+  });
+
+  it("AC-USW-2: a target that is wholly an expansion has no `within`", () => {
+    expect(extract(`rm "$f"`).unmeasured[0]?.within).toBeUndefined();
+    expect(extract(`rm "$d/x"`).unmeasured[0]?.within).toBeUndefined();
+    expect(extract(`sed -i "s/x/y/" "$(pick_file)"`).unmeasured[0]?.within).toBeUndefined();
   });
 });
