@@ -126,7 +126,7 @@ export function planCriterionScopes(spec: DocRecord | undefined, tasks: readonly
 /**
  * Every runner-attested, conclusive, stamped evidence row of the corpus attributed to a (spec, criterion), by the same
  * rules as `attested-ac-runs.ts`: a plan member counts for its plan's spec; a task with no plan lineage counts only for
- * the spec it recorded as governing (`extra.governing_spec`, BR-1495), else the one spec that declares the criterion id.
+ * the spec it recorded as governing (`extra.governing_spec`, BR-1495); one with neither attributes nothing.
  *
  * @param specs - every spec of the corpus
  * @param plans - every plan (its `parent_id` is the governing spec)
@@ -134,12 +134,6 @@ export function planCriterionScopes(spec: DocRecord | undefined, tasks: readonly
  * @returns the rows, unordered
  */
 export function attestationRowsOf(specs: readonly DocRecord[], plans: readonly DocRecord[], tasks: readonly DocRecord[]): AttestationRow[] {
-  const declared = new Map<string, string[]>();
-  for (const spec of specs) {
-    const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"] ?? []);
-    if (!parsed.success) continue;
-    for (const c of parsed.data) declared.set(c.id, [...(declared.get(c.id) ?? []), spec.id as string]);
-  }
   const specsById = new Map(specs.map((s) => [s.id as string, s]));
   const plansById = new Map(plans.map((p) => [p.id as string, p]));
   const rows: AttestationRow[] = [];
@@ -150,12 +144,8 @@ export function attestationRowsOf(specs: readonly DocRecord[], plans: readonly D
       const stamp = entry.attestation?.state_stamp;
       if (entry.ac_ref === undefined || stamp === undefined) continue;
       if (entry.result !== "pass" && entry.result !== "fail") continue;
-      let specId: string | undefined;
-      if (lineageSpecId !== undefined) specId = lineageSpecId ?? undefined;
-      else {
-        const owners = declared.get(entry.ac_ref) ?? [];
-        if (owners.length === 1) specId = owners[0];
-      }
+      // No plan lineage and no recorded spec: attributes nothing (BR-1495, never inferred from the id).
+      const specId: string | undefined = lineageSpecId ?? undefined;
       const spec = specId === undefined ? undefined : specsById.get(specId);
       if (spec === undefined) continue;
       rows.push({ id: `${task.slug}@${entry.recorded_at}`, spec_slug: spec.slug, ac_id: entry.ac_ref, result: entry.result, head_sha: stamp.head_sha, recorded_at: entry.recorded_at });

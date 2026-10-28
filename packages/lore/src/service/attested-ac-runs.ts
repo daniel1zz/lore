@@ -13,8 +13,8 @@
  *   - Evidence -> spec: a plan-member task resolves to its plan's parent spec (a lineage that names no known spec
  *     attributes nothing); an ad-hoc task that RECORDED its governing spec (`extra.governing_spec`, BR-1495)
  *     resolves to that spec, so two specs declaring the same criterion id never collide; a task with no plan
- *     lineage and no recorded spec resolves a row's `ac_ref` only when exactly ONE spec declares
- *     that criterion id, otherwise the row is counted in `ambiguousAcRef` and attributed to nothing.
+ *     lineage and no recorded spec attributes nothing (no lookup by criterion id, BR-1495): its rows are counted
+ *     in `ambiguousAcRef`, the "unattributed plan-less rows" count the callers already surface.
  * Side-effect class: pure.
  * Source: rule-state-service.ts (BR-665 attribution rules, moved here unchanged); spec-a-spec-carries-its-rule-
  *   changes-the-baseline-takes-them (D2).
@@ -31,7 +31,7 @@ export interface AttestedRunIndex {
   readonly latest: ReadonlyMap<string, ConclusiveAttestedEntry>;
   /** Same keys as `latest`: the task whose evidence row is that latest run (to name it and its plan). */
   readonly originTasks: ReadonlyMap<string, DocRecord>;
-  /** Plan-less rows whose `ac_ref` is declared by more than one spec: counted, attributed to nothing. */
+  /** Plan-less rows with no recorded governing spec: counted, attributed to nothing (never guessed by criterion id). */
   readonly ambiguousAcRef: number;
 }
 
@@ -60,10 +60,6 @@ export function indexLatestAttestedRuns(input: {
 }): AttestedRunIndex {
   const specIds = new Set(input.specs.map((s) => s.id));
   const plansById = new Map(input.plans.map((p) => [p.id as string, p]));
-  const specsByAcId = new Map<string, string[]>();
-  for (const spec of input.specs) {
-    for (const acId of spec.acIds) specsByAcId.set(acId, [...(specsByAcId.get(acId) ?? []), spec.id]);
-  }
   const latest = new Map<string, ConclusiveAttestedEntry>();
   const originTasks = new Map<string, DocRecord>();
   let ambiguousAcRef = 0;
@@ -90,9 +86,7 @@ export function indexLatestAttestedRuns(input: {
         if (lineageSpecId !== null && specIds.has(lineageSpecId)) offer(lineageSpecId, entry, task);
         continue;
       }
-      const owners = specsByAcId.get(entry.ac_ref) ?? [];
-      if (owners.length > 1) ambiguousAcRef += 1;
-      else if (owners.length === 1) offer(owners[0] as string, entry, task);
+      ambiguousAcRef += 1; // plan-less and no recorded spec: unattributed, never inferred from the id
     }
   }
   return { latest, originTasks, ambiguousAcRef };
