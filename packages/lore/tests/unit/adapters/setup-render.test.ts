@@ -75,7 +75,7 @@ describe("renderInstallReceipt", () => {
 
     expect(out).not.toContain("MCP");
     expect(out).not.toContain("claude mcp add");
-    expect(out).not.toContain("--mcp-server");
+    expect(out.toLowerCase()).not.toContain("mcp");
   });
 
   // BOUNDARY — a re-run against an already-installed target: everything skipped, nothing

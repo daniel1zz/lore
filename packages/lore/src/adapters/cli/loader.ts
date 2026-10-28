@@ -63,7 +63,7 @@ import type {
   Invocation,
   LoreConfig,
   LoreDefaults,
-  CallerSurface,
+  WritableCallerSurface,
   CorpusProvenance,
   LoreError,
   Result,
@@ -110,9 +110,9 @@ import type { CliIo } from "./output.js";
  * is stable for the entire request. HTTP uses in-process flags instead — see SPEC-024 §9.2.
  *
  * @param env - the entry's environment (`ambient.env`)
- * @returns CallerSurface — "cli" or "agent"
+ * @returns WritableCallerSurface — "cli" or "agent"
  */
-function detectCliSurface(env: Readonly<Record<string, string | undefined>>): CallerSurface {
+function detectCliSurface(env: Readonly<Record<string, string | undefined>>): WritableCallerSurface {
   if (env["LORE_AI_DEFAULT"] === "off" || env["CLAUDECODE"] === "1" || env["CI"] === "true") {
     return "agent";
   }
@@ -123,8 +123,8 @@ function detectCliSurface(env: Readonly<Record<string, string | undefined>>): Ca
  * WHICH ADAPTER a {@link loadLoreApp} boot is composing an App for — the one
  * fact about the calling PROCESS this loader cannot derive and must be TOLD.
  *
- * ⛔ Deliberately NOT `CallerSurface` (SPEC-024's five per-operation values),
- * and the difference is the whole point. `CallerSurface` answers "who is
+ * ⛔ Deliberately NOT `WritableCallerSurface` (SPEC-024's five per-operation values),
+ * and the difference is the whole point. `WritableCallerSurface` answers "who is
  * making THIS call"; for HTTP that is a PER-REQUEST fact resolved in
  * `ActorContext` (`adapters/http/auth.ts`, values `http_cookie`/`http_token`)
  * and is therefore UNKNOWABLE at boot — `app.callerSurface` is `"cli"` or
@@ -459,7 +459,13 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
     // `ai.providers.<name>.timeout_ms` override to built-in defaults with zero warning).
-    printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, configResult.error)); // CLI surface
+    // reason: an `ai`-block violation names the offending key but not WHICH file holds it (a global and a project
+    // config both exist); the file is appended so a removed key (e.g. `ai.default_per_surface.mcp`) is findable.
+    const shown: LoreError =
+      configResult.error.code === "VALIDATION_ERROR" && isAiConfigValidationError(configResult.error)
+        ? { ...configResult.error, message: `${configResult.error.message} (in ${join(dirname(dbPath), "config.yaml")})` }
+        : configResult.error;
+    printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, shown)); // CLI surface
     exitCli(exitCode(configResult.error));
   } else {
     // reason: BR-926 — a project config that exists but does not parse or fails the schema used to be dropped whole,

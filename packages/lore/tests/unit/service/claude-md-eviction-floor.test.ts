@@ -15,7 +15,7 @@
  * the ONE correct write — recording a new service module in the service doc —
  * so the fact gets recorded in a NEIGHBOURING module's doc instead:
  * `service/anchor-resolution.ts` is documented in `packages/core/src`,
- * `adapters/cli` and `adapters/mcp` and is ABSENT from `service/`'s own doc.
+ * `adapters/cli` and `adapters/http` and is ABSENT from `service/`'s own doc.
  * An advisory nobody is obligated to act on is what produced that state, so
  * the floor is DETERMINISTIC and exit-relevant: it rides `lintMemoryFiles`,
  * the single seam `lore status --check-claude-md`'s exit code, the

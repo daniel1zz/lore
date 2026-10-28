@@ -9,7 +9,7 @@
  *
  * Coverage:
  *   HAPPY     migrate schema exits 0, user_version becomes N, ONE audit row (actor, from, to, duration, working copy).
- *   NEGATIVE  `lore list`, `lore --mcp-server`, `lore serve` exit 4 naming both versions and the command; user_version unchanged.
+ *   NEGATIVE  `lore list`, `lore serve` exit 4 naming both versions and the command; user_version unchanged.
  *   BOUNDARY  `--dry-run` lists pending and writes nothing; a corpus already at N reports nothing pending.
  *   STATE     a second run writes nothing (audit rows stay at 1); `lore list` works after the migrate.
  *   REGRESSION a NEW corpus (lore init) starts at the latest schema without any migrate; the store itself refuses a behind corpus.
@@ -38,7 +38,7 @@ function runLore(args: string[], cwd: string) {
   const proc = Bun.spawnSync(["bun", "run", CLI_ENTRY, ...args], {
     cwd,
     stdin: "ignore",
-    // reason: before the refusal exists `lore serve` / `--mcp-server` start and never return; a timeout turns that hang into a red exit code.
+    // reason: before the refusal exists `lore serve` starts and never returns; a timeout turns that hang into a red exit code.
     timeout: 25_000,
     killSignal: "SIGKILL",
     env: { ...process.env, HOME: sandbox, CLAUDECODE: "1", EDITOR: "true" },
@@ -104,14 +104,6 @@ describe("a corpus one schema behind is refused by every command except `lore mi
     expect(readUserVersion(dbPath)).toBe(BEHIND);
   }, TEST_TIMEOUT_MS);
 
-  it("AC-2a: `lore --mcp-server` refuses the same way", () => {
-    const res = runLore(["--mcp-server"], corpusDir);
-    expect(res.exitCode).toBe(4);
-    expect(res.out).toContain("lore migrate schema");
-    expect(res.out).toContain(`requires ${LATEST_SCHEMA_VERSION}`);
-    expect(readUserVersion(dbPath)).toBe(BEHIND);
-  }, TEST_TIMEOUT_MS);
-
   it("AC-2b: `lore serve` on an ephemeral port refuses the same way", () => {
     const res = runLore(["serve", "--port", String(ephemeralPort())], corpusDir);
     expect(res.exitCode).toBe(4);
@@ -126,7 +118,7 @@ describe("a corpus one schema behind is refused by every command except `lore mi
       stdin: "ignore",
       timeout: 60_000,
       killSignal: "SIGKILL",
-      // PATH="" makes MCP registration fail deterministically (exit 1) without touching a real `claude`; the file writes and the receipt still happen.
+      // PATH="" keeps this run from reaching any real tool on this machine's PATH; the file writes and the receipt still happen.
       env: { ...process.env, PATH: "", HOME: sandbox, CLAUDECODE: "1" },
     });
     const out = proc.stdout.toString() + proc.stderr.toString();

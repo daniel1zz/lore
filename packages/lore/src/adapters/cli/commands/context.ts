@@ -90,7 +90,7 @@ import {
   resolveMemoryFileBudgetsFromConfigResult,
 } from "@lore/core";
 import { err, isInsideRoots, ok, outsideRootsError } from "@lore/core";
-import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { WritableCallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { invocationOf } from "../command-invocation.js";
 import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.js";
@@ -168,7 +168,7 @@ const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..",
  * stable env-var checks is cheaper than that coupling. See SPEC-024 §8 Q1
  * for the classification rules this mirrors verbatim.
  */
-function detectContextCliSurface(env: Readonly<Record<string, string | undefined>>): CallerSurface {
+function detectContextCliSurface(env: Readonly<Record<string, string | undefined>>): WritableCallerSurface {
   if (env["LORE_AI_DEFAULT"] === "off" || env["CLAUDECODE"] === "1" || env["CI"] === "true") {
     return "agent";
   }

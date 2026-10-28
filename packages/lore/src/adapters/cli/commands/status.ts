@@ -186,7 +186,7 @@ import {
   resolveBaselineNodeBudgets,
 } from "@lore/core";
 import type {
-  CallerSurface,
+  WritableCallerSurface,
   Invocation,
   LoreConfig,
   LoreError,
@@ -260,11 +260,11 @@ import { SiteCensusError } from "../../../service/site-census.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
 
-/** All CallerSurface values in a stable display order. */
+/** All WritableCallerSurface values in a stable display order. */
 /** BR-1039 — the stated period of the attribution share, in days ending now. */
 const ATTRIBUTION_WINDOW_DAYS = 14;
 
-const ALL_SURFACES:ReadonlyArray<CallerSurface> = [
+const ALL_SURFACES:ReadonlyArray<WritableCallerSurface> = [
   "cli",
   "agent",
   "http_cookie",
@@ -277,7 +277,7 @@ const ALL_SURFACES:ReadonlyArray<CallerSurface> = [
  * The current surface is restored after the loop.
  *
  * @param app - Wired App instance.
- * @returns Record mapping each CallerSurface to its resolved AI boolean.
+ * @returns Record mapping each WritableCallerSurface to its resolved AI boolean.
  */
 /**
  * SPEC-143 AC-CT-8 — the state-binding skips still waiting for a stamped re-record: every

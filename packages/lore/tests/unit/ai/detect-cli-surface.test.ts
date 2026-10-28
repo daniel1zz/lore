@@ -112,11 +112,6 @@ describe("Surface detection — no silent fallback to ai=true for agent", () => 
     expect(result.ai).toBe(false);
   });
 
-  it("mcp surface without explicit MUST NOT return ai=true (all MCP is agent-like)", () => {
-    const result = resolveAiDefault(undefined, "mcp", undefined);
-    expect(result.ai).toBe(false);
-  });
-
   it("http_token surface without explicit MUST NOT return ai=true (API keys are agent-issued)", () => {
     const result = resolveAiDefault(undefined, "http_token", undefined);
     expect(result.ai).toBe(false);

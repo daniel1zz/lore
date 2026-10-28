@@ -421,6 +421,13 @@ export interface SearchHit {
 export type CallerSurface = "cli" | "agent" | "mcp" | "http_cookie" | "http_token";
 
 /**
+ * The surfaces a live process may write under: {@link CallerSurface} without the read-only "mcp".
+ * Every writer (`App.callerSurface`, `runWithAuditSurface`, AI-default resolution) takes this type, so a
+ * new row can never carry "mcp"; the read-side schemas keep the wider union to read old rows.
+ */
+export type WritableCallerSurface = Exclude<CallerSurface, "mcp">;
+
+/**
  * Identifies how the AI on/off decision was resolved.
  *
  * - "explicit_arg" — caller passed --ai or --no-ai * - "config"       — ai.default_per_surface[surface] was set in config.yaml

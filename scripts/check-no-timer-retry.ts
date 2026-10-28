@@ -221,7 +221,7 @@ function resolveCorpusDbPath(): string {
  * `bun:sqlite` is imported LAZILY, deliberately: `scripts/tests/**` is inside
  * this repo's vitest include globs, and vitest cannot resolve `bun:sqlite` — a
  * top-level import would make this module unimportable from the unit tests that
- * cover its pure parsers (same lazy-import move `adapters/mcp/tools.ts` makes,
+ * cover its pure parsers (the same lazy-import move the CLI adapter makes,
  * see this repo's CLI module CLAUDE.md).
  *
  * @param dbPath - the resolved `lore.db`

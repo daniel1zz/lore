@@ -8,8 +8,8 @@
  * Spec: spec-remove-the-lore-mcp-server (D4, BR-1016)
  *
  * `lore status --json` reports AI defaults for the surfaces that still exist (cli, agent, http_cookie,
- * http_token) and no `mcp` entry, even when the config still sets the legacy `ai.default_per_surface.mcp` key
- * (the key is read for compatibility, never reported).
+ * http_token) and no `mcp` entry. (A config that still sets the removed `ai.default_per_surface.mcp` key is
+ * refused loudly instead: config-ai-defaults-mcp-key-refused.bun.test.ts.)
  *
  * Oracle: the real command tree over a throwaway corpus (`mkdtemp` + `lore init`); the live .lore is never touched.
  */
@@ -19,7 +19,6 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
@@ -64,12 +63,5 @@ describe("AC-RMCP-7 lore status AI defaults", () => {
     const defaults = await aiDefaults(await makeCorpus());
     expect(Object.keys(defaults).sort()).toEqual(["agent", "cli", "http_cookie", "http_token"]);
     expect(defaults).not.toHaveProperty("mcp");
-  });
-
-  it("AC-RMCP-7 still exits 0 when the config sets the legacy mcp key, and does not report it", async () => {
-    const dir = await makeCorpus();
-    patchLoreConfig(dir, { ai: { default_per_surface: { mcp: true } } });
-    const defaults = await aiDefaults(dir);
-    expect(Object.keys(defaults).sort()).toEqual(["agent", "cli", "http_cookie", "http_token"]);
   });
 });

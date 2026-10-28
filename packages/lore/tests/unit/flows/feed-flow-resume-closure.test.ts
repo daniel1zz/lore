@@ -5,11 +5,10 @@
  * D3, task task-t3-scope-closure-on-the-resume-ticket-cli-stdout-and-mcp.
  *
  * Scope: exercises the PURE render function directly against synthetic
- * `ResumeResult` fixtures — no store, no App, no MCP/CLI wrapper. This is the
- * most direct oracle for the closure mechanics themselves; the MCP-level proof
- * (`tests/unit/adapters/mcp-session-tools.test.ts`) and the CLI-stdout proof
- * (`tests/integration/cli-feed-task-start.bun.test.ts`) each additionally
- * confirm the SAME rendered string reaches their own surface unmodified,
+ * `ResumeResult` fixtures — no store, no App, no CLI wrapper. This is the
+ * most direct oracle for the closure mechanics themselves; the CLI-stdout proof
+ * (`tests/integration/cli-feed-task-start.bun.test.ts`) additionally
+ * confirms the SAME rendered string reaches its own surface unmodified,
  * per the module's own "closure woven in at exactly ONE place" invariant.
  *
  * Every assertion pins IDENTITY against the exported `RESUME_SCOPE_CLOSURE`

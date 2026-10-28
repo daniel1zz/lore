@@ -794,10 +794,9 @@ describe("AC-LL-10 — no createApp call site passes a sync-bearing config (sour
     expect(loaderSite?.secondArgText).toBe("rawConfig");
   });
 
-  it("AC-LL-10 priming wiring: the CLI entry, the MCP entry and the dashboard mount each await the libsql prime before createApp (the premise of class (c))", () => {
+  it("AC-LL-10 priming wiring: the CLI entry and the dashboard mount each await the libsql prime before createApp (the premise of class (c))", () => {
     const read = (rel: string): string => readFileSync(join(LORE_SRC_ROOT, rel), "utf8");
     expect(read("adapters/cli/run-cli.ts")).toMatch(/await primeReplicaClientWhenSyncEnabled\(/);
-    expect(read("index.ts")).toMatch(/await primeReplicaClientWhenSyncEnabled\(/);
     expect(read("adapters/cli/commands/dashboard.ts")).toMatch(/await primeReplicaClientForProject\(/);
   });
 
