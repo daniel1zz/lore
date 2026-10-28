@@ -245,6 +245,26 @@ describe("AC-DR-7 command premises", () => {
     expect(ran).toEqual(allowed);
   });
 
+  it("AC-DR-7 an inherited object key as a command or subcommand name is not-rerunnable, never a throw, and the runner is never called", async () => {
+    const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"];
+    const commands = [
+      ...inherited.map((key) => `git ${key} x`),
+      ...inherited.map((key) => `git ${key} -x`),
+      ...inherited.map((key) => `${key} x`),
+      ...inherited.map((key) => `lore ${key} x`),
+      "git constructor -x",
+    ];
+    for (const command of commands) {
+      expect(() => isRerunnableCommand(command), command).not.toThrow();
+      expect(isRerunnableCommand(command), command).toBe(false);
+    }
+    const ran: string[] = [];
+    const runner: CommandRunnerPort = { run: async (command) => (ran.push(command), ok({ exitCode: 0, output: "x" })) };
+    const findings = await recheck(decisionOf(commands.map((command) => cmdPremise(command, "x"))), runner);
+    expect(findings.map((f) => f.kind)).toEqual(commands.map(() => "not-rerunnable"));
+    expect(ran).toEqual([]);
+  });
+
   it("AC-DR-7 a runner that cannot run reports unverifiable", async () => {
     const findings = await recheck(decisionOf([cmdPremise("git log -1", "x")]));
     expect(findings.map((f) => f.kind)).toEqual(["unverifiable"]);

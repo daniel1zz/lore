@@ -115,7 +115,8 @@ const RG_FLAGS = flagSpec(["-n", "-i", "-l", "-c", "-w", "-F", "--fixed-strings"
 const GIT_LOG_FLAGS = flagSpec(["--stat", "--name-only", "--name-status", "--oneline", "--no-color", "--no-ext-diff", "--no-textconv"], ["-n", "--max-count"]);
 const GIT_GREP_FLAGS = flagSpec(["-n", "-i", "-w", "-F", "-E", "-l", "-c", "--no-color"], ["-e"]);
 const LORE_FLAGS = flagSpec(["--json"], ["--limit", "--offset", "--type"]);
-const GIT_FLAGS: Readonly<Record<string, FlagSpec>> = { show: GIT_LOG_FLAGS, log: GIT_LOG_FLAGS, diff: GIT_LOG_FLAGS, grep: GIT_GREP_FLAGS };
+// reason: a Map, not an object literal — `GIT_FLAGS["constructor"]` on a literal finds an inherited member and would pass the allowlist.
+const GIT_FLAGS: ReadonlyMap<string, FlagSpec> = new Map([["show", GIT_LOG_FLAGS], ["log", GIT_LOG_FLAGS], ["diff", GIT_LOG_FLAGS], ["grep", GIT_GREP_FLAGS]]);
 const LORE_READ_VERBS = new Set(["get", "list", "search", "tree", "log"]);
 
 /** Whether every word of `args` is a positional or a flag of `spec` (a valued flag consumes the next word). */
@@ -164,7 +165,7 @@ export function isRerunnableCommand(command: string): boolean {
   if (program === "rg") return argsWithinSpec(args, RG_FLAGS);
   if (program === "git") {
     // reason: any option before the subcommand (-c, -C, --git-dir, --exec-path) makes `first` not a subcommand name.
-    const spec = first === undefined ? undefined : GIT_FLAGS[first];
+    const spec = first === undefined ? undefined : GIT_FLAGS.get(first);
     return spec !== undefined && argsWithinSpec(args.slice(1), spec);
   }
   if (program === "lore") {
