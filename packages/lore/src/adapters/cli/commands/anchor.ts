@@ -405,6 +405,10 @@ export default defineLoreCommand({
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
+        if (args.all && typeof args.worktree === "string" && args.worktree !== "") {
+          inv.io.stderr.write("lore anchor scope: --all and --worktree conflict (--all lists every working copy); give one of them\n");
+          return 2;
+        }
         if (!args.all && (typeof args.worktree !== "string" || args.worktree === "")) {
           inv.io.stderr.write("lore anchor scope: --worktree <dir> is required unless --all is given\n");
           return 2;

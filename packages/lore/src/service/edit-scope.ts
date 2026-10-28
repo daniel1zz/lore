@@ -197,7 +197,22 @@ export async function readEditScope(
   if (typeof target !== "string") {
     const open = await deps.openClaimsOfProject();
     if (!open.ok) return open;
-    const claims: ProjectEditScopeClaim[] = open.value.map((row) => ({
+    // reason: BR-1493 says LIVE claim. A claim whose lease expired (or whose run ended) holds nothing, by the same
+    // run-aware staleness the declare path and integrate's own-diff judgment (BR-1346) use for "a fresh claim".
+    const live = new Set<string>();
+    if (open.value.length > 0) {
+      const all = await deps.listTasks();
+      if (!all.ok) return all;
+      const first = all.value[0];
+      if (first !== undefined) {
+        // The candidate is a stand-in excluded from its own siblings by id; only the siblings' staleness is read.
+        const standIn: DocRecord = { ...first, id: `${first.id}-scope-all` as DocRecord["id"] };
+        const context = await deps.buildSiblingContext("lore-scope-all", standIn, all.value, deps.now());
+        if (!context.ok) return context;
+        for (const sibling of context.value.siblingClaims ?? []) if (!sibling.stale) live.add(sibling.slug);
+      }
+    }
+    const claims: ProjectEditScopeClaim[] = open.value.filter((row) => live.has(row.slug)).map((row) => ({
       task: row.slug,
       anchors: row.file_anchors,
       holder_run: row.holder_run,

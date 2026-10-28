@@ -60,7 +60,9 @@
  * A write the text shows but does not place (`unmeasured`: a variable path, `sed -i "$f"`, `python3 -c "$CODE"`) is
  * refused (BR-1493) when a live claim held by ANOTHER run holds a path anywhere in the project (one
  * `lore anchor scope --all` read, spawned only then), allowed otherwise; an unreadable read is refused too. A command the
- * parser cannot segment is not refused. A program in a script file is out of scope: BR-1346 judges it at integrate.
+ * parser cannot segment is not refused, and neither is an unmeasured target whose literal prefix is outside the
+ * working copy or in a git-ignored directory of it (`rm -f /tmp/*.log`, `rm -rf dist/*`), the places a measured target is
+ * already allowed. Only LIVE claims (fresh lease) of another run count. A program in a script file is out of scope: BR-1346 judges it at integrate.
  *
  * ## Invariant: the overlap rule lives in lore, not here
  *
@@ -265,6 +267,24 @@ if (typeof payload.agent_id !== 'string' || payload.agent_id === '') process.exi
 
 const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : process.cwd();
 
+/** A refusal names at most this many unmeasured entries, then counts the rest. */
+const MAX_NAMED_ENTRIES = 10;
+
+/**
+ * Whether an unmeasured entry's literal prefix (`within`, an absolute directory the shell-writes module read from the
+ * text) is a place this gate already allows for a measured target: outside the helper's own working copy, or a directory
+ * git ignores in it. An entry with no `within` (it starts with an expansion) could be anywhere and is never skipped.
+ */
+function landsWhereTheGateDoesNotLook(entry) {
+  if (typeof entry.within !== 'string') return false;
+  const workingCopy = findWorkingCopyRoot(trailWorkingCopy(payload) ?? cwd);
+  if (workingCopy === null) return false;
+  const within = canonicalize(entry.within);
+  if (within !== workingCopy && !within.startsWith(workingCopy + sep)) return true;
+  const probe = spawnSync('git', ['-C', nearestExistingDir(within), 'check-ignore', '-q', '--', join(within, '.lore-gate-probe')], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+  return probe.status === 0;
+}
+
 /**
  * BR-1493: a helper's shell write the text shows but does not place (`unmeasured`, other than an unsegmentable command)
  * is refused while a live claim held by ANOTHER run holds a path anywhere in the project; with no such claim the harm
@@ -272,9 +292,11 @@ const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd 
  * cannot be read the call is refused too (fail closed): whether another run holds a path is unknown.
  * Exits the process on a refusal, returns otherwise.
  */
-function refuseUnreadableWrites(entries) {
+function refuseUnreadableWrites(allEntries) {
+  const entries = allEntries.filter((entry) => !landsWhereTheGateDoesNotLook(entry));
   if (entries.length === 0) return;
-  const named = entries.map((entry) => entry.text).join('; ');
+  const named = entries.slice(0, MAX_NAMED_ENTRIES).map((entry) => entry.text).join('; ') +
+    (entries.length > MAX_NAMED_ENTRIES ? `; +${entries.length - MAX_NAMED_ENTRIES} more` : '');
   const advice = 'Use Edit/Write on the file, or a command whose target is a literal path.';
   let run;
   try {
