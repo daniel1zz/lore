@@ -449,8 +449,14 @@ function findDedicatedExtraKeyViolation(
   for (const entry of guarded) {
     // reason: DC2-8 — a sub_type-scoped key (knowledge `uat`) guards only docs of that sub_type.
     if (entry.subType !== undefined && existing.extra["sub_type"] !== entry.subType) continue;
-    if (!jsonDeepEqual(existing.extra[entry.key], incomingExtra[entry.key])) {
-      return { key: entry.key, writer: entry.writer };
+    // reason: a `within` entry guards one field of a nested object (`milestone_review.traced_decisions`), not the whole object.
+    const fieldOf = (extra: Record<string, unknown>): unknown => {
+      if (entry.within === undefined) return extra[entry.key];
+      const outer = extra[entry.within];
+      return typeof outer === "object" && outer !== null ? (outer as Record<string, unknown>)[entry.key] : undefined;
+    };
+    if (!jsonDeepEqual(fieldOf(existing.extra), fieldOf(incomingExtra))) {
+      return { key: entry.within === undefined ? entry.key : `${entry.within}.${entry.key}`, writer: entry.writer };
     }
   }
   return null;

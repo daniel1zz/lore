@@ -2289,6 +2289,20 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+      const rows =
+        since !== undefined
+          ? (this.db
+              .prepare(`SELECT * FROM versions WHERE decision IS NOT NULL AND created_at >= ? ORDER BY created_at ASC, doc_id ASC, version ASC`)
+              .all(since) as VersionRow[])
+          : (this.db.prepare(`SELECT * FROM versions WHERE decision IS NOT NULL ORDER BY created_at ASC, doc_id ASC, version ASC`).all() as VersionRow[]);
+      return ok(rows.map(rowToVersionRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>> {
     try {
       // reason: the four selected columns are exactly the columns of idx_versions_keys (migration-025), so SQLite

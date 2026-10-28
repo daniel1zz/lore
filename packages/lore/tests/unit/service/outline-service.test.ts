@@ -720,6 +720,7 @@ true,
         listAllVersions: (since) => store.listAllVersions(since),
         listVersionKeys: (since) => store.listVersionKeys(since),
         listDecisionVersions: (query) => store.listDecisionVersions(query),
+        listRecordedDecisions: (since) => store.listRecordedDecisions(since),
         appendAuditEntry: (e) => store.appendAuditEntry(e),
         queryAudit: (f) => store.queryAudit(f),
         // reason: SPEC-079 G3 — new required StoreInterface method; mechanical

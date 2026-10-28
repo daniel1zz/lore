@@ -469,6 +469,8 @@ const DECLARED_FILES = [
   "context/worktree-dispatch.md",
   // spec-human-decisions-are-asked-in-the-session-and-recorded-by (AC-ASK-3, BR-1375): the ask-then-execute rule
   "context/ask-then-execute.md",
+  // spec-a-decision-carrying-write-records-its-decision-on-its (AC-DR-6): the decision fields a write carries
+  "context/decision-records.md",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",

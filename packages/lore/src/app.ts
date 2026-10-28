@@ -85,6 +85,7 @@ import { StateBindingService } from "./service/state-binding-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
 import { WeightTableService } from "./service/weight-table-service.js";
+import { DecisionOutcomeService } from "./service/decision-outcome-service.js";
 import { RuleService } from "./service/rule-service.js";
 import { RuleChangeService } from "./service/rule-change-service.js";
 import { RuleReadService } from "./service/rule-read-service.js";
@@ -492,6 +493,8 @@ export interface App {
    * always wired in production.
    */
   weightTableService?: WeightTableService;
+  /** DecisionOutcomeService — `lore decision trace` (the sole writer of `traced_decisions`) and `lore decision rates` (BR-1481). */
+  decisionOutcomeService?: DecisionOutcomeService;
   /**
    * RuleService — the sole writer of a `baseline` doc's verb-owned `extra` keys (rules with
    * permanent `BR-n` ids, label, depends_on, glossary) and of baseline node creation
@@ -1103,6 +1106,7 @@ function buildAppFromSqlite(
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     weightTableService: armDecisionGate(new WeightTableService(store, corpusService), decisionGate),
+    decisionOutcomeService: buildDecisionOutcomeService(store, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
@@ -1544,6 +1548,7 @@ function buildAppFromTurso(
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     weightTableService: armDecisionGate(new WeightTableService(store, corpusService), decisionGate),
+    decisionOutcomeService: buildDecisionOutcomeService(store, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
@@ -1703,6 +1708,16 @@ function buildAppFromTurso(
  * and appends through `CorpusService.appendAudit` (the audit write route: foreign-corpus refusal, caller attribution,
  * serialized hash-chain append).
  */
+/** The outcome service (`lore decision trace|rates`, BR-1481): reads and writes only through `CorpusService`'s ports. */
+function buildDecisionOutcomeService(store: StoreInterface, corpusService: CorpusService): DecisionOutcomeService {
+  return new DecisionOutcomeService({
+    store,
+    writer: corpusService,
+    listMilestoneReviewDocs: (planId) => corpusService.listMilestoneReviewDocs(planId),
+    getPlanBundle: (planId) => corpusService.getPlanBundle(planId),
+  });
+}
+
 function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bundle: PlanBundle) => Promise<Result<DecisionFinding[], LoreError>> {
   // reason: built lazily (git root resolved on the first review) so an app that never assesses a plan never spawns git.
   return (bundle) => {
