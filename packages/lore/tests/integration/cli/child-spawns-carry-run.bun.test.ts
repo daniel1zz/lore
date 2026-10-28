@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Invocation } from "@lore/core";
 import { createProductionHumanChannelPorts } from "../../../src/adapters/real-human-channel-port.js";
+import { checkHumanChannelPreconditions, type HumanChannelPorts } from "../../../src/service/human-channel.js";
 import { runSchemaMigration } from "../../../src/service/integrate-service.js";
 
 const RUN = "cc:child-spawn-session";
@@ -77,5 +78,26 @@ describe("AC-RV-11: spawned descendant lore children inherit the verified run", 
     const ports = createProductionHumanChannelPorts(inv);
     expect(ports.argv()).not.toContain(CALLER_FLAG);
     expect(ports.env()["LORE_HARNESS_RUN"]).toBe(RUN);
+  });
+
+  it("human channel: the agent-ancestry refusal reads the run VALUE from the environment, not argv", () => {
+    // every other check passes (terminals present, no agent marker, empty process table, no controlling terminal to open), so
+    // the ONLY thing that can end in `agent-ancestry` here is the run value in the environment
+    const portsWith = (env: Record<string, string>): HumanChannelPorts => ({
+      stdinIsTty: () => true,
+      stdoutIsTty: () => true,
+      env: () => env,
+      argv: () => [],
+      selfPid: () => 4242,
+      readProcessTable: () => ({ ok: true, value: [] }),
+      newNonce: () => "nonce",
+      openTerminal: () => null,
+    });
+    const carried = checkHumanChannelPreconditions(portsWith({ LORE_HARNESS_RUN: RUN }));
+    expect(carried.ok).toBe(false);
+    expect(carried.ok ? "" : carried.error.message).toBe("agent-ancestry: the environment carries an agent run identity (LORE_HARNESS_RUN)");
+    // control: the same ports without the value get past that check and stop at the missing terminal
+    const without = checkHumanChannelPreconditions(portsWith({}));
+    expect(without.ok ? "" : without.error.rule).toBe("tty-required");
   });
 });
