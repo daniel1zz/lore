@@ -1,3 +1,4 @@
+// @layer store AC-AF-2 (owner is suite-result-service.test.ts; this file pins the SQLite round trip)
 /**
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-2, BR-1497)
  *
