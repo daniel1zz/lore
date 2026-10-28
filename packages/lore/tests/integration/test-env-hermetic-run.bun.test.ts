@@ -50,7 +50,7 @@ describe("test env is hermetic about the harness run", () => {
       const init = runLore(["init"], dir);
       expect(init.exitCode, init.stderr + init.stdout).toBe(0);
 
-      const created = runLore(["create", "knowledge", "--title", "Hermetic run probe", "--content", "probe", "--json"], dir);
+      const created = runLore(["create", "knowledge", "--sub-type", "reference", "--title", "Hermetic run probe", "--content", "probe", "--json"], dir);
       expect(created.exitCode, created.stderr + created.stdout).toBe(0);
       expect(created.stderr + created.stdout).not.toContain(UNKNOWN_RUN);
 
