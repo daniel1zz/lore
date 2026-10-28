@@ -83,9 +83,9 @@ When a leaf's rule is only valid because another leaf's rule holds, declare it: 
 |---|---|
 | Create a node | `lore baseline add <parent> --node root\|branch\|leaf --label <l> --title <t> [--content-file <path>]` |
 | Rename a label | `lore baseline set-label <node> <label>` |
-| Add a rule | `lore rule add <leaf> --statement "..." --confidence established --enforced-by guaranteed --example "..."` |
-| Edit / retire / move a rule that already describes the product (no `deprecated`: a rule is true or it is not) | `lore rule set BR-n [--statement ...] [--lifecycle retired --note ...] [--move-to <leaf>]` |
-| Propose a rule a spec is about to introduce, rewrite or remove (not in the tree until the spec lands) | `lore rule propose <spec> add --leaf <leaf> --statement ... --example ... --enforced-by both` · `... modify BR-n ...` · `... retire BR-n --note ...`; list with `lore rule changes <spec>` |
+| Add a rule | `lore rule add <leaf> --statement "..." --confidence established --enforced-by guaranteed --example "..."` plus `--reason "..." --premise "<claim>|<source>|<tier>" --alt "<option>|<why rejected>"` for an agent on an approved leaf (rule file `decision-records`) |
+| Edit / retire / move a rule that already describes the product (no `deprecated`: a rule is true or it is not) | `lore rule set BR-n [--statement ...] [--lifecycle retired --note ...] [--move-to <leaf>]` plus the decision flags `--reason --premise --alt`; a statement change also `--gate "meaning-unchanged|pass|<evidence>"`; raising confidence is refused (rule file `decision-records`) |
+| Propose a rule a spec is about to introduce, rewrite or remove (not in the tree until the spec lands) | `lore rule propose <spec> add --leaf <leaf> --statement ... --example ... --enforced-by both` · `... modify BR-n ...` · `... retire BR-n --note ...`; list with `lore rule changes <spec>`; on a non-draft spec an agent adds `--reason --premise --alt` (rule file `decision-records`) |
 | Land a spec's change set (every criterion citing a changed rule needs a runner-attested pass; plan close runs it) | `lore rule apply <spec>` |
 | Glossary term | `lore baseline glossary add <node> --term <t> --meaning <m>` (root, branch only) |
 | Declare a dependency | `lore baseline depends <leaf> --add BR-n` |
