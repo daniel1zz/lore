@@ -60,11 +60,8 @@ import {
 } from "./milestone-review.js";
 import { applyDecisionFindings, rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
 import {
-  applyRegressionFloor,
   applySnapshotRule,
-  attributeSuiteFailures,
   renderSuiteSection,
-  touchedFilesOfDiff,
   staleCitingAcIds,
   type StaleAcRefresherPort,
   type StaleRefreshReport,
@@ -289,15 +286,12 @@ export class MilestoneReviewService {
         ...(e.ac_ref !== undefined ? { ac_ref: e.ac_ref } : {}),
       })),
     }));
-    const touched = opts.diffText !== undefined && opts.diffText.length > 0 ? touchedFilesOfDiff(opts.diffText) : undefined;
-    const attribution =
-      opts.suite !== undefined ? attributeSuiteFailures(opts.suite, touched) : { attributed: [], unattributed: [] };
     const judgedInputsResult = this.deps.judgedDecisionInputs !== undefined ? await this.deps.judgedDecisionInputs(bundle) : ok<JudgedDecisionInput[]>([]);
     if (!judgedInputsResult.ok) return judgedInputsResult;
     const judgedInputs = judgedInputsResult.value;
     const judged = await runJudgment({
       base: {
-        suiteSection: renderSuiteSection(opts.suite, attribution, touched !== undefined),
+        suiteSection: renderSuiteSection(opts.suite),
         plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },
         ...(bundle.spec !== undefined ? { spec: { slug: bundle.spec.slug, title: bundle.spec.title, content: bundle.spec.content } } : {}),
         tasks,
@@ -313,8 +307,8 @@ export class MilestoneReviewService {
       recorded: judgedInputs,
     });
     if (!judged.ok) return judged;
-    // reason: both measured inputs are applied AFTER the judge so it cannot waive them (Part D): an attributed
-    // failing test file fails regression; snapshot_accuracy fails only on a contradicted cited rule.
+    // reason: measured inputs are applied AFTER the judge so it cannot waive them (Part D): regression is the per-landing
+    // fact; snapshot_accuracy fails only on a contradicted cited rule.
     const decisionFindingsResult = this.deps.recheckDecisions !== undefined ? await this.deps.recheckDecisions(bundle) : ok<DecisionFinding[]>([]);
     if (!decisionFindingsResult.ok) return decisionFindingsResult;
     // reason: one list — the deterministic re-check, the judge's objections and the criterion re-runs all land in
@@ -325,20 +319,12 @@ export class MilestoneReviewService {
     // reason: a wrong-when-written decision premise fails snapshot_accuracy AFTER the cited-rule rule so neither the judge
     // nor that rule can turn it back into a pass or an n/a (spec D5).
     // reason: the facts dimensions come from measured facts alone (spec D6, judgment layer): the judge was never asked
-    // for them and an answer on one is stripped. Without per-landing regression, a measured suite with nothing
-    // attributed to this plan is a pass; no suite at all is not-measured (never pass).
-    const measured = factsDimensions(opts.facts, judged.value.record.ai_criteria);
-    const factDims =
-      opts.facts?.regression === undefined && opts.suite?.status === "measured"
-        ? { ...measured, regression: { verdict: "pass" as const, reason: "no failing file of the full suite on main is attributed to this plan", reference: "Kayenta canary analysis" } }
-        : measured;
+    // for them and an answer on one is stripped. Regression comes from the per-landing rows (BR-1496); with none supplied
+    // it is not-measured, never a pass inferred from the HEAD suite (no second attribution path).
+    const factDims = factsDimensions(opts.facts, judged.value.record.ai_criteria);
     const dimensions = applyDecisionFindings(
       applySnapshotRule(
-        applyRegressionFloor(
-          applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
-          attribution,
-          opts.suite?.status === "measured" ? opts.suite.commit : undefined,
-        ),
+        applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
         citedRulesResult.value,
       ),
       decisionFindings,
@@ -350,7 +336,7 @@ export class MilestoneReviewService {
     // a later batch that only retries filing reads them from the stored review instead of re-judging.
     const causes = measuredCauses(
       dimensions,
-      attribution.attributed,
+      opts.facts?.regression_files ?? [],
       citedRulesResult.value,
       opts.suite?.status === "measured" ? opts.suite.failing_test_files.map((f) => f.file) : [],
     );

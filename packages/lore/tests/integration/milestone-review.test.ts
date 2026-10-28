@@ -518,7 +518,7 @@ describe("milestone review gates close", () => {
     expect(spawnSync("git", ["status", "--porcelain"], { cwd: tmpDir, encoding: "utf8" }).stdout.trim()).toBe("");
   });
 
-  it("milestone review gates close: a failing test file counts against a plan only when its diff touched the file or a direct import", { timeout: 60_000 }, async () => {
+  it("milestone review gates close: regression comes from the per-landing facts, never from a failing file on main's HEAD (BR-1496)", { timeout: 60_000 }, async () => {
     const { MilestoneReviewService } = await import("../../src/service/milestone-review-service.js");
     const stored: { dimensions: Record<string, { verdict: string; reason: string }> }[] = [];
     const plan = { id: "P1", slug: "plan-p1", title: "Plan P1", content: "x", version: 1, extra: {} };
@@ -545,22 +545,33 @@ describe("milestone review gates close", () => {
         { file: "tests/elsewhere.test.ts", imports: ["src/z.ts"] },
       ],
     };
-    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@\n+x\ndiff --git a/tests/itself-touched.test.ts b/tests/itself-touched.test.ts\n@@\n+y\n";
-    const withDiff = await service.review("plan-p1", { diffText: diff, diffSource: "test", maxDiffChars: 100_000, suite });
-    expect(withDiff.ok).toBe(true);
-    const regression = stored[0]?.dimensions["regression"];
-    expect(regression?.verdict).toBe("fail");
-    expect(regression?.reason).toContain("tests/touches-import.test.ts");
-    expect(regression?.reason).toContain("tests/itself-touched.test.ts");
-    expect(regression?.reason).not.toContain("tests/elsewhere.test.ts");
-    // no landed diff: nothing can be tied to the plan, the judge's pass stands.
-    const noDiff = await service.review("plan-p1", { diffSource: "none", maxDiffChars: 100_000, suite });
-    expect(noDiff.ok).toBe(true);
-    expect(stored[1]?.dimensions["regression"]?.verdict).toBe("pass");
-    // a run that was not measured is never read as a failure, and (spec change, milestone-6) never as a pass either.
-    const unmeasured = await service.review("plan-p1", { diffText: diff, diffSource: "test", maxDiffChars: 100_000, suite: { status: "not_measured", reason: "no main" } });
-    expect(unmeasured.ok).toBe(true);
-    expect(stored[2]?.dimensions["regression"]?.verdict).toBe("not-measured");
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@\n+x\n";
+    // a red HEAD suite whose files the diff touched is NOT a regression by itself: with no per-landing facts it is not-measured.
+    const noFacts = await service.review("plan-p1", { diffText: diff, diffSource: "test", maxDiffChars: 100_000, suite });
+    expect(noFacts.ok).toBe(true);
+    expect(stored[0]?.dimensions["regression"]?.verdict).toBe("not-measured");
+    // the per-landing rows decide: an uncleared regression fails and names its files.
+    const failed = await service.review("plan-p1", {
+      diffText: diff,
+      diffSource: "test",
+      maxDiffChars: 100_000,
+      suite,
+      facts: { regression: [{ subject: "landing-1", verdict: "fail", detail: "regression still red: tests/touches-import.test.ts" }], regression_files: ["tests/touches-import.test.ts"] },
+    });
+    expect(failed.ok).toBe(true);
+    expect(stored[1]?.dimensions["regression"]?.verdict).toBe("fail");
+    expect(stored[1]?.dimensions["regression"]?.reason).toContain("tests/touches-import.test.ts");
+    expect(stored[1]?.dimensions["regression"]?.reason).not.toContain("tests/elsewhere.test.ts");
+    // clean per-landing rows pass even while main's HEAD suite is red in other files.
+    const passed = await service.review("plan-p1", {
+      diffText: diff,
+      diffSource: "test",
+      maxDiffChars: 100_000,
+      suite,
+      facts: { regression: [{ subject: "landing-1", verdict: "pass", detail: "no regression in 3 failing file(s)" }] },
+    });
+    expect(passed.ok).toBe(true);
+    expect(stored[2]?.dimensions["regression"]?.verdict).toBe("pass");
   });
 
   it("milestone review gates close: snapshot_accuracy fails only on a contradicted cited rule; stale and unknown are n/a with the reason", { timeout: 60_000 }, async () => {

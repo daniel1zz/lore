@@ -3,17 +3,16 @@
  * milestones Part D "Review inputs, measured once per batch").
  *
  * Purpose: the pure half of the two measured inputs of a review. (1) The plan-close chain plus the full test suite run
- *   ONCE for a whole `lore assess` batch on main's HEAD (`SuiteRun`); each plan's regression dimension reads it, and a
- *   failing test file counts against a plan only when the plan's landed diff touched that file or a file it imports
- *   directly. (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
+ *   ONCE for a whole `lore assess` batch on main's HEAD (`SuiteRun`), recorded as main's red/green state and shown to the judge as
+ *   context only (regression itself is measured per landing). (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
  *   `unknown` and `unverified` are n/a with the reason, and stale evidence is re-verified once per batch beforehand.
  * Public surface: SuiteRun, SuiteCommandResult, FailingTestFile, parseFailingTestFiles, touchedFilesOfDiff,
- *   attributeSuiteFailures, renderSuiteSection, applyRegressionFloor, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport,
+ *   renderSuiteSection, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport,
  *   SuiteRunnerPort.
  * Invariants:
  *   - A suite that was not measured is `status: "not_measured"` with a reason; it is never read as a pass.
- *   - Attribution never guesses: with no landed diff nothing is attributed to the plan (and the section says why).
- *   - The regression floor only ever TURNS a verdict into fail (attributed failing file); it never promotes a fail.
+ *   - Regression is NOT decided here: `regression-per-landing.ts` measures it per landing (BR-1496); a red file on main's
+ *     HEAD is never charged to a plan by itself.
  *   - The snapshot rule turns a verdict into fail only for a contradicted rule, and into na when none is contradicted.
  * Side-effect class: pure (no IO, no clock).
  *
@@ -89,86 +88,27 @@ export function touchedFilesOfDiff(diffText: string): Set<string> {
   return files;
 }
 
-/** How the batch's failing test files split for ONE plan. */
-export interface SuiteAttribution {
-  /** Failing files the plan's diff touched or whose direct import it touched: they count against this plan. */
-  readonly attributed: readonly string[];
-  /** Failing files with no such tie to the plan: shown to the judge, never counted. */
-  readonly unattributed: readonly string[];
-}
-
 /**
- * Splits a measured suite's failing files for one plan.
- *
- * @param suite - the batch run
- * @param touched - the files the plan's landed diff touched; `undefined` when the plan has no derivable diff
- * @returns everything unattributed when the suite was not measured or the plan has no diff
+ * The prompt section carrying the batch's one suite run on main's HEAD. It is context for the judge only: regression
+ * is measured per landing (`regression-per-landing.ts`, the facts table), and a failing file here is never charged to
+ * a plan by itself.
  */
-export function attributeSuiteFailures(suite: SuiteRun, touched: ReadonlySet<string> | undefined): SuiteAttribution {
-  if (suite.status !== "measured") return { attributed: [], unattributed: [] };
-  if (touched === undefined) return { attributed: [], unattributed: suite.failing_test_files.map((f) => f.file) };
-  const attributed: string[] = [];
-  const unattributed: string[] = [];
-  for (const failing of suite.failing_test_files) {
-    const tied = touched.has(failing.file) || failing.imports.some((imported) => touched.has(imported));
-    (tied ? attributed : unattributed).push(failing.file);
-  }
-  return { attributed, unattributed };
-}
-
-/** The prompt section carrying the batch's suite run for one plan's regression dimension. */
-export function renderSuiteSection(
-  suite: SuiteRun | undefined,
-  attribution: SuiteAttribution,
-  hasPlanDiff: boolean,
-): string {
+export function renderSuiteSection(suite: SuiteRun | undefined): string {
   if (suite === undefined) {
-    return "No full-suite run was supplied for this review (not measured); do not fail regression for a missing run.";
+    return "No full-suite run on main was supplied for this review (not measured).";
   }
   if (suite.status === "not_measured") {
-    return `The full-suite run on main was NOT measured: ${suite.reason}. Do not fail regression for a missing run; judge from the diff and evidence.`;
+    return `The full-suite run on main was NOT measured: ${suite.reason}.`;
   }
-  const lines = [`One run for the whole batch, on main at ${suite.commit}:`];
+  const lines = [`One run for the whole batch, on main at ${suite.commit} (context only; regression is measured per landing in the facts table):`];
   for (const c of suite.commands) lines.push(`- \`${c.command}\` exit ${String(c.exit_code)}`);
   for (const s of suite.skipped) lines.push(`- \`${s.command}\` not run: ${s.reason}`);
   lines.push(
-    attribution.attributed.length === 0
-      ? "Failing test files attributed to THIS plan (its diff touched the file or a file it imports directly): none."
-      : `Failing test files attributed to THIS plan: ${attribution.attributed.join(", ")}.`,
+    suite.failing_test_files.length === 0
+      ? "Failing test files on main: none."
+      : `Failing test files on main (not charged to this plan by being red now): ${suite.failing_test_files.map((f) => f.file).join(", ")}.`,
   );
-  if (attribution.unattributed.length > 0) {
-    lines.push(
-      hasPlanDiff
-        ? `Failing test files NOT tied to this plan (other work; do not count them against it): ${attribution.unattributed.join(", ")}.`
-        : `This plan has no derivable diff, so these failing files cannot be tied to it and do not count: ${attribution.unattributed.join(", ")}.`,
-    );
-  }
   return lines.join("\n");
-}
-
-/**
- * Turns `regression` into a fail when a failing test file is attributed to the plan.
- *
- * @param dimensions - the judge's judgments
- * @param attribution - the plan's attribution
- * @returns the judgments; `regression` is replaced only when `attribution.attributed` is non-empty
- */
-export function applyRegressionFloor(
-  dimensions: LlmMilestoneOutput["dimensions"],
-  attribution: SuiteAttribution,
-  commit: string | undefined,
-): LlmMilestoneOutput["dimensions"] {
-  if (attribution.attributed.length === 0) return dimensions;
-  return {
-    ...dimensions,
-    regression: {
-      verdict: "fail",
-      reason:
-        `Full suite on main${commit !== undefined ? ` at ${commit}` : ""} fails in ${attribution.attributed.join(", ")}, ` +
-        `which this plan's diff touched or imports directly (judge said: ${dimensions.regression.reason})`,
-      reference: dimensions.regression.reference.length > 0 ? dimensions.regression.reference : "Kayenta canary analysis",
-    },
-  };
 }
 
 /** Why a non-contradicted state is not a disagreement between document and code (BR-984 state definitions). */
