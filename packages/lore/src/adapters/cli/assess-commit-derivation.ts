@@ -15,6 +15,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import type { LandingKind } from "@lore/core";
 
 /** Explicit maxBuffer — the 1 MiB spawnSync default silently truncates a growing diff/log payload. */
 const GIT_MAX_BUFFER = 20 * 1024 * 1024;
@@ -116,7 +117,7 @@ export interface PlanLanding {
   /** This landing's `outside_anchors` (BR-1346); `undefined` when the landing did not measure it. */
   outside_anchors: string[] | undefined;
   /** `no-change` landings put nothing on main and contribute no diff. */
-  kind: "no-change" | "commits";
+  kind: LandingKind;
 }
 
 /** {@link CommitDerivationResult} for a diff built from landings, plus the facts the review gates read. */
@@ -134,7 +135,7 @@ export interface LandingTaskInput {
     | {
         main_before: string;
         landing_commit: string;
-        kind: "no-change" | "commits";
+        kind: LandingKind;
         outside_anchors?: string[] | undefined;
       }
     | undefined;

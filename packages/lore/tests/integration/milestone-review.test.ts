@@ -976,11 +976,16 @@ describe("milestone review gates close", () => {
     expect(typeof first.pending_decision).toBe("number");
     expect(pendingIds()).toEqual([first.pending_decision]);
     must(["delete", specs.old, "--confirm"]); // the plan's attributed list is now empty
-    const batch = assessRows(["--where", "needs-review", "--close"]);
-    expect(batch.exitCode, batch.stderr).toBe(0);
+    // A6: this plan was never landed through integrate, so its regression and security gates are not-measured; the batch
+    // files their issue (the fake GitHub is the upstream) and holds the plan open, a gate never closes by default
+    configureGithubUpstream();
+    const batch = assessRows(["--where", "needs-review", "--file-issues", "--close"]);
+    expect(batch.exitCode, `${batch.stderr}${JSON.stringify(batch.rows)}`).toBe(0);
     expect(batch.rows.map((r) => r.plan)).toEqual([plan]);
+    // the stale question is withdrawn and the plan proceeds to the close decision
     expect(pendingIds()).toHaveLength(0);
-    expect(statusOf(plan)).toBe("archived");
+    expect(batch.rows[0]).toMatchObject({ outcome: "kept-open" });
+    expect(statusOf(plan)).not.toBe("archived");
   });
 
   it("milestone review gates close: a failing review with no linked open issue still refuses the close (exit 4, BR-1372)", { timeout: 300_000 }, () => {

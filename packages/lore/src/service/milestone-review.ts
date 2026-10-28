@@ -3,7 +3,7 @@
  *
  * Purpose: the pure half of BR-1372. `lore assess` stores a review carrying the plan-state fingerprint it judged;
  *   plan close recomputes the fingerprint and compares.
- * Public surface: planStateFingerprint, milestoneFactsFingerprint, FactsFingerprintInput, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
+ * Public surface: planStateFingerprint, landedCommitsOf, milestoneFactsFingerprint, FactsFingerprintInput, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
  *   MilestoneReviewCurrency, MILESTONE_REVIEW_SUB_TYPE, and the main-red ledger (BR-1412): MAIN_RED_ACTION,
  *   MAIN_RED_GREEN_ACTION, MAIN_CHECKED_ACTION, MainRedLedgerPort, foldMainRedRecords, classifySuiteForMainRed, planMainRedWrites.
  * Invariants:
@@ -22,7 +22,7 @@ import { z } from "zod";
 import {
   err,
   ok,
-  filableDimensions,
+  failedDimensions,
   milestoneReviewSchema,
   specAcceptanceCriteriaSchema,
   type DocRecord,
@@ -48,6 +48,22 @@ export function latestLandingCommit(tasks: readonly Pick<DocRecord, "extra">[]):
     if (newest === undefined || landing.recorded_at > newest.at) newest = { at: landing.recorded_at, commit: landing.landing_commit };
   }
   return newest?.commit ?? "none";
+}
+
+/**
+ * The distinct main commits `tasks` landed, in task order. A no-change landing put nothing on main (the one predicate,
+ * `landingOf`), so it has no commit and no suite result to measure.
+ *
+ * @param tasks - the plan's member tasks (`extra.landing`)
+ */
+export function landedCommitsOf(tasks: readonly Pick<DocRecord, "extra">[]): string[] {
+  const commits = new Set<string>();
+  for (const task of tasks) {
+    const landing = readTaskLanding(task.extra);
+    if (landing === undefined || landing.kind === "no-change") continue;
+    commits.add(landing.landing_commit);
+  }
+  return [...commits];
 }
 
 /** The governing spec's live (not superseded) AC ids with content hashes, sorted. */
@@ -196,8 +212,10 @@ export function assessMilestoneCurrency(
   if (latest.review.fingerprint !== current) {
     return { state: "stale", reviewed: latest.review.fingerprint, current, reviewSlug: latest.doc.slug };
   }
-  // reason: a not-measured gate needs the same record a failed dimension does (it holds the plan open), so close reads both.
-  const failed = filableDimensions(latest.review.dimensions);
+  // reason: the plan-close gate reads FAILED dimensions only (BR-1372). Holding a plan open for a not-measured or unaccepted
+  // gate is the review batch's close rule (`ReviewBatchRunner`, BR-1379); the batch never archives past one, so the
+  // verdict stored here is read as before.
+  const failed = failedDimensions(latest.review.dimensions);
   if (failed.length > 0 || latest.review.overall === "fail") {
     return { state: "failed", failed, reviewSlug: latest.doc.slug };
   }

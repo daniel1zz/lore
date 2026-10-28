@@ -24,7 +24,7 @@
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-1, BR-1496, D1)
  */
 
-import { err, ok, type LoreError, type MilestoneFactRow, type Result } from "@lore/core";
+import { err, ok, type LandingKind, type LoreError, type MilestoneFactRow, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { loreErrorText, type CommitSuiteRunnerPort } from "./suite-result-service.js";
 
@@ -34,7 +34,7 @@ export interface RegressionLandingInput {
   readonly main_before: string;
   readonly task_slugs: readonly string[];
   /** `no-change` landings put nothing on main: nothing to measure. */
-  readonly kind: "no-change" | "commits";
+  readonly kind: LandingKind;
 }
 
 /** The newest stored main suite result at or after the plan's last landing (a measured one), or none. */

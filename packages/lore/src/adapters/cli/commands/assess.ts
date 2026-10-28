@@ -56,6 +56,7 @@ import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { DecisionGate } from "../../../service/decision-gate.js";
 import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
 import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
+import { landedCommitsOf } from "../../../service/milestone-review.js";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { suiteRunOfResult } from "../../../service/suite-result-service.js";
@@ -443,7 +444,7 @@ export default defineLoreCommand({
                 if (!attested.ok) return attested;
                 if (batchSuites !== undefined) {
                   // landings with nothing to attest still get their suite result now (a stored one runs nothing)
-                  for (const commit of landingCommitsOf(bundle.value.tasks)) {
+                  for (const commit of landedCommitsOf(bundle.value.tasks)) {
                     const looked = await batchSuites.lookupOrRun(commit, landingRunner);
                     if (!looked.ok) inv.io.stderr.write(`Warning: suite at landing ${commit} not measured: ${formatErrorFor(inv, looked.error)}\n`);
                   }
@@ -608,16 +609,6 @@ interface BatchCloseInput {
   readonly factsFingerprint: BatchRunPorts["factsFingerprint"];
   readonly filing: IssueFilingService | undefined;
   readonly json: boolean;
-}
-
-/** The distinct main commits the tasks landed (a no-change landing put nothing on main and has no suite to run). */
-function landingCommitsOf(tasks: readonly { readonly extra: Readonly<Record<string, unknown>> }[]): string[] {
-  const commits = new Set<string>();
-  for (const task of tasks) {
-    const landing = readTaskLanding(task.extra);
-    if (landing !== undefined && landing.kind !== "no-change") commits.add(landing.landing_commit);
-  }
-  return [...commits];
 }
 
 /** The corpus reader the attestation wiring needs. */
