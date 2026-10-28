@@ -152,6 +152,8 @@ export interface AiCriterionInput {
 export interface MilestoneFacts {
   /** Script criteria attestation (`correctness_vs_acs` input). */
   readonly attestation?: readonly MilestoneFactRow[];
+  /** The evidence row that decided each criterion (`subject` = `<spec>:<ac>`); the review fingerprint hashes these (BR-1498). */
+  readonly attestation_ids?: readonly { readonly subject: string; readonly id: string }[];
   /** Regression per landing (full suite at each landing commit). */
   readonly regression?: readonly MilestoneFactRow[];
   /** Files of regressions still uncleared (the regression finding's root cause), from `regression-per-landing`. */
