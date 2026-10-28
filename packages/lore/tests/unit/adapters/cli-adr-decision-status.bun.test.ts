@@ -42,6 +42,7 @@ import { tmpdir } from "os";
 import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -87,7 +88,7 @@ async function createAdr(
   const result = await runLore(
     [
       "create",
-      "adr",
+      "adr", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)),
       "--title",
       title,
       "--decision-status",
@@ -107,7 +108,7 @@ async function createKnowledge(tmpDir: string, title: string): Promise<string> {
   const result = await runLore(
     [
       "create",
-      "knowledge",
+      "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)),
       "--title",
       title,
       "--sub-type",

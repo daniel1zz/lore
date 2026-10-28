@@ -29,6 +29,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { AC_REF_NOT_ON_PARENT_SPEC } from "../../../src/service/ac-ref-messages.js";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ afterEach(() => {
 
 function createPlan(title: string, parentSlug?: string): string {
   const args = ["create", "plan", "--title", title, "--no-ai", "--content", "body"];
-  if (parentSlug !== undefined) args.push("--parent", parentSlug);
+  args.push("--parent", parentSlug ?? ensureRequirementsDocSlug((a) => runLore(a, tmpDir)));
   const r = runLore(args, tmpDir);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const m = r.stdout.match(/Slug:\s+(\S+)/);

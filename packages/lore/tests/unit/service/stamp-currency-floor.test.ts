@@ -59,6 +59,7 @@ import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 const NOW = "2026-10-17T10:00:00.000Z";
@@ -74,7 +75,7 @@ function makeCorpus() {
 type Corpus = ReturnType<typeof makeCorpus>;
 
 async function createTask(c: Corpus, title: string): Promise<DocRecord> {
-  const plan = await c.corpus.create({ type: "plan", title: `Plan ${title}`, content: "body" } as CreateDocInput);
+  const plan = await c.corpus.create({ parent_id: await ensureRequirementsDocId(c.corpus), type: "plan", title: `Plan ${title}`, content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
   const task = await c.corpus.create({
     type: "task",
@@ -263,7 +264,7 @@ describe("AC-CT-3: a row's audit id is its server-written recorded_corpus_rev, e
 
   it("a row with neither a recorded rev nor an evidence audit row, in an armed corpus, is unbound/audit_id_unresolved and counted", async () => {
     const c = makeCorpus();
-    const plan = await c.corpus.create({ type: "plan", title: "Plan legacy", content: "b" } as CreateDocInput);
+    const plan = await c.corpus.create({ parent_id: await ensureRequirementsDocId(c.corpus), type: "plan", title: "Plan legacy", content: "b" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan");
     const legacyRow = {
       oracle: "tsc",
@@ -454,7 +455,7 @@ describe("AC-CT-3 half 5: lore done's per-task floor refuses an unbound-only tas
 describe("AC-CT-3 R13: the arming step reports the legacy rows that would become unbound, before arming", () => {
   /** Two docs whose attested rows have no audit trail (the measured 98-rows-in-36-docs shape), one clean doc. */
   async function seedLegacyCorpus(c: Corpus) {
-    const plan = await c.corpus.create({ type: "plan", title: "Plan legacy", content: "b" } as CreateDocInput);
+    const plan = await c.corpus.create({ parent_id: await ensureRequirementsDocId(c.corpus), type: "plan", title: "Plan legacy", content: "b" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan");
     const attested = (n: number) => ({
       oracle: "tsc",

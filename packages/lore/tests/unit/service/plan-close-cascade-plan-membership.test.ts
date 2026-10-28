@@ -36,6 +36,7 @@ import { err, ok } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /**
  * RE-BASELINED by spec-approval-and-plan-closure-go-through-the-same-checks-on
  * (AC-AP-5, BR-1072, #47). The cascade now asks an injected `DoneFloorPort` about
@@ -85,7 +86,7 @@ function floorRefusal(floor: StubFloor): StubVerdict {
 }
 
 async function createPlan(cs: CorpusService, title: string): Promise<DocRecord> {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return result.value;
 }

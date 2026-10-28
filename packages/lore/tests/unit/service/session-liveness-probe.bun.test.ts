@@ -76,6 +76,7 @@ import {
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -355,7 +356,7 @@ describe("`lore session list` command-level oracle (AC-OWN-5's own named surface
       await mustRunLoreCmd(["init"], tmpDir);
 
       const planSlug = parseSlugFromCreateOutput(
-        (await mustRunLoreCmd(["create", "plan", "--title", "Session cmd oracle plan", "--content", "Plan body.", "--no-ai"], tmpDir)).stdout,
+        (await mustRunLoreCmd(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => mustRunLoreCmd(a, tmpDir)), "--title", "Session cmd oracle plan", "--content", "Plan body.", "--no-ai"], tmpDir)).stdout,
       );
       const mineTaskSlug = parseSlugFromCreateOutput(
         (await mustRunLoreCmd(

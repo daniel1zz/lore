@@ -46,6 +46,7 @@ import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { createRealWorktreeProbe, type WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
 const cleanupDirs: string[] = [];
@@ -104,7 +105,7 @@ function makeServices(probe: WorktreeGitProbe = fakeWorktreeProbe()) {
 }
 
 async function createPlanAndTask(cs: CorpusService): Promise<{ taskId: string }> {
-  const plan = await mustCreate(cs, { type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
   const task = await mustCreate(cs, {
     type: "task",
     title: "Task",

@@ -38,6 +38,7 @@ import { sessionActorFor, withSessionIdentity } from "../../helpers/session-acto
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 setDefaultTimeout(180_000);
 
 // tests/integration/cli/ -> repo root is 5 levels up.
@@ -184,7 +185,7 @@ function buildFixture(): Fixture {
     repo,
   );
   const knowledge = slugOf(
-    mustRun(["create", "knowledge", "--title", "CSL Knowledge", "--sub-type", "reference", "--content", "k", "--no-ai"], repo).stdout,
+    mustRun(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustRun(a, repo)), "--title", "CSL Knowledge", "--sub-type", "reference", "--content", "k", "--no-ai"], repo).stdout,
   );
 
   const tasks: string[] = [];

@@ -31,6 +31,7 @@ import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { cleanupWorktrees, commitAll, makeWorktree } from "./support/run-end-fixture.js";
 import { createLiveApp } from "../helpers/live-app.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 setDefaultTimeout(120_000);
 
 /** One derived name shared by two different runs — the situation BR-1056 exists for. */
@@ -93,7 +94,7 @@ async function endRun(run: RunId): Promise<void> {
 
 async function createPlanWithTasks(anchorsPerTask: string[][]): Promise<{ planId: string; taskIds: string[] }> {
   return withApp(async (app) => {
-    const plan = await app.corpusService.create({ type: "plan", title: "Run Owned Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await app.corpusService.create({ parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan", title: "Run Owned Plan", content: "# Plan" } as CreateDocInput);
     if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
     const taskIds: string[] = [];
     for (const [index, anchors] of anchorsPerTask.entries()) {

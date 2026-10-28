@@ -40,6 +40,7 @@ import { liveAmbient, liveWriteContext, LIVE_TEST_RUN } from "../../live-invocat
 import { registerTestRun } from "../../helpers/test-run-identity.js";
 import { createPartyCorpus, type LoreRun, type Party, type PartyCorpus } from "../../helpers/known-party-corpus.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 const AGENT: Party = { kind: "run", run: "cc:dr2-agent" };
@@ -99,7 +100,7 @@ describe("AC-DR-2: the CLI refuses an agent's non-draft write without its decisi
     corpus = createPartyCorpus("dr2");
     const prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "DR PRD", "--content", "root", "--no-ai"]));
     const makeAdr = (title: string): string =>
-      corpus.slugOf(corpus.setup(["create", "adr", "--title", title, "--decision-status", "accepted", "--no-ai", "--content", "# Decision\n\nwe chose A"]));
+      corpus.slugOf(corpus.setup(["create", "adr", "--parent", prd, "--title", title, "--decision-status", "accepted", "--no-ai", "--content", "# Decision\n\nwe chose A"]));
     adr = makeAdr("DR ADR one");
     adrForStatus = makeAdr("DR ADR two");
     adrForHuman = makeAdr("DR ADR three");
@@ -276,7 +277,7 @@ describe("AC-DR-2: a direct CorpusService.set call (the service every adapter re
     app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     registerTestRun(tmpRoot, LIVE_TEST_RUN);
     const created = await app.corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "adr",
       title: "Direct ADR",
       content: "# Decision\n\nwe chose A",
       extra: { decision_status: "accepted" },

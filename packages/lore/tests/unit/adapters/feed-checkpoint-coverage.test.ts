@@ -78,6 +78,7 @@ import { CHECKPOINT_PRODUCED_TYPE } from "../../../src/flows/feed-flow.js";
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const LIVE_APP_TS = join(PACKAGE_ROOT, "tests", "helpers", "live-app.ts");
+const PARENTED_CREATE_TS = join(PACKAGE_ROOT, "tests", "helpers", "parented-create.ts");
 
 interface RunResult {
   readonly stdout: string;
@@ -137,7 +138,7 @@ function seedSkillDocs(dbPath: string, scriptDir: string, specs: readonly SeedSp
   const scriptPath = join(scriptDir, "seed-skills.ts");
   const scriptSource = `
 import { createLiveApp } from ${JSON.stringify(LIVE_APP_TS)};
-
+import { ensureRequirementsDocId } from ${JSON.stringify(PARENTED_CREATE_TS)};
 const dbPath = process.argv[2];
 const specs = JSON.parse(process.argv[3]);
 
@@ -146,7 +147,7 @@ const app = createLiveApp(dbPath);
 try {
   for (const spec of specs) {
     const createResult = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: spec.title,
       content: spec.content,
       extra: { sub_type: "skill", skill: { applies_to: spec.appliesTo } },

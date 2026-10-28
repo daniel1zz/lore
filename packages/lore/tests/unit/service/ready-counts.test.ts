@@ -14,6 +14,7 @@ import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 async function setup() {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -23,7 +24,7 @@ async function setup() {
     if (!r.ok) throw new Error(JSON.stringify(r.error));
     return r.value;
   };
-  const plan = await mk({ type: "plan", title: "Counts Plan", content: "# P" } as CreateDocInput);
+  const plan = await mk({ type: "plan", parent_id: await ensureRequirementsDocId(cs), title: "Counts Plan", content: "# P" } as CreateDocInput);
   const task = (title: string) =>
     mk({ type: "task", title, parent_id: plan.id, content: `# ${title}`, extra: { plan_id: plan.id } } as CreateDocInput);
   return { cs, twf, plan, task };

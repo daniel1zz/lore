@@ -18,6 +18,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { createPartyCorpus, type LoreRun, type Party, type PartyCorpus } from "../../helpers/known-party-corpus.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 const AGENT: Party = { kind: "run", run: "cc:dx1-agent" };
@@ -76,7 +77,7 @@ describe("AC-DX-1: an agent's anchor removal on a non-draft document carries a d
     spec = makeSpec("DX approved spec");
     draftSpec = makeSpec("DX draft spec");
     humanSpec = makeSpec("DX human spec");
-    knowledge = corpus.slugOf(corpus.setup(["create", "knowledge", "--sub-type", "reference", "--title", "DX approved knowledge", "--no-ai", "--content", "a fact about things"]));
+    knowledge = corpus.slugOf(corpus.setup(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => corpus.setup(a)), "--sub-type", "reference", "--title", "DX approved knowledge", "--no-ai", "--content", "a fact about things"]));
     for (const slug of [spec, draftSpec, humanSpec, knowledge]) {
       corpus.setup(["anchor", "add", slug, "src/a.ts#Alpha", "src/b.ts#Beta"]);
     }

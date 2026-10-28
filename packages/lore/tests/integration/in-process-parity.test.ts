@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { withSessionIdentity } from "../helpers/session-actor";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
 // tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
@@ -67,7 +68,8 @@ function normalise(text: string, dir: string): string {
 /** The sequence both runners execute; each entry is one argv. */
 const SEQUENCE: readonly (readonly string[])[] = [
   ["init"],
-  ["create", "plan", "--title", "Parity plan", "--content", "Plan body.", "--no-ai"],
+  ["create", "prd", "--title", "Parity root", "--content", "Root body.", "--no-ai"],
+  ["create", "plan", "--parent", "prd-parity-root", "--title", "Parity plan", "--content", "Plan body.", "--no-ai"],
   ["list", "--json"],
   ["get", "plan-parity-plan"],
   ["tree", "plan-parity-plan"],
@@ -137,7 +139,7 @@ describe("AC-TG-11 in-process helper parity with dist/lore", () => {
     const dir = freshDir();
     expect((await runInProcess(["init"], dir)).exitCode).toBe(0);
     expect(
-      (await runInProcess(["create", "plan", "--title", "Written in process", "--content", "Body.", "--no-ai"], dir))
+      (await runInProcess(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runInProcess(a, dir)), "--title", "Written in process", "--content", "Body.", "--no-ai"], dir))
         .exitCode,
     ).toBe(0);
     const read = await runBinary(["get", "plan-written-in-process", "--json"], dir);
@@ -168,7 +170,7 @@ describe("AC-TG-11 in-process helper parity with dist/lore", () => {
     const a = freshDir();
     const b = freshDir();
     for (const dir of [a, b]) expect((await runInProcess(["init"], dir)).exitCode).toBe(0);
-    await runInProcess(["create", "plan", "--title", "Only in A", "--content", "A.", "--no-ai"], a);
+    await runInProcess(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((args) => runInProcess(args, a)), "--title", "Only in A", "--content", "A.", "--no-ai"], a);
 
     const [inA, inB] = await Promise.all([
       runInProcess(["list", "--json"], a),

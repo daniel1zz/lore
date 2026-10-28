@@ -48,6 +48,7 @@ import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<DocRecord> {
@@ -72,7 +73,7 @@ function makeServices(config?: LoreConfig) {
 
 /** A top-level plan (no parent at all) — hasSpecParent will resolve false. */
 async function createTopLevelPlan(cs: CorpusService): Promise<string> {
-  const plan = await mustCreate(cs, { type: "plan", title: "Top-Level Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Top-Level Plan", content: "# Plan" } as CreateDocInput);
   return plan.id;
 }
 

@@ -34,6 +34,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { installStubClaude, stubClaudeEnv } from "../../helpers/stub-claude.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -96,7 +97,7 @@ afterEach(() => {
 });
 
 function createPlan(title: string): string {
-  const r = runLore(["create", "plan", "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  const r = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--no-ai", "--content", "body"], tmpDir);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const m = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = m?.[1];

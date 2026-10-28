@@ -15,6 +15,7 @@ import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const ANCHOR = "packages/lore/tests/unit/x.bun.test.ts";
 
 const REPO_ROOT = "/work/repo";
@@ -23,7 +24,7 @@ async function setup() {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const svc = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120, repoRoot: REPO_ROOT }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  const plan = await cs.create({ type: "plan", title: "P", content: "b" } as CreateDocInput);
+  const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "P", content: "b" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
     type: "task",

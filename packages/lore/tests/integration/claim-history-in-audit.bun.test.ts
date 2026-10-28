@@ -26,6 +26,7 @@ import { actedStore } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const scratch: string[] = [];
 const closers: Array<() => void> = [];
 afterAll(() => {
@@ -49,7 +50,7 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
       const store = openStore(kind);
       const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const tasks = new TaskWorkflowService(store, undefined as never, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-      const plan = await corpus.create({ type: "plan", title: "Plan", content: "b" } as CreateDocInput);
+      const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "Plan", content: "b" } as CreateDocInput);
       if (!plan.ok) throw new Error("plan");
       const created = await corpus.create({ type: "task", title: "T", parent_id: plan.value.id, content: "b", extra: { plan_id: plan.value.id } } as CreateDocInput);
       if (!created.ok) throw new Error("task");

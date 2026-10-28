@@ -35,6 +35,7 @@ import type { StalenessFlowDeps } from "../../../src/flows/staleness-flow.js";
 import { ok } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function buildTestFlowDeps(corpusService: CorpusService, judgmentService: JudgmentService): StalenessFlowDeps {
   return {
     listByType: async (type) => {
@@ -63,13 +64,13 @@ describe("HAPPY/STATE — a regular review judgment with a resolvable superseded
     const { corpusService, judgmentService } = await setup();
 
     const oldDoc = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzD11OldDecision",
       content: "body",
       extra: { decision_status: "accepted" },
     } as CreateDocInput);
     const newDoc = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzD11NewDecision",
       content: "body",
       extra: { decision_status: "accepted" },
@@ -124,7 +125,7 @@ describe("ERROR — an unresolvable superseded_candidate.ref renders a note, nev
     const { corpusService, judgmentService } = await setup();
 
     const doc = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzD11UnresolvableTarget",
       content: "body",
       extra: { sub_type: "reference" },
@@ -164,7 +165,7 @@ describe("REGRESSION — a judgment with NO superseded_candidate renders byte-id
     const { corpusService, judgmentService } = await setup();
 
     const doc = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzD11RegressionTarget",
       content: "body",
       extra: { decision_status: "accepted" },

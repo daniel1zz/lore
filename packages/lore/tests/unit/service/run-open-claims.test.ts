@@ -17,6 +17,7 @@ import { actedStore } from "../../live-invocation.js";
 import { RunService } from "../../../src/service/run-service.js";
 import type { WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const WC = "/wt/agent-w";
 
 type Listed = ReturnType<WorktreeGitProbe["listWorktrees"]>;
@@ -30,7 +31,7 @@ const REPO = "/repo";
 async function setup(listed: Listed, claimedWorktree: string, probe: WorktreeGitProbe = probeOf(listed)) {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const plan = await corpus.create({ type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
+  const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
   const created = await corpus.create({
     type: "task",

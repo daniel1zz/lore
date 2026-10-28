@@ -27,6 +27,7 @@ import { SessionService } from "../../../src/service/session-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices(handoffTtlMinutes = 10080) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -47,7 +48,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 describe("SessionService.resume — HAPPY: newest-wins by plan", () => {
   it("returns the newer of two same-actor/same-plan handoffs, ordered by a pinned created_at", async () => {
     const { store, corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan R1", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan R1", content: "# Plan" } as CreateDocInput);
 
     const older = await sessionService.writeHandoff({
       by: "alice",
@@ -83,8 +84,8 @@ describe("SessionService.resume — HAPPY: newest-wins by plan", () => {
 describe("SessionService.resume — HAPPY: direct --handoff targeting skips derivation", () => {
   it("returns exactly the targeted (older) handoff even though a newer one exists elsewhere, ignoring opts.by/opts.plan", async () => {
     const { corpusService, sessionService } = makeServices();
-    const planA = await mustCreate(corpusService, { type: "plan", title: "Plan A", content: "# Plan" } as CreateDocInput);
-    const planB = await mustCreate(corpusService, { type: "plan", title: "Plan B", content: "# Plan" } as CreateDocInput);
+    const planA = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan A", content: "# Plan" } as CreateDocInput);
+    const planB = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan B", content: "# Plan" } as CreateDocInput);
 
     const target = await sessionService.writeHandoff({
       by: "author-one",
@@ -214,7 +215,7 @@ describe("SessionService.resume — NEGATIVE/ERROR: not-found vs bad-input", () 
 
   it("resume({plan}) on a valid plan with no handoffs → found: false (not an error)", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Empty Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Empty Plan", content: "# Plan" } as CreateDocInput);
 
     const result = await sessionService.resume({ plan: plan.slug });
     expect(result.ok).toBe(true);
@@ -236,7 +237,7 @@ describe("SessionService.resume — NEGATIVE/ERROR: not-found vs bad-input", () 
 describe("SessionService.resume — STATE: actor isolation", () => {
   it("resume({plan, by: 'alice'}) returns only alice's handoff, never bob's, regardless of recency", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Shared Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Shared Plan", content: "# Plan" } as CreateDocInput);
 
     const aliceHandoff = await sessionService.writeHandoff({
       by: "alice",
@@ -271,7 +272,7 @@ describe("SessionService.resume — STATE: actor isolation", () => {
 describe("SessionService.resume — STATE: multi-actor surfacing", () => {
   it("resume({plan}) with by omitted and >1 actor → multi_actor: true, handoffs[] one per actor, handoff undefined", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Multi Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Multi Plan", content: "# Plan" } as CreateDocInput);
 
     const aliceHandoff = await sessionService.writeHandoff({
       by: "alice",
@@ -306,7 +307,7 @@ describe("SessionService.resume — STATE: multi-actor surfacing", () => {
 
   it("single-actor case: multi_actor: false, handoff (singular) present, handoffs (plural) absent", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Single Actor Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Single Actor Plan", content: "# Plan" } as CreateDocInput);
 
     const aliceHandoff = await sessionService.writeHandoff({
       by: "alice",

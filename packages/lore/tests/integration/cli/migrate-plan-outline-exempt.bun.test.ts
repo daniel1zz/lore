@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -89,8 +90,8 @@ beforeAll(async () => {
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"]);
-  carrier = slugOf(mustRun(["create", "plan", "--title", "Carrier Plan", "--content", "body", "--no-ai"]).stdout);
-  plain = slugOf(mustRun(["create", "plan", "--title", "Plain Plan", "--content", "body", "--no-ai"]).stdout);
+  carrier = slugOf(mustRun(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => mustRun(a)), "--title", "Carrier Plan", "--content", "body", "--no-ai"]).stdout);
+  plain = slugOf(mustRun(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => mustRun(a)), "--title", "Plain Plan", "--content", "body", "--no-ai"]).stdout);
   await seedLegacyExemption(carrier);
 });
 

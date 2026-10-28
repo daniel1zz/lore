@@ -29,6 +29,7 @@ import { exitCode } from "../../src/adapters/cli/utils.js";
 import { computeRecoverableUntil } from "../../src/service/soft-delete-window.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
+import { ensureRequirementsDocId, ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 const AC = "spec-defect-clusters-round-2-part-a-sessions-seats-setup-init#AC-DC2-6";
@@ -68,7 +69,7 @@ function slugOf(stdout: string): string {
 }
 
 function newKnowledge(title: string): string {
-  return slugOf(mustRun(["create", "knowledge", "--sub-type", "reference", "--title", title, "--content", "body", "--no-ai"]).stdout);
+  return slugOf(mustRun(["create", "knowledge", "--parent", ensureRequirementsDocSlug(mustRun), "--sub-type", "reference", "--title", title, "--content", "body", "--no-ai"]).stdout);
 }
 
 interface LogEntry {
@@ -212,7 +213,7 @@ describe("AC-DC2-6 recovery window boundary (in-process, clock seam)", () => {
     const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     try {
       const make = async (title: string): Promise<string> => {
-        const created = await app.corpusService.create({ type: "knowledge", title, content: "b", extra: { sub_type: "reference" } });
+        const created = await app.corpusService.create({ parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge", title, content: "b", extra: { sub_type: "reference" } });
         if (!created.ok) throw new Error(JSON.stringify(created.error));
         const deleted = await app.corpusService.delete(created.value.slug, true);
         if (!deleted.ok) throw new Error(JSON.stringify(deleted.error));

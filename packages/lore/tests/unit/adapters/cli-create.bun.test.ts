@@ -101,6 +101,23 @@ async function importCreateCommand(): Promise<RunnableCommand> {
   return cmd as RunnableCommand;
 }
 
+/**
+ * Files a requirements document and returns its slug: the parent a knowledge, adr or plan create needs
+ * (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6) when the test is not about a parent.
+ * Runs before the caller's own output capture starts, so it never nests two captures.
+ */
+async function createFixtureParentSlug(cmd: { run?: RunnableCommand["run"] }): Promise<string> {
+  const output = captureOutput();
+  try {
+    await runCmd(cmd, { type: "prd", title: "Fixture Requirements", ai: false });
+  } finally {
+    output.restore();
+  }
+  const slug = output.stdout.join("\n").match(/prd-[\w-]+/)?.[0];
+  if (lastExitCode !== 0 || slug === undefined) throw new Error(`fixture parent prd failed (exit ${lastExitCode}): ${output.stderr.join("\n")}`);
+  return slug;
+}
+
 async function importGetCommand(): Promise<RunnableCommand> {
   const getMod = await import("../../../src/adapters/cli/commands/get.js");
   const getCmd = (getMod as { default?: { run?: RunnableCommand["run"] } }).default;
@@ -222,11 +239,12 @@ describe("lore create — happy path", () => {
   it("creates a knowledge doc with sub-type=research", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
+    const parent = await createFixtureParentSlug(cmd);
 
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "knowledge", title: "Research Notes", "sub-type": "research", ai: false });
+      await runCmd(cmd, { type: "knowledge", title: "Research Notes", "sub-type": "research", parent, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -616,12 +634,13 @@ describe("lore create — boundary cases", () => {
   it("all valid --decision-status enum values are accepted", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
+    const parent = await createFixtureParentSlug(cmd);
 
     for (const status of ["proposed", "accepted", "deprecated", "superseded"]) {
       const output = captureOutput();
       const exit = captureExit();
       try {
-        await runCmd(cmd, { type: "adr", title: `ADR-${status}`, "decision-status": status, ai: false });
+        await runCmd(cmd, { type: "adr", title: `ADR-${status}`, "decision-status": status, parent, ai: false });
       } catch (e: unknown) {
         if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
       } finally {
@@ -635,6 +654,7 @@ describe("lore create — boundary cases", () => {
   it("all valid --sub-type enum values are accepted", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
+    const parent = await createFixtureParentSlug(cmd);
 
     for (const subType of ["ideation", "retro", "research", "reference"]) {
       const output = captureOutput();
@@ -644,6 +664,7 @@ describe("lore create — boundary cases", () => {
           type: "knowledge",
           title: `Knowledge-${subType}`,
           "sub-type": subType,
+          parent,
           ai: false,
         });
       } catch (e: unknown) {
@@ -710,6 +731,7 @@ describe("lore create — state verification", () => {
   it("after creating adr, lore get shows extra.decision_status", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
+    const parent = await createFixtureParentSlug(cmd);
 
     const out1 = captureOutput();
     try {
@@ -717,6 +739,7 @@ describe("lore create — state verification", () => {
         type: "adr",
         title: "Architecture Decision",
         "decision-status": "accepted",
+        parent,
         ai: false,
       });
     } catch (e: unknown) {
@@ -751,10 +774,11 @@ describe("lore create — state verification", () => {
   it("after creating knowledge, lore get shows extra.sub_type", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
+    const parent = await createFixtureParentSlug(cmd);
 
     const out1 = captureOutput();
     try {
-      await runCmd(cmd, { type: "knowledge", title: "Team Retro", "sub-type": "retro", ai: false });
+      await runCmd(cmd, { type: "knowledge", title: "Team Retro", "sub-type": "retro", parent, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {

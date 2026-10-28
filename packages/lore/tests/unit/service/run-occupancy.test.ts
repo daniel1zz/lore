@@ -20,6 +20,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { RunService, type RunOccupancy } from "../../../src/service/run-service.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const COMPOSITION = { schemaVersion: 1 as const, fragments: [] };
 const REAL = "/private/tmp/occ/agent-X1";
 const LINK = "/tmp/occ/agent-X1";
@@ -32,7 +33,7 @@ async function setup() {
   const now = () => new Date(Date.UTC(2026, 9, 12, 5, 0, tick++));
   const service = new RunService(store, now, undefined, (p) => LINKS[p] ?? p, "/repo");
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const plan = await corpus.create({ type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
+  const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
   const planId = plan.value.id;
   let n = 0;

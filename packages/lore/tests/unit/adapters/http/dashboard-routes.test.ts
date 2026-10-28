@@ -164,7 +164,7 @@ describe("POST /api/dashboard/docs — create", () => {
       const body1 = await parseRes(res1!);
       const doc1 = (body1.data as Record<string, unknown>).doc as Record<string, unknown>;
 
-      const req2 = jsonReq("POST", "/api/dashboard/docs", { type: "plan", title: "A Plan" });
+      const req2 = jsonReq("POST", "/api/dashboard/docs", { type: "plan", title: "A Plan", parent_id: doc1.id });
       const url2 = makeUrl("/api/dashboard/docs");
       const res2 = await handleDashboardRoute(req2, url2, app, COOKIE_ACTOR);
       const body2 = await parseRes(res2!);

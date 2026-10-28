@@ -28,6 +28,7 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -404,7 +405,7 @@ describe("Scenario 4: discovery (list + search)", () => {
     const prdResult = runLore(["create", "prd", "--title", "My PRD", "--json", "--no-ai"], tmpDir);
     prdSlug = parseJson<{ slug: string }>(prdResult).data!.slug;
     runLore(["create", "spec", "--title", "Auth Feature Spec","--no-ai"], tmpDir);
-    runLore(["create", "plan", "--title", "General Plan", "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "General Plan", "--no-ai"], tmpDir);
   });
 
   afterEach(() => {
@@ -669,7 +670,7 @@ describe("Scenario 8: JSON output composability", () => {
     disableAllGates(tmpDir);
     runLore(["create", "prd", "--title", "JSON PRD", "--no-ai"], tmpDir);
     // plan requires no extra fields (knowledge/adr require extra.sub_type/decision_status)
-    runLore(["create", "plan", "--title", "JSON Plan", "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "JSON Plan", "--no-ai"], tmpDir);
   });
 
   afterEach(() => {
@@ -702,7 +703,7 @@ describe("Scenario 8: JSON output composability", () => {
 
   it("HAPPY: create --json returns doc envelope with all required fields", () => {
     // Use plan type — no parent or extra fields required (spec/adr/knowledge/task all have requirements)
-    const result = runLore(["create", "plan", "--title", "Extra Plan", "--json", "--no-ai"], tmpDir);
+    const result = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Extra Plan", "--json", "--no-ai"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{
       id: string;
@@ -766,7 +767,7 @@ describe("Scenario 9: status command", () => {
   it("HAPPY: status after creating docs reflects count by type (AC-E2E-001.10)", () => {
     runLore(["create", "prd", "--title", "PRD 1", "--no-ai"], tmpDir);
     // plan requires no extra fields (knowledge requires extra.sub_type)
-    runLore(["create", "plan", "--title", "Plan 1", "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Plan 1", "--no-ai"], tmpDir);
 
     const result = runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);

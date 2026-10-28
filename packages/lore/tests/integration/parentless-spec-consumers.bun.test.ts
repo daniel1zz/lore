@@ -28,6 +28,8 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { detachParentInDb } from "../helpers/detach-parent.js";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -140,9 +142,12 @@ describe("parentless spec consumers (AC-BLS3B-5)", () => {
   });
 
   it("NEGATIVE control: a parentless knowledge doc is still an orphan in the tree check and the statistic", () => {
+    // reason: a knowledge record can no longer be created without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad
+    // D6), so the loose note is filed under a requirements document and then detached: the legacy-data shape this control is about.
     knowledgeSlug = slugOf(
-      mustRun(["create", "knowledge", "--title", "Loose Note", "--sub-type", "reference", "--content", "x", "--no-ai"]).stdout,
+      mustRun(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustRun(a)), "--title", "Loose Note", "--sub-type", "reference", "--content", "x", "--no-ai"]).stdout,
     );
+    detachParentInDb(join(dir, ".lore", "lore.db"), knowledgeSlug);
     expect(parentIdOf(knowledgeSlug)).toBeNull();
 
     const { exitCode, drifts } = treeDrifts();

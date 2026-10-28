@@ -50,6 +50,7 @@ import { sessionActorFromId } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore, liveWriteActor } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /**
  * The author of a write that names no `by`: the name the store's write context carries (the invocation's known party,
  * BR-1055) — never $LORE_ACTOR, a session id in the env, or the computer's user name. `actedStore` declares it.
@@ -89,7 +90,7 @@ function makeStore() {
 }
 
 async function createPlan(cs: CorpusService, title: string, opts?: { by?: string }) {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput, opts);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "body" } as CreateDocInput, opts);
   if (!result.ok) throw new Error(`create failed: ${JSON.stringify(result.error)}`);
   return result.value;
 }

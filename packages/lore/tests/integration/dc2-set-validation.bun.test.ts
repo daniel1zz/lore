@@ -27,6 +27,7 @@ import { createApp, type App } from "../../src/app.js";
 import { startHttpServer } from "../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapters/http/machine-auth.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const SPEC_AC = "spec-defect-clusters-round-2-part-a-sessions-seats-setup-init#AC-DC2-8";
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
@@ -80,11 +81,11 @@ beforeAll(async () => {
   const dbPath = join(dir, ".lore", "lore.db");
   app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 
-  const plan = await must(app.corpusService.create({ type: "plan", title: "DC2-8 plan P", content: "# Plan" } as CreateDocInput));
+  const plan = await must(app.corpusService.create({ parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan", title: "DC2-8 plan P", content: "# Plan" } as CreateDocInput));
   planSlug = plan.slug;
   plainDoc = await must(
     app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: "DC2-8 plain reference",
       content: "body",
       extra: { sub_type: "reference" },

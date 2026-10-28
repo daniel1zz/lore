@@ -25,6 +25,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPartyCorpus, type Party, type PartyCorpus } from "../../helpers/known-party-corpus.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 const AGENT: Party = { kind: "run", run: "cc:dr6-agent" };
@@ -89,7 +90,7 @@ describe("AC-DR-6: file premises are quoted and pinned at write time", () => {
 
   beforeAll(() => {
     corpus = createPartyCorpus("dr6");
-    adr = corpus.slugOf(corpus.setup(["create", "adr", "--title", "DR6 ADR", "--decision-status", "accepted", "--no-ai", "--content", "# Decision\n\nbody"]));
+    adr = corpus.slugOf(corpus.setup(["create", "adr", "--parent", ensureRequirementsDocSlug((a) => corpus.setup(a)), "--title", "DR6 ADR", "--decision-status", "accepted", "--no-ai", "--content", "# Decision\n\nbody"]));
     const db = new Database(join(corpus.dir, ".lore", "lore.db"));
     try {
       db.query("UPDATE docs SET status = 'approved' WHERE slug = ?").run(adr);
@@ -98,7 +99,7 @@ describe("AC-DR-6: file premises are quoted and pinned at write time", () => {
     }
     // reason: BR-1482 — a decision's scores must cite the approved weight table of the command's kind (`document revision`
     // for `lore set`); the table is approved directly in the corpus file, as the ADR above is.
-    weightTable = corpus.slugOf(corpus.setup(["create", "knowledge", "--sub-type", "reference", "--title", "DR6 weights", "--no-ai", "--content", "# Weights\n\nbody"]));
+    weightTable = corpus.slugOf(corpus.setup(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => corpus.setup(a)), "--sub-type", "reference", "--title", "DR6 weights", "--no-ai", "--content", "# Weights\n\nbody"]));
     corpus.setup(["weights", "set", weightTable, "--kind", "document revision", "--dimension", "cost=1"]);
     const tableDb = new Database(join(corpus.dir, ".lore", "lore.db"));
     try {

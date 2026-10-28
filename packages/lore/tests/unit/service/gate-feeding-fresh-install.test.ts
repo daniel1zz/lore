@@ -78,6 +78,7 @@ import { err } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreConfig, LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -166,7 +167,7 @@ describe("CorpusService spec-create fallback — HAPPY", () => {
     const prd = await createApprovedPrd(service, "Root PRD");
 
     const skillCreate = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Team write-spec rules",
       content: "## Rule\n\nDistinctive team-authored rule text.",
       extra: { sub_type: "skill", skill: { applies_to: "spec" } },

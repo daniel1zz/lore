@@ -24,6 +24,7 @@ import { createRealProcessTablePort } from "../../../src/adapters/process-table-
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const STAMP = "2026-10-27T00:00:00.000Z";
 const R1 = "cc:ended-claim-r1";
 const R2 = "cc:ended-claim-r2";
@@ -110,7 +111,7 @@ describe("AC-RV-10: a claim ends with its run", () => {
     mkdirSync(join(tmpRoot, ".lore"), { recursive: true });
     dbPath = join(tmpRoot, ".lore", "lore.db");
     app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
-    const plan = await app.corpusService.create({ type: "plan", title: "Ended Claim Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await app.corpusService.create({ parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan", title: "Ended Claim Plan", content: "# Plan" } as CreateDocInput);
     if (!plan.ok) throw new Error(`plan: ${JSON.stringify(plan.error)}`);
     const task = await app.corpusService.create({
       type: "task",

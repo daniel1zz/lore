@@ -116,7 +116,7 @@ async function seedFixture(): Promise<Seeded> {
   await create("planLive", ["plan", "--title", "Live plan", "--parent", slugs["spec"] ?? "", "--content", "Plan."]);
   await create("planArchived", ["plan", "--title", "Archived adopter", "--parent", slugs["spec"] ?? "", "--content", "Plan."]);
   await create("planResolver", ["plan", "--title", "Archived resolver plan", "--parent", slugs["spec"] ?? "", "--content", "Plan."]);
-  await create("knowledge", ["knowledge", "--title", "Related note", "--sub-type", "reference", "--content", "Note."]);
+  await create("knowledge", ["knowledge", "--parent", slugs["spec"] ?? "", "--title", "Related note", "--sub-type", "reference", "--content", "Note."]);
   await create("taskThree", adhoc("Task resolving three"));
   await create("taskTwo", adhoc("Task resolving the unwritten verdict"));
   for (const number of numbers) await create(`m${number}`, adhoc(`Mirror ${number}`));

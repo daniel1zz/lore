@@ -33,6 +33,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -115,7 +116,7 @@ function createKnowledge(dir: string, title: string): { id: string; slug: string
   const out = execFileSync(
     "bun",
     [
-      LORE_ENTRY, "create", "knowledge",
+      LORE_ENTRY, "create", "knowledge", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, dir),
       "--title", title,
       "--sub-type", "reference",
       "--content", `# ${title}\n\nThe corpus is the only place this body is authored.\n`,

@@ -28,6 +28,7 @@ import { resolveDoc } from "../../../src/service/resolve.js";
 import type { CreateDocInput, DocRecord, DocType, LoreConfig, UatVerdict } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const ACCEPT_VERDICT: UatVerdict = {
@@ -81,7 +82,7 @@ async function makeDocOfType(cs: CorpusService, type: DocType): Promise<DocRecor
   }
   if (type === "adr") {
     return mustCreate(cs, {
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(cs), type: "adr",
       title: "Test adr",
       content: "body",
       extra: { decision_status: "accepted" },
@@ -89,13 +90,13 @@ async function makeDocOfType(cs: CorpusService, type: DocType): Promise<DocRecor
   }
   if (type === "knowledge") {
     return mustCreate(cs, {
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(cs), type: "knowledge",
       title: "Test knowledge",
       content: "body",
       extra: { sub_type: "reference" },
     });
   }
-  const plan = await mustCreate(cs, { type: "plan", title: "Parent plan", content: "body", extra: {} });
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Parent plan", content: "body", extra: {} });
   if (type === "task") {
     return mustCreate(cs, {
       type: "task",
@@ -123,6 +124,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 async function makePlan(cs: CorpusService, extra: Record<string, unknown> = {}): Promise<DocRecord> {
   const input: CreateDocInput = {
+    parent_id: await ensureRequirementsDocId(cs),
     type: "plan",
     title: "Test plan",
     content: "## Plan\n\nbody",
@@ -147,7 +149,7 @@ describe("SPEC-054 AC-054-5 — direct create of sub_type 'uat' is rejected", ()
   it("NEGATIVE: CorpusService.create with sub_type 'uat' returns VALIDATION_ERROR naming lore uat record", async () => {
     const { corpusService } = makeHarness();
     const result = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "forged uat",
       content: "x",
       extra: { sub_type: "uat", uat: ACCEPT_VERDICT },

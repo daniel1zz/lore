@@ -27,6 +27,7 @@ import { renderHandoffContent, DEGRADED_HANDOFF_MARKER, canonicaliseBody } from 
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -47,7 +48,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 describe("SessionService.writeHandoff — HAPPY (AC-SL-3)", () => {
   it("creates a draft knowledge/handoff doc parented to the given plan, content = renderHandoffContent projection", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan A", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan A", content: "# Plan" } as CreateDocInput);
     const task = await mustCreate(corpusService, {
       type: "task",
       title: "Task A",
@@ -92,7 +93,7 @@ describe("SessionService.writeHandoff — HAPPY (AC-SL-3)", () => {
 
   it("defaults task_refs/modified_files/key_decisions to [] rather than leaving them undefined", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan B", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan B", content: "# Plan" } as CreateDocInput);
 
     const result = await sessionService.writeHandoff({
       by: "claude",
@@ -181,7 +182,7 @@ describe("SessionService.writeHandoff — ERROR (AC-SL-12)", () => {
 
   it("plan_ref pointing at a soft-deleted plan → VALIDATION_ERROR", async () => {
     const { store, corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Doomed Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Doomed Plan", content: "# Plan" } as CreateDocInput);
     const deleted = await store.softDelete(plan.id);
     if (!deleted.ok) throw new Error(JSON.stringify(deleted.error));
 
@@ -200,7 +201,7 @@ describe("SessionService.writeHandoff — ERROR (AC-SL-12)", () => {
 
   it("plan_ref pointing at a non-plan doc (a task) → VALIDATION_ERROR", async () => {
     const { corpusService, sessionService } = makeServices();
-    const plan = await mustCreate(corpusService, { type: "plan", title: "Parent Plan", content: "# Plan" } as CreateDocInput);
+    const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Parent Plan", content: "# Plan" } as CreateDocInput);
     const task = await mustCreate(corpusService, {
       type: "task",
       title: "Some Task",
@@ -275,7 +276,7 @@ describe("SessionService.writeHandoff — REGRESSION: pre-existing knowledge sub
     const { corpusService } = makeServices();
 
     const ideation = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "An idea",
       content: "# Idea",
       extra: { sub_type: "ideation" },
@@ -283,7 +284,7 @@ describe("SessionService.writeHandoff — REGRESSION: pre-existing knowledge sub
     expect(ideation.ok).toBe(true);
 
     const retro = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "A retro",
       content: "# Retro",
       extra: { sub_type: "retro" },
@@ -291,7 +292,7 @@ describe("SessionService.writeHandoff — REGRESSION: pre-existing knowledge sub
     expect(retro.ok).toBe(true);
 
     const reference = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "A reference",
       content: "# Reference",
       extra: { sub_type: "reference" },

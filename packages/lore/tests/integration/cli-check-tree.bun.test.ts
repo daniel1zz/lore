@@ -33,6 +33,8 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+import { detachParentInDb } from "../helpers/detach-parent.js";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -141,12 +143,15 @@ function createSpec(tmpDir: string, title: string, parentSlug: string): string {
  * scenario below to construct a genuinely FIXABLE orphan.
  */
 function createOrphanAdr(tmpDir: string, title: string): string {
+  // reason: a decision record can no longer be created without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad
+  // D6), so the orphan is made by detaching the parent of a filed one: the legacy-data shape the orphan check exists for.
   const result = runLore(
-    ["create", "adr", "--title", title, "--decision-status", "accepted", "--no-ai"],
+    ["create", "adr", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--decision-status", "accepted", "--no-ai"],
     tmpDir,
   );
-  const match = result.stdout.match(/Slug:\s+(\S+)/);
-  return match?.[1] ?? "";
+  const slug = result.stdout.match(/Slug:\s+(\S+)/)?.[1] ?? "";
+  detachParentInDb(join(tmpDir, ".lore", "lore.db"), slug);
+  return slug;
 }
 
 // ─── Scenario 1: Consistent tree + blueprint → exit 0 ──────────────────────
@@ -410,7 +415,10 @@ describe("lore tree --orphans: orphans exist", () => {
     createPrd(tmpDir, "root-prd");
     // Plan without parent = orphan (non-root type, parent_id=null)
     // reason: --no-ai bypasses AI generation (SPEC-017) so test setup is not blocked by claude binary.
-    runLore(["create", "plan", "--title", "Orphaned Plan", "--no-ai"], tmpDir);
+    // reason: a plan can no longer be created without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6),
+    // so the orphan is made by detaching the parent of a filed one.
+    const orphan = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Orphaned Plan", "--no-ai"], tmpDir);
+    detachParentInDb(join(tmpDir, ".lore", "lore.db"), orphan.stdout.match(/Slug:\s+(\S+)/)?.[1] ?? "");
   });
 
   afterEach(() => cleanupDir(tmpDir));

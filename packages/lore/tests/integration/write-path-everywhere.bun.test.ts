@@ -63,6 +63,7 @@ import { createLiveApp } from "../helpers/live-app.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const CALLER = "agent:dcl5-caller";
 const AUTHOR = "agent:dcl5-original-author";
 const RUN = "cc:dcl5-run";
@@ -479,7 +480,7 @@ const SCENARIOS: readonly Scenario[] = [
     kind: "working-state",
     auditAction: "claim",
     seed: async (w) => {
-      const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
+      const plan = await mustCreate(w.seedCorpus, { parent_id: await ensureRequirementsDocId(w.seedCorpus), type: "plan", title: slugFor("plan"), content: "body" });
       const task = await mustCreate(w.seedCorpus, {
         type: "task", title: slugFor("task"), parent_id: plan.id, content: "body", extra: { plan_id: plan.id },
       });
@@ -491,7 +492,7 @@ const SCENARIOS: readonly Scenario[] = [
     kind: "working-state",
     auditAction: "evidence",
     seed: async (w) => {
-      const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
+      const plan = await mustCreate(w.seedCorpus, { parent_id: await ensureRequirementsDocId(w.seedCorpus), type: "plan", title: slugFor("plan"), content: "body" });
       const phase = await seedRaw(
         w.raw,
         makeDoc("phase" as DocType, slugFor("phase"), { parent_id: plan.id, extra: { plan_id: plan.id, checklist: [], track: [] } }),
@@ -539,7 +540,7 @@ const SCENARIOS: readonly Scenario[] = [
     kind: "working-state",
     auditAction: "update",
     seed: async (w) => {
-      const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
+      const plan = await mustCreate(w.seedCorpus, { parent_id: await ensureRequirementsDocId(w.seedCorpus), type: "plan", title: slugFor("plan"), content: "body" });
       const phase = await seedRaw(
         w.raw,
         makeDoc("phase" as DocType, slugFor("phase"), { parent_id: plan.id, extra: { plan_id: plan.id, checklist: [], track: [] } }),
@@ -553,7 +554,7 @@ const SCENARIOS: readonly Scenario[] = [
     kind: "working-state",
     auditAction: "update",
     seed: async (w) => {
-      const plan = await mustCreate(w.seedCorpus, { type: "plan", title: slugFor("plan"), content: "body" });
+      const plan = await mustCreate(w.seedCorpus, { parent_id: await ensureRequirementsDocId(w.seedCorpus), type: "plan", title: slugFor("plan"), content: "body" });
       return {
         docIds: [plan.id],
         run: async () =>

@@ -26,6 +26,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 interface Fixture {
   readonly store: InMemoryStore;
   readonly service: CorpusService;
@@ -90,7 +91,7 @@ async function approvedSpec(store: InMemoryStore, service: CorpusService, title 
 
 async function approvedRetro(store: InMemoryStore, service: CorpusService): Promise<DocRecord> {
   const retro = await mustCreate(service, {
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(service), type: "knowledge",
     title: "A retro",
     content: "what happened",
     extra: { sub_type: "retro" },

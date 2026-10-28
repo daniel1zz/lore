@@ -53,6 +53,7 @@ import {
 } from "../helpers/recording-gh-stub";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const REPO = "acme-test/read-surfaces-defect-channel";
 const REPO_ID = 770_100;
 const FEEDBACK_YAML = ["feedback:", "  upstream:", `    repo: ${REPO}`].join("\n");
@@ -123,7 +124,7 @@ async function seedPlanCarrier(corpus: string, title: string, number: number, ar
   try {
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const created = await cs.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(cs), type: "plan",
       title,
       content: "## Overview\n\nCarrier body.",
       extra: { issues: [{ repo_id: REPO_ID, number }] },

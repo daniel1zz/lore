@@ -16,6 +16,7 @@ import { type Telemetry, type TelemetryEvent, type AiGenerationEvent } from "@lo
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Capturing telemetry spy ─────────────────────────────────────────────────
 
 /** In-memory telemetry that captures all recorded events for test assertions. */
@@ -124,7 +125,7 @@ describe("HAPPY — create() records a telemetry event", () => {
   it("successful link() → 1 event with method=link and link_type in meta", async () => {
     const { service, telemetry } = makeServiceWithCapture();
     const prd = await service.create(prdInput("Source PRD"));
-    const adr = await service.create({ type: "adr", title: "ADR 1", extra: { decision_status: "proposed" } });
+    const adr = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "adr", title: "ADR 1", extra: { decision_status: "proposed" } });
     expect(prd.ok).toBe(true);
     expect(adr.ok).toBe(true);
     if (!prd.ok || !adr.ok) return;
@@ -189,7 +190,7 @@ describe("STATE — all 5 instrumented methods produce exactly 1 event per call"
     await service.search("state");
 
     // link — create another doc first
-    const created2 = await service.create({ type: "adr", title: "ADR Link Test", extra: { decision_status: "proposed" } });
+    const created2 = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "adr", title: "ADR Link Test", extra: { decision_status: "proposed" } });
     if (!created2.ok) throw new Error("create adr failed");
     await service.link(created2.value.slug, created.value.slug, "relates-to");
 

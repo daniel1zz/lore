@@ -23,6 +23,7 @@ import { PhaseService } from "../../../src/service/phase-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -39,7 +40,7 @@ async function createPlan(
   extraOpts: Record<string, unknown> = {},
 ): Promise<string> {
   const result = await cs.create({
-    type: "plan",
+    parent_id: await ensureRequirementsDocId(cs), type: "plan",
     title,
     extra: extraOpts,
   } as CreateDocInput);

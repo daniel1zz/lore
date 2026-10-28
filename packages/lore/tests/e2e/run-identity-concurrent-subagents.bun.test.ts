@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { registerRunInDb } from "../helpers/test-run-identity";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -95,7 +96,9 @@ function attest(command: string, agent: string | undefined): Promise<string> {
   });
 }
 
-const WRITE = 'lore create knowledge --sub-type reference --title "$1" --content body --no-ai';
+// reason: a knowledge record needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6); the command text
+// names the fixture's requirements document, so it is built once the corpus exists.
+let WRITE = "";
 
 /** Runs `fn` against the corpus registry/documents, read-write, with a lock wait so it never races a writer. */
 function withDb<T>(fn: (db: Database) => T, readonly = false): T {
@@ -128,6 +131,11 @@ beforeAll(() => {
   dbPath = join(corpus, ".lore", "lore.db");
   // The main session's harness is THIS process (an ancestor of both subagents' harnesses below).
   if (!registerRunInDb(dbPath, MAIN_RUN)) throw new Error("run registration found no runs table");
+  const parentSlug = ensureRequirementsDocSlug((args) => {
+    const p = spawnSync(LORE_BIN, args, { cwd: corpus, env: agentEnv({ LORE_HARNESS_RUN: MAIN_RUN }), encoding: "utf8" });
+    return { stdout: p.stdout, stderr: p.stderr, exitCode: p.status };
+  });
+  WRITE = `lore create knowledge --parent ${parentSlug} --sub-type reference --title "$1" --content body --no-ai`;
 });
 
 afterAll(() => {

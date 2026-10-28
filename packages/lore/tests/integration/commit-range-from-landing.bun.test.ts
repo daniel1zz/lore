@@ -33,6 +33,7 @@ import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const GIT_ENV = {
   ...process.env,
   GIT_AUTHOR_NAME: "Tester",
@@ -127,7 +128,7 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
       ...probeOverride,
     },
   );
-  const plan = await cs.create({ type: "plan", title: "Landing plan", content: "body" } as CreateDocInput);
+  const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Landing plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
     type: "task", title: "Landing task", parent_id: plan.value.id, content: "body", extra: { plan_id: plan.value.id },

@@ -60,6 +60,7 @@ import { registerTestRun } from "../../helpers/test-run-identity";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -160,7 +161,19 @@ function must<T>(r: { ok: boolean; value?: T; error?: unknown }, what: string): 
 }
 
 async function mkDoc(s: Svc, input: Record<string, unknown>, by: string): Promise<{ id: string; slug: string }> {
-  const r = await s.corpus.create(input as unknown as CreateDocInput, { by });
+  // reason: knowledge, decision and plan records need a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad
+  // D6); the fixture's requirements document is written by the same `by` so the attribution under test stays the caller's.
+  const needsParent = ["knowledge", "adr", "plan"].includes(String(input["type"])) && input["parent_id"] === undefined;
+  const parented = needsParent
+    ? {
+        ...input,
+        parent_id: await ensureRequirementsDocId({
+          list: (filter) => s.corpus.list(filter),
+          create: (doc) => s.corpus.create(doc, { by }),
+        }),
+      }
+    : input;
+  const r = await s.corpus.create(parented as unknown as CreateDocInput, { by });
   return must(r as never, `create ${String(input["type"])}`) as { id: string; slug: string };
 }
 

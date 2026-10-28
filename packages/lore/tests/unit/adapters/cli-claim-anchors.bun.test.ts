@@ -70,6 +70,7 @@ import { tmpdir, hostname } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -108,7 +109,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
 }
 
 async function createPlan(tmpDir: string, title: string): Promise<string> {
-  const result = await runLore(["create", "plan", "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
+  const result = await runLore(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }

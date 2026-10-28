@@ -21,6 +21,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 class RecordingCloser implements IssueCloser {
   readonly calls: string[] = [];
   async readIssue(ref: GithubIssueRef): Promise<Result<GithubIssueSnapshot, LoreError>> {
@@ -61,7 +62,7 @@ async function build() {
     } as CreateDocInput),
     "issue",
   );
-  const plan = await must(cs.create({ type: "plan", title: "Accepted with defects", content: "body" } as CreateDocInput), "plan");
+  const plan = await must(cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Accepted with defects", content: "body" } as CreateDocInput), "plan");
   return { store, cs, closer, issue, plan };
 }
 
@@ -96,7 +97,7 @@ describe("known defects are not issues the plan carries", () => {
   it("REGRESSION: a plan that carries the same kind of issue itself still closes it on archive", async () => {
     const w = await build();
     const carrierPlan = await must(
-      w.cs.create({ type: "plan", title: "Carries the issue", content: "body", extra: { issues: [{ repo_id: 123, number: 7 }] } } as CreateDocInput),
+      w.cs.create({ parent_id: await ensureRequirementsDocId(w.cs), type: "plan", title: "Carries the issue", content: "body", extra: { issues: [{ repo_id: 123, number: 7 }] } } as CreateDocInput),
       "carrier plan",
     );
 

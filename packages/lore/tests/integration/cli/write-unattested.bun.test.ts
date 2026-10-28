@@ -42,6 +42,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
 import { registerTestRun } from "../../helpers/test-run-identity.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -213,7 +214,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("a doc create under an unknown run id is refused and writes nothing under either name ($LORE_ACTOR is ignored)", async () => {
     const since = new Date().toISOString();
-    const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Unattested via session", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME, ...asRun(GHOST_A) });
+    const r = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME, ...asRun(GHOST_A) })), "--sub-type", "reference", "--title", "Unattested via session", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
     const written = await writtenSince(dir, since);
     expect(written.audit).toEqual([]);
@@ -301,7 +302,7 @@ describe("AC-RID-8: no run value at all", () => {
     const t = newTask(dir, "No flag author target");
     const since = new Date().toISOString();
     mustLore(["claim", t], dir, NAME_ENV);
-    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
+    mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID })), "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(`${row.action} by ${row.actor}`).not.toBe(`${row.action} by ${os}`);
@@ -348,7 +349,7 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
   it("a gated create under a session id: gate rows also carry the session name", async () => {
     const os = userInfo().username;
     const since = new Date().toISOString();
-    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Gate actor create", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
+    mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID })), "--sub-type", "reference", "--title", "Gate actor create", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {

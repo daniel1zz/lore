@@ -34,6 +34,7 @@ import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -47,7 +48,7 @@ async function createPlanWithPhases(
   ps: PhaseService,
   phaseNames: string[],
 ): Promise<string> {
-  const planR = await cs.create({ type: "plan", title: "Phased Plan", content: "body" } as CreateDocInput);
+  const planR = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Phased Plan", content: "body" } as CreateDocInput);
   if (!planR.ok) throw new Error(`plan create failed: ${JSON.stringify(planR.error)}`);
   for (const name of phaseNames) {
     const addR = await ps.addPhase(planR.value.id, name);

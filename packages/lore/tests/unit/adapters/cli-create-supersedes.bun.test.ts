@@ -205,6 +205,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
           type: "knowledge",
           title: "Should Not Be Created",
           "sub-type": "ideation",
+          parent: prd.slug,
           supersedes: task.slug,
           ai: false,
         });
@@ -229,6 +230,8 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
     try {
       await initLoreDb();
       const cmd = await importCreateCommand();
+      const prd = await createTitledDoc(cmd, { type: "prd", title: "Root PRD" });
+      expect(prd.exitCode).toBe(0);
       const knowledgeCountBefore = await countDocsOfType("knowledge", true);
       const output = captureOutput();
       try {
@@ -236,6 +239,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
           type: "knowledge",
           title: "Should Also Not Be Created",
           "sub-type": "ideation",
+          parent: prd.slug,
           supersedes: "knowledge-does-not-exist-at-all",
           ai: false,
         });
@@ -257,10 +261,13 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       await initLoreDb();
       const cmd = await importCreateCommand();
 
+      const prd = await createTitledDoc(cmd, { type: "prd", title: "Root PRD" });
+      expect(prd.exitCode).toBe(0);
       const oldKnowledge = await createTitledDoc(cmd, {
         type: "knowledge",
         title: "Old Knowledge Doc",
         "sub-type": "ideation",
+        parent: prd.slug,
       });
       expect(oldKnowledge.exitCode).toBe(0);
       expect(oldKnowledge.slug).toBeTruthy();
@@ -272,6 +279,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
           type: "knowledge",
           title: "New Knowledge Doc",
           "sub-type": "ideation",
+          parent: prd.slug,
           supersedes: oldKnowledge.slug,
           ai: false,
         });
@@ -307,10 +315,13 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       await initLoreDb();
       const cmd = await importCreateCommand();
 
+      const prd = await createTitledDoc(cmd, { type: "prd", title: "Root PRD" });
+      expect(prd.exitCode).toBe(0);
       const oldAdr = await createTitledDoc(cmd, {
         type: "adr",
         title: "Old Decision",
         "decision-status": "accepted",
+        parent: prd.slug,
       });
       expect(oldAdr.exitCode).toBe(0);
       expect(oldAdr.slug).toBeTruthy();
@@ -320,6 +331,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
           type: "adr",
           title: "New Decision",
           "decision-status": "accepted",
+          parent: prd.slug,
           supersedes: oldAdr.slug,
           ai: false,
         });

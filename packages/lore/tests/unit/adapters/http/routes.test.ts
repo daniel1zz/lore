@@ -85,6 +85,7 @@ import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
 import { actedStore } from "../../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../../helpers/parented-create.js";
 /** Always before any doc/judgment/audit entry created during a test run (SPEC-033 F1 routes). */
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -209,7 +210,7 @@ async function createPrd(title: string): Promise<{ id: string; slug: string }> {
 
 /** SPEC-037 D1 — fixture helpers for GET /api/ready/:planIdOrSlug tests. */
 async function createPlan(title: string): Promise<{ id: string; slug: string }> {
-  const result = await app.corpusService.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  const result = await app.corpusService.create({ parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return { id: result.value.id, slug: result.value.slug };
 }
@@ -318,7 +319,7 @@ describe("POST /api/docs", () => {
     });
 
     it("creates docs of different types successfully", async () => {
-      const { req: req1, url: url1 } = makePostRequest("/api/docs", { type: "plan", title: "Phase Plan" });
+      const { req: req1, url: url1 } = makePostRequest("/api/docs", { type: "plan", title: "Phase Plan", parent_id: await ensureRequirementsDocId(app.corpusService) });
       const res1 = await handleApiRoute(req1, url1, app, TEST_ACTOR);
       expect(res1!.status).toBe(201);
       const body1 = await parseResponse(res1!);

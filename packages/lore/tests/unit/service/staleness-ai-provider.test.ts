@@ -39,6 +39,7 @@ import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, DocRecord, StalenessBundle, Telemetry } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function makeMockTelemetry(): Telemetry {
@@ -65,7 +66,7 @@ function makeStalenessService(opts: { provider: InMemoryAIProvider }) {
 async function makeKnowledgeDoc(store: InMemoryStore, title = "Staleness Test K"): Promise<DocRecord> {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const result = await corpusService.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
     title,
     content: "This is the finding under probe.",
     extra: { sub_type: "retro" },

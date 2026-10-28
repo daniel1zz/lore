@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { claimBranchTask } from "../helpers/claim-branch-task.js";
 import { DEFAULT_TEST_RUN } from "../helpers/test-run-identity.js";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -103,7 +104,10 @@ class Fixture {
     this.git(["checkout", "-q", "--detach", "main"]);
     installShippedGuard(this.repo, `${this.repo}-guard-hooks`); // integrate requires the guard (BR-1273)
 
-    const created = sh(this.repo, "bun", ["run", INDEX_TS, "create", "knowledge", "--title", "Snapshot visible doc", "--sub-type", "reference", "--content", "present in the shared corpus", "--json"], this.env());
+    const created = sh(this.repo, "bun", ["run", INDEX_TS, "create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => {
+      const ran = sh(this.repo, "bun", ["run", INDEX_TS, ...a], this.env());
+      return { stdout: ran.stdout, stderr: ran.stderr, exitCode: ran.status };
+    }), "--title", "Snapshot visible doc", "--sub-type", "reference", "--content", "present in the shared corpus", "--json"], this.env());
     if (created.status !== 0) throw new Error(`lore create failed: ${created.stdout}${created.stderr}`);
     const slug = /"slug":\s*"([^"]+)"/.exec(created.stdout)?.[1];
     if (slug === undefined) throw new Error(`no slug in: ${created.stdout}`);

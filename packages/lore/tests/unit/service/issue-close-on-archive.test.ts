@@ -28,6 +28,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const NOW = "2026-10-12T10:00:00.000Z";
 const REPO_ID = 123;
 const REPO = "acme/widget";
@@ -118,7 +119,7 @@ const refsOf = (...numbers: number[]): Array<{ repo_id: number; number: number }
 async function createPlan(w: World, title: string, issues?: number[]): Promise<DocRecord> {
   return must(
     w.cs.create({
-      type: "plan", title, content: "body", ...(issues === undefined ? {} : { extra: { issues: refsOf(...issues) } }),
+      parent_id: await ensureRequirementsDocId(w.cs), type: "plan", title, content: "body", ...(issues === undefined ? {} : { extra: { issues: refsOf(...issues) } }),
     } as CreateDocInput),
     "plan",
   );
@@ -389,7 +390,7 @@ describe("carrier close REGRESSION: an App without the port behaves as before", 
     const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await must(
-      cs.create({ type: "plan", title: "Bare", content: "b", extra: { issues: refsOf(11) } } as CreateDocInput),
+      cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Bare", content: "b", extra: { issues: refsOf(11) } } as CreateDocInput),
       "plan",
     );
     await must(cs.set(plan.id, { status: "approved" }), "approve");

@@ -32,8 +32,12 @@ import { startHttpServer } from "../../../../src/adapters/http/index.js";
 import { createMachineAuthStores } from "../../../../src/adapters/http/machine-auth.js";
 import { liveAmbient, liveIo } from "../../../live-invocation.js";
 import { registerTestRun } from "../../../helpers/test-run-identity.js";
+import { SQLiteStore } from "../../../../src/store/sqlite-store.js";
+import { insertRequirementsDocWithoutHistory } from "../../../helpers/parented-create.js";
 
 interface Harness {
+  /** A requirements document inserted without history rows (these suites count and attribute every create row). */
+  readonly parentId: string;
   readonly dir: string;
   readonly dbPath: string;
   readonly app: App;
@@ -82,7 +86,7 @@ async function post(h: Harness, headers: Record<string, string>, title: string):
   return fetch(`${h.baseUrl}/api/docs`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({ type: "knowledge", title, content: "body", extra: { sub_type: "reference" } }),
+    body: JSON.stringify({ type: "knowledge", title, content: "body", parent_id: h.parentId, extra: { sub_type: "reference" } }),
   });
 }
 
@@ -124,7 +128,11 @@ describe.each(cases)("AC-HID-6: HTTP writes name their key or login ($label)", (
     const session = machineAuth.sessionStore.create("dashboard-local");
 
     const server = startHttpServer(app, { io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
+    const seedStore = new SQLiteStore(dbPath);
+    const parentId = await insertRequirementsDocWithoutHistory(seedStore);
+    seedStore.close();
     h = {
+      parentId,
       dir,
       dbPath,
       app,

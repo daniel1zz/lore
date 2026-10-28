@@ -23,6 +23,7 @@ import { createRealProcessTablePort } from "../../../src/adapters/process-table-
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { insertRequirementsDocWithoutHistory } from "../../helpers/parented-create.js";
 const INDEX_TS = new URL("../../../src/index.ts", import.meta.url).pathname;
 const STAMP = "2026-10-27T00:00:00.000Z";
 
@@ -30,6 +31,7 @@ let root: string;
 let corpus: string;
 let dbPath: string;
 let harnessB: ChildProcess;
+let parentId: string;
 
 function baseEnv(): Record<string, string> {
   const env: Record<string, string | undefined> = {
@@ -114,7 +116,7 @@ async function runUnderHarnessA(value: string, args: string[]): Promise<{ exit: 
   return { exit: match === null ? -1 : Number(match[1]), out, harnessPid: child.pid };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), "lore-session-boundary-"));
   mkdirSync(join(root, "home"), { recursive: true });
   corpus = join(root, "corpus");
@@ -123,6 +125,11 @@ beforeEach(() => {
   // reason: Bun.spawnSync, not node:child_process: the test run's spawn shims patch the node call twice under Bun.
   const init = Bun.spawnSync(["bun", "run", INDEX_TS, "init"], { cwd: corpus, env: baseEnv() });
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stdout.toString()}${init.stderr.toString()}`);
+  // reason: a plan needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6). The requirements document is
+  // inserted without history, so it adds no audit row: the tests below count and attribute every create row.
+  const seedStore = new SQLiteStore(dbPath);
+  parentId = await insertRequirementsDocWithoutHistory(seedStore);
+  seedStore.close();
   harnessB = spawn("sleep", ["600"], { stdio: "ignore" });
   if (harnessB.pid === undefined) throw new Error("could not start harness B");
 });
@@ -136,7 +143,7 @@ describe("AC-RV-9: the trust boundary is the session", () => {
   it("a value naming a run of ANOTHER session's harness process (B), used under A, is refused with exit 4 naming B's process", async () => {
     await seedRun("cc:B", "main", null, harnessB.pid as number);
     const before = auditRows().length;
-    const r = await runUnderHarnessA("cc:B", ["create", "plan", "--title", "Cross-session plan"]);
+    const r = await runUnderHarnessA("cc:B", ["create", "plan", "--parent", parentId, "--title", "Cross-session plan"]);
     expect(r.exit, r.out).toBe(4);
     expect(r.out).toContain(`harness process ${String(harnessB.pid)}`);
     expect(auditRows()).toHaveLength(before);
@@ -144,7 +151,7 @@ describe("AC-RV-9: the trust boundary is the session", () => {
 
   it("a value naming a SIBLING run of the same session (cc:A:y, used from cc:A:x's call) is accepted, exit 0, recorded as cc:A:y", async () => {
     await seedRun("cc:B", "main", null, harnessB.pid as number);
-    const r = await runUnderHarnessA("cc:A:y", ["create", "plan", "--title", "Sibling plan"]);
+    const r = await runUnderHarnessA("cc:A:y", ["create", "plan", "--parent", parentId, "--title", "Sibling plan"]);
     expect(r.exit, r.out).toBe(0);
     const creates = auditRows().filter((row) => row["action"] === "create");
     expect(creates.length).toBeGreaterThan(0);

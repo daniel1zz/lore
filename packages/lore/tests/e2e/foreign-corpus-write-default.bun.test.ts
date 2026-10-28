@@ -79,6 +79,7 @@ import { z } from "zod";
 import { GateCheckpointConfigSchema } from "@lore/core";
 import * as loreCore from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
 
 // ─── Path / spawn setup (mirrors worktree-corpus-resolution.bun.test.ts) ───
 
@@ -186,7 +187,9 @@ async function initCorpus(dir: string): Promise<void> {
  * worktree at `repo/.claude/worktrees/agent-x` carrying no `.lore/` of its
  * own. Returns both paths; every write in (a)/(b) targets `worktreePath`.
  */
-async function createNestedWorktreeFixture(prefix: string): Promise<{ repoRoot: string; worktreePath: string }> {
+async function createNestedWorktreeFixture(
+  prefix: string,
+): Promise<{ repoRoot: string; worktreePath: string; parentSlug: string }> {
   const repoRoot = mkScratchDir(`fcwd-${prefix}-repo-`);
 
   // Pins "every fixture is an mkdtemp repo asserted to live OUTSIDE the repo
@@ -203,6 +206,9 @@ async function createNestedWorktreeFixture(prefix: string): Promise<{ repoRoot: 
 
   initGitRepo(repoRoot);
   await initCorpus(repoRoot);
+  // reason: a knowledge record needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6); the
+  // requirements document is written natively in the parent corpus, so the foreign write below is the only foreign one.
+  const parentSlug = await ensureRequirementsDocSlugAsync((args) => runLore(args, repoRoot));
 
   mkdirSync(join(repoRoot, ".claude", "worktrees"), { recursive: true });
   const worktreeRelPath = join(".claude", "worktrees", "agent-x");
@@ -216,14 +222,16 @@ async function createNestedWorktreeFixture(prefix: string): Promise<{ repoRoot: 
   // non-foreign write, and neither (a) nor (b) would mean anything.
   expect(existsSync(join(worktreePath, ".lore"))).toBe(false);
 
-  return { repoRoot, worktreePath };
+  return { repoRoot, worktreePath, parentSlug };
 }
 
 /** A non-lifecycle corpus write — `lore create knowledge` — AC-CP-4's own example of the measured pollution vector. */
-function knowledgeCreateArgs(titleSuffix: string): string[] {
+function knowledgeCreateArgs(titleSuffix: string, parentSlug: string): string[] {
   return [
     "create",
     "knowledge",
+    "--parent",
+    parentSlug,
     "--sub-type",
     "reference",
     "--title",
@@ -266,8 +274,8 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
   it(
     "(a) BEHAVIOURAL DEFAULT: a non-lifecycle foreign write is refused by default — EXPECTED RED until the guard task lands",
     async () => {
-      const { worktreePath } = await createNestedWorktreeFixture("a");
-      const result = await runLore(knowledgeCreateArgs("a"), worktreePath);
+      const { worktreePath, parentSlug } = await createNestedWorktreeFixture("a");
+      const result = await runLore(knowledgeCreateArgs("a", parentSlug), worktreePath);
       assertForeignWriteRefused(result, "AC-CP-4(a)");
     },
     30000,
@@ -276,7 +284,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
   it(
     "(b) CONTROL: foreign_corpus_write.enabled:false in the project config leaves the identical write succeeding — VACUOUS until (a) is also green (see module header)",
     async () => {
-      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("b");
+      const { repoRoot, worktreePath, parentSlug } = await createNestedWorktreeFixture("b");
 
       // Same map key `resolveForeignCorpusWriteGateEnabled` reads
       // (config.ts) — "corpus-write", deliberately not one of the four real
@@ -288,7 +296,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
         ),
       );
 
-      const result = await runLore(knowledgeCreateArgs("b"), worktreePath);
+      const result = await runLore(knowledgeCreateArgs("b", parentSlug), worktreePath);
       // NOTE (per this file's module header): with no guard wired at all yet,
       // EVERY write succeeds regardless of this config knob — this assertion
       // is currently satisfied for the WRONG reason (vacuously) and only

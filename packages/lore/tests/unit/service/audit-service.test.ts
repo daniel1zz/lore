@@ -29,6 +29,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
+import { insertRequirementsDocWithoutHistory } from "../../helpers/parented-create.js";
 import { liveWriteActor, actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
@@ -43,8 +44,8 @@ function makeStore() {
   return { store, corpusService };
 }
 
-async function createPlan(cs: CorpusService, title = "Audit Test Plan"): Promise<string> {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+async function createPlan(cs: CorpusService, store: InMemoryStore, title = "Audit Test Plan"): Promise<string> {
+  const result = await cs.create({ parent_id: await insertRequirementsDocWithoutHistory(store), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return result.value.id;
 }
@@ -80,7 +81,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
     void planId;
 
     const result = await auditService.verify();
@@ -95,7 +96,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
 
     const result = await auditService.query({ doc_id: planId });
     expect(result.ok).toBe(true);
@@ -114,7 +115,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    await createPlan(corpusService);
+    await createPlan(corpusService, store);
 
     const result = await auditService.query({ doc_id: "01J5X7KZRF4AXRHX9WKE6DVP6P" });
     expect(result.ok).toBe(true);
@@ -130,7 +131,7 @@ describe("NEGATIVE — a versions row with no matching audit entry is a miss", (
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
 
     // Simulate a writer that forgot to audit: insertVersion with no appendAuditEntry.
     await store.insertVersion(
@@ -157,7 +158,7 @@ describe("BOUNDARY — no date skips a version (task-audit-verification-checks-e
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
     await store.insertVersion(
       baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2001-01-01T00:00:00.000Z" }),
     );
@@ -177,7 +178,7 @@ describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match"
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
 
     // versions row demands an audit entry at (planId, 3)...
     await store.insertVersion(
@@ -208,7 +209,7 @@ describe("STATE — every version is reported audited, reconstructed or missing"
   it("a backfill entry satisfies its version and counts as reconstructed; an original entry counts as audited", async () => {
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
-    const planId = await createPlan(corpusService); // version 1: audited by the create entry
+    const planId = await createPlan(corpusService, store); // version 1: audited by the create entry
 
     await store.insertVersion(
       baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2001-01-01T00:00:00.000Z" }),
@@ -234,7 +235,7 @@ describe("STATE — every version is reported audited, reconstructed or missing"
 
   it("an original entry wins: a version with BOTH an original and a backfill entry counts as audited", async () => {
     const { store, corpusService } = makeStore();
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
     await store.appendAuditEntry({
       timestamp: "2026-10-19T00:00:00.000Z",
       actor: "system",
@@ -252,7 +253,7 @@ describe("STATE — every version is reported audited, reconstructed or missing"
 
   it("a backfill entry never satisfies a different version of the same doc", async () => {
     const { store, corpusService } = makeStore();
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
     await store.insertVersion(
       baseVersionRow({ doc_id: planId, version: 3, action: "update", created_at: "2001-01-01T00:00:00.000Z" }),
     );
@@ -281,7 +282,7 @@ describe("REGRESSION — delete is excluded from the verifiable-action anchor se
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
 
     // Simulate exactly what CorpusService.delete's versions row looks like — action "delete",
     // version 0 sentinel — but WITHOUT the accompanying appendAuditEntry call.
@@ -310,7 +311,7 @@ describe("REGRESSION — an unrelated action family (\"judge\") does not mask a 
     const { store, corpusService } = makeStore();
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
 
     // A writer regression: an update versions row was inserted with NO accompanying
     // create/update/approve/reject/restore-family audit entry...
@@ -345,7 +346,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
     const auditService = new AuditService(store);
 
-    const planId = await createPlan(corpusService);
+    const planId = await createPlan(corpusService, store);
     const taskId = await createTask(corpusService, planId);
 
     const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });

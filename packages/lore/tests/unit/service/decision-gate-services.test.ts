@@ -24,6 +24,7 @@ import { DecisionGate, type DecisionDraft, type DecisionGitPort } from "../../..
 import { actedStore } from "../../live-invocation.js";
 import { approveAllPending } from "../../helpers/approve-baseline.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const noGit: DecisionGitPort = {
   headSha: () => ({ ok: true, value: "c".repeat(40) }),
   hasUncommittedChanges: () => ({ ok: true, value: false }),
@@ -78,7 +79,7 @@ async function mustCreate(corpus: CorpusService, input: CreateDocInput): Promise
 
 /** An approved ADR (the human writes it: a fixture is not under test). */
 async function approvedAdr(): Promise<DocRecord> {
-  const adr = await mustCreate(f.humanCorpus, { type: "adr", title: "Pick a store", content: "Chose A.", extra: { decision_status: "proposed" } } as CreateDocInput);
+  const adr = await mustCreate(f.humanCorpus, { parent_id: await ensureRequirementsDocId(f.humanCorpus), type: "adr", title: "Pick a store", content: "Chose A.", extra: { decision_status: "proposed" } } as CreateDocInput);
   const approved = await f.humanCorpus.set(adr.id, { status: "approved" });
   if (!approved.ok) throw new Error(`fixture approve failed: ${JSON.stringify(approved.error)}`);
   return approved.value;

@@ -77,6 +77,7 @@ import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const ORCHESTRATOR = "agent:main-orchestrator";
@@ -166,7 +167,7 @@ async function createPlanAndTasks(
   anchorsPerTask: string[][],
 ): Promise<{ planId: string; taskIds: string[] }> {
   const plan = await mustCreate(corpusService, {
-    type: "plan",
+    parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
     title: "Session Split Plan",
     content: "# Plan",
   } as CreateDocInput);

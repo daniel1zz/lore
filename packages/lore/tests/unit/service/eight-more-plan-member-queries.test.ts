@@ -48,6 +48,7 @@ import { SessionService } from "../../../src/service/session-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord, EvidenceEntry } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 
 // ─── Shared fixture helpers ───────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ async function createPlan(cs: CorpusService, parentId: string | null, title: str
   const result = await cs.create({
     type: "plan",
     title,
-    ...(parentId !== null ? { parent_id: parentId } : {}),
+    parent_id: parentId ?? (await ensureRequirementsDocId(cs)),
     content: "plan body",
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);

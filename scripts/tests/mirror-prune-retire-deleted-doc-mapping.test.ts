@@ -58,6 +58,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -161,7 +162,7 @@ function createKnowledgeDoc(tmpDir: string, title: string): string {
   const out = execFileSync(
     "bun",
     [
-      LORE_ENTRY, "create", "knowledge",
+      LORE_ENTRY, "create", "knowledge", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, tmpDir),
       "--title", title,
       "--sub-type", "reference",
       "--content", `# ${title}\n\nBody for ${title}.\n`,

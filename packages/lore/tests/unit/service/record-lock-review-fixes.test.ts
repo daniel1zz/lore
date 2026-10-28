@@ -20,6 +20,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeFixture(): { store: InMemoryStore; service: CorpusService } {
   const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
@@ -35,7 +36,7 @@ async function mustCreate(service: CorpusService, input: CreateDocInput): Promis
 
 async function approvedRetro(service: CorpusService): Promise<DocRecord> {
   const retro = await mustCreate(service, {
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(service), type: "knowledge",
     title: "A retro",
     content: "what happened",
     extra: { sub_type: "retro" },

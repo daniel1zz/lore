@@ -13,6 +13,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput, DocId } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
 function makeStore() {
@@ -58,8 +59,10 @@ async function createLegacyParentedSpec(
 }
 
 /** Create a valid ADR input */
-function adrInput(title = "Use TypeScript"): CreateDocInput {
+/** A decision record needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6): the caller passes one. */
+function adrInput(parent_id: string, title = "Use TypeScript"): CreateDocInput {
   return {
+    parent_id,
     type: "adr",
     title,
     extra: { decision_status: "proposed" },
@@ -200,7 +203,7 @@ describe("create", () => {
 
   it("AC-SVC-002.07: adr with valid extra.decision_status → role=decision", async () => {
     const { service } = makeService();
-    const result = await service.create(adrInput());
+    const result = await service.create(adrInput(await ensureRequirementsDocId(service)));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.type).toBe("adr");
@@ -209,7 +212,7 @@ describe("create", () => {
 
   it("AC-SVC-002.N01: adr without decision_status → VALIDATION_ERROR", async () => {
     const { service } = makeService();
-    const result = await service.create({ type: "adr", title: "Missing status" });
+    const result = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "adr", title: "Missing status" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -484,7 +487,7 @@ describe("get — ancestors (SPEC-036 §2 D1)", () => {
 describe("list — DocSummary meta field (AC-36-7)", () => {
   it("a freshly created task with no evidence/claim → meta is { t:'task', evidence_pass:0, evidence_fail:0 }, claimed_by absent; tags/priority present", async () => {
     const { service } = makeService();
-    const plan = await service.create({ type: "plan", title: "Plan For Task Meta" });
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Plan For Task Meta" });
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
 
@@ -926,8 +929,8 @@ describe("list", () => {
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
 
-    await service.create(adrInput("ADR 1"));
-    await service.create(adrInput("ADR 2"));
+    await service.create(adrInput(await ensureRequirementsDocId(service), "ADR 1"));
+    await service.create(adrInput(await ensureRequirementsDocId(service), "ADR 2"));
 
     const prds = await service.list({ type: "prd" });
     expect(prds.ok).toBe(true);
@@ -946,7 +949,7 @@ describe("list", () => {
     const { service } = makeService();
     await service.create(prdInput("Doc 1"));
     await service.create(prdInput("Doc 2"));
-    await service.create(adrInput("ADR 1"));
+    await service.create(adrInput(await ensureRequirementsDocId(service), "ADR 1"));
 
     const result = await service.list({});
     expect(result.ok).toBe(true);
@@ -1328,7 +1331,7 @@ describe("status", () => {
     const { service } = makeService();
     await service.create(prdInput("PRD 1"));
     await service.create(prdInput("PRD 2"));
-    await service.create(adrInput("ADR 1"));
+    await service.create(adrInput(await ensureRequirementsDocId(service), "ADR 1"));
 
     const result = await service.status();
     expect(result.ok).toBe(true);

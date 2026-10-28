@@ -108,8 +108,8 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-9 intern
 
   it("HAPPY: a write with no invoking actor records the literal `system` in version and audit rows", async () => {
     const { store, corpus, lock } = openFixture();
-    await createDoc(corpus, { type: "prd", title: "Root", content: "root" } as CreateDocInput);
-    const plan = await createDoc(corpus, { type: "plan", title: "Plan", content: "plan" } as CreateDocInput);
+    const root = await createDoc(corpus, { type: "prd", title: "Root", content: "root" } as CreateDocInput);
+    const plan = await createDoc(corpus, { type: "plan", parent_id: root.id, title: "Plan", content: "plan" } as CreateDocInput);
 
     const added = await new PhaseService(store, lock).addPhase(plan.id, "build");
     expect(added.ok).toBe(true);

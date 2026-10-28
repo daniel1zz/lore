@@ -41,6 +41,7 @@ import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } fr
 import { actedStore, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
 const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
@@ -126,7 +127,7 @@ async function seedPlanCarrier(corpusRoot: string, title: string, number: number
   const { cs, close } = bareService(corpusRoot);
   try {
     const created = await cs.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(cs), type: "plan",
       title,
       content: "## Overview\n\nCarrier body.",
       extra: { issues: [{ repo_id: STUB_REPO_ID, number }] },

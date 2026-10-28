@@ -23,6 +23,7 @@ import type { MockInstance } from "vitest";
 import { runCli } from "../../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "../../helpers/test-invocation";
 
+import { asCliRun, ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 const REPO_ROOT = resolve(import.meta.dirname, "../../../../..");
 const CLI_EXIT = join(REPO_ROOT, "packages/lore/src/adapters/cli/cli-exit");
 
@@ -169,7 +170,7 @@ describe("ES-E runCli returns the codes the typed handlers return", () => {
   it("returns 0 for a succeeding command, 4 for a validation refusal and 2 for an unknown flag", async () => {
     expect((await run(["init"])).code).toBe(0);
     expect((await run(["list", "--json"])).code).toBe(0);
-    expect((await run(["create", "plan", "--title", "Plan one", "--no-ai"])).code).toBe(0);
+    expect((await run(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync(async (a) => asCliRun(await run(a))), "--title", "Plan one", "--no-ai"])).code).toBe(0);
     // `done` of a plan is a validation refusal ("Expected a task document"), not a usage error
     expect((await run(["done", "plan-one"])).code).toBe(4);
     expect((await run(["list", "--definitely-not-a-flag"])).code).toBe(2);

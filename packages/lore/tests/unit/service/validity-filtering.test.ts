@@ -30,6 +30,7 @@ import { ValidityService } from "../../../src/service/validity-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -43,7 +44,7 @@ async function createKnowledge(
   extra: Record<string, unknown> = {},
 ): Promise<DocRecord> {
   const result = await cs.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(cs), type: "knowledge",
     title,
     content: `body mentioning ${title} findme`,
     extra: { sub_type: "ideation", ...extra },
@@ -53,7 +54,7 @@ async function createKnowledge(
 }
 
 async function createTask(cs: CorpusService): Promise<DocRecord> {
-  const planResult = await cs.create({ type: "plan", title: "Plan", content: "body" } as CreateDocInput);
+  const planResult = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Plan", content: "body" } as CreateDocInput);
   if (!planResult.ok) throw new Error("setup failed");
   const taskResult = await cs.create({
     type: "task",

@@ -56,6 +56,7 @@ import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Shared interleave helper ─────────────────────────────────────────────────
 
 /**
@@ -122,7 +123,7 @@ function makeTaskServices(config?: LoreConfig, withGate = true) {
 }
 
 async function createTopLevelPlan(cs: CorpusService): Promise<string> {
-  const plan = await mustCreate(cs, { type: "plan", title: "Top-Level Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Top-Level Plan", content: "# Plan" } as CreateDocInput);
   return plan.id;
 }
 

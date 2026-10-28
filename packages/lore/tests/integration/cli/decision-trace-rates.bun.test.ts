@@ -29,6 +29,7 @@ import { createApp, type App } from "../../../src/app.js";
 import { liveAmbient, liveWriteContext, LIVE_TEST_RUN } from "../../live-invocation.js";
 import { registerTestRun } from "../../helpers/test-run-identity.js";
 import { createItemsCorpus, RULE_ARGS, type ItemsCorpus } from "../../helpers/baseline-items-corpus.js";
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -104,7 +105,7 @@ describe("AC-DR-9: decision trace and decision rates", () => {
     await corpus.approveAll(corpus.leaf);
 
     // an approved rule-revision weight table, then a scored rule revision
-    const table = slugOf((await corpus.must(["create", "knowledge", "--sub-type", "reference", "--title", "Rule revision weights", "--no-ai", "--content", "# Weights\n\nA table.\n"])).stdout);
+    const table = slugOf((await corpus.must(["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => corpus.must(a)), "--sub-type", "reference", "--title", "Rule revision weights", "--no-ai", "--content", "# Weights\n\nA table.\n"])).stdout);
     await corpus.must(["weights", "set", table, "--kind", "rule revision", "--dimension", "evidence=0.6", "--dimension", "reach=0.4"]);
     await corpus.approveAll(table);
     const tableVersion = docRow(table).version;

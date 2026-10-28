@@ -30,6 +30,7 @@ import { actedStore } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const scratch: string[] = [];
 const closers: Array<() => void> = [];
 afterAll(() => {
@@ -59,7 +60,10 @@ function compose(kind: Kind) {
 }
 
 async function create(corpus: CorpusService, input: Record<string, unknown>): Promise<DocRecord> {
-  const r = await corpus.create(input as CreateDocInput);
+  // reason: knowledge, decision and plan records need a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6).
+  const needsParent = ["knowledge", "adr", "plan"].includes(String(input["type"])) && input["parent_id"] === undefined;
+  const parented = needsParent ? { ...input, parent_id: await ensureRequirementsDocId(corpus) } : input;
+  const r = await corpus.create(parented as CreateDocInput);
   if (!r.ok) throw new Error(`create failed: ${JSON.stringify(r.error)}`);
   return r.value;
 }

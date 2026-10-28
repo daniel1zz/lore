@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { registerRunInDb } from "../helpers/test-run-identity";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -91,7 +92,9 @@ function storedRuns(title: string): Array<string | null> {
 }
 
 /** The lore write every form performs: one knowledge document titled `title`. */
-const writeOf = (cmd: string, title: string): string => `${cmd} create knowledge --sub-type reference --title ${title} --content body --no-ai`;
+let parentSlug = "";
+
+const writeOf = (cmd: string, title: string): string => `${cmd} create knowledge --parent ${parentSlug} --sub-type reference --title ${title} --content body --no-ai`;
 
 interface Form {
   readonly name: string;
@@ -118,7 +121,7 @@ const FORMS: readonly Form[] = [
   { name: "negation", command: (t) => `! ${writeOf("lore", t)}`, exitCode: 1 },
   { name: "braces", command: (t) => `{ ${writeOf("lore", t)}; }` },
   { name: "env A=1", command: (t) => writeOf("env A=1 lore", t) },
-  { name: "xargs", command: (t) => `echo ${t} | xargs lore create knowledge --sub-type reference --content body --no-ai --title` },
+  { name: "xargs", command: (t) => `echo ${t} | xargs lore create knowledge --parent ${parentSlug} --sub-type reference --content body --no-ai --title` },
   { name: "timeout", command: (t) => writeOf("timeout 5 lore", t), skip: !hasTimeout },
   { name: "exec", command: (t) => writeOf("exec lore", t) },
   { name: "command", command: (t) => writeOf("command lore", t) },
@@ -142,7 +145,7 @@ beforeAll(() => {
   corpus = join(root, "corpus");
   mkdirSync(join(corpus, "dist"), { recursive: true });
   symlinkSync(LORE_BIN, join(corpus, "dist", "lore"));
-  writeFileSync(join(corpus, "package.json"), JSON.stringify({ name: "fixture", scripts: { dev: "lore create knowledge --sub-type reference --content body --no-ai --title" } }));
+  writeFileSync(join(corpus, "package.json"), JSON.stringify({ name: "fixture", scripts: {} }));
   const git = (a: string[]) => execFileSync("git", a, { cwd: corpus, stdio: ["ignore", "pipe", "pipe"] });
   git(["init", "-q", "-b", "main"]);
   git(["config", "user.email", "e2e@example.invalid"]);
@@ -154,6 +157,16 @@ beforeAll(() => {
   mustLore(["init"]);
   // The run's harness process is THIS process: every bash below descends from it.
   if (!registerRunInDb(join(corpus, ".lore", "lore.db"), RUN)) throw new Error("run registration found no runs table");
+  // reason: a knowledge record needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6), so the
+  // fixture files a requirements document first; the `dev` script is written after it because its text names that parent.
+  parentSlug = ensureRequirementsDocSlug((args) => {
+    const p = spawnSync(LORE_BIN, args, { cwd: corpus, env: agentEnv({ LORE_HARNESS_RUN: RUN }), encoding: "utf8" });
+    return { stdout: p.stdout, stderr: p.stderr, exitCode: p.status };
+  });
+  writeFileSync(
+    join(corpus, "package.json"),
+    JSON.stringify({ name: "fixture", scripts: { dev: `lore create knowledge --parent ${parentSlug} --sub-type reference --content body --no-ai --title` } }),
+  );
 });
 
 afterAll(() => {

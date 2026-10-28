@@ -38,6 +38,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ⛔ The script is loaded with a DYNAMIC import of a computed path, and its surface is typed here.
 // A static `import ... from "../../../../scripts/check-list-json-real-corpus-buffer.js"` makes
 // `tsc -p packages/lore/tsconfig.tests.json` pull a file outside its `rootDir` into the program
@@ -91,13 +92,14 @@ function makeFixtureDir(label: string): string {
   return dir;
 }
 
-function runLoreIn(dir: string, args: string[]): void {
+function runLoreIn(dir: string, args: string[]): string {
   const proc = spawnSync("bun", [LORE_ENTRY, ...args], {
     cwd: dir,
     encoding: "utf8",
     env: { ...process.env, HOME: dir, EDITOR: "true", CLAUDECODE: "1", CI: "true", LORE_AI_DEFAULT: "off" },
   });
   if (proc.status !== 0) throw new Error(`fixture setup: lore ${args.join(" ")} exited ${String(proc.status)}: ${proc.stderr}`);
+  return proc.stdout;
 }
 
 /** A run record carrying a synthetic stdout — for the verdict cases that need a payload the CLI no longer emits. */
@@ -115,9 +117,11 @@ function canonicalRow(slug: string): Record<string, unknown> {
 beforeAll(() => {
   seeded = makeFixtureDir("seeded");
   runLoreIn(seeded, ["init", "--author", "list-buffer-test"]);
+  // reason: a knowledge record needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6).
+  const parent = ensureRequirementsDocSlug((a) => ({ stdout: runLoreIn(seeded, a), stderr: "", exitCode: 0 }));
   for (let i = 1; i <= SEEDED_ROWS; i++) {
     runLoreIn(seeded, [
-      "create", "knowledge", "--sub-type", "reference", "--title", `Buffer Probe ${i}`,
+      "create", "knowledge", "--parent", parent, "--sub-type", "reference", "--title", `Buffer Probe ${i}`,
       "--content", `## Probe ${i}\n\nbody`, "--no-ai",
     ]);
   }

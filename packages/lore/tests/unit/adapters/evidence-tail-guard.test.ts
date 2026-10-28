@@ -54,6 +54,7 @@ import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 
@@ -95,7 +96,7 @@ afterEach(() => {
 });
 
 function createPlan(): string {
-  const r = runLore(["create", "plan", "--title", "Tail Guard Plan", "--no-ai", "--content", "body"], tmpDir);
+  const r = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Tail Guard Plan", "--no-ai", "--content", "body"], tmpDir);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const m = r.stdout.match(/Slug:\s+(\S+)/);
   if (!m?.[1]) throw new Error(`Could not extract plan slug from: ${r.stdout}`);

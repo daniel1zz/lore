@@ -42,6 +42,7 @@ import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
@@ -53,7 +54,7 @@ function makeServices(ttl = 120) {
 }
 
 async function createPlan(cs: CorpusService, title = "Test Plan"): Promise<string> {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return result.value.id;
 }

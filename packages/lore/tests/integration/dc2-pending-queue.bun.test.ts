@@ -26,6 +26,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
 const SPEC = "spec-defect-clusters-round-2-part-b-review-pending-queue-corpus";
 const SRC = new URL("../../src/", import.meta.url).pathname;
 
@@ -85,7 +86,7 @@ beforeEach(async () => {
   };
   inReviewSpec = await create("spec", "Queued in review spec");
   draftSpec = await create("spec", "Plain draft spec");
-  const plan = await create("plan", "Queue plan");
+  const plan = await create("plan", "Queue plan", ["--parent", draftSpec]);
   draftTask = await create("task", "Draft queue task", ["--parent", plan, "--plan-id", plan]);
 
   const move = await runLore(["set", inReviewSpec, "--status", "in-review"], dir);
@@ -142,7 +143,7 @@ describe(`${SPEC}#AC-DC2-11`, () => {
       expect(source, file).toContain("VALID_TRANSITIONS");
     }
     const k = await runLore(
-      ["create", "knowledge", "--title", "Archivable note", "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
+      ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, dir)), "--title", "Archivable note", "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
       dir,
     );
     expect(k.exitCode).toBe(0);

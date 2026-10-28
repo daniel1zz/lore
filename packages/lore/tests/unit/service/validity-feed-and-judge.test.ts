@@ -43,6 +43,7 @@ import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-
 import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeCorpusServices() {
@@ -86,7 +87,7 @@ async function createApprovedSkill(
   appliesTo = "spec",
 ): Promise<DocRecord> {
   const createResult = await cs.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(cs), type: "knowledge",
     title,
     content: "# Skill rules\nWrite good specs.",
     extra: { sub_type: "skill", skill: { applies_to: appliesTo } },

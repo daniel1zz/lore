@@ -44,6 +44,7 @@ import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const NOW = "2026-08-06T12:00:00.000Z";
 
 function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
@@ -61,7 +62,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 async function createPlan(cs: CorpusService): Promise<string> {
-  const plan = await mustCreate(cs, { type: "plan", title: "Anchor Probe Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Anchor Probe Plan", content: "# Plan" } as CreateDocInput);
   return plan.id;
 }
 

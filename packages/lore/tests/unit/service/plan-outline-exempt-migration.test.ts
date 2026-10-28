@@ -28,6 +28,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const SERVICE_MODULE = "../../../src/service/plan-outline-exempt-migration-service.js";
 
 const LEGACY = { reason: "domain doc tracked in a follow-up", by: "agent:old", at: "2026-07-26T00:00:00.000Z" };
@@ -36,7 +37,7 @@ async function fixture(): Promise<{ store: InMemoryStore; cs: CorpusService; pla
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const mkPlan = async (title: string, extra: Record<string, unknown>): Promise<DocRecord> => {
-    const r = await cs.create({ type: "plan", title, content: "plan body", extra } as CreateDocInput);
+    const r = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "plan body", extra } as CreateDocInput);
     if (!r.ok) throw new Error(`create plan failed: ${JSON.stringify(r.error)}`);
     return r.value;
   };

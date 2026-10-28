@@ -22,6 +22,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function validHandoffPayload(): Record<string, unknown> {
   return {
     sub_type: "handoff",
@@ -41,7 +42,7 @@ describe("CorpusService — handoff writer-identity guard (AC-SL-4)", () => {
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const result = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "x",
       content: "# x",
       extra: validHandoffPayload(),
@@ -75,7 +76,7 @@ describe("CorpusService — handoff writer-identity guard (AC-SL-4)", () => {
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const result = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "An idea",
       content: "# Idea",
       extra: { sub_type: "ideation" },

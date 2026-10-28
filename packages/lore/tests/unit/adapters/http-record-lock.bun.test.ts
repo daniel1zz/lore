@@ -39,6 +39,7 @@ import type { App } from "../../../src/app.js";
 import { actedStore, liveIo } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
 interface TestContext {
@@ -141,7 +142,7 @@ async function lockedSpec(ctx: TestContext): Promise<DocRecord> {
 
 async function lockedAdr(ctx: TestContext): Promise<DocRecord> {
   const created = await ctx.app.corpusService.create({
-    type: "adr",
+    parent_id: await ensureRequirementsDocId(ctx.app.corpusService), type: "adr",
     title: "Locked ADR",
     content: "decision v1",
     extra: { decision_status: "proposed" },
