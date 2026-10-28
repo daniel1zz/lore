@@ -293,6 +293,8 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
 // is store-shared.ts; this module re-exports so a consumer of
 // StoreInterface's trace methods has ONE import surface for both).
 export type {
+  SuiteFileRunRecord,
+  SuiteResultRecord,
   CheckOutcomeInput,
   CheckOutcomeKind,
   CheckOutcomeStat,
@@ -309,6 +311,8 @@ export type {
   TraceStatsWindow,
 } from "./store-shared.js";
 import type {
+  SuiteFileRunRecord,
+  SuiteResultRecord,
   CheckOutcomeInput,
   CheckOutcomeStat,
   LeaseAcquisition,
@@ -1447,6 +1451,27 @@ export interface StoreInterface {
 
   /** One aggregate per check id (runs, denials, errors, first/last run, last denial), ordered by check id. */
   listCheckOutcomeStats(): Promise<Result<CheckOutcomeStat[], LoreError>>;
+
+  /**
+   * Append one `suite_results` row (migration-043, BR-1497). Append-only: a retry of an unrunnable commit is a NEW row
+   * with the next `attempt`. A second row for the same `(commit_sha, attempt)` is a STORE_ERROR (UNIQUE).
+   */
+  insertSuiteResult(record: SuiteResultRecord): Promise<Result<void, LoreError>>;
+
+  /** Every stored result of one commit, oldest attempt first; empty when the commit was never looked up. */
+  listSuiteResultsForCommit(commitSha: string): Promise<Result<SuiteResultRecord[], LoreError>>;
+
+  /** Every stored result, oldest `measured_at` first (ties by id). The main red/green state is derived from this list. */
+  listSuiteResults(): Promise<Result<SuiteResultRecord[], LoreError>>;
+
+  /** One stored result by its id, or null. */
+  getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>>;
+
+  /** Append per-file re-run rows (migration-043) in ONE write; an empty array writes nothing. */
+  insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>>;
+
+  /** The per-file re-runs attached to a suite result, in insertion order. */
+  listSuiteFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>>;
 
   /**
    * Record the question lore issued for a pending decision with its single-use nonce (migration-034, BR-1374).

@@ -4,7 +4,8 @@
  *
  * Purpose: give every plan's regression dimension the same measured run, without ever running the suite in the shared
  *   checkout and without writing the repo's `.lore`.
- * Public surface: createGitSuiteRunner, suiteChildEnv, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, resolveDirectImports.
+ * Public surface: createGitSuiteRunner (main's HEAD), createGitCommitSuiteRunner (any commit: resolve, run the suite,
+ *   re-run named test files; BR-1497), suiteChildEnv, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, FILE_TEST_SCRIPT, resolveDirectImports.
  * Invariants:
  *   - The commands are the project's own package.json scripts (`check:plan-close`, `test`) run with `bun run`; a script
  *     the project does not define is reported as skipped with that reason, never invented.
@@ -31,6 +32,7 @@ import {
   type SuiteRun,
   type SuiteRunnerPort,
 } from "../../service/milestone-review-inputs.js";
+import { loreErrorText, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../service/suite-result-service.js";
 
 /** The plan-close chain script (`bun run check:plan-close`). */
 export const PLAN_CLOSE_SCRIPT = "check:plan-close";
@@ -122,30 +124,109 @@ export function createGitSuiteRunner(
   /** Awaited after the suite was measured while the throwaway worktree still exists (stale-evidence refresh). */
   inWorktree?: (root: string, commit: string) => Promise<void>,
 ): SuiteRunnerPort {
+  const runner = createGitCommitSuiteRunner(cwd, env);
   return {
     run: async (): Promise<Result<SuiteRun, LoreError>> => {
-      const top = spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
-      if (top.status !== 0) return notMeasured(`not inside a git checkout: ${top.output.trim()}`);
-      const repoRoot = top.output.trim();
-      const head = spawn("git", ["rev-parse", "--verify", "main^{commit}"], repoRoot, env);
-      if (head.status !== 0) return notMeasured(`no \`main\` branch to measure: ${head.output.trim()}`);
-      const commit = head.output.trim();
-
-      const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
-      try {
-        const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repoRoot, env);
-        if (added.status !== 0) return notMeasured(`could not create the throwaway worktree: ${added.output.trim()}`);
-        const measured = measure(scratch, commit, suiteChildEnv(env));
-        if (inWorktree !== undefined) await inWorktree(scratch, commit);
-        return ok(measured);
-      } catch (cause) {
-        return err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
-      } finally {
-        rmSync(scratch, { recursive: true, force: true });
-        spawn("git", ["worktree", "prune"], repoRoot, env);
-      }
+      const resolved = await runner.resolveCommit("main");
+      if (!resolved.ok) return notMeasured(loreErrorText(resolved.error));
+      return runner.runSuite(resolved.value.commit, inWorktree);
     },
   };
+}
+
+/** The script a single test file is re-run with (`bun run test:file <file>`); a project without it cannot re-run files. */
+export const FILE_TEST_SCRIPT = "test:file";
+
+/**
+ * The same measurement as {@link createGitSuiteRunner}, generalised to any commit: resolve a ref, run the suite at a
+ * commit, re-run named test files at a commit. What is run does not change: `check:plan-close` then `test`, in a
+ * throwaway worktree of that commit, under the harness-free environment.
+ *
+ * @param cwd - any directory inside the project's checkout
+ * @param env - the environment the commands run with
+ * @returns a port; every method returns a Result and never throws
+ */
+export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv): CommitSuiteRunnerPort {
+  const repoRootOf = (): Result<string, LoreError> => {
+    const top = spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
+    if (top.status !== 0) return err({ code: "STORE_ERROR", message: `not inside a git checkout: ${top.output.trim()}` });
+    return ok(top.output.trim());
+  };
+
+  /** Runs `work` in a throwaway detached worktree of `commit`, removed afterwards whatever happens. */
+  const inThrowawayWorktree = async <T>(commit: string, work: (root: string) => Promise<T>): Promise<Result<T, LoreError>> => {
+    const repo = repoRootOf();
+    if (!repo.ok) return repo;
+    const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
+    try {
+      const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repo.value, env);
+      if (added.status !== 0) {
+        return err({ code: "STORE_ERROR", message: `could not create the throwaway worktree: ${added.output.trim()}` });
+      }
+      return ok(await work(scratch));
+    } catch (cause) {
+      return err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+      spawn("git", ["worktree", "prune"], repo.value, env);
+    }
+  };
+
+  return {
+    resolveCommit: async (ref) => {
+      const repo = repoRootOf();
+      if (!repo.ok) return repo;
+      const commit = spawn("git", ["rev-parse", "--verify", `${ref}^{commit}`], repo.value, env);
+      if (commit.status !== 0) return err({ code: "STORE_ERROR", message: `no commit \`${ref}\` to measure: ${commit.output.trim()}` });
+      const sha = commit.output.trim();
+      const tree = spawn("git", ["rev-parse", "--verify", `${sha}^{tree}`], repo.value, env);
+      if (tree.status !== 0) return err({ code: "STORE_ERROR", message: `no tree for commit ${sha}: ${tree.output.trim()}` });
+      return ok({ commit: sha, tree: tree.output.trim() });
+    },
+
+    runSuite: async (commit, inWorktree) => {
+      const ran = await inThrowawayWorktree(commit, async (root) => {
+        const measured = measure(root, commit, suiteChildEnv(env));
+        if (inWorktree !== undefined) await inWorktree(root, commit);
+        return measured;
+      });
+      // reason: a run that cannot be set up is `not_measured` with the reason (never a pass); an unexpected failure stays an err.
+      if (!ran.ok && ran.error.code === "STORE_ERROR" && loreErrorText(ran.error).startsWith("could not create the throwaway worktree")) {
+        return notMeasured(loreErrorText(ran.error));
+      }
+      return ran;
+    },
+
+    runFiles: async (commit, files) =>
+      inThrowawayWorktree(commit, async (root) => {
+        const childEnv = suiteChildEnv(env);
+        const prepared = prepareDependencies(root, childEnv);
+        if (prepared !== undefined) throw new Error(prepared);
+        const manifestPath = join(root, "package.json");
+        const manifest = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { scripts?: Record<string, string> }) : {};
+        if (manifest.scripts?.[FILE_TEST_SCRIPT] === undefined) {
+          throw new Error(`package.json at ${commit} defines no "${FILE_TEST_SCRIPT}" script, so single test files cannot be re-run`);
+        }
+        const outcomes: FileRunOutcome[] = [];
+        for (const file of files) {
+          const startedMs = Date.now();
+          const ran = spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv);
+          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs });
+        }
+        return outcomes;
+      }),
+  };
+}
+
+/** Installs dependencies in a fresh worktree when the project has some; returns the failure text, or `undefined` when ready. */
+function prepareDependencies(root: string, env: NodeJS.ProcessEnv): string | undefined {
+  const manifestPath = join(root, "package.json");
+  if (!existsSync(manifestPath)) return undefined;
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { dependencies?: object; devDependencies?: object };
+  const hasDependencies = Object.keys(manifest.dependencies ?? {}).length + Object.keys(manifest.devDependencies ?? {}).length > 0;
+  if (!hasDependencies || existsSync(join(root, "node_modules"))) return undefined;
+  const installed = spawn("bun", ["install", "--frozen-lockfile"], root, env);
+  return installed.status === 0 ? undefined : `dependency install in the throwaway worktree failed: ${tail(installed.output).trim()}`;
 }
 
 function measure(root: string, commit: string, env: NodeJS.ProcessEnv): SuiteRun {
@@ -164,13 +245,8 @@ function measure(root: string, commit: string, env: NodeJS.ProcessEnv): SuiteRun
     dependencies?: object;
     devDependencies?: object;
   };
-  const hasDependencies = Object.keys(manifest.dependencies ?? {}).length + Object.keys(manifest.devDependencies ?? {}).length > 0;
-  if (hasDependencies && !existsSync(join(root, "node_modules"))) {
-    const installed = spawn("bun", ["install", "--frozen-lockfile"], root, env);
-    if (installed.status !== 0) {
-      return { status: "not_measured", reason: `dependency install in the throwaway worktree failed: ${tail(installed.output).trim()}` };
-    }
-  }
+  const prepared = prepareDependencies(root, env);
+  if (prepared !== undefined) return { status: "not_measured", reason: prepared };
   const commands: SuiteCommandResult[] = [];
   const skipped: { command: string; reason: string }[] = [];
   let combined = "";

@@ -50,6 +50,8 @@ import type {
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
+  SuiteResultRecord,
+  SuiteFileRunRecord,
   CheckOutcomeInput,
   CheckOutcomeStat,
   PendingAskInput,
@@ -146,6 +148,9 @@ export class InMemoryStore implements StoreInterface {
   private readonly readCounts = new Map<string, number>();
   /** BR-1373 — mirrors `check_outcomes`: one entry per gate/hook run, append-only. */
   private readonly checkOutcomes: CheckOutcomeInput[] = [];
+  /** Mirrors `suite_results` / `suite_file_runs` (migration-043), in insertion order. */
+  private readonly suiteResults: SuiteResultRecord[] = [];
+  private readonly suiteFileRuns: SuiteFileRunRecord[] = [];
   /** BR-1374 — mirrors `pending_asks`: lore-issued questions with their single-use nonces, in issue order. */
   private readonly pendingAsks: Array<PendingAskInput & { used_at: string | null }> = [];
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
@@ -1872,6 +1877,36 @@ export class InMemoryStore implements StoreInterface {
   async appendCheckOutcomes(rows: readonly CheckOutcomeInput[]): Promise<Result<void, LoreError>> {
     for (const row of rows) this.checkOutcomes.push({ ...row });
     return ok(undefined);
+  }
+
+  async insertSuiteResult(record: SuiteResultRecord): Promise<Result<void, LoreError>> {
+    // reason: mirrors the UNIQUE (commit_sha, attempt) and PRIMARY KEY (id) constraints of migration-043.
+    if (this.suiteResults.some((r) => r.id === record.id || (r.commit_sha === record.commit_sha && r.attempt === record.attempt))) {
+      return err({ code: "STORE_ERROR", message: `suite_results: duplicate result for ${record.commit_sha} attempt ${String(record.attempt)}` });
+    }
+    this.suiteResults.push({ ...record });
+    return ok(undefined);
+  }
+
+  async listSuiteResultsForCommit(commitSha: string): Promise<Result<SuiteResultRecord[], LoreError>> {
+    return ok(this.suiteResults.filter((r) => r.commit_sha === commitSha).sort((a, b) => a.attempt - b.attempt));
+  }
+
+  async listSuiteResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
+    return ok([...this.suiteResults].sort((a, b) => (a.measured_at < b.measured_at ? -1 : a.measured_at > b.measured_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  }
+
+  async getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>> {
+    return ok(this.suiteResults.find((r) => r.id === id) ?? null);
+  }
+
+  async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {
+    for (const row of rows) this.suiteFileRuns.push({ ...row });
+    return ok(undefined);
+  }
+
+  async listSuiteFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    return ok(this.suiteFileRuns.filter((r) => r.suite_result_id === suiteResultId));
   }
 
   async issuePendingAsk(input: PendingAskInput): Promise<Result<void, LoreError>> {

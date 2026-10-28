@@ -2,8 +2,9 @@
  * @spec_ref spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and#AC-RV-11
  * @task task-red-tests-export-prefix-ancestry-verification-refusal (RED; implementation lands in a later task of the same plan)
  *
- * The child processes lore spawns carry the caller's run in their ENVIRONMENT (LORE_HARNESS_RUN) and pass no run flag:
- *   - the review batch (`spawnDetachedReviewBatch`): the child is a recording script, so its argv and env are observed;
+ * The DESCENDANT child processes lore spawns and waits for carry the caller's run in their ENVIRONMENT (LORE_HARNESS_RUN)
+ * and pass no run flag. A detached job (the post-integrate review batch) outlives its caller and is not a descendant: it
+ * writes under a delegated child run and is covered by AC-DJ-1 (detached-job-delegated-run.bun.test.ts, #501):
  *   - integrate's migrate step (`runSchemaMigration`): the command handed to the runner names no run flag;
  *   - the human channel (`createProductionHumanChannelPorts`): the argv it surfaces to the channel check names no run flag
  *     (agent ancestry is read from the value in the environment, not from argv).
@@ -11,14 +12,14 @@
  * Behaviour level over existing public functions. The two write-through-a-real-child cases (a migrate child that stamps its
  * write) belong to the end-to-end shell-form tests of the same plan (AC-RV-2); this file pins the spawn contracts.
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Invocation } from "@lore/core";
 import { createProductionHumanChannelPorts } from "../../../src/adapters/real-human-channel-port.js";
-import { spawnDetachedReviewBatch } from "../../../src/adapters/cli/review-batch-wiring.js";
+import { checkHumanChannelPreconditions, type HumanChannelPorts } from "../../../src/service/human-channel.js";
 import { runSchemaMigration } from "../../../src/service/integrate-service.js";
 
 const RUN = "cc:child-spawn-session";
@@ -35,37 +36,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-async function waitForFile(path: string, milliseconds: number): Promise<string> {
-  const deadline = Date.now() + milliseconds;
-  while (Date.now() < deadline) {
-    if (existsSync(path) && readFileSync(path, "utf8").includes("END")) return readFileSync(path, "utf8");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`the child never wrote ${path}`);
-}
-
-describe("AC-RV-11: spawned lore children inherit the verified run", () => {
-  it("review batch: the child's environment carries LORE_HARNESS_RUN and its argv carries no run flag", async () => {
-    const recorder = join(root, "recorder.sh");
-    const record = join(root, "record.txt");
-    writeFileSync(recorder, `#!/bin/sh\n{ echo "ENV=$LORE_HARNESS_RUN"; echo "ARGV=$*"; echo END; } > '${record}'\n`);
-    chmodSync(recorder, 0o755);
-
-    const spawned = spawnDetachedReviewBatch({
-      cwd: root,
-      corpusDir: join(root, "corpus"),
-      execPath: recorder,
-      isCompiled: true,
-      env: { PATH: process.env["PATH"] },
-      harnessRun: RUN,
-    });
-    expect(spawned.ok).toBe(true);
-
-    const seen = await waitForFile(record, 15_000);
-    expect(seen).toContain(`ENV=${RUN}`);
-    expect(seen).not.toContain(CALLER_FLAG);
-  }, 30_000);
-
+describe("AC-RV-11: spawned descendant lore children inherit the verified run", () => {
   it("integrate's migrate step: the command handed to the runner names no run flag", () => {
     const commands: string[] = [];
     runSchemaMigration(
@@ -107,5 +78,26 @@ describe("AC-RV-11: spawned lore children inherit the verified run", () => {
     const ports = createProductionHumanChannelPorts(inv);
     expect(ports.argv()).not.toContain(CALLER_FLAG);
     expect(ports.env()["LORE_HARNESS_RUN"]).toBe(RUN);
+  });
+
+  it("human channel: the agent-ancestry refusal reads the run VALUE from the environment, not argv", () => {
+    // every other check passes (terminals present, no agent marker, empty process table, no controlling terminal to open), so
+    // the ONLY thing that can end in `agent-ancestry` here is the run value in the environment
+    const portsWith = (env: Record<string, string>): HumanChannelPorts => ({
+      stdinIsTty: () => true,
+      stdoutIsTty: () => true,
+      env: () => env,
+      argv: () => [],
+      selfPid: () => 4242,
+      readProcessTable: () => ({ ok: true, value: [] }),
+      newNonce: () => "nonce",
+      openTerminal: () => null,
+    });
+    const carried = checkHumanChannelPreconditions(portsWith({ LORE_HARNESS_RUN: RUN }));
+    expect(carried.ok).toBe(false);
+    expect(carried.ok ? "" : carried.error.message).toBe("agent-ancestry: the environment carries an agent run identity (LORE_HARNESS_RUN)");
+    // control: the same ports without the value get past that check and stop at the missing terminal
+    const without = checkHumanChannelPreconditions(portsWith({}));
+    expect(without.ok ? "" : without.error.rule).toBe("tty-required");
   });
 });

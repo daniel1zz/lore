@@ -89,6 +89,8 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  SuiteResultRecord,
+  SuiteFileRunRecord,
   CheckOutcomeInput,
   CheckOutcomeStat,
   PendingAskInput,
@@ -164,6 +166,11 @@ import {
   isExemptionActive,
   NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
+  rowToSuiteResult,
+  rowToSuiteFileRun,
+  suiteResultJsonColumns,
+  type SuiteResultRow,
+  type SuiteFileRunRow,
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
@@ -189,6 +196,7 @@ import { applyMigration039 } from "./migrations/migration-039.js";
 import { applyMigration040 } from "./migrations/migration-040.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
+import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1048,6 +1056,20 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-041 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 43 && 43 <= ceiling) {
+      // reason: migration-043 creates suite_results + suite_file_runs (BR-1497) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 42.
+      try {
+        this.db.exec(MIGRATION_043_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-042 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3874,6 +3896,74 @@ export class SQLiteStore implements StoreInterface {
         }
       })();
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertSuiteResult(record: SuiteResultRecord): Promise<Result<void, LoreError>> {
+    try {
+      const json = suiteResultJsonColumns(record);
+      this.db.run(
+        `INSERT INTO suite_results (id, commit_sha, tree_sha, status, attempt, cause, commands, skipped, failing_files, duration_ms, measured_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [record.id, record.commit_sha, record.tree_sha, record.status, record.attempt, record.cause, json.commands, json.skipped, json.failing_files, record.duration_ms, record.measured_at],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listSuiteResultsForCommit(commitSha: string): Promise<Result<SuiteResultRecord[], LoreError>> {
+    try {
+      const rows = this.db.prepare("SELECT * FROM suite_results WHERE commit_sha = ? ORDER BY attempt ASC").all(commitSha) as SuiteResultRow[];
+      return ok(rows.map(rowToSuiteResult));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listSuiteResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
+    try {
+      const rows = this.db.prepare("SELECT * FROM suite_results ORDER BY measured_at ASC, id ASC").all() as SuiteResultRow[];
+      return ok(rows.map(rowToSuiteResult));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>> {
+    try {
+      const row = this.db.prepare("SELECT * FROM suite_results WHERE id = ?").get(id) as SuiteResultRow | null | undefined;
+      return ok(row === null || row === undefined ? null : rowToSuiteResult(row));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {
+    if (rows.length === 0) return ok(undefined);
+    try {
+      // reason: one transaction so a re-run's per-file rows land whole or not at all.
+      this.db.transaction(() => {
+        for (const row of rows) {
+          this.db.run(
+            "INSERT INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
+          );
+        }
+      })();
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listSuiteFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    try {
+      const rows = this.db.prepare("SELECT * FROM suite_file_runs WHERE suite_result_id = ? ORDER BY id ASC").all(suiteResultId) as SuiteFileRunRow[];
+      return ok(rows.map(rowToSuiteFileRun));
     } catch (e) {
       return wrapStoreError(e);
     }

@@ -29,6 +29,7 @@ import {
   foldMainRedRecords,
   type MainRedLedgerPort,
 } from "../../../src/service/milestone-review.js";
+import { SuiteResultService } from "../../../src/service/suite-result-service.js";
 import type { SuiteRun } from "../../../src/service/milestone-review-inputs.js";
 
 const DIMENSIONS = ["correctness_vs_acs", "spec_conformance", "regression", "design_necessity", "snapshot_accuracy", "concurrency_safety", "security"];
@@ -67,7 +68,11 @@ function ledger(): MainRedLedgerPort {
         if (!listed.ok) return listed;
         rows.push(...listed.value);
       }
-      return ok(rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} })));
+      const audited = rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} }));
+      // BR-1497: "main was checked at <commit>" is derived from the stored suite results, as app.ts does.
+      const derived = await new SuiteResultService({ store, now: () => clock, newId: () => "unused", clockMs: () => 0 }).listMainCheckedRows();
+      if (!derived.ok) return derived;
+      return ok([...audited, ...derived.value].sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0)));
     },
     appendRow: (row) =>
       store.appendAuditEntry({ timestamp: row.timestamp, actor: "agent:main-red-test", session_id: "main-red", action: row.action, details: { ...row.details } }),
@@ -92,7 +97,30 @@ function serviceWith(port: MainRedLedgerPort | undefined): MilestoneReviewServic
   return new MilestoneReviewService(deps);
 }
 
+let storedResults = 0;
+
+/** Stores the measured suite as the commit's suite result (production's lookup-or-run does this before the review reads main). */
+async function storeSuite(suite: SuiteRun | undefined): Promise<void> {
+  if (suite === undefined || suite.status !== "measured") return;
+  storedResults += 1;
+  const inserted = await store.insertSuiteResult({
+    id: `suite-${String(storedResults)}`,
+    commit_sha: suite.commit,
+    tree_sha: "t".repeat(40),
+    status: "measured",
+    attempt: 1,
+    cause: null,
+    commands: suite.commands,
+    skipped: suite.skipped,
+    failing_test_files: suite.failing_test_files,
+    duration_ms: 1,
+    measured_at: clock,
+  });
+  if (!inserted.ok) throw new Error(JSON.stringify(inserted.error));
+}
+
 async function review(service: MilestoneReviewService, suite: SuiteRun | undefined) {
+  await storeSuite(suite);
   return service.review("plan-one", { diffText: DIFF, diffSource: "fixture", maxDiffChars: 100000, ...(suite !== undefined ? { suite } : {}) });
 }
 
@@ -205,7 +233,10 @@ describe("AC-DC-6: main red is recorded locally at detection independent of issu
     await review(service, undefined);
     expect(await rawCount(MAIN_RED_ACTION)).toBe(0);
     expect(await rawCount(MAIN_RED_GREEN_ACTION)).toBe(0);
-    expect(await rawCount(MAIN_CHECKED_ACTION)).toBe(1);
+    // BR-1497: no second record of the run — nothing writes a main-checked audit row, the check is derived from the one stored result
+    expect(await rawCount(MAIN_CHECKED_ACTION)).toBe(0);
+    const derived = await ledger().listRows();
+    expect(derived.ok && derived.value.filter((r) => r.action === MAIN_CHECKED_ACTION)).toHaveLength(1);
   });
 
   it("AC-DC-6 a corrupt ledger row fails the review loudly instead of being skipped", async () => {
