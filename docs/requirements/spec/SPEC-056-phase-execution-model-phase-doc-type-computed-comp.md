@@ -6,7 +6,7 @@ title: "Phase execution model: phase doc type, computed completion, checklist/tr
 status: approved
 priority: medium
 created: 2026-07-19
-updated: 2026-10-17
+updated: 2026-10-28
 tags: []
 links:
   - {id: SPEC-070, type: relates-to}
@@ -140,7 +140,7 @@ Cut from v1 (P5 admission rule self-applied): `lintChecklistQuantifiability` —
 - [⚑] [script] AC-P-3: phase-claim gate passes the IMPORTED SPEC-042 anchor-overlap fixture on phase docs, includes same-actor NEGATIVE case (not rejected), and task-claim config alias emits exactly 1 deprecation warning, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/service/phase-claim-gate.test.ts
   other_command=2
-- [⚑] [script] AC-P-4: buildPhaseStartPack seeded fixture: T1 sections complete, T3 excludes invalidated docs, over-budget sections recorded in truncated[], zero-phase plan returns typed err, CLI and MCP payloads deep-equal, 0 failures
+- [⚑] [script] AC-P-4: buildPhaseStartPack seeded fixture: T1 sections complete, T3 excludes invalidated docs, over-budget sections recorded in truncated[], zero-phase plan returns typed err, two builds from identical deps and args deep-equal, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/flows/phase-feed-flow.test.ts
   other_command=3
 - [⚑] [script] AC-P-5: migration fixture (>=8 tasks, 3 plans, legacy_phase residue, multi-claim group, >50 merged evidence, empty declared phase): aggregate reconciliation diff 0, per-field fidelity asserted on >=2 phases, second run performs 0 new writes

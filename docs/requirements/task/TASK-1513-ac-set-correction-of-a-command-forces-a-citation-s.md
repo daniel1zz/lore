@@ -3,10 +3,10 @@ id: TASK-1513
 type: task
 role: plan
 title: "ac set --correction of a command forces a citation, so batch repoints mint wrong cites"
-status: draft
+status: deprecated
 priority: high
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-25
 tags: []
 parent: PLAN-197
 plan: PLAN-197

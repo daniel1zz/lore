@@ -7,13 +7,12 @@ status: archived
 priority: high
 phase: "Phase 1: Status set"
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-25
 tags: []
 parent: PLAN-180
 plan: PLAN-180
 links:
   - {id: TASK-1301, type: blocks}
-  - {id: TASK-1357, type: resolves}
 ---
 Estimate: S
 Approach: packages/core/src/task-workflow.ts:1071 set + JSDoc (record-lock reason, cite the spec); gate-predicates.ts:248-257 comment; check task-feed-wiring.ts consumes the shared set; update any test pinning active as refused (Risk R1).

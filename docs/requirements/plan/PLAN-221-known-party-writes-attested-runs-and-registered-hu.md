@@ -3,10 +3,10 @@ id: PLAN-221
 type: plan
 role: plan
 title: "Known-party writes: attested runs and registered human sessions only"
-status: approved
+status: archived
 priority: high
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: SPEC-225
 phases:

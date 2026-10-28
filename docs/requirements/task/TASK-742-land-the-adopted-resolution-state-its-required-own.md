@@ -7,12 +7,10 @@ status: archived
 priority: high
 phase: "m7"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-25
 tags: []
 parent: PLAN-132
 plan: PLAN-132
-links:
-  - {id: TASK-723, type: resolves}
 ---
 # Task Objective
 

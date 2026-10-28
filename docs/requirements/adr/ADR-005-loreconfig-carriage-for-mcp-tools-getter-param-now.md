@@ -6,10 +6,12 @@ title: "LoreConfig carriage for MCP tools — getter param now, App-field as str
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-26
+updated: 2026-10-28
 tags: []
 parent: SPEC-070
 ---
+> ⚠ INVALIDATED 2026-10-28T09:53:34.951Z — superseded by adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only; The lore MCP server is deleted (bba93a16); registerTools and its LoreConfig carriage no longer exist, so the proposed App.getConfig migration for MCP tools has nothing to migrate.
+
 # ADR — LoreConfig carriage for MCP tools: getter param now, App-field as the structural fix
 
 ## Context

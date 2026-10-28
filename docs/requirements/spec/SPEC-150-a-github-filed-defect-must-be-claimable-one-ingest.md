@@ -6,7 +6,7 @@ title: "A GitHub-filed defect must be claimable: one ingest seam turns a listed 
 status: approved
 priority: critical
 created: 2026-08-24
-updated: 2026-10-18
+updated: 2026-10-27
 tags: [defect-channel, github, intake, read-side, claimable]
 links:
   - {id: SPEC-145, type: relates-to}
@@ -226,7 +226,7 @@ Recorded per the discipline that a criterion changed after it was written must c
 - [⚑] [script] AC-GR-10: The GitHub listing is not a census of all defects: with local-only pre-GitHub reports present in the same corpus AND 3 seeded GitHub issues, the GitHub-shape listing prints EXACTLY 3 rows and its output contains the PINNED literal boundary line "pre-GitHub local-only reports are not listed here (see 'lore issues --local')" — pinned so 'names the boundary' is a substring assertion, not a reader's judgment. Covered by describe 'AC-GR-10: the GitHub listing excludes local-only reports and says so'. Falsifier: union the two sources and the row count exceeds 3; or drop the boundary line and the substring assertion fails.
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/github-issue-read-surface.bun.test.ts -t 'AC-GR-10' 2>&1 && echo 'AC-GR-10 PASS: the GitHub listing shows only the 3 GitHub issues and names the --local boundary'
   other_command=3
-- [⚑] [script] AC-GR-11: The MCP surface files and lands a claimable task: the test MUST obtain the handler by importing 'registerTools' (packages/lore/src/adapters/mcp/tools.ts:1434) and registering against a real McpServer — naming the symbol so a handler reconstructed from the same module cannot satisfy a literal reading — and the lore_report_issue handler then returns a success payload naming the created corpus task's slug under a GitHub-shaped feedback.upstream. Stated limit, not papered over: this drives the REGISTERED handler, not a spawned stdio server, because this repo has no MCP stdio harness (every tests/unit/adapters/mcp-*.test.ts calls handlers via registerTools). Falsifier: restore the isGithubUpstreamCfg refusal branch in adapters/mcp/tools.ts and the payload becomes the refusal error.
+- [⊖] [script] AC-GR-11: The MCP surface files and lands a claimable task: the test MUST obtain the handler by importing 'registerTools' (packages/lore/src/adapters/mcp/tools.ts:1434) and registering against a real McpServer — naming the symbol so a handler reconstructed from the same module cannot satisfy a literal reading — and the lore_report_issue handler then returns a success payload naming the created corpus task's slug under a GitHub-shaped feedback.upstream. Stated limit, not papered over: this drives the REGISTERED handler, not a spawned stdio server, because this repo has no MCP stdio harness (every tests/unit/adapters/mcp-*.test.ts calls handlers via registerTools). Falsifier: restore the isGithubUpstreamCfg refusal branch in adapters/mcp/tools.ts and the payload becomes the refusal error.
   script: test — bun run test:file packages/lore/tests/unit/adapters/mcp-github-filing.test.ts 2>&1 && echo 'AC-GR-11 PASS: the registered lore_report_issue handler files under the GitHub shape and names the created task slug'
   other_command=4
 - [⚑] [script] AC-GR-12: The read path never writes (G4's oracle, absent until the review named the gap): against a corpus holding 3 un-ingested GitHub issues, the count of corpus tasks carrying extra.issue_report and the target docs' version-log row counts are BYTE-EQUAL before and after a real dist/lore 'issues' run. Covered by describe 'AC-GR-12: lore issues mutates nothing'. Falsifier: have the read path call CorpusService.create for an un-ingested row and the task count rises from 0 to 3.
@@ -235,10 +235,8 @@ Recorded per the discipline that a criterion changed after it was written must c
 
 ## Code anchors
 
-- packages/lore/src/service/issue-task-shaping.ts#toIssueTaskInput
 - packages/lore/src/service/github-issue-listing.ts#joinListing
 - packages/lore/src/adapters/cli/report-issue-wiring.ts#resolveGithubIssueListing
 - packages/lore/src/adapters/cli/commands/issues.ts
 - packages/lore/src/adapters/cli/commands/issue.ts
-- packages/lore/src/adapters/mcp/tools.ts
 - packages/core/src/schemas.ts

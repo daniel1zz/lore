@@ -3,10 +3,10 @@ id: PLAN-234
 type: plan
 role: plan
 title: "Test runs own their temp dir: one run root holds HOME and TMPDIR, removed by its run"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-23
 tags: []
 parent: SPEC-204
 phases:

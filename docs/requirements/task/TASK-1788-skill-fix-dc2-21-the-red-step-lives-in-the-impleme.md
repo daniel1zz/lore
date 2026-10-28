@@ -7,13 +7,11 @@ status: archived
 priority: medium
 phase: "wave-1"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-226
 plan: PLAN-226
 links:
-  - {id: TASK-879, type: resolves}
-  - {id: TASK-896, type: resolves}
   - {id: TASK-1675, type: blocks}
 ---
 Estimate: M

@@ -6,7 +6,7 @@ title: "Session layer part 2: session registry + file-anchor claim safety (S3)"
 status: approved
 priority: high
 created: 2026-07-11
-updated: 2026-10-17
+updated: 2026-10-27
 tags: [session, claims, file-anchors, spec-042, write-conflict]
 ---
 # SPEC-042 — Session layer part 2: session registry + file-anchor claim safety (PRD §15 S3)
@@ -316,7 +316,7 @@ three lenses independently returned revise-then-approve; v2 incorporates:
   script: test — bunx vitest run packages/lore/tests/unit/service/file-anchors-validation.test.ts
 - [⚑] [script] AC-S3-6: Sessions projection: distinct-by claims group into distinct sessions; same-by same-machine distinct-worktree claims form TWO sessions (D1 composite key); legacy machine-less claims by one actor form ONE session (absent field is a stable key); two claims both stale yield sessions [] (staleness filter); anchorless advisory fires only when at least one sibling declares anchors, zero-adoption plan shows NO marker; mutation-counting proxy records zero writes during ready and bootstrap
   script: test — bunx vitest run packages/lore/tests/unit/service/session-registry.test.ts
-- [⚑] [script] AC-S3-8: MCP parity: lore_claim machine/worktree/branch persisted; lore_anchor_set replaces anchors while preserving claim and evidence; lore_ready equals CLI --json after unwrapping envelopes and normalizing wall-clock-derived subfields (age_minutes, stale) with self-consistency asserted on the normalized fields; lore_bootstrap exposes active_sessions
+- [⊖] [script] AC-S3-8: MCP parity: lore_claim machine/worktree/branch persisted; lore_anchor_set replaces anchors while preserving claim and evidence; lore_ready equals CLI --json after unwrapping envelopes and normalizing wall-clock-derived subfields (age_minutes, stale) with self-consistency asserted on the normalized fields; lore_bootstrap exposes active_sessions
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-session-registry.test.ts
 - [⚑] [script] AC-S3-9: Tree claim badge renders claimed:by@branch when branch present and claimed:by without; stale suffix and evidence counts unchanged (REGRESSION)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/tree-claim-badge.test.ts

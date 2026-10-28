@@ -8,8 +8,6 @@ priority: high
 created: 2026-10-15
 updated: 2026-10-17
 tags: [lifecycle, gates]
-links:
-  - {id: TASK-1246, type: resolves}
 ---
 # Spec: An active spec counts as approved for claiming its tasks and approving plans under it
 

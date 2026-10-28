@@ -47,7 +47,7 @@ Declared after landing.
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-P0C-1: BR-494: a filing through lore report-issue with a stub gh produces an issue body that opens with the filing field block followed, in order, by description, expected, actual and repro command, and the command prints the issue number and address and exits 0 — asserted by describe 'BR-494 filed issue body' in report-issue-body-contract.bun.test.ts
+- [⊘] [script] AC-P0C-1: BR-494: a filing through lore report-issue with a stub gh produces an issue body that opens with the filing field block followed, in order, by description, expected, actual and repro command, and the command prints the issue number and address and exits 0 — asserted by describe 'BR-494 filed issue body' in report-issue-body-contract.bun.test.ts
   script: test — bunx --bun vitest run --testTimeout=120000 --hookTimeout=120000 packages/lore/tests/integration/cli/report-issue-body-contract.bun.test.ts && echo 'AC-P0C-1 PASS: BR-494 filed body order + number/address + exit 0'
   other_command=1
 - [⚑] [script] AC-P0C-2: BR-613: a blank or whitespace-only node label is refused on both RuleService.addNode and CorpusService.create and creates no document; an unknown tree or a kind outside its tree stays refused — asserted by describe 'BR-613 node label, tree and kind' in baseline-field-bounds.test.ts

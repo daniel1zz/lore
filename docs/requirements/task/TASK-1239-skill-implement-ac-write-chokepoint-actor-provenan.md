@@ -7,14 +7,13 @@ status: archived
 priority: critical
 phase: "Phase 1: Write paths"
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-25
 tags: []
 parent: PLAN-178
 plan: PLAN-178
 links:
   - {id: TASK-1236, type: blocks}
   - {id: TASK-1233, type: blocks}
-  - {id: TASK-1295, type: resolves}
 ---
 Estimate: L
 Approach: one service function applyAcChange(spec,before,after,actor) that every write changing extra.acceptance_criteria passes through; CorpusService.create/set call it when the AC array differs (byte comparison of the canonical JSON); AcService verbs call it as the sanctioned path; refusal code AC_WRITE_NOT_VIA_AC_VERB; AC audit/version rows take the resolved actor

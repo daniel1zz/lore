@@ -3,15 +3,16 @@ id: PLAN-151
 type: plan
 role: plan
 title: "A spec carries its rule changes; the baseline takes them only when the spec lands"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-25
 tags: []
 parent: SPEC-176
 phases:
   - {name: "changeset", description: "T1 change set + gate + views"}
   - {name: "apply", description: "T2 apply + plan close"}
+  - {name: "migration", description: "live-corpus migration by the orchestrator"}
 ---
 # Plan — A spec carries its rule changes; the baseline takes them only when the spec lands
 

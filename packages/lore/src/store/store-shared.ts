@@ -45,7 +45,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import type { RunLifecycle, VersionKey } from "./store-interface.js";
+import type { AcExemptionRow, RunLifecycle, VersionKey } from "./store-interface.js";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
 
@@ -630,6 +630,38 @@ export function rowToVersionRecord(row: VersionRow): VersionRecord {
  */
 export function decisionToColumn(decision: DecisionRecord | null | undefined): string | null {
   return decision == null ? null : JSON.stringify(decision);
+}
+
+/** The `ac_exemptions` columns every read selects (migration-042 added `decision` and `harness_run`). */
+export const AC_EXEMPTION_COLUMNS = "doc_id, ac_id, reason, expires_at, granted_by, granted_at, decision, harness_run";
+
+/** Raw `ac_exemptions` row; `decision` is JSON text, both migration-042 columns NULL on older rows. */
+export interface AcExemptionDbRow {
+  doc_id: string;
+  ac_id: string;
+  reason: string;
+  expires_at: string;
+  granted_by: string;
+  granted_at: string;
+  decision?: string | null;
+  harness_run?: string | null;
+}
+
+/**
+ * Maps a raw exemption row to an {@link AcExemptionRow}: absence-tolerant like {@link rowToVersionRecord} (older rows omit
+ * the keys); a stored decision that no longer parses fails loud, never dropped.
+ */
+export function rowToAcExemption(row: AcExemptionDbRow): AcExemptionRow {
+  return {
+    doc_id: row.doc_id,
+    ac_id: row.ac_id,
+    reason: row.reason,
+    expires_at: row.expires_at,
+    granted_by: row.granted_by,
+    granted_at: row.granted_at,
+    ...(row.decision != null ? { decision: decisionRecordSchema.parse(JSON.parse(row.decision)) } : {}),
+    ...(row.harness_run != null ? { harness_run: row.harness_run } : {}),
+  };
 }
 
 export function rowToAuditEntry(row: AuditRow): AuditEntry {

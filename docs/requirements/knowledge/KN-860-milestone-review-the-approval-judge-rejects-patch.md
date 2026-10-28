@@ -1,0 +1,43 @@
+---
+id: KN-860
+type: knowledge
+role: knowledge
+title: "Milestone review: The approval judge rejects patch-shaped designs"
+status: approved
+priority: medium
+created: 2026-10-23
+updated: 2026-10-23
+tags: []
+parent: PLAN-209
+links:
+  - {id: PLAN-209, type: informs}
+---
+# Milestone review: FAIL
+
+Fingerprint: 9bdd6fc5988ad0e7f35120255a6617cebfa5fb3ee707a5162f3377df2104d069
+Diff: derived from 6 commit(s), excluding 0 merged in from main across the plan's tasks
+
+| Dimension | Verdict | Reason | Reference |
+|---|---|---|---|
+| correctness_vs_acs | fail | AC-DN-1 and AC-DN-2 pass on attested runs (review-template-v4.test.ts and plan-approval-judged-by-default.test.ts, each re-attested with an echo marker). AC-DN-3 is not met. It is a spec AC and the plan's post-merge step on the real judge, and its only evidence is two [self-reported] manual passes, so no trusted runner produced it. The first report also says it ran on 'prompt v5'. The landed registry holds only v1..v4, and review-template-v4.test.ts asserts REVIEW_TEMPLATES['v5'] is undefined, so that run could not have judged under the shipped v4 prompt. The second report ran after the end-state fixture was edited at 8aded5f2 ('without echoed class labels'), which means the control input was tuned until it passed. Neither run records the verdicts or the design_necessity findings for the two fixtures. There are no milestone decisions or overrides. | spec AC-DN-3; task evidence lines '[self-reported] manual pass ... prompt v5' and '... fixtures at commit 8aded5f2'; packages/lore/tests/unit/ai/review-template-v4.test.ts 'ERROR: an unknown version key is not registered' |
+| spec_conformance | pass | D1: buildReviewPromptV4 is v3 plus DESIGN_NECESSITY_RULE. The rule covers all four item classes (a) to (d), the end-state test, a mandatory reject with dimension design_necessity, and the exemption when the document says why. It applies to every doc type, is registered as v4 and set current, and v1-v3 are untouched, with byte-equality pinned by a frozen JSON snapshot. D2: the judgment_required_types default is now ["spec","adr","plan"], and an explicit project list is still honoured (HAPPY case with [spec]). D3: the produce fragment gains the one sentence, the manifest sha and SSOT hash are re-baselined, and no AC pins the sentence, as D3 asks. The one change outside the stated scope is review-service.ts, where the post-write plan gate now passes skipJudgmentGate: true. D2 needs it to work: otherwise the gate would measure version N+1, which no judgment covers, and refuse every judged plan. It adds no new behaviour beyond the spec. No new scanner or ledger was added (INV-1). | packages/lore/src/ai/review-template.ts DESIGN_NECESSITY_RULE / buildReviewPromptV4 / REVIEW_TEMPLATES; packages/core/src/config.ts judgment_required_types default; packages/lore/src/service/review-service.ts post-write enforceApprovalGate |
+| regression | fail | Full suite on main at db5480615339aebdde0cd35245b88cc9cbbd6dd9 fails in packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts, packages/lore/tests/integration/write-path-everywhere.bun.test.ts, which this plan's diff touched or imports directly (judge said: The full-suite run on main db548061 attributes two failing files to this plan. (1) packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts fails even though this diff edits it to set judgment_required_types: []. It is a compiled-binary test, so a stale dist or an incomplete fixture change leaves the shipped binary path unverified, which goes against INV-3. (2) packages/lore/tests/integration/write-path-everywhere.bun.test.ts is untouched by the diff. It most likely approves a plan without a judgment and is now refused by the new default. Behaviour at risk: existing flows that approve plans without a judgment. The other seven failing files are attributed to other work and are not counted.) | Full-suite section: 'Failing test files attributed to THIS plan: bootstrap-injection-compiled.bun.test.ts, write-path-everywhere.bun.test.ts'; plan INV-3 |
+| design_necessity | pass | Each choice is needed and follows an external practice. (1) A new append-only prompt version that keeps v1-v3 frozen so past judgments stay reproducible follows immutable versioned artifacts and append-only schema migrations. (2) The frozen v1-v3 output snapshot follows golden-master or snapshot testing. (3) The design-necessity rule is a prompt rubric dimension rather than a deterministic detector, following rubric-based LLM-as-judge practice. (4) Gating plan approval through the existing default config list reuses the existing gate rather than adding one, as INV-1 requires. (5) Skipping the judgment gate in the post-write re-check, because the judgment was already enforced on the version being approved, follows check-once-then-act validation. (6) Requiring two agreeing runs per AC-DN-3 fixture follows self-consistency sampling for non-deterministic judges. (7) Test fixtures that turn off the orthogonal gate keep each test to one concern. No stopgap, scanner, ledger or phased migration was introduced. | Snapshot / golden-master testing (Feathers, 'Working Effectively with Legacy Code'; Jest snapshot testing); append-only versioned migrations (Flyway/Rails migrations); G-Eval / OpenAI Evals rubric-based LLM-as-judge; Wang et al. 2022 self-consistency; Google code review guide (single-concern tests) |
+| snapshot_accuracy | na | no cited rule is contradicted; not verified: BR-263 (unknown: no-code-anchors), BR-281 (unknown: no-code-anchors), BR-1237 (unknown: no-code-anchors) (All three cited rules (BR-263, BR-281, BR-1237) are 'unknown (no-code-anchors)'. None is contradicted by a failing run of its citing criterion, so this dimension cannot fail. The documents do match the code where they can be checked: the config JSDoc shows the ["spec","adr","plan"] default, and the REVIEW_TEMPLATES JSDoc names v4.) | Cited rule state: BR-263, BR-281, BR-1237 unknown (no-code-anchors) |
+| concurrency_safety | pass | The prompt change is a pure function, and the config default is read-only. The review-service change only removes a judgment re-check on the post-write version. The judgment is still enforced, before the write, on the version being approved, the same check-then-write window specs and ADRs already have. It adds no shared mutable state. The new and edited tests each use their own mkdtemp corpus and DB and append to their own config files, so parallel runs cannot interfere. | packages/lore/src/service/review-service.ts pre-write enforceApprovalGate + post-write skipJudgmentGate; plan-approval-judged-by-default.test.ts freshCorpus(mkdtemp) |
+| security | pass | No new input path, credential or privilege. The new prompt text is a static constant, and document content reaches the judge exactly as it did under v3. Adding plan to the default judged types tightens the approval gate rather than loosening it. The post-write skip cannot be used to bypass the gate, because the pre-write judgment check on the version being approved still runs, and overrides still go through the existing audited path. Tests seed judgments only into throwaway DBs. | OWASP ASVS V4 access control (gate tightened, not widened); packages/core/src/config.ts default; review-service.ts approve() |
+
+## Retired ACs
+
+- spec-a-retro-lesson-names-the-mechanism-that-stops-it-recurring:AC-RM-1 (spec deprecated): spec deprecated
+- spec-a-retro-lesson-names-the-mechanism-that-stops-it-recurring:AC-RM-2 (spec deprecated): spec deprecated
+- spec-a-retro-lesson-names-the-mechanism-that-stops-it-recurring:AC-RM-3 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-1 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-2 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-3 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-5 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-6 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-7 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-8 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-9 (spec deprecated): spec deprecated
+- spec-ambient-state-is-read-once-at-the-entry-owned-only-prune:AC-IV-4 (spec deprecated): spec deprecated

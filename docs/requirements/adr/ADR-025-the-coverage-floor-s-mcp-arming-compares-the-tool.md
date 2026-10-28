@@ -6,10 +6,12 @@ title: "The coverage floor's MCP arming compares the tool name's LAST segment de
 status: approved
 priority: high
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-28
 tags: []
 parent: PRD-001
 ---
+> ⚠ INVALIDATED 2026-10-28T09:53:36.740Z — superseded by adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only; The lore MCP server is deleted (bba93a16); no lore_feed MCP tool exists, so the MCP-shaped arming half of the resume coverage floor has no tool name to compare.
+
 # The coverage floor's MCP arming compares the tool name's LAST segment deliberately — a full-name match would silently disarm alias-registered consumers
 
 ## Context

@@ -478,6 +478,7 @@ export default defineLoreCommand({
             by: resolveActor(inv),
             decision: decision.draft,
             writerSource: inv.identity.claimedSource,
+            writerRun: inv.identity.harnessRun,
           });
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");

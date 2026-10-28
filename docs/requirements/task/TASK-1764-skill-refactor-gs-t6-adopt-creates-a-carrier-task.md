@@ -3,11 +3,11 @@ id: TASK-1764
 type: task
 role: plan
 title: "[Skill:refactor] GS-T6 adopt creates a carrier task; resolve writes only GitHub"
-status: approved
+status: archived
 priority: medium
 phase: "surfaces"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 plan: PLAN-224

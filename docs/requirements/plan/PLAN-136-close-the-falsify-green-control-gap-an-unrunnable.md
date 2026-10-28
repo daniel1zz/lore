@@ -6,14 +6,12 @@ title: "Close the falsify green-control gap: an unrunnable scratch worktree must
 status: archived
 priority: medium
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-25
 tags: []
 parent: SPEC-133
 phases:
   - {name: "green-control", description: "Insert the unmutated green control before the mutation, downgrade to inconclusive when it fails, and prove it with a test that constructs an unrunnable scratch worktree"}
   - {name: "surface-oracle", description: "Close the assess MAJOR: an oracle that observes the PERSISTED row and drives the --falsify CLI branch, plus the launch-failure inconsistency"}
-links:
-  - {id: TASK-748, type: resolves}
 ---
 Closes defect 01M0H8XP5JZTR8Q7BH6HV6YRM4 (task-lore-verify-falsify-compares-only-the-exit-code-so-an), measured 2026-08-21: 11 of 11 `lore verify --falsify` invocations recorded result:expected-fail + capture_source:runner while never executing their mutation — 10 criteria across 3 specs, a 100% false-match rate.
 

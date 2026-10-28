@@ -3,10 +3,10 @@ id: PLAN-166
 type: plan
 role: plan
 title: "P0 requirement coverage: falsifying criteria for 8 rules"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-25
 tags: []
 parent: SPEC-161
 phases:

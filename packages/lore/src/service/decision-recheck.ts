@@ -3,7 +3,9 @@
  *
  * Purpose: select the decisions that belong to a plan, re-verify each file / command source they rest on against git
  *   and a read-only re-run, and report findings; a wrong-when-written finding fails `snapshot_accuracy`.
- * Public surface: selectPlanDecisions, recheckDecision, recheckPlanDecisions, isRerunnableCommand,
+ * Exemption decisions (#481, BR-1492) are selected beside version rows: the exemptions of the plan's spec, and those a
+ *   plan task's claim run granted within its window; address `<spec slug>#exempt:<AC id>@<granted_at>`.
+ * Public surface: selectPlanDecisions, exemptionDecisionAddress, recheckDecision, recheckPlanDecisions, isRerunnableCommand,
  *   applyDecisionFindings, createWorktreeCommandRunner, CommandRunnerPort, DecisionRecheckDeps; the judged half:
  *   buildJudgedDecisionInputs, judgedFindingsOf, rerunCitingCriteria, CriterionRerunPort.
  * Invariants:
@@ -57,6 +59,7 @@ import {
   type VersionRecord,
 } from "@lore/core";
 import { judgedDecisionsAnswerSchema, type JudgedDecisionInput } from "../ai/milestone-review-template.js";
+import { approvedRulesOf } from "./baseline-items.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import type { GitPort } from "./rule-state-service.js";
 import { resolveVerifyEnv } from "./verify-spawn.js";
@@ -70,7 +73,7 @@ export interface CommandRunnerPort {
 export interface DecisionRecheckDeps {
   readonly store: Pick<
     StoreInterface,
-    "listDecisionVersions" | "queryAudit" | "findBySlug" | "find" | "findLinks" | "findVersions" | "listRuleRegistry" | "listAcCites"
+    "listDecisionVersions" | "listDecisionExemptions" | "queryAudit" | "findBySlug" | "find" | "findLinks" | "findVersions" | "listRuleRegistry" | "listAcCites"
   >;
   readonly git: GitPort;
   readonly runner: CommandRunnerPort;
@@ -83,9 +86,18 @@ export type DecisionStoreDeps = Pick<DecisionRecheckDeps, "store">;
 export interface SelectedDecision {
   readonly address: string;
   readonly record: DecisionRecord;
-  /** The document the decision's write changed, and the version it created. */
+  /** The document the decision's write changed, and the version it created (absent for an exemption decision: no version row). */
   readonly docId: DocId;
-  readonly version: number;
+  readonly version?: number;
+}
+
+/**
+ * The address an exemption decision's findings name: `<spec slug>#exempt:<AC id>@<granted_at>` (granted_at is the ISO grant
+ * instant, so a renewed exemption of the same criterion is a different address). It is not a `<slug>@<version>` address, so
+ * `lore decision trace` cannot name it; `lore decision rates` and the milestone re-check use it as the decision's identity.
+ */
+export function exemptionDecisionAddress(specSlug: string, acId: string, grantedAt: string): string {
+  return `${specSlug}#exempt:${acId}@${grantedAt}`;
 }
 
 const SHELL_META = /[;&|<>`$(){}\\\n\r]/;
@@ -104,7 +116,8 @@ const RG_FLAGS = flagSpec(["-n", "-i", "-l", "-c", "-w", "-F", "--fixed-strings"
 const GIT_LOG_FLAGS = flagSpec(["--stat", "--name-only", "--name-status", "--oneline", "--no-color", "--no-ext-diff", "--no-textconv"], ["-n", "--max-count"]);
 const GIT_GREP_FLAGS = flagSpec(["-n", "-i", "-w", "-F", "-E", "-l", "-c", "--no-color"], ["-e"]);
 const LORE_FLAGS = flagSpec(["--json"], ["--limit", "--offset", "--type"]);
-const GIT_FLAGS: Readonly<Record<string, FlagSpec>> = { show: GIT_LOG_FLAGS, log: GIT_LOG_FLAGS, diff: GIT_LOG_FLAGS, grep: GIT_GREP_FLAGS };
+// reason: a Map, not an object literal — `GIT_FLAGS["constructor"]` on a literal finds an inherited member and would pass the allowlist.
+const GIT_FLAGS: ReadonlyMap<string, FlagSpec> = new Map([["show", GIT_LOG_FLAGS], ["log", GIT_LOG_FLAGS], ["diff", GIT_LOG_FLAGS], ["grep", GIT_GREP_FLAGS]]);
 const LORE_READ_VERBS = new Set(["get", "list", "search", "tree", "log"]);
 
 /** Whether every word of `args` is a positional or a flag of `spec` (a valued flag consumes the next word). */
@@ -153,7 +166,7 @@ export function isRerunnableCommand(command: string): boolean {
   if (program === "rg") return argsWithinSpec(args, RG_FLAGS);
   if (program === "git") {
     // reason: any option before the subcommand (-c, -C, --git-dir, --exec-path) makes `first` not a subcommand name.
-    const spec = first === undefined ? undefined : GIT_FLAGS[first];
+    const spec = first === undefined ? undefined : GIT_FLAGS.get(first);
     return spec !== undefined && argsWithinSpec(args.slice(1), spec);
   }
   if (program === "lore") {
@@ -338,11 +351,31 @@ export async function selectPlanDecisions(deps: DecisionStoreDeps, bundle: PlanB
     if (!slug.ok) return slug;
     selected.push({ address: `${slug.value}@${row.version}`, record: row.decision, docId: row.doc_id, version: row.version });
   }
+  // Exemption decisions (#481): the exemptions of the plan's spec, and those a plan task's claim run granted within its window.
+  const exemptions = await deps.store.listDecisionExemptions({
+    docIds: bundle.spec !== undefined ? [bundle.spec.id] : [],
+    windows: windows.value,
+  });
+  if (!exemptions.ok) return exemptions;
+  for (const row of exemptions.value) {
+    if (row.decision === undefined) continue;
+    const slug = await slugOfDoc(deps, row.doc_id, slugs);
+    if (!slug.ok) return slug;
+    const address = exemptionDecisionAddress(slug.value, row.ac_id, row.granted_at);
+    if (seen.has(address)) continue;
+    seen.add(address);
+    selected.push({ address, record: row.decision, docId: row.doc_id });
+  }
   return ok(selected);
 }
 
 async function slugOf(deps: DecisionStoreDeps, row: VersionRecord, cache: Map<string, string>): Promise<Result<string, LoreError>> {
   if (row.slug !== undefined) return ok(row.slug);
+  return slugOfDoc(deps, row.doc_id, cache);
+}
+
+async function slugOfDoc(deps: DecisionStoreDeps, docId: DocId, cache: Map<string, string>): Promise<Result<string, LoreError>> {
+  const row = { doc_id: docId };
   const cached = cache.get(row.doc_id);
   if (cached !== undefined) return ok(cached);
   const doc = await deps.store.find(row.doc_id);
@@ -392,17 +425,16 @@ function describeSource(source: DecisionRecord["premises"][number]["source"]): s
 /** The rule a decision's `before` replaced: the rule of the written version whose statement changed from `before`. */
 async function locateReworded(
   deps: DecisionStoreDeps,
-  decision: SelectedDecision,
+  decision: SelectedDecision & { readonly version: number },
   before: string,
 ): Promise<Result<{ readonly id: string; readonly after: string } | undefined, LoreError>> {
   const versions = await deps.store.findVersions(decision.docId, { limit: 1000 });
   if (!versions.ok) return versions;
   const statements = (version: number): Map<string, string> => {
     const row = versions.value.find((v) => v.version === version);
-    const rules = row?.extra["rules"];
     const found = new Map<string, string>();
-    if (!Array.isArray(rules)) return found;
-    for (const rule of rules as unknown[]) {
+    if (row === undefined) return found;
+    for (const rule of approvedRulesOf(row)) {
       const candidate = rule as { id?: unknown; statement?: unknown };
       if (typeof candidate.id === "string" && typeof candidate.statement === "string") found.set(candidate.id, candidate.statement);
     }
@@ -458,7 +490,8 @@ export async function buildJudgedDecisionInputs(deps: DecisionStoreDeps, bundle:
       inputs.push({ ...base, citing: [] });
       continue;
     }
-    const located = await locateReworded(deps, decision, before);
+    // reason: an exemption decision has no version row to compare against, so a `before` on it can never be located.
+    const located = decision.version === undefined ? ok(undefined) : await locateReworded(deps, { ...decision, version: decision.version }, before);
     if (!located.ok) return located;
     if (located.value === undefined) {
       inputs.push({ ...base, unlocatedBefore: before, citing: [] });

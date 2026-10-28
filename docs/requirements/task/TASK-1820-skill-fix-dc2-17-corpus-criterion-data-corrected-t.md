@@ -7,14 +7,10 @@ status: approved
 priority: medium
 phase: "wave-3"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: PLAN-226
 plan: PLAN-226
-links:
-  - {id: TASK-1197, type: resolves}
-  - {id: TASK-1196, type: resolves}
-  - {id: TASK-1152, type: resolves}
 ---
 Estimate: M
 Approach: spec-defect-clusters-round-2-part-c-criterion-data-demotion D17 end state; fix the root cause named there.

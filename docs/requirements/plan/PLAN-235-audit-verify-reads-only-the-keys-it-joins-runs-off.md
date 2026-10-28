@@ -3,10 +3,10 @@ id: PLAN-235
 type: plan
 role: plan
 title: "Audit verify reads only the keys it joins, runs off the HTTP request loop, and checks the anchor on every surface"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: SPEC-079
 phases:

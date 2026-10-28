@@ -7,14 +7,11 @@ status: approved
 priority: medium
 phase: "wave-5"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: PLAN-226
 plan: PLAN-226
 links:
-  - {id: TASK-886, type: resolves}
-  - {id: TASK-1174, type: resolves}
-  - {id: TASK-348, type: resolves}
   - {id: TASK-1818, type: blocks}
 ---
 Estimate: M

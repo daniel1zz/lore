@@ -1035,7 +1035,10 @@ interface WriteClassification {
  * changed, e.g. only `updated_at` moved) keeps its snapshot: it has no delta to put in audit, and the
  * history must never lose a write.
  */
-function classifyWrite(before: DocRecord, after: DocRecord): WriteClassification {
+function classifyWrite(before: DocRecord, after: DocRecord, carriesDecision = false): WriteClassification {
+  // reason: a decision lives on a versions row (`versions.decision`), so a write that carries one always snapshots, even
+  // when it touches only working-state keys such as `code_anchors` (BR-1491, #483): without the row the decision is lost.
+  if (carriesDecision) return { snapshot: true };
   // reason: a DocRecord has every `docs` column ContentComparableRow's index signature describes structurally.
   if (isContentChange(before.type, before as unknown as ContentComparableRow, after as unknown as ContentComparableRow)) return { snapshot: true };
   const stateChange = buildStateChange(before.type, before.extra, after.extra);
@@ -1560,7 +1563,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (request.versioning === "keep") return this.writeDocKeepingVersion(request, actor.value, now);
     const newVersion = doc.version + 1;
     const after: DocRecord = { ...doc, ...definedOnly(patch), version: newVersion, updated_at: now };
-    const classification = classifyWrite(doc, after);
+    const classification = classifyWrite(doc, after, request.decision !== undefined);
     const versionRecord: VersionRecord = {
       doc_id: doc.id,
       version: newVersion,
@@ -3996,7 +3999,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       abandonmentWrites = leafPlansToCompanionWrites(abandonment.value.leaves, resolvedActor, now, false);
     }
 
-    const classification = classifyWrite(existing, { ...existing, ...docPatch } as DocRecord);
+    const classification = classifyWrite(existing, { ...existing, ...docPatch } as DocRecord, decision !== undefined);
     const updateResult = await this.store.updateWithProvenance(
       existing.id,
       docPatch,

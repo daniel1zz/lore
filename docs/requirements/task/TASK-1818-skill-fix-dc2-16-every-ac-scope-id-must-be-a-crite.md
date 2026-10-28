@@ -7,13 +7,13 @@ status: approved
 priority: medium
 phase: "wave-6"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: PLAN-227
 plan: PLAN-227
 links:
-  - {id: TASK-1394, type: resolves}
   - {id: TASK-1819, type: blocks}
+  - {id: TASK-2088, type: blocks}
 ---
 Estimate: M
 Approach: spec-defect-clusters-round-2-part-b-review-pending-queue-corpus D16 end state; fix the root cause named there.

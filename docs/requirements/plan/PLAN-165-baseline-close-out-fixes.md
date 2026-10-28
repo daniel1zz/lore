@@ -3,10 +3,10 @@ id: PLAN-165
 type: plan
 role: plan
 title: "Baseline close-out fixes"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-25
 tags: []
 parent: SPEC-162
 phases:

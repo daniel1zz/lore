@@ -3,11 +3,11 @@ id: TASK-1606
 type: task
 role: plan
 title: "G1 tests pinning behaviour removed today follow the new behaviour"
-status: approved
+status: archived
 priority: medium
 phase: "G"
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-26
 tags: []
 parent: PLAN-211
 plan: PLAN-211

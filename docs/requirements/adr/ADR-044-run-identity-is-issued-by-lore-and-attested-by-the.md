@@ -6,7 +6,7 @@ title: "Run identity is issued by lore and attested by the harness; self-reporte
 status: approved
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-28
 tags: [identity, actor, claim, attestation]
 parent: PRD-001
 links:
@@ -42,7 +42,7 @@ Claude Code hands hooks a stable, distinct per-subagent `agent_id` at SubagentSt
 ## Decision
 
 1. **Run identity, issued by lore.** Each execution run — a main session or one subagent — is registered by lore and given a run id, with its type, harness reference (`session_id`, `agent_id`), parent run (lineage) and branch. Runs live in an append-only store table, not as corpus documents; local paths (worktree) stay out of the corpus (SPEC-025 non-goal).
-2. **Attested by the harness, never self-reported.** A harness adapter proves which run an invocation belongs to. For Claude Code: SessionStart registers the main run, SubagentStart registers a subagent run, PreToolUse (Bash and `mcp__lore__*`) injects the run into that single call via `updatedInput`, overwriting any value the caller supplied. Per-invocation, never through an environment variable.
+2. **Attested by the harness, never self-reported.** A harness adapter proves which run an invocation belongs to. For Claude Code: SessionStart registers the main run, SubagentStart registers a subagent run, PreToolUse (Bash and `mcp__lore__*`) injects the run into that single call via `updatedInput`, overwriting any value the caller supplied. Per-invocation, never through an environment variable. *Amended 2026-10-28: the `mcp__lore__*` half no longer exists; the lore MCP server was deleted on 2026-10-27 (`adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`), so PreToolUse attests Bash calls only.*
 3. **Two attribution fields on every write.** `attested_run` (from the adapter; absent when no adapter vouched) and `claimed` (from `--by` / `$LORE_ACTOR`, if any). Every surface prints `attested: <run | unattested> · claimed: <name>`. A write without attestation is labelled `unattested` — never guessed, never back-filled from the OS username.
 4. **Claims conflict by run.** On the same task, a fresh claim held by another attested run is a conflict requiring `--steal`, recorded as a takeover; an unattested claimant against an attested holder is a conflict too. Replaces BR-125's "same `by` = same holder" and answers CLAM Q2.
 5. **"The agent" is derived, never stored.** Views over runs (by type/template, later by composition) are computed, consistent with sessions (SPEC-042 D1) and readiness. Not part of the first slice.
@@ -50,7 +50,7 @@ Claude Code hands hooks a stable, distinct per-subagent `agent_id` at SubagentSt
    > **SUPERSEDED 2026-10-11** by `adr-write-identity-is-the-attested-run-alone-a-run-s-claims-end` (its Decision 1-3): `$LORE_ACTOR` is removed now, without the two-week window. `--by` is removed from every write command, and the MCP `by` argument from every write tool. Read-side `--by` filters stay. The bullets below are kept as the historical record of this decision and are no longer in force.
    - `$LORE_ACTOR`: first slice reads it only as `claimed` and warns once per process that it is deprecated; it is removed from the binary after two weeks at ≥95% attestation with no remaining dependent caller.
    - `--by`: kept, optional, `claimed` only. Remaining legitimate uses: callers with no adapter (a human on the CLI), recording on behalf of someone (`attested` = the run that executed, `claimed` = who it was for), and read-side filters (`lore feed session-resume --by`, `lore bootstrap --by`), which should move to run/lineage filters later.
-   - MCP: the 18 tools that require `by` (`z.string().min(1)`) make it optional — requiring it forces agents to invent a name.
+   - MCP: the 18 tools that require `by` (`z.string().min(1)`) make it optional — requiring it forces agents to invent a name. *(Moot since 2026-10-27: the MCP tools were deleted, `adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`.)*
 7. **Text that tells agents to set identity is removed in the SAME slice as the adapter ships** — never before, or agents fall back to the session tier, which a session's subagents share. Surfaces: user context fragments `user-04`, `user-17`; `assets/agents/lore-implementer.md`; skills `lore-autopilot`, `lore-plan` (workflow examples, mode-update, phase-decomposition), `lore`, `shared/lore-cli-map`, `lore-session-review` (invariants check "distinct LORE_ACTOR" → "writes carry an attested run"), `lore-session-capture`; `assets/governance/seat-briefing.md` (`export LORE_ACTOR={{ACTOR}}`); root `CLAUDE.md`; `assets/context/corpus-workflow-3-execute.md` → `.claude/rules/lore-corpus-workflow-execute.md`. Unregistered dead file: `~/.claude/hooks/pre-task-lore-dispatch-gate.mjs`.
 8. **History is not rewritten.** The 5,657 existing evidence rows and all earlier writes read as `attested: unattested`, their stored name shown as `claimed`.
 

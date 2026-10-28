@@ -6,15 +6,13 @@ title: "Implementation — out-of-box reporting channel (self-provision + SPEC-0
 status: archived
 priority: high
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-10-25
 tags: [feedback-loop, distribution-first]
 parent: SPEC-108
 phases:
   - {name: "RED"}
   - {name: "GREEN"}
   - {name: "CLOSE"}
-links:
-  - {id: TASK-536, type: resolves}
 ---
 # Implementation — out-of-box reporting channel (self-provision + unlock the SPEC-073 hint)
 

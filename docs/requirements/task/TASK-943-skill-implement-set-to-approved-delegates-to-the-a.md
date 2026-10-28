@@ -7,13 +7,11 @@ status: archived
 priority: high
 phase: "approval-parity"
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-28
 tags: []
 parent: PLAN-154
 plan: PLAN-154
 links:
-  - {id: TASK-1207, type: resolves}
-  - {id: TASK-1248, type: resolves}
   - {id: TASK-930, type: blocks}
   - {id: TASK-956, type: blocks}
   - {id: TASK-939, type: blocks}

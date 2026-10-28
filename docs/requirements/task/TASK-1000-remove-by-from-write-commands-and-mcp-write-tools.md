@@ -7,11 +7,9 @@ status: archived
 priority: medium
 phase: "wave-2"
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-28
 tags: []
 parent: PLAN-161
 plan: PLAN-161
-links:
-  - {id: TASK-1018, type: resolves}
 ---
 

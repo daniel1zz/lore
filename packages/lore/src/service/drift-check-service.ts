@@ -67,10 +67,12 @@ import {
   type FsProbe,
   type DriftRow,
 } from "@lore/core";
-import type { DocRecord, DocType } from "@lore/core";
+import type { DecisionRecord, DocRecord, DocType } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
+import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
+import { findWriteSourceFor } from "../store/write-context-store.js";
 
 // FsProbe (D4) is the core port; re-exported so existing importers keep their path.
 export type { FsProbe };
@@ -144,6 +146,16 @@ export class DriftCheckService {
   }
 
   private readonly writer: DocWritePort;
+  private decisionGate: DecisionGate | undefined;
+
+  /**
+   * Arms the decision gate for `removeCodeAnchors` (BR-1491): an agent's removal of an anchor from a spec or knowledge
+   * document that is not a draft is refused without a complete decision. Called once by each `app.ts` composition root;
+   * absent (a bare `new DriftCheckService(...)`) means ungated. `addCodeAnchors`/`setCodeAnchors` are never gated.
+   */
+  setDecisionGate(gate: DecisionGate): void {
+    this.decisionGate = gate;
+  }
 
   // ── checkDrift ──────────────────────────────────────────────────────────
 
@@ -277,13 +289,16 @@ export class DriftCheckService {
    * @param docIdOrSlug - Spec or knowledge document ULID or slug
    * @param anchors - Candidate raw anchor strings to remove
    * @param now - Time seam (see {@link addCodeAnchors}).
+   * @param opts.decision - The decision the writer supplied (`--reason --premise --alt ...`); required of an agent's
+   *   removal on a doc that is not a draft (BR-1491), recorded on the version row the removal creates.
    * @returns Updated `code_anchors` array after removal
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec/knowledge doc, or a bad anchor entry), STALE_VERSION
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec/knowledge doc, a bad anchor entry, or a missing/incomplete decision), STALE_VERSION
    */
   async removeCodeAnchors(
     docIdOrSlug: string,
     anchors: string[],
     now: () => string = defaultNow,
+    opts: { readonly decision?: DecisionDraft } = {},
   ): Promise<Result<string[], LoreError>> {
     const docResult = await this.resolveAnchorableDoc(docIdOrSlug);
     if (!docResult.ok) return docResult;
@@ -300,7 +315,15 @@ export class DriftCheckService {
 
     const remaining = existing.filter((a) => !toRemove.has(a));
 
-    return this.writeCodeAnchors(doc, remaining, "remove", now);
+    // BR-1491: judged after every refusal of the change itself and before anything is written.
+    let decision: DecisionRecord | undefined;
+    if (this.decisionGate !== undefined) {
+      const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft: doc.status === "draft", changesMoreThanStatus: true });
+      const judged = await this.decisionGate.judgeChecked({ required, draft: opts.decision, kind: "document revision" });
+      if (!judged.ok) return judged;
+      decision = judged.value;
+    }
+    return this.writeCodeAnchors(doc, remaining, "remove", now, decision);
   }
 
   /**
@@ -426,6 +449,7 @@ export class DriftCheckService {
     anchors: string[],
     operation: "add" | "remove" | "set",
     now: () => string,
+    decision?: DecisionRecord,
   ): Promise<Result<string[], LoreError>> {
     const changeVerb = operation === "add" ? "updated" : operation === "remove" ? "updated (removal)" : "replaced";
     const written = await this.writer.writeDoc({
@@ -433,6 +457,7 @@ export class DriftCheckService {
       patch: { extra: { ...doc.extra, code_anchors: anchors } },
       action: "update",
       changeSummary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
+      ...(decision !== undefined ? { decision } : {}),
       auditAction: "update",
       auditDetails: { operation, anchor_count: anchors.length },
       lock: "none",

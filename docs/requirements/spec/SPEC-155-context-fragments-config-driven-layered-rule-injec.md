@@ -6,14 +6,13 @@ title: "Context fragments: config-driven layered rule injection into Claude Code
 status: approved
 priority: high
 created: 2026-10-07
-updated: 2026-10-17
+updated: 2026-10-23
 tags: []
 links:
   - {id: SPEC-083, type: relates-to}
   - {id: SPEC-080, type: relates-to}
   - {id: SPEC-098, type: relates-to}
   - {id: SPEC-046, type: relates-to}
-  - {id: TASK-884, type: resolves}
   - {id: SPEC-154, type: relates-to}
   - {id: SPEC-083, type: supersedes}
 ---
@@ -229,7 +228,7 @@ Estimate: `subagent:*` ≈ 5,200 chars; `subagent:lore-implementer` ≈ 9,300 + 
 
 - [⚑] [script] AC-CF-1: discoverFragments: a project-layer fragment with the same id as a shipped one replaces it in the result; two fragments with the same id inside one layer return err naming both file paths (describe 'AC-CF-1'). Falsifier: delete the id-override branch -> override test red.
   script: test — out=$(bunx vitest run packages/lore/tests/unit/context-fragments/discover.test.ts -t 'AC-CF-1' 2>&1); rc=$?; echo "$out" | tail -6; [ $rc -eq 0 ] && echo "$out" | grep -qE 'Tests +[0-9]+ passed' && echo 'AC-CF-1 PASS: layer override and duplicate-id refusal'
-- [⚑] [script] AC-CF-2: selectFragments for outlet hook:subagent-start, agentType tester, language zh: includes subagent:* and subagent:tester fragments; excludes a subagent:lore-reviewer-only fragment, a when.language [en] fragment, and an id listed in context.fragments.disable (describe 'AC-CF-2'). Falsifier: treat subagent:<type> as subagent:* -> red.
+- [⊖] [script] AC-CF-2: selectFragments for outlet hook:subagent-start, agentType tester, language zh: includes subagent:* and subagent:tester fragments; excludes a subagent:lore-reviewer-only fragment, a when.language [en] fragment, and an id listed in context.fragments.disable (describe 'AC-CF-2'). Falsifier: treat subagent:<type> as subagent:* -> red.
   script: test — out=$(bunx vitest run packages/lore/tests/unit/context-fragments/select.test.ts -t 'AC-CF-2' 2>&1); rc=$?; echo "$out" | tail -6; [ $rc -eq 0 ] && echo "$out" | grep -qE 'Tests +[0-9]+ passed' && echo 'AC-CF-2 PASS: audience/when/disable selection positive and negative'
 - [⚑] [script] AC-CF-3: renderOutlet: hook:session-start block of exactly 9,600 chars (HOOK_STRING_CAP 10,000 - NOTICE_RESERVE 400) returns ok and 9,601 returns err; hook:subagent-start block of exactly 9,400 chars (10,000 - POINTER_CEILING 600) returns ok and 9,401 returns err; every err is BUDGET_EXCEEDED listing each fragment id with its char count (describe 'AC-CF-3'). Falsifier: change the cap comparison > to >= -> boundary test red.
   script: test — out=$(bunx vitest run packages/lore/tests/unit/context-fragments/render.test.ts -t 'AC-CF-3' 2>&1); rc=$?; echo "$out" | tail -6; [ $rc -eq 0 ] && echo "$out" | grep -qE 'Tests +[0-9]+ passed' && echo 'AC-CF-3 PASS: hook string cap boundary'
@@ -254,7 +253,7 @@ Estimate: `subagent:*` ≈ 5,200 chars; `subagent:lore-implementer` ≈ 9,300 + 
 - [⚑] [script] AC-CF-10: With an invalid fragment file in the project layer, the subagent hook exits 0 and its additionalContext contains the renderer error code (never empty output) (describe 'AC-CF-10'). Falsifier: swallow the error and print nothing -> red.
   script: e2e — f=$(mktemp); bunx --bun vitest run packages/lore/tests/e2e/context-fragments-compiled.bun.test.ts -t 'AC-CF-10' > "$f" 2>&1; rc=$?; tail -6 "$f"; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' "$f" && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' "$f" && echo 'AC-CF-10 PASS: hook failure is loud and non-blocking'
   other_command=4
-- [⚑] [script] AC-CF-11: 'lore setup' registers a SessionStart hook entry with matcher compact for the session-start hook, and a compact-source SessionStart payload makes the hook re-emit a dynamic main fixture fragment nonce (describe 'AC-CF-11').
+- [⊖] [script] AC-CF-11: 'lore setup' registers a SessionStart hook entry with matcher compact for the session-start hook, and a compact-source SessionStart payload makes the hook re-emit a dynamic main fixture fragment nonce (describe 'AC-CF-11').
   script: e2e — f=$(mktemp); bunx --bun vitest run packages/lore/tests/e2e/context-fragments-compiled.bun.test.ts -t 'AC-CF-11' > "$f" 2>&1; rc=$?; tail -6 "$f"; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' "$f" && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' "$f" && echo 'AC-CF-11 PASS: compact matcher registered and re-injects dynamic main fragments'
   other_command=5
 - [⚑] [script] AC-CF-12: When a project .claude/rules/lore-*.md file is stale versus a fresh render, the fragments SessionStart hook output contains the fixed marker lore:stale-managed-context and the changed fragment nonce; when the rules files are fresh, neither appears; with a dynamic fixture block sized so the changed bodies exceed the remaining budget (10,000 minus dynamic block minus notice line), the output lists the changed fragment ids instead of their bodies and is at most 10,000 chars (describe 'AC-CF-12').
@@ -278,7 +277,7 @@ Estimate: `subagent:*` ≈ 5,200 chars; `subagent:lore-implementer` ≈ 9,300 + 
   other_command=4
 - [⚑] [script] AC-CF-19: No main-session duplication: for a fixture with one static main fragment in each of the shipped, user and project layers, selectFragments for rules:project returns exactly the shipped and project ones and rules:user returns exactly the user one; the two id sets are disjoint (describe 'AC-CF-19'). Falsifier: include the shipped layer in rules:user -> red.
   script: test — out=$(bunx vitest run packages/lore/tests/unit/context-fragments/select.test.ts -t 'AC-CF-19' 2>&1); rc=$?; echo "$out" | tail -6; [ $rc -eq 0 ] && echo "$out" | grep -qE 'Tests +[0-9]+ passed' && echo 'AC-CF-19 PASS: each static main fragment routed to exactly one CLAUDE.md outlet'
-- [⚑] [script] AC-CF-20: Cross-file override refusal: a user-layer fragment or a global context.fragments.disable entry targeting a shipped static main fragment id, and a project-layer fragment or a project disable entry targeting a user-layer static main fragment id, each make the check function return err naming that id; the same ids targeting dynamic or subagent-only fragments are accepted and applied (describe 'AC-CF-20'). Falsifier: allow cross-file override -> red.
+- [⊖] [script] AC-CF-20: Cross-file override refusal: a user-layer fragment or a global context.fragments.disable entry targeting a shipped static main fragment id, and a project-layer fragment or a project disable entry targeting a user-layer static main fragment id, each make the check function return err naming that id; the same ids targeting dynamic or subagent-only fragments are accepted and applied (describe 'AC-CF-20'). Falsifier: allow cross-file override -> red.
   script: test — out=$(bunx vitest run packages/lore/tests/unit/context-fragments/select.test.ts -t 'AC-CF-20' 2>&1); rc=$?; echo "$out" | tail -6; [ $rc -eq 0 ] && echo "$out" | grep -qE 'Tests +[0-9]+ passed' && echo 'AC-CF-20 PASS: cross-file override resolved before routing; project targeting user static main refused'
 - [⚑] [script] AC-CF-21: Git-shared determinism: the rules:project render is byte-equal across two runs that differ only in user-layer fragments and global config (context.language and disable) (describe 'AC-CF-21'). Falsifier: feed merged config or the user layer into rules:project -> red.
   script: test — out=$(bunx vitest run packages/lore/tests/unit/context-fragments/select.test.ts -t 'AC-CF-21' 2>&1); rc=$?; echo "$out" | tail -6; [ $rc -eq 0 ] && echo "$out" | grep -qE 'Tests +[0-9]+ passed' && echo 'AC-CF-21 PASS: project Z1 render independent of user layer and global config'

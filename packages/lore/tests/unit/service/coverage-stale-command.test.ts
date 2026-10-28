@@ -18,6 +18,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
 
 const corpora: MiniCorpus[] = [];
@@ -41,7 +42,7 @@ async function withGammaDeclared(): Promise<MiniCorpus> {
   c.writeSource(`${MINI_CLI}/commands/gamma.ts`, `export default { run() { return 0; } };\n`);
   await c.mapAllSites(c.leafA, "alpha");
   await c.mapAllSites(c.leafB, "beta");
-  expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma"])).exitCode).toBe(0);
+  expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma", ...DECIDED_FLAGS])).exitCode).toBe(0);
   await c.mapAllSites(c.leafA, "gamma");
   return c;
 }
@@ -101,7 +102,7 @@ describe("declared command not in this tree is reported, not a defect (task-root
     const c = await buildMiniCorpus();
     corpora.push(c);
     // leaf A declares alpha and gamma; alpha's site is never mapped (a real gap); gamma is absent from the registry.
-    expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma", ...DECIDED_FLAGS])).exitCode).toBe(0);
     await c.mapAllSites(c.leafB, "beta");
     const r = await c.run(["baseline", "coverage", c.root, "--json"]);
     expect(r.exitCode, r.stdout + r.stderr).toBe(0);
@@ -135,7 +136,7 @@ describe("declared command not in this tree is reported, not a defect (task-root
     await c.mapAllSites(c.leafB, "beta");
     const added = await c.run(["baseline", "add", c.branch, "--node", "leaf", "--label", "lp", "--title", "BCR Leaf Pending"]);
     const pending = (added.stdout.match(/Slug:\s+(\S+)/) ?? added.stdout.match(/Created baseline \w+ (\S+) \(/))?.[1] as string;
-    expect((await c.run(["baseline", "map", pending, "--command", "delta"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", pending, "--command", "delta", ...DECIDED_FLAGS])).exitCode).toBe(0);
     const r = await c.run(["baseline", "coverage", c.root, "--json"]);
     expect(r.stdout + r.stderr).not.toContain("command-unresolved");
     expect(r.exitCode, r.stdout + r.stderr).toBe(0);
@@ -150,7 +151,7 @@ describe("declared command not in this tree is reported, not a defect (task-root
   it("removing the declaration (the printed fix) clears the line: exit 0", async () => {
     const c = await withGammaDeclared();
     c.writeSource(`${MINI_CLI}/index.ts`, REGISTRY_AB);
-    expect((await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma", ...DECIDED_FLAGS])).exitCode).toBe(0);
     const r = await c.run(["baseline", "coverage", c.root]);
     expect(r.exitCode, r.stdout + r.stderr).toBe(0);
     expect(r.stdout).not.toContain("declared command not in this tree");

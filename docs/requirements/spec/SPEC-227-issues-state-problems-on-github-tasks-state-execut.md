@@ -8,6 +8,8 @@ priority: medium
 created: 2026-10-19
 updated: 2026-10-20
 tags: []
+links:
+  - {id: SPEC-193, type: supersedes}
 ---
 ## Overview/Goal
 

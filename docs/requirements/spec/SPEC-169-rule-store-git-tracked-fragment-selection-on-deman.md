@@ -6,7 +6,7 @@ title: "Rule store: git-tracked fragment selection, on-demand skill delivery, de
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [context-fragments, rule-store]
 ---
 ## Overview/Goal
@@ -92,10 +92,10 @@ Structured criteria: `lore ac list <this spec>`, AC-RS-1 to AC-RS-15. Each cites
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-RS-1: Fragment frontmatter: delivery skill without description, with a 1537-char description, with mode dynamic, or with a non-[main] audience is a schema error; a 1536-char description passes; absent delivery parses as rules.
+- [⊖] [script] AC-RS-1: Fragment frontmatter: delivery skill without description, with a 1537-char description, with mode dynamic, or with a non-[main] audience is a schema error; a 1536-char description passes; absent delivery parses as rules.
   script: test — o=$(mktemp); bunx vitest run packages/core/tests/unit/rs-frontmatter-delivery.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-1 PASS: skill delivery schema bounds'
   other_command=2
-- [⚑] [script] AC-RS-2: A skill-delivery fragment appears in no rules:* and no hook:* outlet and in exactly one of skills:project / skills:user according to its layer.
+- [⊖] [script] AC-RS-2: A skill-delivery fragment appears in no rules:* and no hook:* outlet and in exactly one of skills:project / skills:user according to its layer.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/context-fragments/rs-select-skill-routing.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-2 PASS: skill fragments leave rules and hooks'
   other_command=2
 - [⚑] [script] AC-RS-3: Selection add/remove are idempotent (byte-equal on repeat); an unknown id is refused; a project selection disabling a user static-main fragment is refused; a config-file fragments.disable is refused naming selection.yaml.
@@ -110,7 +110,7 @@ Structured criteria: `lore ac list <this spec>`, AC-RS-1 to AC-RS-15. Each cites
 - [⚑] [script] AC-RS-6: A selection write interleaved by another write between read and write returns CONFLICT and leaves the file equal to the interleaved bytes.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/flows/rs-selection-cas.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-6 PASS: selection write refuses lost update'
   other_command=2
-- [⚑] [script] AC-RS-7: Spawned lore in a temp HOME and lore-init corpus: context list --json lists every fragment with layer, delivery and selected; context remove corpus-workflow-close records it in selection.yaml and deletes .claude/rules/lore-corpus-workflow-close.md; a repeat exits 0 leaving the file byte-equal; add restores the rules file; remove of an unknown name exits 4.
+- [⊖] [script] AC-RS-7: Spawned lore in a temp HOME and lore-init corpus: context list --json lists every fragment with layer, delivery and selected; context remove corpus-workflow-close records it in selection.yaml and deletes .claude/rules/lore-corpus-workflow-close.md; a repeat exits 0 leaving the file byte-equal; add restores the rules file; remove of an unknown name exits 4.
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-context-selection-cli.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-7 PASS: context list add remove drive the selection'; }
   other_command=2
 - [⚑] [script] AC-RS-8: Spawned lore fragments check: a cross-layer whitespace-normalized duplicate exits 4 with [duplicate_line] naming both files on stderr, and exits 0 once removed; a .lore/config.yaml carrying context.fragments.disable exits 4 naming selection.yaml.

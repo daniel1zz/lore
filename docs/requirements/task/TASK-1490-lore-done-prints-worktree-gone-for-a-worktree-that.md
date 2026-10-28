@@ -3,10 +3,10 @@ id: TASK-1490
 type: task
 role: plan
 title: "lore done prints 'worktree: gone' for a worktree that still exists"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-16
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: PLAN-194
 plan: PLAN-194

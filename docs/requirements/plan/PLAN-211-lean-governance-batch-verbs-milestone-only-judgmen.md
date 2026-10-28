@@ -3,10 +3,10 @@ id: PLAN-211
 type: plan
 role: plan
 title: "Lean governance: batch verbs, milestone-only judgment, lean context"
-status: approved
+status: archived
 priority: critical
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-25
 tags: []
 parent: SPEC-233
 phases:

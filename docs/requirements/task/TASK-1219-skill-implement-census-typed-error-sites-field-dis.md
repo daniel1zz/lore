@@ -7,14 +7,13 @@ status: archived
 priority: critical
 phase: "Phase 2: Indexes and census"
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-25
 tags: []
 parent: PLAN-178
 plan: PLAN-178
 links:
   - {id: TASK-1217, type: blocks}
   - {id: TASK-1216, type: blocks}
-  - {id: TASK-1222, type: resolves}
 ---
 Estimate: M
 Approach: site-census.ts — (1) site = any expression whose contextual type (TypeChecker.getContextualType / getTypeAtLocation) is assignable to the product LoreError type, plus err()/gateFailure() calls; (2) key = file#symbol#code#field when field is a literal, else #<ordinal-in-function>; (3) resolve @lore/* imports through the analysed repo's package.json workspaces + tsconfig paths (custom module resolution host), never through node_modules symlink targets; reached files outside the root are reported, not dropped

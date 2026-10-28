@@ -6,7 +6,7 @@ title: "Memory hygiene part 2: staleness probes (H2)"
 status: approved
 priority: high
 created: 2026-07-12
-updated: 2026-10-17
+updated: 2026-10-27
 tags: [memory-hygiene, staleness, probes, spec-044]
 ---
 # SPEC-044 — Memory hygiene part 2: staleness probes (PRD §16 H2)
@@ -373,7 +373,7 @@ background token burn.
 - [⚑] [script] AC-SP-6: Spawned-CLI smoke with fake claude-cli shell-script provider fixture (assess-ai.bun.test.ts mechanism) and EXPLICIT --min-age-days 0 (load-bearing: fresh fixtures are younger than the 14-day default): lore review --staleness --limit 1 --min-age-days 0 exits 0 and persists a judgment; --json carries probes[] + skipped{invalidated,too_young} + total_candidates + excluded_by_limit; partially-failing batch keeps completed judgments, reports per-probe error, exits 0; all-fail batch exits 6; --fail-on-candidate exits 3 on >=1 fresh escalate; lore review <doc> --staleness refuses an invalidated target (exit 4); --staleness --no-ai and --pending --staleness both exit 2 BEFORE any IO; --staleness --list performs NO provider invocation (fixture would loudly fail if called) and drops a listed doc after that doc is edited
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-staleness.bun.test.ts
   other_command=2
-- [⚑] [script] AC-SP-7: MCP parity: lore_staleness_probe requires by; payload deep-equals CLI --json (envelopes unwrapped); expectedTools gains lore_staleness_probe, length literal 29 -> 30
+- [⊖] [script] AC-SP-7: MCP parity: lore_staleness_probe requires by; payload deep-equals CLI --json (envelopes unwrapped); expectedTools gains lore_staleness_probe, length literal 29 -> 30
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-staleness.test.ts
 - [⚑] [script] AC-SP-8: D11 byproduct: review judgment with superseded_candidate persists (migration-005 column) and renders the invalidate nudge with resolvable ref; absent field renders byte-identical to pre-SPEC-044 (REGRESSION); unresolvable ref renders note-not-command
   script: test — bunx vitest run packages/lore/tests/unit/service/review-superseded-candidate.test.ts

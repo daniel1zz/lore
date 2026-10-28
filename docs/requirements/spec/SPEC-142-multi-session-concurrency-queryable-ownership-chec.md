@@ -9,7 +9,7 @@ created: 2026-08-12
 updated: 2026-10-17
 tags: []
 links:
-  - {id: SPEC-237, type: implements}
+  - {id: SPEC-267, type: implements}
   - {id: ADR-033, type: relates-to}
   - {id: SPEC-042, type: relates-to}
 ---

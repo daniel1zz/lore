@@ -7,13 +7,10 @@ status: archived
 priority: medium
 phase: "wave-3"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-227
 plan: PLAN-227
-links:
-  - {id: TASK-913, type: resolves}
-  - {id: TASK-1123, type: resolves}
 ---
 Estimate: M
 Approach: spec-defect-clusters-round-2-part-b-review-pending-queue-corpus D9 end state; fix the root cause named there.
