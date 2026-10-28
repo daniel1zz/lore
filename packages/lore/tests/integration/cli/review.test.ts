@@ -41,6 +41,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { installStubClaude, stubClaudeEnv } from "../../helpers/stub-claude.js";
 
+import { detachParentInDb } from "../../helpers/detach-parent.js";
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -104,6 +105,20 @@ function createPlan(title: string): string {
   const m = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = m?.[1];
   if (!slug) throw new Error(`Could not extract plan slug from: ${r.stdout}`);
+  return slug;
+}
+
+/**
+ * A plan with NO parent: the orphan whose deterministic review fails `parent_contract`. reason: a plan can no longer be created
+ * without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6), so it is filed under `parentSlug` (a
+ * document the test already needs) and detached: the legacy-data shape this review check exists for.
+ */
+function createOrphanPlan(title: string, parentSlug: string): string {
+  const r = runLore(["create", "plan", "--parent", parentSlug, "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
+  const slug = r.stdout.match(/Slug:\s+(\S+)/)?.[1];
+  if (!slug) throw new Error(`Could not extract plan slug from: ${r.stdout}`);
+  detachParentInDb(join(tmpDir, ".lore", "lore.db"), slug);
   return slug;
 }
 
@@ -240,9 +255,9 @@ describe("lore review --pending — empty queue", () => {
 
 describe("lore review --pending — mixed outcomes (deterministic-reject succeeds, AI path fails)", () => {
   it("exits 0 (not all failed) with a stderr warning naming the failure count", () => {
-    const planSlug = createPlan("Batch Plan");
+    const prdSlug = createPrd("Batch Clean PRD");
+    const planSlug = createOrphanPlan("Batch Plan", prdSlug);
     createTaskWithoutEvidence(planSlug, "Batch Evidence-less Task");
-    createPrd("Batch Clean PRD");
 
     const result = runLore(["review", "--pending"], tmpDir);
 
@@ -254,9 +269,9 @@ describe("lore review --pending — mixed outcomes (deterministic-reject succeed
   });
 
   it("--json envelope reports both judgment results and an error result", () => {
-    const planSlug = createPlan("Batch Plan JSON");
+    const prdSlug = createPrd("Batch Clean PRD JSON");
+    const planSlug = createOrphanPlan("Batch Plan JSON", prdSlug);
     createTaskWithoutEvidence(planSlug, "Batch Evidence-less Task JSON");
-    createPrd("Batch Clean PRD JSON");
 
     const result = runLore(["review", "--pending", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);

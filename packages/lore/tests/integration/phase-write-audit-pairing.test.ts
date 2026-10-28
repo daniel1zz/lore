@@ -149,6 +149,7 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { detachParentInDb } from "../helpers/detach-parent.js";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Locations ──────────────────────────────────────────────────────────────
 
@@ -408,6 +409,10 @@ function makeApprovedPlan(title: string): { readonly dir: string; readonly slug:
     runLoreInFixture(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLoreInFixture(a, dir)), "--title", title, "--content", "Baseline content.", "--json"], dir),
     "lore create plan --json",
   );
+  // reason: a plan can no longer be created without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6),
+  // and a plan that has one passes review's deterministic checks and reaches the AI judge. This fixture needs the review that
+  // records a deterministic judgment without any AI call, so the plan is detached: the legacy-data shape it was written against.
+  detachParentInDb(join(dir, ".lore", "lore.db"), created.slug);
   jsonEnvelope<unknown>(runLoreInFixture(["review", created.slug, "--json"], dir), `lore review ${created.slug} --json`);
   const approved = jsonEnvelope<{ status: string }>(
     runLoreInFixture(["approve", created.slug, "--json"], dir),
