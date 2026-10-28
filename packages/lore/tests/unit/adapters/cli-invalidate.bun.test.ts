@@ -125,7 +125,9 @@ async function createPlan(tmpDir: string, title: string): Promise<string> {
 /** Seeds the write-spec-rule skill doc (feeding source for the spec-create gate)
  *  directly into the throwaway corpus's SQLite file — a SEPARATE bun process from the
  *  compiled binary, mirroring how CI/deploy runs this script (module header). */
-function seedFeedingSkill(tmpDir: string): { slug: string } {
+async function seedFeedingSkill(tmpDir: string): Promise<{ slug: string }> {
+  // reason: BR-709 — the seed files the rule doc under the corpus's requirements document, so one must exist first.
+  await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir));
   const dbPath = join(tmpDir, ".lore", "lore.db");
   // reason: cwd is the corpus, so the test run's known-party spawn rewrite registers the seed's run in THIS corpus.
   const proc = Bun.spawnSync(["bun", SEED_SCRIPT, dbPath], { cwd: tmpDir });
@@ -272,7 +274,7 @@ describe("lore invalidate — ERROR (ineligible type)", () => {
 
 describe("lore status — STATE (SPEC-043 D8)", () => {
   it("the warning string surfaces once the feeding-source skill doc is invalidated", async () => {
-    const { slug: skillSlug } = seedFeedingSkill(tmpDir);
+    const { slug: skillSlug } = await seedFeedingSkill(tmpDir);
 
     const beforeStatus = await runLore(["status"], tmpDir);
     expect(beforeStatus.exitCode).toBe(0);

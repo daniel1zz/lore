@@ -156,15 +156,16 @@ beforeAll(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-render-seam-"));
   mustRun(["init"], tmpDir);
 
-  const seed = Bun.spawnSync(["bun", "run", SEED_SCRIPT], { cwd: tmpDir, env: { ...process.env, HOME: tmpDir } });
-  if (seed.exitCode !== 0) throw new Error(`seed-write-spec-rule failed: ${seed.stderr.toString()}`);
-
   prdWithExtra = parseSlug(
     mustRun(["create", "prd", "--title", "Seam Root With Extra", "--no-ai", "--content", "## Overview\n\nRoot body."], tmpDir).stdout,
   );
   prdPlain = parseSlug(
     mustRun(["create", "prd", "--title", "Seam Root Plain", "--no-ai", "--content", "## Overview\n\nPlain body."], tmpDir).stdout,
   );
+
+  // reason: BR-709 — the seed files the rule doc under the corpus's requirements document, so it runs once one exists.
+  const seed = Bun.spawnSync(["bun", "run", SEED_SCRIPT], { cwd: tmpDir, env: { ...process.env, HOME: tmpDir } });
+  if (seed.exitCode !== 0) throw new Error(`seed-write-spec-rule failed: ${seed.stderr.toString()}`);
 
   // REAL dedicated writer → authentic `extra.requirements` on a LEGAL prd parent.
   mustRun(["requirement", "add", prdWithExtra, "R-1", "--statement", "The seam announces withheld structured extra.", "--priority", "P0"], tmpDir);

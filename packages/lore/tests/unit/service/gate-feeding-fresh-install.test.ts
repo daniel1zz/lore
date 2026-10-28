@@ -78,7 +78,7 @@ import { err } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreConfig, LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
-import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { ensureRequirementsDocId, ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -132,6 +132,8 @@ function extractSource(message: string): string | null {
  * is populated by production code, not a hand-built imitation.
  */
 function seedWriteSpecRuleInto(corpusDir: string): void {
+  // reason: BR-709 — the seed files the rule doc under the corpus's requirements document, so one must exist first.
+  ensureRequirementsDocSlug((args) => runLore(args, corpusDir));
   const result = spawnSync("bun", [SEED_SCRIPT, join(corpusDir, ".lore", "lore.db")], {
     cwd: corpusDir,
     env: { ...process.env, HOME: corpusDir },
