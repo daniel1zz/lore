@@ -44,6 +44,8 @@ describe("AC-DR-6: file premises are quoted and pinned at write time", () => {
   let adr: string;
   let firstSha: string;
   let secondSha: string;
+  let weightTable: string;
+  let weightTableVersion: number;
 
   const git = (...args: string[]): string => {
     const proc = Bun.spawnSync(["git", "-c", "user.name=dr6", "-c", "user.email=dr6@example.invalid", ...args], { cwd: corpus.dir });
@@ -93,6 +95,17 @@ describe("AC-DR-6: file premises are quoted and pinned at write time", () => {
       db.query("UPDATE docs SET status = 'approved' WHERE slug = ?").run(adr);
     } finally {
       db.close();
+    }
+    // reason: BR-1482 — a decision's scores must cite the approved weight table of the command's kind (`document revision`
+    // for `lore set`); the table is approved directly in the corpus file, as the ADR above is.
+    weightTable = corpus.slugOf(corpus.setup(["create", "knowledge", "--sub-type", "reference", "--title", "DR6 weights", "--no-ai", "--content", "# Weights\n\nbody"]));
+    corpus.setup(["weights", "set", weightTable, "--kind", "document revision", "--dimension", "cost=1"]);
+    const tableDb = new Database(join(corpus.dir, ".lore", "lore.db"));
+    try {
+      tableDb.query("UPDATE docs SET status = 'approved' WHERE slug = ?").run(weightTable);
+      weightTableVersion = (tableDb.query("SELECT version FROM docs WHERE slug = ?").get(weightTable) as { version: number }).version;
+    } finally {
+      tableDb.close();
     }
     git("init", "-q");
     mkdirSync(join(corpus.dir, "src"), { recursive: true });
@@ -215,7 +228,7 @@ describe("AC-DR-6: file premises are quoted and pinned at write time", () => {
         [
           "set", adr, "--content", `# Decision\n\nrevision ${writes}`, "--correction", "typo", "--reason", "the constant moved",
           "--premise", "the ttl is stated|issue:#41|A", "--alt", "leave it|the record would stay wrong", "--gate", gate,
-          ...(score !== undefined ? ["--score", score] : []),
+          ...(score !== undefined ? ["--score", score, "--weight-table", `${weightTable}@${weightTableVersion}`] : []),
         ],
         AGENT,
       );

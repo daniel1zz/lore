@@ -161,6 +161,9 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     handoff: () => import("./commands/handoff.js"),
     uat: () => import("./commands/uat.js"),
     requirement: () => import("./commands/requirement.js"),
+    // weights (spec-a-decision-carrying-write-records-its-decision-on-its, "Weight tables") — dedicated writer of a
+    // reference document's `extra.weight_table`; `lore set` is refused on that key. See commands/weights.ts.
+    weights: () => import("./commands/weights.js"),
     anchor: () => import("./commands/anchor.js"),
     // rule / baseline (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C3) —
     // dedicated writers of a baseline doc's verb-owned `extra` keys (rules, label, depends_on,

@@ -77,9 +77,9 @@ function computeEvidenceGate(draft: DecisionDraft | undefined): StoredGate {
  * @example
  * judgeRuleEdit(gate, { carriesDecision: true, current: { statement: "A", confidence: "established" }, patch: { statement: "B" }, draft });
  */
-export function judgeRuleEdit(gate: DecisionGate, facts: RuleEditFacts): Result<DecisionRecord | undefined, LoreError> {
+export async function judgeRuleEdit(gate: DecisionGate, facts: RuleEditFacts): Promise<Result<DecisionRecord | undefined, LoreError>> {
   const required = facts.carriesDecision && !isTrivialRulePatch(facts.current.confidence, facts.patch);
-  if (!required) return gate.judge({ required: false, draft: facts.draft });
+  if (!required) return gate.judgeChecked({ required: false, draft: facts.draft, kind: "rule revision" });
 
   const wanted = facts.patch["confidence"];
   if (typeof wanted === "string" && isConfidenceLowered(wanted, facts.current.confidence)) {
@@ -93,11 +93,11 @@ export function judgeRuleEdit(gate: DecisionGate, facts: RuleEditFacts): Result<
 
   const statement = facts.patch["statement"];
   const changesStatement = typeof statement === "string" && statement !== facts.current.statement;
-  if (!changesStatement) return gate.judge({ required: true, draft: facts.draft });
+  if (!changesStatement) return gate.judgeChecked({ required: true, draft: facts.draft, kind: "rule revision" });
 
   const writerGates = (facts.draft?.gates ?? []).filter((stored) => stored.id !== GATE_EVIDENCE_S_TO_C);
   const withComputed: DecisionDraft = { ...(facts.draft ?? {}), gates: [...writerGates, computeEvidenceGate(facts.draft)] };
-  const judged = gate.judge({ required: true, draft: withComputed });
+  const judged = await gate.judgeChecked({ required: true, draft: withComputed, kind: "rule revision" });
   if (!judged.ok) return judged;
   if (judged.value === undefined) return judged;
 
