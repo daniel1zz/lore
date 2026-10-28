@@ -45,6 +45,7 @@ import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
+import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -170,6 +171,8 @@ import type {
   AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
+  SuiteResultRecord,
+  SuiteFileRunRecord,
   CheckOutcomeInput,
   CheckOutcomeStat,
   PendingAskInput,
@@ -235,6 +238,9 @@ import {
   isExemptionActive,
   NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
+  rowToSuiteResult,
+  rowToSuiteFileRun,
+  suiteResultJsonColumns,
 } from "./store-shared.js";
 import {
   PLAN_MEMBERS_SQL,
@@ -1268,6 +1274,11 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_042_SQL);
+      }
+
+      if (currentVersion < 43) {
+        // reason: migration-043 creates suite_results + suite_file_runs (BR-1497).
+        await this.client.executeMultiple(MIGRATION_043_SQL);
       }
     })();
 
@@ -4391,6 +4402,108 @@ export class TursoStore implements StoreInterface {
         "write",
       );
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  private suiteResultFromRow(row: Row): SuiteResultRecord {
+    return rowToSuiteResult({
+      id: rowStr(row, "id"),
+      commit_sha: rowStr(row, "commit_sha"),
+      tree_sha: rowStr(row, "tree_sha"),
+      status: rowStr(row, "status"),
+      attempt: Number(row["attempt"]),
+      cause: rowStrOrNull(row, "cause"),
+      commands: rowStr(row, "commands"),
+      skipped: rowStr(row, "skipped"),
+      failing_files: rowStr(row, "failing_files"),
+      duration_ms: Number(row["duration_ms"]),
+      measured_at: rowStr(row, "measured_at"),
+    });
+  }
+
+  async insertSuiteResult(record: SuiteResultRecord): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      const json = suiteResultJsonColumns(record);
+      await this.client.execute({
+        sql: `INSERT INTO suite_results (id, commit_sha, tree_sha, status, attempt, cause, commands, skipped, failing_files, duration_ms, measured_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [record.id, record.commit_sha, record.tree_sha, record.status, record.attempt, record.cause, json.commands, json.skipped, json.failing_files, record.duration_ms, record.measured_at],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listSuiteResultsForCommit(commitSha: string): Promise<Result<SuiteResultRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "SELECT * FROM suite_results WHERE commit_sha = ? ORDER BY attempt ASC", args: [commitSha] });
+      return ok(rs.rows.map((row) => this.suiteResultFromRow(row)));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listSuiteResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute("SELECT * FROM suite_results ORDER BY measured_at ASC, id ASC");
+      return ok(rs.rows.map((row) => this.suiteResultFromRow(row)));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "SELECT * FROM suite_results WHERE id = ?", args: [id] });
+      const row = rs.rows[0];
+      return ok(row === undefined ? null : this.suiteResultFromRow(row));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {
+    if (rows.length === 0) return ok(undefined);
+    try {
+      await this.ensureReady();
+      // reason: one batch (implicit transaction) so a re-run's per-file rows land whole or not at all.
+      await this.client.batch(
+        rows.map((row) => ({
+          sql: "INSERT INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          args: [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
+        })),
+        "write",
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listSuiteFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "SELECT * FROM suite_file_runs WHERE suite_result_id = ? ORDER BY id ASC", args: [suiteResultId] });
+      return ok(
+        rs.rows.map((row) =>
+          rowToSuiteFileRun({
+            suite_result_id: rowStr(row, "suite_result_id"),
+            commit_sha: rowStr(row, "commit_sha"),
+            file: rowStr(row, "file"),
+            exit_code: Number(row["exit_code"]),
+            output_tail: rowStr(row, "output_tail"),
+            duration_ms: Number(row["duration_ms"]),
+            measured_at: rowStr(row, "measured_at"),
+          }),
+        ),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

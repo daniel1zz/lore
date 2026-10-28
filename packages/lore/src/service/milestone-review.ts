@@ -211,7 +211,9 @@ export interface CitedRuleStateRow {
 // ---------------------------------------------------------------------------------------------------------------------
 // Main-red ledger (BR-1412, BR-1414, spec-delivery-concurrency-and-autonomy-metrics AC-DC-6)
 //
-// Storage: append-only rows of the corpus audit chain (no table, no migration). The audit append is serialized inside
+// Storage: `main-red` / `main-red-green` are append-only rows of the corpus audit chain. `main-checked` is NOT written any
+// more (BR-1497): the port derives it from the stored suite results (`suite-result-service.ts::deriveMainCheckedRows`), so
+// one suite run has one record; legacy `main-checked` audit rows are still read as history. The audit append is serialized inside
 // one store transaction, so concurrent writers never fork the chain; a record is the FOLD of its rows, never a mutated
 // row, which is what makes "the green time recorded on the open record" safe under concurrent reviews.
 // ---------------------------------------------------------------------------------------------------------------------
@@ -272,6 +274,8 @@ export interface MainRedLedgerState {
   readonly records: readonly MainRedRecord[];
   /** The newest `main-checked` row, if any. */
   readonly lastChecked?: MainCheckedDetails;
+  /** Every `main-checked` row, oldest first (BR-1497: derived from stored suite results; legacy audit rows come first). */
+  readonly checks: readonly MainCheckedDetails[];
   /** `at` of the newest green `main-checked` row. */
   readonly lastGreenAt?: string;
 }
@@ -297,6 +301,7 @@ export function foldMainRedRecords(rows: readonly MainRedRow[]): Result<MainRedL
   const records = new Map<string, MainRedRecord>();
   let lastChecked: MainCheckedDetails | undefined;
   let lastGreenAt: string | undefined;
+  const checks: MainCheckedDetails[] = [];
   for (const row of rows) {
     if (row.action === MAIN_RED_ACTION) {
       const parsed = mainRedDetailsSchema.safeParse(row.details);
@@ -313,11 +318,13 @@ export function foldMainRedRecords(rows: readonly MainRedRow[]): Result<MainRedL
       const parsed = mainCheckedDetailsSchema.safeParse(row.details);
       if (!parsed.success) return err(corruptLedgerRow(row.action, parsed.error.issues));
       lastChecked = parsed.data;
+      checks.push(parsed.data);
       if (parsed.data.status === "green") lastGreenAt = parsed.data.at;
     }
   }
   return ok({
     records: [...records.values()],
+    checks,
     ...(lastChecked !== undefined ? { lastChecked } : {}),
     ...(lastGreenAt !== undefined ? { lastGreenAt } : {}),
   });
@@ -359,14 +366,21 @@ export function classifySuiteForMainRed(suite: MainSuiteInput): MainSuiteState {
  * - red, no open record: one `main-red` record (range = last green-checked commit .. this commit), then the check row;
  * - red with an open record: only the check row (the outage is one record);
  * - green with an open record: a `main-red-green` stamp on it, then the check row;
- * - green otherwise: only the check row. A check row repeating the last commit and status is not written again.
+ * - green otherwise: nothing.
+ *
+ * It never writes a `main-checked` row (BR-1497): "main was checked at <commit>" is derived from the stored suite
+ * result of that commit, so the ledger state already holds the measured commit's own check. The range start and the
+ * last-green time therefore come from the checks of OTHER commits only.
  */
 export function planMainRedWrites(state: MainRedLedgerState, measured: MainSuiteState, now: string): MainRedRow[] {
   if (measured.state === "unmeasured") return [];
   const rows: MainRedRow[] = [];
   const open = state.records.filter((r) => r.green_at === undefined).at(-1);
   if (measured.state === "red" && open === undefined) {
-    const rangeFrom = state.lastChecked?.status === "green" ? state.lastChecked.commit : null;
+    const prior = state.checks.filter((c) => c.commit !== measured.commit);
+    const previous = prior.at(-1);
+    const rangeFrom = previous?.status === "green" ? previous.commit : null;
+    const lastGreenAt = prior.filter((c) => c.status === "green").at(-1)?.at;
     const details: MainRedDetails = {
       record_id: `main-red-${createHash("sha256").update(`${rangeFrom ?? "none"}..${measured.commit}`).digest("hex").slice(0, 16)}`,
       range_from: rangeFrom,
@@ -374,16 +388,12 @@ export function planMainRedWrites(state: MainRedLedgerState, measured: MainSuite
       failing_files: measured.failingFiles,
       failing_checks: measured.failingChecks,
       detected_at: now,
-      last_green_at: state.lastGreenAt ?? null,
+      last_green_at: lastGreenAt ?? null,
     };
     rows.push({ action: MAIN_RED_ACTION, timestamp: now, details });
   }
   if (measured.state === "green" && open !== undefined) {
     rows.push({ action: MAIN_RED_GREEN_ACTION, timestamp: now, details: { record_id: open.record_id, green_at: now, green_commit: measured.commit } });
-  }
-  const status = measured.state === "red" ? "red" : "green";
-  if (state.lastChecked?.commit !== measured.commit || state.lastChecked.status !== status) {
-    rows.push({ action: MAIN_CHECKED_ACTION, timestamp: now, details: { commit: measured.commit, status, at: now } });
   }
   return rows;
 }

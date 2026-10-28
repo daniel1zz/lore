@@ -108,6 +108,8 @@ import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext 
 import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
 import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION, type MainRedLedgerPort } from "./service/milestone-review.js";
+import { SuiteResultService } from "./service/suite-result-service.js";
+import { randomUUID } from "node:crypto";
 import { RetiredAcService } from "./service/retired-ac-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -358,6 +360,11 @@ export interface App {
    * Source: SPEC-039 §2 D3, §9.1
    */
   verifyRunnerService?: VerifyRunnerService;
+  /**
+   * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
+   * siblings so hand-built App stubs stay valid; both composition roots wire it.
+   */
+  suiteResultService?: SuiteResultService;
   /**
    * SessionService — SPEC-041 S1 (bootstrap pointer-set) + S2 (lossless handoff) +
    * resume. Constructor-injected with `corpusService.createHandoffDoc` (bound — the
@@ -1157,6 +1164,7 @@ function buildAppFromSqlite(
     // envPassthroughAll (resolved config) + processEnv (a `process.env` snapshot
     // captured HERE at composition time, mirroring how `repoRoot` is captured from
     // `process.cwd()` — VerifyRunnerService itself never reads `process.env`).
+    suiteResultService: buildSuiteResultService(store),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1597,6 +1605,7 @@ function buildAppFromTurso(
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
     // (SPEC-039 §2 D3). SPEC-039 §M2 additions — see `buildAppFromSqlite`'s
     // identical comment.
+    suiteResultService: buildSuiteResultService(store),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1729,17 +1738,34 @@ function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bu
   };
 }
 
+/** The suite-result store's service over a store (BR-1497): the one place a commit's full-suite result is kept. */
+function buildSuiteResultService(store: StoreInterface): SuiteResultService {
+  return new SuiteResultService({
+    store,
+    now: () => new Date().toISOString(),
+    newId: () => `suite-${randomUUID()}`,
+    clockMs: () => performance.now(),
+  });
+}
+
 function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService): MainRedLedgerPort {
+  const suiteResults = buildSuiteResultService(store);
   return {
     now: () => new Date().toISOString(),
     listRows: async () => {
       const rows = [];
+      // reason: BR-1497 — `main-checked` is derived from the stored suite results below; the audit rows of that action
+      // are legacy history (nothing writes them any more) and still fold, so an older corpus keeps its range starts.
       for (const action of [MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION]) {
         const listed = await store.listAuditRowsByAction(action);
         if (!listed.ok) return listed;
         rows.push(...listed.value);
       }
-      return { ok: true as const, value: rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} })) };
+      const audited = rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} }));
+      const derived = await suiteResults.listMainCheckedRows();
+      if (!derived.ok) return derived;
+      // reason: a stable sort by time interleaves the derived checks with the audit rows; ties keep audit-first order.
+      return { ok: true as const, value: [...audited, ...derived.value].sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0)) };
     },
     appendRow: (row) => corpusService.appendAudit({ action: row.action, sessionId: "main-red", timestamp: row.timestamp, details: { ...row.details } }),
   };
