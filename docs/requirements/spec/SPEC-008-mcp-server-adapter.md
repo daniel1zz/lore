@@ -6,7 +6,7 @@ title: "MCP Server Adapter"
 status: deprecated
 priority: critical
 created: 2026-06-08
-updated: 2026-10-10
+updated: 2026-10-28
 tags: [mcp, adapter, ai-agent, phase-2]
 links:
   - {id: SPEC-001, type: implements}
@@ -137,8 +137,3 @@ Each tool file: parse input → call service → format as MCP content. Same thi
 | MCP server running | Client calls lore_create({type: "spec", title: "Auth"}) without parent | Returns SCHEMA_VIOLATION error |
 | MCP server running | Client requests lore://docs/PRD-001 resource | Returns PRD document as JSON |
 | MCP server running | Client calls lore_context_bundle({id_or_slug: "spec-auth"}) | Returns target + parent PRD + related ADRs |
-
-
-## Code anchors
-
-- packages/lore/src/adapters/mcp/

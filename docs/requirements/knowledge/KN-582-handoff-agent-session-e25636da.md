@@ -3,10 +3,10 @@ id: KN-582
 type: knowledge
 role: knowledge
 title: "Handoff — agent:session-e25636da"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-24
 tags: []
 parent: PLAN-162
 ---

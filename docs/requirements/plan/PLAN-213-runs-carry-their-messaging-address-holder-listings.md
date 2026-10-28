@@ -3,10 +3,10 @@ id: PLAN-213
 type: plan
 role: plan
 title: "Runs carry their messaging address; holder listings show it"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-25
 tags: []
 parent: SPEC-231
 phases:

@@ -6,7 +6,7 @@ title: "Interception moves off every tool call: turn-end review and gate-hook re
 status: archived
 priority: high
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-25
 tags: []
 parent: SPEC-180
 phases:
@@ -14,11 +14,6 @@ phases:
   - {name: "Phase 2: Turn-end review", description: "stop-turn-review hook with findings (a)(b)(c) and its setting (AC-TE-3, TE-4, TE-7)"}
   - {name: "Phase 3: Roster swap", description: "shipped roster and this repo's settings swap the retired hooks for stop-turn-review; converge proof (AC-TE-5)"}
   - {name: "Phase 4: Land and verify", description: "rule apply + BR-1089/BR-1090 restatement (#198), anchors, lore verify, full suite on main"}
-links:
-  - {id: TASK-882, type: resolves}
-  - {id: TASK-1022, type: resolves}
-  - {id: TASK-950, type: resolves}
-  - {id: TASK-935, type: resolves}
 ---
 # Plan: Interception moves off every tool call — turn-end review and gate-hook retirement
 

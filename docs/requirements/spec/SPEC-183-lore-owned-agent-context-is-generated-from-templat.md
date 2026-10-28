@@ -6,7 +6,7 @@ title: "Lore-owned agent context is generated from templates and registered vari
 status: approved
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-27
 tags: []
 links:
   - {id: SPEC-155, type: relates-to}
@@ -124,7 +124,7 @@ Declared as structured criteria (`lore ac add`), AC-CV-1 … AC-CV-8. Every comm
 - [⚑] [script] AC-CV-7: setup-service resolves {{lore:claude_dir}} in settings-hook commands through expandTemplate; the token '{{CLAUDE_DIR}}' appears in no file under assets/ or packages/*/src; settings.json written by a fresh spawned 'setup' into HOME=<mkdtemp> equals packages/lore/tests/fixtures/context-variables/pre-change-settings.json byte-for-byte after replacing every occurrence of the absolute '<HOME>/.claude' path with the literal token '<CLAUDE_DIR>' on BOTH sides (the fixture is captured from the pre-change code by the RED task with the same replacement).
   script: test — bunx vitest run packages/lore/tests/unit/setup/claude-dir-variable.test.ts && ! grep -nE '\.(skip|skipIf|todo|only)\(|skip: *true' packages/lore/tests/unit/setup/claude-dir-variable.test.ts && echo 'AC-CV-7 PASS'
   other_command=2
-- [⚑] [script] AC-CV-8: LORE_MCP_TOOL_NAMES has exactly the names registered on a real MCP server instance (compared against the server's tool list, not a hand count); the installed lore skill states the tool count as String(LORE_MCP_TOOL_NAMES.length); no CLAUDE.md in the repo and no file under assets/ matches /\b\d+ `?lore_\*`? tools/ outside an unexpanded {{lore:mcp_tool_count}} (issue #209).
+- [⊖] [script] AC-CV-8: LORE_MCP_TOOL_NAMES has exactly the names registered on a real MCP server instance (compared against the server's tool list, not a hand count); the installed lore skill states the tool count as String(LORE_MCP_TOOL_NAMES.length); no CLAUDE.md in the repo and no file under assets/ matches /\b\d+ `?lore_\*`? tools/ outside an unexpanded {{lore:mcp_tool_count}} (issue #209).
   script: test — bunx vitest run packages/lore/tests/unit/assets/mcp-tool-count.test.ts && ! grep -nE '\.(skip|skipIf|todo|only)\(|skip: *true' packages/lore/tests/unit/assets/mcp-tool-count.test.ts && echo 'AC-CV-8 PASS'
   other_command=1
 
@@ -134,5 +134,4 @@ Declared as structured criteria (`lore ac add`), AC-CV-1 … AC-CV-8. Every comm
 - packages/core/src/context-variables.ts#validateRegistry
 - packages/lore/src/service/context-fragments/expand.ts#expandFragments
 - packages/lore/src/service/context-variables-registry.ts#LORE_CONTEXT_VARIABLES
-- packages/lore/src/adapters/mcp/tool-names.ts#LORE_MCP_TOOL_NAMES
 - packages/lore/src/adapters/real-asset-source.ts#expandInstalledAsset

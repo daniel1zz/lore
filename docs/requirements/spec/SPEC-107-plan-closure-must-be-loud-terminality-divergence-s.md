@@ -9,7 +9,7 @@ created: 2026-07-28
 updated: 2026-10-23
 tags: [governance, plan-close, gates]
 links:
-  - {id: SPEC-238, type: implements}
+  - {id: SPEC-268, type: implements}
 ---
 # Spec: Plan closure must be loud — terminality divergence, silent demotion, and absence-as-assertion
 

@@ -6,16 +6,13 @@ title: "Unified upgrade reminder and retirement of the session-start fragment ho
 status: archived
 priority: high
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-25
 tags: []
 parent: SPEC-179
 phases:
   - {name: "Phase 1: Project check", description: "lore setup --project --check and the shared check cache shape (AC-UR-1)"}
   - {name: "Phase 2: Advisory and outlet retirement", description: "session-start-resume advisory (AC-UR-2); retire hook:session-start outlet and session-start-fragments hook (AC-UR-3..5)"}
   - {name: "Phase 3: Land and verify", description: "rule apply, anchors, lore verify, full suite on main"}
-links:
-  - {id: TASK-1049, type: resolves}
-  - {id: TASK-1048, type: resolves}
 ---
 # Plan: Unified upgrade reminder and retirement of the session-start fragment hook
 

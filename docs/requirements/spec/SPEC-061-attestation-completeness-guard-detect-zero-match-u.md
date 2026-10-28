@@ -6,7 +6,7 @@ title: "Attestation completeness guard: detect zero-match / under-match test ora
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-10-17
+updated: 2026-10-27
 tags: []
 ---
 # SPEC-061 — Attestation completeness guard: detect zero-match / under-match test oracles
@@ -247,7 +247,7 @@ Full mechanism, why no exit code can fix it, and the required repair:
   other_command=1
 - [·] [script] AC-061-16: From a throwaway corpus driven by the compiled dist/lore binary: lore evidence --result pass with a -t-filtered command and no output tail exits 4 AND writes no evidence row (the task's verification_evidence length is unchanged), while an unfiltered pass on the same task writes exactly one
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/evidence-completeness-guard-compiled.bun.test.ts
-- [·] [script] AC-061-17: GATE PARITY: the MCP lore_evidence_add tool refuses the same filtered-pass-without-proof input the CLI refuses, by consuming the SAME shared decision function (mirroring findMissingOracleFilesForEvidence's CLI+MCP split) — asserted by driving the MCP tool handler directly, not by inspecting imports
+- [⊖] [script] AC-061-17: GATE PARITY: the MCP lore_evidence_add tool refuses the same filtered-pass-without-proof input the CLI refuses, by consuming the SAME shared decision function (mirroring findMissingOracleFilesForEvidence's CLI+MCP split) — asserted by driving the MCP tool handler directly, not by inspecting imports
   script: test — bunx vitest run packages/lore/tests/unit/adapters/evidence-completeness-guard.test.ts -t 'AC-061-17'
 - [⚑] [script] AC-061-18: PATH EXTRACTION IS SCOPED TO RUNNER SEGMENTS, NEVER THE WHOLE CHAIN (root fix for two of three measured manifestations). splitCommandSegments — already present and quote-aware at packages/core/src/oracle-file-existence.ts:151 but consumed by neither path extractor — becomes the ONE exported segmentation seam that BOTH countExplicitPathArgs (attestation-completeness.ts, today a flat tokenizeCommand walk over the raw string) and extractTestFileTokens (oracle-file-existence.ts, today a bare command.match over the raw string) call. A second walker over the unsegmented string is a second definition of 'what counts as a path here', and the two disagreed in opposite directions. Measured 2026-08-19: countExplicitPathArgs returned 3 for a chain whose two shell-builtin existence checks contributed the two extra tokens, so lore verify reported 'ran 1 of 3 declared paths' and lore done refused an already-finished task on the attestation floor; separately findMissingOracleFiles reported a bare basename appearing inside a success-echo message as a path that does not exist and refused the declaration outright. Both are one root. REQUIRED: a segment that is not a recognised runner invocation contributes NO path tokens, and a segment whose shape cannot be classified is reported as unclassified rather than silently contributing zero — a confident wrong answer is the failure mode here, not an absent one. RED: revert either consumer to the flat unsegmented scan and that consumer's case must fail naming the phantom token it re-admits. Covered by the describe block named runner-segment-scope in packages/core/tests/attestation-completeness.test.ts.
   script: test — bunx vitest run packages/core/tests/attestation-completeness.test.ts -t runner-segment-scope 2>&1 && echo 'AC-061-18 PASS: both path extractors read runner segments only, a non-runner segment contributes no tokens, and an unclassifiable segment is reported as unclassified'

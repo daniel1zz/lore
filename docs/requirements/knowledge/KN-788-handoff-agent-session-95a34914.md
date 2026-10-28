@@ -3,7 +3,7 @@ id: KN-788
 type: knowledge
 role: knowledge
 title: "Handoff — agent:session-95a34914"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-23
 updated: 2026-10-23

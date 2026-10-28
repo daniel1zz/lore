@@ -6,23 +6,12 @@ title: "Close the eight verified critical defects"
 status: archived
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-25
 tags: []
 parent: SPEC-186
 phases:
   - {name: "Phase 1: fixes", description: "F1-F8, one task per root cause, red-first inside each task; parallel except T2->T1 and T7->T8 (shared files)"}
   - {name: "Phase 2: verification", description: "full suite on main, rebuild, lore verify, close resolved reports"}
-links:
-  - {id: TASK-729, type: resolves}
-  - {id: TASK-727, type: resolves}
-  - {id: TASK-726, type: resolves}
-  - {id: TASK-720, type: resolves}
-  - {id: TASK-713, type: resolves}
-  - {id: TASK-936, type: resolves}
-  - {id: TASK-884, type: resolves}
-  - {id: TASK-719, type: resolves}
-  - {id: TASK-728, type: resolves}
-  - {id: TASK-911, type: resolves}
 ---
 ## Overview
 

@@ -3,10 +3,10 @@ id: SPEC-193
 type: spec
 role: spec
 title: "In-repo lore defect backlog: findings from developing lore are plan work, not issues"
-status: draft
+status: deprecated
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-25
 tags: []
 ---
 ## Overview/Goal

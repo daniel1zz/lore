@@ -6,7 +6,7 @@ title: "Run-only write identity and run-end claim release"
 status: approved
 priority: medium
 created: 2026-10-11
-updated: 2026-10-20
+updated: 2026-10-28
 tags: [run-identity, claims]
 ---
 ## Overview/Goal
@@ -77,7 +77,7 @@ Structured criteria live in `extra.acceptance_criteria` (`lore ac list <this spe
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-ROI-1: Every CLI write command and every MCP write tool rejects a caller-supplied identity: no write command declares a by/--by argument and no MCP write tool schema has a by property; the read-side --by filters are exactly the pinned allowlist.
+- [⚑] [script] AC-ROI-1: Every CLI write command rejects a caller-supplied identity: no write command declares a by/--by argument; the read-side --by filters are exactly the pinned allowlist.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/cli/write-commands-take-no-by.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-ROI-1 PASS: no write surface accepts a caller identity'
   other_command=2
 - [⚑] [script] AC-ROI-2: With LORE_ACTOR set in the environment, actor resolution never returns it and never reports source env, in both the core and the CLI resolver; with no run the resolved source follows session, then worktree, then os, in that order.

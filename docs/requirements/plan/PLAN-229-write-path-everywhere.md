@@ -3,10 +3,10 @@ id: PLAN-229
 type: plan
 role: plan
 title: "Write path everywhere"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: SPEC-211
 phases:

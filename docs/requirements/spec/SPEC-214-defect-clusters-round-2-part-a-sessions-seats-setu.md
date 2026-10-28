@@ -6,7 +6,7 @@ title: "Defect clusters round 2 part A: sessions, seats, setup, init, deleted do
 status: approved
 priority: high
 created: 2026-10-19
-updated: 2026-10-20
+updated: 2026-10-28
 tags: []
 ---
 ## Overview/Goal
@@ -167,6 +167,6 @@ Structured ACs AC-DC2-1..AC-DC2-8 (`lore ac list`).
   other_command=3
 - [·] [script] AC-DC2-7: Throwaway corpus, docs K, A, B. (a) `lore link K A --type parent` then `lore link K B --type parent`: both exit 0; `lore get K --json` shows exactly one outgoing parent link (to B) and parent_id B. (b) `lore unlink K B`: either exit 0 with parent_id null, or exit 4 with `PARENT_REQUIRED` and parent_id still B; which branch is pinned by the core schema's parent requiredness for K's type, and in no case does exit 0 leave parent_id equal to B. (c) `lore unlink A B` with no link between them exits 3 with `LINK_NOT_FOUND`; `--json` has ok:false. (d) `lore link K K` exits 4 and `lore get K --json` lists no self-link. Each case is run against SQLiteStore and InMemoryStore. SIMPLEST GREEN-BUT-BROKEN CASE (asserted): checking only parent_id after re-parenting (updated today) or only the tree view; an unlink test on a pair that HAS a link. The test counts parent link rows. Made red once by deleting the old-parent-row removal from addLinkWithProvenance in sqlite-store.ts.
   script: test — bun run test:file packages/lore/tests/integration/dc2-link-integrity.bun.test.ts && echo 'AC-DC2-7 PASS: one parent row agrees with parent_id; no-op unlink exit 3; self-link exit 4'
-- [⚑] [script] AC-DC2-8: Throwaway corpus. (a) `lore set D --title "   "` and `--title ""` exit 4 naming `title`; D's version is unchanged; `lore create knowledge --title "   " ...` also exits 4. (b) After `lore uat record P --json-file accept.json`, an MCP `lore_set` on the uat doc with a changed `extra.uat.verdict` returns isError with a message naming `lore uat record`, and `lore uat show P` still prints the accept verdict; the same patch through CLI `lore set --extra` and HTTP PATCH is refused identically; resending the unchanged `extra.uat` is accepted. SIMPLEST GREEN-BUT-BROKEN CASE (asserted): a test that sends only an empty string (min(1) already refuses on create) or that goes through CLI only (MCP is the reported route). The test sends whitespace and uses MCP. Made red once by removing the knowledge/uat entry from DEDICATED_EXTRA_KEYS.
-  script: test — bun run test:file packages/lore/tests/integration/dc2-set-validation.bun.test.ts && echo 'AC-DC2-8 PASS: blank title refused exit 4; extra.uat rewrite refused on MCP CLI HTTP'
-  other_command=2
+- [⚑] [script] AC-DC2-8: Throwaway corpus. (a) `lore set D --title "   "` and `--title ""` exit 4 naming `title`; D's version is unchanged; `lore create knowledge --title "   " ...` also exits 4. (b) After `lore uat record P --json-file accept.json`, a CLI `lore set --extra` on the uat doc with a changed `extra.uat.verdict` is refused with a message naming `lore uat record`, and `lore uat show P` still prints the accept verdict; the same patch through HTTP PATCH is refused identically; resending the unchanged `extra.uat` is accepted. SIMPLEST GREEN-BUT-BROKEN CASE (asserted): a test that sends only an empty string (min(1) already refuses on create) or that goes through one surface only. The test sends whitespace and drives both CLI and HTTP. Made red once by removing the knowledge/uat entry from DEDICATED_EXTRA_KEYS.
+  script: test — bun run test:file packages/lore/tests/integration/dc2-set-validation.bun.test.ts && echo 'AC-DC2-8 PASS: blank title refused exit 4; extra.uat rewrite refused on CLI and HTTP'
+  other_command=3

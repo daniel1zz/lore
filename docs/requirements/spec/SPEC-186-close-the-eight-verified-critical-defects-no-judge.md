@@ -6,7 +6,7 @@ title: "Close the eight verified critical defects: no judge, listing, mirror, wo
 status: approved
 priority: medium
 created: 2026-10-16
-updated: 2026-10-23
+updated: 2026-10-28
 tags: []
 links:
   - {id: SPEC-040, type: relates-to}
@@ -18,18 +18,7 @@ links:
   - {id: SPEC-155, type: relates-to}
   - {id: SPEC-166, type: relates-to}
   - {id: SPEC-107, type: relates-to}
-  - {id: TASK-727, type: resolves}
-  - {id: TASK-726, type: resolves}
-  - {id: TASK-720, type: resolves}
-  - {id: TASK-713, type: resolves}
-  - {id: TASK-729, type: resolves}
-  - {id: TASK-936, type: resolves}
-  - {id: TASK-884, type: resolves}
-  - {id: TASK-719, type: resolves}
-  - {id: TASK-728, type: resolves}
   - {id: TASK-701, type: relates-to}
-  - {id: TASK-913, type: relates-to}
-  - {id: TASK-711, type: relates-to}
 ---
 ## Overview/Goal
 
@@ -93,7 +82,7 @@ Extends (not edits) the governing specs in the Scope table; each fix task links 
   other_command=1
 - [⚑] [script] AC-CRIT-5: In a throwaway corpus, after changing ONLY a doc's status, the mirror --check run before any export exits exactly 2 and its output names that doc's mirror file
   script: test — bunx vitest run scripts/tests/mirror-body-drift-rewrite.test.ts -t 'status-only'
-- [⚑] [script] AC-CRIT-6: In a throwaway corpus with two knowledge docs, one invalidated: 'lore list --type knowledge --json' exits 0 with data.total=1 and data.omitted_invalid=1, its text output contains '1 invalidated hidden', and with --include-invalid it reports total=2 and omitted_invalid=0; the MCP lore_list result carries the same omitted_invalid
+- [⚑] [script] AC-CRIT-6: In a throwaway corpus with two knowledge docs, one invalidated: 'lore list --type knowledge --json' exits 0 with data.total=1 and data.omitted_invalid=1, its text output contains '1 invalidated hidden', and with --include-invalid it reports total=2 and omitted_invalid=0
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli/list-omitted-invalid.bun.test.ts
   other_command=4
 - [⚑] [script] AC-CRIT-7: Given a temp git repo whose .lore/lore.db user_version is one below the code's and a linked worktree without .lore: (a) a CLI command run from the worktree that resolves the corpus through the git_common_dir fallback exits exactly 4 with a VALIDATION_ERROR naming the schema mismatch; (b) createApp(findLoreDbPath()) called in-process with the worktree as cwd throws the named schema-mismatch error before opening the store; (c) 'lore gate spec-create' run from the worktree with LORE_GATE_BYPASS=1 (the bypass-audit path that must never exit) exits exactly 0 and prints one warning line naming the mismatch; after (a)-(c) the main db's user_version is unchanged; (d) the same CLI command run from the main checkout migrates the db to the code's version

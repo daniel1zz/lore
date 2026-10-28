@@ -9,8 +9,6 @@ created: 2026-08-18
 updated: 2026-08-20
 tags: []
 parent: PRD-001
-links:
-  - {id: TASK-723, type: relates-to}
 ---
 Governance-tool gaps measured 2026-08-18 while resuming
 `knowledge-handoff-agent-main-orchestrator-107`. Gap 4 is why the others are here

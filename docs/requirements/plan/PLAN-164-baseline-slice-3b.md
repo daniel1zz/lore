@@ -3,10 +3,10 @@ id: PLAN-164
 type: plan
 role: plan
 title: "Baseline slice 3b"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: SPEC-163
 phases:

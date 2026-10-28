@@ -7,15 +7,10 @@ status: archived
 priority: medium
 phase: "fix"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: PLAN-233
 plan: PLAN-233
-links:
-  - {id: TASK-1382, type: resolves}
-  - {id: TASK-995, type: resolves}
-  - {id: TASK-1370, type: resolves}
-  - {id: TASK-1351, type: resolves}
 ---
 Estimate: L
 Approach: see spec D4 (end state) and the bound reports (lore get each); fix the root, not each report.

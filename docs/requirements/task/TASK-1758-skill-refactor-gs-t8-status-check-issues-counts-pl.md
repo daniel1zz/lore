@@ -3,11 +3,11 @@ id: TASK-1758
 type: task
 role: plan
 title: "[Skill:refactor] GS-T8 status --check-issues counts; plain status makes no GitHub call"
-status: approved
+status: archived
 priority: medium
 phase: "surfaces"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 plan: PLAN-224

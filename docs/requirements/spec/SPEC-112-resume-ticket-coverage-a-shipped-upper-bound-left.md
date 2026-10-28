@@ -6,7 +6,7 @@ title: "Resume-ticket coverage: a shipped upper bound left the lower bound unrep
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-10-23
+updated: 2026-10-28
 tags: []
 links:
   - {id: SPEC-110, type: relates-to}
@@ -121,7 +121,7 @@ Structured, machine-checkable ACs are registered via `lore ac add`; the prose he
 
 - [⚑] [script] AC-RC-3: The rendered ticket contains both RESUME_SCOPE_CLOSURE and RESUME_COVERAGE_FLOOR, each asserted by identity against its own exported constant in a separate assertion, and the two constants are proven distinct strings so a merged single-string implementation fails
   script: test — bunx vitest run packages/lore/tests/unit/feed-resume-coverage.test.ts -t "both bounds"
-- [⚑] [script] AC-RC-4: The compiled binary CLI stdout for lore feed session-resume AND the MCP lore_feed response for checkpoint session-resume each contain the ordinal tags, the cardinality line, and RESUME_COVERAGE_FLOOR, asserted per surface so passing on one surface alone fails
+- [⚑] [script] AC-RC-4: The compiled binary CLI stdout for lore feed session-resume contains the ordinal tags, the cardinality line, and RESUME_COVERAGE_FLOOR
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/resume-coverage-compiled.bun.test.ts -t "both surfaces"
   other_command=3
 - [⚑] [script] AC-RC-8: After running lore setup against a throwaway claude-dir the installed stop-handoff-coverage hook is byte-identical to its assets SSOT path, and the embedded assets manifest sha256 entries for the new hook and the edited governance asset both equal the on-disk file digests

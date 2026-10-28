@@ -3,10 +3,10 @@ id: PLAN-209
 type: plan
 role: plan
 title: "The approval judge rejects patch-shaped designs"
-status: approved
+status: archived
 priority: high
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: SPEC-200
 phases:

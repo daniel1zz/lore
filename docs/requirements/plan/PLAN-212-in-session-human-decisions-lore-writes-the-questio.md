@@ -3,10 +3,10 @@ id: PLAN-212
 type: plan
 role: plan
 title: "In-session human decisions: lore writes the question, the harness records the answer"
-status: approved
+status: archived
 priority: high
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-25
 tags: []
 parent: SPEC-234
 phases:

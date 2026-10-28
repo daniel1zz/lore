@@ -6,7 +6,7 @@ title: "Session-start injection carries only the session's own open items; corpu
 status: approved
 priority: medium
 created: 2026-10-11
-updated: 2026-10-19
+updated: 2026-10-27
 tags: []
 links:
   - {id: SPEC-080, type: relates-to}
@@ -255,9 +255,9 @@ Declared as structured ACs (AC-SI-1 … AC-SI-12) via `lore ac add`; see the str
 - [⚑] [script] AC-SI-8: The retired constant name BOOTSTRAP_INJECTION_KNOWN_KEYS has zero hits in package src and tests, and RESUME_SCOPE_CLOSURE names every member of BOOTSTRAP_RESUME_CLOSURE_KEYS (= BOOTSTRAP_CORPUS_GLOBAL_KEYS plus resume_hint and my_claims, D8) — exhaustive-set assertion, not substring.
   script: test — ! grep -rn BOOTSTRAP_INJECTION_KNOWN_KEYS packages/core/src packages/lore/src packages/core/tests packages/lore/tests && bunx vitest run packages/core/tests/unit/resume-coverage-constants.test.ts packages/lore/tests/unit/flows/feed-flow-resume-closure.test.ts
   other_command=1
-- [⚑] [script] AC-SI-9: REGRESSION: MCP lore_bootstrap shape pin and the SPEC-057 frozen session-service baseline stay green — the full report is untouched. session-service.test.ts loses only its retired AC-080-2 omitted-plan caps case (it called the retired maxActivePlans projection; D10, needle checked by AC-SI-11) and is otherwise unedited; mcp-session-tools.test.ts changes only its constant import/name (D8 split), no assertion change.
-  script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-session-tools.test.ts packages/lore/tests/unit/service/session-service.test.ts
-  other_command=2
+- [·] [script] AC-SI-9: REGRESSION: the SPEC-057 frozen session-service baseline stays green — the full report is untouched. session-service.test.ts loses only its retired AC-080-2 omitted-plan caps case (it called the retired maxActivePlans projection; D10, needle checked by AC-SI-11) and is otherwise unedited.
+  script: test — bunx vitest run packages/lore/tests/unit/service/session-service.test.ts
+  other_command=4
 - [⚑] [script] AC-SI-10: SessionService.seatClaims(seat: BootstrapSeatSignal) on InMemoryStore with an injected realpath port (no real filesystem): returns exactly the tasks whose extra.claim.worktree equals seat.branch, or is an absolute path resolving through the port to the same directory as seat.worktree (D11/D12); fixtures: symlink-recorded claim vs real seat path and the reverse both match; trailing slash matches; a port that throws ENOENT falls back to path.resolve and still matches the identical string; a relative claim ('.', 'foo') is compared only as a branch; an empty claim.worktree matches nothing; excludes another branch's claims, another worktree's path, claims with no worktree, and archived or deprecated tasks; marks a claim older than claimTtlMinutes stale:true; sorted claimed_at ascending; writes nothing (store write spy count 0). Smallest red mutation: dropping the terminal-status filter includes the archived fixture; resolving only the seat side fails the symlink-recorded fixture.
   script: test — bunx vitest run packages/lore/tests/unit/service/session-service-seat-claims.test.ts
   other_command=1

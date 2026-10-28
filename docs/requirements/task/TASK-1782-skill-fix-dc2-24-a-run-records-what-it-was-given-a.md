@@ -7,13 +7,10 @@ status: archived
 priority: medium
 phase: "wave-1"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-225
 plan: PLAN-225
-links:
-  - {id: TASK-992, type: resolves}
-  - {id: TASK-1380, type: resolves}
 ---
 Estimate: M
 Approach: spec-defect-clusters-round-2-part-d-store-selection-runs D24 end state; fix the root cause named there.

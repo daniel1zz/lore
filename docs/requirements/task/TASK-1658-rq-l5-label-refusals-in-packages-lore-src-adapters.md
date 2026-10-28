@@ -2,11 +2,11 @@
 id: TASK-1658
 type: task
 role: plan
-title: "RQ-L5: label refusals in packages/lore/src/adapters (cli, mcp, http, top level) and their tests"
+title: "RQ-L5: label refusals in packages/lore/src/adapters (cli, http, top level) and their tests"
 status: approved
 priority: high
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-27
 tags: []
 parent: PLAN-216
 plan: PLAN-216

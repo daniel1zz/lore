@@ -6,7 +6,7 @@ title: "The defect channel reaches no machine but its own: GitHub becomes intake
 status: approved
 priority: critical
 created: 2026-08-23
-updated: 2026-10-18
+updated: 2026-10-25
 tags: [defect-channel, transport, github, intake, cap-removal]
 links:
   - {id: ADR-037, type: informs}
@@ -174,7 +174,7 @@ Structured criteria are declared via `lore ac add` and are the executable form; 
 - [⚑] [script] AC-GI-10: A config carrying feedback.inbound.open_report_cap parses successfully and emits a warning naming the key (the permanence of that behaviour is policy in Scope, not part of this oracle)
   script: test — bunx vitest run packages/lore/tests/unit/service/feedback-config-compat.test.ts && echo 'AC-GI-10 PASS: legacy cap key parses and warns by name'
   other_command=2
-- [⚑] [script] AC-GI-11: Migration lands 12 issues, exactly 2 closed with a state_reason, and each of the six closed front-matter fields (severity, category, tags, idempotency_key, reporter_corpus, reporter_root_prd) equals its corpus source
+- [⊖] [script] AC-GI-11: Migration lands 12 issues, exactly 2 closed with a state_reason, and each of the six closed front-matter fields (severity, category, tags, idempotency_key, reporter_corpus, reporter_root_prd) equals its corpus source
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/issue-migration.bun.test.ts && echo 'AC-GI-11 PASS: 12 issues, 2 closed with reason, front-matter equal field by field'
   other_command=2
 - [⚑] [script] AC-GI-12: No read surface issues one network call per issue: the call count for listing 50 issues equals the call count for listing 1

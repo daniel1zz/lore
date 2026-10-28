@@ -3,10 +3,10 @@ id: PLAN-210
 type: plan
 role: plan
 title: "Design-necessity rule v5"
-status: approved
+status: archived
 priority: high
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: SPEC-201
 phases:

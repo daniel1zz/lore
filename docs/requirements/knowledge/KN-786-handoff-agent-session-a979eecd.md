@@ -3,10 +3,10 @@ id: KN-786
 type: knowledge
 role: knowledge
 title: "Handoff — agent:session-a979eecd"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-24
 tags: []
 parent: PLAN-219
 ---

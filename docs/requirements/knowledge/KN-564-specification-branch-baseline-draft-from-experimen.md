@@ -8,9 +8,9 @@ priority: medium
 created: 2026-10-07
 updated: 2026-10-23
 tags: [baseline, pilot-input, specification-branch]
-parent: SPEC-235
+parent: SPEC-265
 links:
-  - {id: SPEC-235, type: relates-to}
+  - {id: SPEC-265, type: relates-to}
 ---
 # Specification branch — experiment draft (input to slice-1 pilot, NOT authoritative)
 

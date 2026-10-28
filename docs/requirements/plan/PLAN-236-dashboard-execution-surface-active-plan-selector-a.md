@@ -3,10 +3,10 @@ id: PLAN-236
 type: plan
 role: plan
 title: "Dashboard execution surface: active-plan selector and honest ready-list badges"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-23
 tags: []
 parent: SPEC-077
 phases:

@@ -6,7 +6,7 @@ title: "Session layer part 1: bootstrap pointer-set + lossless handoff (S1+S2)"
 status: approved
 priority: high
 created: 2026-07-10
-updated: 2026-10-17
+updated: 2026-10-27
 tags: [session, bootstrap, handoff, spec-041, context-continuity]
 ---
 # SPEC-041 — Session layer part 1: bootstrap pointer-set + lossless handoff (PRD §15 S1+S2)
@@ -188,7 +188,7 @@ InMemoryStore (MCP handlers invoked in-process via `_registeredTools` — the ex
   script: test — bunx vitest run packages/lore/tests/unit/service/session-handoff-write.test.ts
 - [⚑] [script] AC-SL-5: Resume supports newest-wins --plan targeting and direct --handoff targeting; renders an age line and warns past workflow.handoff_ttl_minutes; enforces output_tail cap; returns '(no handoff recorded)' with exit 0 when none exists
   script: test — bunx vitest run packages/lore/tests/unit/service/session-resume.test.ts
-- [⚑] [script] AC-SL-6: lore_bootstrap and lore_handoff reject a missing by argument; their JSON payloads deep-equal the CLI --json shapes for the same seeded corpus (in-process _registeredTools invocation)
+- [⊖] [script] AC-SL-6: lore_bootstrap and lore_handoff reject a missing by argument; their JSON payloads deep-equal the CLI --json shapes for the same seeded corpus (in-process _registeredTools invocation)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-session-tools.test.ts
 - [⚑] [script] AC-SL-7: A handoff written via --json-file with all fields populated is reproduced field-for-field by resume; the flags path and json-file path produce identical docs for equivalent input
   script: test — bunx vitest run packages/lore/tests/unit/service/session-roundtrip.test.ts

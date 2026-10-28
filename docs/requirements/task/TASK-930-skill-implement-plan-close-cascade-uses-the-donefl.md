@@ -7,12 +7,11 @@ status: archived
 priority: high
 phase: "plan-close-floors"
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-25
 tags: []
 parent: PLAN-154
 plan: PLAN-154
 links:
-  - {id: TASK-1251, type: resolves}
   - {id: TASK-956, type: blocks}
   - {id: TASK-926, type: blocks}
 ---

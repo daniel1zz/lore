@@ -3,10 +3,10 @@ id: PLAN-219
 type: plan
 role: plan
 title: "Per-item baseline approval: pending revisions, approved-version reads, derived node status"
-status: approved
+status: archived
 priority: high
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: SPEC-220
 phases:

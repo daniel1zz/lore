@@ -7,13 +7,12 @@ status: archived
 priority: high
 phase: "red-proof"
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-25
 tags: []
 parent: PLAN-153
 plan: PLAN-153
 links:
   - {id: TASK-960, type: blocks}
-  - {id: TASK-1242, type: resolves}
 ---
 Estimate: S
 Approach: verify-runner-service.ts `_runFalsifier`: after the mutated run and BEFORE comparing its exit code with the declared one, run `findDiscoveryRefusal` (attestation-completeness.ts:1257) on its output and check for exit 126/127; either hit records `inconclusive`, `capture_source: "runner-unattested"`, no attestation, outcome code 3, even when the code equals the declared one (D11, BR-1075). The genuine-red path (a runner summary with a failure and a matching code) is unchanged. Run scoped: falsify-discovery-refusal.test.ts, attested-red.test.ts, falsify-stored-exit-range.test.ts, `bun run typecheck`.

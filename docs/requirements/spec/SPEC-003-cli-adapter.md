@@ -6,7 +6,7 @@ title: "CLI Adapter"
 status: approved
 priority: critical
 created: 2026-06-08
-updated: 2026-10-10
+updated: 2026-10-28
 tags: [cli, adapter, ux, phase-1]
 links:
   - {id: SPEC-001, type: implements}
@@ -83,7 +83,7 @@ These commands were added in Phase 2 alongside the MCP / HTTP / sync / eval spec
 | Command | Spec | Description |
 |---|---|---|
 | `lore serve [--port] [--host]` | SPEC-010 / SPEC-011 | Start the Lore HTTP API server (Bun.serve, bearer-token auth). Mounts the HTTP adapter |
-| `lore agent <create\|list\|revoke>` | SPEC-010 §3.2 | Manage API keys for AI agents (issued tokens for the HTTP API). NOT an MCP-server launcher — MCP is entered via top-level `--mcp-server` flag |
+| `lore agent <create\|list\|revoke>` | SPEC-010 §3.2 | Manage API keys for AI agents (issued tokens for the HTTP API) |
 | `lore sync <setup\|status\|push\|pull>` | SPEC-009 | Configure and operate the Turso embedded-replica sync engine. Bypasses `loadLoreApp` and manages TursoStore directly |
 | `lore eval [--scenario]` | SPEC-013 | Run read-only evaluation scenarios against the corpus (FTS5 resilience, etc.) |
 
@@ -141,7 +141,7 @@ Error: Document not found: SPEC-999
 
 ### 4.5 JSON Mode (`--json`)
 
-Every command supports `--json` flag for machine-readable output. Identical structure to what MCP adapter (P2) will return.
+Every command supports `--json` flag for machine-readable output.
 
 ## 5. Exit Codes
 
@@ -214,7 +214,7 @@ defaults:
 | Given | When | Then |
 |---|---|---|
 | User runs `lore get SPEC-001` | CLI adapter parses args | Calls `corpusService.get({id: "SPEC-001"})`, formats result with navigation footer |
-| User runs `lore get SPEC-001 --json` | Same parse | Same service call, outputs raw JSON (same structure as future MCP response) |
+| User runs `lore get SPEC-001 --json` | Same parse | Same service call, outputs raw JSON |
 | User runs `lore get NONEXISTENT` | Service returns DocNotFound | CLI prints error with suggestion, exits with code 3 |
 | User runs `lore create spec --title "Auth"` | CLI calls `corpusService.create({type: "spec", title: "Auth"})` | Prompts for parent_id (required for spec), opens $EDITOR for content |
 | User runs `lore list --type spec --status draft` | CLI calls `corpusService.list({type: "spec", status: "draft"})` | Displays formatted table |

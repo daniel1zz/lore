@@ -6,14 +6,12 @@ title: "An active spec counts as approved for claims and plan approval"
 status: archived
 priority: high
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-25
 tags: []
 parent: SPEC-181
 phases:
   - {name: "Phase 1: Status set", description: "UPSTREAM_APPROVED_STATUSES = {approved, active} (AC-ACT-1, AC-ACT-2)"}
   - {name: "Phase 2: Land and verify", description: "rule apply, anchors, lore verify, full suite on main"}
-links:
-  - {id: TASK-1246, type: resolves}
 ---
 # Plan: An active spec counts as approved for claims and plan approval
 

@@ -6,7 +6,7 @@ title: "Issue closure loop — computed resolution + agent-reachable visibility"
 status: approved
 priority: medium
 created: 2026-07-29
-updated: 2026-10-17
+updated: 2026-10-25
 tags: []
 ---
 ## Overview/Goal
@@ -77,32 +77,32 @@ Binding, inherited from §20: cross-corpus paths use **twin throwaway corpora** 
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-resolution.test.ts -t AC-ICL-1
 - [⚑] [script] AC-ICL-2: computeIssueResolution returns 'open' with no resolves in-edge, 'resolving' with a resolves in-edge whose source is draft/in-review/approved, and 'fixed' once any source doc reaches active or archived.
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-resolution.test.ts -t AC-ICL-2
-- [⚑] [script] AC-ICL-3: lore issue resolve <issue> --state fixed exits non-zero and its stderr names 'lore link' and 'resolves' as the only path to fixed; no resolution field is written.
+- [⊖] [script] AC-ICL-3: lore issue resolve <issue> --state fixed exits non-zero and its stderr names 'lore link' and 'resolves' as the only path to fixed; no resolution field is written.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-closure.bun.test.ts -t AC-ICL-3
   other_command=4
-- [⚑] [script] AC-ICL-4: lore issue resolve --state rejected|wontfix --reason <r> persists state and reason under extra.issue_report.resolution, and the computed resolution reports that terminal state over any resolves-edge computation.
+- [⊖] [script] AC-ICL-4: lore issue resolve --state rejected|wontfix --reason <r> persists state and reason under extra.issue_report.resolution, and the computed resolution reports that terminal state over any resolves-edge computation.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-closure.bun.test.ts -t AC-ICL-4
   other_command=4
-- [⚑] [script] AC-ICL-5: lore issues --json lists exactly the tasks carrying extra.issue_report with their computed resolution; --open excludes fixed/rejected/wontfix; --all includes them; a corpus with zero reports yields an empty list and exit 0.
+- [⊖] [script] AC-ICL-5: lore issues --json lists exactly the tasks carrying extra.issue_report with their computed resolution; --open excludes fixed/rejected/wontfix; --all includes them; a corpus with zero reports yields an empty list and exit 0.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-closure.bun.test.ts -t AC-ICL-5
   other_command=4
-- [⚑] [script] AC-ICL-6: lore status --check-issues flags (a) a resolves in-edge whose source is terminal while the issue task is not archived, and (b) an open report older than feedback.stale_after_days; a byte-comparison of every issue doc before and after proves it mutated nothing.
+- [⊖] [script] AC-ICL-6: lore status --check-issues flags (a) a resolves in-edge whose source is terminal while the issue task is not archived, and (b) an open report older than feedback.stale_after_days; a byte-comparison of every issue doc before and after proves it mutated nothing.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-check.bun.test.ts -t AC-ICL-6
   other_command=3
 - [⚑] [script] AC-ICL-7: In a throwaway consumer corpus against a stubbed gh, the consumer-side lore report-issue --list prints the COMPUTED resolution: before any fix a filed report computes open; once a spec carrying a resolves edge to it is archived, its row shows fixed (the resolution cell), never open or draft. An unreadable remote fails LOUD — a non-zero exit with gh's own message on stderr — while lore issues --local still lists the filed history, exit 0. CORRECTED (TG-11B): the criterion degraded an unreadable upstream to a row status 'unreachable' (exit 0) and echoed a recorded rejection reason; both belonged to the SQLite list renderer deleted in 8b3845b1 (the remote listing has no reason column and, by the no-silent-fallback rule, does not hide an outage behind exit 0). The rejection-reason echo is therefore no longer asserted anywhere.
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli/issue-read-surfaces-gh.bun.test.ts -t 'AC-ICL-7:' 2>&1 && echo "AC-ICL-7 PASS: the consumer-side listing prints the computed resolution and fails loud on an unreadable remote"
   other_command=3
-- [⊘] [script] AC-ICL-8: End-to-end on the real shape: a filed issue plus an archived spec carrying a resolves edge computes fixed, lore issues --open omits it, and --check-issues reports it as an unclosed escalation until the issue task itself is archived.
+- [⊖] [script] AC-ICL-8: End-to-end on the real shape: a filed issue plus an archived spec carrying a resolves edge computes fixed, lore issues --open omits it, and --check-issues reports it as an unclosed escalation until the issue task itself is archived.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-closure-e2e.bun.test.ts -t AC-ICL-8
   other_command=3
 - [⚑] [script] AC-ICL-9: The dashboard Issues page renders each report's computed resolution and the nav badge counts computed-open reports; verified in Playwright against a seeded throwaway corpus, serialized on a fixed dev-server port.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues-resolution.spec.ts
-- [⚑] [script] AC-ICL-10: An issue task whose own status is archived, with no resolves in-edge and no explicit terminal state, computes 'closed'; lore issues --open omits it and --resolved includes it; an explicit terminal state and a resolves-edge result each still take precedence over archived.
+- [⊖] [script] AC-ICL-10: An issue task whose own status is archived, with no resolves in-edge and no explicit terminal state, computes 'closed'; lore issues --open omits it and --resolved includes it; an explicit terminal state and a resolves-edge result each still take precedence over archived.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-closed-state.bun.test.ts -t AC-ICL-10
   other_command=4
 - [⚑] [script] AC-ICL-11: computeIssueResolution computes 'rejected' for a report rejected through the review workflow (hasRecordedReviewRejection true, which outranks the archived-doc 'closed' state and applies with no explicit write) and for an explicit rejected state carrying a recorded reason; in neither case is a row ever computed 'open'. Verified at the pure-function layer. CORRECTED (TG-11B): the criterion also required the consumer-side row to carry the recorded reason through a cross-corpus list, and lore reject leaves doc.status at draft per SPEC-005, so the audit-trail lookback that fed hasRecordedReviewRejection lived in the deleted upstream branch (commands/issues.ts header, 8b3845b1); the gh read path does not pass that flag, so the review-rejection signal is not wired through any read surface today — a residual gap named here, not hidden.
   script: test — bunx --bun vitest run packages/lore/tests/unit/service/issue-resolution.test.ts -t AC-ICL-11 2>&1 && echo "AC-ICL-11 PASS: a recorded review rejection and an explicit rejected-with-reason both compute rejected, never open"
   other_command=3
-- [⊘] [script] AC-ICL-12: The resolves-edge e2e suites exercise the REAL migration path: no test-only CHECK-constraint widening helper exists anywhere under packages/lore/tests, and both suites still pass without it.
+- [⊖] [script] AC-ICL-12: The resolves-edge e2e suites exercise the REAL migration path: no test-only CHECK-constraint widening helper exists anywhere under packages/lore/tests, and both suites still pass without it.
   script: test — bunx --bun vitest run packages/lore/tests/e2e/issue-closure.bun.test.ts packages/lore/tests/e2e/issue-closed-state.bun.test.ts && ! grep -rq widenLinkTypeCheckForResolvesTestOnly tests/
   other_command=3

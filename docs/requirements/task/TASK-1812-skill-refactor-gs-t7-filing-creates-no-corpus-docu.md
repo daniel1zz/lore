@@ -3,16 +3,15 @@ id: TASK-1812
 type: task
 role: plan
 title: "[Skill:refactor] GS-T7 filing creates no corpus document; MCP filing names GitHub"
-status: approved
+status: archived
 priority: medium
 phase: "foundation"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 plan: PLAN-224
 links:
-  - {id: TASK-1457, type: resolves}
   - {id: TASK-1757, type: blocks}
   - {id: TASK-1800, type: blocks}
 ---

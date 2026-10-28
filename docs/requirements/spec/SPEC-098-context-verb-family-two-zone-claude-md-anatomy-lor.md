@@ -6,7 +6,7 @@ title: "Context verb family — two-zone CLAUDE.md anatomy, lore context init re
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [claude-md, context, distribution, governance]
 links:
   - {id: ADR-014, type: implements}
@@ -179,7 +179,7 @@ One direction only: core ← service ← flows ← adapters. No cycles.
 - [⊘] [script] AC-CTX-4: Splice SSOT holds: setup-project-flow imports spliceManagedSections from context-projection (grep-pin asserts no second marker-splice implementation remains) and the existing setup e2e suite stays green
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-splice-ssot.test.ts
   other_command=4
-- [·] [script] AC-CTX-5: RETIRED HOOK, current mechanism: the claude-md-guard PostToolUse hook was retired in ee114c62; its check now runs at turn end in stop-turn-review.mjs, which blocks a turn that edited a CLAUDE.md past its ceiling, carrying the 'lore status --check-claude-md' report; a CLAUDE.md edited within budget is silent, and an over-budget file the turn did not touch is not re-reported
+- [⊖] [script] AC-CTX-5: RETIRED HOOK, current mechanism: the claude-md-guard PostToolUse hook was retired in ee114c62; its check now runs at turn end in stop-turn-review.mjs, which blocks a turn that edited a CLAUDE.md past its ceiling, carrying the 'lore status --check-claude-md' report; a CLAUDE.md edited within budget is silent, and an over-budget file the turn did not touch is not re-reported
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/hooks/stop-turn-review-drift-budget.test.ts -t 'CLAUDE.md budget'
   other_command=7
 - [·] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0

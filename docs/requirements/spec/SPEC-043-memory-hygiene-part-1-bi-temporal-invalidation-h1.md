@@ -6,7 +6,7 @@ title: "Memory hygiene part 1: bi-temporal invalidation (H1)"
 status: approved
 priority: high
 created: 2026-07-11
-updated: 2026-10-17
+updated: 2026-10-27
 tags: [memory-hygiene, validity, invalidation, spec-043, bi-temporal]
 ---
 # SPEC-043 — Memory hygiene part 1: bi-temporal invalidation (PRD §16 H1)
@@ -310,7 +310,7 @@ verdicts: revise-then-approve / NEEDS_WORK / NEEDS_WORK. v2 incorporates:
 - [⚑] [script] AC-MH-8: Spawned CLI smoke (assertFreshBinary beforeAll, budget-conscious): invalidate happy exit 0; undo-on-never-invalidated exit 4; non-knowledge/adr target exit 4; search hides then --include-invalid shows with [invalid] badge; create adr --supersedes creates+invalidates+links in one command; lore status warning STRING surfaces for one pre-armed invalidated-feeding-source fixture
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-invalidate.bun.test.ts
   other_command=1
-- [⚑] [script] AC-MH-9: MCP parity: lore_invalidate requires by and deep-equals CLI --json (envelopes unwrapped); lore_search/lore_list include_invalid equivalent to CLI flags; lore_get payload carries computed validity_state (invalidated boolean + invalid_at + invalidated_by_slug + reason) for invalidated docs and invalidated=false otherwise; expectedTools gains lore_invalidate and length literal 28 to 29
+- [⊖] [script] AC-MH-9: MCP parity: lore_invalidate requires by and deep-equals CLI --json (envelopes unwrapped); lore_search/lore_list include_invalid equivalent to CLI flags; lore_get payload carries computed validity_state (invalidated boolean + invalid_at + invalidated_by_slug + reason) for invalidated docs and invalidated=false otherwise; expectedTools gains lore_invalidate and length literal 28 to 29
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-invalidate.test.ts
 - [⚑] [script] AC-MH-10: Boundary+guard: re-invalidating keeps ORIGINAL invalid_at while refreshing reason/invalidated_by (first signal wins); legacy doc without validity round-trips set/get untouched; D10 guard: CorpusService.set changing extra.validity is VALIDATION_ERROR naming lore invalidate; malformed validity via set rejected with the REAL issue message; ADR create with valid decision_status + malformed validity reports the validity issue not the misleading decision_status message (S1 REGRESSION)
   script: test — bunx vitest run packages/lore/tests/unit/service/validity-service.test.ts

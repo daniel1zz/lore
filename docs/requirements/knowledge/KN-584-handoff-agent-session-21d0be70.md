@@ -3,10 +3,10 @@ id: KN-584
 type: knowledge
 role: knowledge
 title: "Handoff — agent:session-21d0be70"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-24
 tags: []
 parent: PLAN-162
 links:

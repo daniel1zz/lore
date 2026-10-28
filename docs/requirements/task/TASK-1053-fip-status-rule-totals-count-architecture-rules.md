@@ -7,12 +7,10 @@ status: archived
 priority: medium
 phase: "fixes"
 created: 2026-10-10
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: PLAN-163
 plan: PLAN-163
-links:
-  - {id: TASK-1065, type: resolves}
 ---
 Estimate: M
 Source: spec-fresh-install-probe-fixes-a-fresh-consumer-can-run-the AC-FIP-4

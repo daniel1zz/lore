@@ -6,7 +6,7 @@ title: "One unknown key discards the whole .lore/config.yaml and the error then 
 status: draft
 priority: high
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-27
 tags: [silent-fallback, config, north-star]
 parent: PRD-001
 ---
@@ -57,7 +57,7 @@ if (!configResult.ok) return undefined;
 
 Whole-file parse, one Result, discarded on failure with no diagnostic on any surface.
 
-⛔ Do NOT file this as an undocumented oversight — it is partially documented, and the documentation is where the fix must start. `loader.ts`'s own header invariant says: "Every OTHER config parse failure (malformed YAML, bad sync/telemetry/workflow section, unknown top-level key, etc.) keeps the pre-existing silent fallback-to-undefined behaviour — this is a documented non-goal of SPEC-030, not an oversight." And `loadProjectConfig`'s docstring justifies not aborting: "a live MCP server's per-call config re-read must never abort the process mid-request."
+⛔ Do NOT file this as an undocumented oversight — it is partially documented, and the documentation is where the fix must start. `loader.ts`'s own header invariant says: "Every OTHER config parse failure (malformed YAML, bad sync/telemetry/workflow section, unknown top-level key, etc.) keeps the pre-existing silent fallback-to-undefined behaviour — this is a documented non-goal of SPEC-030, not an oversight." `loadProjectConfig`'s docstring justified not aborting by a long-lived tool process that re-read config per call; that process is retired (`adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`), so the justification no longer holds.
 
 That justification is sound and is NOT what this task disputes. **Not aborting and emitting no diagnostic are two different decisions, and only the first one was ever argued.** The sibling paths prove the asymmetry is not principled: the global config warns to stderr on malformed input, and an invalid `ai` block exits LOUD at CLI startup (SPEC-030 AC-HJ-3). The project-config path on this route does neither. `spec-the-retired-shape-refusal-message-has-two-byte-identical`'s standing lesson is the same shape: "a refusal branch on one config shape and absent on its neighbour reads as guarded everywhere."
 

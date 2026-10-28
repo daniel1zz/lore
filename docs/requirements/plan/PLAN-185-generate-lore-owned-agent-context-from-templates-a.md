@@ -6,7 +6,7 @@ title: "Generate lore-owned agent context from templates and registered variable
 status: archived
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-25
 tags: []
 parent: SPEC-183
 phases:
@@ -16,7 +16,6 @@ phases:
   - {name: "Phase 4: Verification", description: "Full suite on main, lore verify for all AC-CV, spec code anchors, check-drift exit 0."}
 links:
   - {id: SPEC-183, type: implements}
-  - {id: TASK-1353, type: resolves}
 ---
 ## Overview
 
