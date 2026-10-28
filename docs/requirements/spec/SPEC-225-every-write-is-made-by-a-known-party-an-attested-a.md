@@ -6,7 +6,7 @@ title: "Every write is made by a known party: an attested agent run or an explic
 status: approved
 priority: high
 created: 2026-10-19
-updated: 2026-10-20
+updated: 2026-10-28
 tags: [identity, session, claim]
 ---
 ## Overview/Goal
@@ -63,7 +63,7 @@ Structured criteria are recorded with `lore ac add` (AC-HID-1..6).
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-HID-1: In a throwaway corpus with every identity env var stripped and no human session: lore claim, lore set and lore evidence each exit 4 naming 'lore session start --human' and 'lore setup' and write nothing (version and audit counts unchanged); lore get and lore list still exit 0; an MCP write call without harness_run is refused the same way; a write naming an unregistered harness run exits 4.
+- [⚑] [script] AC-HID-1: In a throwaway corpus with every identity env var stripped and no human session: lore claim, lore set and lore evidence each exit 4 naming 'lore session start --human' and 'lore setup' and write nothing (version and audit counts unchanged); lore get and lore list still exit 0; a write naming an unregistered harness run exits 4.
   script: test — bun run test:file packages/lore/tests/integration/write-requires-known-party.bun.test.ts && echo 'AC-HID-1 PASS: a write with no known party is refused'
   other_command=2
 - [⚑] [script] AC-HID-2: After lore session start --human dana in a throwaway checkout: a lore set writes a version and audit row naming dana with source human and dana's run; lore session show names it; a second start exits 4 naming the open session; after lore session end the next write is refused as in AC-HID-1; a write from a process carrying the agent harness marker is refused rather than attributed to dana.

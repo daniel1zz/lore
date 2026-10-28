@@ -3,10 +3,10 @@ id: PLAN-233
 type: plan
 role: plan
 title: "Defect clusters round 1"
-status: approved
+status: archived
 priority: high
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: SPEC-209
 phases:

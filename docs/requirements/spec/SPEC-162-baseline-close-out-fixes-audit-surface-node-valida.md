@@ -6,7 +6,7 @@ title: "Baseline close-out fixes: audit surface, node validation, isolation e2e,
 status: approved
 priority: medium
 created: 2026-10-10
-updated: 2026-10-17
+updated: 2026-10-28
 tags: []
 ---
 # Baseline close-out fixes: audit surface, node validation, multi-project isolation e2e, compiled census, standard review, tree counts, link atomicity, fidelity judge input
@@ -35,10 +35,10 @@ Declared after landing.
 - [⚑] [script] AC-BLC-2: #129 #130 (BR-613): a whitespace-only label ('   ', '\t\n ') is refused with VALIDATION_ERROR by CorpusService.create and creates no doc, and RuleService.addNode with tree 'marketing' is refused and creates no doc — asserted by describe 'BR-613 node label, tree and kind' in baseline-field-bounds.test.ts
   script: test — bunx vitest run packages/lore/tests/unit/service/baseline-field-bounds.test.ts && echo 'AC-BLC-2 PASS: whitespace label + unknown tree refused on both write paths'
   other_command=1
-- [⚑] [script] AC-BLC-1: #128 (AS-19): a create, set and approve through CorpusService record an audit entry whose surface equals the caller surface; driven through the CLI the entry reads 'cli', through the MCP tool 'mcp', through HTTP with a session cookie 'http_cookie' and with a bearer token 'http_token' — asserted by audit-surface.bun.test.ts
-  script: test — bunx --bun vitest run --testTimeout=120000 --hookTimeout=120000 packages/lore/tests/integration/http/audit-surface.bun.test.ts && echo 'AC-BLC-1 PASS: audit entries carry cli/mcp/http_cookie/http_token surface'
-  other_command=2
-- [⚑] [script] AC-BLC-3: (BR-996) the multi-project isolation e2e passes end to end: an approve plus doc edit addressed to project A succeed (HTTP 2xx) exactly as on a single project, project B's documents stay byte-unchanged, an unregistered project gets 404, and an If-Match token minted under A replayed against B is rejected
+- [⊘] [script] AC-BLC-1: #128 (AS-19): a create, set and approve through CorpusService record an audit entry whose surface equals the caller surface; driven through the CLI the entry reads 'cli', through HTTP with a session cookie 'http_cookie' and with a bearer token 'http_token' — asserted by audit-surface.bun.test.ts
+  script: test — bunx --bun vitest run --testTimeout=120000 --hookTimeout=120000 packages/lore/tests/integration/http/audit-surface.bun.test.ts && echo 'AC-BLC-1 PASS: audit entries carry cli/http_cookie/http_token surface'
+  other_command=5
+- [✘] [script] AC-BLC-3: (BR-996) the multi-project isolation e2e passes end to end: an approve plus doc edit addressed to project A succeed (HTTP 2xx) exactly as on a single project, project B's documents stay byte-unchanged, an unregistered project gets 404, and an If-Match token minted under A replayed against B is rejected
   script: e2e — cd packages/dashboard && bunx playwright test --config=tests/e2e/playwright.multi-project.config.ts tests/e2e/multi-project-isolation.spec.ts && echo 'AC-BLC-3 PASS: isolation e2e green incl. approve on A'
 - [⚑] [script] AC-BLC-4: #58 (AS-16): after bun run build, the compiled dist/lore runs 'baseline sites' and 'baseline coverage' for the specification branch with exit 0 and lists at least one refusal site, never a typescript-unavailable error — asserted by compiled-census.bun.test.ts
   script: test — bun run build > /dev/null 2>&1 && bunx --bun vitest run --testTimeout=300000 --hookTimeout=300000 packages/lore/tests/integration/cli/compiled-census.bun.test.ts && echo 'AC-BLC-4 PASS: compiled binary runs the census'

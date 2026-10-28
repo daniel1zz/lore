@@ -7,19 +7,11 @@ status: archived
 priority: medium
 phase: "fix"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: PLAN-233
 plan: PLAN-233
 links:
-  - {id: TASK-974, type: resolves}
-  - {id: TASK-966, type: resolves}
-  - {id: TASK-945, type: resolves}
-  - {id: TASK-1249, type: resolves}
-  - {id: TASK-1247, type: resolves}
-  - {id: TASK-353, type: resolves}
-  - {id: TASK-355, type: resolves}
-  - {id: TASK-755, type: resolves}
   - {id: TASK-1835, type: blocks}
 ---
 Estimate: L

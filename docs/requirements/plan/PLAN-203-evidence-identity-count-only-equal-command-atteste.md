@@ -3,10 +3,10 @@ id: PLAN-203
 type: plan
 role: plan
 title: "Evidence identity: count only equal-command attested rows; re-verify the drop set"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: SPEC-196
 phases:

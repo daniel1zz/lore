@@ -6,7 +6,7 @@ title: "Two helper agent types: lore-reader and lore-implementer"
 status: approved
 priority: medium
 created: 2026-10-15
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [agents, subagent, dispatch]
 ---
 ## Overview/Goal
@@ -52,7 +52,7 @@ Structured criteria are declared with `lore ac add` (AC-AT-1 .. AC-AT-6). Each s
 - [⚑] [script] AC-AT-2: The dispatch-isolation hook refuses a lore-implementer dispatch without isolation (exit 2, stderr naming lore-implementer), passes the same dispatch with isolation=worktree and a lore-reader dispatch (exit 0), and its source names lore-reader and none of lore-explorer, lore-reviewer or 'tester'.
   script: other — cd /Users/apple/Projects/zz/lore && h=assets/hooks/pre-dispatch-isolation-gate.mjs; e=$(mktemp); printf '{"tool_name":"Agent","tool_input":{"subagent_type":"lore-implementer","prompt":"x"}}' | node $h >/dev/null 2>"$e"; r1=$?; printf '{"tool_name":"Agent","tool_input":{"subagent_type":"lore-implementer","isolation":"worktree","prompt":"x"}}' | node $h >/dev/null 2>&1; r2=$?; printf '{"tool_name":"Agent","tool_input":{"subagent_type":"lore-reader","prompt":"x"}}' | node $h >/dev/null 2>&1; r3=$?; echo "implementer-bare=$r1 implementer-worktree=$r2 reader=$r3"; [ $r1 -eq 2 ] && grep -q "lore-implementer" "$e" && [ $r2 -eq 0 ] && [ $r3 -eq 0 ] && grep -q "lore-reader" $h && ! grep -qE "lore-explorer|lore-reviewer|'tester'" $h && echo "AC-AT-2 PASS: isolation gate refuses a bare lore-implementer dispatch (exit 2), passes worktree and lore-reader, names only current types"
   other_command=2
-- [⚑] [script] AC-AT-4: No fragment audience under assets/context or .lore/context names subagent:lore-explorer, subagent:lore-reviewer or subagent:tester; agent-rules.md reaches subagent:lore-reader; evidence-attestation.md reaches subagent:lore-implementer; lore fragments check exits 0.
+- [⊖] [script] AC-AT-4: No fragment audience under assets/context or .lore/context names subagent:lore-explorer, subagent:lore-reviewer or subagent:tester; agent-rules.md reaches subagent:lore-reader; evidence-attestation.md reaches subagent:lore-implementer; lore fragments check exits 0.
   script: other — cd /Users/apple/Projects/zz/lore && ! grep -rnE 'subagent:(lore-explorer|lore-reviewer|tester)' assets/context .lore/context && grep -q 'subagent:lore-reader' assets/context/agent-rules.md && grep -q 'subagent:lore-implementer' assets/context/evidence-attestation.md && lore fragments check && echo "AC-AT-4 PASS: no fragment audience names a retired type; agent-rules reaches lore-reader; fragments check exits 0"
   other_command=2
 - [⚑] [script] AC-AT-1: assets/agents/ lists exactly 'lore-implementer.md lore-reader.md'; the frontmatter of lore-reader.md has the lines '  - Write', '  - Edit' and '  - NotebookEdit'; lore-implementer.md contains no word 'tester' (case-insensitive); lore-reader.md contains the string 'lore-review'.

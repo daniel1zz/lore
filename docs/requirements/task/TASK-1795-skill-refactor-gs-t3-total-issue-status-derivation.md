@@ -3,11 +3,11 @@ id: TASK-1795
 type: task
 role: plan
 title: "[Skill:refactor] GS-T3 total issue status derivation and the single live join"
-status: approved
+status: archived
 priority: medium
 phase: "surfaces"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 plan: PLAN-224

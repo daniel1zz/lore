@@ -6,10 +6,12 @@ title: "The MCP boot carries the same frozen-startup-cwd provenance the HTTP fix
 status: draft
 priority: high
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-27
 tags: []
 parent: PRD-001
 ---
+> ⚠ INVALIDATED 2026-10-27T06:26:28.144Z — superseded by adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only; lore MCP server removed (adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only): there is no MCP boot left to carry ambient provenance
+
 Disclosed unprompted by the implementer of `task-the-http-exemption-is-conditional-on-where-lore-serve-was` while fixing the HTTP half, and confirmed by direct inspection on merged main.
 
 ## The defect

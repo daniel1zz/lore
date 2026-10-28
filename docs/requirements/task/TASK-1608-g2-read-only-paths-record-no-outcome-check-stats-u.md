@@ -3,11 +3,11 @@ id: TASK-1608
 type: task
 role: plan
 title: "G2 read-only paths record no outcome; check-stats uses the plan-membership predicate"
-status: approved
+status: archived
 priority: medium
 phase: "G"
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-26
 tags: []
 parent: PLAN-211
 plan: PLAN-211

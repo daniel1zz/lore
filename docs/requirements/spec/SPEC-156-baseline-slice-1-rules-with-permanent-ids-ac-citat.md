@@ -9,7 +9,7 @@ created: 2026-10-07
 updated: 2026-10-17
 tags: [baseline, slice-1]
 links:
-  - {id: SPEC-235, type: implements}
+  - {id: SPEC-265, type: implements}
   - {id: ADR-041, type: relates-to}
 ---
 # Architecture: Baseline slice 1 — rules, citations, evidence-computed rule state, specification-branch pilot

@@ -6,7 +6,7 @@ title: "Trusted runner: attested evidence for script-mode ACs"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-10-23
+updated: 2026-10-28
 tags: [verify, attestation, evidence, runner, spec-039]
 links:
   - {id: ADR-001, type: relates-to}
@@ -138,7 +138,7 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
 
 - [⚑] [script] AC-VRF-1: attestation is optional on evidenceEntrySchema; a mixed evidence array (legacy entry without + new entry with attestation) parses as a whole via extractEvidence
   script: test — bunx vitest run packages/core/src/task-workflow.test.ts
-- [⚑] [script] AC-VRF-2: evidence write surfaces (CLI lore evidence / MCP lore_evidence_add) reject input carrying attestation with VALIDATION_ERROR exit 4
+- [⚑] [script] AC-VRF-2: the evidence write surface (CLI lore evidence) rejects input carrying attestation with VALIDATION_ERROR exit 4
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-service.test.ts
 - [⚑] [script] AC-VRF-3: lore verify end-to-end: exit-0 command produces attested pass evidence with correct exit_code and duration_ms via recordVerifiedEvidence sole injection site
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-runner-service.test.ts
@@ -156,7 +156,7 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
   script: test — bunx vitest run packages/core/src/acceptance.test.ts packages/lore/tests/unit/service/ac-service.test.ts
 - [⊖] [script] AC-VRF-9: assess prompt bumps to version 5 with attested annotation in the AC table; the three version-4 assertions migrate in the same change
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [⚑] [script] AC-VRF-10: lore verify CLI and lore_verify MCP happy and negative paths (ambiguous task, no script ACs, draft-spec warning)
+- [✘] [script] AC-VRF-10: lore verify CLI happy and negative paths (ambiguous task, no script ACs, draft-spec warning)
   script: test — bunx vitest run packages/lore/tests/integration/cli/verify.test.ts
 - [⚑] [script] AC-VRF-11: full suites pass on both runners with zero regressions
   script: test — bun run test

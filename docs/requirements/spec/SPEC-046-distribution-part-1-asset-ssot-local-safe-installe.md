@@ -6,7 +6,7 @@ title: "Distribution part 1: asset SSOT + local safe installer (P0+P1)"
 status: approved
 priority: high
 created: 2026-07-16
-updated: 2026-10-18
+updated: 2026-10-28
 tags: [distribution, installer, p17, setup]
 ---
 **spec_kind:** feature · **implements →** PRD §17 Distribution & Adoption (P0+P1 slice)
@@ -22,11 +22,11 @@ Design provenance: user-approved brainstorm (2026-07-16) → PRD §17 v0.9 (5-st
 **IN:**
 - **P0** — `assets/` SSOT tree at repo root: `assets/skills/` (lore, lore-kickoff, lore-session, lore-doctor, lore-autopilot), `assets/agents/` (lore-explorer, lore-planner, lore-implementer, lore-reviewer), `assets/hooks/` (session-start-resume.mjs, stop-doc-sync.mjs, subagent-context.mjs, pre-subagent-gate.mjs, pre-no-general-agent-gate.mjs, lore-gate g1–g4), `assets/governance/corpus-workflow.md` (authored FRESH as a standalone versioned file — the governance snippet extracted clean of the owner's private global CLAUDE.md personal rules), `assets/project/` (project-level g1–g4 hooks, pre-push, lore.tree.yaml template).
 - **P1 installer** — new `lore setup` CLI command family: `lore setup` (install), `--dry-run` (plan only, zero writes), `--uninstall` (reverse strictly via manifest), `--project` (repo scaffold), `--claude-dir <path>` (target-dir override), `--yes` (skip confirmation ONLY — pinned semantics; P2 postinstall contract).
-- Authoritative manifest `<claude-dir>/.lore-setup-manifest.json`: every written path/entry recorded (`SetupEntry {path, kind: skill|agent|hook|governance|settings-hook|mcp, sha256, written_at}`); `sha256` computed over FINAL ON-DISK BYTES (post-merge), never the raw payload — the invariant future three-way upgrade diffing depends on.
+- Authoritative manifest `<claude-dir>/.lore-setup-manifest.json`: every written path/entry recorded (`SetupEntry {path, kind: skill|agent|hook|governance|settings-hook|mcp, sha256, written_at}`; `mcp` is read-only — a manifest written by a pre-removal binary may hold it, `lore setup` never writes it); `sha256` computed over FINAL ON-DISK BYTES (post-merge), never the raw payload — the invariant future three-way upgrade diffing depends on.
 - `settings.json` merge: pure `mergeSettings({loreEntries, existing})` returns the COMPLETE new content or `err` — malformed pre-existing JSON → `err(VALIDATION_ERROR)`, and the whole install run performs ZERO writes (fail loud, no partial write). Atomic write in the fs layer (tmp + rename).
-- Global MCP registration via `claude mcp add -s user lore -- lore --mcp-server` (verified surface: user-scope servers persist in `~/.claude.json` `mcpServers`; delegating the file format to the claude CLI). Uninstall via `claude mcp remove -s user lore`. Recorded in the manifest as kind `mcp` (this is why the `mcp` kind stays in P1 — uninstall consumes it). `claude` binary absent → loud error naming the manual command, install of file assets still completes (MCP step reported as skipped in the receipt, exit ≠ 0).
+- No tool-server registration: `lore setup` registers no MCP server and writes no `mcp` manifest row (the lore MCP server is retired: `adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`, `spec-remove-the-lore-mcp-server`). An old manifest's `mcp` row is dropped on the next install and skipped on uninstall.
 - Backup-before-overwrite into `<claude-dir>/.lore-backups/<timestamp>/`; `--uninstall` restores backed-up files byte-identically (restore-from-backup is THE uninstall mechanism for merge-target files).
-- Post-run receipt (rendered in `adapters/cli/setup-render.ts`): binary found, N skills/agents/hooks written/skipped, MCP registered ✓/skipped, manifest path, backup path.
+- Post-run receipt (rendered in `adapters/cli/setup-render.ts`): binary found, N skills/agents/hooks written/skipped, manifest path, backup path.
 - `lore setup --project`: `lore init` (existing service path) + `assets/project/` hooks + pre-push + `lore.tree.yaml` + `git config core.hooksPath hooks` — via `ProjectSetupService` + `flows/setup-project-flow.ts`.
 
 **OUT (later specs):** P2 npm publish + TTY postinstall trigger; P3 cross-compile + binary-embedded assets (spike-gated); win32; upgrade-conflict resolution UI (manifest schema is future-proofed, logic deferred); redistribution of any skill we don't own (tdd/to-prd/brainstorming = external deps, documented only).
@@ -35,8 +35,8 @@ Design provenance: user-approved brainstorm (2026-07-16) → PRD §17 v0.9 (5-st
 
 Module structure (4-perspective review synthesis, all revisions absorbed):
 
-- **`@lore/core` (pure, browser-safe):** `setup-manifest.ts` — `setupManifestSchema`/`setupEntrySchema` (Zod), `planInstall(currentManifest, payload, existingFiles) → InstallPlan {writes, skips, backups, removals}`; `merge-settings.ts` — `mergeSettings({existing, loreEntries}) → Result<object>` (NARROW input — never the manifest object); `register-mcp.ts` — MCP args builder (pure). Six-dimension vitest.
-- **`service/setup-service.ts`** — `SetupService` (stateless, `Result<T, LoreError>`): `planInstall()` / `install()` / `uninstall()`. Constructor ports: `AssetSource {load(): Promise<Result<AssetPayload>>}` (P1 impl reads `assets/` dir; P3 swaps to binary-embed WITHOUT touching SetupService), `SetupFsReader {read, stat}` + `SetupFsWriter {write, mkdir, backup, remove}` (SPLIT ports — `planInstall()` receives reader ONLY, structurally cannot write), `McpRegistrar {add, remove}` (P1 impl shells `claude mcp`). `targetDir` is a RESOLVED string parameter — resolution (`--claude-dir` > `$CLAUDE_CONFIG_DIR` > `homedir()`) lives in the CLI adapter; the service contains zero `homedir()`/env reads.
+- **`@lore/core` (pure, browser-safe):** `setup-manifest.ts` — `setupManifestSchema`/`setupEntrySchema` (Zod), `planInstall(currentManifest, payload, existingFiles) → InstallPlan {writes, skips, backups, removals}`; `merge-settings.ts` — `mergeSettings({existing, loreEntries}) → Result<object>` (NARROW input — never the manifest object). Six-dimension vitest.
+- **`service/setup-service.ts`** — `SetupService` (stateless, `Result<T, LoreError>`): `planInstall()` / `install()` / `uninstall()`. Constructor ports: `AssetSource {load(): Promise<Result<AssetPayload>>}` (P1 impl reads `assets/` dir; P3 swaps to binary-embed WITHOUT touching SetupService), `SetupFsReader {read, stat}` + `SetupFsWriter {write, mkdir, backup, remove}` (SPLIT ports — `planInstall()` receives reader ONLY, structurally cannot write). `targetDir` is a RESOLVED string parameter — resolution (`--claude-dir` > `$CLAUDE_CONFIG_DIR` > `homedir()`) lives in the CLI adapter; the service contains zero `homedir()`/env reads.
 - **`service/project-setup-service.ts`** — `ProjectSetupService` (repo-target scaffold), consuming `flows/setup-project-flow.ts`. SEPARATE service (global-machine vs repo target-type split, mirroring the anchor-command DriftCheck/TaskWorkflow precedent). `commands/setup.ts` and `commands/init.ts` never import each other.
 - **`adapters/cli/commands/setup.ts`** (thin citty adapter: flag parsing, target-dir resolution, service calls) + **`adapters/cli/setup-render.ts`** (receipt rendering, vitest-testable — assess-render.ts precedent).
 - Verb naming: `planInstall/install/uninstall` — avoids collision with lore `plan` docs.
@@ -47,7 +47,7 @@ Module structure (4-perspective review synthesis, all revisions absorbed):
 
 Deterministic oracles (structured ACs added via `lore ac add`, script-mode, executable by `lore verify`):
 
-- AC-046-A [script/test] Pure-fn suite green (manifest schema, planInstall, mergeSettings incl. malformed→err, register-mcp args): `bunx vitest run packages/lore/tests/unit/core/setup-pure.test.ts`
+- AC-046-A [script/test] Pure-fn suite green (manifest schema, planInstall, mergeSettings incl. malformed→err): `bunx vitest run packages/lore/tests/unit/core/setup-pure.test.ts`
 - AC-046-B [script/test] SetupService lifecycle green (fake-fs fault injection + mkdtemp roundtrip, invariants I1–I5): `bunx vitest run packages/lore/tests/unit/service/setup-service.test.ts`
 - AC-046-C [script/test] ProjectSetupService scaffold green (init + hooks + tree.yaml + hooksPath in a throwaway git repo): `bunx vitest run packages/lore/tests/unit/service/project-setup-service.test.ts`
 - AC-046-D [script/test] Asset SSOT conformance green (assets/ tree contains every declared skill/agent/hook/governance file; governance snippet parses standalone): `bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts`
@@ -60,7 +60,7 @@ Deterministic oracles (structured ACs added via `lore ac add`, script-mode, exec
 |---|---|---|---|
 | R1 | H | settings.json merge bug corrupts a live Claude Code config | I1 zero-write-on-error invariant + atomic tmp+rename + backup-before-overwrite + PRD hard-gate metric (zero corruption incidents) |
 | R2 | M | governance snippet extraction drags private rules into the distributable | P0 authors it FRESH; AC-046-D asserts standalone parse; review pass before approve |
-| R3 | M | `claude mcp` CLI surface changes shape | registration delegated to the CLI (not file writes); failure is loud + receipt-visible; manual command named in error |
+| R3 | — | (retired) the `claude mcp` registration step this risk covered was removed with the lore MCP server (`adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`) | — |
 | R4 | L | assets/ SSOT drifts from the owner's live ~/.claude copies | post-install the SSOT is authoritative — owner re-runs `lore setup` like everyone else (dogfooding) |
 
 ## Boundaries
@@ -70,7 +70,7 @@ Thin glue over existing conventions: services return `Result`, ports injected (F
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-046-A: Pure-fn suite green: setup-manifest schema, planInstall, mergeSettings (malformed existing JSON returns err), register-mcp args builder — six-dimension coverage
+- [⚑] [script] AC-046-A: Pure-fn suite green: setup-manifest schema, planInstall, mergeSettings (malformed existing JSON returns err) — six-dimension coverage
   script: test — bunx vitest run packages/lore/tests/unit/core/setup-pure.test.ts
 - [⚑] [script] AC-046-B: SetupService lifecycle green: fake-fs fault injection (partial-write honesty, re-run convergence) + mkdtemp roundtrip; invariants I1-I5 each have a dedicated test
   script: test — bun run test:file packages/lore/tests/unit/service/setup-service.test.ts
@@ -96,7 +96,6 @@ Thin glue over existing conventions: services return `Result`, ports injected (F
 
 - packages/core/src/setup-manifest.ts
 - packages/core/src/merge-settings.ts
-- packages/core/src/register-mcp.ts
 - packages/lore/src/service/setup-service.ts
 - packages/lore/src/service/project-setup-service.ts
 - packages/lore/src/flows/setup-project-flow.ts

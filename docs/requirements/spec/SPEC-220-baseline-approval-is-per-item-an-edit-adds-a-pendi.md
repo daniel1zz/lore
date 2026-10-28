@@ -6,7 +6,7 @@ title: "Baseline approval is per item: an edit adds a pending revision while the
 status: approved
 priority: high
 created: 2026-10-19
-updated: 2026-10-20
+updated: 2026-10-24
 tags: [baseline, approval]
 ---
 ## Overview/Goal
@@ -89,7 +89,7 @@ Structured criteria are recorded with `lore ac add` (AC-BIA-1..7).
 - [·] [script] AC-BIA-1: On an approved leaf in a throwaway corpus: lore rule set BR-x --statement Y leaves the leaf's other rules and own part approved; rule show prints the approved statement and Y labelled pending; the cite gate, rule state and coverage read the approved statement; approving the leaf after review makes Y the approved version.
   script: test — bun run test:file packages/lore/tests/integration/baseline-item-pending-revision.bun.test.ts && echo 'AC-BIA-1 PASS: a revision is pending while the approved version governs'
   other_command=3
-- [·] [script] AC-BIA-2: lore rule add on an approved leaf adds a pending add: the registry lifecycle is proposed, a criterion citing it is refused as not live at spec approval, coverage does not count it, the leaf's other items stay approved; lore approve --item BR-n without a review that saw it exits 4; after lore review and lore approve --item BR-n it is live.
+- [⚑] [script] AC-BIA-2: lore rule add on an approved leaf adds a pending add: the registry lifecycle is proposed, a criterion citing it is refused as not live at spec approval, coverage does not count it, the leaf's other items stay approved; lore approve --item BR-n without a review that saw it exits 4; after lore review and lore approve --item BR-n it is live.
   script: test — bun run test:file packages/lore/tests/integration/baseline-item-pending-add.bun.test.ts && echo 'AC-BIA-2 PASS: a direct add is not live until approved'
   other_command=4
 - [·] [script] AC-BIA-3: Two sessions add one rule each to one leaf; review sees both; a third rule added after the review is not promoted by approve and stays pending; a second write to a reviewed item replaces its pending revision and approve then exits 4 naming it; reject --item discards one pending revision and leaves the other.

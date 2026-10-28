@@ -6,7 +6,7 @@ title: "lore ready's records carry no validity signal, so a dispatcher cannot te
 status: draft
 priority: medium
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-10-27
 tags: [defect, validity, ready, probe-signal, discriminated-union]
 parent: PRD-001
 links:
@@ -41,7 +41,9 @@ Three files, one of them a shared core type, and the ripple is real:
 > (`task-workflow.ts`) UNCHANGED, including the field literally named `.task` — see the RED
 > test's CONTRACT NOTE §2 for why renaming it to `.phase` is deliberately out of THIS task's
 > scope (it would ripple into every `ReadyRecord` consumer: CLI `lore ready`, `lore tree`
-> badges, MCP `lore_ready`).
+> badges, ...).
+
+(Quote shortened on 2026-10-27: its last consumer was on the tool surface retired by `adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`.)
 
 The stated reason is scoped to **RENAMING `.task` → `.phase`** — a breaking change to an existing field that every consumer already reads. ADDING a field is a strictly weaker change: no existing reader loses anything. So the fence does **not** forbid this task, but its invariant text says `UNCHANGED`, which your change will contradict on its face.
 
@@ -50,7 +52,7 @@ Therefore: read `CONTRACT NOTE §2` in that module's RED test before touching an
 # Required fix
 
 1. Add validity to `ReadyRecord` using the ALREADY-SHIPPED helper `withPreGatedLiveStatus` from `packages/lore/src/service/validity-service.ts`. ⛔ Do not write a second predicate — that helper is named for its assumption (the caller has already excluded at the injected instant), which is exactly `ready`'s situation.
-2. **Enumerate every `ReadyRecord` consumer before changing the shape** — CLI `ready`, MCP `lore_ready`, HTTP, dashboard — and state per consumer whether it breaks, ignores, or benefits. The `phase-workflow-service.ts` JSDoc names this ripple as its reason for deferring; discharge that reason explicitly rather than overruling it silently.
+2. **Enumerate every `ReadyRecord` consumer before changing the shape** — CLI `ready`, HTTP, dashboard — and state per consumer whether it breaks, ignores, or benefits. The `phase-workflow-service.ts` JSDoc names this ripple as its reason for deferring; discharge that reason explicitly rather than overruling it silently.
 3. `phase-workflow-service.ts` emits the same record with no injected validity source in some paths. If a path genuinely cannot consult validity, it must say so structurally (`{probed:false, reason}`), NOT emit a bare empty value — mirror `anchor_resolution`'s discriminated union rather than inventing a third convention.
 
 # Oracle

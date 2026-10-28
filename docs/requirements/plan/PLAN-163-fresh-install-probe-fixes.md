@@ -3,10 +3,10 @@ id: PLAN-163
 type: plan
 role: plan
 title: "Fresh-install probe fixes"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-23
 tags: []
 parent: SPEC-164
 phases:

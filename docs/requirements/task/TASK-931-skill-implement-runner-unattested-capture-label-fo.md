@@ -7,13 +7,12 @@ status: archived
 priority: high
 phase: "capture-label"
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-25
 tags: []
 parent: PLAN-153
 plan: PLAN-153
 links:
   - {id: TASK-960, type: blocks}
-  - {id: TASK-1250, type: resolves}
   - {id: TASK-927, type: blocks}
 ---
 Estimate: M

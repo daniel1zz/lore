@@ -3,10 +3,10 @@ id: PLAN-204
 type: plan
 role: plan
 title: "Autonomy phase 1: decision function, human channel, lore-executed cleanup, overrides escalate"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: SPEC-197
 phases:

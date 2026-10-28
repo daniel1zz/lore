@@ -6,7 +6,7 @@ title: "Lean governance: batch verbs, judgment only at milestones, lean context"
 status: approved
 priority: critical
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-27
 tags: []
 ---
 # Lean governance: batch verbs, judgment only at milestones, lean context
@@ -125,7 +125,7 @@ AC-LG-1..14 (`lore ac add`). Each script-mode AC runs its own test file with `-t
 - [⚑] [script] AC-LG-3: A DRAFT CAN BE ABANDONED. VALID_TRANSITIONS allows draft -> deprecated for every doc type; lore bulk deprecate on a draft plan and a draft task writes deprecated with the reason; archived -> deprecated stays invalid (INVALID_TRANSITION, exit 4).
   script: test — bun run test:file packages/lore/tests/integration/bulk-lifecycle.test.ts -t 'draft can be abandoned' && echo 'AC-LG-3 PASS: draft->deprecated valid for all types, archived->deprecated refused'
   other_command=1
-- [⚑] [script] AC-LG-4: MCP PARITY. MCP exposes lore_bulk with the same selector, preview/apply and per-row result as the CLI, plus lore_done and lore_reject; a lore_bulk call and the equivalent CLI call over the same corpus fixture return the same rows. lore archive --apply exits 1 when any candidate failed.
+- [⊖] [script] AC-LG-4: MCP PARITY. MCP exposes lore_bulk with the same selector, preview/apply and per-row result as the CLI, plus lore_done and lore_reject; a lore_bulk call and the equivalent CLI call over the same corpus fixture return the same rows. lore archive --apply exits 1 when any candidate failed.
   script: test — bun run test:file packages/lore/tests/integration/bulk-lifecycle.test.ts -t 'mcp parity' && echo 'AC-LG-4 PASS: lore_bulk/lore_done/lore_reject match the CLI'
   other_command=1
 - [·] [script] AC-LG-5: LEAN INTEGRATE FLOOR. bun run check:floor --list prints exactly install, build, typecheck, baseline-coverage:changed, ac-oracle-ownership:changed; the plan-close chain lists every check: script including the full baseline-coverage and ac-oracle-ownership; one declaration feeds run-chain.ts and --list; a check: script in package.json in neither list fails the test; check:test-budgets and its ledger no longer exist and the vitest config sets testTimeout 30000 for the integration and e2e projects. A branch adding an undeclared command fails baseline-coverage:changed, a branch deleting an AC's owner test fails ac-oracle-ownership:changed, and a branch touching neither runs each step in under 5 s with exit 0. lore integrate runs the own-diff judgment before the floor command.
@@ -151,7 +151,7 @@ AC-LG-1..14 (`lore ac add`). Each script-mode AC runs its own test file with `-t
   other_command=2
 - [⚑] [script] AC-LG-12: MILESTONE REVIEW IS THE ONLY PLAN-CLOSE CHECK. lore assess <plan>... | --where stores per plan a review with the seven dimensions, each with verdict pass|fail|n/a, reason and reference, one row per plan. Closing a plan is refused (exit 4, rule BR-1372) when the latest review is not for the plan's current state or any dimension fails, and succeeds with a passing current review even when the plan has no plan-level attestation exemption and cites a rule whose state is unknown. The assessment-freshness predicate, the plan-level attestation floor, the plan-close cited-rule check, lore plan exempt-assessment-freshness and lore plan exempt-attestation are removed; requires_uat still applies.
   script: test — bun run test:file packages/lore/tests/integration/milestone-review.test.ts -t 'milestone review gates close' && echo 'AC-LG-12 PASS: plan close needs a passing seven-dimension review'
-  other_command=9
+  other_command=13
 - [·] [script] AC-LG-13: CHECKS COUNT THEIR CATCHES. Each retained gate and hook appends one outcome row (check id, pass|deny|error, time) per run; lore checks stats prints runs, denials and last denial per check id; a check with >=30 days and >=50 runs and 0 denials is listed under removal candidates and one with a denial is not.
   script: test — bun run test:file packages/lore/tests/integration/check-stats.test.ts -t 'checks count catches' && echo 'AC-LG-13 PASS: every check records outcomes; never-catching checks are listed'
   other_command=3

@@ -6,7 +6,7 @@ title: "Corpus-governed active AI workflow (Inversion of Control) with determini
 status: approved
 priority: critical
 created: 2026-07-08
-updated: 2026-07-14
+updated: 2026-10-28
 tags: [architecture, paradigm, ai-workflow, governance, inversion-of-control]
 parent: PRD-001
 links:
@@ -55,7 +55,7 @@ Conditional best practice for **structured / verifiable / multi-actor (humans + 
 The net build is **thin glue**. Reuse, do not rebuild:
 
 - Hook mechanism → **Claude Code hooks** (already the substrate)
-- agent ↔ corpus → **MCP** (lore already ships 24 tools)
+- agent ↔ corpus → **MCP** (lore already ships 24 tools) — *amended 2026-10-28: superseded by `adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`; agents reach the corpus through Bash and the `lore` CLI, and HTTP remains the other surface.*
 - deterministic policy beyond shell scripts → **OPA/Rego** or **AWS Cedar**
 - prompt/skill eval loop → existing **SPEC-034 judge + SPEC-035 calibration** (+ Langfuse only if heavy prompt experimentation)
 - passive-context interop → emit **AGENTS.md** from the corpus (do not compete with it)

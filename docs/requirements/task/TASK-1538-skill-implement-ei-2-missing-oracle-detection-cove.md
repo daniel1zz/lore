@@ -7,13 +7,12 @@ status: archived
 priority: high
 phase: "Phase 1: rule and re-verification"
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-25
 tags: []
 parent: PLAN-203
 plan: PLAN-203
 links:
   - {id: TASK-1539, type: blocks}
-  - {id: TASK-1079, type: resolves}
 ---
 Estimate: M
 Approach: oracle-file-existence.ts extracts only TEST_FILE_TOKEN_PATTERN paths (~96) from segments led by vitest/bun test/bun run/playwright/dist/lore (~288-291, 382-389); unclassified segments yield [] and findMissingOracleFiles returns [] (~694) = fail-open. Extend extraction to file paths handed to an interpreter/runner (bun, node, sh, bash, tsx, bunx <tool>); count and name segments it cannot classify (AS-17) instead of treating them as clean. Remove TG-22's narrowing: deriveAcCoverageState (~744) returns not_measured whenever oracle_file_missing is non-empty, regardless of passes_ran_missing_oracle; annotateMissingOracleFiles (ac-service.ts ~1476-1510) keeps the count only as information. lore ac add/set path check covers script paths. Red-first: the 5 halves of AC-EI-2. Update TG-22's tests whose expectation encoded the narrowing, stating the spec authority (AC-TG-6 text + AC-EI-2). Remove the AC-EI-2 not-built ledger row.

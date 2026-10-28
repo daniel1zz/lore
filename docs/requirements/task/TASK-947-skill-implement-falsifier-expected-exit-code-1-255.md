@@ -7,7 +7,7 @@ status: archived
 priority: high
 phase: "falsifier-range"
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-25
 tags: []
 parent: PLAN-153
 plan: PLAN-153
@@ -15,7 +15,6 @@ links:
   - {id: TASK-931, type: blocks}
   - {id: TASK-942, type: blocks}
   - {id: TASK-960, type: blocks}
-  - {id: TASK-1258, type: resolves}
 ---
 Estimate: M
 Approach: (1) service/ac-write-chokepoint.ts `admitAcWrite`: for each criterion that is new or whose falsifier differs from the stored one, on every AcWritePath (ac-verb, create, import, restore, wholesale), refuse `expected_exit_code` that is not an integer in 1..255 with VALIDATION_ERROR field `falsifier.expected_exit_code`, before any write (spec D3). A write that leaves a stored falsifier unchanged is never refused because of it. Do NOT touch `acFalsifierSchema` (packages/core/src/acceptance.ts, D4). (2) ac-service.ts only as needed to pass the stored criterion to the chokepoint for comparison. (3) commands/ac.ts: `--falsifier-exit-code` help text says 1..255; parsing unchanged (:842-860). (4) VerifyRunnerService `_runFalsifier` (verify-runner-service.ts:1766+): before the green control, refuse a stored value outside 1..255 with VALIDATION_ERROR naming `lore ac set <spec> <AC> --correction "<reason>" --falsifier-exit-code <n>`; executor and recorder untouched (D5). Run scoped: the four RED files, every test importing ac-write-chokepoint.ts / ac-service.ts / verify-runner-service.ts (hand-pick), `bun run build` before the e2e, `bun run typecheck`.

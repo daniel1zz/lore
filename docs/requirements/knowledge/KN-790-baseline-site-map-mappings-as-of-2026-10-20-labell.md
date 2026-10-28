@@ -6,7 +6,7 @@ title: "Baseline site-map mappings as of 2026-10-20: labelling hints for RQ, nev
 status: draft
 priority: medium
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-27
 tags: []
 ---
 ## Purpose
@@ -956,8 +956,6 @@ D1-1 placed 644 of them at the constructing line; the rest (522 on shared sites,
 - packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#plan_ref~1 | BR-338 | baseline-hand-off-a-session
 - packages/lore/src/service/session-service.ts#SessionService.writeHandoff#VALIDATION_ERROR#plan_ref~2 | BR-339 | baseline-hand-off-a-session
 - packages/lore/src/service/setup-service.ts#AssetSource#load | BR-825 | baseline-install-the-agent-integration
-- packages/lore/src/service/setup-service.ts#McpRegistrar#add | BR-826 | baseline-install-the-agent-integration
-- packages/lore/src/service/setup-service.ts#McpRegistrar#remove | BR-844 | baseline-uninstall-an-integration
 - packages/lore/src/service/setup-service.ts#SetupFsWriter#backup | BR-824 | baseline-install-the-agent-integration
 - packages/lore/src/service/setup-service.ts#SetupFsWriter#mkdir | BR-824 | baseline-install-the-agent-integration
 - packages/lore/src/service/setup-service.ts#SetupFsWriter#remove | BR-842 | baseline-uninstall-an-integration

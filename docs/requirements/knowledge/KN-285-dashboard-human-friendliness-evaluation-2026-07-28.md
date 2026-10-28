@@ -8,10 +8,10 @@ priority: medium
 created: 2026-07-28
 updated: 2026-07-31
 tags: [dashboard, grill-review, product-direction]
-parent: SPEC-244
+parent: SPEC-274
 links:
   - {id: KN-297, type: relates-to}
-  - {id: SPEC-244, type: informs}
+  - {id: SPEC-274, type: informs}
   - {id: SPEC-105, type: informs}
 ---
 # Dashboard human-friendliness evaluation 2026-07-28 — six direction verdicts from a /grill-me session

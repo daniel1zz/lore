@@ -10,7 +10,6 @@ updated: 2026-07-29
 tags: []
 parent: PRD-001
 links:
-  - {id: TASK-550, type: informs}
   - {id: PLAN-103, type: informs}
 ---
 ## What happened

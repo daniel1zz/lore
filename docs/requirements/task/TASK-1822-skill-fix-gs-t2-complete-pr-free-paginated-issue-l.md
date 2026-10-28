@@ -3,16 +3,15 @@ id: TASK-1822
 type: task
 role: plan
 title: "[Skill:fix] GS-T2 complete PR-free paginated issue listing"
-status: approved
+status: archived
 priority: medium
 phase: "foundation"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 plan: PLAN-224
 links:
-  - {id: TASK-1451, type: resolves}
   - {id: TASK-1795, type: blocks}
   - {id: TASK-1757, type: blocks}
   - {id: TASK-1800, type: blocks}

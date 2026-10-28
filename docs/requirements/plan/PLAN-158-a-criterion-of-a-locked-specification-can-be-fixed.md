@@ -6,14 +6,11 @@ title: "A criterion of a locked specification can be fixed as an audited correct
 status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-25
 tags: []
 parent: SPEC-170
 phases:
   - {name: "criterion-correction", description: "ac set --correction through service, CLI, refusal text and prose"}
-links:
-  - {id: TASK-991, type: resolves}
-  - {id: TASK-1002, type: resolves}
 ---
 # Plan — A criterion of a locked specification can be fixed as an audited correction
 

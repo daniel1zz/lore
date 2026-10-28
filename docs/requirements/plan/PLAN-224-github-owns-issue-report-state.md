@@ -3,10 +3,10 @@ id: PLAN-224
 type: plan
 role: plan
 title: "GitHub owns issue-report state"
-status: approved
+status: archived
 priority: critical
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: SPEC-212
 phases:
@@ -28,7 +28,7 @@ Implement spec-github-owns-issue-report-state-no-mirror-task-work-carries: GitHu
 1. foundation: T7 filing, T2 pagination, T1 carrier schema.
 2. surfaces: T3 status, T4 close-on-archive, T5 lore issues, T6 adopt/resolve, T8 status check, T9 HTTP+dashboard.
 3. migration: T10 migrate command.
-Corpus operations after T10 are the main agent's, in this order: (1) `lore integrate gs-integration`; (2) `lore done` every GS task (they are archived BEFORE the migration, so their `resolves` links count as archived resolvers); (3) `lore rule apply` for this spec's change set; (4) `lore issues migrate` dry-run, read in full; (5) `lore issues migrate --apply`; (6) `lore issue resolve <n> --state superseded --by <this spec> --reason "made moot by <this spec>: <one line per report>"` for the 7 moot reports; (7) `lore verify`, `lore assess`.
+Corpus operations after T10 are the main agent's, in this order: (1) `lore integrate gs-integration`; (2) `lore done` every GS task (they are archived BEFORE the migration, so their `resolves` links count as archived resolvers); (3) `lore rule apply` for this spec's change set; (4) `lore issues migrate` dry-run, read in full; (5) `lore issues migrate --apply`; (6) `lore issue resolve <n> --state superseded --superseded-by <this spec> --reason "made moot by <this spec>: <one line per report>"` for the 7 moot reports; (7) `lore verify`, `lore assess`.
 
 ## Risk Register
 | Risk | Impact | Mitigation |
@@ -52,7 +52,7 @@ Corpus operations after T10 are the main agent's, in this order: (1) `lore integ
 | GS-T9 HTTP + dashboard | AC-GS-14 | — | adapters/http/issue-reports-routes.ts; packages/dashboard/src/components/{IssueReportsCard,IssuesList,IssueDetail}.tsx; packages/dashboard/src/routes/{issues.tsx, issues_.$id.tsx, p.$name.issues.tsx, p.$name.issues_.$id.tsx}; packages/dashboard/src/lib/issue-reports-query.ts |
 | GS-T10 migrate | AC-GS-12, AC-GS-13 | — | commands/issues-migrate.ts (new), adapters/cli/index.ts |
 
-All 16 AC-GS ids are covered exactly once. D10 fold-in: #288 (T2) and #294 (T7) are fixed by code and bound to those tasks with --resolves. The moot ones (#204 #285 #289 #290 #291 #292 #293) are not bound to any task (no code fixes them): after the landing they are closed with `lore issue resolve <n> --state superseded --by spec-github-owns-issue-report-state-no-mirror-task-work-carries`, per the spec's D10. #16 #259 #286 stay open (out of scope).
+All 16 AC-GS ids are covered exactly once. D10 fold-in: #288 (T2) and #294 (T7) are fixed by code and bound to those tasks with --resolves. The moot ones (#204 #285 #289 #290 #291 #292 #293) are not bound to any task (no code fixes them): after the landing they are closed with `lore issue resolve <n> --state superseded --superseded-by spec-github-owns-issue-report-state-no-mirror-task-work-carries`, per the spec's D10. #16 #259 #286 stay open (out of scope).
 
 ## Test files and ownership notes
 - Each task writes its AC tests as NEW files `packages/lore/tests/integration/gs-<task>-*.bun.test.ts` (or `packages/core/tests/gs-*`), and updates the EXISTING tests its own change breaks, so the feature branch stays coherent: the 7 mirror e2e files are anchored to the task that changes their behaviour (issue-adopt-compiled -> T6; issue-check -> T8; issue-closed-state, issue-closure -> T3; issue-close-on-archive-compiled, issue-closure-e2e, issue-task-done-close-compiled -> T4); any other existing test a task breaks is declared (`lore anchor add`) before it is edited, and the anchor-overlap check arbitrates.

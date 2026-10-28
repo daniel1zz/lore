@@ -79,8 +79,8 @@
   "thresholds_hash": "c7d38e3e42ce2e54fecc1b0b1eaed3b5d14ef0f28838a2ff73532a0000f1f9d9",
   "integrity": "intact",
   "decision_chain_head": {
-    "head_id": 501,
-    "head_hash": "879b681e28f96567f82465d90a828cdf680831ca27d6687f91fbb3a05914ca19",
-    "count": 501
+    "head_id": 755,
+    "head_hash": "a4b701e90a0cbc38025f4eb2f5321a97ceeed80cbba39f61ca1571548b7380b5",
+    "count": 755
   }
 }

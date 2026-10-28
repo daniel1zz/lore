@@ -8,8 +8,6 @@ priority: medium
 created: 2026-10-12
 updated: 2026-10-17
 tags: []
-links:
-  - {id: TASK-953, type: resolves}
 ---
 # A spec carries its rule changes; the baseline takes them only when the spec lands
 
@@ -97,7 +95,7 @@ Declared with `lore ac add` (AC-CS-1..6).
 - [⊘] [script] AC-CS-4: Snapshot views (new file rule-snapshot-views.test.ts): the leaf's rule list, lore rule find, rule impact and baseline coverage list only live rules; proposed rules appear only in lore rule changes / lore rule show; retired rules appear only when a view asks for tombstones; the spec review judge input includes extra.rule_changes. Smallest red mutation: rule find returning proposed rules.
   script: test — bunx vitest run packages/lore/tests/unit/service/rule-snapshot-views.test.ts
   other_command=2
-- [⚑] [script] AC-CS-5: Migration done on the live corpus (read-only check): no rule_registry row is in lifecycle deprecated (the 7 were each retired with a note naming what replaced them); BR-1080 and BR-1081, written into the snapshot ahead of implementation, are retired and re-proposed as BR-1082 and BR-1083 in the change set of spec-archiving-the-work-that-resolves-a-defect-report-closes; BR-961 and BR-962 are retired naming BR-1079. Measured red 2026-10-12: 7 deprecated rows. Smallest red mutation: leaving one deprecated rule fails the count.
+- [✘] [script] AC-CS-5: Migration done on the live corpus (read-only check): no rule_registry row is in lifecycle deprecated (the 7 were each retired with a note naming what replaced them); BR-1080 and BR-1081, written into the snapshot ahead of implementation, are retired and re-proposed as BR-1082 and BR-1083 in the change set of spec-archiving-the-work-that-resolves-a-defect-report-closes; BR-961 and BR-962 are retired naming BR-1079. Measured red 2026-10-12: 7 deprecated rows. Smallest red mutation: leaving one deprecated rule fails the count.
   script: other — bun run packages/lore/src/index.ts rule find --text 'lifecycle' --json > /dev/null && test "$(sqlite3 -readonly .lore/lore.db "select count(*) from rule_registry where lifecycle='deprecated'")" = 0 && echo 'AC-CS-5 PASS: no rule left in the deprecated lifecycle after migration'
 - [⊘] [script] AC-CS-6: bun run typecheck exits 0.
   script: tsc — bun run typecheck

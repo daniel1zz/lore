@@ -3,11 +3,11 @@ id: TASK-1757
 type: task
 role: plan
 title: "[Skill:implement] GS-T10 one-time lore issues migrate command (dry-run default, through the one write route)"
-status: approved
+status: archived
 priority: medium
 phase: "migration"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 plan: PLAN-224

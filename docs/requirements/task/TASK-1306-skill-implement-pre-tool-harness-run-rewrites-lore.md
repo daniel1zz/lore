@@ -7,14 +7,13 @@ status: archived
 priority: medium
 phase: "Phase 1: Foundations"
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-25
 tags: []
 parent: PLAN-181
 plan: PLAN-181
 links:
   - {id: TASK-1303, type: blocks}
   - {id: TASK-1310, type: blocks}
-  - {id: TASK-1359, type: resolves}
 ---
 Estimate: S
 Approach: Replace the hard-coded MCP_TOOL_PREFIX 'mcp__lore__' check with the matcher's own shape (mcp__<server>__lore_*); other servers untouched.

@@ -6,7 +6,7 @@ title: "Context provenance: injected corpus-global state and a pasted resume tic
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-10-17
+updated: 2026-10-28
 tags: []
 ---
 ## Overview
@@ -116,7 +116,7 @@ Structured, machine-checkable ACs are registered via `lore ac add`; the prose he
   other_command=3
 - [⚑] [script] AC-CP-1: The first key of the bootstrap injection payload is the scope declaration and its value is strictly identical to the exported BOOTSTRAP_SCOPE_DECLARATION constant, and the test iterates the exported REQUIRED_DISCLAIMER_TOKENS array asserting the constant contains each member
   script: test — bunx vitest run packages/core/tests/unit/bootstrap-injection-provenance.test.ts -t 'first key'
-- [⚑] [script] AC-CP-4: Both the CLI stdout and the MCP lore_feed session-resume response contain the exported RESUME_SCOPE_CLOSURE constant verbatim, and the test iterates BOOTSTRAP_INJECTION_KNOWN_KEYS asserting that constant names each member
+- [⚑] [script] AC-CP-4: The CLI stdout of lore feed session-resume contains the exported RESUME_SCOPE_CLOSURE constant verbatim, and the test iterates BOOTSTRAP_INJECTION_KNOWN_KEYS asserting that constant names each member
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts -t 'scope closure'
   other_command=9
 - [⚑] [script] AC-CP-2: Projecting a BootstrapReport with both droppable arrays empty and one oversized field against a char budget it cannot meet yields budget_exceeded true with EVERY data field intact per the SPEC-080 payload-returned-intact rule, the declaration present and unsliced at position 1, and the omission ledger never naming the declaration

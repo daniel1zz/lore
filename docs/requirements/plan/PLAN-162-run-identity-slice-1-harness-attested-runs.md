@@ -3,10 +3,10 @@ id: PLAN-162
 type: plan
 role: plan
 title: "Run identity slice 1 — harness-attested runs"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-25
 tags: [identity, run]
 parent: SPEC-165
 phases:

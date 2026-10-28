@@ -6,7 +6,7 @@ title: "CLAUDE.md root section-structure check and adoption mode for existing pr
 status: approved
 priority: medium
 created: 2026-10-07
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [claude-md, memory-files, governance, adoption, distribution]
 links:
   - {id: ADR-040, type: relates-to}
@@ -214,6 +214,5 @@ Existing tests updated in the same slice: `claude-md-template-pointer.test.ts`, 
 - packages/lore/tests/integration/bootstrap-memory-file-health.bun.test.ts
 - packages/lore/tests/unit/flows/context-flow-adoption.test.ts
 - packages/lore/tests/unit/assets/claude-md-contract-sections.test.ts
-- packages/lore/tests/integration/pre-push-structure-trip.bun.test.ts
 - packages/lore/tests/integration/status-memory-pointers-adoption.test.ts
 - packages/lore/tests/integration/claude-md-nested-repo-discovery.test.ts

@@ -6,7 +6,7 @@ title: "Deterministic task dispatch bundle: lore feed task-start"
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-17
+updated: 2026-10-27
 tags: []
 links:
   - {id: ADR-005, type: relates-to}
@@ -198,10 +198,10 @@ the thick-bundle property).
 - [⚑] [script] AC-070-7: CLI lore feed task-start <task> prints all 8 section headers; --json emits the pack object; unresolvable task exits 3; missing positional exits 2; spec-create/session-resume/phase-start outputs unchanged after the table-driven dispatch refactor
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli-feed-task-start.bun.test.ts
   other_command=4
-- [⚑] [script] AC-070-8: MCP lore_feed checkpoint=task-start returns a pack deep-equal to the CLI --json pack for the same corpus state, and checkpoint=phase-start returns the real buildPhaseStartPack pack instead of the generic buildFeed note
+- [⊖] [script] AC-070-8: MCP lore_feed checkpoint=task-start returns a pack deep-equal to the CLI --json pack for the same corpus state, and checkpoint=phase-start returns the real buildPhaseStartPack pack instead of the generic buildFeed note
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts
   other_command=2
-- [⚑] [script] AC-070-9: MCP lore_feed task-start resolves workflow.task_feed.* config budgets identically to the CLI path: with a non-default budget set in config, the MCP pack's truncated[] and section clipping deep-equal the CLI --json pack for the same corpus state
+- [⊖] [script] AC-070-9: MCP lore_feed task-start resolves workflow.task_feed.* config budgets identically to the CLI path: with a non-default budget set in config, the MCP pack's truncated[] and section clipping deep-equal the CLI --json pack for the same corpus state
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts -t "AC-070-9"
 - [⚑] [script] AC-070-10: prior-failure output_tail clipping is surrogate-safe: an astral-plane (emoji/CJK-B) fixture clipped at the 500-char boundary yields no unpaired UTF-16 surrogate in the pack (headChars from @lore/core, no bare String.slice in task-feed-wiring)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-10"
@@ -218,9 +218,9 @@ the thick-bundle property).
 - [⚑] [script] AC-070-14: aux port internal refetch failures propagate as err so the section degrades loudly: a forced pointer-refetch failure yields the knowledge-pointers unavailable note (never invalidated:false rows), and a forced handoff-doc lookup failure yields the handoff unavailable note (never title=slug rows)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-14"
   other_command=1
-- [⚑] [script] AC-070-15: MCP lore_feed task-start resolves budgets per call from a config getter: changing workflow.task_feed between two lore_feed calls on the same server instance changes the second pack's truncated[] without restart
+- [⊖] [script] AC-070-15: MCP lore_feed task-start resolves budgets per call from a config getter: changing workflow.task_feed between two lore_feed calls on the same server instance changes the second pack's truncated[] without restart
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts -t "AC-070-15"
-- [⚑] [script] AC-070-16: special-checkpoint membership and required-arg name live in ONE exported descriptor map consumed by both the CLI dispatch table and the MCP branches, and MCP lore_feed rejects contradictory field combos (task-start with phase, phase-start with task, generic checkpoint with task or phase) with VALIDATION_ERROR
+- [⊖] [script] AC-070-16: special-checkpoint membership and required-arg name live in ONE exported descriptor map consumed by both the CLI dispatch table and the MCP branches, and MCP lore_feed rejects contradictory field combos (task-start with phase, phase-start with task, generic checkpoint with task or phase) with VALIDATION_ERROR
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts -t "AC-070-16"
 - [⚑] [script] AC-070-17: pack assembly issues no duplicate store reads: the task doc is fetched exactly once (navigation threaded from the first fetch, call-count-asserted via fakes) and computeAcCoverage parses each task's evidence exactly once via single-pass bucketing with output equal to the previous implementation on mixed fixtures
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-17"

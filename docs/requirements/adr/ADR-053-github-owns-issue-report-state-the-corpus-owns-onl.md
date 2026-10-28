@@ -6,7 +6,7 @@ title: "GitHub owns issue-report state; the corpus owns only the work that resol
 status: draft
 priority: critical
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-28
 tags: [defect-channel, github, ssot, adr]
 links:
   - {id: ADR-037, type: supersedes}
@@ -62,7 +62,7 @@ resolves.** There is no per-issue corpus record.
 - Archiving a carrier closes each named issue as **completed**, sets `resolution:fixed`, and comments the carrier's slug. This
   is the push direction that exists today via `resolves` links (`issue-close-on-archive.ts::onArchived`), re-keyed on the
   carrier field.
-- Every read (`lore issues`, `lore issue adopt`, the dashboard, MCP, HTTP, `lore status --check-issues`) reads GitHub live,
+- Every read (`lore issues`, `lore issue adopt`, the dashboard, HTTP, `lore status --check-issues`) reads GitHub live,
   with pagination, pull requests excluded.
 - Offline is a named error: exit 8 (gh missing or not logged in), 9 (network), 10 (rate limited), never a local fallback,
   because nothing local exists to fall back to.
@@ -177,7 +177,7 @@ adoption itself.
 
 ## Consequences
 
-**Offline.** `lore issues`, `lore issue adopt|resolve`, `lore status --check-issues`, the MCP issue tools, the HTTP
+**Offline.** `lore issues`, `lore issue adopt|resolve`, `lore status --check-issues`, the HTTP
 `/api/issue-reports` route and the dashboard issues pages fail with the existing taxonomy (CLI exit 8/9/10/4, HTTP
 401/503/429 via `middleware.ts:109-114`; any other GitHub error keeps its existing CLI exit 4 mapping), and print nothing that looks like a list. `lore done` / `lore archive` of a carrier
 still succeed offline. The close is recorded as `issue_close_failed` (already exists, BR-1082) and shown as

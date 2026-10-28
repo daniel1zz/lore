@@ -3,10 +3,10 @@ id: KN-787
 type: knowledge
 role: knowledge
 title: "Handoff — agent:session-b2737a57"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-26
 tags: []
 parent: PLAN-224
 ---

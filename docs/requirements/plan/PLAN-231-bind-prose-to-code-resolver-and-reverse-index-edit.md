@@ -3,10 +3,10 @@ id: PLAN-231
 type: plan
 role: plan
 title: "Bind prose to code: resolver and reverse index, edit-time notice, stable generated sections"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 tags: []
 parent: SPEC-210
 phases:

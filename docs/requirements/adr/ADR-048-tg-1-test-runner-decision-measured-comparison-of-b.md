@@ -6,7 +6,7 @@ title: "TG-1 test runner decision: measured comparison of bun-only, vitest-on-Bu
 status: approved
 priority: critical
 created: 2026-10-16
-updated: 2026-10-17
+updated: 2026-10-28
 tags: [testing, runner, tg-1]
 parent: PRD-001
 links:
@@ -108,7 +108,7 @@ Static classification of the 312 bun files, following imports with Bun's transpi
     - embedded asset serving (governance ×3, rs-shipped-catalog, context-provenance manifest parity)
   - 8 test real process behaviour:
     - SIGTERM and server lifecycle (dashboard-sigterm, dashboard-command)
-    - the MCP stdio transport (record-lock-compiled)
+    - the MCP stdio transport (record-lock-compiled; this surface and its test were deleted on 2026-10-27, `adr-retire-the-lore-mcp-server-the-cli-and-http-are-the-only`)
     - hooks run the way Claude Code runs them, plus `--harness-run` argv handling in index.ts (run-identity-e2e, harness-run-any-server-name, session-start-seat-injection-hook, resume-coverage, context-fragments)
 - **Command logic that can run in-process: 67 files, 1959 logged spawns.** Most say in their headers that they spawn the binary because the command imports the bun-only loader, or to test wiring.
 - 28 test files already call a command's `run()` in-process, with a spy on `process.exit` and `process.chdir`. Each file copies this pattern; there is no shared helper. This is the same process-wide state that broke `--concurrent`.

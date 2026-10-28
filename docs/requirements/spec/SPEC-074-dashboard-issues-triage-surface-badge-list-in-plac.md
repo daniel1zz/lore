@@ -6,7 +6,7 @@ title: "dashboard Issues triage surface: badge, list, in-place adjudication"
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-10-20
+updated: 2026-10-25
 tags: [spec-074, report-issue, dashboard, triage]
 ---
 ## Overview
@@ -40,7 +40,7 @@ Structured via `lore ac add` (AC-074-1..5): 4 Playwright e2e + 1 route-auth test
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-3'
 - [⚑] [script] AC-074-4: Home card: with open reports present the dashboard home shows an incoming-reports card with the open count and at most 3 most-recent titles linking to the Issues page; with 0 open reports the badge is hidden and the card shows an explicit empty state (not a blank region).
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-4'
-- [⚑] [script] AC-074-5: GET /api/issue-reports auth matrix: cookie session 200, bearer token 200 (read-only), no auth 401; response rows carry the 8 declared fields plus open_count, and a corpus with 0 reports returns open_count 0 with an empty rows array (not an error).
+- [⊖] [script] AC-074-5: GET /api/issue-reports auth matrix: cookie session 200, bearer token 200 (read-only), no auth 401; response rows carry the 8 declared fields plus open_count, and a corpus with 0 reports returns open_count 0 with an empty rows array (not an error).
   script: test — bunx vitest run packages/lore/tests/unit/adapters/http-issue-reports.test.ts -t 'AC-074-5'
   other_command=1
 
@@ -49,4 +49,3 @@ Structured via `lore ac add` (AC-074-1..5): 4 Playwright e2e + 1 route-auth test
 - packages/lore/src/adapters/http/issue-reports-routes.ts#handleGetIssueReports
 - packages/dashboard/src/components/IssueDetail.tsx
 - packages/dashboard/src/components/IssueReportsCard.tsx
-- packages/dashboard/tests/e2e/issues.spec.ts

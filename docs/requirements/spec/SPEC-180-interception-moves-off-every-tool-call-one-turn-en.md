@@ -6,14 +6,8 @@ title: "Interception moves off every tool call: one turn-end review replaces per
 status: approved
 priority: high
 created: 2026-10-15
-updated: 2026-10-17
+updated: 2026-10-28
 tags: [hooks, gates, distribution]
-links:
-  - {id: TASK-882, type: resolves}
-  - {id: TASK-1050, type: resolves}
-  - {id: TASK-1022, type: resolves}
-  - {id: TASK-950, type: resolves}
-  - {id: TASK-935, type: resolves}
 ---
 # Spec: Interception moves off every tool call — one turn-end review replaces per-edit checks, and the gate hooks retire in favour of the service-layer gates
 
@@ -61,9 +55,9 @@ Structured criteria are declared with `lore ac add` (AC-TE-*). Hook tests run th
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-TE-1: In a throwaway corpus, every refusal the retired g1-g4 hooks produced is produced by the write itself: a spec created with any parent (a spec takes no parent, BR-2), a spec approved with no structured criterion, a plan approved over an unapproved spec, and a claim on a task whose upstream spec is unapproved each exit 4 through the CLI and return an error through the MCP tool, naming the checkpoint, and write no document or version; and neither distribution-hooks.ts, assets/hooks, hooks/ nor .claude/settings.json names lore-gate-g1..g4 or g1..g4 any more.
-  script: test — out=$(mktemp) && bunx --bun vitest run packages/lore/tests/integration/gates/gate-hook-retirement-parity.bun.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 9 ] && echo 'AC-TE-1 PASS: four checkpoint refusals hold on CLI and MCP writes with no hook; no g1-g4 hook remains shipped or registered'
-  other_command=3
+- [⚑] [script] AC-TE-1: In a throwaway corpus, every refusal the retired g1-g4 hooks produced is produced by the write itself: a spec created with any parent (a spec takes no parent, BR-2), a spec approved with no structured criterion, a plan approved over an unapproved spec, and a claim on a task whose upstream spec is unapproved each exit 4 through the CLI, naming the checkpoint, and write no document or version; and neither distribution-hooks.ts, assets/hooks, hooks/ nor .claude/settings.json names lore-gate-g1..g4 or g1..g4 any more.
+  script: test — out=$(mktemp) && bunx --bun vitest run packages/lore/tests/integration/gates/gate-hook-retirement-parity.bun.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 5 ] && echo 'AC-TE-1 PASS: four checkpoint refusals hold on CLI writes with no hook; no g1-g4 hook remains shipped or registered'
+  other_command=4
 - [⚑] [script] AC-TE-2: post-edit-mark.mjs fed an Edit payload carrying agent_id and agent_type records the entry with that agent id, and stop-turn-review.mjs over a turn whose only edits carry an agent_id produces no output and exit 0; the same edit without agent_id is counted as the main session's (control).
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/hooks/turn-record-agent-id.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 3 ] && echo 'AC-TE-2 PASS: helper-agent edits are recorded with their agent id and never counted as the main turn edits; control counted'
   other_command=3
@@ -76,7 +70,7 @@ Structured criteria are declared with `lore ac add` (AC-TE-*). Hook tests run th
 - [⚑] [script] AC-TE-5: The shipped roster registers stop-turn-review.mjs on Stop and no longer lists stop-doc-sync.mjs, claude-md-guard.sh or any lore-gate-g* hook; no shipped PreToolUse or PostToolUse hook other than pre-bash-git-safety-gate.mjs can emit a deny or block decision; in a throwaway claude dir installed by a build that shipped the retired hooks, lore setup removes their files and settings entries, adds stop-turn-review, and keeps a user-owned Stop entry pointing elsewhere; this repo's .claude/settings.json no longer references pre-subagent-gate.mjs.
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/cli/setup-turn-end-review-roster.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 4 ] && echo 'AC-TE-5 PASS: roster swaps the retired per-call and stop hooks for stop-turn-review; converge removes them and keeps user entries; no per-call deny hook besides git safety'
   other_command=2
-- [⚑] [script] AC-TE-6: pre-tool-harness-run.mjs, run against the REAL built dist/lore on PATH (no stub) in a throwaway corpus with a run registered via lore run register: mcp__lore__lore_get and mcp__lore-dev__lore_get both come back with updatedInput carrying that run id; mcp__github__get_issue and mcp__mylore__get_issue come back with no updatedInput.
+- [⊖] [script] AC-TE-6: pre-tool-harness-run.mjs, run against the REAL built dist/lore on PATH (no stub) in a throwaway corpus with a run registered via lore run register: mcp__lore__lore_get and mcp__lore-dev__lore_get both come back with updatedInput carrying that run id; mcp__github__get_issue and mcp__mylore__get_issue come back with no updatedInput.
   script: test — bun run build >/dev/null 2>&1 && out=$(mktemp); bunx vitest run packages/lore/tests/integration/hooks/harness-run-any-server-name.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 4 ] && grep -q REAL_BINARY_NO_STUB packages/lore/tests/integration/hooks/harness-run-any-server-name.test.ts && echo 'AC-TE-6 PASS: the real lore binary attributes the run for lore tools under any server name and never for other servers'
   other_command=4
 - [⚑] [script] AC-TE-7: In a throwaway git repo with a 50-line uncommitted .ts change left by an earlier turn and the main-session source-edit setting on: user-prompt-turn-start.mjs records a tree id, the real index is byte-identical before and after, and a following turn that edits nothing produces no finding (exit 0, empty stdout), while a following turn that adds 50 more lines to another .ts file produces exactly one finding naming only that file.

@@ -6,7 +6,7 @@ title: "Memory hygiene part 3: doc-code drift oracle (H3)"
 status: approved
 priority: high
 created: 2026-07-12
-updated: 2026-10-19
+updated: 2026-10-27
 tags: [memory-hygiene, drift, code-anchors, spec-045]
 ---
 # SPEC-045 — Memory hygiene part 3: doc-code drift oracle (PRD §16 H3)
@@ -335,7 +335,7 @@ here so a reader who remembers the old spelling learns it is gone rather than as
 - [⚑] [script] AC-DR-4: G11 seeded fixture (budget-conscious: ONE mkdtemp corpus, PRD seeded FIRST then specs via --parent + --code-anchor, sequential file mutations, no per-case re-init): all-verified -> exit 0 consistent; EACH drift class (delete file, rename export, empty dir, never-existing path, dir-anchor on plain file) -> exit 3 with spec slug + anchor + kind + literal repair hint, NO seeded-missing anchor EVER reported consistent; --check-drift --check-tree composed exit = drift-3-wins-over-4 precedence; unarmed -> exit 0 + armed:false; workflow.drift.enabled:false -> exit 0 + explicit disabled note; plain lore status shows store-only armed count with zero probing
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-drift.bun.test.ts
   other_command=2
-- [⚑] [script] AC-DR-5: MCP parity: lore_status {check_drift:true} code_drift deep-equals CLI --json data.code_drift (shared drift-flow builder); argless lore_status returns pre-SPEC-045 shape unchanged (REGRESSION, first-schema migration); lore_anchor_set on spec REPLACES code_anchors (declarative, divergence documented) and on task byte-identical incl. loud # rejection; expectedTools stays 30
+- [⊖] [script] AC-DR-5: MCP parity: lore_status {check_drift:true} code_drift deep-equals CLI --json data.code_drift (shared drift-flow builder); argless lore_status returns pre-SPEC-045 shape unchanged (REGRESSION, first-schema migration); lore_anchor_set on spec REPLACES code_anchors (declarative, divergence documented) and on task byte-identical incl. loud # rejection; expectedTools stays 30
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-drift.test.ts
 - [⚑] [script] AC-DR-6: Projection: renderResolvedToMarkdown output renders the Code anchors list when declared and byte-identical output when absent (REGRESSION); rendering performs zero filesystem probing (probe counter untouched)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/spec-projection-anchors.test.ts

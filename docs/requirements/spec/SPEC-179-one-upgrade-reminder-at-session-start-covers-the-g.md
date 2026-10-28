@@ -6,11 +6,8 @@ title: "One upgrade reminder at session start covers the global and the project 
 status: approved
 priority: high
 created: 2026-10-15
-updated: 2026-10-17
+updated: 2026-10-23
 tags: [hooks, setup, fragments, distribution]
-links:
-  - {id: TASK-1049, type: resolves}
-  - {id: TASK-1048, type: resolves}
 ---
 # Spec: One upgrade reminder at session start covers the global and the project install; the session-start fragment hook is retired
 
@@ -62,7 +59,7 @@ Structured criteria are declared with `lore ac add` (AC-UR-*). Every script crit
 - [⚑] [script] AC-UR-3: lore fragments render --outlet hook:session-start exits 2 and its stderr names the target as retired; render --outlet hook:subagent-start --agent-type lore-implementer still exits 0 with SubagentStart JSON; helper-start text exactly at its limit passes and one character over is reported over the limit.
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/cli/fragments-session-start-retired.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 3 ] && echo 'AC-UR-3 PASS: session-start render target refused exit 2 as retired; helper-start render and its exact limit unchanged'
   other_command=2
-- [⚑] [script] AC-UR-4: In a throwaway project, a project fragment declaring mode: dynamic with audience main makes lore fragments check exit 4 with the fragment id on stderr and in the JSON report; removing that fragment returns check to exit 0 (control).
+- [⊖] [script] AC-UR-4: In a throwaway project, a project fragment declaring mode: dynamic with audience main makes lore fragments check exit 4 with the fragment id on stderr and in the JSON report; removing that fragment returns check to exit 0 (control).
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/cli/fragments-check-dynamic-refused.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 2 ] && echo 'AC-UR-4 PASS: a dynamic main-session fragment is refused by fragments check with exit 4 naming it; control exits 0'
   other_command=2
 - [⚑] [script] AC-UR-5: session-start-fragments.mjs is absent from the shipped hook roster and assets/hooks; in a throwaway claude dir installed by a build that shipped it (file + SessionStart and compact settings entries recorded in the ledger), lore setup removes the file and both settings entries, keeps session-start-resume.mjs and its entry, and leaves a user-owned SessionStart entry pointing elsewhere untouched.

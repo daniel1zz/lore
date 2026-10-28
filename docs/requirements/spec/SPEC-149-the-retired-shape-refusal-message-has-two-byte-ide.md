@@ -3,10 +3,10 @@ id: SPEC-149
 type: spec
 role: spec
 title: "The retired-shape refusal message has two independent definitions and no oracle fails when they diverge — measured: they already had"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-24
-updated: 2026-10-17
+updated: 2026-10-27
 tags: [defect-channel, ssot, mcp, oracle-design, green-control]
 ---
 ## Overview
@@ -134,5 +134,3 @@ no criterion is vacuously satisfied.
 ## Code anchors
 
 - packages/lore/src/adapters/cli/report-issue-wiring.ts#buildRetiredFeedbackUpstreamError
-- packages/lore/src/adapters/mcp/tools.ts
-- packages/lore/tests/unit/adapters/mcp-issue-shape-message-ssot.test.ts

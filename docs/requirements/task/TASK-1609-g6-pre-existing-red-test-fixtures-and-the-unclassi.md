@@ -3,11 +3,11 @@ id: TASK-1609
 type: task
 role: plan
 title: "G6 pre-existing red test fixtures and the unclassified cases"
-status: approved
+status: archived
 priority: medium
 phase: "G"
 created: 2026-10-23
-updated: 2026-10-23
+updated: 2026-10-26
 tags: []
 parent: PLAN-211
 plan: PLAN-211
