@@ -120,9 +120,9 @@ lore handoff --plan <plan> \
 - `--next` entries are the resume anchor: concrete, ordered, self-contained
 - A failing oracle at session end MUST be captured (`--failing-command` + tail) so the
   next session resumes from the failure, not from scratch
-- New architectural decisions → `lore create adr --title ... --decision-status accepted`
+- New architectural decisions → `lore create adr --parent <spec it governs> --title ... --decision-status accepted`
   + `lore link <adr> <plan> --type=informs` (durable decisions outlive handoffs)
-- Session learnings worth sharing → `lore create knowledge --sub-type retro`
+- Session learnings worth sharing → `lore create knowledge --parent <plan or spec it reviews> --sub-type retro`
 
 ### Pre-Completion DoD Check (when all tasks archived)
 

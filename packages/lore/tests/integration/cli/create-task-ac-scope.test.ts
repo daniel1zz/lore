@@ -424,12 +424,28 @@ describe("lore create task --adhoc — --ac-scope requiredness covers the ad-hoc
         "body",
         "--ac-scope",
         "AC-ADHOCDECL-1",
+        "--spec",
+        specSlug,
       ],
       tmpDir,
     );
 
     expect(result.exitCode).toBe(0);
     expect(getDoc(extractSlug(result.stdout)).extra["ac_scope"]).toEqual(["AC-ADHOCDECL-1"]);
+  });
+
+  it("NEGATIVE: --adhoc with a non-empty --ac-scope and no --spec is refused, exit 4, naming --spec (BR-118)", () => {
+    const prdSlug = createPrd("Adhoc No Spec PRD");
+    const specSlug = createSpec("Adhoc No Spec Spec", prdSlug);
+    declareScriptAc(specSlug, "AC-NOSPEC-1");
+
+    const result = runLore(
+      ["create", "task", "--title", "Adhoc No Spec Task", "--adhoc", "--no-ai", "--content", "body", "--ac-scope", "AC-NOSPEC-1"],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("--spec");
   });
 
   it("BOUNDARY: the --adhoc conflict checks still win over the ac-scope requiredness (exit 2, not 4)", () => {

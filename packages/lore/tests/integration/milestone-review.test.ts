@@ -1060,8 +1060,9 @@ describe("milestone review gates close: stale refresh and suite environment", ()
         verifyAdhocTask: async (task: { slug: string }, _specs: unknown, opts: Opts) => (adhocCalls.push({ task: task.slug, opts }), core.ok({})),
       } as never,
       listDocs: async () => core.ok([]),
+      specOfPlan: async () => core.ok({ id: "SPEC-X", slug: "spec-x", type: "spec", extra: {} } as never),
       createAdhocTask: async (_title: string, acId: string) =>
-        (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId] } } as never)),
+        (created.push(acId), core.ok({ slug: `adhoc-${acId}`, deleted_at: null, extra: { adhoc: true, ac_scope: [acId], governing_spec: "SPEC-X" } } as never)),
       executionRoot: "/tmp/root",
       by: "agent:test",
       nowIso: () => "2026-10-23T00:00:00.000Z",

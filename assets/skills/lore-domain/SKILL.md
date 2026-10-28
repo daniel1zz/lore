@@ -31,6 +31,6 @@ Skills are pointers, documents are content. One knowledge source, reused across 
 DDD methodology pipeline: Structure Scan → Event Storming → Aggregate Design → Context Mapping → Strategic Classification → Ubiquitous Language.
 
 ## Architecture
-- **Document layer**: `docs/domain/{domain}/` — entities, aggregates, rules, workflows, glossary, event-storm (registered in lore via `lore create knowledge --sub-type reference`)
+- **Document layer**: `docs/domain/{domain}/` — entities, aggregates, rules, workflows, glossary, event-storm (registered in lore via `lore create knowledge --parent <spec or prd it concerns> --sub-type reference`)
 - **Skill layer**: `.claude/skills/{domain}-domain/` — knowledge loader that activates domain context
 - **Cross-domain**: When working on feature X, activate all relevant domains first

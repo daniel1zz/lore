@@ -165,7 +165,7 @@ describe("ReviewService.reopen (AC-DR-4)", () => {
         type: "task",
         title: "Adhoc",
         content: "found",
-        extra: { adhoc: true, ac_scope: ["AC-RO-1"] },
+        extra: { adhoc: true, ac_scope: ["AC-RO-1"], governing_spec: spec.id },
       });
       await addEvidence(f.store, adhoc.id, 1, "AC-RO-1");
       await forceStatus(f.store, spec, "approved");

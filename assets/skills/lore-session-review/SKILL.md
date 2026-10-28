@@ -82,7 +82,7 @@ No violations found is a valid outcome — report it plainly; never manufacture 
 
 ## Phase 4 — Persist
 
-If the project has `.lore/`: write the report as `lore create knowledge --sub-type retro --title "Session process review — <date> <descriptor>" --content-file <report>` and `lore link` it to the session's plan (if one exists, kind `informs`). Export `CLAUDECODE=1` so AI-assist stays off. No `.lore/` → offer the report as a file and suggest `lore init`.
+If the project has `.lore/`: write the report as `lore create knowledge --parent <plan or spec it reviews> --sub-type retro --title "Session process review — <date> <descriptor>" --content-file <report>` and `lore link` it to the session's plan (if one exists, kind `informs`). Export `CLAUDECODE=1` so AI-assist stays off. No `.lore/` → offer the report as a file and suggest `lore init`.
 
 Every finding already carries its own Mechanization (Phase 3). Cross-check prior retros (`lore search "session process review" --json` / `lore search "session performance review" --json`): if a finding's mechanization was ALREADY recommended in an earlier retro and STILL not built, escalate its severity by one level and say so — a twice-recommended, un-built gate is itself a Lore-governance failure (the corpus flagged the class and nothing mechanized it). That escalation is the signal to stop writing retros about the class and actually land the gate/hook/CLAUDE.md change this session.
 

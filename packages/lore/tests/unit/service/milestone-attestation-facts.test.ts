@@ -224,11 +224,18 @@ describe("AC-AF-3 readers of the corpus", () => {
     expect(rows[0]).toMatchObject({ spec_slug: "spec-one", ac_id: "AC-1", head_sha: L, result: "pass" });
   });
 
-  it("AC-AF-3 BOUNDARY: a task with no plan lineage counts only for the one spec declaring the criterion", () => {
+  it("AC-AF-3 BOUNDARY: a task with no plan lineage and no recorded spec attributes nothing, even when one spec declares the criterion (BR-1495)", () => {
     const adhoc = doc({ id: "T2", slug: "adhoc", type: "task", extra: { adhoc: true, ac_scope: ["AC-1"], verification_evidence: [evidence("AC-1", true)] } });
-    expect(attestationRowsOf([spec], [plan], [adhoc])).toHaveLength(1);
+    expect(attestationRowsOf([spec], [plan], [adhoc])).toHaveLength(0);
+    const recorded = doc({ id: "T4", slug: "adhoc-rec", type: "task", extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: spec.id, verification_evidence: [evidence("AC-1", true)] } });
+    expect(attestationRowsOf([spec], [plan], [recorded])).toHaveLength(1);
+  });
+
+  it("AC-AF-3 STATE: an ad-hoc task that recorded its governing spec counts for that spec only, even when another spec declares the same id (BR-1495)", () => {
     const twin = doc({ id: "S2", slug: "spec-two", type: "spec", extra: { acceptance_criteria: [{ id: "AC-1", statement: "s", verify: { mode: "human" } }] } });
-    expect(attestationRowsOf([spec, twin], [plan], [adhoc])).toHaveLength(0);
+    const recorded = doc({ id: "T3", slug: "adhoc-recorded", type: "task", extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: twin.id, verification_evidence: [evidence("AC-1", true)] } });
+    const rows = attestationRowsOf([spec, twin], [plan], [recorded]);
+    expect(rows.map((r) => r.spec_slug)).toEqual(["spec-two"]);
   });
 });
 

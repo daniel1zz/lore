@@ -45,7 +45,8 @@ import {
   computePlanCloseCascadeTargets,
   isLedgerKnowledgeSubType,
   extractDeclaredAcScope,
-  resolveGoverningSpecByAcScope,
+  resolveRecordedGoverningSpec,
+  checkScopeDeclaredOnSpec,
   resolveStatusAfterContractEdit,
   // reason: BOTH halves of the --sub-type usage contract read their authority
   // from @lore/core rather than restating it — KNOWLEDGE_SUB_TYPES (types.ts) is
@@ -2213,7 +2214,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       });
     }
 
-    const data = parsed.data;
+    let data = parsed.data;
 
     const carrierRefusal = judgeIssueCarrierExtra(data.type, data.extra) ?? judgeKnownDefectsExtra(data.type, data.extra);
     if (carrierRefusal !== undefined) return err(carrierRefusal);
@@ -2441,6 +2442,14 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       resolvedParentId = rootPrd.id;
       resolvedParentType = rootPrd.type;
       resolvedParentMarkdown = rootPrd.content;
+    }
+
+    // BR-118/BR-1495: an ad-hoc task with a non-empty criteria scope records its governing spec, and
+    // every scope id must be declared on it. Checked HERE so CLI, HTTP and every internal creator share it.
+    if (data.type === "task" && data.extra?.["adhoc"] === true) {
+      const recorded = await this._normalizeAdhocGoverningSpec(data.extra);
+      if (!recorded.ok) return recorded;
+      if (recorded.value !== undefined) data = { ...data, extra: { ...data.extra, governing_spec: recorded.value } };
     }
 
     // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4),
@@ -5419,6 +5428,45 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   }
 
   /**
+   * The create-time governing-spec rule for an ad-hoc task (BR-118, BR-1495).
+   *
+   * @returns the spec id to store as `extra.governing_spec` (`undefined` for an empty or absent
+   *   scope with no spec recorded).
+   * @throws VALIDATION_ERROR field `governing_spec` (non-empty scope, no spec — names `--spec`),
+   *   field `ac_scope` (an id the spec does not declare — names the declared ids), DOC_NOT_FOUND.
+   */
+  private async _normalizeAdhocGoverningSpec(extra: Record<string, unknown>): Promise<Result<string | undefined, LoreError>> {
+    const scope = Array.isArray(extra["ac_scope"]) ? (extra["ac_scope"] as unknown[]).filter((id): id is string => typeof id === "string") : [];
+    const ref = typeof extra["governing_spec"] === "string" && extra["governing_spec"].length > 0 ? extra["governing_spec"] : undefined;
+    if (scope.length === 0 && ref === undefined) return ok(undefined);
+    if (ref === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "governing_spec",
+        message:
+          `an ad-hoc task with ac_scope (${scope.join(", ")}) must record its governing spec — pass --spec <spec> ` +
+          "(CLI) or extra.governing_spec (API). Criterion ids are unique only within one spec.",
+        value: scope,
+        rule: "BR-118",
+      });
+    }
+    const resolved = await resolveDoc(this.store, ref);
+    if (!resolved.ok) return resolved;
+    if (resolved.value.type !== "spec") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "governing_spec",
+        message: `--spec must name a spec; "${ref}" is a ${resolved.value.type}`,
+        value: ref,
+        rule: "BR-118",
+      });
+    }
+    const checked = checkScopeDeclaredOnSpec(scope, resolved.value, "ad-hoc task");
+    if (!checked.ok) return checked;
+    return ok(resolved.value.id);
+  }
+
+  /**
    * The `--adhoc`-task sibling of {@link resolveDeclaredAcIds} (task-an-ad-hoc-
    * task-s-attested-evidence-cannot-carry-ac-ref). An `--adhoc` task (SPEC-069
    * §Design Decisions D2) has no `plan_id` and is parented to the corpus root
@@ -5429,13 +5477,12 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    * appendEvidenceEntry`'s cross-entity `ac_ref` check, which used to call
    * `resolveDeclaredAcIds(task.parent_id)` unconditionally).
    *
-   * Resolves the governing spec via the task's OWN declared `extra.ac_scope`
-   * instead of a plan→spec walk, using `resolveGoverningSpecByAcScope`
-   * (`@lore/core`) — the EXACT SAME search `VerifyRunnerService.verifyAdhocTask`
-   * runs to find its own governing spec — so the two surfaces can never
-   * disagree about which spec governs a given ad-hoc task. Never guesses: an
-   * absent/empty ac_scope, or one matching zero/multiple specs, all refuse loud
-   * rather than picking a spec arbitrarily.
+   * Resolves the governing spec through the spec the task RECORDED
+   * (`extra.governing_spec`, BR-156/BR-1495) via `resolveRecordedGoverningSpec`
+   * (`@lore/core`) — the same lookup `VerifyRunnerService.verifyAdhocTask` runs.
+   * A deprecated spec and a superseded criterion still resolve (BR-1494). A task
+   * that recorded none refuses loud (naming `lore scope spec`); nothing is
+   * searched by criterion id.
    *
    * @param task - The ALREADY-RESOLVED target ad-hoc task (caller resolves by
    *   id/slug; this method does no id resolution of its own — same contract as
@@ -5483,43 +5530,12 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    */
   async resolveDeclaredAcCriteriaForAdhocTask(
     task: DocRecord,
-    now: () => string = defaultNow,
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
-    const declared = extractDeclaredAcScope(task);
-    if (declared === undefined) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "ac_scope",
-        message:
-          `ad-hoc task "${task.slug}" has no declared ac_scope, so its governing spec cannot ` +
-          "be resolved (no plan/spec link exists for an --adhoc task, SPEC-069 D2) — declare " +
-          `one with 'lore scope add ${task.slug} <AC-ID>' first.`,
-        value: task.slug,
-        rule: "BR-1327",
-      });
-    }
-    if (declared.length === 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "ac_scope",
-        message:
-          `ad-hoc task "${task.slug}" declares no acceptance criterion — its ac_scope is an ` +
-          "EMPTY array, so there is no declared AC id to resolve a governing spec from. " +
-          `Re-declare with 'lore scope add ${task.slug} <AC-ID>' before recording evidence.`,
-        value: task.slug,
-        rule: "BR-1327",
-      });
-    }
-
     const specsResult = await this.store.findMany({ type: "spec" });
     if (!specsResult.ok) return specsResult;
 
-    const resolveResult = resolveGoverningSpecByAcScope(
-      declared,
-      specsResult.value,
-      `ad-hoc task "${task.slug}"`,
-      now(),
-    );
+    // BR-156/BR-1495: the spec the task RECORDED, never a search by criterion id.
+    const resolveResult = resolveRecordedGoverningSpec(task, specsResult.value, `ad-hoc task "${task.slug}"`);
     if (!resolveResult.ok) return resolveResult;
 
     return ok(resolveResult.value.criteria);

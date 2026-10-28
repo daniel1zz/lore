@@ -183,7 +183,7 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
         type: "task",
         title: "Port Carries Criteria Adhoc Task",
         content: "found mid-plan",
-        extra: { adhoc: true, ac_scope: [AC_ID] },
+        extra: { adhoc: true, ac_scope: [AC_ID], governing_spec: specId },
       } as CreateDocInput);
 
       const taskFound = await store.find(taskId);
@@ -195,7 +195,6 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
       if (!storeWalk.ok) throw new Error("fixture: adhoc governing criteria resolution failed");
       const storeCriterion = storeWalk.value.find((c) => c.id === AC_ID);
       expect(storeCriterion?.oracle_generation).toBe(STORE_GENERATION);
-      void specId; // spec is reached only via ac_scope search, never referenced by id directly
 
       const taskWorkflowService = new TaskWorkflowService(
         store,

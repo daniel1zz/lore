@@ -126,10 +126,10 @@ Query official integration docs for the recommended library paired with the proj
 
 ## Phase 5: Persist Decision (MANDATORY)
 
-Use `lore create adr` to persist the architectural decision:
+Use `lore create adr --parent <spec it governs>` to persist the architectural decision:
 
 ```
-lore create adr \
+lore create adr --parent <spec it governs> \
   --title "Use {SDK} for {purpose}" \
   --decision-status proposed \
   --content "{context + evaluation summary + why this SDK won + alternatives considered with rejection reasons + constraints: must use {SDK} >= v{X}; avoid {rejected SDK} due to {deal-breaker}}"

@@ -8,7 +8,9 @@
  * Public surface: createVerifyStaleRefresher, VerifyStaleRefresherDeps, createAppCriterionRerunner.
  * Invariants:
  *   - Commands run in the execution root supplied by the caller (the batch's throwaway main worktree), never here.
- *   - EVERY refresh row lands on the reusable per-AC ad-hoc task (SPEC-069: `extra.adhoc`, `ac_scope` = [that AC]),
+ *   - EVERY refresh row lands on the reusable per-(spec, AC) ad-hoc task (SPEC-069: `extra.adhoc`, `ac_scope` = [that AC],
+ *     `extra.governing_spec` = the criterion's spec, BR-1495; reused by (spec, criterion), never by a bare id, because
+ *     an id is unique only within one spec),
  *     never on the task that declares the criterion: the declaring task's 50-row evidence cap can therefore never be
  *     why a rule stays stale (#393). Rows carry `milestone_refresh`, so the write path replaces the previous refresh
  *     row of the same AC + runner and the ad-hoc task stays at one current row per AC. Readers
@@ -21,7 +23,7 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { err, ok, type DocRecord, type LoreError, type Result } from "@lore/core";
+import { err, extractGoverningSpecRef, ok, type DocRecord, type LoreError, type Result } from "@lore/core";
 import type { CriterionRerunPort } from "../../service/decision-recheck.js";
 import type { StaleAcRefresherPort } from "../../service/milestone-review-inputs.js";
 import type { VerifyPlanResult, VerifyRunnerService } from "../../service/verify-runner-service.js";
@@ -32,8 +34,10 @@ export interface VerifyStaleRefresherDeps {
   readonly verify: Pick<VerifyRunnerService, "verifyAdhocTask">;
   /** Every task and spec of the corpus (ad-hoc lookup and governing-spec resolution). */
   readonly listDocs: (type: "task" | "spec") => Promise<Result<DocRecord[], LoreError>>;
-  /** Creates the ad-hoc task (extra.adhoc, parented to the root PRD by the service) scoped to `acId`. */
-  readonly createAdhocTask: (title: string, acId: string) => Promise<Result<DocRecord, LoreError>>;
+  /** The spec a plan's criteria belong to (the plan's parent spec). */
+  readonly specOfPlan: (planRef: string) => Promise<Result<DocRecord, LoreError>>;
+  /** Creates the ad-hoc task (extra.adhoc, parented to the root PRD by the service) scoped to `acId` of `spec`. */
+  readonly createAdhocTask: (title: string, acId: string, spec: DocRecord) => Promise<Result<DocRecord, LoreError>>;
   /** The throwaway main worktree the criteria's commands run in. */
   readonly executionRoot: string;
   /** Actor recorded on the evidence. */
@@ -49,9 +53,11 @@ export interface VerifyStaleRefresherDeps {
  */
 export function createVerifyStaleRefresher(deps: VerifyStaleRefresherDeps): StaleAcRefresherPort {
   return {
-    runAcs: async (_planRef, acIds): Promise<Result<void, LoreError>> => {
+    runAcs: async (planRef, acIds): Promise<Result<void, LoreError>> => {
+      const spec = await deps.specOfPlan(planRef);
+      if (!spec.ok) return spec;
       for (const acId of acIds) {
-        const refreshed = await runOnAdhocTask(deps, acId);
+        const refreshed = await runOnAdhocTask(deps, acId, spec.value);
         if (!refreshed.ok) return refreshed;
       }
       return ok(undefined);
@@ -85,9 +91,29 @@ function createAppStaleRefresherDeps(
       const listed = await app.corpusService.listFull({ type });
       return listed.ok ? ok(listed.value.docs) : listed;
     },
-    createAdhocTask: (title, acId) =>
+    specOfPlan: async (planRef) => {
+      const plan = await app.corpusService.get(planRef);
+      if (!plan.ok) return plan;
+      const parentId = plan.value.doc.parent_id;
+      if (plan.value.doc.type !== "plan" || parentId === null) {
+        return err({ code: "VALIDATION_ERROR", field: "plan", message: `"${planRef}" is not a plan with a parent spec, so its criteria's spec is unknown`, value: planRef });
+      }
+      const spec = await app.corpusService.get(parentId);
+      if (!spec.ok) return spec;
+      if (spec.value.doc.type !== "spec") {
+        return err({ code: "VALIDATION_ERROR", field: "plan", message: `plan "${planRef}" has a ${spec.value.doc.type} parent, not a spec`, value: planRef });
+      }
+      return ok(spec.value.doc);
+    },
+    createAdhocTask: (title, acId, spec) =>
       app.corpusService.create(
-        { type: "task", title, content: `Re-verifies ${acId} for the milestone review.`, priority: "low", extra: { adhoc: true, ac_scope: [acId] } },
+        {
+          type: "task",
+          title,
+          content: `Re-verifies ${acId} of ${spec.slug} for the milestone review.`,
+          priority: "low",
+          extra: { adhoc: true, ac_scope: [acId], governing_spec: spec.id },
+        },
         { by: opts.by },
       ),
     executionRoot: opts.executionRoot,
@@ -113,7 +139,11 @@ export function createAppCriterionRerunner(
   const deps = createAppStaleRefresherDeps(app, verify, opts);
   return {
     rerun: async (spec, acId) => {
-      const ran = await runOnAdhocTask(deps, acId, spec.slug);
+      const specs = await deps.listDocs("spec");
+      if (!specs.ok) return specs;
+      const specDoc = specs.value.find((candidate) => candidate.slug === spec.slug);
+      if (specDoc === undefined) return err({ code: "DOC_NOT_FOUND", id: spec.slug });
+      const ran = await runOnAdhocTask(deps, acId, specDoc);
       if (!ran.ok) return ran;
       const row = ran.value.results.find((r) => r.ac_id === acId);
       if (row === undefined) return err({ code: "STORE_ERROR", message: `the runner reported no result for ${spec.slug} ${acId}` });
@@ -122,26 +152,30 @@ export function createAppCriterionRerunner(
   };
 }
 
-function declaresOnly(task: DocRecord, acId: string): boolean {
+function declaresOnly(task: DocRecord, acId: string, spec: DocRecord): boolean {
   const scope = task.extra["ac_scope"];
-  return task.extra["adhoc"] === true && Array.isArray(scope) && scope.length === 1 && scope[0] === acId;
+  const recorded = extractGoverningSpecRef(task);
+  return (
+    task.extra["adhoc"] === true &&
+    Array.isArray(scope) &&
+    scope.length === 1 &&
+    scope[0] === acId &&
+    (recorded === spec.id || recorded === spec.slug)
+  );
 }
 
-async function runOnAdhocTask(deps: VerifyStaleRefresherDeps, acId: string, specSlug?: string): Promise<Result<VerifyPlanResult, LoreError>> {
+async function runOnAdhocTask(deps: VerifyStaleRefresherDeps, acId: string, spec: DocRecord): Promise<Result<VerifyPlanResult, LoreError>> {
   const { listDocs, createAdhocTask } = deps;
   const tasks = await listDocs("task");
   if (!tasks.ok) return tasks;
-  const specs = await listDocs("spec");
-  if (!specs.ok) return specs;
-  let task = tasks.value.find((candidate) => candidate.deleted_at === null && declaresOnly(candidate, acId));
+  // reason: a criterion id is only unique within its spec, so the task is found by (spec, criterion), never the bare id.
+  let task = tasks.value.find((candidate) => candidate.deleted_at === null && declaresOnly(candidate, acId, spec));
   if (task === undefined) {
-    const created = await createAdhocTask(`Milestone review refresh of ${acId}`, acId);
+    const created = await createAdhocTask(`Milestone review refresh of ${spec.slug} ${acId}`, acId, spec);
     if (!created.ok) return created;
     task = created.value;
   }
-  // reason: a criterion id is only unique within its spec; the re-run names its spec so a shared id never matches two.
-  const candidates = specSlug === undefined ? specs.value : specs.value.filter((spec) => spec.slug === specSlug);
-  const run = await deps.verify.verifyAdhocTask(task, candidates, {
+  const run = await deps.verify.verifyAdhocTask(task, [spec], {
     acIds: [acId],
     by: deps.by,
     nowIso: deps.nowIso(),

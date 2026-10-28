@@ -24,7 +24,7 @@
 6. **Persist**:
    - Create `docs/domain/{domain}/business-scenarios.md`
    - If dir doesn't exist → also create minimal `README.md` + `index.yaml`
-   - Register in lore: `lore create knowledge --sub-type reference`
+   - Register in lore: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference`
 
 ## Output
 - `docs/domain/{domain}/business-scenarios.md`

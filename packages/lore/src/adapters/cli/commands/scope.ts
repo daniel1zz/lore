@@ -8,6 +8,12 @@
  *   add  <target> <ac-id...>   Read-modify-write UNION — declare more ids (repeatable positional).
  *   rm   <target> <ac-id...>   Read-modify-write DIFFERENCE — un-declare ids.
  *   list <target>              Show the target's currently declared scope.
+ *   spec <task> <spec>         Record the spec that governs an AD-HOC task's criteria
+ *                              (`extra.governing_spec`, BR-1495). Works on any ad-hoc task,
+ *                              locked or archived; one version, one audit entry; body, title
+ *                              and status untouched. Refused (exit 4, naming the declared ids)
+ *                              when a scope id is not declared on that spec. `add` on an
+ *                              ad-hoc task checks the new ids against this recorded spec.
  *
  * `<target>` is resolved FIRST, then dispatched by its doc type — deliberately
  * the same resolve-then-dispatch shape `commands/anchor.ts` uses:
@@ -190,7 +196,7 @@ async function runScopeMutation(inv: Invocation,
 export default defineLoreCommand({
   meta: {
     name: "scope",
-    description: "Manage a task's or phase's declared ac_scope — the AC ids it claims (add / rm / list)",
+    description: "Manage a task's or phase's declared ac_scope — the AC ids it claims (add / rm / list) — and an ad-hoc task's governing spec (spec)",
   },
   subCommands: {
     add: defineLoreCommand({
@@ -274,6 +280,55 @@ export default defineLoreCommand({
 
           const by = resolveActor(inv);
           return await runScopeMutation(inv, app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+
+    spec: defineLoreCommand({
+      meta: {
+        name: "spec",
+        description:
+          "Record the spec that governs an ad-hoc task's criteria (extra.governing_spec); works on locked or archived tasks",
+      },
+      args: {
+        task: {
+          type: "positional",
+          description: "Ad-hoc task document ID or slug",
+          required: true,
+        },
+        spec: {
+          type: "positional",
+          description: "Governing spec document ID or slug",
+          required: true,
+        },
+        json: {
+          type: "boolean",
+          description: "Output result as JSON",
+        },
+      },
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
+        try {
+          const result = await app.taskWorkflowService.setGoverningSpec(args.task as string, args.spec as string, {
+            by: resolveActor(inv),
+            source: app.callerSurface,
+          });
+          if (!result.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
+          }
+          const doc = result.value;
+          const recorded = doc.extra["governing_spec"];
+          if (args.json === true) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc, governing_spec: recorded } }, null, 2));
+            return 0;
+          }
+          printLine(inv.io.stdout, `Recorded governing spec ${String(recorded)} on ${doc.slug} (v${doc.version})`);
+          return 0;
         } finally {
           app.close();
         }

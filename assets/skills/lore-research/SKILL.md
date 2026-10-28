@@ -105,7 +105,7 @@ Agent({
 After agent(s) return:
 
 1. **Relay findings** to the user (comparison table + recommendation + confidence)
-2. **Persist decision** if applicable: `lore create adr --title "<title>" --decision-status proposed --content "<rationale + alternatives + tradeoffs>"`
+2. **Persist decision** if applicable: `lore create adr --parent <spec it governs> --title "<title>" --decision-status proposed --content "<rationale + alternatives + tradeoffs>"`
 3. **Route downstream** if needed:
    - Research reveals architecture decision -> suggest `/design`
    - Research reveals implementation ready -> suggest `lore ready <plan> --json`

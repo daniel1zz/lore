@@ -11,11 +11,11 @@ CLI — no direct file I/O into `.lore/`.
 ```
 Session knowledge → lore CLI
 │
-├─ Decision (tech / architecture / business rule) → lore create adr --decision-status accepted|proposed
-├─ Bug pattern / retro learning                   → lore create knowledge --sub-type retro
-├─ Research finding / benchmark / comparison      → lore create knowledge --sub-type research
-├─ SDK gotcha / playbook / reusable reference     → lore create knowledge --sub-type reference
-├─ Raw idea, not yet decided                      → lore create knowledge --sub-type ideation
+├─ Decision (tech / architecture / business rule) → lore create adr --parent <spec it governs> --decision-status accepted|proposed
+├─ Bug pattern / retro learning                   → lore create knowledge --parent <plan or spec it reviews> --sub-type retro
+├─ Research finding / benchmark / comparison      → lore create knowledge --parent <spec or prd it concerns> --sub-type research
+├─ SDK gotcha / playbook / reusable reference     → lore create knowledge --parent <spec or prd it concerns> --sub-type reference
+├─ Raw idea, not yet decided                      → lore create knowledge --parent <spec or prd it concerns> --sub-type ideation
 ├─ Feature requirements (structured, with ACs)    → lore feed spec-create
 │                                                   then lore create spec --kind feature + lore ac add
 ├─ API contract / data model / UI standard        → belongs on the governing spec. Read its Standing in `lore get`:
@@ -40,7 +40,7 @@ Session knowledge → lore CLI
 introduced, layer boundary moved, security/perf strategy chosen — *with an alternative
 rejected*. No rejected alternative → it's a learning, not a decision.
 
-**Persist**: `lore create adr --title "<descriptive title>" --decision-status accepted`
+**Persist**: `lore create adr --parent <spec it governs> --title "<descriptive title>" --decision-status accepted`
 (use `proposed` when the user hasn't ratified it).
 
 **Content template**:
@@ -57,7 +57,7 @@ rejected*. No rejected alternative → it's a learning, not a decision.
 **Detection signals**: conditional logic enforcing policy, validation invariants,
 state-transition guards, access-control rules.
 
-**Persist**: `lore create adr` — a rule is a decision about the domain.
+**Persist**: `lore create adr --parent <spec it governs>` — a rule is a decision about the domain.
 
 **Content template**:
 ```markdown
@@ -72,7 +72,7 @@ state-transition guards, access-control rules.
 **Detection signals**: non-obvious root cause identified, fix applied with explanation,
 similar bugs plausible elsewhere. Obvious typo-class fixes are noise.
 
-**Persist**: `lore create knowledge --sub-type retro --title "Bug: <brief>"`
+**Persist**: `lore create knowledge --parent <plan or spec it reviews> --sub-type retro --title "Bug: <brief>"`
 
 **Content template**:
 ```markdown
@@ -88,7 +88,7 @@ similar bugs plausible elsewhere. Obvious typo-class fixes are noise.
 **Detection signals**: non-trivial SDK integration implemented, gotcha discovered while
 debugging, effective multi-SDK combination, version-specific workaround.
 
-**Persist**: `lore create knowledge --sub-type reference --title "<SDK> Playbook"`
+**Persist**: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title "<SDK> Playbook"`
 (or `Integration: <A> + <B>` for combinations).
 
 **Dedup rule**: `lore search "<sdk name>" --type knowledge --json` — found → extend via
@@ -108,7 +108,7 @@ debugging, effective multi-SDK combination, version-specific workaround.
 **Detection signals**: benchmark run, options compared with evidence, external source
 verified (keep the URLs/tier).
 
-**Persist**: `lore create knowledge --sub-type research`
+**Persist**: `lore create knowledge --parent <spec or prd it concerns> --sub-type research`
 
 ## 6. Feature Requirements
 
@@ -132,7 +132,7 @@ a new decision replaces an old one; a documented pattern turned out to be an ant
 ```bash
 lore invalidate <old> --superseded-by <new> --reason "..."   # replacement exists
 lore invalidate <old> --reason "disproven: <evidence>"        # no replacement
-lore create adr --title "..." --supersedes <old>              # create + invalidate in one
+lore create adr --parent <spec it governs> --title "..." --supersedes <old>              # create + invalidate in one
 ```
 Never leave a disproven doc standing un-invalidated — filtered reads (`search`/`list`)
 would keep feeding it to future sessions as truth.

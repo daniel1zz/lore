@@ -207,7 +207,7 @@ After resolution, capture and update:
 - Update: `docs/ops/runbooks/{service}-runbook.md`, `docs/ops/alerts/{service}-alerts.md`
 - Link to: `docs/troubleshooting/incident-history.md`
 
-Tools: `lore: lore create knowledge --sub-type retro, lore set, lore link` | `serena: create_text_file`
+Tools: `lore: lore create knowledge --parent <plan or spec it reviews> --sub-type retro, lore set, lore link` | `serena: create_text_file`
 
 ## Exit Criteria
 

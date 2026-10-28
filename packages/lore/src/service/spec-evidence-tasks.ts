@@ -8,18 +8,16 @@
  * Public surface: {@link findSpecChildPlans}, {@link findTasksUnderPlans}, {@link findAdhocGovernedTasks},
  * {@link findSpecEvidenceTasks}, {@link countEvidenceEntries}.
  * Invariants: holds no state beyond the passed `StoreInterface`; read-only; membership decided by
- * `isPlanMember` (never bare `parent_id`); an ad-hoc task counts only when `resolveGoverningSpecByAcScope`
- * resolves its declared scope to this spec.
+ * `isPlanMember` (never bare `parent_id`); an ad-hoc task counts only when the spec it recorded
+ * (`extra.governing_spec`, BR-1495) is this spec.
  * Side-effect class: IO (reads only).
  */
 
-import { extractDeclaredAcScope, extractEvidence, ok, resolveGoverningSpecByAcScope } from "@lore/core";
+import { extractEvidence, extractGoverningSpecRef, ok } from "@lore/core";
 import type { DocId, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { isPlanMember } from "./plan-membership.js";
 
-/** Service-layer clock: the one wall-clock read feeding core's `nowIso` parameter. */
-const defaultNow = (): string => new Date().toISOString();
 
 /** Child plans of a spec (direct parent_id match only). */
 export async function findSpecChildPlans(
@@ -50,33 +48,23 @@ export async function findTasksUnderPlans(
 }
 
 /**
- * Ad-hoc tasks whose declared `ac_scope` resolves, unambiguously, to `spec` through
- * `resolveGoverningSpecByAcScope` over the full spec list (never a bare id string match — AC ids are
- * unique only within one spec). Absent/ambiguous/other-spec scope → silently excluded.
+ * Ad-hoc tasks that recorded `spec` as their governing spec (`extra.governing_spec`, BR-1495). Never a
+ * match on scope ids (AC ids are unique only within one spec); a task recording another spec, or none, is excluded.
  */
 export async function findAdhocGovernedTasks(
   store: StoreInterface,
   spec: DocRecord,
-  now: () => string = defaultNow,
 ): Promise<Result<DocRecord[], LoreError>> {
   const allTasksResult = await store.findMany({ type: "task" });
   if (!allTasksResult.ok) return allTasksResult;
   const adhocTasks = allTasksResult.value.filter((t) => t.extra["adhoc"] === true);
   if (adhocTasks.length === 0) return ok([]);
 
-  const allSpecsResult = await store.findMany({ type: "spec" });
-  if (!allSpecsResult.ok) return allSpecsResult;
-  const allSpecs = allSpecsResult.value;
-
-  const nowIso = now();
-  const governed: DocRecord[] = [];
-  for (const task of adhocTasks) {
-    const declared = extractDeclaredAcScope(task);
-    if (declared === undefined || declared.length === 0) continue;
-    const resolveResult = resolveGoverningSpecByAcScope(declared, allSpecs, `ad-hoc task "${task.slug}"`, nowIso);
-    if (!resolveResult.ok) continue;
-    if (resolveResult.value.spec.id === spec.id) governed.push(task);
-  }
+  // BR-156/BR-1495: membership is the spec the task recorded (id or slug), nothing inferred from its scope ids.
+  const governed = adhocTasks.filter((task) => {
+    const ref = extractGoverningSpecRef(task);
+    return ref !== undefined && (ref === spec.id || ref === spec.slug);
+  });
   return ok(governed);
 }
 
@@ -93,13 +81,12 @@ export interface SpecEvidenceTasks {
 export async function findSpecEvidenceTasks(
   store: StoreInterface,
   spec: DocRecord,
-  now: () => string = defaultNow,
 ): Promise<Result<SpecEvidenceTasks, LoreError>> {
   const plansResult = await findSpecChildPlans(store, spec.id);
   if (!plansResult.ok) return plansResult;
   const planTasksResult = await findTasksUnderPlans(store, plansResult.value);
   if (!planTasksResult.ok) return planTasksResult;
-  const adhocResult = await findAdhocGovernedTasks(store, spec, now);
+  const adhocResult = await findAdhocGovernedTasks(store, spec);
   if (!adhocResult.ok) return adhocResult;
   return ok({
     plans: plansResult.value,

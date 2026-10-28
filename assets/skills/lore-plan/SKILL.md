@@ -79,7 +79,7 @@ Plan's core is structured decomposition. **Uses `mcp__sequential-thinking__seque
 - >50% of critical path tasks blocked for >2 sessions → trigger `replan`
 - >3 risks materialized in same phase → pause and reassess via `replan`
 - Scope change invalidates >30% of existing tasks → trigger `replan`
-- User explicitly requests cancellation → deprecate remaining tasks with retrospective (`lore create knowledge --sub-type retro`)
+- User explicitly requests cancellation → deprecate remaining tasks with retrospective (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro`)
 
 ## Rules
 

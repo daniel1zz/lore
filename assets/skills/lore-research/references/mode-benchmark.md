@@ -140,10 +140,10 @@ Query official tuning/optimization docs for the recommended option:
 
 ## Phase 5: Persist Decision (MANDATORY)
 
-Use `lore create adr` to persist the benchmark-driven decision:
+Use `lore create adr --parent <spec it governs>` to persist the benchmark-driven decision:
 
 ```
-lore create adr \
+lore create adr --parent <spec it governs> \
   --title "Use {A} for {purpose} — benchmark-driven" \
   --decision-status proposed \
   --content "{performance question + normalized results + conditions + methodology quality + confidence + constraints: A wins for {workload X} by {margin}% under {conditions}; B preferred when {alternative condition}}"
