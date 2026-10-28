@@ -54,6 +54,7 @@ import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/lore/tests/unit/adapters/ -> ../../../src/adapters/cli/commands/ac.ts
 const AC_TS_PATH = resolve(__dirname, "../../../src/adapters/cli/commands/ac.ts");
@@ -163,7 +164,7 @@ async function createTask(planId: string, title = "Wiring Test Task"): Promise<D
 
 async function createKnowledge(title = "Wiring Test Knowledge"): Promise<DocRecord> {
   const result = await corpusService.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
     title,
     content: "Knowledge body.",
     extra: { sub_type: "reference" },

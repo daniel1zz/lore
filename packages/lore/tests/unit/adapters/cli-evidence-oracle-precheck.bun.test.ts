@@ -37,6 +37,7 @@ import type { CreateDocInput } from "@lore/core";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /** The exit code the most recent `cmd.run` ended with (commands return it; none sets `process.exitCode`). */
 let lastExitCode = 0;
 
@@ -85,7 +86,7 @@ async function seedTask(): Promise<string> {
   const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const planResult = await app.corpusService.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan",
       title: "Oracle Precheck Test Plan",
       content: "body",
     } as CreateDocInput);

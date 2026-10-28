@@ -64,6 +64,7 @@ import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import type { Invocation } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 type RunnableCommand = {
   run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
@@ -133,7 +134,7 @@ async function seedTask(): Promise<string> {
   const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const plan = await app.corpusService.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan",
       title: "Capture Window Test Plan",
       content: "body",
     } as CreateDocInput);

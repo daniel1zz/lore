@@ -28,6 +28,7 @@ import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const GIT_ENV = {
   ...process.env,
   GIT_AUTHOR_NAME: "Tester",
@@ -64,7 +65,7 @@ async function makeArchivableTask(probeRepo: string = process.cwd()): Promise<{ 
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
     createRealWorktreeProbe(probeRepo),
   );
-  const plan = await cs.create({ type: "plan", title: "Range plan", content: "body" } as CreateDocInput);
+  const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Range plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
     type: "task",
@@ -123,7 +124,7 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
       undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
       probe,
     );
-    const plan = await cs.create({ type: "plan", title: "Branch plan", content: "body" } as CreateDocInput);
+    const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Branch plan", content: "body" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan");
     const created = await cs.create({
       type: "task", title: "Branch task", parent_id: plan.value.id, content: "body",

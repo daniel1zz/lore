@@ -37,6 +37,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { listFreshStalenessEscalates, type StalenessFlowDeps } from "../../../src/flows/staleness-flow.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function buildTestFlowDeps(corpusService: CorpusService, judgmentService: JudgmentService): StalenessFlowDeps {
   return {
     listByType: async (type) => {
@@ -87,19 +88,19 @@ describe("listFreshStalenessEscalates — HAPPY/NEGATIVE/BOUNDARY", () => {
     const { corpusService, judgmentService } = await setup();
 
     const escalated = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzVisibilityEscalated",
       content: "body",
       extra: { sub_type: "reference" },
     } as CreateDocInput);
     const unprobed = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzVisibilityUnprobed",
       content: "body",
       extra: { sub_type: "reference" },
     } as CreateDocInput);
     const heldDoc = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzVisibilityHolds",
       content: "body",
       extra: { decision_status: "accepted" },
@@ -146,7 +147,7 @@ describe("listFreshStalenessEscalates — STATE (count drops on edit, D14)", () 
     const { store, corpusService, judgmentService } = await setup();
 
     const doc = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzVisibilityEditDrops",
       content: "body",
       extra: { sub_type: "reference" },
@@ -179,7 +180,7 @@ describe("listFreshStalenessEscalates — REGRESSION (re-probe to holds also dro
     const { corpusService, judgmentService } = await setup();
 
     const doc = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzVisibilityReprobeDrops",
       content: "body",
       extra: { decision_status: "accepted" },

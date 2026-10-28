@@ -35,6 +35,7 @@ import type { CreateDocInput, LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 type DoneFloorId = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
 
 /** The contract the paired task adds (spec D5). Cast: the method does not exist yet. */
@@ -54,7 +55,7 @@ function makeServices(wireOverridePort = true) {
 type Services = ReturnType<typeof makeServices>;
 
 async function createTask(s: Services, title: string, extra: Record<string, unknown> = {}): Promise<string> {
-  const plan = await s.corpusService.create({ type: "plan", title: `${title} Plan`, content: "body" } as CreateDocInput);
+  const plan = await s.corpusService.create({ parent_id: await ensureRequirementsDocId(s.corpusService), type: "plan", title: `${title} Plan`, content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
   const task = await s.corpusService.create({
     type: "task",

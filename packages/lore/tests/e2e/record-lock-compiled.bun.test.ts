@@ -27,6 +27,7 @@ import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 setDefaultTimeout(120_000);
 
 interface RunResult {
@@ -155,7 +156,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
 
   it("a knowledge reference shows 'Standing: living'", () => {
     const slug = parseSlug(
-      mustLore(["create", "knowledge", "--title", "Living Reference", "--sub-type", "reference", "--content", "Reference body.", "--no-ai"]),
+      mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => ({ stdout: mustLore(a), stderr: "", exitCode: 0 })), "--title", "Living Reference", "--sub-type", "reference", "--content", "Reference body.", "--no-ai"]),
     );
     const out = mustLore(["get", slug]);
     expect(out).toContain("Standing: living");

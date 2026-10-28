@@ -26,6 +26,7 @@ import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
 // From packages/lore/tests/integration/cli/ → ../../../ → packages/lore/
@@ -87,7 +88,7 @@ function injectLegacyPhase(planId: string, phaseValue: string, dbDir: string): v
 /** Create a plan and return its ULID (from --json output). */
 function createPlanWithId(title: string, cwd: string): { planId: string; planSlug: string } {
   const r = runLore(
-    ["create", "plan", "--title", title, "--no-ai", "--content", "body", "--json"],
+    ["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, cwd)), "--title", title, "--no-ai", "--content", "body", "--json"],
     cwd,
   );
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
@@ -101,7 +102,7 @@ function createPlanWithId(title: string, cwd: string): { planId: string; planSlu
 
 /** Create a plan WITHOUT legacy extra.phase (clean state, returns slug). */
 function createCleanPlan(title: string, cwd: string): string {
-  const r = runLore(["create", "plan", "--title", title, "--no-ai", "--content", "body"], cwd);
+  const r = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, cwd)), "--title", title, "--no-ai", "--content", "body"], cwd);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const slugM = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = slugM?.[1];

@@ -27,6 +27,7 @@ import { join } from "node:path";
 
 import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "../../helpers/gh-issue-stub";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 const SPEC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries";
 const dirsToClean: string[] = [];
 afterAll(() => cleanDirs(dirsToClean));
@@ -65,7 +66,7 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
       { dirsToClean, pageSize: 5 },
     );
     const createPlan = async (title: string): Promise<DocJson> => {
-      const result = await fixture.run(["create", "plan", "--title", title, "--no-ai", "--content", "## Goal\n\nBody.", "--json"], "setup");
+      const result = await fixture.run(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => fixture.run(a, "setup")), "--title", title, "--no-ai", "--content", "## Goal\n\nBody.", "--json"], "setup");
       expect(result.exitCode, result.stderr + result.stdout).toBe(0);
       return (JSON.parse(result.stdout) as { data: DocJson }).data;
     };
@@ -211,7 +212,12 @@ describe("AC-IL-7 an ad-hoc adoption needs a requirements document, a plan adopt
   let planSlug = "";
   beforeAll(async () => {
     fixture = await makeIssueFixture([{ number: 5 }], { dirsToClean, withRootPrd: false });
-    const plan = await fixture.run(["create", "plan", "--title", "Prdless plan", "--no-ai", "--content", "## Goal\n\nBody.", "--json"], "setup");
+    // reason: the corpus must stay free of any requirements document (that is what this test is about), and a plan needs a parent
+    // (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6): the plan is filed under a spec.
+    const spec = await fixture.run(["create", "spec", "--title", "Prdless spec", "--no-ai", "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx", "--json"], "setup");
+    expect(spec.exitCode, spec.stderr + spec.stdout).toBe(0);
+    const specSlug = (JSON.parse(spec.stdout) as { data: DocJson }).data.slug;
+    const plan = await fixture.run(["create", "plan", "--parent", specSlug, "--title", "Prdless plan", "--no-ai", "--content", "## Goal\n\nBody.", "--json"], "setup");
     expect(plan.exitCode, plan.stderr + plan.stdout).toBe(0);
     planSlug = (JSON.parse(plan.stdout) as { data: DocJson }).data.slug;
   }, 240_000);

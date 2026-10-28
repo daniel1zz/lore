@@ -53,6 +53,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 import { actedStore } from "../../live-invocation.js";
 
 /**
@@ -80,7 +81,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { declareWriteActorForTests } from "../../../src/store/write-context-store.js";
 
-const [, , dbPath, readyPath, barrierPath, slug, resultPath] = process.argv;
+const [, , dbPath, readyPath, barrierPath, slug, resultPath, parentId] = process.argv;
 
 async function waitFor(path, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -101,6 +102,7 @@ writeFileSync(readyPath, "ready");
 await waitFor(barrierPath, 5000);
 
 const result = await corpusService.create({
+  parent_id: parentId,
   type: "knowledge",
   title: \`verbatim slug race probe \${slug}\`,
   extra: { sub_type: "reference" },
@@ -131,6 +133,8 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
   let tempDir: string;
   let dbPath: string;
   let workerScriptPath: string;
+  // reason: the worker processes create knowledge records, which need a parent; the id is made once per corpus here.
+  let parentId: string;
 
   beforeAll(() => {
     // Written next to this test file, not an OS tmpdir — see WORKER_SCRIPT's
@@ -143,7 +147,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
     rmSync(workerScriptPath, { force: true });
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "lore-verbatim-slug-"));
     dbPath = join(tempDir, "corpus.db");
     // Pre-migrate the schema via a real SQLiteStore BEFORE any child process
@@ -151,6 +155,9 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
     // race between two writers — never a first-ever-migration race between
     // the two child connections (an orthogonal concern this AC does not own).
     const setup = actedStore(new SQLiteStore(dbPath));
+    parentId = await ensureRequirementsDocId(
+      new CorpusService(setup, new RecordLockService(setup, new GateEnforcer(undefined))),
+    );
     setup.close();
   });
 
@@ -172,11 +179,11 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
         const resultBPath = join(tempDir, `result-b-${i}.json`);
 
         const procA = Bun.spawn(
-          ["bun", workerScriptPath, dbPath, readyA, barrier, slug, resultAPath],
+          ["bun", workerScriptPath, dbPath, readyA, barrier, slug, resultAPath, parentId],
           { stdout: "pipe", stderr: "pipe" },
         );
         const procB = Bun.spawn(
-          ["bun", workerScriptPath, dbPath, readyB, barrier, slug, resultBPath],
+          ["bun", workerScriptPath, dbPath, readyB, barrier, slug, resultBPath, parentId],
           { stdout: "pipe", stderr: "pipe" },
         );
 
@@ -247,7 +254,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
     const title = "Verbatim Slug Regression Probe";
 
     const first = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title,
       extra: { sub_type: "reference" },
     });
@@ -257,7 +264,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
     // Same title, still no slug: today's generated-slug behavior must alias
     // with "-2" exactly as it did before this task's change existed.
     const second = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title,
       extra: { sub_type: "reference" },
     });

@@ -29,6 +29,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -108,7 +109,7 @@ afterAll(() => {
 
 describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI): $LORE_ACTOR is ignored and never named", () => {
   it("a single-write process with $LORE_ACTOR set prints no line naming it", () => {
-    const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Retired single write", "--content", "body", "--no-ai"], dir, ACTOR_Y);
+    const r = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, ACTOR_Y)), "--sub-type", "reference", "--title", "Retired single write", "--content", "body", "--no-ai"], dir, ACTOR_Y);
     expect(r.exitCode).toBe(0);
     expect(loreActorMentions(r.stderr)).toEqual([]);
   });
@@ -136,8 +137,8 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
   });
 
   it("two separate processes each print no line naming it", () => {
-    const a = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Retired process one", "--content", "body", "--no-ai"], dir, ACTOR_Y);
-    const b = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Retired process two", "--content", "body", "--no-ai"], dir, ACTOR_Z);
+    const a = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, ACTOR_Y)), "--sub-type", "reference", "--title", "Retired process one", "--content", "body", "--no-ai"], dir, ACTOR_Y);
+    const b = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, ACTOR_Z)), "--sub-type", "reference", "--title", "Retired process two", "--content", "body", "--no-ai"], dir, ACTOR_Z);
     expect(a.exitCode).toBe(0);
     expect(b.exitCode).toBe(0);
     expect(loreActorMentions(a.stderr)).toEqual([]);
@@ -145,7 +146,7 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
   });
 
   it("--json stdout stays parseable and does not mention it; stderr neither", () => {
-    const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Retired json stdout", "--content", "body", "--no-ai", "--json"], dir, ACTOR_Y);
+    const r = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, ACTOR_Y)), "--sub-type", "reference", "--title", "Retired json stdout", "--content", "body", "--no-ai", "--json"], dir, ACTOR_Y);
     expect(r.exitCode).toBe(0);
     expect(() => JSON.parse(r.stdout)).not.toThrow();
     expect(r.stdout).not.toContain("LORE_ACTOR");
@@ -154,7 +155,7 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
 
   it("the env name is NOT recorded: no audit row is authored by Y", async () => {
     const since = new Date().toISOString();
-    const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Retired not recorded", "--content", "body", "--no-ai"], dir, ACTOR_Y);
+    const r = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, ACTOR_Y)), "--sub-type", "reference", "--title", "Retired not recorded", "--content", "body", "--no-ai"], dir, ACTOR_Y);
     expect(r.exitCode).toBe(0);
     const rows = await auditSince(since);
     expect(rows.length).toBeGreaterThan(0);
@@ -171,7 +172,7 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
   });
 
   it("a write with neither a session nor $LORE_ACTOR prints no deprecation line", () => {
-    const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Deprecation none", "--content", "body", "--no-ai"], dir, null);
+    const r = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, dir, null)), "--sub-type", "reference", "--title", "Deprecation none", "--content", "body", "--no-ai"], dir, null);
     expect(loreActorMentions(r.stderr)).toEqual([]);
   });
 });

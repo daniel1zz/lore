@@ -30,6 +30,7 @@ import { formatTerritoryHuman, partitionTerritory } from "../../../src/adapters/
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const COMPOSITION = { schemaVersion: 1 as const, fragments: [] };
 
 function makeWorld() {
@@ -53,7 +54,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 async function seed(options: { resumeAddress?: string } = {}) {
   const w = makeWorld();
-  const plan = await mustCreate(w.corpus, { type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(w.corpus, { parent_id: await ensureRequirementsDocId(w.corpus), type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
   const mk = (title: string) =>
     mustCreate(w.corpus, {
       type: "task",
@@ -168,7 +169,7 @@ describe("holder listings show the holding run's messaging address (AC-MA-3)", (
 
   it("BOUNDARY: a subagent-only holder (the main run holds nothing) still resolves to the main run's address", async () => {
     const w = makeWorld();
-    const plan = await mustCreate(w.corpus, { type: "plan", title: "P", content: "# P" } as CreateDocInput);
+    const plan = await mustCreate(w.corpus, { parent_id: await ensureRequirementsDocId(w.corpus), type: "plan", title: "P", content: "# P" } as CreateDocInput);
     const t = await mustCreate(w.corpus, {
       type: "task",
       title: "Only sub",
@@ -194,7 +195,7 @@ describe("holder listings show the holding run's messaging address (AC-MA-3)", (
 
   it("ERROR: a claim whose run the registry does not hold lists null, never throws", async () => {
     const w = makeWorld();
-    const plan = await mustCreate(w.corpus, { type: "plan", title: "P", content: "# P" } as CreateDocInput);
+    const plan = await mustCreate(w.corpus, { parent_id: await ensureRequirementsDocId(w.corpus), type: "plan", title: "P", content: "# P" } as CreateDocInput);
     const t = await mustCreate(w.corpus, {
       type: "task",
       title: "Ghost",

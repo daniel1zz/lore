@@ -30,6 +30,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 interface Fixture {
   readonly store: InMemoryStore;
   readonly corpus: CorpusService;
@@ -228,7 +229,7 @@ describe("record-edit gate on AcService (AC-DR-3)", () => {
 describe("record-edit gate on VersionService.restore (AC-DR-3)", () => {
   async function adrWithTwoVersions(f: Fixture): Promise<DocRecord> {
     const adr = await mustCreate(f.corpus, {
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(f.corpus), type: "adr",
       title: "Use SQLite",
       content: "decision v1",
       extra: { decision_status: "proposed" },
@@ -344,7 +345,7 @@ describe("non-rewrite writes on locked records are not refused (AC-DR-3 REGRESSI
   it("accepts invalidate on an approved ADR", async () => {
     const f = makeFixture();
     const adr = await mustCreate(f.corpus, {
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(f.corpus), type: "adr",
       title: "Old decision",
       content: "d",
       extra: { decision_status: "proposed" },

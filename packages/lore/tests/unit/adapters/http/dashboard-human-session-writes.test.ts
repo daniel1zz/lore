@@ -36,8 +36,12 @@ import {
   writeHumanSessionFile,
 } from "../../../../src/adapters/cli/human-session-file.js";
 import { liveAmbient, liveIo } from "../../../live-invocation.js";
+import { SQLiteStore } from "../../../../src/store/sqlite-store.js";
+import { insertRequirementsDocWithoutHistory } from "../../../helpers/parented-create.js";
 
 interface Harness {
+  /** A requirements document inserted without history rows (these suites count and attribute every create row). */
+  readonly parentId: string;
   readonly dir: string;
   readonly stateHome: string;
   readonly dbPath: string;
@@ -85,7 +89,7 @@ async function post(h: Harness, headers: Record<string, string>, title: string):
   return fetch(`${h.baseUrl}/api/docs`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({ type: "knowledge", title, content: "body", extra: { sub_type: "reference" } }),
+    body: JSON.stringify({ type: "knowledge", title, content: "body", parent_id: h.parentId, extra: { sub_type: "reference" } }),
   });
 }
 
@@ -117,7 +121,11 @@ describe("local dashboard writes are made by the checkout's human session", () =
         humanSessionOf: (checkout) => resolveHumanSessionBinding({ LORE_STATE_HOME: stateHome }, dir, checkout),
       },
     });
+    const seedStore = new SQLiteStore(dbPath);
+    const parentId = await insertRequirementsDocWithoutHistory(seedStore);
+    seedStore.close();
     h = {
+      parentId,
       dir,
       stateHome,
       dbPath,

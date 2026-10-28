@@ -45,6 +45,7 @@ import { err, ok } from "@lore/core";
 import type { CreateDocInput, DocRecord, LinkRecord, LoreError, ReviewJudgment, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -60,7 +61,7 @@ async function createKnowledge(
   extra: Record<string, unknown> = {},
 ): Promise<DocRecord> {
   const result = await cs.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(cs), type: "knowledge",
     title,
     content: "body",
     extra: { sub_type: "ideation", ...extra },
@@ -75,7 +76,7 @@ async function createAdr(
   extra: Record<string, unknown> = {},
 ): Promise<DocRecord> {
   const result = await cs.create({
-    type: "adr",
+    parent_id: await ensureRequirementsDocId(cs), type: "adr",
     title,
     content: "body",
     extra: { decision_status: "accepted", ...extra },
@@ -85,7 +86,7 @@ async function createAdr(
 }
 
 async function createPlan(cs: CorpusService, title = "Test Plan"): Promise<string> {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return result.value.id;
 }
@@ -492,7 +493,7 @@ describe("STATE — partial-failure recovery: doc half committed, re-run repairs
     const validityService = new ValidityService(store);
 
     const a1CreateResult = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "A1 old",
       content: "body",
       extra: { decision_status: "accepted" },
@@ -500,7 +501,7 @@ describe("STATE — partial-failure recovery: doc half committed, re-run repairs
     if (!a1CreateResult.ok) throw new Error("setup failed");
     const a1 = a1CreateResult.value;
     const a2CreateResult = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "A2 new",
       content: "body",
       extra: { decision_status: "accepted" },
@@ -622,7 +623,7 @@ describe("REGRESSION — legacy doc round-trips untouched; D10 CorpusService.set
   it("D10/S1 REGRESSION: ADR create with valid decision_status + malformed validity reports the validity issue", async () => {
     const { corpusService } = makeServices();
     const result = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "Bad validity ADR",
       content: "body",
       extra: {

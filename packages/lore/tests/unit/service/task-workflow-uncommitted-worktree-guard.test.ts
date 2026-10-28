@@ -70,6 +70,7 @@ import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Real-git fixture helpers (no fakes — see module MOCK RISK note) ────────
 
 const createdDirs: string[] = [];
@@ -127,7 +128,7 @@ async function createPlanAndTask(
   cs: CorpusService,
   extraOpts: Record<string, unknown> = {},
 ): Promise<string> {
-  const plan = await cs.create({ type: "plan", title: "UWG Plan", content: "body" } as CreateDocInput);
+  const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "UWG Plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
   const task = await cs.create({
     type: "task",

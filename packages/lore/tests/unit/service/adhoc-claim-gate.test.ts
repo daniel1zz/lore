@@ -45,6 +45,7 @@ import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures (mirrors claim-anchor-gate.test.ts) ──────────────────────────
 
 async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<DocRecord> {
@@ -93,7 +94,7 @@ async function createAdhocTask(cs: CorpusService, title: string, anchors?: strin
 
 /** A real plan-parented task (non-ad-hoc), for the REGRESSION check. */
 async function createPlanParentedTask(cs: CorpusService, anchors?: string[]): Promise<string> {
-  const plan = await mustCreate(cs, { type: "plan", title: "Real Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Real Plan", content: "# Plan" } as CreateDocInput);
   const task = await mustCreate(cs, {
     type: "task",
     title: "Real Plan Task",

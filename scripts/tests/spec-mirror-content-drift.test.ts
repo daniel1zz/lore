@@ -62,6 +62,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -231,7 +232,7 @@ function seedCorpusWithExportedMirror(): SeededCorpus {
   const createOut = execFileSync(
     "bun",
     [
-      LORE_ENTRY, "create", "knowledge",
+      LORE_ENTRY, "create", "knowledge", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, dir),
       "--title", "Body Divergence Probe",
       "--sub-type", "reference",
       "--content", "# Body Divergence Probe\n\nThe corpus is the only place this body is authored.\n",

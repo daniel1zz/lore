@@ -47,6 +47,7 @@ import {
 import type { CreateDocInput, HandoffExtra } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -59,7 +60,7 @@ function makeServices() {
 }
 
 async function mustCreatePlan(cs: CorpusService, title: string) {
-  const result = await cs.create({ type: "plan", title, content: "# Plan" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "# Plan" } as CreateDocInput);
   if (!result.ok) throw new Error(`plan create failed: ${JSON.stringify(result.error)}`);
   return result.value;
 }

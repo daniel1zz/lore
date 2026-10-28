@@ -34,6 +34,7 @@ import { PhaseService } from "../../../src/service/phase-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -48,7 +49,7 @@ async function makePlan(
   title: string,
   phaseNames: readonly string[],
 ): Promise<string> {
-  const planResult = await corpusService.create({ type: "plan", title } as CreateDocInput);
+  const planResult = await corpusService.create({ parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title } as CreateDocInput);
   if (!planResult.ok) throw new Error(`plan create failed: ${JSON.stringify(planResult.error)}`);
   for (const name of phaseNames) {
     const addResult = await phaseService.addPhase(planResult.value.id, name);

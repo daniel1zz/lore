@@ -52,6 +52,7 @@ import type { CreateDocInput, LinkRecord, LoreError, Result, Telemetry, Telemetr
 import { err } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ───────
 
 class CapturingTelemetry implements Telemetry {
@@ -97,7 +98,7 @@ async function createApprovedSkillDoc(
   opts: { title: string; appliesTo: string },
 ): Promise<{ id: string; slug: string }> {
   const created = await service.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(service), type: "knowledge",
     title: opts.title,
     content: "## Rule\n\nBody.",
     extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },
@@ -239,7 +240,7 @@ describe("CorpusService.create() provenance auto-write — NEGATIVE", () => {
   it("no approved feeding skill declared for the type -> create() still ok, no governs link anywhere", async () => {
     const { service, store } = makeService();
     // Deliberately seed NO skill doc at all.
-    const plan = await service.create({ type: "plan", title: "Ungoverned Plan" } as CreateDocInput);
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Ungoverned Plan" } as CreateDocInput);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
 

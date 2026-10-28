@@ -50,6 +50,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -223,7 +224,7 @@ describe("AC-OX-5 (a+b+d) — production wiring: a status-only draft->archived d
       const createOut = execFileSync(
         "bun",
         [
-          LORE_ENTRY, "create", "knowledge",
+          LORE_ENTRY, "create", "knowledge", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, tmpDir),
           "--title", "Frontmatter Drift Probe",
           "--sub-type", "reference",
           "--content", "# Frontmatter Drift Probe\n\nThis body never changes across this test.\n",

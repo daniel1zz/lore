@@ -53,6 +53,7 @@ import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Command type + importers (mirrors gate-feeding-skill-discovery.bun.test.ts) ──
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
@@ -158,7 +159,7 @@ async function createApprovedSkillDoc(opts: {
 }): Promise<{ id: string; slug: string }> {
   return withApp(async (app) => {
     const createResult = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: opts.title,
       content: opts.content,
       extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },
@@ -179,7 +180,7 @@ async function createDraftSkillDoc(opts: {
 }): Promise<{ id: string; slug: string }> {
   return withApp(async (app) => {
     const createResult = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: opts.title,
       content: opts.content,
       extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },

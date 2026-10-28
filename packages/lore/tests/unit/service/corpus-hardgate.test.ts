@@ -32,6 +32,7 @@ import type { DocId, DocRecord } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import { ulid } from "ulidx";
 import { actedStore } from "../../live-invocation.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -48,9 +49,9 @@ function prdInput(title = "Root Product"): CreateDocInput {
   return { type: "prd", title };
 }
 
-/** Create a valid plan (no parent required) */
-function planInput(title = "Phase Plan"): CreateDocInput {
-  return { type: "plan", title };
+/** Create a valid plan; it needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6) */
+function planInput(parent_id: string, title = "Phase Plan"): CreateDocInput {
+  return { type: "plan", title, parent_id };
 }
 
 /**
@@ -268,7 +269,7 @@ describe("NEGATIVE — link: parent type contract hard gate (RED — impl missin
     const { service, store } = makeService();
 
     // Create a plan via service
-    const planResult = await service.create(planInput("Execution Plan"));
+    const planResult = await service.create(planInput(await ensureRequirementsDocId(service), "Execution Plan"));
     expect(planResult.ok).toBe(true);
     if (!planResult.ok) return;
 
@@ -472,7 +473,7 @@ describe("HAPPY — create: valid parent types are allowed through", () => {
   it("AC-HARDGATE-001.H02: link(plan, prd, 'parent') → success (link path allows valid type)", async () => {
     const { service } = makeService();
 
-    const planResult = await service.create(planInput("Unlinked Plan"));
+    const planResult = await service.create(planInput(await ensureRequirementsDocId(service), "Unlinked Plan"));
     expect(planResult.ok).toBe(true);
     if (!planResult.ok) return;
     const planDoc = planResult.value;

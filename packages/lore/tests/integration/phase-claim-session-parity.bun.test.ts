@@ -54,6 +54,7 @@ import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit, liveI
 import { testSessionOf } from "../helpers/test-run-identity.js";
 import type { Invocation } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 /**
  * The name the CURRENT process environment resolves to (session tier, else the fallback tiers). No surface takes a
  * `--by`, so the claim holder and the pre-flight candidate must both be this resolved name — evaluated AFTER each
@@ -137,7 +138,7 @@ async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
 async function createPlanWithPhases(anchorsPerPhase: string[][]): Promise<{ phaseSlugs: string[] }> {
   return withApp(async (app) => {
     const plan = await app.corpusService.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan",
       title: "Phase Session Parity Plan",
       content: "# Plan",
     } as CreateDocInput);

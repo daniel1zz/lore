@@ -38,6 +38,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput, TreeBlueprint } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeService() {
   const store = actedStore(new InMemoryStore());
   return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), store };
@@ -99,7 +100,7 @@ describe("getReviewBundle — HAPPY (doc with a live parent)", () => {
     const prd = await service.create({ type: "prd", title: "Linked PRD", content: "x" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd failed");
     const knowledge = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Related Knowledge",
       content: "x",
       extra: { sub_type: "reference" },
@@ -211,7 +212,7 @@ describe("getReviewBundle — NEGATIVE (broken link targets)", () => {
     const prd = await service.create({ type: "prd", title: "Link Source PRD", content: "x" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd failed");
     const knowledge = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Soon Gone Knowledge",
       content: "x",
       extra: { sub_type: "reference" },
@@ -235,7 +236,7 @@ describe("getReviewBundle — NEGATIVE (broken link targets)", () => {
     const prd = await service.create({ type: "prd", title: "Mixed Links PRD", content: "x" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd failed");
     const liveKnowledge = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Still Alive Knowledge",
       content: "x",
       extra: { sub_type: "reference" },

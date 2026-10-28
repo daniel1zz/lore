@@ -23,6 +23,7 @@ import { applyAuditedAdoption } from "../../src/adapters/cli/commands/baseline-a
 import type { DocWritePort } from "../../src/service/corpus-service";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
+import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
 const scratch: string[] = [];
 
 afterEach(() => {
@@ -151,7 +152,7 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
 
   it("INT-T5 migrate ordinals --apply from a linked worktree reconciles the worktree export-index only", async () => {
     const { home, main, worktree } = await makeFixture();
-    const created = await runLore(["create", "adr", "--title", "Ordinal seed", "--decision-status", "accepted", "--no-ai", "--content", "# Ordinal seed\n\nbody"], main, home);
+    const created = await runLore(["create", "adr", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, main, home)), "--title", "Ordinal seed", "--decision-status", "accepted", "--no-ai", "--content", "# Ordinal seed\n\nbody"], main, home);
     expect(created.exitCode, created.stderr).toBe(0);
     const exported = await runLore(["export-docs"], main, home);
     expect(exported.exitCode, exported.stderr).toBe(0);
@@ -165,7 +166,9 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
     const migrated = await runLore(["migrate", "ordinals", "--apply"], worktree, home);
     expect(migrated.exitCode, migrated.stderr).toBe(0);
     const humanIds = Object.values(JSON.parse(readFileSync(indexPath, "utf8")).mappings as Record<string, { human_id: string }>).map((m) => m.human_id);
-    expect(humanIds).toEqual(["ADR-001"]);
+    // reason: the adr is filed under a requirements document (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6), which is
+    // mirrored too; only the adr was drifted, so the migration restores ADR-001 and leaves PRD-001 as it was.
+    expect([...humanIds].sort()).toEqual(["ADR-001", "PRD-001"]);
     expect(snapshot(main)).toEqual(before);
   }, 60_000);
 

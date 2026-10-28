@@ -32,6 +32,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -48,7 +49,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 async function createPlan(cs: CorpusService): Promise<string> {
-  const plan = await mustCreate(cs, { type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
   return plan.id;
 }
 
@@ -182,7 +183,7 @@ describe("CorpusService.create — file_anchors create-time validation (SPEC-042
   it("a plan create with a stray extra.file_anchors key is NOT validated (task-only seam)", async () => {
     const { corpusService } = makeServices();
     const result = await corpusService.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
       title: "Plan With Stray Key",
       content: "# Plan",
       extra: { file_anchors: ["../whatever-invalid"] },

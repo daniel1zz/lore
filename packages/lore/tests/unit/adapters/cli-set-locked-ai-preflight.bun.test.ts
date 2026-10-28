@@ -80,6 +80,12 @@ async function run(cmd: RunnableCommand, args: Record<string, unknown>): Promise
 }
 
 async function createDoc(args: Record<string, unknown>): Promise<string> {
+  // reason: knowledge, decision and plan records need a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6);
+  // these tests are about the locked record, so each gets a requirements document as its parent.
+  if (["knowledge", "adr", "plan"].includes(String(args["type"])) && args["parent"] === undefined) {
+    const parent = await createDoc({ type: "prd", title: "Fixture Requirements", content: "## Overview\n\nroot" });
+    return createDoc({ ...args, parent });
+  }
   const create = await importCmd("create");
   const lines: string[] = [];
   const l = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {

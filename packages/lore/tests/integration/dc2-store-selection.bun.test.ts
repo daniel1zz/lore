@@ -70,8 +70,27 @@ async function makeSandbox(syncYaml: string, withToken: boolean): Promise<Sandbo
   const sb: Sandbox = { root, home, corpus, dbPath: join(corpus, ".lore", "lore.db"), env };
   const init = await lore(sb, "init");
   if (init.code !== 0) throw new Error(`harness: lore init failed: ${init.stderr}`);
+  // reason: a knowledge record needs a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6); the requirements
+  // document is written locally BEFORE sync is switched on, because with sync on every write goes to the remote.
+  const prd = await lore(sb, "create", "prd", "--title", "Fixture Requirements", "--content", "Root requirements.", "--no-ai");
+  if (prd.code !== 0) throw new Error(`harness: lore create prd failed: ${prd.stderr}`);
   patchLoreConfig(corpus, syncYaml);
   return sb;
+}
+
+/**
+ * The slug of the requirements document `makeSandbox` wrote: the parent a knowledge record needs
+ * (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6). Read straight from the local file, so it works with sync on.
+ */
+function rootPrdSlug(sb: Sandbox): string {
+  const db = new Database(sb.dbPath, { readonly: true });
+  try {
+    const row = db.query("SELECT slug FROM docs WHERE type = 'prd' ORDER BY created_at LIMIT 1").get() as { slug: string } | null;
+    if (row === null) throw new Error("harness: the sandbox holds no requirements document");
+    return row.slug;
+  } finally {
+    db.close();
+  }
 }
 
 function syncSection(enabled: boolean, remoteUrl: string): string {
@@ -194,7 +213,7 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
       const countBefore = localDocCount(sb);
       const filesBefore = filesUnder(join(sb.corpus, ".lore"));
 
-      const result = await lore(sb, "create", "knowledge", "--title", TITLE, "--sub-type", "reference", "--content", "body");
+      const result = await lore(sb, "create", "knowledge", "--parent", rootPrdSlug(sb), "--title", TITLE, "--sub-type", "reference", "--content", "body");
 
       expect(result.code).toBe(1);
       expect(result.stderr).toContain(TOKEN_VARIABLE);
@@ -213,7 +232,7 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
       const sb = await makeSandbox(syncSection(true, url), true);
       const countBefore = localDocCount(sb);
 
-      const result = await lore(sb, "create", "knowledge", "--title", TITLE, "--sub-type", "reference", "--content", "body");
+      const result = await lore(sb, "create", "knowledge", "--parent", rootPrdSlug(sb), "--title", TITLE, "--sub-type", "reference", "--content", "body");
 
       expect(result.code).toBe(1);
       expect(result.stderr).toContain(url);
@@ -235,7 +254,7 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
       restores.push(installReplicaStoreFactory(double.factory));
       const countBefore = localDocCount(sb);
 
-      const created = await lore(sb, "create", "knowledge", "--title", TITLE, "--sub-type", "reference", "--content", "body", "--json");
+      const created = await lore(sb, "create", "knowledge", "--parent", rootPrdSlug(sb), "--title", TITLE, "--sub-type", "reference", "--content", "body", "--json");
       expect(created.code, created.stderr).toBe(0);
       const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
       expect(double.writes.filter((name) => name.startsWith("insert"))).toHaveLength(1);
@@ -288,7 +307,7 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
       restores.push(installReplicaStoreFactory(double.factory));
       const countBefore = localDocCount(sb);
 
-      const created = await lore(sb, "create", "knowledge", "--title", TITLE, "--sub-type", "reference", "--content", "body");
+      const created = await lore(sb, "create", "knowledge", "--parent", rootPrdSlug(sb), "--title", TITLE, "--sub-type", "reference", "--content", "body");
 
       expect(created.code, created.stderr).toBe(0);
       expect(double.opens).toHaveLength(0);

@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { createApp, type App } from "../../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /**
  * `scripts/` lives outside `packages/lore/tsconfig.tests.json`'s `rootDir` (which is
  * scoped to the `@lore/lore` workspace package), so a static `import` of the script
@@ -126,7 +127,7 @@ describe("seedWriteSpecRule", () => {
   // STATE — upgrade path: a pre-existing sub_type="reference" doc is upgraded in place
   it("upgrades an existing approved sub_type=reference doc to skill in place, without creating a duplicate", async () => {
     const manual = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: WRITE_SPEC_RULE_TITLE,
       content: "legacy reference content",
       extra: { sub_type: "reference" },
@@ -184,7 +185,7 @@ describe("seedWriteSpecRule", () => {
   // NEGATIVE — a differently-titled knowledge doc does not block seeding
   it("still seeds when an unrelated knowledge doc already exists", async () => {
     const unrelated = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: "Some other reference doc",
       content: "unrelated",
       extra: { sub_type: "reference" },

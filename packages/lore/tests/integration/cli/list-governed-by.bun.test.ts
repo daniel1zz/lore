@@ -38,6 +38,7 @@ import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from
 let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Command type + output capture (mirrors pending-judgment-badges.bun.test.ts) ──
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
@@ -110,7 +111,7 @@ async function seedApprovedSkill(
   const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const created = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: opts.title,
       content: "## Rule\n\nBody.",
       extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },

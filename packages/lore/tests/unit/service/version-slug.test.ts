@@ -46,6 +46,7 @@ import type { CreateDocInput, DocRecord, VersionRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   return {
@@ -189,7 +190,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
       const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
 
-      const plan = await corpusService.create({ type: "plan", title: "Evidence Slug Plan", content: "body" } as CreateDocInput);
+      const plan = await corpusService.create({ parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Evidence Slug Plan", content: "body" } as CreateDocInput);
       expect(plan.ok).toBe(true);
       if (!plan.ok) return;
 

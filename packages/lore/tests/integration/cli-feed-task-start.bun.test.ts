@@ -59,6 +59,7 @@ import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
+import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -275,7 +276,7 @@ async function createFullChain(dir: string): Promise<{
  */
 async function createHandoffChain(dir: string): Promise<{ planSlug: string; handoffSlug: string }> {
   const planResult = await runLore(
-    ["create", "plan", "--title", "T3 Resume Plan", "--content", "Plan body.", "--no-ai"],
+    ["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, dir,)), "--title", "T3 Resume Plan", "--content", "Plan body.", "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);

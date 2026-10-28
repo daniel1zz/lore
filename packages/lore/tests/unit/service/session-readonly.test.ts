@@ -22,6 +22,7 @@ import type { CreateDocInput } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const MUTATING_METHODS = [
   "insert",
   "update",
@@ -72,7 +73,7 @@ async function seedCorpus(store: InMemoryStore) {
   });
 
   await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# Root" } as CreateDocInput);
-  const plan = await mustCreate(corpusService, { type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
   const task = await mustCreate(corpusService, {
     type: "task",
     title: "Task",
@@ -86,7 +87,7 @@ async function seedCorpus(store: InMemoryStore) {
   if (!claimed.ok) throw new Error(JSON.stringify(claimed.error));
 
   await mustCreate(corpusService, {
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
     title: "Draft note",
     content: "# Draft",
     extra: { sub_type: "reference" },

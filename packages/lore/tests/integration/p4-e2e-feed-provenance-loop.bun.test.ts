@@ -180,9 +180,20 @@ describe("P4 e2e: feed-before-produce + provenance closed loop (AC-P4-7)", () =>
     "seed skill+prd -> feed pulls the rule pre-creation -> create spec -> governs link " +
       "auto-written -> forward --governed-by finds it -> reverse nav backlink shows it",
     async () => {
-      // ── Step 1: seed an approved knowledge/skill (applies_to="spec") + a prd ──
+      // ── Step 1: seed a prd + an approved knowledge/skill (applies_to="spec") filed under it ──
+      const prd = await withApp(async (app) => {
+        const created = await app.corpusService.create({
+          type: "prd",
+          title: "E2E Parent PRD",
+          content: "## Overview\n\nE2E parent PRD body.",
+        } as CreateDocInput);
+        if (!created.ok) throw new Error(`prd create failed: ${JSON.stringify(created.error)}`);
+        return { id: created.value.id, slug: created.value.slug };
+      });
+
       const skill = await withApp(async (app) => {
         const created = await app.corpusService.create({
+          parent_id: prd.id,
           type: "knowledge",
           title: "E2E write-spec rules",
           content: "## Rule\n\nE2E closed-loop marker content.",
@@ -192,16 +203,6 @@ describe("P4 e2e: feed-before-produce + provenance closed loop (AC-P4-7)", () =>
         const approved = await app.corpusService.set(created.value.id, { status: "approved" });
         if (!approved.ok) throw new Error(`skill approve failed: ${JSON.stringify(approved.error)}`);
         return { id: created.value.id, slug: approved.value.slug };
-      });
-
-      const prd = await withApp(async (app) => {
-        const created = await app.corpusService.create({
-          type: "prd",
-          title: "E2E Parent PRD",
-          content: "## Overview\n\nE2E parent PRD body.",
-        } as CreateDocInput);
-        if (!created.ok) throw new Error(`prd create failed: ${JSON.stringify(created.error)}`);
-        return { id: created.value.id, slug: created.value.slug };
       });
 
       // ── Step 2: `lore feed spec-create --parent <prd>` — BEFORE any spec exists ──

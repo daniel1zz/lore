@@ -171,6 +171,7 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Locations ──────────────────────────────────────────────────────────────
 
 /** Repo root — four levels up from `packages/lore/tests/integration/`. Re-asserted on every spawn. */
@@ -432,6 +433,7 @@ function soleMetaOfType(payload: ListPayload, type: string): Record<string, unkn
 
 /** Slugs are derived from titles by the corpus (`{type}-{kebab-title}`) — pinned here so a rename cannot silently un-target an assertion. */
 const A_PLAN = "plan-row-contract-plan";
+const A_PARENT_SPEC = "spec-row-contract-parent-spec";
 const A_KNOWLEDGE_RETRACTED = "knowledge-row-contract-retracted";
 const A_KNOWLEDGE_SUCCESSOR = "knowledge-row-contract-successor";
 const A_TASK = "task-row-contract-task";
@@ -450,7 +452,7 @@ interface FixtureACaptures {
 let fixtureA: FixtureACaptures;
 
 /**
- * FIXTURE A — plan / knowledge x2 / adr / task, and deliberately NO prd and NO spec:
+ * FIXTURE A — spec (the parent every plan, adr and knowledge row is filed under) / plan / knowledge x2 / adr / task, and deliberately NO prd:
  * every type present here has a derivable `meta`, which is what makes AC-MOS-1's
  * ten-key EQUALITY satisfiable on the bare `--include-invalid` invocation. See the
  * header's "Two fixtures" section for why that exclusion is closed in fixture B
@@ -461,18 +463,21 @@ const FIXTURE_TEN_KEY = "list-json-row-contract-ten-key-";
 function buildFixtureA(): FixtureACaptures {
   const dir = makeFixture(FIXTURE_TEN_KEY);
 
-  mustSucceed(["create", "plan", "--title", "Row Contract Plan", "--content", "Plan body."], dir);
+  // reason: a plan, decision record and knowledge record need a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad
+  // D6), and fixture A may hold no prd (a prd row has no `meta`). A spec has a derivable `meta`, so the parent is a spec.
+  mustSucceed(["create", "spec", "--title", "Row Contract Parent Spec", "--content", B_SPEC_BODY, "--kind", "tech"], dir);
+  mustSucceed(["create", "plan", "--parent", A_PARENT_SPEC, "--title", "Row Contract Plan", "--content", "Plan body."], dir);
   mustSucceed(["phase", "add", A_PLAN, A_PHASE], dir);
   mustSucceed(
-    ["create", "knowledge", "--title", "Row Contract Retracted", "--content", "Retracted body.", "--sub-type", "retro"],
+    ["create", "knowledge", "--parent", A_PARENT_SPEC, "--title", "Row Contract Retracted", "--content", "Retracted body.", "--sub-type", "retro"],
     dir,
   );
   mustSucceed(
-    ["create", "knowledge", "--title", "Row Contract Successor", "--content", "Successor body.", "--sub-type", "reference"],
+    ["create", "knowledge", "--parent", A_PARENT_SPEC, "--title", "Row Contract Successor", "--content", "Successor body.", "--sub-type", "reference"],
     dir,
   );
   mustSucceed(
-    ["create", "adr", "--title", "Row Contract Adr", "--content", "Adr body.", "--decision-status", "accepted"],
+    ["create", "adr", "--parent", A_PARENT_SPEC, "--title", "Row Contract Adr", "--content", "Adr body.", "--decision-status", "accepted"],
     dir,
   );
   mustSucceed(
@@ -557,9 +562,9 @@ function buildFixtureB(): FixtureBCaptures {
     ["create", "spec", "--title", "Row Contract Spec", "--content", B_SPEC_BODY,"--kind", "tech"],
     dir,
   );
-  mustSucceed(["create", "plan", "--title", "Row Contract Plan B", "--content", "Plan body."], dir);
+  mustSucceed(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => mustSucceed(a, dir)), "--title", "Row Contract Plan B", "--content", "Plan body."], dir);
   mustSucceed(
-    ["create", "knowledge", "--title", "Row Contract Skill", "--content", "Skill body.", "--sub-type", "skill"],
+    ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustSucceed(a, dir,)), "--title", "Row Contract Skill", "--content", "Skill body.", "--sub-type", "skill"],
     dir,
   );
   mustSucceed(["link", B_SKILL, B_PLAN, "--type", "governs"], dir);
@@ -664,7 +669,7 @@ describe("one row contract across every --json emit branch", () => {
       const all = fixtureA.pinned.get("--include-invalid");
       if (all === undefined) throw new Error("the --include-invalid capture is missing");
       // The bare --include-invalid run exercises exactly these types in fixture A.
-      expect([...new Set(all.docs.map((row) => row["type"]))].sort()).toEqual(["adr", "knowledge", "plan", "task"]);
+      expect([...new Set(all.docs.map((row) => row["type"]))].sort()).toEqual(["adr", "knowledge", "plan", "spec", "task"]);
 
       expect(soleMetaOfType(all, "adr")).toEqual({ t: "adr", decision_status: "accepted" });
       expect(soleMetaOfType(all, "plan")).toEqual({ t: "plan", phase_count: 1 });

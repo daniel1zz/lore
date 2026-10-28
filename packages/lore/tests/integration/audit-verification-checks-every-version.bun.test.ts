@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { scrubIdentityEnv } from "../helpers/test-run-identity.js";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -81,7 +82,7 @@ beforeEach(() => {
   const init = runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}${init.stdout}`);
   base = readFileSync(configPath(), "utf8").trimEnd();
-  const created = runLore(["create", "knowledge", "--sub-type", "reference", "--title", "Backfill fixture", "--content", "body", "--json"], dir);
+  const created = runLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, dir)), "--sub-type", "reference", "--title", "Backfill fixture", "--content", "body", "--json"], dir);
   if (created.exitCode !== 0) throw new Error(`lore create failed: ${created.stderr}${created.stdout}`);
   docId = (JSON.parse(created.stdout) as { data: { id: string } }).data.id;
 });

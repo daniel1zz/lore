@@ -26,6 +26,7 @@ import { SessionService } from "../../../src/service/session-service.js";
 import type { DocId, LinkType, CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /** Counting subclass — asserts batch-call-count invariants (mirrors StalenessProbeService's CountingStore precedent). */
 class CountingStore extends InMemoryStore {
   findLinksByToIdsCallCount = 0;
@@ -62,7 +63,7 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
     // without correctly scoping per-task-id would leak blocker status across plans.
     for (let i = 0; i < 3; i++) {
       const plan = await mustCreate(corpusService, {
-        type: "plan",
+        parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
         title: `Plan ${i}`,
         content: "# Plan",
       } as CreateDocInput);
@@ -108,7 +109,7 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
     const { corpusService, sessionService } = makeSessionService(store);
 
     const activePlan = await mustCreate(corpusService, {
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
       title: "Active Plan",
       content: "# Plan",
     } as CreateDocInput);
@@ -121,7 +122,7 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
     } as CreateDocInput);
 
     const archivedPlan = await mustCreate(corpusService, {
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
       title: "Archived Plan",
       content: "# Plan",
     } as CreateDocInput);

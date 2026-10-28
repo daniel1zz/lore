@@ -21,6 +21,7 @@ import type { MockInstance } from "vitest";
 import { runCli } from "../../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "../../helpers/test-invocation";
 
+import { asCliRun, ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 let root: string;
 let home: string;
 let cwd: string;
@@ -84,7 +85,7 @@ describe("AC-ES-2 runCli returns the exit code", () => {
     const list = await run(["list", "--json"]);
     expect(list.code).toBe(0);
 
-    const created = await run(["create", "plan", "--title", "Plan one", "--no-ai"]);
+    const created = await run(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync(async (a) => asCliRun(await run(a))), "--title", "Plan one", "--no-ai"]);
     expect(created.code).toBe(0);
 
     // `done` of a plan is a validation refusal ("Expected a task document"), not a usage error

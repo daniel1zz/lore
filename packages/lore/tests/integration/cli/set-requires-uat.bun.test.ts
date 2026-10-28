@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 import { checkpointRegistry } from "../../../src/service/checkpoint-registry";
 import { REQUIRES_UAT_FIELD } from "../../../src/service/gate-predicates";
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 
 let tmpDir: string;
 
@@ -27,7 +28,10 @@ async function runLore(args: string[]) {
 }
 
 async function createDoc(type: string, title: string, extra: string[] = []): Promise<string> {
-  const r = await runLore(["create", type, "--title", title, "--no-ai", "--content", "body", ...extra]);
+  // reason: knowledge, decision and plan records need a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6).
+  const needsParent = ["knowledge", "adr", "plan"].includes(type) && !extra.includes("--parent");
+  const parent = needsParent ? ["--parent", await ensureRequirementsDocSlugAsync((args) => runLore(args))] : [];
+  const r = await runLore(["create", type, "--title", title, "--no-ai", "--content", "body", ...parent, ...extra]);
   if (r.exitCode !== 0) throw new Error(`create ${type} failed: ${r.stderr}`);
   const slug = r.stdout.match(/Slug:\s+(\S+)/)?.[1];
   if (!slug) throw new Error(`no slug in: ${r.stdout}`);

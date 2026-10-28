@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 const X_SOURCE = "export function alpha(): number {\n  return 1;\n}\n\nexport function beta(): number {\n  return 2;\n}\n";
 const BASE = { "src/x.ts": X_SOURCE, "src/z.ts": "export const z = 1;\n", "src/w.ts": "export const w = 1;\n" };
 
@@ -85,7 +86,7 @@ describe("AC-LB-3 — anchors follow moved files at landing", () => {
     fx = f;
     f.commitOnMain(BASE, "base sources");
     const knowledge = f.parseSlug(
-      f.mustLore(["create", "knowledge", "--title", "Anchored fact", "--sub-type", "reference", "--content", "w is one", "--no-ai"]).stdout,
+      f.mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => f.mustLore(a)), "--title", "Anchored fact", "--sub-type", "reference", "--content", "w is one", "--no-ai"]).stdout,
     );
     f.mustLore(["anchor", "add", knowledge, "src/w.ts#w"]);
     const knowledgeVersion = versionOf(f, knowledge);

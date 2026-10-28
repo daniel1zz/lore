@@ -149,6 +149,7 @@ import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Locations ──────────────────────────────────────────────────────────────
 
 /** Repo root — four levels up from `packages/lore/tests/integration/`. Re-asserted on every spawn. */
@@ -404,7 +405,7 @@ function makeApprovedPlan(title: string): { readonly dir: string; readonly slug:
   patchLoreConfig(dir, "workflow:\n  review:\n    judgment_required_types: []\n");
 
   const created = jsonEnvelope<{ slug: string }>(
-    runLoreInFixture(["create", "plan", "--title", title, "--content", "Baseline content.", "--json"], dir),
+    runLoreInFixture(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLoreInFixture(a, dir)), "--title", title, "--content", "Baseline content.", "--json"], dir),
     "lore create plan --json",
   );
   jsonEnvelope<unknown>(runLoreInFixture(["review", created.slug, "--json"], dir), `lore review ${created.slug} --json`);

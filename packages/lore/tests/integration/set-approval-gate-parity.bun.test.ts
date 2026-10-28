@@ -29,6 +29,7 @@ import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 import { liveAmbient, liveWriteContext, actedStore } from "../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Rig ─────────────────────────────────────────────────────────────────────
 
 let dir: string;
@@ -112,7 +113,7 @@ async function makeSpec(label: string, opts: { cite: boolean }): Promise<DocReco
 async function makeAdr(label: string): Promise<DocRecord> {
   return must(
     app.corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "adr",
       title: next(label),
       content: "body",
       extra: { decision_status: "accepted" },

@@ -23,6 +23,7 @@ import * as core from "@lore/core";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { retirementAssessFields } from "../../src/service/retired-ac-service.js";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -471,7 +472,7 @@ describe("milestone review gates close", () => {
     expect(core.knowledgeExtraSchema.safeParse({ sub_type: "assessment", assessment: { verdict: 42 } }).success).toBe(true);
 
     // An archived legacy doc (payload a legacy parse would reject) reads back as its raw body.
-    const created = runLore(["create", "knowledge", "--title", "Legacy plan outcome", "--sub-type", "research", "--content", "RAWBODY legacy assessment text", "--no-ai"], tmpDir);
+    const created = runLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Legacy plan outcome", "--sub-type", "research", "--content", "RAWBODY legacy assessment text", "--no-ai"], tmpDir);
     expect(created.exitCode, created.stderr).toBe(0);
     const slug = slugOf(created.stdout);
     const { Database } = await import("bun:sqlite");
@@ -486,7 +487,7 @@ describe("milestone review gates close", () => {
     expect(read.stdout).toContain("RAWBODY legacy assessment text");
 
     // Nothing may write a new one.
-    const forged = runLore(["create", "knowledge", "--title", "New assessment", "--sub-type", "assessment", "--content", "x", "--no-ai"], tmpDir);
+    const forged = runLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "New assessment", "--sub-type", "assessment", "--content", "x", "--no-ai"], tmpDir);
     expect(forged.exitCode).not.toBe(0);
     expect(forged.stderr).toContain("assessment");
   });

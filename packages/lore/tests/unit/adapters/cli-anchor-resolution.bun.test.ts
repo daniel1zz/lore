@@ -58,6 +58,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 setDefaultTimeout(60_000);
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -167,7 +168,7 @@ beforeEach(async () => {
   mkdirSync(join(tmpDir, "src", "existing-dir"), { recursive: true });
   writeFileSync(join(tmpDir, "src", "real.ts"), "export const real = 1;\n");
   planSlug = parseSlug(
-    (await mustRun(["create", "plan", "--title", "Anchor Probe Plan", "--content", "# Plan", "--no-ai", "--json"], tmpDir))
+    (await mustRun(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => mustRun(a, tmpDir)), "--title", "Anchor Probe Plan", "--content", "# Plan", "--no-ai", "--json"], tmpDir))
       .stdout,
   );
 });

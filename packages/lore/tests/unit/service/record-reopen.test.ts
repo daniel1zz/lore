@@ -27,6 +27,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeFixture() {
   const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
@@ -211,7 +212,7 @@ describe("ReviewService.reopen (AC-DR-4)", () => {
 
     it("refuses a non-spec naming the type", async () => {
       const f = makeFixture();
-      const plan = await mustCreate(f.corpus, { type: "knowledge", title: "K", content: "k", extra: { sub_type: "reference" } });
+      const plan = await mustCreate(f.corpus, { parent_id: await ensureRequirementsDocId(f.corpus), type: "knowledge", title: "K", content: "k", extra: { sub_type: "reference" } });
 
       const result = await f.review.reopen(plan.slug, "why not");
 

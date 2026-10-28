@@ -49,6 +49,7 @@ import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const MUTATING_METHODS = [
@@ -104,7 +105,7 @@ function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
 }
 
 async function createPlan(cs: CorpusService, title = "Plan"): Promise<string> {
-  const plan = await mustCreate(cs, { type: "plan", title, content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "# Plan" } as CreateDocInput);
   return plan.id;
 }
 

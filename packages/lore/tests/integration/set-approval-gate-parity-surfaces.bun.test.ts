@@ -32,6 +32,7 @@ import { startHttpServer } from "../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapters/http/machine-auth.js";
 import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 
@@ -108,7 +109,7 @@ async function makeSpec(label: string, opts: { cite: boolean }): Promise<DocReco
 async function makeAdr(label: string): Promise<DocRecord> {
   return must(
     app.corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "adr",
       title: next(label),
       content: "body",
       extra: { decision_status: "accepted" },

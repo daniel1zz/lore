@@ -49,6 +49,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -113,7 +114,7 @@ describe("AC-068-10: compiled dist/lore survives a CJK-title create (SPEC-068 ho
     const result = await runLore(
       [
         "create",
-        "adr",
+        "adr", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir,)),
         "--decision-status",
         "accepted",
         "--title",
@@ -152,7 +153,7 @@ describe("AC-068-10: compiled dist/lore survives a CJK-title create (SPEC-068 ho
     const result = await runLore(
       [
         "create",
-        "adr",
+        "adr", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir,)),
         "--decision-status",
         "accepted",
         "--title",

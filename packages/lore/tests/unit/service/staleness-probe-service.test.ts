@@ -47,6 +47,7 @@ import { StalenessProbeService, type ProbeStalenessPort } from "../../../src/ser
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 
 // ─── Test Doubles ───────────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ async function createAndBackdate(
   daysAgo: number,
 ): Promise<{ id: DocId; version: number; updated_at: string }> {
   const extra = type === "knowledge" ? { sub_type: "ideation" } : { decision_status: "accepted" };
-  const created = await cs.create({ type, title, content: "body", extra } as CreateDocInput);
+  const created = await cs.create({ type, title, content: "body", extra, parent_id: await ensureRequirementsDocId(cs) } as CreateDocInput);
   if (!created.ok) throw new Error(`create failed: ${JSON.stringify(created.error)}`);
   const oldIso = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
   const updated = await store.update(created.value.id, { updated_at: oldIso });

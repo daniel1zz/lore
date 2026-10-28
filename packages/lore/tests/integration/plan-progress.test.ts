@@ -58,6 +58,7 @@ import type { StoreInterface } from "../../src/store/store-interface.js";
 import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version.js";
 import { actedStore } from "../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 type Kind = "memory" | "sqlite" | "turso";
 const KINDS: readonly Kind[] = ["memory", "sqlite", "turso"];
 
@@ -414,7 +415,7 @@ describe("progress written with the task — CorpusService write path", () => {
   it("REGRESSION: a plan created through the service carries progress, and writeDoc / delete keep it current", async () => {
     const store = actedStore(new InMemoryStore());
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const created = await service.create({ type: "plan", title: "Service plan" });
+    const created = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Service plan" });
     if (!created.ok) throw new Error(JSON.stringify(created.error));
     expect(readStoredPlanProgress(created.value.extra)).toMatchObject({ state: "empty", total: 0 });
 

@@ -67,6 +67,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Fixtures (mirror task-workflow-service.test.ts's shapes exactly) ────────
 
 function makeServices() {
@@ -79,7 +80,7 @@ function makeServices() {
 }
 
 async function createPlan(cs: CorpusService, title = "Empty Scope Plan"): Promise<string> {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return result.value.id;
 }

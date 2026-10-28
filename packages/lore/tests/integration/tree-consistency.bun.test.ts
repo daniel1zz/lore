@@ -40,6 +40,8 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
+import { detachParentInDb } from "../helpers/detach-parent.js";
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -135,8 +137,15 @@ function createSpec(tmpDir: string, title: string, parentSlug: string): string {
   return extractSlug(runLore(["create", "spec", "--title", title,"--no-ai"], tmpDir));
 }
 
+/**
+ * A plan with NO parent: an orphan. reason: a plan can no longer be created without a parent
+ * (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6), so it is filed under a requirements document and
+ * then detached: the legacy-data shape the orphan check exists for.
+ */
 function createPlan(tmpDir: string, title: string): string {
-  return extractSlug(runLore(["create", "plan", "--title", title, "--no-ai"], tmpDir));
+  const slug = extractSlug(runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--no-ai"], tmpDir));
+  detachParentInDb(join(tmpDir, ".lore", "lore.db"), slug);
+  return slug;
 }
 
 function writeBlueprint(tmpDir: string, yaml: string): void {

@@ -20,6 +20,7 @@ import { coverFailedDimensions, type IssueRead } from "../../../src/service/mile
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 const REPO_ID = 7;
 const FP = "d".repeat(64);
 const entry = (number: number, dimension: string, repo_id = REPO_ID) => ({ repo_id, number, dimension, fingerprint: FP });
@@ -31,7 +32,7 @@ async function build(entries: unknown[], read: Reader) {
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const created = await cs.create({ type: "prd", title: "Root", content: "r" } as CreateDocInput);
   if (!created.ok) throw new Error(JSON.stringify(created.error));
-  const planResult = await cs.create({ type: "plan", title: "Cover plan", content: "p" } as CreateDocInput);
+  const planResult = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Cover plan", content: "p" } as CreateDocInput);
   if (!planResult.ok) throw new Error(JSON.stringify(planResult.error));
   const written = await cs.set(planResult.value.id, { extra: { known_defects: entries } });
   if (!written.ok) throw new Error(JSON.stringify(written.error));

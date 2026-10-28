@@ -165,6 +165,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ⛔ The script is loaded with a DYNAMIC import of a computed path, and its surface is typed here.
 // A static import of a `.ts` file under `scripts/` makes `tsc -p packages/lore/tsconfig.tests.json`
 // pull it outside its `rootDir` (TS6059); the repo's `.mjs` scripts avoid that only because JS is
@@ -409,7 +410,7 @@ function makeApprovedPlan(title: string): { readonly dir: string; readonly slug:
   patchLoreConfig(dir, "workflow:\n  review:\n    judgment_required_types: []\n");
 
   const created = jsonEnvelope<{ slug: string }>(
-    runLoreInFixture(["create", "plan", "--title", title, "--content", "Baseline content.", "--json"], dir),
+    runLoreInFixture(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLoreInFixture(a, dir)), "--title", title, "--content", "Baseline content.", "--json"], dir),
     "lore create plan --json",
   );
   jsonEnvelope<unknown>(runLoreInFixture(["review", created.slug, "--json"], dir), `lore review ${created.slug} --json`);
@@ -699,7 +700,7 @@ describe(AC2_SUITE_TITLE, () => {
     if (init.exitCode !== 0) throw new Error(`lore init failed (exit ${init.exitCode}): ${init.stderr}`);
     const adr = jsonEnvelope<{ slug: string }>(
       runLoreInFixture(
-        ["create", "adr", "--title", "Fixture Premise Decision", "--decision-status", opts.decisionStatus, "--content", "d", "--no-ai", "--json"],
+        ["create", "adr", "--parent", ensureRequirementsDocSlug((a) => runLoreInFixture(a, dir)), "--title", "Fixture Premise Decision", "--decision-status", opts.decisionStatus, "--content", "d", "--no-ai", "--json"],
         dir,
       ),
       "lore create adr --json",

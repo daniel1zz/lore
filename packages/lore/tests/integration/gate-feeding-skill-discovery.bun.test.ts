@@ -40,6 +40,7 @@ import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from
 let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Command type + importer (mirrors spec-loop-e2e.bun.test.ts) ────────────
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
@@ -122,7 +123,7 @@ async function createApprovedSkillDoc(opts: {
 }): Promise<{ id: string; slug: string }> {
   return withApp(async (app) => {
     const createResult = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: opts.title,
       content: opts.content,
       extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },
@@ -145,7 +146,7 @@ async function createDraftSkillDoc(opts: {
 }): Promise<{ id: string; slug: string }> {
   return withApp(async (app) => {
     const createResult = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: opts.title,
       content: opts.content,
       extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },

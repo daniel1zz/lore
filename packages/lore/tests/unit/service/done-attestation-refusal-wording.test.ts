@@ -67,6 +67,7 @@ import type { CreateDocInput, LoreError } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -78,7 +79,7 @@ function makeServices() {
 }
 
 async function createPlan(cs: CorpusService): Promise<string> {
-  const result = await cs.create({ type: "plan", title: "Wording Plan", content: "body" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Wording Plan", content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`plan create failed: ${JSON.stringify(result.error)}`);
   return result.value.id;
 }

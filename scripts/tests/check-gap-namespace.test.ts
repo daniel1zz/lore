@@ -87,6 +87,7 @@ import {
   type GapEntry,
 } from "../check-gap-namespace.js";
 
+import { ensureRequirementsDocSlug } from "../../packages/lore/tests/helpers/parented-create.js";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -461,7 +462,7 @@ function initFixtureCorpus(): string {
 
 function createKnowledgeDoc(cwd: string, title: string, content: string): { id: string; slug: string } {
   const result = runLore(
-    ["create", "knowledge", "--title", title, "--content", content, "--sub-type", "reference", "--json"],
+    ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, cwd)), "--title", title, "--content", content, "--sub-type", "reference", "--json"],
     cwd,
   );
   if (result.exitCode !== 0) {

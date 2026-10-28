@@ -28,6 +28,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /** Minimal valid DocRecord fixture — every field the schema/derivation touches is real. */
 function makeDoc(overrides: Partial<DocRecord> & { updated_at: string }): DocRecord {
   return {
@@ -137,7 +138,7 @@ describe("SessionService.bootstrap — active_plans[].last_activity_at (HAPPY, A
     });
 
     const plan = await mustCreate(corpusService, {
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
       title: "Activity Plan",
       content: "# Plan",
     } as CreateDocInput);
@@ -177,7 +178,7 @@ describe("SessionService.bootstrap — active_plans[].last_activity_at (HAPPY, A
     });
 
     const plan = await mustCreate(corpusService, {
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
       title: "Childless Plan",
       content: "# Plan",
     } as CreateDocInput);

@@ -31,6 +31,7 @@ import { createApp } from "../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import type { CreateDocInput } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
 const SPEC = "spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes";
@@ -91,7 +92,7 @@ async function fileSkillDoc(repo: string, opts: { title: string; appliesTo: stri
   const app = createApp(join(repo, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const created = await app.corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
       title: opts.title,
       content: `## Project rule\n\nMarker text of ${opts.title}.`,
       extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },

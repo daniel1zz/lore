@@ -24,6 +24,7 @@ import { PhaseService } from "../../../src/service/phase-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -39,7 +40,7 @@ async function setupPlan(
   ps: PhaseService,
   phaseNames: string[] = [],
 ): Promise<string> {
-  const planR = await cs.create({ type: "plan", title: "Test Plan" } as CreateDocInput);
+  const planR = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Test Plan" } as CreateDocInput);
   if (!planR.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planR.error)}`);
   for (const name of phaseNames) {
     const addR = await ps.addPhase(planR.value.id, name);
@@ -82,7 +83,7 @@ describe("CorpusService.create — task with phase when plan has NO phases", () 
 
   it("AC-PHASE-3.1b: VALIDATION_ERROR even when plan has empty phases array explicitly", async () => {
     const { corpusService, store } = makeServices();
-    const planR = await corpusService.create({ type: "plan", title: "Empty Array Plan" } as CreateDocInput);
+    const planR = await corpusService.create({ parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Empty Array Plan" } as CreateDocInput);
     expect(planR.ok).toBe(true);
     if (!planR.ok) return;
 

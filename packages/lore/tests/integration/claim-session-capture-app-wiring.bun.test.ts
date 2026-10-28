@@ -39,6 +39,7 @@ import type { CreateDocInput, DocRecord, RunId, TaskClaim } from "@lore/core";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 const ORCHESTRATOR = "agent:main-orchestrator";
 /** The runs of the two orchestrators: the anchor mutex compares these, never the shared display name. */
 const RUN_FIRST = "cc:3de02220-first" as RunId;
@@ -103,7 +104,7 @@ async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
 async function createPlanWithTasks(anchorsPerTask: string[][]): Promise<{ planId: string; taskIds: string[] }> {
   return withApp(async (app) => {
     const plan = await app.corpusService.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan",
       title: "Session Capture Wiring Plan",
       content: "# Plan",
     } as CreateDocInput);

@@ -76,6 +76,7 @@ import { actedStore } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
 const cleanupDirs: string[] = [];
@@ -224,7 +225,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 async function createPlanAndTask(cs: CorpusService, title: string): Promise<{ planId: string; taskId: string }> {
-  const plan = await mustCreate(cs, { type: "plan", title: `Plan for ${title}`, content: "# Plan" } as CreateDocInput);
+  const plan = await mustCreate(cs, { parent_id: await ensureRequirementsDocId(cs), type: "plan", title: `Plan for ${title}`, content: "# Plan" } as CreateDocInput);
   const task = await mustCreate(cs, {
     type: "task",
     title,

@@ -30,6 +30,7 @@ import { ok, err } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/src/service/seat-service.js
 const SEAT_SERVICE_MODULE_PATH = ["..", "..", "..", "src", "service", "seat-service.js"].join("/");
 
@@ -138,7 +139,7 @@ class FakeGitPort implements GitPort {
 }
 
 async function mustCreatePlan(cs: CorpusService, title: string): Promise<DocRecord> {
-  const result = await cs.create({ type: "plan", title, content: "# Plan" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "# Plan" } as CreateDocInput);
   if (!result.ok) throw new Error(`create failed: ${JSON.stringify(result.error)}`);
   return result.value;
 }

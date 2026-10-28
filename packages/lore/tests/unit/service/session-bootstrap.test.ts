@@ -26,6 +26,7 @@ import type { GateCheckpoint } from "../../../src/service/checkpoint-registry.js
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeSessionService(store: InMemoryStore, isCheckpointEnabled?: (cp: GateCheckpoint) => boolean) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const sessionService = new SessionService(store, {
@@ -56,7 +57,7 @@ describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
 
     // Approved skill doc feeding the spec-create checkpoint.
     const skillCreate = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "Write-spec skill",
       content: "# Skill",
       extra: { sub_type: "skill", skill: { applies_to: "spec" } },
@@ -67,7 +68,7 @@ describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
     const skillDoc = approveResult.value;
 
     const plan = await mustCreate(corpusService, {
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "plan",
       title: "Session Plan",
       content: "# Plan",
     } as CreateDocInput);
@@ -103,7 +104,7 @@ describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
     if (!archivedPatch.ok) throw new Error(JSON.stringify(archivedPatch.error));
 
     const draftDoc = await mustCreate(corpusService, {
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "Draft note",
       content: "# Draft",
       extra: { sub_type: "reference" },

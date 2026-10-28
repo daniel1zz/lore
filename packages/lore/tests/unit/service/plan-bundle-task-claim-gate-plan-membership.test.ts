@@ -45,6 +45,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -53,7 +54,7 @@ function makeServices() {
 }
 
 async function createPlan(cs: CorpusService, title: string): Promise<DocRecord> {
-  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  const result = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title, content: "body" } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
   return result.value;
 }

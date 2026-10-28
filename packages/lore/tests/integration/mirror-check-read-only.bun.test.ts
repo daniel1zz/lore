@@ -85,6 +85,7 @@ import type { CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Loading scripts/export-spec-mirror.ts WITHOUT a static cross-package import ──
 //
 // `packages/lore/tsconfig.tests.json` pins `rootDir: "."` (= `packages/lore`) — a
@@ -225,7 +226,7 @@ async function setupCleanExportedCorpus(): Promise<ThrowawayCorpus> {
 
     for (const title of ["Mirror Check Plan Alpha", "Mirror Check Plan Beta"]) {
       const planResult = await app.corpusService.create({
-        type: "plan",
+        parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan",
         title,
         content: `## Overview\n\n${title} body.\n`,
       } as CreateDocInput);

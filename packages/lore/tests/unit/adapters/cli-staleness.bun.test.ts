@@ -48,6 +48,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -82,7 +83,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
 
 async function createKnowledge(tmpDir: string, title: string): Promise<string> {
   const result = await runLore(
-    ["create", "knowledge", "--title", title, "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
+    ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
     tmpDir,
   );
   if (result.exitCode !== 0) throw new Error(`create knowledge failed: ${result.stderr}`);

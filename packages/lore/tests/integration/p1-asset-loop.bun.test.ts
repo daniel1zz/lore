@@ -40,6 +40,7 @@ import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from
 let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Command type + importer (mirrors gate-feeding-skill-discovery.bun.test.ts) ────
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
@@ -144,7 +145,7 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
   it("step 1 — a user self-authors a knowledge/skill doc (applies_to=spec) via the plain create API, not a seed script", async () => {
     const created = await withApp(async (app) => {
       const createResult = await app.corpusService.create({
-        type: "knowledge",
+        parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
         title: "My custom spec-writing skill",
         content: "## Overview\n\nThese are my own custom rules for writing specs — not seeded.",
         extra: { sub_type: "skill", skill: { applies_to: "spec" } },
@@ -204,7 +205,7 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
   it("step 4 — applies_to isolation: a plan-scoped skill never leaks into the spec gate's feeding pack", async () => {
     const created = await withApp(async (app) => {
       const createResult = await app.corpusService.create({
-        type: "knowledge",
+        parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
         title: "A plan-writing skill, not spec-scoped",
         content: "## Overview\n\nPlan-only marker content — must never leak into spec-create.",
         extra: { sub_type: "skill", skill: { applies_to: "plan" } },

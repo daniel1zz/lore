@@ -19,6 +19,7 @@ import { SessionService } from "../../../src/service/session-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 /** Fake realpath: `links` maps symlink -> real target; anything else not in `existing` throws ENOENT. */
 function fakeRealpath(links: Record<string, string>, existing: string[]) {
   return (p: string): string => {
@@ -50,7 +51,7 @@ async function setup(realpath = PORT) {
     undefined,
     realpath,
   );
-  const plan = await corpus.create({ type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
+  const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
   const planDoc: DocRecord = plan.value;
   let n = 0;

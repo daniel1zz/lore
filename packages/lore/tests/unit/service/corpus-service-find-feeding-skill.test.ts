@@ -34,6 +34,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeService() {
   const store = actedStore(new InMemoryStore());
   return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), store };
@@ -44,7 +45,7 @@ async function createApprovedSkillDoc(
   opts: { title: string; appliesTo: string; content?: string },
 ): Promise<{ id: string; slug: string }> {
   const created = await service.create({
-    type: "knowledge",
+    parent_id: await ensureRequirementsDocId(service), type: "knowledge",
     title: opts.title,
     content: opts.content ?? "## Rule\n\nBody.",
     extra: { sub_type: "skill", skill: { applies_to: opts.appliesTo } },
@@ -90,7 +91,7 @@ describe("findFeedingSkill — NEGATIVE", () => {
   it("does not match an approved knowledge doc that is not sub_type 'skill'", async () => {
     const { service } = makeService();
     const created = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Reference doc pretending to have skill fields",
       content: "x",
       extra: { sub_type: "reference", skill: { applies_to: "spec" } },
@@ -136,7 +137,7 @@ describe("findFeedingSkill — STATE", () => {
   it("a draft skill doc is invisible until approved, then becomes discoverable", async () => {
     const { service } = makeService();
     const created = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Not yet approved rules",
       content: "## Rule\n\nDraft body.",
       extra: { sub_type: "skill", skill: { applies_to: "spec" } },

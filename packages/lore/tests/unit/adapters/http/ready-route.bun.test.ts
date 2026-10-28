@@ -49,6 +49,7 @@ import { actedStore, liveIo } from "../../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 import { fakeWorktreeProbe } from "../../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../../helpers/parented-create.js";
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ async function makeTestServer(): Promise<TestContext> {
   const machineKeyResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
   if (!machineKeyResult.ok) throw new Error("Failed to create machine API key");
 
-  const planResult = await app.corpusService.create({ type: "plan", title: "Ready Route Plan", content: "body" });
+  const planResult = await app.corpusService.create({ parent_id: await ensureRequirementsDocId(app.corpusService), type: "plan", title: "Ready Route Plan", content: "body" });
   if (!planResult.ok) throw new Error("Failed to create seed plan");
 
   const taskResult = await app.corpusService.create({

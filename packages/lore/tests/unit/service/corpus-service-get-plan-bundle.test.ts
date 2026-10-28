@@ -31,6 +31,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeService() {
   const store = actedStore(new InMemoryStore());
   return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), store };
@@ -76,7 +77,7 @@ describe("getPlanBundle — HAPPY (spec-parented plan, AC-ASSESS-12)", () => {
 
   it("resolving by slug works the same as resolving by id", async () => {
     const { service } = makeService();
-    const plan = await service.create({ type: "plan", title: "Slug Resolve Plan", content: "x" } as CreateDocInput);
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Slug Resolve Plan", content: "x" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan failed");
 
     const bundleResult = await service.getPlanBundle(plan.value.slug);
@@ -87,7 +88,7 @@ describe("getPlanBundle — HAPPY (spec-parented plan, AC-ASSESS-12)", () => {
 
   it("tasks[] carries extra.verification_evidence entries intact", async () => {
     const { service } = makeService();
-    const plan = await service.create({ type: "plan", title: "Evidence Plan", content: "x" } as CreateDocInput);
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Evidence Plan", content: "x" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan failed");
     const task = await service.create({
       type: "task",
@@ -139,7 +140,7 @@ describe("getPlanBundle — PRD-parented and unparented plans (AC-ASSESS-12)", (
 
   it("plan with no parent at all → spec is undefined, not an error", async () => {
     const { service } = makeService();
-    const plan = await service.create({ type: "plan", title: "Orphan Plan", content: "goals" } as CreateDocInput);
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Orphan Plan", content: "goals" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan failed");
 
     const bundleResult = await service.getPlanBundle(plan.value.id);
@@ -172,7 +173,7 @@ describe("getPlanBundle — NEGATIVE (non-plan input)", () => {
 
   it("a task id/slug → VALIDATION_ERROR", async () => {
     const { service } = makeService();
-    const plan = await service.create({ type: "plan", title: "Parent Plan", content: "x" } as CreateDocInput);
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Parent Plan", content: "x" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan failed");
     const task = await service.create({
       type: "task",
@@ -207,7 +208,7 @@ describe("getPlanBundle — ERROR (nonexistent doc)", () => {
 describe("getPlanBundle — BOUNDARY (zero-task plan)", () => {
   it("a plan with zero child tasks returns tasks: [] — getPlanBundle itself is not the AC-ASSESS-8 gate", async () => {
     const { service } = makeService();
-    const plan = await service.create({ type: "plan", title: "Empty Plan", content: "x" } as CreateDocInput);
+    const plan = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Empty Plan", content: "x" } as CreateDocInput);
     if (!plan.ok) throw new Error("plan failed");
 
     const bundleResult = await service.getPlanBundle(plan.value.id);
@@ -222,9 +223,9 @@ describe("getPlanBundle — BOUNDARY (zero-task plan)", () => {
 describe("getPlanBundle — STATE (task/plan isolation)", () => {
   it("tasks belonging to a DIFFERENT plan are not leaked into this plan's bundle", async () => {
     const { service } = makeService();
-    const planA = await service.create({ type: "plan", title: "Plan A", content: "x" } as CreateDocInput);
+    const planA = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Plan A", content: "x" } as CreateDocInput);
     if (!planA.ok) throw new Error("planA failed");
-    const planB = await service.create({ type: "plan", title: "Plan B", content: "x" } as CreateDocInput);
+    const planB = await service.create({ parent_id: await ensureRequirementsDocId(service), type: "plan", title: "Plan B", content: "x" } as CreateDocInput);
     if (!planB.ok) throw new Error("planB failed");
 
     await service.create({

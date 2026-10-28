@@ -33,6 +33,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { renderStalenessRepairCommand, type StalenessFlowDeps } from "../../../src/flows/staleness-flow.js";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeNoOpTelemetry(): Telemetry {
   return { record: vi.fn(), emit: vi.fn(), close: vi.fn() };
 }
@@ -71,7 +72,7 @@ describe("HAPPY/STATE/REGRESSION — stale_candidate probe escalates without aut
     const { store, corpusService, judgmentService } = await setup();
 
     const created = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzStalenessTargetUnique",
       content: "This fact may no longer hold.",
       extra: { sub_type: "reference" },
@@ -127,7 +128,7 @@ describe("HAPPY/STATE/REGRESSION — stale_candidate probe escalates without aut
   it("REGRESSION: a HOLDS verdict never produces an escalate judgment", async () => {
     const { store, corpusService, judgmentService } = await setup();
     const created = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzStalenessHoldsTarget",
       content: "Still accurate.",
       extra: { decision_status: "accepted" },
@@ -164,7 +165,7 @@ describe("D6 — renderStalenessRepairCommand", () => {
   it("HAPPY: names the probed doc's own slug and clips --reason to <=100 chars (BOUNDARY)", async () => {
     const { corpusService, judgmentService } = await setup();
     const created = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzRepairCommandTarget",
       content: "body",
       extra: { sub_type: "reference" },
@@ -202,13 +203,13 @@ describe("D6 — renderStalenessRepairCommand", () => {
   it("HAPPY: appends --superseded-by <slug> when the nominated ref resolves", async () => {
     const { corpusService, judgmentService } = await setup();
     const oldDoc = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzOldFact",
       content: "body",
       extra: { sub_type: "reference" },
     } as CreateDocInput);
     const newDoc = await corpusService.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "knowledge",
       title: "ZzzNewFact",
       content: "body",
       extra: { sub_type: "reference" },
@@ -244,7 +245,7 @@ describe("D6 — renderStalenessRepairCommand", () => {
   it("ERROR: an unresolvable superseded_candidate.ref never produces a broken command — base command still renders, unresolvedNote is set", async () => {
     const { corpusService, judgmentService } = await setup();
     const created = await corpusService.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(corpusService), type: "adr",
       title: "ZzzUnresolvableRefTarget",
       content: "body",
       extra: { decision_status: "accepted" },

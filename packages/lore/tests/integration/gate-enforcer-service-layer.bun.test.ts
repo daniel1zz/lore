@@ -58,6 +58,7 @@ import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 // ─── Project setup ────────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -198,7 +199,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       try {
 
         const skillCreate = await app.corpusService.create({
-          type: "knowledge",
+          parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
           title: "Write-spec rules (D3 test)",
           content: "## Rule\n\nEvery spec needs a `## ` heading skeleton.",
           extra: { sub_type: "skill", skill: { applies_to: "spec" } },
@@ -280,7 +281,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         if (!prd.ok) throw new Error(`prd create failed: ${JSON.stringify(prd.error)}`);
 
         const skillCreate = await app.corpusService.create({
-          type: "knowledge",
+          parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
           title: "Write-spec rules (disabled-gate test)",
           content: "## Rule\n\nIrrelevant while disabled.",
           extra: { sub_type: "skill", skill: { applies_to: "spec" } },

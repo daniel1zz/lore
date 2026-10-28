@@ -28,6 +28,7 @@ import { tmpdir } from "os";
 import { sessionEnvFor } from "../helpers/session-actor";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
+import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -252,7 +253,7 @@ function createTopLevelPlanWithOverlappingAnchorTasks(tmpDir: string): {
   taskBSlug: string;
 } {
   const planSlug = parseSlug(
-    runLore(["create", "plan", "--title", "Anchor Overlap Config Plan", "--content", "Plan body.", "--no-ai"], tmpDir)
+    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Anchor Overlap Config Plan", "--content", "Plan body.", "--no-ai"], tmpDir)
       .stdout,
   );
   const taskASlug = parseSlug(

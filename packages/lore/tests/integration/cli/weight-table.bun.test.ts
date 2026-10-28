@@ -28,6 +28,7 @@ import { liveAmbient, liveWriteContext, LIVE_TEST_RUN } from "../../live-invocat
 import { registerTestRun } from "../../helpers/test-run-identity.js";
 import { createItemsCorpus, RULE_ARGS, type ItemsCorpus } from "../../helpers/baseline-items-corpus.js";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 const DECIDED = ["--reason", "the rule under-states the claim contract", "--premise", "readers hit the gap|issue:#41|A", "--alt", "leave it|the gap stays"];
@@ -68,7 +69,7 @@ describe("AC-DR-10: weight tables and score validation", () => {
     });
 
   const createReference = async (title: string): Promise<string> => {
-    const run = await corpus.must(["create", "knowledge", "--sub-type", "reference", "--title", title, "--no-ai", "--content", `# ${title}\n\nA weight table.\n`]);
+    const run = await corpus.must(["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => corpus.must(a)), "--sub-type", "reference", "--title", title, "--no-ai", "--content", `# ${title}\n\nA weight table.\n`]);
     const slug = run.stdout.match(/Slug:\s+(\S+)/)?.[1];
     if (slug === undefined) throw new Error(`no slug in: ${run.stdout}`);
     return slug;

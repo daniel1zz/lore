@@ -38,6 +38,7 @@ import { tmpdir } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -76,7 +77,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
 }
 
 async function createPlan(tmpDir: string, title: string): Promise<string> {
-  const result = await runLore(["create", "plan", "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
+  const result = await runLore(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
@@ -180,7 +181,7 @@ describe("lore create knowledge --sub-type handoff — NEGATIVE (writer-identity
   //      — unreachable from CLI flags alone, hence tested there, not here.
   it("exit 4 (VALIDATION_ERROR) — blocked before the write-path-exclusivity guard, by the schema-level extra.handoff presence check", async () => {
     const result = await runLore(
-      ["create", "knowledge", "--sub-type", "handoff", "--title", "Sneaky handoff", "--content", "not a real handoff", "--no-ai"],
+      ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--sub-type", "handoff", "--title", "Sneaky handoff", "--content", "not a real handoff", "--no-ai"],
       tmpDir,
     );
 
@@ -284,7 +285,7 @@ describe("lore handoff — STATE: round trip through the real store", () => {
 describe("lore create knowledge --sub-type — REGRESSION (SSOT import repair, D4 drive-by)", () => {
   it("--sub-type prompt is accepted by CLI validation (reaches the service, exit 0)", async () => {
     const result = await runLore(
-      ["create", "knowledge", "--sub-type", "prompt", "--title", "A reusable prompt", "--content", "prompt body", "--no-ai"],
+      ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--sub-type", "prompt", "--title", "A reusable prompt", "--content", "prompt body", "--no-ai"],
       tmpDir,
     );
 
@@ -294,7 +295,7 @@ describe("lore create knowledge --sub-type — REGRESSION (SSOT import repair, D
 
   it("--sub-type skill is accepted by CLI validation (reaches the service, exit 0)", async () => {
     const result = await runLore(
-      ["create", "knowledge", "--sub-type", "skill", "--title", "A reusable skill", "--content", "skill body", "--no-ai"],
+      ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--sub-type", "skill", "--title", "A reusable skill", "--content", "skill body", "--no-ai"],
       tmpDir,
     );
 

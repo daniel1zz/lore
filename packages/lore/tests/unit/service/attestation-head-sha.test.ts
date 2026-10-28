@@ -44,6 +44,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── temp git fixtures (mkdtemp only — never the repo's own tree) ───────────
 
 const tempDirs: string[] = [];
@@ -247,7 +248,7 @@ describe("self-reported evidence never carries head_sha / worktree_dirty (C5)", 
     const store = actedStore(new InMemoryStore());
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const svc = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-    const plan = await corpus.create({ type: "plan", title: "P", content: "b" } as CreateDocInput);
+    const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "P", content: "b" } as CreateDocInput);
     if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
     const task = await corpus.create({
       type: "task",

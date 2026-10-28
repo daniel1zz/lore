@@ -60,6 +60,7 @@ import { formatStampVerdictLine } from "../../../src/adapters/cli/status-stamp-v
 import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 const NOW = "2026-10-17T10:00:00.000Z";
@@ -76,7 +77,7 @@ function makeCorpus() {
 type Corpus = ReturnType<typeof makeCorpus>;
 
 async function createTask(c: Corpus, title: string, fileAnchors: string[] = []): Promise<DocRecord> {
-  const plan = await c.corpus.create({ type: "plan", title: `Plan ${title}`, content: "body" } as CreateDocInput);
+  const plan = await c.corpus.create({ parent_id: await ensureRequirementsDocId(c.corpus), type: "plan", title: `Plan ${title}`, content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
   const task = await c.corpus.create({
     type: "task",

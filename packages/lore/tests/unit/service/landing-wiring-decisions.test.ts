@@ -25,6 +25,7 @@ import { runOfName } from "../../helpers/test-run-identity.js";
 import { FAKE_HEAD_SHA, fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import type { WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeServices(probe: WorktreeGitProbe = fakeWorktreeProbe()) {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -37,7 +38,7 @@ function makeServices(probe: WorktreeGitProbe = fakeWorktreeProbe()) {
 }
 
 async function createTask(corpus: CorpusService, anchors: string[] = []): Promise<string> {
-  const plan = await corpus.create({ type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
+  const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "Plan", content: "# Plan" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
   const task = await corpus.create({
     type: "task", title: "Task", parent_id: plan.value.id, content: "# Task",

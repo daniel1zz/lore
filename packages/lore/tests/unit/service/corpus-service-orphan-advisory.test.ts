@@ -22,6 +22,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 function makeService() {
   const store = actedStore(new InMemoryStore());
   return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), store };
@@ -41,7 +42,7 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
     const rootPrd = await createRootPrd(service);
 
     const result = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Orphan Knowledge",
       extra: { sub_type: "reference" },
     } as CreateDocInput);
@@ -63,7 +64,7 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
     const rootPrd = await createRootPrd(service);
 
     const result = await service.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(service), type: "adr",
       title: "Orphan ADR",
       extra: { decision_status: "proposed" },
     } as CreateDocInput);
@@ -80,7 +81,7 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
     const rootPrd = await createRootPrd(service);
 
     const result = await service.create({
-      type: "plan",
+      parent_id: await ensureRequirementsDocId(service), type: "plan",
       title: "Orphan Plan",
       content: "body",
     } as CreateDocInput);
@@ -98,7 +99,7 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
     const { service } = makeService();
 
     const result = await service.create({
-      type: "knowledge",
+      parent_id: await ensureRequirementsDocId(service), type: "knowledge",
       title: "Early Exploration Note",
       extra: { sub_type: "ideation" },
     } as CreateDocInput);
@@ -112,7 +113,7 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
     const { service } = makeService();
 
     const result = await service.create({
-      type: "adr",
+      parent_id: await ensureRequirementsDocId(service), type: "adr",
       title: "Early Decision",
       extra: { decision_status: "proposed" },
     } as CreateDocInput);

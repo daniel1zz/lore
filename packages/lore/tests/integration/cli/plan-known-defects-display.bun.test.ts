@@ -28,6 +28,7 @@ import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 const FAKE_REPO = "acme/widget";
 const REPO_ID = 4242;
 const FP = "9".repeat(64);
@@ -131,7 +132,7 @@ async function makeCorpus(states: Record<number, "open" | "closed">, asCarrier =
     ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    plan-close:", "      enabled: false", "  review:", "    judgment_required_types: []", "feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"),
   );
   await mustRun(corpus, ["create", "prd", "--title", "Kd5 PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
-  const created = JSON.parse((await mustRun(corpus, ["create", "plan", "--title", "Kd5 plan", "--no-ai", "--content", "Plan body.", "--json"])).stdout) as { data: { slug: string; id: string } };
+  const created = JSON.parse((await mustRun(corpus, ["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => mustRun(corpus, a)), "--title", "Kd5 plan", "--no-ai", "--content", "Plan body.", "--json"])).stdout) as { data: { slug: string; id: string } };
   const db = new Database(join(dir, ".lore", "lore.db"));
   try {
     const row = db.query("SELECT extra FROM docs WHERE id = ?").get(created.data.id) as { extra: string };
