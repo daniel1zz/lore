@@ -310,7 +310,7 @@ function refuseUnreadableWrites(allEntries) {
   }
   let claims;
   try {
-    const read = runLore(trailWorkingCopy(payload) ?? cwd, ['anchor', 'scope', '--all', '--json', '--harness-run', run]);
+    const read = runLore(trailWorkingCopy(payload) ?? cwd, ['anchor', 'scope', '--all', '--json'], run);
     if (read.status !== 0) throw `\`lore anchor scope --all\` exited ${read.status}: ${(read.stderr || read.stdout).trim().split('\n')[0]}`;
     const data = JSON.parse(read.stdout)?.data;
     if (!Array.isArray(data?.claims)) throw '`lore anchor scope --all --json` did not return {claims}';

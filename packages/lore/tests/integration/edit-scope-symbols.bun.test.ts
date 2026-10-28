@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @layer hook AC-USW-5 (hook-process half; the AC's owner file is packages/lore/tests/unit/hooks/shell-writes.test.ts)
 // @spawns assets/hooks/pre-edit-anchor-gate.mjs
 /**
  * Edit-time anchor gate, symbol scope (task-skill-fix-the-edit-time-gate-locks-whole-files-so-disjoint).

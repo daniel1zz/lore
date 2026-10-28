@@ -1,3 +1,4 @@
+// @layer hook-unit AC-USW-2 (parser half; the AC's owner file is packages/lore/tests/integration/edit-scope-symbols.bun.test.ts)
 /**
  * `assets/hooks/lib/shell-writes.mjs` — the files a Bash command line writes, read from its text alone
  * (spec-a-helper-s-shell-write-whose-target-cannot-be-read-is, BR-1493).
