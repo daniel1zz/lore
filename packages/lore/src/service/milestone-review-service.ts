@@ -6,8 +6,10 @@
  * Public surface: `MilestoneReviewService.review(planRef, opts)`, `MilestoneReviewService.recordMainRed(suite)`,`MilestoneReviewDeps`, `MilestoneReviewResult`.
  * Invariants:
  *   - The judge never writes the fingerprint, the overall verdict or the decision list; this service computes them.
- *   - A judge answer that does not parse as all seven dimensions is retried ONCE with the parse error; a second
- *     failure is an AI error and NOTHING is stored (a half-formed review is never a review).
+ *   - The judge is asked only the four judged dimensions and the AI-mode criteria (`milestone-review-judgment.ts`); the
+ *     facts dimensions are computed from measured facts and an AI verdict on one is ignored. A judge answer that does not
+ *     parse is retried ONCE with the parse error; a second failure is an AI error and NOTHING is stored.
+ *   - A diff over the per-call budget is judged in file chunks, never cut; unseen files make the gates not-measured (BR-1499).
  *   - `design_necessity` without a reference is a fail whatever the judge said (`applyDeterministicDimensionRules`).
  *   - Main red is recorded in the local ledger at detection, BEFORE the judge runs and before any issue is filed, so a
  *     judge failure or a failing issue filer never loses it (BR-1412); a ledger failure fails the review loudly.
@@ -22,9 +24,7 @@
 import {
   applyDeterministicDimensionRules,
   err,
-  extractAssessmentJson,
   extractEvidence,
-  llmMilestoneOutputSchema,
   ok,
   overallMilestoneVerdict,
   renderMilestoneReviewContent,
@@ -36,13 +36,14 @@ import {
   type ReviewCauses,
   type LoreError,
   type MilestoneDecisionRef,
+  type MilestoneFacts,
   type MilestoneReview,
   type PlanBundle,
   type Result,
   type RetiredAcRef,
 } from "@lore/core";
+import { factsDimensions, mergeDimensions, runJudgment, type JudgePort } from "./milestone-review-judgment.js";
 import {
-  buildMilestoneReviewPrompt,
   MILESTONE_REVIEW_PROMPT_VERSION,
   type JudgedDecisionInput,
   type MilestoneTaskInput,
@@ -57,7 +58,7 @@ import {
   type CitedRuleStateRow,
   type MainRedLedgerPort,
 } from "./milestone-review.js";
-import { applyDecisionFindings, judgedFindingsOf, rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
+import { applyDecisionFindings, rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
 import {
   applyRegressionFloor,
   applySnapshotRule,
@@ -78,6 +79,11 @@ export interface MilestoneReviewDeps {
   readonly listDecisionLog: () => Promise<Result<DecisionLogRow[], LoreError>>;
   /** Sends `prompt` to the configured judge and returns its raw text. */
   readonly judge: (prompt: string, title: string) => Promise<Result<string, LoreError>>;
+  /**
+   * Like `judge` but returns the call's duration and token usage; `app.ts` wires it. Absent (hand-built services), the
+   * service times `judge` itself and records no tokens (unknown, never 0).
+   */
+  readonly judgeMeasured?: JudgePort;
   /** The ACs retired during the plan (adr-an-acceptance-criterion-retires-with-the-feature-it), listed in the review. */
   readonly listRetiredAcs?: (bundle: PlanBundle) => Promise<Result<RetiredAcRef[], LoreError>>;
   readonly createReviewDoc: (input: CreateDocInput) => Promise<Result<DocRecord, LoreError>>;
@@ -105,7 +111,10 @@ export interface MilestoneReviewOptions {
   readonly diffText?: string;
   /** How the diff was obtained, or why it is absent (stored on the review). */
   readonly diffSource: string;
+  /** Per-call budget for diff text; a larger diff is judged in file chunks (BR-1499), never cut. */
   readonly maxDiffChars: number;
+  /** Measured facts for the facts table and the facts dimensions (attestation, regression per landing, scope, AI-mode criteria). */
+  readonly facts?: MilestoneFacts;
   /** The batch's one full-suite run (`lore assess` measures it once); absent = none supplied for this review. */
   readonly suite?: SuiteRun;
   /** Runs one criterion in this run's execution context; absent = the re-run of criteria citing a reworded rule is not done. */
@@ -116,10 +125,6 @@ export interface MilestoneReviewOptions {
 export interface MilestoneReviewResult {
   readonly doc: DocRecord;
   readonly review: MilestoneReview;
-}
-
-function aiError(message: string): LoreError {
-  return { code: "AI_PROVIDER_ERROR", message, provider: "milestone-review" };
 }
 
 /**
@@ -290,20 +295,23 @@ export class MilestoneReviewService {
     const judgedInputsResult = this.deps.judgedDecisionInputs !== undefined ? await this.deps.judgedDecisionInputs(bundle) : ok<JudgedDecisionInput[]>([]);
     if (!judgedInputsResult.ok) return judgedInputsResult;
     const judgedInputs = judgedInputsResult.value;
-    const prompt = buildMilestoneReviewPrompt({
-      suiteSection: renderSuiteSection(opts.suite, attribution, touched !== undefined),
-      plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },
-      ...(bundle.spec !== undefined ? { spec: { slug: bundle.spec.slug, title: bundle.spec.title, content: bundle.spec.content } } : {}),
-      tasks,
-      citedRules: citedRulesResult.value,
-      decisions,
-      recordedDecisions: judgedInputs,
+    const judged = await runJudgment({
+      base: {
+        suiteSection: renderSuiteSection(opts.suite, attribution, touched !== undefined),
+        plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },
+        ...(bundle.spec !== undefined ? { spec: { slug: bundle.spec.slug, title: bundle.spec.title, content: bundle.spec.content } } : {}),
+        tasks,
+        citedRules: citedRulesResult.value,
+        decisions,
+        ...(opts.facts !== undefined ? { facts: opts.facts } : {}),
+        diffSource: opts.diffSource,
+      },
+      title: bundle.plan.title,
       ...(opts.diffText !== undefined ? { diffText: opts.diffText } : {}),
-      diffSource: opts.diffSource,
       maxDiffChars: opts.maxDiffChars,
+      judge: this.judgePort(),
+      recorded: judgedInputs,
     });
-
-    const judged = await this.judgeWithRetry(prompt, bundle.plan.title, judgedInputs);
     if (!judged.ok) return judged;
     // reason: both measured inputs are applied AFTER the judge so it cannot waive them (Part D): an attributed
     // failing test file fails regression; snapshot_accuracy fails only on a contradicted cited rule.
@@ -313,12 +321,21 @@ export class MilestoneReviewService {
     // `decision_findings`; only a wrong-when-written one changes a verdict (`applyDecisionFindings`).
     const rerun = opts.rerunCriterion !== undefined ? await rerunCitingCriteria(judgedInputs, opts.rerunCriterion) : [];
     const decisionFindings = [...decisionFindingsResult.value, ...judged.value.findings, ...rerun];
+    const judgment = judged.value.record;
     // reason: a wrong-when-written decision premise fails snapshot_accuracy AFTER the cited-rule rule so neither the judge
     // nor that rule can turn it back into a pass or an n/a (spec D5).
+    // reason: the facts dimensions come from measured facts alone (spec D6, judgment layer): the judge was never asked
+    // for them and an answer on one is stripped. Without per-landing regression, a measured suite with nothing
+    // attributed to this plan is a pass; no suite at all is not-measured (never pass).
+    const measured = factsDimensions(opts.facts, judged.value.record.ai_criteria);
+    const factDims =
+      opts.facts?.regression === undefined && opts.suite?.status === "measured"
+        ? { ...measured, regression: { verdict: "pass" as const, reason: "no failing file of the full suite on main is attributed to this plan", reference: "Kayenta canary analysis" } }
+        : measured;
     const dimensions = applyDecisionFindings(
       applySnapshotRule(
         applyRegressionFloor(
-          applyDeterministicDimensionRules(judged.value.output.dimensions),
+          applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
           attribution,
           opts.suite?.status === "measured" ? opts.suite.commit : undefined,
         ),
@@ -346,6 +363,7 @@ export class MilestoneReviewService {
       dimensions,
       decisions,
       ...(decisionFindings.length > 0 ? { decision_findings: decisionFindings } : {}),
+      judgment,
       prompt_version: MILESTONE_REVIEW_PROMPT_VERSION,
       diff_source: opts.diffSource,
     };
@@ -373,36 +391,14 @@ export class MilestoneReviewService {
     return ok({ doc, review });
   }
 
-  /** One judge call, parsed; on a parse failure one retry that shows the judge its own error. */
-  private async judgeWithRetry(
-    prompt: string,
-    title: string,
-    inputs: readonly JudgedDecisionInput[],
-  ): Promise<Result<{ output: LlmMilestoneOutput; findings: DecisionFinding[] }, LoreError>> {
-    let currentPrompt = prompt;
-    let lastProblem = "";
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const raw = await this.deps.judge(currentPrompt, title);
-      if (!raw.ok) return raw;
-      const extracted = extractAssessmentJson(raw.value);
-      if (extracted.ok) {
-        const parsed = llmMilestoneOutputSchema.safeParse(extracted.value);
-        if (parsed.success) {
-          // reason: llmMilestoneOutputSchema strips unknown keys, so the decisions answer is read from the raw object.
-          const answered = judgedFindingsOf(inputs, (extracted.value as { decisions?: unknown }).decisions);
-          if (answered.ok) return ok({ output: parsed.data, findings: answered.value });
-          lastProblem = answered.error;
-        } else {
-          lastProblem = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
-        }
-      } else {
-        lastProblem = "message" in extracted.error ? extracted.error.message : extracted.error.code;
-      }
-      currentPrompt =
-        `${prompt}\n\nYour previous answer was rejected: ${lastProblem}\n` +
-        "Answer again with ONE JSON object containing all seven dimensions, each with verdict, reason and reference, and a non-empty cites list on every failed finding" +
-        (inputs.length > 0 ? `, and a \`decisions\` array with one answer for each of: ${inputs.map((i) => i.address).join(", ")}.` : ".");
-    }
-    return err(aiError(`the judge did not return a valid seven-dimension review after one retry: ${lastProblem}`));
+  /** The judge port with cost: the measured one when wired, else `judge` timed here (tokens unknown, never 0). */
+  private judgePort(): JudgePort {
+    const measured = this.deps.judgeMeasured;
+    if (measured !== undefined) return measured;
+    return async (prompt, title) => {
+      const started = performance.now();
+      const raw = await this.deps.judge(prompt, title);
+      return raw.ok ? ok({ text: raw.value, duration_ms: Math.round(performance.now() - started) }) : raw;
+    };
   }
 }

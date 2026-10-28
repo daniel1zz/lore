@@ -144,6 +144,11 @@ function parseDiffIntoChunks(diffText: string): DiffFileChunk[] {
  * listDiffFiles("diff --git a/src/foo.ts b/src/foo.ts\n...");
  * // => ["src/foo.ts"]
  */
+export function splitDiffByFile(diffText: string): { readonly filePath: string; readonly text: string }[] {
+  return parseDiffIntoChunks(diffText).map((chunk) => ({ filePath: chunk.filePath, text: chunk.text }));
+}
+
+/** @see splitDiffByFile — this is the file-list view of the same parse. */
 export function listDiffFiles(diffText: string): string[] {
   return parseDiffIntoChunks(diffText).map((chunk) => chunk.filePath);
 }

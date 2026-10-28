@@ -235,7 +235,7 @@ export class AIProviderService {
    * Exposed so the CLI can print the AC-AE-1 pre-flight budget warning BEFORE invoking
    * the provider, without duplicating `config.ai.assess.max_diff_chars` lookup logic.
    *
-   * @returns Configured max chars (from config.ai.assess.max_diff_chars; default 24000)
+   * @returns Configured max chars (from config.ai.assess.max_diff_chars; default 80000)
    * Source: SPEC-028 AC-AE-1
    */
   get assessMaxDiffChars(): number {
@@ -254,6 +254,28 @@ export class AIProviderService {
   async judgeMilestone(prompt: string, title: string): Promise<Result<string, LoreError>> {
     const { result } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
     return result.ok ? ok(result.value.content) : result;
+  }
+
+  /**
+   * `judgeMilestone` that keeps what the call cost: wall-clock duration and, when the provider reports it, token usage
+   * (the CLI provider reports none, so tokens stay absent rather than 0).
+   *
+   * @param prompt - the rendered review prompt
+   * @param title - the plan's title
+   * @returns `ok({text, duration_ms, tokens_in?, tokens_out?})` or the provider's own `AI_PROVIDER_ERROR`; never throws
+   */
+  async judgeMilestoneMeasured(
+    prompt: string,
+    title: string,
+  ): Promise<Result<{ text: string; duration_ms: number; tokens_in?: number; tokens_out?: number }, LoreError>> {
+    const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
+    if (!result.ok) return result;
+    const usage = result.value.usage;
+    return ok({
+      text: result.value.content,
+      duration_ms,
+      ...(usage !== undefined ? { tokens_in: usage.input_tokens, tokens_out: usage.output_tokens } : {}),
+    });
   }
 
   // ─── SPEC-017: create path ──────────────────────────────────────────────────
