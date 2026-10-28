@@ -205,6 +205,46 @@ describe("AC-DR-7 command premises", () => {
     expect(ran).toEqual([]);
   });
 
+  it("AC-DR-7 each flag that runs a program or writes a file is not-rerunnable and the runner is never called (#482)", async () => {
+    const bypasses = [
+      "rg --pre-glob '*.gz' x",
+      "rg --pre-glob=*.gz x",
+      "rg --pre ./x y",
+      "rg -z x",
+      "rg --search-zip x",
+      "git grep -Oless x",
+      "git grep -O less x",
+      "git grep --open-files-in-pager=less x",
+      "git -c core.pager=evil show HEAD",
+      "git -C /tmp show HEAD",
+      "git --git-dir=/tmp/x log",
+      "git --exec-path=/tmp show HEAD",
+      "git diff --output=out.txt",
+      "git diff --output out.txt",
+      "git diff --no-index /etc/passwd /etc/hosts",
+      "git log --ext-diff",
+      "git show --textconv HEAD",
+      "lore get spec-a --out /tmp/x",
+      "lore list --unknown-flag",
+      "grep --pre x f",
+      "grep -f /etc/passwd x",
+    ];
+    const ran: string[] = [];
+    const runner: CommandRunnerPort = { run: async (command) => (ran.push(command), ok({ exitCode: 0, output: "x" })) };
+    const findings = await recheck(decisionOf(bypasses.map((command) => cmdPremise(command, "x"))), runner);
+    expect(findings.map((f) => f.kind)).toEqual(bypasses.map(() => "not-rerunnable"));
+    expect(ran).toEqual([]);
+  });
+
+  it("AC-DR-7 a command using only allowlisted flags is still re-run", async () => {
+    const ran: string[] = [];
+    const runner: CommandRunnerPort = { run: async (command) => (ran.push(command), ok({ exitCode: 0, output: "x" })) };
+    const allowed = ["rg -n -i --glob *.ts LIMIT src", "git grep -n -e LIMIT", "git log --oneline -n 3", "lore get spec-a --json", "grep -rn --include=*.ts LIMIT src"];
+    const findings = await recheck(decisionOf(allowed.map((command) => cmdPremise(command, "x"))), runner);
+    expect(findings).toEqual([]);
+    expect(ran).toEqual(allowed);
+  });
+
   it("AC-DR-7 a runner that cannot run reports unverifiable", async () => {
     const findings = await recheck(decisionOf([cmdPremise("git log -1", "x")]));
     expect(findings.map((f) => f.kind)).toEqual(["unverifiable"]);
