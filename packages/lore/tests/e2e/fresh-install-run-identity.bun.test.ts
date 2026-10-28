@@ -38,7 +38,7 @@ const HOOK_FILE = "pre-tool-harness-run.mjs";
 const ALLOW_RULE = "Bash(export LORE_HARNESS_RUN=*)";
 const SESSION = "e2e-fresh-install-session";
 /** `lore setup` with PATH="" cannot reach a real `claude` to register the tool server: it writes every file, then exits 1. */
-const SETUP_MCP_UNREGISTERED_EXIT = 1;
+const SETUP_OK_EXIT = 0;
 
 let root = "";
 let project = "";
@@ -54,7 +54,7 @@ function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 }
 
 function setup(args: string[]): number {
-  // PATH="" keeps the MCP registration step from reaching a real `claude`.
+  // PATH="" keeps setup from reaching a real `claude`.
   const p = spawnSync(LORE_BIN, ["setup", ...args, "--claude-dir", claudeDir, "--yes"], { cwd: project, env: env({ PATH: "" }), encoding: "utf8" });
   return p.status ?? -1;
 }
@@ -86,7 +86,7 @@ beforeAll(() => {
   mkdirSync(project, { recursive: true });
   mkdirSync(claudeDir, { recursive: true });
   mkdirSync(join(root, "xdg"), { recursive: true });
-  expect(setup([])).toBe(SETUP_MCP_UNREGISTERED_EXIT);
+  expect(setup([])).toBe(SETUP_OK_EXIT);
 });
 
 afterAll(() => {

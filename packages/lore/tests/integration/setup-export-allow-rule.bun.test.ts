@@ -22,8 +22,8 @@ const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, 
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const BUN_BIN = Bun.which("bun") ?? "bun";
 const RULE = "Bash(export LORE_HARNESS_RUN=*)";
-/** PATH="" makes the MCP registration step fail, which is exit 1; file and manifest work still completes. */
-const MCP_FAILS_EXIT = 1;
+/** setup registers no MCP server any more (spec-remove-the-lore-mcp-server): file and manifest work completes with exit 0. */
+const SETUP_OK_EXIT = 0;
 
 function runSetup(args: string[], cwd: string): { exitCode: number; stderr: string } {
   const proc = Bun.spawnSync([BUN_BIN, "run", INDEX_TS, "setup", ...args], {
@@ -50,7 +50,7 @@ const manifestOf = (dir: string): Record<string, any> =>
 describe("lore setup export allow rule", () => {
   it("HAPPY: fresh install adds exactly one allow rule and records it in the manifest", () => {
     const dir = scratch();
-    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(MCP_FAILS_EXIT);
+    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(SETUP_OK_EXIT);
     const s = settingsOf(dir);
     expect(s.permissions).toEqual({ allow: [RULE] });
     expect(manifestOf(dir).permissions).toEqual({ allow: [RULE] });
@@ -62,7 +62,7 @@ describe("lore setup export allow rule", () => {
       join(dir, "settings.json"),
       JSON.stringify({ permissions: { allow: ["Bash(lore get:*)"], deny: ["Bash(rm:*)"] }, theme: "dark" }),
     );
-    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(MCP_FAILS_EXIT);
+    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(SETUP_OK_EXIT);
     expect(settingsOf(dir).permissions.allow).toEqual(["Bash(lore get:*)", RULE]);
     expect(runSetup(["--uninstall", "--yes", "--claude-dir", dir], dir).exitCode).toBe(0);
     const s = settingsOf(dir);
@@ -74,7 +74,7 @@ describe("lore setup export allow rule", () => {
   it("BOUNDARY: a rule the user already had is not lore's and survives uninstall", () => {
     const dir = scratch();
     writeFileSync(join(dir, "settings.json"), JSON.stringify({ permissions: { allow: [RULE] } }));
-    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(MCP_FAILS_EXIT);
+    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(SETUP_OK_EXIT);
     expect(settingsOf(dir).permissions.allow).toEqual([RULE]);
     expect(manifestOf(dir).permissions).toBeUndefined();
     expect(runSetup(["--uninstall", "--yes", "--claude-dir", dir], dir).exitCode).toBe(0);
@@ -83,8 +83,8 @@ describe("lore setup export allow rule", () => {
 
   it("STATE: a second install keeps one copy and keeps it listed", () => {
     const dir = scratch();
-    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(MCP_FAILS_EXIT);
-    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(MCP_FAILS_EXIT);
+    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(SETUP_OK_EXIT);
+    expect(runSetup(["--yes", "--claude-dir", dir], dir).exitCode).toBe(SETUP_OK_EXIT);
     expect(settingsOf(dir).permissions.allow).toEqual([RULE]);
     expect(manifestOf(dir).permissions).toEqual({ allow: [RULE] });
   });

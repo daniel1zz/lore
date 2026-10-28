@@ -13,7 +13,6 @@
  * refusal is checked through the CLI's own exit-code mapping (`exitCode`): a clean or gone worktree of an ended run is
  * claimable and releasable without a steal or force (exit 0); a dirty worktree that still exists stays protected (exit 5).
  */
-import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,14 +97,12 @@ describe("AC-RV-10: a claim ends with its run", () => {
     return r.ok ? { isError: false, text: JSON.stringify(r.value) } : { isError: true, text: JSON.stringify(r.error) };
   }
 
-  function claimedBy(): string | null {
-    const db = new Database(dbPath, { readonly: true });
-    try {
-      const rows = db.query("SELECT harness_run FROM audit WHERE action = 'claim' ORDER BY rowid DESC LIMIT 1").all() as { harness_run: string }[];
-      return rows[0]?.harness_run ?? null;
-    } finally {
-      db.close();
-    }
+  // reason: the service call takes the run as an argument while the audit row is stamped by the app's own ambient run,
+  // so the holder is read from the claim record the claim wrote.
+  async function claimedBy(): Promise<string | null> {
+    const doc = await app.corpusService.get(taskSlug);
+    if (!doc.ok) throw new Error(`get failed: ${JSON.stringify(doc.error)}`);
+    return readClaimRecord(doc.value.doc)?.harness_run ?? null;
   }
 
   beforeEach(async () => {
@@ -142,7 +139,7 @@ describe("AC-RV-10: a claim ends with its run", () => {
     expect(second.isError, second.text).not.toBe(true);
     expect(second.text).toContain(R1);
     expect(second.text).toContain("ended");
-    expect(claimedBy()).toBe(R2);
+    expect(await claimedBy()).toBe(R2);
   });
 
   it("R1 is live: R2's claim still refuses, naming R1, and nothing changes hands (regression pin)", async () => {
@@ -152,7 +149,7 @@ describe("AC-RV-10: a claim ends with its run", () => {
     const second = await claimAs(R2, BY_R2);
     expect(second.isError).toBe(true);
     expect(second.text).toContain(R1);
-    expect(claimedBy()).toBe(R1);
+    expect(await claimedBy()).toBe(R1);
   });
 
   describe("with a real git worktree recorded on the claim", () => {
