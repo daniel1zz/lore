@@ -138,6 +138,12 @@ export interface BatchRunPorts {
   readonly settleRetirement: (bundle: PlanBundle) => Promise<Result<PlanRetirementState | undefined, LoreError>>;
   /** Measures the batch's one full-suite run. */
   readonly measureSuite: (planRefs: readonly string[]) => Promise<SuiteRun | undefined>;
+  /**
+   * Attests the plan's landed script criteria at their landing commits before the plan is judged (BR-1498): a criterion
+   * verified only in the task worktree is otherwise not-measured. Optional (absent = no attestation step); an `err`
+   * is an errored attempt (audit row), never a skipped step.
+   */
+  readonly attestLanded?: (planRef: string) => Promise<Result<unknown, LoreError>>;
   /** Judges one plan and stores the review. */
   readonly reviewPlan: (planRef: string, suite: SuiteRun | undefined) => Promise<Result<MilestoneReviewResult, LoreError>>;
   /** Archives the plan through the gated close (coverage reads the plan's known defects, each issue by number). */
@@ -331,6 +337,11 @@ export class ReviewBatchRunner {
       coverFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
     }
     if (latest === undefined || latest.review.fingerprint !== fingerprint || coverFixed) {
+      // reason: BR-1498 — landed criteria are attested at their landing commit BEFORE the judgment reads attestation.
+      if (ports.attestLanded !== undefined) {
+        const attested = await ports.attestLanded(ref);
+        if (!attested.ok) return fail("review", fingerprint, attested.error, false);
+      }
       const suite = await measureOnce();
       const judged = await ports.reviewPlan(ref, suite);
       // reason: an errored review is recorded as an audit row, NOT a review: it does not count toward once-per-fingerprint.

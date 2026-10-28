@@ -45,13 +45,16 @@ import { createGithubIssuePort } from "../assess-file-issues.js";
 import { IssueFilingService } from "../../../service/issue-filing-service.js";
 import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
-import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow } from "../../../service/review-batch-service.js";
+import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow, type BatchRunPorts } from "../../../service/review-batch-service.js";
 import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
 import { err, ok, type DocId } from "@lore/core";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { suiteRunOfResult } from "../../../service/suite-result-service.js";
 import { regressionPerLanding } from "../../../service/regression-per-landing.js";
+import { attestPlanLanding, measurePlanAttestation, type ListDocsPort } from "../assess-attestation-wiring.js";
+import { createGitLandingAttester } from "../assess-landing-attester.js";
+import { createGitMainFirstParent } from "../assess-main-first-parent.js";
 import { createGitClearingSourceFinder } from "../assess-regression-clearing.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
@@ -319,8 +322,15 @@ export default defineLoreCommand({
             inv.io.stderr.write(`Warning: regression per landing not measured for ${ref}: ${formatErrorFor(inv, measured.error)}\n`);
           }
         }
+        // reason: BR-1498 — correctness is decided from attestations bound to main from each task's landing; AI-mode
+        // criteria go to the judge. Unreadable inputs leave attestation absent (not-measured), never pass.
+        let attestationFacts: Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria"> = {};
+        const attested = await measurePlanAttestation(listDocsOf(app), bundle.value, createGitMainFirstParent(inv.cwd, inv.env));
+        if (attested.ok) attestationFacts = attested.value;
+        else inv.io.stderr.write(`Warning: criteria attestation not measured for ${ref}: ${formatErrorFor(inv, attested.error)}\n`);
         const facts: MilestoneFacts = {
           ...regressionFacts,
+          ...attestationFacts,
           outside_anchors: derivation.landings.flatMap((l) =>
             l.outside_anchors !== undefined && l.outside_anchors.length > 0 ? [{ landing: l.landing_commit, files: l.outside_anchors }] : [],
           ),
@@ -336,7 +346,25 @@ export default defineLoreCommand({
       };
 
       if (args.close === true) {
-        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, filing, json: args.json === true });
+        // reason: BR-1498 — the batch attests each landed task's script criteria at its landing commit before judging.
+        const batchVerifyRunner = app.verifyRunnerService;
+        const attestLanded =
+          batchVerifyRunner === undefined
+            ? undefined
+            : async (ref: string) => {
+                const bundle = await app.corpusService.getPlanBundle(ref);
+                if (!bundle.ok) return bundle;
+                return attestPlanLanding(
+                  listDocsOf(app),
+                  bundle.value,
+                  createGitMainFirstParent(inv.cwd, inv.env),
+                  createGitLandingAttester(inv.cwd, inv.env, (executionRoot) =>
+                    createAppCriterionRerunner(app, batchVerifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() }),
+                  ),
+                  (line) => inv.io.stderr.write(`${line}\n`),
+                );
+              };
+        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, attestLanded, filing, json: args.json === true });
       }
 
       const suite = await measureSuite(refs.value);
@@ -431,8 +459,17 @@ interface BatchCloseInput {
   readonly planRefs: readonly string[];
   readonly measureSuite: (refs: readonly string[]) => Promise<SuiteRun | undefined>;
   readonly reviewOne: (ref: string, suite: SuiteRun | undefined) => ReturnType<NonNullable<App["milestoneReviewService"]>["review"]>;
+  readonly attestLanded: BatchRunPorts["attestLanded"];
   readonly filing: IssueFilingService | undefined;
   readonly json: boolean;
+}
+
+/** The corpus reader the attestation wiring needs. */
+function listDocsOf(app: App): ListDocsPort {
+  return async (type) => {
+    const listed = await app.corpusService.listFull({ type });
+    return listed.ok ? ok(listed.value.docs) : listed;
+  };
 }
 
 /**
@@ -458,6 +495,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
       return app.retiredAcService.settle(bundle);
     },
     measureSuite: input.measureSuite,
+    ...(input.attestLanded !== undefined ? { attestLanded: input.attestLanded } : {}),
     reviewPlan: input.reviewOne,
     closePlan: async (ref) => {
       const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor });

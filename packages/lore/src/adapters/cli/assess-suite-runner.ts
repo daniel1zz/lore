@@ -138,6 +138,40 @@ export function createGitSuiteRunner(
 export const FILE_TEST_SCRIPT = "test:file";
 
 /**
+ * Runs `work` in a throwaway detached worktree of `commit`, removed afterwards whatever happens. The ONE worktree
+ * mechanic shared by the suite runs and the post-landing attestation (BR-1498).
+ *
+ * @param cwd - any directory inside the project's checkout
+ * @param env - the environment git runs with
+ * @param commit - the commit the worktree is checked out at
+ * @param work - awaited with the worktree's root
+ * @returns `ok(work's value)`; `err` when the worktree cannot be created or `work` throws
+ */
+export async function runInThrowawayWorktree<T>(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  commit: string,
+  work: (root: string) => Promise<T>,
+): Promise<Result<T, LoreError>> {
+  const top = spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
+  if (top.status !== 0) return err({ code: "STORE_ERROR", message: `not inside a git checkout: ${top.output.trim()}` });
+  const repo = top.output.trim();
+  const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
+  try {
+    const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repo, env);
+    if (added.status !== 0) {
+      return err({ code: "STORE_ERROR", message: `could not create the throwaway worktree: ${added.output.trim()}` });
+    }
+    return ok(await work(scratch));
+  } catch (cause) {
+    return err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+    spawn("git", ["worktree", "prune"], repo, env);
+  }
+}
+
+/**
  * The same measurement as {@link createGitSuiteRunner}, generalised to any commit: resolve a ref, run the suite at a
  * commit, re-run named test files at a commit. What is run does not change: `check:plan-close` then `test`, in a
  * throwaway worktree of that commit, under the harness-free environment.
@@ -153,24 +187,8 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
     return ok(top.output.trim());
   };
 
-  /** Runs `work` in a throwaway detached worktree of `commit`, removed afterwards whatever happens. */
-  const inThrowawayWorktree = async <T>(commit: string, work: (root: string) => Promise<T>): Promise<Result<T, LoreError>> => {
-    const repo = repoRootOf();
-    if (!repo.ok) return repo;
-    const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
-    try {
-      const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repo.value, env);
-      if (added.status !== 0) {
-        return err({ code: "STORE_ERROR", message: `could not create the throwaway worktree: ${added.output.trim()}` });
-      }
-      return ok(await work(scratch));
-    } catch (cause) {
-      return err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
-    } finally {
-      rmSync(scratch, { recursive: true, force: true });
-      spawn("git", ["worktree", "prune"], repo.value, env);
-    }
-  };
+  const inThrowawayWorktree = <T>(commit: string, work: (root: string) => Promise<T>): Promise<Result<T, LoreError>> =>
+    runInThrowawayWorktree(cwd, env, commit, work);
 
   return {
     resolveCommit: async (ref) => {
@@ -219,7 +237,7 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
 }
 
 /** Installs dependencies in a fresh worktree when the project has some; returns the failure text, or `undefined` when ready. */
-function prepareDependencies(root: string, env: NodeJS.ProcessEnv): string | undefined {
+export function prepareDependencies(root: string, env: NodeJS.ProcessEnv): string | undefined {
   const manifestPath = join(root, "package.json");
   if (!existsSync(manifestPath)) return undefined;
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { dependencies?: object; devDependencies?: object };
