@@ -1,8 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @spawns packages/lore/tests/integration/cli/stub-unreadable-ps.preload.ts
 /**
- * @spec_ref AC-RID-1
- *
  * `lore run register --harness-pid <live pid>` when the process table cannot be read (#418): the port throws
  * ProcessTableUnreadableError, the command refuses with exit 4 naming the cause `process-table-unreadable`, and NO run
  * row is written (a run is never registered without its harness).
