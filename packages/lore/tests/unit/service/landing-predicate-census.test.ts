@@ -76,9 +76,10 @@ describe("the landing predicate census", () => {
   it("BOUNDARY: a reader that compares or declares a kind is not a producer", () => {
     const readers = filesMatching(COMPARES_KIND);
     expect(readers).toEqual([
+      "packages/lore/src/adapters/cli/assess-commit-derivation.ts", // a no-change landing contributes no diff to the review
       "packages/lore/src/adapters/cli/commands/get.ts", // prints `Landing: no-change` / `Landing: commits <tip>`
       "packages/lore/src/service/milestone-review.ts", // `if (landing.kind === "no-change") continue;`
-      "packages/lore/src/service/task-commit-range.ts", // a no-change landing adds no commit range
+      "packages/lore/src/service/regression-per-landing.ts", // a no-change landing has no suite to measure
       "packages/lore/src/service/task-workflow-service.ts", // a no-change landing needs no commit-range write at done
     ]);
     for (const file of readers) expect(filesMatching(PRODUCES_KIND)).not.toContain(file);

@@ -3,7 +3,7 @@
  *
  * Purpose: the pure half of BR-1372. `lore assess` stores a review carrying the plan-state fingerprint it judged;
  *   plan close recomputes the fingerprint and compares.
- * Public surface: planStateFingerprint, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
+ * Public surface: planStateFingerprint, landedCommitsOf, milestoneFactsFingerprint, FactsFingerprintInput, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
  *   MilestoneReviewCurrency, MILESTONE_REVIEW_SUB_TYPE, and the main-red ledger (BR-1412): MAIN_RED_ACTION,
  *   MAIN_RED_GREEN_ACTION, MAIN_CHECKED_ACTION, MainRedLedgerPort, foldMainRedRecords, classifySuiteForMainRed, planMainRedWrites.
  * Invariants:
@@ -48,6 +48,22 @@ export function latestLandingCommit(tasks: readonly Pick<DocRecord, "extra">[]):
     if (newest === undefined || landing.recorded_at > newest.at) newest = { at: landing.recorded_at, commit: landing.landing_commit };
   }
   return newest?.commit ?? "none";
+}
+
+/**
+ * The distinct main commits `tasks` landed, in task order. A no-change landing put nothing on main (the one predicate,
+ * `landingOf`), so it has no commit and no suite result to measure.
+ *
+ * @param tasks - the plan's member tasks (`extra.landing`)
+ */
+export function landedCommitsOf(tasks: readonly Pick<DocRecord, "extra">[]): string[] {
+  const commits = new Set<string>();
+  for (const task of tasks) {
+    const landing = readTaskLanding(task.extra);
+    if (landing === undefined || landing.kind === "no-change") continue;
+    commits.add(landing.landing_commit);
+  }
+  return [...commits];
 }
 
 /** The governing spec's live (not superseded) AC ids with content hashes, sorted. */
@@ -100,6 +116,45 @@ export function planStateFingerprint(
     .update(canonicalJson({ title: plan.title, content: plan.content, phases: plan.extra?.["phases"] ?? null }))
     .digest("hex");
   const canonical = `plan:${plan.id}#${planPart}|tasks:${taskPart}|landed:${latestLandingCommit(tasks)}|acs:${liveAcHashes(spec).join(",")}`;
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+/** Everything beyond the plan's own state that a review's verdict reads (spec "Fingerprint", AC-AF-6). */
+export interface FactsFingerprintInput {
+  /** The stored suite result id each landing was measured from. */
+  readonly landingResultIds: readonly { readonly landing: string; readonly id: string }[];
+  /** The deciding attestation id of each criterion. */
+  readonly attestationIds: readonly { readonly subject: string; readonly id: string }[];
+  /** The cited rules' states. */
+  readonly citedRules: readonly { readonly rule_id: string; readonly state: string }[];
+  readonly promptVersion: string;
+  /** True while regression has uncleared files: only then does a newer stored main suite result matter. */
+  readonly regressionUncleared: boolean;
+  /** The newest stored main suite result consulted for clearing (hashed only while `regressionUncleared`). */
+  readonly clearingResultId?: string;
+}
+
+/**
+ * The measured facts a review read, as one comparable value (BR-1379, AC-AF-6): the landing commits' suite result ids,
+ * each criterion's deciding attestation id, the cited rules' states, the prompt version and, ONLY while regression has
+ * uncleared files, the id of the newest stored main suite result consulted for clearing.
+ *
+ * reason: main's HEAD is deliberately NOT an input. A review is re-made when one of these facts changes, never because
+ * main moved: a moved HEAD changes nothing a verdict reads unless a newer stored suite result exists and regression has
+ * something left to clear. The ids are stored-row ids (a re-run is a new row), so a re-measurement changes them.
+ *
+ * @param input - the facts
+ * @returns SHA-256 hex
+ */
+export function milestoneFactsFingerprint(input: FactsFingerprintInput): string {
+  const byKey = <T>(items: readonly T[], key: (item: T) => string): T[] => [...items].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  const canonical = canonicalJson({
+    suites: byKey(input.landingResultIds, (r) => r.landing).map((r) => `${r.landing}=${r.id}`),
+    attestations: byKey(input.attestationIds, (a) => a.subject).map((a) => `${a.subject}=${a.id}`),
+    rules: byKey(input.citedRules, (r) => r.rule_id).map((r) => `${r.rule_id}=${r.state}`),
+    prompt: input.promptVersion,
+    clearing: input.regressionUncleared ? (input.clearingResultId ?? "none") : "n/a",
+  });
   return createHash("sha256").update(canonical).digest("hex");
 }
 
@@ -157,6 +212,9 @@ export function assessMilestoneCurrency(
   if (latest.review.fingerprint !== current) {
     return { state: "stale", reviewed: latest.review.fingerprint, current, reviewSlug: latest.doc.slug };
   }
+  // reason: the plan-close gate reads FAILED dimensions only (BR-1372). Holding a plan open for a not-measured or unaccepted
+  // gate is the review batch's close rule (`ReviewBatchRunner`, BR-1379); the batch never archives past one, so the
+  // verdict stored here is read as before.
   const failed = failedDimensions(latest.review.dimensions);
   if (failed.length > 0 || latest.review.overall === "fail") {
     return { state: "failed", failed, reviewSlug: latest.doc.slug };

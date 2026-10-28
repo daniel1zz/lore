@@ -24,11 +24,11 @@ import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../src/service/task-workflow-service.js";
 import { createRealWorktreeProbe } from "../../src/service/worktree-cleanup.js";
-import { collectRecordedRanges } from "../../src/service/task-commit-range.js";
+import { readTaskLanding } from "../../src/service/task-commit-range.js";
 import { IntegrateService, type IntegrateGit } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
-import { deriveCommitSetForPlan } from "../../src/adapters/cli/assess-commit-derivation.js";
+import { deriveLandingDiffForPlan } from "../../src/adapters/cli/assess-commit-derivation.js";
 import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { runOfName } from "../helpers/test-run-identity.js";
@@ -194,8 +194,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     expect(range).toMatchObject({ state: "recorded", head: f.branchHead, landing_commit: mergeSha });
     expect(done.value.task.extra["landing"]).toMatchObject({ branch: "feat-landing", branch_head: f.branchHead, landing_commit: mergeSha });
 
-    const ranges = collectRecordedRanges([{ slug: f.slug, extra: done.value.task.extra }]);
-    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
+    const derived = deriveLandingDiffForPlan(f.repo, [{ slug: f.slug, landing: readTaskLanding(done.value.task.extra) }], true);
     expect(derived.status).toBe("derived");
     expect(derived.commits.map((c) => c.sha)).toEqual([f.ownCommit]);
     expect(derived.diff_text).toContain("own-landing-file.txt");
@@ -215,8 +214,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     if (!done.ok) return;
     expect(done.value.task.extra["landing"]).toMatchObject({ branch: "feat-landing", branch_head: f.branchHead });
     expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", head: f.branchHead, head_source: "landing" });
-    const ranges = collectRecordedRanges([{ slug: f.slug, extra: done.value.task.extra }]);
-    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
+    const derived = deriveLandingDiffForPlan(f.repo, [{ slug: f.slug, landing: readTaskLanding(done.value.task.extra) }], true);
     expect(derived.commits.map((c) => c.sha)).toEqual([f.ownCommit]);
     expect(derived.diff_text).toContain("own-landing-file.txt");
   }, 60_000);
@@ -227,8 +225,9 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const main = run(f.repo, "rev-parse", "main");
     // the measured defect: the evidence re-claim recorded main itself as the range (base == head)
     const stale = { state: "recorded", head: main, base: main, head_source: "worktree", worktree: "feat-landing", recorded_at: "t" };
-    const ranges = collectRecordedRanges([{ slug: f.slug, extra: { commit_range: stale } }]);
-    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
+    // a task that only carries a stale `commit_range` has no landing record: the review names it unlanded and measures no diff for it
+    const derived = deriveLandingDiffForPlan(f.repo, [{ slug: f.slug, landing: readTaskLanding({ commit_range: stale }) }], true);
+    expect(derived.unlanded_tasks).toEqual([f.slug]);
     expect(derived.commits.map((c) => c.sha)).not.toContain(f.ownCommit);
     expect(derived.diff_text).not.toContain("own-landing-file.txt");
   }, 60_000);

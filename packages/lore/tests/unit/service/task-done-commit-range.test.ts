@@ -22,8 +22,8 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { createRealWorktreeProbe } from "../../../src/service/worktree-cleanup.js";
-import { collectRecordedRanges, readMeasuredCommitRange } from "../../../src/service/task-commit-range.js";
-import { deriveCommitSetForPlan } from "../../../src/adapters/cli/assess-commit-derivation.js";
+import { readMeasuredCommitRange, readTaskLanding } from "../../../src/service/task-commit-range.js";
+import { deriveLandingDiffForPlan } from "../../../src/adapters/cli/assess-commit-derivation.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
@@ -161,8 +161,8 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     const range = readMeasuredCommitRange(done.value.task.extra);
     expect(range).toMatchObject({ state: "recorded", head: c2, base, head_source: "landing", landing_commit: mergeSha });
 
-    const ranges = collectRecordedRanges([{ slug: done.value.task.slug, extra: done.value.task.extra }]);
-    const derived = deriveCommitSetForPlan(repo, [done.value.task.slug], true, ranges);
+    const landing = readTaskLanding(done.value.task.extra);
+    const derived = deriveLandingDiffForPlan(repo, [{ slug: done.value.task.slug, landing }], true);
     expect(derived.status).toBe("derived");
     expect(derived.commits.map((c) => c.sha)).toEqual([c1, c2]);
     expect(derived.attribution[done.value.task.slug]).toBe("recorded_range");

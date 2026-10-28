@@ -15,9 +15,13 @@
  * with its own verdict; a row fails alone. Exit 0 = every plan passed; 1 = any plan failed its review or could not
  * be reviewed; 2 = usage (no selector, ids and --where together, --no-ai, a bad --where).
  *
- * The diff is derived per plan from the commit range each task recorded at landing
- * (`assess-commit-derivation.ts::deriveCommitSetForPlan`); a plan with no recorded range is reviewed from its
- * documents and evidence, and the stored review says so (`diff_source`).
+ * The diff is derived per plan from each landing's own `main_before..landing_commit`
+ * (`assess-commit-derivation.ts::deriveLandingDiffForPlan`); a task with no landing record is named, has no measured diff,
+ * and makes regression and security not-measured (the stored review says so in `diff_source`).
+ *
+ * Gates (BR-1379): `correctness_vs_acs`, `regression` and `security` keep a plan open when they fail or are not measured
+ * (`--close` files their issue and leaves the plan as it was); `lore assess <plan> --accept-gate <regression|security>`
+ * with `--reason`, `--premise` and `--alt` records the acceptance (BR-1500, `GateAcceptanceService`) so the plan can close.
  *
  * AI default (SPEC-026 §3 D5): assess has no non-AI mode. It runs with AI on every surface by default; only an
  * EXPLICIT `ai.default_per_surface.<surface> = false` config override requires `--ai`. `--no-ai` is always exit 2.
@@ -47,7 +51,12 @@ import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
 import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow, type BatchRunPorts } from "../../../service/review-batch-service.js";
 import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
-import { err, ok, type DocId } from "@lore/core";
+import { err, ok, type DocId, type Result } from "@lore/core";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
+import { DecisionGate } from "../../../service/decision-gate.js";
+import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
+import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
+import { landedCommitsOf } from "../../../service/milestone-review.js";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { suiteRunOfResult } from "../../../service/suite-result-service.js";
@@ -152,6 +161,12 @@ export default defineLoreCommand({
       description:
         "Run as the review batch under the store lease: judge a plan only when no valid review matches its current fingerprint, file by root cause, then archive it (accepted, or accepted with known defects)",
     },
+    "accept-gate": {
+      type: "string",
+      description:
+        "Accept one failed or not-measured gate (regression | security) of the plan's current review as a known defect so the plan can close; needs --reason, --premise and --alt. correctness_vs_acs cannot be accepted: use `lore ac supersede`",
+    },
+    ...DECISION_FLAG_ARGS,
     json: { type: "boolean", description: "Output the rows as JSON" },
     ai: {
       type: "boolean",
@@ -175,6 +190,9 @@ export default defineLoreCommand({
     }
 
     const positionals = ((args._ as string[] | undefined) ?? (args.plan !== undefined ? [String(args.plan)] : [])).map(String);
+    // reason: BR-1500 — accepting a gate is its own verb of this command: it judges no plan and calls no AI, so it is
+    // handled before the AI checks below.
+    if (args["accept-gate"] !== undefined) return await runAcceptGate(context, positionals);
     // reason: `needs-review` is not a key=value filter; it names the batch's trigger set (BR-1379), resolved below.
     const needsReview = args.where === "needs-review";
     if (needsReview && positionals.length > 0) {
@@ -266,12 +284,26 @@ export default defineLoreCommand({
                 }
               };
         // reason: BR-1497 — main's HEAD is looked up in the suite-result store first; the suite runs only when that
-        // commit has no measured result, so a second batch at the same commit runs nothing (the stale-cited-rule refresh
-        // rides a fresh run only). Per-landing scheduling is the post-landing batch's job (A6).
+        // commit has no measured result, so a second batch at the same commit runs nothing. Per-landing suite runs and
+        // attestation are the post-landing batch's step (`attestLanded` below).
         const suiteResults = app.suiteResultService;
         if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
-        const looked = await suiteResults.lookupOrRun("main", createGitCommitSuiteRunner(inv.cwd, inv.env), refreshStale);
-        return looked.ok ? suiteRunOfResult(looked.value) : { status: "not_measured", reason: formatErrorFor(inv, looked.error) };
+        const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
+        // reason: A1 noted the stale cited-rule refresh was skipped on a stored-result hit. It now runs, in a worktree at the
+        // measured commit, whether or not the suite result was cached (`lookupOrRunWith`), and only when some plan cites a
+        // stale rule (so a batch with nothing stale opens no worktree for it).
+        const stale = refreshStale === undefined ? ok(false) : await reviewService.hasStaleCitations(suiteRefs);
+        if (!stale.ok) return { status: "not_measured", reason: formatErrorFor(inv, stale.error) };
+        if (refreshStale === undefined || !stale.value) {
+          const looked = await suiteResults.lookupOrRun("main", runner);
+          return looked.ok ? suiteRunOfResult(looked.value) : { status: "not_measured", reason: formatErrorFor(inv, looked.error) };
+        }
+        const refreshed = await suiteResults.lookupOrRunWith("main", runner, (root) => refreshStale(root));
+        if (!refreshed.ok) return { status: "not_measured", reason: formatErrorFor(inv, refreshed.error) };
+        if (refreshed.value.workError !== undefined) {
+          inv.io.stderr.write(`Warning: stale cited-rule refresh could not run: ${formatErrorFor(inv, refreshed.value.workError)}\n`);
+        }
+        return suiteRunOfResult(refreshed.value.result);
       };
 
       const filingCtx = {
@@ -286,8 +318,20 @@ export default defineLoreCommand({
           ? undefined
           : new IssueFilingService(createGithubIssuePort(issueUpstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()));
 
-      /** Judges one plan from its landed diff: the one review step both the hand run and the batch use. */
-      const reviewOne = async (ref: string, suiteForPlan: SuiteRun | undefined) => {
+      /** One plan's measured inputs: its landing-derived diff and the facts layer (what a review reads). */
+      interface MeasuredPlan {
+        readonly derivation: ReturnType<typeof deriveLandingDiffForPlan>;
+        readonly diffSource: DiffSourceRecord;
+        readonly facts: MilestoneFacts;
+        readonly rerunCriterion: ReturnType<typeof createAppCriterionRerunner> | undefined;
+      }
+      // reason: the batch measures a plan's facts to fingerprint them (AC-AF-6) and, when the fingerprint changed, reviews it
+      // from those SAME facts: the measurement is handed over once so a batch never measures (and, for an unrunnable
+      // landing, never re-runs the suite) twice for one review.
+      const measuredByPlan = new Map<string, MeasuredPlan>();
+
+      /** Measures one plan's diff and facts: the one measurement both the hand run and the batch use. */
+      const measurePlanFacts = async (ref: string): Promise<Result<MeasuredPlan, LoreError>> => {
         const bundle = await app.corpusService.getPlanBundle(ref);
         if (!bundle.ok) return bundle;
         const tasks = bundle.value.tasks;
@@ -309,7 +353,7 @@ export default defineLoreCommand({
         // reason: BR-1496 — regression is measured per landing (suite at each landing commit from the store, failing files
         // re-run at main_before and confirmed); without the suite-result store regression stays not-measured, never pass.
         const suiteResults = app.suiteResultService;
-        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files"> = {};
+        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "landing_result_ids" | "clearing_result_id"> = {};
         if (suiteResults !== undefined) {
           const measured = await regressionPerLanding(derivation.landings, derivation.unlanded_tasks, {
             suites: suiteResults,
@@ -317,7 +361,12 @@ export default defineLoreCommand({
             findClearingSource: createGitClearingSourceFinder(inv.cwd, inv.env, () => suiteResults.listResults()),
           });
           if (measured.ok) {
-            regressionFacts = { regression: measured.value.rows, regression_files: [...new Set(measured.value.uncleared.map((u) => u.file))].sort() };
+            regressionFacts = {
+              regression: measured.value.rows,
+              regression_files: [...new Set(measured.value.uncleared.map((u) => u.file))].sort(),
+              landing_result_ids: measured.value.landing_result_ids,
+              ...(measured.value.clearing_result_id !== undefined ? { clearing_result_id: measured.value.clearing_result_id } : {}),
+            };
           } else {
             inv.io.stderr.write(`Warning: regression per landing not measured for ${ref}: ${formatErrorFor(inv, measured.error)}\n`);
           }
@@ -336,35 +385,73 @@ export default defineLoreCommand({
           ),
           unlanded_tasks: derivation.unlanded_tasks,
         };
+        return ok({ derivation, diffSource, facts, rerunCriterion });
+      };
+
+      /** Judges one plan from its landed diff: the one review step both the hand run and the batch use. */
+      const reviewOne = async (ref: string, suiteForPlan: SuiteRun | undefined) => {
+        const handedOver = measuredByPlan.get(ref);
+        measuredByPlan.delete(ref);
+        const measured = handedOver !== undefined ? ok(handedOver) : await measurePlanFacts(ref);
+        if (!measured.ok) return measured;
+        const { derivation, diffSource, facts, rerunCriterion } = measured.value;
         return reviewService.review(ref, {
           facts,
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
           diffSource: describeDiffSource(diffSource),
-          maxDiffChars: app.aiProviderService.assessMaxDiffChars,          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
+          maxDiffChars: app.aiProviderService.assessMaxDiffChars,
+          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
         });
+      };
+
+      /** The facts fingerprint a review made now would carry (the batch's re-review test, AC-AF-6). */
+      const factsFingerprint = async (ref: string): Promise<Result<string, LoreError>> => {
+        const measured = await measurePlanFacts(ref);
+        if (!measured.ok) return measured;
+        measuredByPlan.set(ref, measured.value);
+        return reviewService.factsFingerprint(ref, measured.value.facts);
       };
 
       if (args.close === true) {
         // reason: BR-1498 — the batch attests each landed task's script criteria at its landing commit before judging.
+        // reason: BR-1497 — the post-landing batch also runs the suite at each new landing commit that has no stored result, and
+        // the attestation rides that run's worktree (`lookupOrRunWith`): one checkout per landing, not one per job.
         const batchVerifyRunner = app.verifyRunnerService;
+        const batchSuites = app.suiteResultService;
+        const landingRunner = createGitCommitSuiteRunner(inv.cwd, inv.env);
         const attestLanded =
-          batchVerifyRunner === undefined
+          batchVerifyRunner === undefined && batchSuites === undefined
             ? undefined
             : async (ref: string) => {
                 const bundle = await app.corpusService.getPlanBundle(ref);
                 if (!bundle.ok) return bundle;
-                return attestPlanLanding(
-                  listDocsOf(app),
-                  bundle.value,
-                  createGitMainFirstParent(inv.cwd, inv.env),
-                  createGitLandingAttester(inv.cwd, inv.env, (executionRoot) =>
-                    createAppCriterionRerunner(app, batchVerifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() }),
-                  ),
-                  (line) => inv.io.stderr.write(`${line}\n`),
-                );
+                const attested =
+                  batchVerifyRunner === undefined
+                    ? ok(undefined)
+                    : await attestPlanLanding(
+                        listDocsOf(app),
+                        bundle.value,
+                        createGitMainFirstParent(inv.cwd, inv.env),
+                        createGitLandingAttester(
+                          inv.cwd,
+                          inv.env,
+                          (executionRoot) => createAppCriterionRerunner(app, batchVerifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() }),
+                          batchSuites === undefined ? undefined : { suites: batchSuites, runner: landingRunner },
+                        ),
+                        (line) => inv.io.stderr.write(`${line}\n`),
+                      );
+                if (!attested.ok) return attested;
+                if (batchSuites !== undefined) {
+                  // landings with nothing to attest still get their suite result now (a stored one runs nothing)
+                  for (const commit of landedCommitsOf(bundle.value.tasks)) {
+                    const looked = await batchSuites.lookupOrRun(commit, landingRunner);
+                    if (!looked.ok) inv.io.stderr.write(`Warning: suite at landing ${commit} not measured: ${formatErrorFor(inv, looked.error)}\n`);
+                  }
+                }
+                return attested;
               };
-        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, attestLanded, filing, json: args.json === true });
+        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, attestLanded, factsFingerprint, filing, json: args.json === true });
       }
 
       const suite = await measureSuite(refs.value);
@@ -450,6 +537,65 @@ export default defineLoreCommand({
   },
 });
 
+/**
+ * `lore assess <plan> --accept-gate <dimension> --reason ... --premise ... --alt ...` (BR-1500): resolves the flags and
+ * hands them to `GateAcceptanceService`; the rules (which gates, the decision, the record) are the service's.
+ */
+async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positionals: readonly string[]): Promise<number> {
+  const inv = invocationOf(context);
+  const { args } = context as unknown as { args: Record<string, unknown> };
+  if (positionals.length !== 1 || args.where !== undefined || args.close === true || args["file-issues"] === true) {
+    inv.io.stderr.write("Error: --accept-gate takes exactly one plan and no --where, --close or --file-issues.\n");
+    return 2;
+  }
+  const draft = parseDecisionFlags(args);
+  if (!draft.ok) {
+    inv.io.stderr.write(formatErrorFor(inv, draft.error) + "\n");
+    return exitCode(draft.error);
+  }
+  const { app, config } = loadLoreApp({ inv });
+  try {
+    const classification = classifyFeedbackUpstream(config);
+    if (classification.kind === "retired") {
+      inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+      return exitCode(classification.error);
+    }
+    const actor = resolveActor(inv);
+    const filing =
+      classification.kind === "unconfigured"
+        ? undefined
+        : new IssueFilingService(
+            createGithubIssuePort(
+              classification.cfg,
+              { consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv), corpusService: app.corpusService, actor, home: inv.paths.home, env: inv.env },
+              app.corpusService,
+              app.corpusService.getPlanCloseIssuePort(),
+            ),
+          );
+    const service = new GateAcceptanceService({
+      getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
+      listReviewDocs: (planId) => app.corpusService.listMilestoneReviewDocs(planId),
+      // reason: the same gate `lore set` applies to an agent's decision (BR-1476); no weight-table lookup is wired because
+      // this verb takes no scores, so a decision naming scores or a table is refused rather than passed unchecked.
+      gate: new DecisionGate(new SpawnDecisionGitPort(inv.cwd)),
+      filing,
+      writer: app.corpusService,
+      by: actor,
+    });
+    const accepted = await service.acceptGate(positionals[0] ?? "", String(args["accept-gate"]), draft.value);
+    if (!accepted.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
+      return exitCode(accepted.error);
+    }
+    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} as a known defect (issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
+    else printLine(inv.io.stdout, line);
+    return 0;
+  } finally {
+    app.close();
+  }
+}
+
 /** The inputs of the `--close` batch, built by `run`. */
 interface BatchCloseInput {
   readonly app: App;
@@ -460,6 +606,7 @@ interface BatchCloseInput {
   readonly measureSuite: (refs: readonly string[]) => Promise<SuiteRun | undefined>;
   readonly reviewOne: (ref: string, suite: SuiteRun | undefined) => ReturnType<NonNullable<App["milestoneReviewService"]>["review"]>;
   readonly attestLanded: BatchRunPorts["attestLanded"];
+  readonly factsFingerprint: BatchRunPorts["factsFingerprint"];
   readonly filing: IssueFilingService | undefined;
   readonly json: boolean;
 }
@@ -496,6 +643,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     },
     measureSuite: input.measureSuite,
     ...(input.attestLanded !== undefined ? { attestLanded: input.attestLanded } : {}),
+    ...(input.factsFingerprint !== undefined ? { factsFingerprint: input.factsFingerprint } : {}),
     reviewPlan: input.reviewOne,
     closePlan: async (ref) => {
       const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor });

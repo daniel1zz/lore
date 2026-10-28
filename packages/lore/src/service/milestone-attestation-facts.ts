@@ -17,7 +17,8 @@
  *   - The latest bound row (by `recorded_at`) decides; its id (`<task-slug>@<recorded_at>`) is exposed in
  *     `deciding_ids` so the fingerprint can hash it (A6).
  *   - AI-mode criteria are listed for the judgment layer, human-mode ones are left to UAT; superseded criteria are skipped.
- *   - A plan with no live script or AI criterion in scope is `not-measured` (named), never a vacuous pass.
+ *   - A plan with no live script or AI criterion in scope is `na` (the row's detail says "no criterion in scope"): it neither
+ *     blocks the close nor reads as pass.
  *   - `attestLandedCriteria` attests only criteria whose landing is on main's first-parent history (an attestation at any
  *     other commit would not count), one port call per landing commit; a failure of one landing does not stop the others.
  * Side-effect class: pure except through the injected ports (`attestLandedCriteria` writes attested evidence via its port).
@@ -233,7 +234,9 @@ export async function attestationFacts(
     if (attestableLanding !== undefined) attestable.push({ ...attestableLanding, spec_slug: scope.spec_slug, ac_id: scope.ac_id });
   }
   if (rows.length === 0 && aiCriteria.length === 0) {
-    rows.push({ subject: "criteria", verdict: "not-measured", detail: "the plan's task scopes hold no live script or AI-mode criterion, so correctness has nothing measured" });
+    // reason: spec "Criteria attestation" (corrected 2026-10-29): nothing in scope is `na`, not not-measured; it must not
+    // block the close, and the reason names the empty scope so it never reads as a vacuous pass.
+    rows.push({ subject: "criteria", verdict: "na", detail: "no criterion in scope: the plan's task scopes hold no live script or AI-mode criterion" });
   }
   return { rows, ai_criteria: aiCriteria, deciding_ids: decidingIds, attestable };
 }

@@ -17,7 +17,6 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { latestLandingCommit } from "../../../src/service/milestone-review.js";
-import { collectRecordedRanges } from "../../../src/service/task-commit-range.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
@@ -160,11 +159,5 @@ describe("a no-change landing adds no commit range to a review's input", () => {
     expect(latestLandingCommit([landed("commits", "c1")])).toBe("c1");
     expect(latestLandingCommit([landed("no-change", "n1")])).toBe("none");
     expect(latestLandingCommit([landed("no-change", "n1"), landed("commits", "c1")])).toBe("c1");
-
-    const ranges = collectRecordedRanges([
-      { slug: "t-commits", extra: landed("commits", "c1").extra },
-      { slug: "t-nochange", extra: landed("no-change", "n1").extra },
-    ]);
-    expect([...ranges.keys()]).toEqual(["t-commits"]);
   });
 });

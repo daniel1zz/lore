@@ -18,7 +18,7 @@
 
 import { z } from "zod";
 import type { LoreError } from "./errors.js";
-import { MILESTONE_DIMENSIONS } from "./milestone-review.js";
+import { MILESTONE_DIMENSIONS, type MilestoneDimension } from "./milestone-review.js";
 
 /** The `extra` key a plan stores its known defects under. */
 export const KNOWN_DEFECTS_FIELD = "known_defects";
@@ -29,6 +29,11 @@ export const knownDefectEntrySchema = z.object({
   number: z.number().int().positive(),
   dimension: z.enum(MILESTONE_DIMENSIONS),
   fingerprint: z.string().min(1),
+  /**
+   * True when the entry records a GATE the plan was accepted with (`lore assess --accept-gate`, BR-1500): a plain entry
+   * (an issue the batch filed) never lets a plan close past a failed or not-measured gate; a flagged one does.
+   */
+  gate_accepted: z.literal(true).optional(),
 });
 export type KnownDefectEntry = z.infer<typeof knownDefectEntrySchema>;
 
@@ -85,6 +90,15 @@ export function readKnownDefects(extra: unknown): KnownDefectEntry[] {
     if (parsed.success) entries.push(parsed.data);
   }
   return entries;
+}
+
+/**
+ * The dimensions the plan's known defects accept as gates (`gate_accepted`).
+ *
+ * @param entries - the plan's known-defect entries
+ */
+export function acceptedGateDimensions(entries: readonly KnownDefectEntry[]): MilestoneDimension[] {
+  return [...new Set(entries.filter((e) => e.gate_accepted === true).map((e) => e.dimension))];
 }
 
 /**

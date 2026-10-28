@@ -150,11 +150,11 @@ describe("AC-AF-3 correctness from bound evidence", () => {
     expect(dim.reason).toContain("spec-one:AC-9");
   });
 
-  it("AC-AF-3 BOUNDARY: a plan with no live script or AI criterion is not-measured, human criteria are left to UAT", async () => {
+  it("AC-AF-3 BOUNDARY: a plan with no live script or AI criterion is na naming that no criterion is in scope, human criteria are left to UAT", async () => {
     const none = await attestationFacts([], [], main());
-    expect(none.rows).toEqual([expect.objectContaining({ verdict: "not-measured" })]);
+    expect(none.rows).toEqual([expect.objectContaining({ verdict: "na", detail: expect.stringContaining("no criterion in scope") })]);
     const human = await attestationFacts([scope("AC-H", L, "human")], [], main());
-    expect(human.rows).toEqual([expect.objectContaining({ verdict: "not-measured" })]);
+    expect(human.rows).toEqual([expect.objectContaining({ verdict: "na", detail: expect.stringContaining("no criterion in scope") })]);
   });
 
   it("AC-AF-3 ERROR: an unreadable history and a task with no landing are not-measured, never pass", async () => {

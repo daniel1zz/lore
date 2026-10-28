@@ -162,14 +162,30 @@ async function judgeCall(
   return err(aiError(`the judge did not return a valid review (${mode} call) after one retry: ${lastProblem}`));
 }
 
-function notMeasured(reason: string): DimensionJudgment {
-  return { verdict: "not-measured", reason, reference: "" };
+/** A not-measured verdict; `cites` (what was not measured) give the finding a stable root-cause identity when it is filed. */
+function notMeasured(reason: string, cites?: readonly string[]): DimensionJudgment {
+  return { verdict: "not-measured", reason, reference: "", ...(cites !== undefined && cites.length > 0 ? { cites: [...cites] } : {}) };
 }
 
 /** A gate judged with an unseen file is never a pass: it keeps a fail, otherwise it is not-measured and names the files. */
 function withUnseen(judgment: DimensionJudgment, unseen: readonly string[]): DimensionJudgment {
   if (unseen.length === 0 || judgment.verdict === "fail") return judgment;
-  return notMeasured(`not seen by any call: ${unseen.join(", ")} (judge said: ${judgment.verdict}, ${judgment.reason})`);
+  return notMeasured(`not seen by any call: ${unseen.join(", ")} (judge said: ${judgment.verdict}, ${judgment.reason})`, unseen);
+}
+
+/**
+ * Security is a gate judged on the plan's diff; a task with no landing record has no measured diff, so a security pass (or
+ * n/a) over the rest is not a pass over the plan: it is not-measured, naming the tasks. A fail stays a fail (spec D3, A6).
+ *
+ * @param judgment - the judged security verdict
+ * @param unlandedTasks - tasks of the plan with no landing record
+ */
+export function withUnlandedTasks(judgment: DimensionJudgment, unlandedTasks: readonly string[]): DimensionJudgment {
+  if (unlandedTasks.length === 0 || judgment.verdict === "fail") return judgment;
+  const unlandedCites = unlandedTasks.map((slug) => `unlanded:${slug}`);
+  const note = `no measured diff for task(s) without a landing record: ${unlandedTasks.join(", ")}`;
+  if (judgment.verdict === "not-measured") return notMeasured(`${judgment.reason}; ${note}`, [...(judgment.cites ?? []), ...unlandedCites]);
+  return notMeasured(`${note} (judge said: ${judgment.verdict}, ${judgment.reason})`, unlandedCites);
 }
 
 /**
@@ -227,7 +243,7 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     findings = answered.value.findings;
   }
 
-  dimensions.security = withUnseen(dimensions.security, unseen);
+  dimensions.security = withUnlandedTasks(withUnseen(dimensions.security, unseen), input.base.facts?.unlanded_tasks ?? []);
   dimensions.concurrency_safety = withUnseen(dimensions.concurrency_safety, unseen);
 
   const expected = input.base.facts?.ai_criteria ?? [];
@@ -274,13 +290,19 @@ export function factsDimensions(
     ...aiCriteria.map((c) => ({ subject: `${c.spec}:${c.ac}`, verdict: c.verdict, detail: c.reason })),
   ];
   const fold = (items: readonly { subject: string; verdict: string; detail: string }[], absent: string, label: string): DimensionJudgment => {
-    if (items.length === 0) return notMeasured(absent);
+    if (items.length === 0) return notMeasured(absent, [`${label}:not-supplied`]);
+    // reason: `na` rows say nothing of this kind is in scope (e.g. "no criterion in scope"); a fold of only `na` is `na`, never pass.
+    if (items.every((r) => r.verdict === "na")) {
+      return { verdict: "na", reason: items.map((r) => r.detail).join("; "), reference: "" };
+    }
     const failed = items.filter((r) => r.verdict === "fail");
     if (failed.length > 0) {
       return { verdict: "fail", reason: `${label} failing: ${failed.map((r) => `${r.subject} (${r.detail})`).join("; ")}`, reference: "attested evidence", cites: failed.map((r) => r.subject) };
     }
     const unmeasured = items.filter((r) => r.verdict === "not-measured");
-    if (unmeasured.length > 0) return notMeasured(`${label} not measured: ${unmeasured.map((r) => `${r.subject} (${r.detail})`).join("; ")}`);
+    if (unmeasured.length > 0) {
+      return notMeasured(`${label} not measured: ${unmeasured.map((r) => `${r.subject} (${r.detail})`).join("; ")}`, unmeasured.map((r) => r.subject));
+    }
     return { verdict: "pass", reason: `${label}: all ${String(items.length)} pass`, reference: "attested evidence" };
   };
   return {

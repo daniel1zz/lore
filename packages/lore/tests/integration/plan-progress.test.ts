@@ -886,7 +886,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(world.issues.filed).toBe(0);
   });
 
-  it("HAPPY: two plans with the same failing-file set share ONE issue (fingerprint in its body), both accepted with known defects", async () => {
+  it("HAPPY: two plans with the same failing-file set share ONE issue (fingerprint in its body); regression is a gate, so both stay open (A6: was accepted with known defects)", async () => {
     const world = new World();
     const a = world.add(makeWorldPlan("p-red-a"));
     const b = world.add(makeWorldPlan("p-red-b"));
@@ -897,7 +897,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     world.suiteFailingFiles = ["packages/x/tests/b.test.ts", "packages/x/tests/a.test.ts"];
     const run = await world.runner().runBatch(["p-red-a", "p-red-b"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
-    expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects", "accepted-with-known-defects"]);
+    expect(rows.map((r) => r.outcome)).toEqual(["kept-open", "kept-open"]);
     expect(world.issues.filed).toBe(1);
     const issue = world.issues.open[0];
     const cause = causeOf({ plan: "p-red-a", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/a.test.ts"], suite_failing_files: ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts"] } });
@@ -905,7 +905,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(issue?.title).toContain(`[fp:${cause.short}]`);
     expect(issue?.title).toContain("main red: packages/x/tests/a.test.ts, packages/x/tests/b.test.ts");
     expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-red-a->101", "p-red-b->101"]);
-    expect(a.archived && b.archived).toBe(true);
+    expect(a.archived || b.archived).toBe(false);
     expect(world.suiteRuns).toBe(1);
   });
 
@@ -951,7 +951,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     later.failing = ["regression"];
     later.regressionFiles = ["a.test.ts"];
     const run = await world.runner().runBatch(["p-red-later"], world.ports("batch-2"));
-    expect(run.ok && run.value.state === "ran" && run.value.rows[0]?.outcome).toBe("accepted-with-known-defects");
+    expect(run.ok && run.value.state === "ran" && run.value.rows[0]?.outcome).toBe("kept-open");
     expect(world.issues.filed).toBe(1);
     expect(world.issues.links).toContainEqual({ plan: "p-red-later", issue: 101, dimensions: ["regression"] });
   });
@@ -1102,7 +1102,7 @@ describe("lease and retry — renewal, takeover, errors, once per fingerprint, o
     expect(plan.archived).toBe(true);
   });
 
-  it("ERROR: a filing error keeps the verdict; the next batch retries only the filing and archives", async () => {
+  it("ERROR: a filing error keeps the verdict; the next batch retries only the filing and, regression being a gate, keeps the plan open", async () => {
     const world = new World();
     const plan = world.add(makeWorldPlan("p-file-error"));
     plan.failing = ["regression"];
@@ -1115,10 +1115,10 @@ describe("lease and retry — renewal, takeover, errors, once per fingerprint, o
     expect(plan.archived).toBe(false);
     expect(await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).computeTriggerSet()).toEqual({ ok: true, value: [{ plan: "p-file-error", need: "filing" }] });
     const second = await world.runner().runBatch(["p-file-error"], world.ports("batch-2"));
-    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted-with-known-defects", reviewed: false });
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "kept-open", reviewed: false });
     expect(world.judgeCalls).toEqual(["p-file-error"]);
     expect(world.issues.filed).toBe(1);
-    expect(plan.archived).toBe(true);
+    expect(plan.archived).toBe(false);
   });
 
   it("STATE: a plan is reviewed at most once per fingerprint, even when its close failed and is retried", async () => {
@@ -1225,7 +1225,7 @@ describe("an unfileable stored review means needs review; one plan never blocks 
     const { world, bad } = await worldWithBadRecord();
     const run = await world.runner().runBatch(["p-bad", "p-good"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
-    expect(rows.map((r) => [r.plan, r.outcome, r.reviewed])).toEqual([["p-bad", "accepted-with-known-defects", true], ["p-good", "accepted", true]]);
+    expect(rows.map((r) => [r.plan, r.outcome, r.reviewed])).toEqual([["p-bad", "kept-open", true], ["p-good", "accepted", true]]);
     expect(world.errors).toHaveLength(1);
     expect(world.errors[0]).toMatchObject({ planSlug: "p-bad", stage: "review" });
     expect(world.errors[0]?.message).toContain("suite_failing_files");
@@ -1239,7 +1239,7 @@ describe("an unfileable stored review means needs review; one plan never blocks 
     await world.runner().runBatch(["p-bad"], world.ports("batch-1", { filing: undefined }));
     // the first batch re-reviewed (complete review stored) but could not file; the next one retries only the filing
     const second = await world.runner().runBatch(["p-bad"], world.ports("batch-2"));
-    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "accepted-with-known-defects", reviewed: false });
+    expect(second.ok && second.value.state === "ran" && second.value.rows[0]).toMatchObject({ outcome: "kept-open", reviewed: false });
     expect(world.judgeCalls).toEqual(["p-bad", "p-bad"]); // the seeding judgment, then exactly one re-review
   });
 
@@ -1583,9 +1583,8 @@ describe("AC-PCR-4 an issue the batch just filed counts as open at the close of 
   it("HAPPY: the batch closes the plan through the gated close with no issue numbers handed over", async () => {
     const world = new World();
     const plan = world.add(makeWorldPlan("p-fresh"));
-    plan.failing = ["regression"];
-    plan.regressionFiles = ["fresh.test.ts"];
-    world.suiteFailingFiles = ["fresh.test.ts"];
+    // a non-gate dimension: a failed gate keeps the plan open (A6), so the close-with-known-defects path is this one's
+    plan.failing = ["concurrency_safety"];
     const handed: unknown[][] = [];
     const ports = world.ports("batch-fresh", { closePlan: async (...args: unknown[]) => { handed.push(args); return ok(undefined); } });
     const run = await world.runner().runBatch(["p-fresh"], ports);
@@ -1599,18 +1598,17 @@ describe("AC-PCR-4 one coverage predicate decides filing-complete and plan close
   it("HAPPY: an open issue with the fingerprint tag in its title but no finding record is re-linked (record written, nothing filed) and the plan is archived with known defects in the same batch", async () => {
     const world = new World();
     const plan = world.add(makeWorldPlan("p-legacy"));
-    plan.failing = ["regression"];
-    plan.regressionFiles = ["legacy.test.ts"];
-    world.suiteFailingFiles = ["legacy.test.ts"];
-    const cause = causeOf({ plan: "p-legacy", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["legacy.test.ts"], suite_failing_files: ["legacy.test.ts"] } });
+    // a non-gate dimension: a failed gate keeps the plan open (A6), so the close-with-known-defects path is this one's
+    plan.failing = ["design_necessity"];
+    const cause = causeOf({ plan: "p-legacy", dimension: "design_necessity", reason: "design_necessity failed", reference: "fixture", cites: ["src/design_necessity.ts"], reviewSlug: "r" });
     // an issue filed before the record existed: tag in the title, linked to the plan, no recorded dimension
-    world.issues.open.push({ number: 7, title: `regression: legacy ${`[fp:${cause.short}]`}`, body: "" });
+    world.issues.open.push({ number: 7, title: `design_necessity: legacy ${`[fp:${cause.short}]`}`, body: "" });
     world.issues.links.push({ plan: "p-legacy", issue: 7, dimensions: [] });
     const run = await world.runner().runBatch(["p-legacy"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
     expect(rows.map((r) => r.outcome)).toEqual(["accepted-with-known-defects"]);
     expect(world.issues.filed).toBe(0);
-    expect(world.issues.links).toEqual([{ plan: "p-legacy", issue: 7, dimensions: ["regression"] }]);
+    expect(world.issues.links).toEqual([{ plan: "p-legacy", issue: 7, dimensions: ["design_necessity"] }]);
     expect(plan.archived).toBe(true);
   });
 
@@ -1678,10 +1676,10 @@ describe("AC-PCR-5 a fixed covering issue sends its plan back to review", () => 
     const { world, plan } = await planWithClosedCover();
     const run = await world.runner().runBatch(["p-fixed"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
-    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", true, [101]]]);
+    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["kept-open", true, [101]]]);
     expect(world.issues.filed).toBe(1);
     expect(world.issues.links.find((l) => l.issue === 101)).toMatchObject({ plan: "p-fixed", dimensions: ["regression"] });
-    expect(plan.archived).toBe(true);
+    expect(plan.archived).toBe(false);
   });
 
   it("REGRESSION: the filing dedupe matches open issues only, never a closed one carrying the fingerprint", async () => {
@@ -1708,13 +1706,13 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     return { world, plan };
   }
 
-  it("HAPPY: a re-review failing with the closed cover's fingerprint files a NEW issue and the plan closes as accepted with known defects in the same batch", async () => {
+  it("HAPPY: a re-review failing with the closed cover's fingerprint files a NEW issue (regression is a gate: the plan stays open, A6)", async () => {
     const { world, plan } = await planWithClosedCoverAndReceipt();
     const run = await world.runner().runBatch(["p-loop"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
-    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", true, [101]]]);
+    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["kept-open", true, [101]]]);
     expect(world.issues.links.find((l) => l.issue === 101)).toMatchObject({ plan: "p-loop", dimensions: ["regression"] });
-    expect(plan.archived).toBe(true);
+    expect(plan.archived).toBe(false);
   });
 
   it("STATE: a second batch with nothing changed does not call the judge for the plan", async () => {
@@ -1724,7 +1722,7 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
     const second = await world.runner().runBatch(["p-loop"], world.ports("batch-2"));
     const rows = second.ok && second.value.state === "ran" ? second.value.rows : [];
-    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["accepted-with-known-defects", false]]);
+    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["kept-open", false]]);
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
   });
 
@@ -1738,9 +1736,9 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     expect(set).toEqual({ ok: true, value: [{ plan: "p-loop", need: "filing" }] });
     const second = await world.runner().runBatch(["p-loop"], world.ports("batch-2"));
     const rows = second.ok && second.value.state === "ran" ? second.value.rows : [];
-    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["accepted-with-known-defects", false, [101]]]);
+    expect(rows.map((r) => [r.outcome, r.reviewed, r.issues])).toEqual([["kept-open", false, [101]]]);
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
-    expect(plan.archived).toBe(true);
+    expect(plan.archived).toBe(false);
   });
 });
 
