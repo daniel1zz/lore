@@ -36,17 +36,54 @@ const { existsSync, readFileSync, statSync } = createRequire(import.meta.url)("n
 /** The per-call environment value that carries a lore call's run (same spelling as core's `HARNESS_RUN_ENV`; spelled out for the cycle reason above). */
 export const HARNESS_RUN_ENV = "LORE_HARNESS_RUN";
 
-/** Start time of `pid` as `ps -o lstart=` reads it (ISO-8601, second precision), or `null` when there is no such process / it does not parse. */
-function startTimeOfPid(pid: number): string | null {
-  const run = realSpawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
-  const parsed = run.status === 0 && (run.stdout ?? "").trim() !== "" ? new Date((run.stdout ?? "").trim()) : null;
-  return parsed === null || Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+/** What one `ps -o lstart= -p <pid>` read says: a start time, the process is gone, or the table could not be read. */
+type LstartRead = { readonly kind: "ok"; readonly iso: string } | { readonly kind: "gone" } | { readonly kind: "unreadable"; readonly reason: string };
+
+// Same rule as adapters/process-table-port.ts (#418), duplicated on purpose: that adapter imports `child_process`, which
+// this module's importer wraps, so importing it here would be a load cycle.
+const PS_TIMEOUT_MS = 5000;
+const PS_EMPTY_READ_ATTEMPTS = 3;
+
+function isProcessAlive(pid: number): boolean | "unknown" {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    return code === "EPERM" ? true : "unknown";
+  }
 }
 
-/** True when `pid` still is the process that started at `registeredStart` (a reused pid, or a gone one, is not). */
+/**
+ * Read the start time of `pid`: up to 3 reads while `ps` exits 0 with empty output, 5s SIGKILL timeout per read; still
+ * empty -> `kill(pid, 0)` decides: ESRCH is "gone", anything else is "unreadable" (never "gone").
+ */
+function readLstart(pid: number): LstartRead {
+  for (let attempt = 0; attempt < PS_EMPTY_READ_ATTEMPTS; attempt += 1) {
+    const run = realSpawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      timeout: PS_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    if (run.error !== undefined) return { kind: "unreadable", reason: `ps could not run (${run.error.message})` };
+    const text = (run.stdout ?? "").trim();
+    if (run.status === 0 && text !== "") {
+      const parsed = new Date(text);
+      return Number.isNaN(parsed.getTime()) ? { kind: "unreadable", reason: `lstart "${text}" did not parse` } : { kind: "ok", iso: parsed.toISOString() };
+    }
+    if (run.status !== 0 && (run.stderr ?? "").trim() === "" && text === "") return { kind: "gone" }; // ps exit 1, no output: no such pid
+    if (run.status !== 0) return { kind: "unreadable", reason: `ps exited ${String(run.status)}` };
+  }
+  return isProcessAlive(pid) === false ? { kind: "gone" } : { kind: "unreadable", reason: `ps printed nothing for live pid ${String(pid)}` };
+}
+
+/** True when `pid` still is the process that started at `registeredStart` (a reused pid, or a gone one, is not). An unreadable table never displaces a recorded harness. */
 function isSameLiveProcess(pid: number, registeredStart: string | null): boolean {
-  const start = startTimeOfPid(pid);
-  return start !== null && (registeredStart === null || start === registeredStart);
+  const read = readLstart(pid);
+  if (read.kind === "unreadable") return true;
+  return read.kind === "ok" && (registeredStart === null || read.iso === registeredStart);
 }
 
 /**
@@ -76,9 +113,10 @@ let ownStartTime: string | null | undefined;
  */
 function startTimeOfThisProcess(): string | null {
   if (ownStartTime !== undefined) return ownStartTime;
-  const run = realSpawnSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
-  const parsed = run.status === 0 ? new Date((run.stdout ?? "").trim()) : null;
-  ownStartTime = parsed === null || Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  const read = readLstart(process.pid);
+  // reason: an unreadable table is never cached as "no start time" (and this process is alive, so "gone" is also a read failure).
+  if (read.kind !== "ok") throw new Error(`test-run-identity: cannot read this process's start time: ${read.kind === "unreadable" ? read.reason : "ps reports it gone"}`);
+  ownStartTime = read.iso;
   return ownStartTime;
 }
 
