@@ -41,6 +41,18 @@ export interface CommitSuiteRunnerPort {
   readonly runSuite: (commit: string, inWorktree?: (root: string, commit: string) => Promise<void>) => Promise<Result<SuiteRun, LoreError>>;
   /** Re-runs the named test files at `commit`, one outcome per file, in the order given. */
   readonly runFiles: (commit: string, files: readonly string[]) => Promise<Result<readonly FileRunOutcome[], LoreError>>;
+  /**
+   * Runs `work` in a throwaway worktree of `commit` with dependencies prepared (the same mechanic the suite uses). Used for
+   * work that must happen at a commit whose suite result is already stored. Optional: a runner without it cannot do such work.
+   */
+  readonly withWorktree?: (commit: string, work: (root: string) => Promise<void>) => Promise<Result<void, LoreError>>;
+}
+
+/** What {@link SuiteResultService.lookupOrRunWith} did: the commit's result and what happened to the extra work. */
+export interface LookupWithWorkOutcome {
+  readonly result: SuiteResultRecord;
+  /** Set when the work could not be run at all (no worktree); absent when it ran, whatever the work itself reported. */
+  readonly workError?: LoreError;
 }
 
 /** The slice of the store this service uses. */
@@ -150,6 +162,41 @@ export class SuiteResultService {
     const inserted = await this.deps.store.insertSuiteResult(record);
     if (!inserted.ok) return inserted;
     return ok(record);
+  }
+
+  /**
+   * {@link lookupOrRun} plus work that must run at the commit in a throwaway worktree EXACTLY once per call, whether the
+   * suite result was cached or not: on a fresh run it rides the suite's own worktree (no second checkout or install); on a
+   * stored hit it gets a worktree of its own. The post-landing batch uses it for landed-criteria attestation, and `assess`
+   * for the stale cited-rule refresh (A1 noted the refresh was skipped on a stored hit).
+   *
+   * @param ref - `main` or a commit sha
+   * @param runner - runs the suite on a miss; must implement `withWorktree` for the stored-hit case
+   * @param work - awaited with the worktree root and the commit
+   * @returns the commit's result; `workError` set when the work could not be run (the worktree could not be made, or an
+   *   unrunnable fresh run left none); `err` when the lookup itself fails
+   */
+  async lookupOrRunWith(
+    ref: string,
+    runner: CommitSuiteRunnerPort,
+    work: (root: string, commit: string) => Promise<void>,
+  ): Promise<Result<LookupWithWorkOutcome, LoreError>> {
+    let workRan = false;
+    const looked = await this.lookupOrRun(ref, runner, async (root, commit) => {
+      workRan = true;
+      await work(root, commit);
+    });
+    if (!looked.ok) return looked;
+    const result = looked.value;
+    if (workRan) return ok({ result });
+    if (result.status !== "measured") {
+      return ok({ result, workError: { code: "STORE_ERROR", message: `the suite could not run at ${result.commit_sha}, so there is no worktree to work in: ${result.cause ?? "unrunnable"}` } });
+    }
+    if (runner.withWorktree === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "runner.withWorktree", message: "the suite result of this commit is stored and the runner cannot open a worktree for the extra work", rule: "BR-1497" });
+    }
+    const ran = await runner.withWorktree(result.commit_sha, (root) => work(root, result.commit_sha));
+    return ran.ok ? ok({ result }) : ok({ result, workError: ran.error });
   }
 
   /**

@@ -3,7 +3,7 @@
  *
  * Purpose: the single home of the seven review dimensions, the judge's output shape, the stored review shape and the
  *   deterministic verdict rules. Plan close reads the stored review; nothing else decides it.
- * Public surface: MILESTONE_DIMENSIONS, MEASURED_CAUSE_DIMENSIONS, MilestoneDimension, DimensionVerdict, dimensionJudgmentSchema,
+ * Public surface: GATE_DIMENSIONS, isGateDimension, blockingGates, filableDimensions, MILESTONE_DIMENSIONS, MEASURED_CAUSE_DIMENSIONS, MilestoneDimension, DimensionVerdict, dimensionJudgmentSchema,
  *   llmMilestoneOutputSchema, LlmMilestoneOutput, milestoneReviewSchema, MilestoneReview, applyDeterministicDimensionRules,
  *   overallMilestoneVerdict, failedDimensions, renderMilestoneReviewContent, retiredAcRefSchema, RetiredAcRef.
  * Invariants:
@@ -133,7 +133,8 @@ export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
 export interface MilestoneFactRow {
   /** Criterion `<spec>:<ac>` or landing commit, whichever the row is about. */
   readonly subject: string;
-  readonly verdict: "pass" | "fail" | "not-measured";
+  /** `na` = nothing of this kind is in scope (no criterion in the plan's task scopes): it neither blocks nor reads as pass. */
+  readonly verdict: "pass" | "fail" | "not-measured" | "na";
   /** What decided it (attestation id, failing files, why not measured). */
   readonly detail: string;
 }
@@ -164,6 +165,10 @@ export interface MilestoneFacts {
   readonly unlanded_tasks?: readonly string[];
   /** AI-mode criteria of the plan's task scopes. */
   readonly ai_criteria?: readonly AiCriterionInput[];
+  /** The stored suite result id each landing was measured from; the review fingerprint hashes them (BR-1497, AC-AF-6). */
+  readonly landing_result_ids?: readonly { readonly landing: string; readonly id: string }[];
+  /** Id of the stored main suite result consulted for clearing; present only while a regression existed to clear. */
+  readonly clearing_result_id?: string;
 }
 
 /** What the judgment layer did, stored on the review: calls, tokens, time, and the files no call showed. */
@@ -266,6 +271,12 @@ export const milestoneReviewSchema = z.object({
   /** The judgment layer's calls, tokens, time and unseen files; absent on a review stored before it was recorded. */
   judgment: judgmentRecordSchema.optional(),
   prompt_version: z.string().min(1),
+  /**
+   * Fingerprint of the measured facts this review read (suite result ids, deciding attestation ids, cited-rule states,
+   * prompt version, clearing result). `fingerprint` stays the plan-state fingerprint plan close compares; the batch
+   * re-reviews when this one changes. Absent on a review stored before it existed (then re-made once).
+   */
+  facts_fingerprint: z.string().min(1).optional(),
   /** How the diff was obtained, e.g. `auto_derived:derived` or `none`. */
   diff_source: z.string().min(1),
 });
@@ -292,6 +303,36 @@ export function applyDeterministicDimensionRules(
     };
   }
   return dimensions;
+}
+
+/** The gates (spec "Verdict and close"): a failed or not-measured gate keeps the plan open instead of closing it with a known defect. */
+export const GATE_DIMENSIONS = ["correctness_vs_acs", "regression", "security"] as const satisfies readonly MilestoneDimension[];
+export type GateDimension = (typeof GATE_DIMENSIONS)[number];
+
+/** Whether `dimension` is a gate. */
+export function isGateDimension(dimension: string): dimension is GateDimension {
+  return (GATE_DIMENSIONS as readonly string[]).includes(dimension);
+}
+
+/**
+ * The gates that block a close: `fail` or `not-measured`. `na` and `pass` never block.
+ *
+ * @param dimensions - a review's seven verdicts
+ * @returns the blocking gates in render order
+ */
+export function blockingGates(dimensions: LlmMilestoneOutput["dimensions"]): GateDimension[] {
+  return GATE_DIMENSIONS.filter((d) => dimensions[d].verdict === "fail" || dimensions[d].verdict === "not-measured");
+}
+
+/**
+ * The dimensions that need an issue: every failed dimension plus every not-measured gate (a not-measured gate holds the
+ * plan open and so needs the same record a failure gets).
+ *
+ * @param dimensions - a review's seven verdicts
+ * @returns the dimensions in render order
+ */
+export function filableDimensions(dimensions: LlmMilestoneOutput["dimensions"]): MilestoneDimension[] {
+  return MILESTONE_DIMENSIONS.filter((d) => dimensions[d].verdict === "fail" || (dimensions[d].verdict === "not-measured" && isGateDimension(d)));
 }
 
 /** `pass` iff no dimension is `fail`. */

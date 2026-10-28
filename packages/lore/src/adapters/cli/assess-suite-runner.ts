@@ -215,6 +215,15 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
       return ran;
     },
 
+    withWorktree: async (commit, work) => {
+      const ran = await inThrowawayWorktree(commit, async (root) => {
+        const prepared = prepareDependencies(root, suiteChildEnv(env));
+        if (prepared !== undefined) throw new Error(prepared);
+        await work(root);
+      });
+      return ran.ok ? ok(undefined) : ran;
+    },
+
     runFiles: async (commit, files) =>
       inThrowawayWorktree(commit, async (root) => {
         const childEnv = suiteChildEnv(env);

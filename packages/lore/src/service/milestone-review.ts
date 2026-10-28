@@ -3,7 +3,7 @@
  *
  * Purpose: the pure half of BR-1372. `lore assess` stores a review carrying the plan-state fingerprint it judged;
  *   plan close recomputes the fingerprint and compares.
- * Public surface: planStateFingerprint, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
+ * Public surface: planStateFingerprint, milestoneFactsFingerprint, FactsFingerprintInput, latestLandingCommit, CitedRuleStateRow, selectLatestMilestoneReview, assessMilestoneCurrency,
  *   MilestoneReviewCurrency, MILESTONE_REVIEW_SUB_TYPE, and the main-red ledger (BR-1412): MAIN_RED_ACTION,
  *   MAIN_RED_GREEN_ACTION, MAIN_CHECKED_ACTION, MainRedLedgerPort, foldMainRedRecords, classifySuiteForMainRed, planMainRedWrites.
  * Invariants:
@@ -22,7 +22,7 @@ import { z } from "zod";
 import {
   err,
   ok,
-  failedDimensions,
+  filableDimensions,
   milestoneReviewSchema,
   specAcceptanceCriteriaSchema,
   type DocRecord,
@@ -103,6 +103,45 @@ export function planStateFingerprint(
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+/** Everything beyond the plan's own state that a review's verdict reads (spec "Fingerprint", AC-AF-6). */
+export interface FactsFingerprintInput {
+  /** The stored suite result id each landing was measured from. */
+  readonly landingResultIds: readonly { readonly landing: string; readonly id: string }[];
+  /** The deciding attestation id of each criterion. */
+  readonly attestationIds: readonly { readonly subject: string; readonly id: string }[];
+  /** The cited rules' states. */
+  readonly citedRules: readonly { readonly rule_id: string; readonly state: string }[];
+  readonly promptVersion: string;
+  /** True while regression has uncleared files: only then does a newer stored main suite result matter. */
+  readonly regressionUncleared: boolean;
+  /** The newest stored main suite result consulted for clearing (hashed only while `regressionUncleared`). */
+  readonly clearingResultId?: string;
+}
+
+/**
+ * The measured facts a review read, as one comparable value (BR-1379, AC-AF-6): the landing commits' suite result ids,
+ * each criterion's deciding attestation id, the cited rules' states, the prompt version and, ONLY while regression has
+ * uncleared files, the id of the newest stored main suite result consulted for clearing.
+ *
+ * reason: main's HEAD is deliberately NOT an input. A review is re-made when one of these facts changes, never because
+ * main moved: a moved HEAD changes nothing a verdict reads unless a newer stored suite result exists and regression has
+ * something left to clear. The ids are stored-row ids (a re-run is a new row), so a re-measurement changes them.
+ *
+ * @param input - the facts
+ * @returns SHA-256 hex
+ */
+export function milestoneFactsFingerprint(input: FactsFingerprintInput): string {
+  const byKey = <T>(items: readonly T[], key: (item: T) => string): T[] => [...items].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  const canonical = canonicalJson({
+    suites: byKey(input.landingResultIds, (r) => r.landing).map((r) => `${r.landing}=${r.id}`),
+    attestations: byKey(input.attestationIds, (a) => a.subject).map((a) => `${a.subject}=${a.id}`),
+    rules: byKey(input.citedRules, (r) => r.rule_id).map((r) => `${r.rule_id}=${r.state}`),
+    prompt: input.promptVersion,
+    clearing: input.regressionUncleared ? (input.clearingResultId ?? "none") : "n/a",
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
 /** The newest parsable review among `docs` (knowledge docs informs-linked to the plan), by `created_at`. */
 export function selectLatestMilestoneReview(
   docs: readonly DocRecord[],
@@ -157,7 +196,8 @@ export function assessMilestoneCurrency(
   if (latest.review.fingerprint !== current) {
     return { state: "stale", reviewed: latest.review.fingerprint, current, reviewSlug: latest.doc.slug };
   }
-  const failed = failedDimensions(latest.review.dimensions);
+  // reason: a not-measured gate needs the same record a failed dimension does (it holds the plan open), so close reads both.
+  const failed = filableDimensions(latest.review.dimensions);
   if (failed.length > 0 || latest.review.overall === "fail") {
     return { state: "failed", failed, reviewSlug: latest.doc.slug };
   }

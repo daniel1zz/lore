@@ -21,6 +21,11 @@
  *   - The full suite is measured at most once per batch, and only when a plan actually needs a judgment.
  *   - A pass archives as accepted; a fail archives as accepted with known defects after its findings are filed by
  *     root cause (BR-1372 plan close reads the linked open issues); retired ACs wait for the one owner decision.
+ *   - Gates (`correctness_vs_acs`, `regression`, `security`): a gate that failed or is not-measured is filed like any
+ *     failure but the plan stays open (`kept-open`, exit 0, status unchanged) unless the plan accepted that gate with a
+ *     decision (`gate_accepted` known defect, BR-1500); `na` never blocks. Non-gate failures still close as known defects.
+ *   - A current review is re-made when its facts fingerprint changed (suite result ids, deciding attestation ids,
+ *     cited-rule states, prompt version, clearing result), never because main's HEAD alone moved (AC-AF-6).
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
  * Side-effect class: IO through injected ports (services never import each other; the CLI adapter binds the real ones).
  *
@@ -28,7 +33,7 @@
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-3, AC-PCR-4, AC-PCR-5, BR-1379)
  */
 
-import { failedDimensions, milestoneReviewSchema, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
+import { acceptedGateDimensions, blockingGates, filableDimensions, milestoneReviewSchema, ok, readKnownDefects, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
@@ -144,6 +149,11 @@ export interface BatchRunPorts {
    * is an errored attempt (audit row), never a skipped step.
    */
   readonly attestLanded?: (planRef: string) => Promise<Result<unknown, LoreError>>;
+  /**
+   * The facts fingerprint a review of the plan made now would carry (AC-AF-6), measured after `attestLanded`. Optional
+   * (absent = a current review is compared on the plan-state fingerprint alone); an `err` is an errored attempt.
+   */
+  readonly factsFingerprint?: (planRef: string) => Promise<Result<string, LoreError>>;
   /** Judges one plan and stores the review. */
   readonly reviewPlan: (planRef: string, suite: SuiteRun | undefined) => Promise<Result<MilestoneReviewResult, LoreError>>;
   /** Archives the plan through the gated close (coverage reads the plan's known defects, each issue by number). */
@@ -167,7 +177,8 @@ export interface BatchErrorRecord {
 /** One plan's outcome in a batch. */
 export interface BatchPlanRow {
   readonly plan: string;
-  readonly outcome: "accepted" | "accepted-with-known-defects" | "awaiting-owner" | "error" | "skipped";
+  /** `kept-open`: a gate failed or is not-measured; its issue is filed and the plan stays as it was (not an error). */
+  readonly outcome: "accepted" | "accepted-with-known-defects" | "kept-open" | "awaiting-owner" | "error" | "skipped";
   readonly reviewed: boolean;
   readonly review?: string;
   readonly failed: readonly string[];
@@ -331,17 +342,29 @@ export class ReviewBatchRunner {
       }
     }
     let coverFixed = false;
-    if (latest !== undefined && latest.review.fingerprint === fingerprint && latest.review.overall === "fail" && (latest.review.retired_acs?.length ?? 0) === 0) {
-      const coverage = await this.deps.issueCoverage(planId, failedDimensions(latest.review.dimensions));
+    if (latest !== undefined && latest.review.fingerprint === fingerprint && hasFindingsToFile(latest.review) && (latest.review.retired_acs?.length ?? 0) === 0) {
+      const coverage = await this.deps.issueCoverage(planId, filableDimensions(latest.review.dimensions));
       if (!coverage.ok) return fail("review", fingerprint, coverage.error, false);
       coverFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
     }
-    if (latest === undefined || latest.review.fingerprint !== fingerprint || coverFixed) {
+    // reason: AC-AF-6 — the plan-state fingerprint cannot see suite results, attestations or cited-rule states, so a current
+    // review is also compared on its facts fingerprint. The facts are measured AFTER the landing step stored this
+    // landing's suite result and attested its criteria, so the ids hashed are the ones a review made now would read.
+    const planStateChanged = latest === undefined || latest.review.fingerprint !== fingerprint || coverFixed;
+    if (planStateChanged || ports.factsFingerprint !== undefined) {
       // reason: BR-1498 — landed criteria are attested at their landing commit BEFORE the judgment reads attestation.
       if (ports.attestLanded !== undefined) {
         const attested = await ports.attestLanded(ref);
         if (!attested.ok) return fail("review", fingerprint, attested.error, false);
       }
+    }
+    let factsChanged = false;
+    if (!planStateChanged && latest !== undefined && ports.factsFingerprint !== undefined) {
+      const current = await ports.factsFingerprint(ref);
+      if (!current.ok) return fail("review", fingerprint, current.error, false);
+      factsChanged = latest.review.facts_fingerprint !== current.value;
+    }
+    if (planStateChanged || factsChanged) {
       const suite = await measureOnce();
       const judged = await ports.reviewPlan(ref, suite);
       // reason: an errored review is recorded as an audit row, NOT a review: it does not count toward once-per-fingerprint.
@@ -349,14 +372,16 @@ export class ReviewBatchRunner {
       latest = { doc: judged.value.doc, review: judged.value.review };
       reviewed = true;
     }
+    // reason: `planStateChanged` is true whenever `latest` is undefined, so a review exists here; the guard keeps the compiler honest.
+    if (latest === undefined) return fail("review", fingerprint, { code: "STORE_ERROR", message: "no review exists after judging" }, reviewed);
     const review = latest.review;
     const retiredCount = review.retired_acs?.length ?? 0;
     if (retiredCount > 0 && retirement?.state === "pending") {
-      return { plan: planSlug, outcome: "awaiting-owner", reviewed, review: latest.doc.slug, failed: failedDimensions(review.dimensions), issues: [], detail: `${String(retiredCount)} retired AC(s) await the owner (decision #${String(retirement.pendingId)})` };
+      return { plan: planSlug, outcome: "awaiting-owner", reviewed, review: latest.doc.slug, failed: filableDimensions(review.dimensions), issues: [], detail: `${String(retiredCount)} retired AC(s) await the owner (decision #${String(retirement.pendingId)})` };
     }
-    const failed = failedDimensions(review.dimensions);
+    const failed = filableDimensions(review.dimensions);
     const issues: number[] = [];
-    if (review.overall === "fail") {
+    if (failed.length > 0) {
       if (ports.filing === undefined) {
         return fail("filing", fingerprint, { code: "VALIDATION_ERROR", field: "feedback.upstream", message: "the review failed and needs issues filed, but no issue tracker is configured (feedback.upstream.repo)", rule: "BR-1379" }, reviewed, latest.doc.slug);
       }
@@ -375,16 +400,32 @@ export class ReviewBatchRunner {
       if (broken?.error !== undefined) return fail("filing", fingerprint, broken.error, reviewed, latest.doc.slug);
       for (const group of filed.value) if (group.issue !== undefined) issues.push(group.issue.number);
     }
+    // reason: spec "Verdict and close" — a gate that failed or is not-measured keeps the plan open (its issue is filed above);
+    // only a gate the plan accepted with a decision (`lore assess --accept-gate`, a gate_accepted known defect) may close.
+    const acceptedGates = acceptedGateDimensions(readKnownDefects(bundle.plan.extra));
+    const blockers = blockingGates(review.dimensions).filter((gate) => !acceptedGates.includes(gate));
+    const issueNumbers = [...new Set(issues)].sort((a, b) => a - b);
+    if (blockers.length > 0) {
+      return {
+        plan: planSlug,
+        outcome: "kept-open",
+        reviewed,
+        review: latest.doc.slug,
+        failed,
+        issues: issueNumbers,
+        detail: `kept open: gate(s) ${blockers.map((g) => `${g} ${review.dimensions[g].verdict}`).join(", ")} (a gate is accepted only with \`lore assess ${planSlug} --accept-gate <dimension>\` and a decision)`,
+      };
+    }
     const closed = await ports.closePlan(ref);
     if (!closed.ok) return fail("close", fingerprint, closed.error, reviewed, latest.doc.slug);
     return {
       plan: planSlug,
-      outcome: review.overall === "pass" ? "accepted" : "accepted-with-known-defects",
+      outcome: failed.length === 0 ? "accepted" : "accepted-with-known-defects",
       reviewed,
       review: latest.doc.slug,
       failed,
-      issues: [...new Set(issues)].sort((a, b) => a - b),
-      detail: review.overall === "pass" ? "accepted" : `accepted with known defects: ${failed.join(", ")}`,
+      issues: issueNumbers,
+      detail: failed.length === 0 ? "accepted" : `accepted with known defects: ${failed.join(", ")}`,
     };
   }
 }
@@ -406,11 +447,11 @@ async function planFactsOf(
     let filingIncomplete = false;
     let coveringIssueFixed = false;
     let unfileableReview: string | undefined;
-    if (latest.review.fingerprint === fingerprint && latest.review.overall === "fail") {
+    if (latest.review.fingerprint === fingerprint && hasFindingsToFile(latest.review)) {
       const unfileable = unfileableReviewError(bundle.plan.slug, latest.doc.slug, latest.review);
       if (unfileable !== undefined) unfileableReview = messageOf(unfileable);
       else {
-        const coverage = await deps.issueCoverage(bundle.plan.id, failedDimensions(latest.review.dimensions));
+        const coverage = await deps.issueCoverage(bundle.plan.id, filableDimensions(latest.review.dimensions));
         if (!coverage.ok) return coverage;
         filingIncomplete = coverage.value.uncovered.length > 0;
         coveringIssueFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
@@ -418,7 +459,7 @@ async function planFactsOf(
     }
     return ok({
       ...base,
-      latest: { fingerprint: latest.review.fingerprint, overall: latest.review.overall, retiredCount: latest.review.retired_acs?.length ?? 0 },
+      latest: { fingerprint: latest.review.fingerprint, overall: hasFindingsToFile(latest.review) ? "fail" : "pass", retiredCount: latest.review.retired_acs?.length ?? 0 },
       filingIncomplete,
       coveringIssueFixed,
       ...(unfileableReview !== undefined ? { unfileableReview } : {}),
@@ -444,9 +485,17 @@ function closedCoverAlreadyReviewed(docs: readonly DocRecord[], fingerprint: str
   return atFingerprint >= 2;
 }
 
+/**
+ * True when the review has something to file: a failed dimension or a not-measured gate. This, not `overall`, is what the
+ * batch reads as "fail" (`PlanReviewFacts.latest.overall`): a not-measured gate leaves `overall` at pass but holds the plan open.
+ */
+function hasFindingsToFile(review: MilestoneReview): boolean {
+  return review.overall === "fail" || filableDimensions(review.dimensions).length > 0;
+}
+
 /** The root-cause results of a stored review's failed dimensions, one per dimension. */
 function causesOfReview(planSlug: string, reviewSlug: string, review: MilestoneReview): Result<RootCause, LoreError>[] {
-  return failedDimensions(review.dimensions).map((dimension) =>
+  return filableDimensions(review.dimensions).map((dimension) =>
     rootCauseOf({ plan: planSlug, dimension, reason: review.dimensions[dimension].reason, reference: review.dimensions[dimension].reference, cites: review.dimensions[dimension].cites, reviewSlug, causes: review.causes }),
   );
 }

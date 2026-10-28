@@ -3,7 +3,7 @@
  *
  * Purpose: judge a plan on the seven dimensions from its landed diff, documents, attested task evidence, cited-rule
  *   state and the `milestone` decisions that belong to it; store the review with the plan-state fingerprint it judged.
- * Public surface: `MilestoneReviewService.review(planRef, opts)`, `MilestoneReviewService.recordMainRed(suite)`,`MilestoneReviewDeps`, `MilestoneReviewResult`.
+ * Public surface: `MilestoneReviewService.review(planRef, opts)`, `factsFingerprint`, `hasStaleCitations`,`MilestoneReviewService.recordMainRed(suite)`,`MilestoneReviewDeps`, `MilestoneReviewResult`.
  * Invariants:
  *   - The judge never writes the fingerprint, the overall verdict or the decision list; this service computes them.
  *   - The judge is asked only the four judged dimensions and the AI-mode criteria (`milestone-review-judgment.ts`); the
@@ -53,6 +53,7 @@ import {
   classifySuiteForMainRed,
   foldMainRedRecords,
   MILESTONE_REVIEW_SUB_TYPE,
+  milestoneFactsFingerprint,
   planMainRedWrites,
   planStateFingerprint,
   type CitedRuleStateRow,
@@ -173,9 +174,54 @@ export function selectPlanMilestoneDecisions(
   return [...found.values()];
 }
 
+/** The facts fingerprint of one review: what its verdict read beyond the plan's own state (AC-AF-6). */
+function factsFingerprintOf(facts: MilestoneFacts | undefined, cited: readonly CitedRuleStateRow[]): string {
+  return milestoneFactsFingerprint({
+    landingResultIds: facts?.landing_result_ids ?? [],
+    attestationIds: facts?.attestation_ids ?? [],
+    citedRules: cited.map((r) => ({ rule_id: r.rule_id, state: r.state })),
+    promptVersion: MILESTONE_REVIEW_PROMPT_VERSION,
+    regressionUncleared: (facts?.regression_files?.length ?? 0) > 0,
+    ...(facts?.clearing_result_id !== undefined ? { clearingResultId: facts.clearing_result_id } : {}),
+  });
+}
+
 /** See the module header. */
 export class MilestoneReviewService {
   constructor(private readonly deps: MilestoneReviewDeps) {}
+
+  /**
+   * The facts fingerprint a review made NOW from `facts` would carry; the batch compares it with the stored review's
+   * `facts_fingerprint` to decide whether a plan must be re-reviewed (AC-AF-6). Same function `review` stores with.
+   *
+   * @param planRef - plan id or slug
+   * @param facts - the plan's measured facts
+   * @returns the fingerprint; `err` when the plan or its cited rules cannot be read
+   */
+  async factsFingerprint(planRef: string, facts: MilestoneFacts | undefined): Promise<Result<string, LoreError>> {
+    const bundle = await this.deps.getPlanBundle(planRef);
+    if (!bundle.ok) return bundle;
+    const cited = bundle.value.spec !== undefined ? await this.deps.getCitedRuleStates(bundle.value.spec) : ok<CitedRuleStateRow[]>([]);
+    if (!cited.ok) return cited;
+    return ok(factsFingerprintOf(facts, cited.value));
+  }
+
+  /**
+   * Whether any of the plans cites a stale rule a refresh would re-verify (a pure read: nothing runs).
+   *
+   * @param planRefs - the batch's plans
+   * @returns `ok(true)` when at least one citing criterion is stale
+   */
+  async hasStaleCitations(planRefs: readonly string[]): Promise<Result<boolean, LoreError>> {
+    for (const planRef of planRefs) {
+      const bundle = await this.deps.getPlanBundle(planRef);
+      if (!bundle.ok || bundle.value.spec === undefined) continue;
+      const cited = await this.deps.getCitedRuleStates(bundle.value.spec);
+      if (!cited.ok) return cited;
+      if (staleCitingAcIds(cited.value).length > 0) return ok(true);
+    }
+    return ok(false);
+  }
 
   /**
    * Re-verifies stale cited evidence ONCE for a whole batch, before any plan is judged (Part D). Collects the citing
@@ -351,6 +397,7 @@ export class MilestoneReviewService {
       ...(decisionFindings.length > 0 ? { decision_findings: decisionFindings } : {}),
       judgment,
       prompt_version: MILESTONE_REVIEW_PROMPT_VERSION,
+      facts_fingerprint: factsFingerprintOf(opts.facts, citedRulesResult.value),
       diff_source: opts.diffSource,
     };
 

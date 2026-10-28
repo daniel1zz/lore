@@ -83,6 +83,8 @@ export type LandingRegression =
   | {
       readonly status: "measured";
       readonly landing: string;
+      /** The stored suite result this landing was measured from. */
+      readonly result_id: string;
       readonly main_before: string;
       readonly regressions: readonly string[];
       readonly red_before: readonly string[];
@@ -91,11 +93,13 @@ export type LandingRegression =
       readonly failing: readonly string[];
     }
   | { readonly status: "no-change"; readonly landing: string }
-  | { readonly status: "not-measured"; readonly landing: string; readonly reason: string };
+  | { readonly status: "not-measured"; readonly landing: string; readonly reason: string; readonly result_id?: string };
 
 /** The measured regression facts of a plan. */
 export interface RegressionPerLanding {
   readonly landings: readonly LandingRegression[];
+  /** The stored suite result id of every landing that has one (the review fingerprint hashes them). */
+  readonly landing_result_ids: readonly { readonly landing: string; readonly id: string }[];
   /** Regressions still red in the clearing source (these fail the gate). */
   readonly uncleared: readonly RegressionFinding[];
   readonly cleared: readonly ClearedRegression[];
@@ -105,7 +109,12 @@ export interface RegressionPerLanding {
   readonly rows: readonly MilestoneFactRow[];
 }
 
-const notMeasured = (landing: string, reason: string): LandingRegression => ({ status: "not-measured", landing, reason });
+const notMeasured = (landing: string, reason: string, resultId?: string): LandingRegression => ({
+  status: "not-measured",
+  landing,
+  reason,
+  ...(resultId !== undefined ? { result_id: resultId } : {}),
+});
 
 /** The last stored row for `file` at `commit`, or undefined. */
 function storedRunAt(rows: readonly SuiteFileRunRecord[], commit: string, file: string): SuiteFileRunRecord | undefined {
@@ -118,23 +127,25 @@ async function measureLanding(landing: RegressionLandingInput, ports: Regression
   const looked = await ports.suites.lookupOrRun(id, ports.runner);
   if (!looked.ok) return notMeasured(id, `the suite could not be run at the landing: ${loreErrorText(looked.error)}`);
   const result = looked.value;
-  if (result.status !== "measured") return notMeasured(id, `the suite could not run at the landing: ${result.cause ?? "unrunnable"}`);
+  // reason: an unrunnable attempt is a stored row too (new id per attempt), so its id is part of the facts fingerprint (BR-1497).
+  if (result.status !== "measured") return notMeasured(id, `the suite could not run at the landing: ${result.cause ?? "unrunnable"}`, result.id);
   const failing = [...new Set(result.failing_test_files.map((f) => f.file))];
-  const base = { status: "measured" as const, landing: id, main_before: landing.main_before, failing };
+  const base = { status: "measured" as const, landing: id, result_id: result.id, main_before: landing.main_before, failing };
+  const notMeasuredHere = (reason: string): LandingRegression => notMeasured(id, reason, result.id);
   if (failing.length === 0) return { ...base, regressions: [], red_before: [], flaky: [] };
 
   const before = await ports.runner.resolveCommit(landing.main_before);
-  if (!before.ok) return notMeasured(id, `main_before ${landing.main_before} does not resolve: ${loreErrorText(before.error)}`);
+  if (!before.ok) return notMeasuredHere(`main_before ${landing.main_before} does not resolve: ${loreErrorText(before.error)}`);
   const beforeSha = before.value.commit;
 
   const stored = await ports.suites.listFileRuns(result.id);
-  if (!stored.ok) return notMeasured(id, `stored re-runs could not be read: ${loreErrorText(stored.error)}`);
+  if (!stored.ok) return notMeasuredHere(`stored re-runs could not be read: ${loreErrorText(stored.error)}`);
   let rows = stored.value;
 
   const missingBefore = failing.filter((f) => storedRunAt(rows, beforeSha, f) === undefined);
   if (missingBefore.length > 0) {
     const ran = await ports.suites.rerunFiles(result.id, missingBefore, ports.runner, beforeSha);
-    if (!ran.ok) return notMeasured(id, `the failing files could not be re-run at main_before ${beforeSha}: ${loreErrorText(ran.error)}`);
+    if (!ran.ok) return notMeasuredHere(`the failing files could not be re-run at main_before ${beforeSha}: ${loreErrorText(ran.error)}`);
     rows = [...rows, ...ran.value];
   }
   const greenBefore = failing.filter((f) => storedRunAt(rows, beforeSha, f)?.exit_code === 0);
@@ -142,7 +153,7 @@ async function measureLanding(landing: RegressionLandingInput, ports: Regression
   const missingConfirm = greenBefore.filter((f) => storedRunAt(rows, result.commit_sha, f) === undefined);
   if (missingConfirm.length > 0) {
     const ran = await ports.suites.rerunFiles(result.id, missingConfirm, ports.runner);
-    if (!ran.ok) return notMeasured(id, `the confirm run at the landing failed: ${loreErrorText(ran.error)}`);
+    if (!ran.ok) return notMeasuredHere(`the confirm run at the landing failed: ${loreErrorText(ran.error)}`);
     rows = [...rows, ...ran.value];
   }
 
@@ -222,5 +233,6 @@ export async function regressionPerLanding(
   if (rows.length === 0) {
     return err({ code: "VALIDATION_ERROR", field: "landings", message: "regression per landing needs at least one landing or unlanded task", rule: "BR-1496" });
   }
-  return ok({ landings: outcomes, uncleared, cleared, clearing_result_id: clearingResultId, rows });
+  const landingResultIds = outcomes.flatMap((o) => (o.status !== "no-change" && o.result_id !== undefined ? [{ landing: o.landing, id: o.result_id }] : []));
+  return ok({ landings: outcomes, landing_result_ids: landingResultIds, uncleared, cleared, clearing_result_id: clearingResultId, rows });
 }
