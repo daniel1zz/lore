@@ -1,0 +1,199 @@
+/**
+ * The suite-result store's service: one full-suite result per commit, looked up before it is ever run (BR-1497).
+ *
+ * Purpose: make "what did the suite say at commit X" a stored fact: the first lookup of a commit runs the suite once and
+ *   stores it, every later lookup reads the store and runs nothing; the main red/green state the review records is
+ *   derived from the same rows, so there is no second record of one run.
+ * Public surface: SuiteResultService, CommitSuiteRunnerPort, FileRunOutcome, suiteRunOfResult, deriveMainCheckedRows.
+ * Invariants:
+ *   - A commit has at most one `measured` result. A run that could not complete (the runner reports not-measured or
+ *     fails) is stored as `unrunnable` with its cause and attempt number, and the NEXT lookup runs again as a new
+ *     result (new id, `attempt + 1`); an `unrunnable` result is never returned as a cached answer.
+ *   - Stored rows are never edited. Per-file re-runs (`rerunFiles`) are separate rows attached to a result id.
+ *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
+ *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
+ * Side-effect class: stateful (store writes, runner IO through the injected port).
+ *
+ * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-2, BR-1497, BR-1412)
+ */
+
+import { err, ok, type LoreError, type Result } from "@lore/core";
+import type { StoreInterface, SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
+import { MAIN_CHECKED_ACTION, classifySuiteForMainRed, type MainRedRow } from "./milestone-review.js";
+import type { SuiteRun } from "./milestone-review-inputs.js";
+
+/** One test file re-run at a commit. */
+export interface FileRunOutcome {
+  readonly file: string;
+  readonly exit_code: number;
+  readonly output_tail: string;
+  readonly duration_ms: number;
+}
+
+/** What the service needs from a git-backed runner: resolve a ref, run the suite at a commit, re-run named files at a commit. */
+export interface CommitSuiteRunnerPort {
+  /** The commit and tree sha a ref (`main`, a sha) names. */
+  readonly resolveCommit: (ref: string) => Promise<Result<{ readonly commit: string; readonly tree: string }, LoreError>>;
+  /**
+   * Runs the project's plan-close chain and full suite at `commit` in a throwaway worktree.
+   * `inWorktree` is awaited after the measurement while the worktree still exists.
+   */
+  readonly runSuite: (commit: string, inWorktree?: (root: string, commit: string) => Promise<void>) => Promise<Result<SuiteRun, LoreError>>;
+  /** Re-runs the named test files at `commit`, one outcome per file, in the order given. */
+  readonly runFiles: (commit: string, files: readonly string[]) => Promise<Result<readonly FileRunOutcome[], LoreError>>;
+}
+
+/** The slice of the store this service uses. */
+export type SuiteResultStorePort = Pick<
+  StoreInterface,
+  "insertSuiteResult" | "listSuiteResultsForCommit" | "listSuiteResults" | "getSuiteResult" | "insertSuiteFileRuns" | "listSuiteFileRuns"
+>;
+
+/** Injected collaborators (clock and id source are injected so tests are deterministic). */
+export interface SuiteResultServiceDeps {
+  readonly store: SuiteResultStorePort;
+  /** ISO 8601 "now". */
+  readonly now: () => string;
+  /** A fresh unique result id. */
+  readonly newId: () => string;
+  /** Monotonic milliseconds, for run durations. */
+  readonly clockMs: () => number;
+}
+
+/**
+ * A stored result as the review's existing suite shape: `measured` carries the commands and failing files,
+ * `unrunnable` is `not_measured` with its cause (never a pass).
+ */
+export function suiteRunOfResult(result: SuiteResultRecord): SuiteRun {
+  if (result.status === "unrunnable") return { status: "not_measured", reason: result.cause ?? "the suite run did not complete" };
+  return {
+    status: "measured",
+    commit: result.commit_sha,
+    commands: result.commands.map((c) => ({ ...c })),
+    skipped: result.skipped.map((s) => ({ ...s })),
+    failing_test_files: result.failing_test_files.map((f) => ({ file: f.file, imports: [...f.imports] })),
+  };
+}
+
+/**
+ * The "main was checked at <commit>: red|green" rows the main-red ledger folds, derived from stored results (oldest
+ * first). An `unrunnable` result, and a measured run that proves neither red nor green, checked nothing and yields no row.
+ *
+ * @param results - stored suite results, oldest first
+ */
+export function deriveMainCheckedRows(results: readonly SuiteResultRecord[]): MainRedRow[] {
+  const rows: MainRedRow[] = [];
+  for (const result of results) {
+    if (result.status !== "measured") continue;
+    const state = classifySuiteForMainRed(suiteRunOfResult(result));
+    if (state.state === "unmeasured") continue;
+    rows.push({
+      action: MAIN_CHECKED_ACTION,
+      timestamp: result.measured_at,
+      details: { commit: result.commit_sha, status: state.state, at: result.measured_at },
+    });
+  }
+  return rows;
+}
+
+/** Readable text of any LoreError (not every member carries a `message`). */
+export function loreErrorText(error: LoreError): string {
+  return "message" in error && typeof error.message === "string" ? error.message : error.code;
+}
+
+/** Stores and serves one suite result per commit. */
+export class SuiteResultService {
+  constructor(private readonly deps: SuiteResultServiceDeps) {}
+
+  /**
+   * The stored suite result of the commit `ref` names; runs the suite only when no `measured` result exists.
+   *
+   * @param ref - `main` or a commit sha
+   * @param runner - runs the suite when the store has no measured result
+   * @param inWorktree - optional work in the throwaway worktree after a FRESH run (never called on a stored hit)
+   * @returns the measured result, or the `unrunnable` one this call just stored; `err` when the ref does not resolve or the store fails
+   */
+  async lookupOrRun(
+    ref: string,
+    runner: CommitSuiteRunnerPort,
+    inWorktree?: (root: string, commit: string) => Promise<void>,
+  ): Promise<Result<SuiteResultRecord, LoreError>> {
+    const resolved = await runner.resolveCommit(ref);
+    if (!resolved.ok) return resolved;
+    const { commit, tree } = resolved.value;
+    const stored = await this.deps.store.listSuiteResultsForCommit(commit);
+    if (!stored.ok) return stored;
+    const measured = stored.value.find((r) => r.status === "measured");
+    if (measured !== undefined) return ok(measured);
+    const attempt = (stored.value.at(-1)?.attempt ?? 0) + 1;
+
+    const startedMs = this.deps.clockMs();
+    const ran = await runner.runSuite(commit, inWorktree);
+    const durationMs = Math.max(0, Math.round(this.deps.clockMs() - startedMs));
+    const base = { id: this.deps.newId(), commit_sha: commit, tree_sha: tree, attempt, duration_ms: durationMs, measured_at: this.deps.now() };
+    let record: SuiteResultRecord;
+    if (ran.ok && ran.value.status === "measured") {
+      record = {
+        ...base,
+        status: "measured",
+        cause: null,
+        commands: ran.value.commands.map((c) => ({ ...c })),
+        skipped: ran.value.skipped.map((s) => ({ ...s })),
+        failing_test_files: ran.value.failing_test_files.map((f) => ({ file: f.file, imports: [...f.imports] })),
+      };
+    } else {
+      // reason: an incomplete run is a stored fact with its cause, not a missing row, so the attempt count survives and
+      // the review can say "unrunnable (attempt 2): <cause>" instead of silently treating it as green (BR-1497).
+      const cause = ran.ok ? (ran.value.status === "not_measured" ? ran.value.reason : "the suite run did not complete") : loreErrorText(ran.error);
+      record = { ...base, status: "unrunnable", cause, commands: [], skipped: [], failing_test_files: [] };
+    }
+    const inserted = await this.deps.store.insertSuiteResult(record);
+    if (!inserted.ok) return inserted;
+    return ok(record);
+  }
+
+  /**
+   * Re-runs the named test files at the commit of a stored result and stores one row per file attached to it.
+   *
+   * @param suiteResultId - id of the stored result the re-run belongs to
+   * @param files - repo-relative test files (at least one)
+   * @param runner - runs the files at the result's commit
+   * @returns the stored per-file rows; `err` for an unknown result id, no files, a runner failure or a store failure
+   */
+  async rerunFiles(suiteResultId: string, files: readonly string[], runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "rerunFiles needs at least one test file", rule: "BR-1497" });
+    const found = await this.deps.store.getSuiteResult(suiteResultId);
+    if (!found.ok) return found;
+    if (found.value === null) {
+      return err({ code: "VALIDATION_ERROR", field: "suite_result_id", message: `no stored suite result "${suiteResultId}"`, rule: "BR-1497" });
+    }
+    const commit = found.value.commit_sha;
+    const ran = await runner.runFiles(commit, files);
+    if (!ran.ok) return ran;
+    const measuredAt = this.deps.now();
+    const rows: SuiteFileRunRecord[] = ran.value.map((o) => ({
+      suite_result_id: suiteResultId,
+      commit_sha: commit,
+      file: o.file,
+      exit_code: o.exit_code,
+      output_tail: o.output_tail,
+      duration_ms: o.duration_ms,
+      measured_at: measuredAt,
+    }));
+    const inserted = await this.deps.store.insertSuiteFileRuns(rows);
+    if (!inserted.ok) return inserted;
+    return ok(rows);
+  }
+
+  /** The per-file re-runs stored for a result, in the order they ran. */
+  listFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    return this.deps.store.listSuiteFileRuns(suiteResultId);
+  }
+
+  /** The main-checked rows (red or green per measured commit) derived from every stored result, oldest first. */
+  async listMainCheckedRows(): Promise<Result<MainRedRow[], LoreError>> {
+    const all = await this.deps.store.listSuiteResults();
+    if (!all.ok) return all;
+    return ok(deriveMainCheckedRows(all.value));
+  }
+}
