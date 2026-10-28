@@ -18,6 +18,8 @@
  *   - Nothing here reads or assigns a process global (`process.argv`, `process.exit`, `process.exitCode`,
  *     `process.env`, `process.chdir`, `console`, `process.stdout`); a run writes through `inv.io` and reports its
  *     code by return value, so two runs in one process share nothing.
+ *   - A delegated detached job (`LORE_DELEGATED_JOB` set by its spawning caller, #501) waits for the start gate on `inv.io.stdin`
+ *     before anything else, exits 0 having written nothing when stdin ends without it, and ends its child run when it exits.
  * Side-effect class: whatever the dispatched command does, through `inv`.
  *
  * reason: extracted verbatim from the CLI branch of `src/index.ts` (the MCP branch stays there: stdout is its

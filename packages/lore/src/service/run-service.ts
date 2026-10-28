@@ -4,7 +4,8 @@
  * Public surface: {@link RunService.register} (derive id + parent, validate, insert first-wins, reopen an ended
  * run, return the STORED record), {@link RunService.show} (read one run, DOC_NOT_FOUND when unregistered) and
  * {@link RunService.end} (mark a run ended and end its claims, BR-1057), {@link RunService.tasks} (the tasks a
- * registered run ever claimed) and {@link RunService.claimedTasks} (the same read without the registry check).
+ * registered run ever claimed) and {@link RunService.claimedTasks} (the same read without the registry check), and
+ * {@link RunService.registerDelegated} (the child run of a detached job; only `delegated-run.ts` calls it, #501).
  *
  * @invariant Side-effect class: stateful (store writes only). Holds a store and a clock, nothing else.
  * @invariant D5: the composition record is computed by the CALLER (the CLI command, from the existing
