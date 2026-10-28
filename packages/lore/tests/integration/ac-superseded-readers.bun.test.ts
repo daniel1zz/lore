@@ -5,21 +5,18 @@
  * @task task-skill-fix-a-superseded-criterion-is-still-counted-by
  *
  * DC2-15 made `lore verify` skip a superseded criterion. This file pins the OTHER readers of the same
- * mark: `ac list` coverage, the `lore done` declared-ac_scope floor, and the MCP `lore_ac_supersede` writer.
+ * mark: `ac list` coverage and the `lore done` declared-ac_scope floor.
  * Throwaway corpus only (mkdtemp + `lore init`); never the repo's own `.lore/`.
  *
- * Coverage: HAPPY (a coverage `superseded`, b floor satisfied + named line, c MCP mark), NEGATIVE (floor still
- * refuses a scope that holds a LIVE id; a live criterion is never `superseded`), STATE (c: MCP mark == CLI mark
- * shape, spec not demoted), REGRESSION (b control: before supersession the same task is refused by the floor).
+ * Coverage: HAPPY (a coverage `superseded`, b floor satisfied + named line), NEGATIVE (floor still
+ * refuses a scope that holds a LIVE id; a live criterion is never `superseded`),
+ * REGRESSION (b control: before supersession the same task is refused by the floor).
  */
 import { mkdtempSync, rmSync } from "fs";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   AC_COVERAGE_GLYPH_ALPHABET,
   AC_COVERAGE_STATES,
@@ -28,12 +25,10 @@ import {
   projectAcCoverageGlyph,
 } from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
-import { actedStore, liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
+import { actedStore } from "../live-invocation.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { approvePending } from "../helpers/approve-baseline.js";
 import { DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags.js";
-import { createApp } from "../../src/app.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
 
 let dir = "";
 let specS = "";
@@ -63,16 +58,6 @@ const slugOf = (stdout: string): string => {
   if (slug === undefined) throw new Error(`no slug in: ${stdout}`);
   return slug;
 };
-
-interface CriterionJson {
-  readonly id: string;
-  readonly superseded_by?: { spec: string; ac: string; reason: string; by: string; at: string };
-}
-
-async function criteriaOf(slug: string): Promise<CriterionJson[]> {
-  const parsed = JSON.parse(await must(["ac", "list", slug, "--json"])) as { data?: { criteria?: CriterionJson[] } };
-  return parsed.data?.criteria ?? [];
-}
 
 async function coverageStates(slug: string): Promise<Record<string, string>> {
   const parsed = JSON.parse(await must(["ac", "list", slug, "--json"])) as {
@@ -220,37 +205,5 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     const refused = await lore(["done", taskAc1AndAc2]);
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("extra.ac_scope");
-  }, 120_000);
-
-  // reason: BR-1476/BR-1479 — specS is approved by now, so an agent's supersede of its criterion carries a decision, and an MCP
-  // caller cannot supply one (the tool has no decision input): the call is refused by the same service entry. The MCP server is
-  // being removed; this case goes with it, so it is skipped here rather than rewritten around a surface that is leaving.
-  it.skip("(3) the MCP lore_ac_supersede tool stores the same mark as the CLI", async () => {
-    const app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
-    const server = new McpServer({ name: "lore", version: "0.0.0-test" });
-    registerTools(server, app, undefined, liveInvocation());
-    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverT);
-    const client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(clientT);
-    try {
-      const result = (await client.callTool({
-        name: "lore_ac_supersede",
-        arguments: { harness_run: LIVE_TEST_RUN, spec: specS, ac_id: "AC-2", by_spec: specS2, by_ac: "AC-9", reason: "replaced via MCP" },
-      })) as unknown as { isError?: boolean; content: { text: string }[] };
-      expect(result.isError ?? false, result.content.map((c) => c.text).join("\n")).toBe(false);
-    } finally {
-      await client.close();
-      app.close();
-    }
-    const criteria = await criteriaOf(specS);
-    const viaCli = criteria.find((c) => c.id === "AC-1")?.superseded_by;
-    const viaMcp = criteria.find((c) => c.id === "AC-2")?.superseded_by;
-    expect(viaMcp).toBeDefined();
-    expect(Object.keys(viaMcp ?? {}).sort()).toEqual(Object.keys(viaCli ?? {}).sort());
-    expect(viaMcp).toMatchObject({ ac: "AC-9", reason: "replaced via MCP" });
-    expect(viaMcp?.spec).toBe(viaCli?.spec);
-    expect(viaMcp?.by).toBeTruthy();
-    expect((await coverageStates(specS))["AC-2"]).toBe("superseded");
   }, 120_000);
 });

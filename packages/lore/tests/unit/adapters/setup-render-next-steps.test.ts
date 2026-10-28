@@ -174,7 +174,6 @@ describe("renderProjectScaffoldReceipt", () => {
         written: [],
         skipped: [],
         backups: [],
-        mcp: "registered" as const,
         manifestPath: "/tmp/fake-claude-dir/.lore-setup-manifest.json",
         // SPEC-076 T5 — SetupReceipt gained this required field; renderInstallReceipt
         // itself never reads it (see this describe block's own REGRESSION intent), so
@@ -196,8 +195,7 @@ describe("renderProjectScaffoldReceipt", () => {
           "Backups:",
           "  none",
           "",
-          "MCP: registered ✓",
-          "",
+          // task-skill-implement-lore-setup-registers-no-tool-server-and: the MCP line is gone.
           "Manifest: /tmp/fake-claude-dir/.lore-setup-manifest.json",
           "",
           "Next steps:",
@@ -236,7 +234,6 @@ describe("renderProjectScaffoldReceipt", () => {
         written: [],
         skipped: [],
         backups: [],
-        mcp: "registered" as const,
         manifestPath: "/tmp/fake-claude-dir/.lore-setup-manifest.json",
         // SPEC-076 T5 — SetupReceipt gained this required field; renderInstallReceipt
         // itself never reads it (see this describe block's own REGRESSION intent), so
@@ -258,8 +255,7 @@ describe("renderProjectScaffoldReceipt", () => {
           "Restored from backup: 0",
           "  none",
           "",
-          "MCP removal: de-registered ✓",
-          "",
+          // task-skill-implement-lore-setup-registers-no-tool-server-and: the MCP removal line is gone.
           "Manifest removed: /tmp/fake-claude-dir/.lore-setup-manifest.json",
         ].join("\n"),
       );

@@ -2,17 +2,17 @@
  * SetupService — global-machine installer for `lore setup` (SPEC-046 §Design,
  * §Scope "P1 installer"). Wires the vendored `assets/` SSOT tree (skills,
  * agents, hooks, governance snippet) plus a `settings.json` hook merge and a
- * `claude mcp` registration into an existing Claude Code install directory
+ * settings merge into an existing Claude Code install directory
  * ("target dir", conventionally `~/.claude` in production — NEVER read from
  * `homedir()`/env by this module, see invariants below).
  *
  * Public surface:
  *   - SetupService — stateless, constructor-injected ports (AssetSource,
- *     SetupFsReader, SetupFsWriter, McpRegistrar) plus the `SetupUserState` {env, home}
+ *     SetupFsReader, SetupFsWriter) plus the `SetupUserState` {env, home}
  *       .planInstall(opts)  — dry-run; reader-only, zero writer-port calls
  *       .install(opts, now?) — materializes the payload, manifest-authoritative
  *       .uninstall(opts, now?) — reverses STRICTLY via the manifest
- *   - AssetSource / SetupFsReader / SetupFsWriter / McpRegistrar — the four
+ *   - AssetSource / SetupFsReader / SetupFsWriter — the three
  *     injected ports (real implementations are a DOWNSTREAM task; this module
  *     only depends on the interfaces + whatever fakes its own test suite builds)
  *   - SetupReceipt — the outcome shape returned by both `install` and `uninstall`
@@ -31,10 +31,10 @@
  *     the 2026-07-07 "never write to the repo's own corpus from a test" rule
  *     for this service's own real-world target).
  *   - `planInstall` holds `this.writer` on the SAME instance as `install`/
- *     `uninstall` (one constructor, four ports — the ports are NOT split
+ *     `uninstall` (one constructor, three ports — the ports are NOT split
  *     across separate classes) — the "planInstall receives reader only"
  *     guarantee is an IMPLEMENTATION DISCIPLINE (planInstall's body never
- *     references `this.writer`/`this.mcpRegistrar`), verified at runtime by
+ *     references `this.writer`), verified at runtime by
  *     this module's own test suite via a poisoned writer fake that throws on
  *     any method call (SPEC-046 invariant I4).
  *   - `install` plans the ENTIRE run (asset load, settings.json merge,
@@ -97,10 +97,11 @@
  *     lore-tracked or foreign, is never removed.
  *   - No manifest at `targetDir` → `uninstall` fails loud (`VALIDATION_ERROR`,
  *     "nothing to uninstall") rather than silently no-op'ing.
- *   - MCP registration/de-registration failure is NEVER thrown and never
- *     aborts the run — `SetupReceipt.mcp` records `"failed"` and the CALLER
- *     (CLI adapter) is responsible for mapping that to a non-zero exit code;
- *     every file-asset write still completes.
+ *   - `lore setup` neither registers nor de-registers any tool server and never calls
+ *     `claude` (BR-814, BR-844): the installer cannot write a `kind: "mcp"` manifest entry
+ *     (`WrittenSetupEntry`), and an old manifest's `mcp:lore` entry is dropped on the next
+ *     install and skipped on uninstall (`stripMcpEntries`) —
+ *     task-skill-implement-lore-setup-registers-no-tool-server-and.
  *   - **SPEC-076 T5 — converge-semantics hardening.** `install()` ALWAYS uses
  *     `computeInstallPlan` (`planInstall`) for the base writes/skips/backups
  *     decision (fresh install and re-converge alike — the write PLANNER never
@@ -198,6 +199,7 @@ import type {
   PlannedWrite,
   SetupEntry,
   SetupManifest,
+  WrittenSetupEntry,
   SettingsHookEntry,
   UpdatePlan,
   UpdateProbe,
@@ -299,31 +301,6 @@ export interface SetupFsWriter {
   removeDirIfEmpty(path: string): Promise<void>;
 }
 
-/**
- * Outcome of a successful {@link McpRegistrar.add} call: `"added"` — the
- * registration was freshly created this run; `"already_registered"` — the
- * registrar detected the `lore` MCP server was ALREADY registered at user
- * scope (e.g. `claude mcp add`'s exit-1 "already exists" collision) and
- * treated that as the desired end state rather than a failure — an
- * idempotent re-run of `lore setup` must not fail merely because a prior run
- * already converged (SPEC-076 I2 idempotency spirit;
- * task-lore-setup-mcp-add-step-is-non-idempotent-already-exists). Both
- * values map to `SetupReceipt.mcp` (`"registered"` / `"already_registered"`
- * respectively) — see that field's own JSDoc.
- */
-export type McpAddOutcome = "added" | "already_registered";
-
-/**
- * Registers/de-registers the `lore` MCP server with the `claude` CLI at user
- * scope. The production implementation shells `claude mcp add`/`claude mcp
- * remove` (argv built by `@lore/core`'s `buildMcpAddArgs`/`buildMcpRemoveArgs`)
- * — a downstream task, not this one.
- */
-export interface McpRegistrar {
-  add(binPath: string): Promise<Result<McpAddOutcome, LoreError>>;
-  remove(): Promise<Result<void, LoreError>>;
-}
-
 // ─── Public Types ────────────────────────────────────────────────────────────
 
 /**
@@ -334,11 +311,11 @@ export interface McpRegistrar {
  */
 export interface SetupReceipt {
   /**
-   * install(): manifest entries actually written this run (excludes the mcp
-   * entry — see `mcp` below). uninstall(): always `[]` (nothing is "written"
+   * install(): manifest entries actually written this run (never an mcp
+   * entry — {@link WrittenSetupEntry}). uninstall(): always `[]` (nothing is "written"
    * in the asset sense during a reversal).
    */
-  written: SetupEntry[];
+  written: WrittenSetupEntry[];
   /**
    * install(): paths already byte-identical to their intended final content —
    * no write needed. uninstall(): paths removed outright because no backup
@@ -351,18 +328,6 @@ export interface SetupReceipt {
    * uninstall(): paths successfully restored FROM a backup.
    */
   backups: string[];
-  /**
-   * Outcome of the MCP registrar step this run: `"registered"` — the add/remove
-   * call succeeded (install: a FRESH registration this run); `"already_registered"`
-   * — install() only, the registrar found the `lore` MCP server was already
-   * registered at user scope and treated that as success (idempotent re-run,
-   * see {@link McpAddOutcome}) rather than `"failed"`; `"failed"` — it was
-   * attempted and threw/returned `err` for a genuinely different reason
-   * (file-asset work still completed; the CLI adapter maps this to a non-zero
-   * exit); `"skipped"` — uninstall found no tracked `mcp` manifest entry, so no
-   * de-registration was attempted.
-   */
-  mcp: "registered" | "already_registered" | "skipped" | "failed";
   /** Absolute path to `.lore-setup-manifest.json` under the target dir. */
   manifestPath: string;
   /**
@@ -415,8 +380,6 @@ const BACKUP_RUNS_KEEP = 5;
  * exact format (the same property `uninstall` already relies on).
  */
 const RUN_DIR_NAME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-/** Synthetic manifest path for the `mcp` kind entry — there is no real file behind it. */
-const MCP_ENTRY_PATH = "mcp:lore";
 /**
  * `<targetDir>/.lore-setup-check.json` — the `lore setup --check` cache file
  * (SPEC-076 §C6, T4/`setup-check.ts`'s `SetupCheckCache` shape/lifecycle,
@@ -497,7 +460,6 @@ export class SetupService {
     private readonly assetSource: AssetSource,
     private readonly reader: SetupFsReader,
     private readonly writer: SetupFsWriter,
-    private readonly mcpRegistrar: McpRegistrar,
     /** REQUIRED — feeds the real-`~/.claude` guard; a missing value must not weaken it (AS-26). */
     private readonly userState: SetupUserState,
     /** Where the install's best-effort advisories go (a failed backup prune); absent (bare tests) -> not printed. */
@@ -506,7 +468,7 @@ export class SetupService {
 
   /**
    * Dry-run planner — computes what `install()` WOULD do, touching only
-   * `this.assetSource` and `this.reader` (never `this.writer`/`this.mcpRegistrar`
+   * `this.assetSource` and `this.reader` (never `this.writer`
    * — invariant I4).
    *
    * @param opts - `{targetDir}` (resolved, absolute).
@@ -544,12 +506,11 @@ export class SetupService {
   /**
    * Materializes the asset payload into `targetDir`: plans the ENTIRE run
    * first (zero writer calls yet), then backs up + writes + removes via
-   * `this.writer`, registers the MCP server, and — only if its content
+   * `this.writer`, and — only if its content
    * actually differs from what's on disk — writes the authoritative manifest
    * LAST.
    *
-   * @param opts - `{targetDir, binPath, forceDiverged?}` — `binPath` is passed
-   *   straight to `McpRegistrar.add`. `forceDiverged` (SPEC-076 §C3 D2,
+   * @param opts - `{targetDir, binPath, forceDiverged?}` — `binPath` is accepted for CLI wiring parity and unused here. `forceDiverged` (SPEC-076 §C3 D2,
    *   default `false`) overrides the default-skip policy for `diverged`
    *   managed-ownership paths on the UPDATE path (an installed manifest
    *   already exists) — every diverged path is then backed up and
@@ -702,40 +663,19 @@ export class SetupService {
       this.warn(`lore setup install: warning — failed to prune old .lore-backups run directories: ${describeCaught(cause)}`);
     }
 
-    // ── MCP registration (never aborts the run — see module invariants) ────
-    const previousMcpEntry = current?.entries.find((e) => e.kind === "mcp");
-    const mcpResult = await this.mcpRegistrar.add(opts.binPath);
-    let mcp: SetupReceipt["mcp"];
-    let mcpEntry: SetupEntry | undefined;
-    if (mcpResult.ok) {
-      // reason: task-lore-setup-mcp-add-step-is-non-idempotent-already-exists — an
-      // "already_registered" outcome (RealMcpRegistrar detected `claude mcp add`'s
-      // idempotent "already exists" collision) is still a REGISTERED end state, just
-      // one this run didn't freshly create; the receipt's `mcp` field says so
-      // explicitly rather than collapsing it into a plain `"registered"` (which would
-      // read as "just added" to an operator diffing two runs).
-      mcp = mcpResult.value === "already_registered" ? "already_registered" : "registered";
-      const shaOfBin = sha256Hex(opts.binPath);
-      const writtenAt = previousMcpEntry?.sha256 === shaOfBin ? previousMcpEntry.written_at : nowIso;
-      // reason: SPEC-076 D8 — the mcp entry is never emitted by an AssetSource (it has no
-      // file behind it), so its ownership is stamped directly here, "managed" per
-      // setup-manifest.ts's deriveOwnershipFromKind mapping for kind: "mcp".
-      mcpEntry = { path: MCP_ENTRY_PATH, kind: "mcp", sha256: shaOfBin, written_at: writtenAt, ownership: "managed" };
-    } else {
-      mcp = "failed";
-      mcpEntry = previousMcpEntry;
-    }
-
     // ── Manifest — authoritative, written LAST, and only if it changed ─────
     const previousEntryByPath = new Map((current?.entries ?? []).map((e) => [e.path, e] as const));
     const writeByPath = new Map(writePlan.map((w) => [w.path, w] as const));
     const skippedDivergedSet = new Set(skippedDiverged);
 
-    const fileEntries: SetupEntry[] = resolvedPayload.files.map((file) => {
+    const fileEntries: WrittenSetupEntry[] = resolvedPayload.files.flatMap((file): WrittenSetupEntry[] => {
+      // reason: `resolvePayload` already refused an `mcp`-kind asset (BR-815); this narrows the type for the
+      // written-entry shape (`WrittenSetupEntry` excludes "mcp") and is unreachable at runtime.
+      if (file.kind === "mcp") return [];
       const ownershipField = file.ownership !== undefined ? { ownership: file.ownership } : {};
       const write = writeByPath.get(file.path);
       if (write !== undefined) {
-        return { path: file.path, kind: file.kind, sha256: write.sha256, written_at: nowIso, ...ownershipField };
+        return [{ path: file.path, kind: file.kind, sha256: write.sha256, written_at: nowIso, ...ownershipField }];
       }
       const prev = previousEntryByPath.get(file.path);
       // Plain byte-identical skip (computeInstallPlan's `plan.skips`, disk == target) —
@@ -757,13 +697,15 @@ export class SetupService {
       const sha256Value = skippedDivergedSet.has(file.path)
         ? (prev?.sha256 ?? divergedOnDiskSha.get(file.path) ?? file.sha256)
         : file.sha256;
-      return {
-        path: file.path,
-        kind: file.kind,
-        sha256: sha256Value,
-        written_at: prev?.written_at ?? nowIso,
-        ...ownershipField,
-      };
+      return [
+        {
+          path: file.path,
+          kind: file.kind,
+          sha256: sha256Value,
+          written_at: prev?.written_at ?? nowIso,
+          ...ownershipField,
+        },
+      ];
     });
 
     // `installed_at` bumps to `nowIso` only when THIS run actually changed the file state
@@ -782,7 +724,8 @@ export class SetupService {
     // run and `--check` still see it as diverged instead of forgetting it.
     const keptRetiredSet = new Set(keptRetired);
     const keptRetiredEntries = (current?.entries ?? []).filter((e) => keptRetiredSet.has(e.path));
-    const manifestEntries = [...fileEntries, ...keptRetiredEntries, ...(mcpEntry !== undefined ? [mcpEntry] : [])];
+    // reason: an `mcp` entry from an old manifest is never carried forward (BR-815) — only file entries and kept retired files.
+    const manifestEntries = [...fileEntries, ...keptRetiredEntries];
     const manifest: SetupManifest = {
       version: MANIFEST_VERSION,
       claude_dir: opts.targetDir,
@@ -847,7 +790,6 @@ export class SetupService {
       written: fileEntries.filter((e) => writeByPath.has(e.path)),
       skipped: plan.skips.map((s) => s.path),
       backups: committedBackups,
-      mcp,
       manifestPath,
       skippedDiverged,
       removed: committedRemovals,
@@ -936,7 +878,7 @@ export class SetupService {
 
     try {
       for (const entry of current.entries) {
-        if (entry.kind === "mcp") continue; // handled separately below — no file behind this entry
+        if (entry.kind === "mcp") continue; // old manifests only: no file behind this entry and nothing to de-register (BR-844)
         const fullPath = path.join(opts.targetDir, entry.path);
         const backupPath = path.join(opts.targetDir, BACKUPS_DIRNAME, entry.written_at, entry.path);
         const backupStat = await this.reader.stat(backupPath);
@@ -967,15 +909,6 @@ export class SetupService {
       return err(describeWriterFailure("uninstall", cause, { restoredPaths, removedPaths }));
     }
 
-    const mcpEntry = current.entries.find((e) => e.kind === "mcp");
-    let mcp: SetupReceipt["mcp"];
-    if (mcpEntry === undefined) {
-      mcp = "skipped";
-    } else {
-      const mcpResult = await this.mcpRegistrar.remove();
-      mcp = mcpResult.ok ? "registered" : "failed";
-    }
-
     try {
       await this.writer.remove(manifestPath, { boundary: opts.targetDir });
     } catch (cause) {
@@ -983,7 +916,7 @@ export class SetupService {
       return err({
         code: "STORE_ERROR",
         message:
-          `lore setup uninstall: file/mcp reversal completed, but removing the manifest at "${manifestPath}" ` +
+          `lore setup uninstall: file reversal completed, but removing the manifest at "${manifestPath}" ` +
           `failed: ${reason}. Re-run --uninstall to retry manifest removal.`,
         ...(cause instanceof Error ? { cause } : {}),
         rule: "BR-842",
@@ -994,7 +927,6 @@ export class SetupService {
       written: [],
       skipped: removedPaths,
       backups: restoredPaths,
-      mcp,
       manifestPath,
       skippedDiverged: [],
       removed: [],
@@ -1093,6 +1025,16 @@ async function resolvePayload(
   const resolvedFiles: AssetFile[] = [];
 
   for (const file of payload.files) {
+    // BR-815: `lore setup` registers no tool server, so no asset may be an `mcp` registration — fail loud.
+    if (file.kind === "mcp") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: `asset:${file.path}`,
+        message: `asset "${file.path}" has kind "mcp"; lore setup registers no tool server and installs no mcp entry`,
+        value: file.kind,
+        rule: "BR-815",
+      });
+    }
     if (file.kind === "settings-hook") {
       let loreEntries: SettingsHookEntry[];
       try {
@@ -1165,14 +1107,14 @@ async function resolvePayload(
 }
 
 /**
- * Strips the synthetic `kind: "mcp"` manifest entry (if any) before handing a
+ * Strips a legacy `kind: "mcp"` manifest entry (written by a pre-removal binary; if any) before handing a
  * manifest to `@lore/core`'s `computeInstallPlan`. That pure function's
  * `removals` computation is "tracked in `current` but absent from `payload`" —
  * the mcp entry is ALWAYS absent from `AssetPayload.files` (it isn't a file at
  * all), so passing it through unfiltered would make every install() run
  * spuriously call `writer.remove("mcp:lore")`, breaking invariant I2 (a
- * byte-identical re-run must fire ZERO writer calls). The mcp entry's own
- * lifecycle is handled entirely separately, in `install`/`uninstall`.
+ * byte-identical re-run must fire ZERO writer calls). The entry is then
+ * simply absent from the manifest `install` writes, and `uninstall` skips it.
  */
 function stripMcpEntries(manifest: SetupManifest | null): SetupManifest | null {
   if (manifest === null) return null;

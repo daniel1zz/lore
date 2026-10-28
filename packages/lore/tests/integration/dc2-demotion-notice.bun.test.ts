@@ -4,7 +4,7 @@
 // @reads packages/lore/src/adapters/cli/commands/evidence.ts
 /**
  * spec-defect-clusters-round-2-part-c-criterion-data-demotion#AC-DC2-18 (D18, BR-627, BR-38, BR-722): every write
- * that demotes an approved document to draft announces it on stdout, in `--json` and over MCP; the help
+ * that demotes an approved document to draft announces it on stdout, and in `--json`; the help
  * around the cite and capture behaviour states what the gates do.
  *
  * Root cause under test: `RuleService.demoteIfApproved` wrote the demotion as its own version while the CLI
@@ -25,13 +25,6 @@ import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeF
 import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { LoreConfigSchema } from "@lore/core";
-import { createApp } from "../../src/app.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
-import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
-import { registerTestRun } from "../helpers/test-run-identity.js";
 import { DECIDED_FLAGS, DECIDED_STATEMENT_FLAGS } from "../helpers/decision-flags.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
@@ -187,42 +180,6 @@ describe(`${SPEC_QUALIFIED} (a) rule add and rule set no longer demote a baselin
     const data = (JSON.parse(j.stdout) as { data: { demoted?: DemotedPayload; pending?: boolean } }).data;
     expect(data.demoted).toBeUndefined();
     expect(data.pending).toBe(true);
-  });
-});
-
-describe(`${SPEC_QUALIFIED} (a) MCP lore_rule_add results carry no demoted`, () => {
-  // reason: BR-1476 — an agent's rule add to a leaf with an approved version carries a decision, and an MCP caller cannot supply one
-  // (the tool has no decision input), so the service refuses the call. The MCP server is being removed; the CLI half of AC-DC2-18
-  // above covers the same "no demoted" claim, so this case is skipped rather than rewritten around a surface that is leaving.
-  it.skip("lore_rule_add on an approved leaf returns a result without demoted", async () => {
-    const { leaf } = approvedLeaf();
-    const config = LoreConfigSchema.parse({
-      project: { name: "dc2-18", author: "tester" },
-      workflow: { gates: { "record-edit": { enabled: false } } },
-    });
-    const made = createApp(join(dir, ".lore", "lore.db"), config, liveAmbient(), liveWriteContext());
-    if ("ok" in made) throw new Error(`createApp failed: ${JSON.stringify(made)}`);
-    try {
-      const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, made, undefined, liveInvocation());
-      const tool = (server as unknown as { _registeredTools: Record<string, { handler: (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult> }> })
-        ._registeredTools["lore_rule_add"];
-      if (tool === undefined) throw new Error("lore_rule_add not registered");
-      // an MCP write call is made by a known party: it names the run the agent integration vouches for (BR-1351)
-      registerTestRun(dir, LIVE_TEST_RUN);
-      const result = await tool.handler(
-        { leaf, statement: "added over MCP", confidence: "established", enforced_by: "guaranteed", examples: ["example one"], by: "agent:dc2-18", harness_run: LIVE_TEST_RUN },
-        {},
-      );
-      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
-      const first = result.content[0];
-      if (first === undefined || first.type !== "text") throw new Error("expected text content");
-      const payload = JSON.parse(first.text) as { demoted?: DemotedPayload; ruleId?: string };
-      expect(payload.demoted).toBeUndefined();
-      expect(payload.ruleId).toMatch(/^BR-/);
-    } finally {
-      made.close();
-    }
   });
 });
 

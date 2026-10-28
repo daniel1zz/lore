@@ -129,13 +129,12 @@ afterAll(() => {
   cleanupHealthyGhStubDir();
 });
 
-/** Converges a fresh `--claude-dir` via a real `--yes` install. `PATH=""` makes MCP registration fail (exit 1) — file writes still land. */
+/** Converges a fresh `--claude-dir` via a real `--yes` install. Setup registers no MCP server, so the install exits 0 (task-skill-implement-lore-setup-registers-no-tool-server-and). */
 function seedConvergedTarget(scratch: string, targetDir: string): void {
   const install = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-  if (install.exitCode !== 1) {
+  if (install.exitCode !== 0) {
     throw new Error(
-      `seedConvergedTarget: expected the seeding install to exit 1 (files written, MCP registration ` +
-        `fails under PATH=""), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
+      `seedConvergedTarget: expected the seeding install to exit 0 (task-skill-implement-lore-setup-registers-no-tool-server-and: setup registers no MCP server), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
     );
   }
   if (!existsSync(join(targetDir, "agents", "lore-implementer.md"))) {

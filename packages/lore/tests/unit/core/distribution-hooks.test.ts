@@ -91,9 +91,9 @@ describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 21 entries (17 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, pre-edit-anchor-gate: 1, post-ask-decide: 1, user-prompt-fragments: 1 = 21
-    expect(HOOK_REGISTRATIONS).toHaveLength(21);
+  it("expands to exactly 20 entries (17 hooks; per-event expansion for run-register, run-end and session-trail-start)", () => {
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 1 (Bash), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, pre-edit-anchor-gate: 1, post-ask-decide: 1, user-prompt-fragments: 1 = 20
+    expect(HOOK_REGISTRATIONS).toHaveLength(20);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {
@@ -111,6 +111,14 @@ describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
         expect(reg.runner).toBe("bash");
       }
     }
+  });
+});
+
+describe("AC-RMCP-6: harness-run hook registers no MCP matcher", () => {
+  it("AC-RMCP-6: no pre-tool-harness-run entry has a matcher naming mcp__; only Bash remains", () => {
+    const matchers = HOOK_REGISTRATIONS.filter((r) => r.file === "pre-tool-harness-run.mjs").map((r) => r.matcher);
+    expect(matchers).toEqual(["Bash"]);
+    for (const reg of HOOK_REGISTRATIONS) expect(reg.matcher ?? "").not.toContain("mcp__");
   });
 });
 

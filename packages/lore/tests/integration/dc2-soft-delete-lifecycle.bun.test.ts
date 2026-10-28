@@ -24,13 +24,10 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createApp } from "../../src/app.js";
 import { exitCode } from "../../src/adapters/cli/utils.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { computeRecoverableUntil } from "../../src/service/soft-delete-window.js";
-import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -210,7 +207,7 @@ describe("AC-DC2-6 undelete", () => {
   });
 });
 
-describe("AC-DC2-6 recovery window boundary and the MCP route (in-process, clock seam)", () => {
+describe("AC-DC2-6 recovery window boundary (in-process, clock seam)", () => {
   it(`${AC}: undelete succeeds at the window's last instant and fails one millisecond later`, async () => {
     const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     try {
@@ -239,36 +236,6 @@ describe("AC-DC2-6 recovery window boundary and the MCP route (in-process, clock
       const refused = await app.corpusService.undelete(late, { now: new Date(until(late) + 1).toISOString() });
       expect(refused.ok).toBe(false);
       if (!refused.ok) expect(exitCode(refused.error)).toBe(4);
-    } finally {
-      app.close();
-    }
-  });
-
-  it(`${AC}: over MCP, lore_get refuses a deleted doc naming lore undelete and lore_undelete restores it`, async () => {
-    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
-    try {
-      const mcp = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(mcp, app, undefined, liveInvocation());
-      const tools = (mcp as unknown as { _registeredTools: Record<string, { handler: (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult> }> })._registeredTools;
-      const call = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> => {
-        const tool = tools[name];
-        if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-        const res = await tool.handler({ harness_run: LIVE_TEST_RUN, ...args }, {});
-        const first = res.content[0];
-        if (first === undefined || first.type !== "text") throw new Error("expected text content");
-        return { isError: res.isError === true, text: first.text };
-      };
-      const created = await app.corpusService.create({ type: "knowledge", title: "DC2-6 mcp doc", content: "b", extra: { sub_type: "reference" } });
-      if (!created.ok) throw new Error(JSON.stringify(created.error));
-      const slug = created.value.slug;
-      expect((await call("lore_delete", { id_or_slug: slug, confirm: true })).isError).toBe(false);
-
-      const refused = await call("lore_get", { id_or_slug: slug });
-      expect(refused.isError).toBe(true);
-      expect(refused.text).toContain("lore undelete");
-
-      expect((await call("lore_undelete", { id_or_slug: slug })).isError).toBe(false);
-      expect((await call("lore_get", { id_or_slug: slug })).isError).toBe(false);
     } finally {
       app.close();
     }

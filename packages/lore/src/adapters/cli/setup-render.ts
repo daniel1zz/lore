@@ -34,22 +34,12 @@
  *     receipts differing only in array insertion order (e.g. because the underlying
  *     writer/reader port resolved entries in a different sequence) render
  *     byte-identically. This is the module's REGRESSION guarantee.
- *   - `ctx.mcpErrorTail` is an ADDITIVE, OPTIONAL field beyond `{targetDir, binPath}` —
- *     `SetupReceipt.mcp: "failed"` (`setup-service.ts`) is a bare marker with
- *     no error detail of its own (by design: MCP failure never aborts the run, see that
- *     module's invariants). This renderer's `"failed"` branch can show a caller-supplied
- *     stderr/error tail when the CLI adapter has one on hand (e.g. the
- *     `McpRegistrar.add`/`remove()` call's `LoreError.message`), without requiring
- *     `SetupService`/`SetupReceipt` to grow a field it doesn't itself need.
  *   - Plain text, no ANSI color codes — matches `status-stamp-verdict.ts`/`review-render.ts`.
  *     Unicode is limited to the corpus-wide convention marks already used elsewhere in
  *     this adapter (`✓`/`✘`/`·`, see `lore ac list`/`lore verify`).
  *   - `receipt.written` is DOCUMENTED (on `SetupReceipt`, `setup-service.ts`) to never
- *     contain a `kind: "mcp"` entry (the mcp registration outcome is carried entirely by
- *     `receipt.mcp`, not as a manifest-entry row) — this module's kind-grouping helper
- *     therefore only ever iterates the five non-mcp kinds; a `mcp`-kind row reaching it
- *     would be a `SetupService` contract violation, not something this renderer guards
- *     against defensively.
+ *     contain a `kind: "mcp"` entry (`WrittenSetupEntry` excludes it — `lore setup` registers no tool
+ *     server) — this module's kind-grouping helper therefore only iterates the five non-mcp kinds.
  *
  * Side-effect class: pure
  *
@@ -64,13 +54,8 @@ import type { SetupReceipt } from "../../service/setup-service.js";
 export interface SetupRenderCtx {
   /** Resolved target directory (`--claude-dir` > `$CLAUDE_CONFIG_DIR` > `homedir()`). */
   targetDir: string;
-  /** Absolute path to the `lore` binary — echoed in the MCP-skipped manual-registration hint. */
+  /** Absolute path to the `lore` binary. */
   binPath: string;
-  /**
-   * Optional stderr/error-message tail for an `mcp: "failed"` outcome — see this
-   * module's header comment for why `SetupReceipt` itself never carries this detail.
-   */
-  mcpErrorTail?: string;
 }
 
 /** Non-`mcp` kinds, in fixed rendering order (mirrors `SETUP_ENTRY_KINDS`' declared order). */
@@ -116,43 +101,16 @@ function renderPathList(paths: readonly string[], emptyLabel: string): string[] 
 }
 
 /**
- * Renders the MCP outcome line. `direction` disambiguates `SetupReceipt.mcp`'s shared
- * enum — `"registered"` means "add succeeded" for an install and "remove
- * succeeded" for an uninstall (see `SetupReceipt`'s per-field JSDoc on `setup-service.ts`).
- * `"already_registered"` (install() only — task-lore-setup-mcp-add-step-is-non-idempotent-
- * already-exists) is rendered as a DISTINCT skip line rather than folded into
- * `"registered"` — an operator diffing two runs' receipts should be able to tell "this
- * run freshly registered it" apart from "it was already registered, nothing changed".
- */
-function renderMcpLine(mcp: SetupReceipt["mcp"], ctx: SetupRenderCtx, direction: "install" | "uninstall"): string {
-  const prefix = direction === "install" ? "MCP" : "MCP removal";
-
-  if (mcp === "registered") {
-    return direction === "install" ? `${prefix}: registered ✓` : `${prefix}: de-registered ✓`;
-  }
-  if (mcp === "already_registered") {
-    return `${prefix}: skipped (already registered)`;
-  }
-  if (mcp === "skipped") {
-    return direction === "install"
-      ? `${prefix}: skipped (claude not found — run manually: claude mcp add -s user lore -- ${ctx.binPath} --mcp-server)`
-      : `${prefix}: skipped (no tracked mcp entry)`;
-  }
-  // mcp === "failed"
-  return ctx.mcpErrorTail ? `${prefix}: failed (${ctx.mcpErrorTail})` : `${prefix}: failed`;
-}
-
-/**
  * Renders `SetupService.install()`'s outcome (`SetupReceipt`) for terminal output.
  *
  * @param receipt - The install outcome to render.
- * @param ctx - Rendering context (`targetDir`, `binPath`, optional `mcpErrorTail`).
+ * @param ctx - Rendering context (`targetDir`, `binPath`).
  * @returns A deterministic, multi-line plain-text report.
  * @throws Never.
  *
  * @example
  * renderInstallReceipt(
- *   { written: [], skipped: [], backups: [], mcp: "skipped", manifestPath: "/x/.lore-setup-manifest.json" },
+ *   { written: [], skipped: [], backups: [], manifestPath: "/x/.lore-setup-manifest.json" },
  *   { targetDir: "/x", binPath: "/usr/local/bin/lore" },
  * );
  * // => "✓ lore setup complete → /x\n\nWritten: none — all 0 up-to-date\n..."
@@ -182,9 +140,6 @@ export function renderInstallReceipt(receipt: SetupReceipt, ctx: SetupRenderCtx)
     lines.push("");
   }
 
-  lines.push(renderMcpLine(receipt.mcp, ctx, "install"));
-  lines.push("");
-
   lines.push(`Manifest: ${receipt.manifestPath}`);
   lines.push("");
 
@@ -200,8 +155,7 @@ export function renderInstallReceipt(receipt: SetupReceipt, ctx: SetupRenderCtx)
  * terminal output — a preview of what `install()` WOULD do, with zero writes performed.
  *
  * @param plan - The dry-run decision to render.
- * @param ctx - Rendering context (`targetDir`, `binPath`; `mcpErrorTail` is unused here —
- *   `planInstall()` never touches the MCP registrar, see `setup-service.ts`'s invariant I4).
+ * @param ctx - Rendering context (`targetDir`, `binPath`).
  * @returns A deterministic, multi-line plain-text preview.
  * @throws Never.
  */
@@ -249,7 +203,7 @@ export function renderInstallPlan(plan: InstallPlan, ctx: SetupRenderCtx): strin
  * @param receipt - The uninstall outcome to render. `written` is always `[]` (nothing
  *   is "written" during a reversal); `skipped` holds paths removed with no backup;
  *   `backups` holds paths successfully restored FROM a backup.
- * @param ctx - Rendering context (`targetDir`, `binPath`, optional `mcpErrorTail`).
+ * @param ctx - Rendering context (`targetDir`, `binPath`).
  * @returns A deterministic, multi-line plain-text report.
  * @throws Never.
  */
@@ -265,9 +219,6 @@ export function renderUninstallReceipt(receipt: SetupReceipt, ctx: SetupRenderCt
 
   lines.push(`Restored from backup: ${receipt.backups.length}`);
   lines.push(...renderPathList(receipt.backups, "none"));
-  lines.push("");
-
-  lines.push(renderMcpLine(receipt.mcp, ctx, "uninstall"));
   lines.push("");
 
   lines.push(`Manifest removed: ${receipt.manifestPath}`);
@@ -372,8 +323,8 @@ function renderMemoryFileLines(judgement: MemoryFileJudgement): string[] {
  * terminal output.
  *
  * @param receipt - The `--project` scaffold outcome to render.
- * @param ctx - Rendering context; only `targetDir` is used (`binPath`/`mcpErrorTail`
- *   are meaningless here — `--project` never touches the MCP registrar).
+ * @param ctx - Rendering context; only `targetDir` is used (`binPath`
+ *   is meaningless here).
  * @returns A deterministic, multi-line plain-text report.
  * @throws Never.
  *

@@ -28,8 +28,6 @@ import {
   type VariableOutlet,
 } from "@lore/core";
 
-import { LORE_MCP_TOOL_NAMES } from "../adapters/mcp/tool-names.js";
-
 const ALL_OUTLETS: readonly VariableOutlet[] = [...OUTLET_IDS, "asset:install", "setup:settings-hook"];
 
 export const LORE_CONTEXT_VARIABLES: readonly ContextVariable[] = [
@@ -41,15 +39,6 @@ export const LORE_CONTEXT_VARIABLES: readonly ContextVariable[] = [
     value: () => String(CAPTURE_TAIL_CHARS),
     // AC-CV-6: spellings that restate the ceiling by hand in lore-owned prose/code.
     literalPatterns: [/\b4000[- ]char/, /\bmax\(4000\)/, /\btailChars\([^)]*,\s*4000\)/, /=\s*4000;/],
-  },
-  {
-    name: "mcp_tool_count",
-    source: "code",
-    outlets: ALL_OUTLETS,
-    describe: "Number of `lore_*` tools the MCP adapter registers (length of LORE_MCP_TOOL_NAMES).",
-    value: () => String(LORE_MCP_TOOL_NAMES.length),
-    // AC-CV-8: spellings that restate the tool count by hand ("23 `lore_*` tools").
-    literalPatterns: [/\b\d+ `?lore_\*`? tools/],
   },
   {
     name: "implementer_agent",

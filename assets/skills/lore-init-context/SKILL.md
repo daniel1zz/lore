@@ -82,7 +82,7 @@ When a directory contains **only subdirectories and no source files of its own**
 Rules:
 - Do **not** generate `<container>/CLAUDE.md` — there is no concrete code there to describe.
 - Push the module decision down to each child. Each child directory is evaluated independently with the same heuristics (≥3 files, architectural-layer name, etc.).
-- In the root Module Index, link to the children directly: `src/adapters/cli`, `src/adapters/mcp`, `src/adapters/http` — not `src/adapters`.
+- In the root Module Index, link to the children directly: `src/adapters/cli`, `src/adapters/http` — not `src/adapters`.
 
 If a container genuinely has a shared invariant ("all adapters call services via the App composition root, never the store directly"), put that one line in the **root Architecture section**, not in a non-existent `adapters/CLAUDE.md`.
 
@@ -112,8 +112,8 @@ Drift detected in CLAUDE.md vs current code:
 
 | Section            | Existing claim                              | Actual code                                          |
 |--------------------|---------------------------------------------|------------------------------------------------------|
-| What This Is       | "Single CLI backed by bun:sqlite"           | Also has Turso sync (TursoStore) + MCP + HTTP adapters |
-| Layer Stack        | cli / app.ts / service / store / core       | Missing: adapters/mcp, adapters/http, eval           |
+| What This Is       | "Single CLI backed by bun:sqlite"           | Also has Turso sync (TursoStore) + HTTP adapter |
+| Layer Stack        | cli / app.ts / service / store / core       | Missing: adapters/http, eval                     |
 | Service Layer table| 5 services listed                           | TreeCheckService present in code, not in table       |
 | StoreInterface     | "synchronous (bun:sqlite is sync)"          | Methods now return Promise<Result<...>>              |
 | Implementation Status | "Phase 1 underway, CLI is current target"| CLI complete (22 commands), Turso sync landed        |

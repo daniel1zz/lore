@@ -1,7 +1,7 @@
 /**
  * Tests for `loadTreeBlueprint` (`flows/blueprint-flow.ts`) — the shared
  * `lore.tree.yaml` load+parse extraction consumed by `adapters/cli/commands/
- * status.ts`, `adapters/cli/commands/review.ts`, and `adapters/mcp/tools.ts`.
+ * status.ts` and `adapters/cli/commands/review.ts`.
  * Pure fs + `@lore/core` (no `bun:sqlite`, no `App`), so this runs under
  * vitest. Uses a real mkdtemp temp dir per test — NEVER the repo's own
  * `.lore/`/`lore.tree.yaml` (project CLAUDE.md hard rule).

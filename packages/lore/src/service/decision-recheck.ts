@@ -4,7 +4,8 @@
  * Purpose: select the decisions that belong to a plan, re-verify each file / command source they rest on against git
  *   and a read-only re-run, and report findings; a wrong-when-written finding fails `snapshot_accuracy`.
  * Public surface: selectPlanDecisions, recheckDecision, recheckPlanDecisions, isRerunnableCommand,
- *   applyDecisionFindings, createWorktreeCommandRunner, CommandRunnerPort, DecisionRecheckDeps.
+ *   applyDecisionFindings, createWorktreeCommandRunner, CommandRunnerPort, DecisionRecheckDeps; the judged half:
+ *   buildJudgedDecisionInputs, judgedFindingsOf, rerunCitingCriteria, CriterionRerunPort.
  * Invariants:
  *   - Finding kinds: `wrong-when-written` (the source never said what the premise claims), `stale-since` (it said so
  *     at its commit, no longer on main), `unverifiable` (the commit or the answer cannot be had), `not-rerunnable`
@@ -13,6 +14,12 @@
  *     shifts the quoted lines is not a finding.
  *   - Only a wrong-when-written finding changes a verdict; the other kinds are listed on the review.
  *   - Weight tables are never selection targets (spec D4).
+ *   - Gate / score evidence that carries a stored `evidence_source` quote is compared with that quote exactly like a
+ *     premise (so a wrong-when-written evidence is detectable); only evidence with no stored quote derives the quote
+ *     from the pinned commit.
+ *   - The judged half (spec D6) adds findings of kinds `premise-not-supported`, `meaning-changed`, `better-option`
+ *     (the judge's objections) and `criterion-fails` (a criterion citing a reworded rule fails when re-run); like
+ *     the other non-wrong-when-written kinds they are listed and change no verdict.
  * Side-effect class: reads the store and git; the command runner (injected) is the only process spawner.
  *
  * Source: spec-a-decision-carrying-write-records-its-decision-on-its, Scope "Milestone re-check", D4, D5; BR-1480.
@@ -28,7 +35,9 @@ import {
   parseDecisionSource,
   specRuleChangesSchema,
   type DecisionFinding,
+  type DecisionGate,
   type DecisionRecord,
+  type DecisionScore,
   type DocId,
   type DocRecord,
   type LlmMilestoneOutput,
@@ -37,6 +46,7 @@ import {
   type Result,
   type VersionRecord,
 } from "@lore/core";
+import { judgedDecisionsAnswerSchema, type JudgedDecisionInput } from "../ai/milestone-review-template.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import type { GitPort } from "./rule-state-service.js";
 import { resolveVerifyEnv } from "./verify-spawn.js";
@@ -50,16 +60,22 @@ export interface CommandRunnerPort {
 export interface DecisionRecheckDeps {
   readonly store: Pick<
     StoreInterface,
-    "listDecisionVersions" | "queryAudit" | "findBySlug" | "find" | "findLinks" | "findVersions" | "listRuleRegistry"
+    "listDecisionVersions" | "queryAudit" | "findBySlug" | "find" | "findLinks" | "findVersions" | "listRuleRegistry" | "listAcCites"
   >;
   readonly git: GitPort;
   readonly runner: CommandRunnerPort;
 }
 
+/** What selection and the judged inputs need: the store only (git and the runner belong to the deterministic re-check). */
+export type DecisionStoreDeps = Pick<DecisionRecheckDeps, "store">;
+
 /** A decision version row with the address the findings name. */
 export interface SelectedDecision {
   readonly address: string;
   readonly record: DecisionRecord;
+  /** The document the decision's write changed, and the version it created. */
+  readonly docId: DocId;
+  readonly version: number;
 }
 
 const SHELL_META = /[;&|<>`$(){}\\\n\r]/;
@@ -150,8 +166,17 @@ async function checkCommandSource(
   return undefined;
 }
 
-/** A gate / score `evidence` string that is itself a `file:` or `cmd:` source is checked like a premise source. */
-async function checkEvidence(deps: DecisionRecheckDeps, evidence: string): Promise<{ kind: string; fact: string } | undefined> {
+/**
+ * A gate / score `evidence` string that is itself a `file:` or `cmd:` source is checked like a premise source. A stored
+ * `evidence_source` (lore read the quote at write time) is compared with that quote; without one the quote is derived
+ * from the pinned commit, which can only show the evidence went stale, never that it was wrong when written.
+ */
+async function checkEvidence(
+  deps: DecisionRecheckDeps,
+  part: Pick<DecisionGate | DecisionScore, "evidence" | "evidence_source">,
+): Promise<{ kind: string; fact: string } | undefined> {
+  if (part.evidence_source !== undefined) return checkFileSource(deps.git, part.evidence_source, part.evidence_source.quote);
+  const evidence = part.evidence;
   const parsed = parseDecisionSource(evidence.trim());
   if (!parsed.ok) return undefined;
   const source = parsed.source;
@@ -168,7 +193,7 @@ async function checkEvidence(deps: DecisionRecheckDeps, evidence: string): Promi
  * @param decision - the decision and its `<slug>@<version>` address
  * @returns the findings, in premise, gate, score order; empty when everything still holds
  */
-export async function recheckDecision(deps: DecisionRecheckDeps, decision: SelectedDecision): Promise<DecisionFinding[]> {
+export async function recheckDecision(deps: DecisionRecheckDeps, decision: Pick<SelectedDecision, "address" | "record">): Promise<DecisionFinding[]> {
   const findings: DecisionFinding[] = [];
   const add = (part: string, found: { kind: string; fact: string } | undefined): void => {
     if (found !== undefined) findings.push({ decision: decision.address, part, ...found });
@@ -179,13 +204,13 @@ export async function recheckDecision(deps: DecisionRecheckDeps, decision: Selec
     if (source.kind === "file") add(part, checkFileSource(deps.git, source, source.quote));
     else if (source.kind === "cmd") add(part, await checkCommandSource(deps.runner, source.command, source.expect));
   }
-  for (const gate of decision.record.gates ?? []) add(`gate ${gate.id}`, await checkEvidence(deps, gate.evidence));
-  for (const score of decision.record.scores ?? []) add(`score ${score.option}/${score.dimension}`, await checkEvidence(deps, score.evidence));
+  for (const gate of decision.record.gates ?? []) add(`gate ${gate.id}`, await checkEvidence(deps, gate));
+  for (const score of decision.record.scores ?? []) add(`score ${score.option}/${score.dimension}`, await checkEvidence(deps, score));
   return findings;
 }
 
 /** The docs whose writes are the plan's targets: its spec, the leaves of its rule change set, the ADR it implements. */
-async function targetDocIds(deps: DecisionRecheckDeps, spec: DocRecord): Promise<Result<DocId[], LoreError>> {
+async function targetDocIds(deps: DecisionStoreDeps, spec: DocRecord): Promise<Result<DocId[], LoreError>> {
   const ids = new Set<DocId>([spec.id]);
   const changes = specRuleChangesSchema.safeParse(spec.extra["rule_changes"] ?? []);
   if (!changes.success) return err(storeFailure(`${spec.slug} has an unreadable rule change set: ${changes.error.message}`));
@@ -215,7 +240,7 @@ async function targetDocIds(deps: DecisionRecheckDeps, spec: DocRecord): Promise
 
 /** One window per recorded claim of a plan task: the claiming run, from the claim to the task's archive (open if not archived). */
 async function claimWindows(
-  deps: DecisionRecheckDeps,
+  deps: DecisionStoreDeps,
   tasks: readonly DocRecord[],
 ): Promise<Result<{ run: string; from: string; to?: string }[], LoreError>> {
   const windows: { run: string; from: string; to?: string }[] = [];
@@ -243,7 +268,7 @@ async function claimWindows(
  * @param deps - the narrow store
  * @param bundle - the plan, its spec and tasks
  */
-export async function selectPlanDecisions(deps: DecisionRecheckDeps, bundle: PlanBundle): Promise<Result<SelectedDecision[], LoreError>> {
+export async function selectPlanDecisions(deps: DecisionStoreDeps, bundle: PlanBundle): Promise<Result<SelectedDecision[], LoreError>> {
   const docIds = bundle.spec !== undefined ? await targetDocIds(deps, bundle.spec) : ok<DocId[]>([]);
   if (!docIds.ok) return docIds;
   const windows = await claimWindows(deps, bundle.tasks);
@@ -259,12 +284,12 @@ export async function selectPlanDecisions(deps: DecisionRecheckDeps, bundle: Pla
     seen.add(key);
     const slug = await slugOf(deps, row, slugs);
     if (!slug.ok) return slug;
-    selected.push({ address: `${slug.value}@${row.version}`, record: row.decision });
+    selected.push({ address: `${slug.value}@${row.version}`, record: row.decision, docId: row.doc_id, version: row.version });
   }
   return ok(selected);
 }
 
-async function slugOf(deps: DecisionRecheckDeps, row: VersionRecord, cache: Map<string, string>): Promise<Result<string, LoreError>> {
+async function slugOf(deps: DecisionStoreDeps, row: VersionRecord, cache: Map<string, string>): Promise<Result<string, LoreError>> {
   if (row.slug !== undefined) return ok(row.slug);
   const cached = cache.get(row.doc_id);
   if (cached !== undefined) return ok(cached);
@@ -286,6 +311,182 @@ export async function recheckPlanDecisions(deps: DecisionRecheckDeps, bundle: Pl
   const findings: DecisionFinding[] = [];
   for (const decision of selected.value) findings.push(...(await recheckDecision(deps, decision)));
   return ok(findings);
+}
+
+// ─── the judged half (spec D6) ───────────────────────────────────────────────────────────────────────
+
+/** Re-runs one acceptance criterion of a spec; an `err` means it could not run (not that it failed). */
+export interface CriterionRerunPort {
+  readonly rerun: (spec: { readonly slug: string }, acId: string) => Promise<Result<{ readonly passed: boolean; readonly detail: string }, LoreError>>;
+}
+
+function describeSource(source: DecisionRecord["premises"][number]["source"]): string {
+  switch (source.kind) {
+    case "file":
+      return `${source.path}:${source.lines[0]}-${source.lines[1]}@${source.sha} reads "${source.quote}"`;
+    case "cmd":
+      return `\`${source.command}\` printed "${source.expect}"`;
+    case "issue":
+      return `issue #${String(source.number)}`;
+    case "doc":
+      return `document ${source.slug}${source.version !== undefined ? `@${String(source.version)}` : ""}`;
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
+  }
+}
+
+/** The rule a decision's `before` replaced: the rule of the written version whose statement changed from `before`. */
+async function locateReworded(
+  deps: DecisionStoreDeps,
+  decision: SelectedDecision,
+  before: string,
+): Promise<Result<{ readonly id: string; readonly after: string } | undefined, LoreError>> {
+  const versions = await deps.store.findVersions(decision.docId, { limit: 1000 });
+  if (!versions.ok) return versions;
+  const statements = (version: number): Map<string, string> => {
+    const row = versions.value.find((v) => v.version === version);
+    const rules = row?.extra["rules"];
+    const found = new Map<string, string>();
+    if (!Array.isArray(rules)) return found;
+    for (const rule of rules as unknown[]) {
+      const candidate = rule as { id?: unknown; statement?: unknown };
+      if (typeof candidate.id === "string" && typeof candidate.statement === "string") found.set(candidate.id, candidate.statement);
+    }
+    return found;
+  };
+  const prior = statements(decision.version - 1);
+  for (const [id, after] of statements(decision.version)) {
+    if (prior.get(id) === before && after !== before) return ok({ id, after });
+  }
+  return ok(undefined);
+}
+
+/** The live criteria that cite `ruleId`, with their spec slug. */
+async function citingCriteria(deps: DecisionStoreDeps, ruleId: string): Promise<Result<{ spec: string; ac: string }[], LoreError>> {
+  const cites = await deps.store.listAcCites();
+  if (!cites.ok) return cites;
+  const found: { spec: string; ac: string }[] = [];
+  for (const row of cites.value) {
+    if (row.rule_id !== ruleId) continue;
+    const spec = await deps.store.find(row.doc_id);
+    if (!spec.ok) return spec;
+    if (spec.value === null) continue;
+    const criteria = spec.value.extra["acceptance_criteria"];
+    const declared = Array.isArray(criteria) ? (criteria as { id?: unknown; superseded_by?: unknown }[]).find((c) => c.id === row.ac_id) : undefined;
+    // reason: a superseded criterion no longer speaks for the rule (adr-an-acceptance-criterion-retires-with-the-feature-it).
+    if (declared?.superseded_by !== undefined) continue;
+    found.push({ spec: spec.value.slug, ac: row.ac_id });
+  }
+  return ok(found);
+}
+
+/**
+ * The judge's view of the plan's decisions: each selected decision with its premises' stored quotes, its alternatives,
+ * and (for a rule statement change) the old and new statement and the criteria citing the rule.
+ *
+ * @param deps - the narrow store
+ * @param bundle - the plan, its spec and tasks
+ * @returns one input per selected decision (the SAME selection as the deterministic re-check); empty when none is recorded
+ */
+export async function buildJudgedDecisionInputs(deps: DecisionStoreDeps, bundle: PlanBundle): Promise<Result<JudgedDecisionInput[], LoreError>> {
+  const selected = await selectPlanDecisions(deps, bundle);
+  if (!selected.ok) return selected;
+  const inputs: JudgedDecisionInput[] = [];
+  for (const decision of selected.value) {
+    const base = {
+      address: decision.address,
+      reason: decision.record.reason,
+      premises: decision.record.premises.map((p) => ({ claim: p.claim, tier: p.tier, evidence: describeSource(p.source) })),
+      alternatives: decision.record.alternatives,
+    };
+    const before = decision.record.before;
+    if (before === undefined) {
+      inputs.push({ ...base, citing: [] });
+      continue;
+    }
+    const located = await locateReworded(deps, decision, before);
+    if (!located.ok) return located;
+    if (located.value === undefined) {
+      inputs.push({ ...base, unlocatedBefore: before, citing: [] });
+      continue;
+    }
+    const citing = await citingCriteria(deps, located.value.id);
+    if (!citing.ok) return citing;
+    inputs.push({ ...base, rule: { id: located.value.id, before, after: located.value.after }, citing: citing.value });
+  }
+  return ok(inputs);
+}
+
+function problem(message: string): { readonly ok: false; readonly error: string } {
+  return { ok: false, error: message };
+}
+
+/**
+ * Turn the judge's `decisions` answer into findings.
+ *
+ * @param inputs - what the judge was shown
+ * @param answer - the raw `decisions` value of the judge's JSON (undefined when it sent none)
+ * @returns the findings; `err(problem)` (a sentence shown to the judge on the retry) when a decision is unanswered or an answer is malformed
+ */
+export function judgedFindingsOf(inputs: readonly JudgedDecisionInput[], answer: unknown): Result<DecisionFinding[], string> {
+  if (inputs.length === 0) return ok([]);
+  const parsed = judgedDecisionsAnswerSchema.safeParse(answer);
+  if (!parsed.success) {
+    return problem(`\`decisions\` must be an array answering every recorded decision: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
+  }
+  const findings: DecisionFinding[] = [];
+  for (const input of inputs) {
+    const given = parsed.data.find((a) => a.decision === input.address);
+    if (given === undefined) return problem(`\`decisions\` has no answer for ${input.address}`);
+    if (given.premises_supported.length !== input.premises.length) {
+      return problem(`${input.address}: premises_supported has ${String(given.premises_supported.length)} entries for ${String(input.premises.length)} premises`);
+    }
+    if (input.rule !== undefined && given.meaning_unchanged == null) return problem(`${input.address}: meaning_unchanged is required for the reworded rule ${input.rule.id}`);
+    const why = given.reason != null && given.reason.length > 0 ? `: ${given.reason}` : "";
+    for (const [i, supported] of given.premises_supported.entries()) {
+      if (supported) continue;
+      findings.push({ decision: input.address, part: `premise ${String(i + 1)}`, kind: "premise-not-supported", fact: `the judge found premise ${String(i + 1)} ("${input.premises[i]?.claim ?? ""}") not supported by its source${why}` });
+    }
+    if (input.rule !== undefined && given.meaning_unchanged === false) {
+      findings.push({ decision: input.address, part: `rule ${input.rule.id}`, kind: "meaning-changed", fact: `the judge found the meaning of ${input.rule.id} changed by its rewording${why}` });
+    }
+    const better = given.better_option?.trim();
+    if (better !== undefined && better.length > 0) {
+      findings.push({ decision: input.address, part: "alternatives", kind: "better-option", fact: `the judge named a better option: ${better}${why}` });
+    }
+  }
+  return ok(findings);
+}
+
+/**
+ * Spec D6 re-run: for each reworded rule, run every criterion citing it and report a failing one (or one that cannot run).
+ *
+ * @param inputs - the judged inputs (only those with a located `rule` are re-run)
+ * @param port - runs one criterion in the milestone's execution context
+ * @returns findings in decision, criterion order; empty when every citing criterion passes
+ */
+export async function rerunCitingCriteria(inputs: readonly JudgedDecisionInput[], port: CriterionRerunPort): Promise<DecisionFinding[]> {
+  const findings: DecisionFinding[] = [];
+  for (const input of inputs) {
+    if (input.unlocatedBefore !== undefined) {
+      findings.push({ decision: input.address, part: "rule statement", kind: "unverifiable", fact: `no rule of the document replaced the statement "${input.unlocatedBefore}" at this version, so its citing criteria could not be found` });
+      continue;
+    }
+    if (input.rule === undefined) continue;
+    for (const criterion of input.citing) {
+      const part = `rule ${input.rule.id} / ${criterion.ac}`;
+      const ran = await port.rerun({ slug: criterion.spec }, criterion.ac);
+      if (!ran.ok) {
+        findings.push({ decision: input.address, part, kind: "unverifiable", fact: `${criterion.spec} ${criterion.ac} could not be re-run: ${describeError(ran.error)}` });
+      } else if (!ran.value.passed) {
+        const detail = ran.value.detail.length > 0 ? `: ${ran.value.detail}` : "";
+        findings.push({ decision: input.address, part, kind: "criterion-fails", fact: `${criterion.spec} ${criterion.ac} cites ${input.rule.id} and fails when re-run after its statement changed${detail}` });
+      }
+    }
+  }
+  return findings;
 }
 
 /**

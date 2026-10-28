@@ -1,5 +1,5 @@
 // @reads packages/lore/tests/unit/adapters/cli-anchor-resolution.bun.test.ts
-// @reads packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts
+// @reads packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts
 /**
  * `lore evidence` dropped-file guard — the protection that
  * task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a introduced,
@@ -74,7 +74,7 @@ import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // reason: both named files must EXIST: the MCP surface refuses a missing oracle file (field `command`) before the
 // under-match guard speaks (field `output_tail`), so a deleted file turns the parity cases red for the wrong reason.
 const BUN_NAMED_FILE = "packages/lore/tests/unit/adapters/cli-anchor-resolution.bun.test.ts";
-const VITEST_NAMED_FILE = "packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts";
+const VITEST_NAMED_FILE = "packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts";
 
 /** The one-runner command this repo's own evidence now records for a `.bun.test.ts` file. */
 const ONE_RUNNER_BUN_FILE_COMMAND = `bunx --bun vitest run ${BUN_NAMED_FILE}`;

@@ -50,7 +50,7 @@ import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wir
 import { err, ok, type DocId } from "@lore/core";
 import type { App } from "../../../app.js";
 import { createGitSuiteRunner } from "../assess-suite-runner.js";
-import { createAppStaleRefresher } from "../assess-stale-refresh.js";
+import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
@@ -287,7 +287,15 @@ export default defineLoreCommand({
           collectRecordedRanges(tasks),
         );
         const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
+        // reason: spec D6 — criteria citing a reworded rule are re-run through the same trusted runner as the stale
+        // refresh, in this invocation's checkout (the batch's throwaway main worktree is gone once the suite is measured).
+        const verifyRunner = app.verifyRunnerService;
+        const rerunCriterion =
+          verifyRunner === undefined
+            ? undefined
+            : createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() });
         return reviewService.review(ref, {
+          ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
           diffSource: describeDiffSource(diffSource),
           maxDiffChars: app.aiProviderService.assessMaxDiffChars,

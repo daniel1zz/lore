@@ -51,7 +51,7 @@ import {
   AiConfigSchema,
 } from "@lore/core";
 import { err, ok, type DecisionFinding, type PlanBundle, type Result, type LoreError } from "@lore/core";
-import { createWorktreeCommandRunner, recheckPlanDecisions } from "./service/decision-recheck.js";
+import { buildJudgedDecisionInputs, createWorktreeCommandRunner, recheckPlanDecisions } from "./service/decision-recheck.js";
 import type { CallerSurface, AiDefaultSource, InvocationIdentity, Invocation } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
@@ -1130,6 +1130,7 @@ function buildAppFromSqlite(
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
+      judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1569,6 +1570,7 @@ function buildAppFromTurso(
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
+      judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the

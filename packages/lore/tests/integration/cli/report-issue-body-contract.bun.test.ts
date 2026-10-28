@@ -22,16 +22,13 @@
  *   - the command stops printing the issue address / number
  */
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { LoreConfigSchema, NoOpTelemetry, parseIssueBody } from "@lore/core";
-import type { LoreConfig } from "@lore/core";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { parseIssueBody } from "@lore/core";
 
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../helpers/payload-gh-stub";
@@ -240,17 +237,6 @@ describe("BR-494 filed issue body", () => {
 
 // ─── AC-RI-2 — body sections, optional parts, prose repro refused before GitHub ───
 
-const intakeFileIssue = vi.fn();
-// reason: the MCP case below drives the in-process handler; the intake port is mocked so "posts nothing" is observable.
-// The compiled-binary cases above and below are separate processes and unaffected by this mock.
-vi.mock("../../../src/service/github-intake-port.js", () => ({
-  GitHubIntakePort: vi.fn().mockImplementation(() => ({
-    verifyTarget: vi.fn(),
-    searchDuplicates: vi.fn(),
-    fileIssue: intakeFileIssue,
-  })),
-}));
-
 /** A filing's inputs minus the optional parts; each AC-RI-2 case adds its own. */
 function baseArgs(title: string): string[] {
   return [
@@ -369,45 +355,5 @@ describe("AC-RI-2", () => {
     expect(result.stderr).toContain("with");
     expect(result.stderr).toContain("--repro-steps");
     expect(body).toBe("");
-  });
-
-  it("the same prose through the MCP handler returns VALIDATION_ERROR and posts nothing", async () => {
-    const { registerTools } = await import("../../../src/adapters/mcp/tools.js");
-    const { liveInvocation } = await import("../../live-invocation.js");
-    const server = new McpServer({ name: "test", version: "0.0.0" });
-    const config = LoreConfigSchema.parse({
-      project: { name: "test", author: "test" },
-      feedback: { upstream: { repo: FAKE_REPO } },
-    }) as LoreConfig;
-    // reason: the check refuses before the handler touches the app, so a bare app stub is enough for this case.
-    const app = { warn: () => undefined, close: () => undefined, telemetry: new NoOpTelemetry() } as never;
-    registerTools(server, app, () => config, liveInvocation());
-    const tools = (
-      server as unknown as {
-        _registeredTools: Record<string, { handler: (args: unknown, extra: unknown) => Promise<CallToolResult> }>;
-      }
-    )._registeredTools;
-    const tool = tools["lore_report_issue"];
-    if (tool === undefined) throw new Error("lore_report_issue is not registered");
-    const result = await tool.handler(
-      {
-        by: ACTOR,
-        title: "RI-2 mcp prose",
-        description: DESCRIPTION,
-        expected: EXPECTED,
-        actual: ACTUAL,
-        severity: "high",
-        category: "regression",
-        repro_command: PROSE_REPRO,
-      },
-      {},
-    );
-    expect(result.isError).toBe(true);
-    const first = result.content[0];
-    const error = JSON.parse(first !== undefined && first.type === "text" ? first.text : "{}") as Record<string, string>;
-    expect(error["code"]).toBe("VALIDATION_ERROR");
-    expect(error["field"]).toBe("repro_command");
-    expect(error["message"]).toContain("program_not_found");
-    expect(intakeFileIssue).not.toHaveBeenCalled();
   });
 });
