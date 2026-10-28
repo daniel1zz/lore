@@ -76,7 +76,7 @@ describe("AC-DX-1: an agent's anchor removal on a non-draft document carries a d
     spec = makeSpec("DX approved spec");
     draftSpec = makeSpec("DX draft spec");
     humanSpec = makeSpec("DX human spec");
-    knowledge = corpus.slugOf(corpus.setup(["create", "knowledge", "--title", "DX approved knowledge", "--no-ai", "--content", "a fact about things"]));
+    knowledge = corpus.slugOf(corpus.setup(["create", "knowledge", "--sub-type", "reference", "--title", "DX approved knowledge", "--no-ai", "--content", "a fact about things"]));
     for (const slug of [spec, draftSpec, humanSpec, knowledge]) {
       corpus.setup(["anchor", "add", slug, "src/a.ts#Alpha", "src/b.ts#Beta"]);
     }
