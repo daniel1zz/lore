@@ -310,7 +310,7 @@ export const GateCheckpointConfigSchema = z
      * `"corpus-write"` map key (not a real `GateCheckpoint` member; `@lore/core`
      * does not import that type — see {@link resolveGateEnabled}'s own `checkpoint`
      * param doc) chosen to match the guard's own refusal token literal,
-     * `gate:corpus-write:foreign-provenance` (pinned equal across CLI/MCP by
+     * `gate:corpus-write:foreign-provenance` (pinned by
      * AC-CP-5(a)). Still nested on `GateCheckpointConfigSchema` — reusing the
      * SAME per-checkpoint-shaped schema, rather than a bespoke top-level field,
      * is the "exact shape" D4 calls for.

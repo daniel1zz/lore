@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../helpers/cli-live-rule";
+import { DECIDED_FLAGS } from "../helpers/decision-flags";
 
 interface RunResult {
   readonly stdout: string;
@@ -140,7 +141,7 @@ describe("lore rule propose <spec> amend", () => {
     const run = await lore([
       "rule", "propose", spec, "amend", id,
       "--statement", "refined wording of the proposed rule",
-      "--correction", "wording was patch-shaped; same intent",
+      "--correction", "wording was patch-shaped; same intent", ...DECIDED_FLAGS,
     ]);
     expect(run.exitCode).toBe(0);
     expect(text(run)).toContain(id);

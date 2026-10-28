@@ -13,7 +13,7 @@
  * Invariants:
  *   - Opt-out: a start whose env carries `LORE_TEST_IDENTITY=none` is left exactly as written (the variable is removed from
  *     the child's env). A test of the REFUSAL, of a human session, or of the unregistered-run rule uses it.
- *   - A start whose env already carries a run value, starts the MCP server, or is not a `lore` start is never touched.
+ *   - A start whose env already carries a run value, or is not a `lore` start is never touched.
  *   - Only under the Bun runtime (registration needs `bun:sqlite`); the few files vitest runs under Node are untouched.
  *   - Registration writes only the `runs` registry of the corpus found from `cwd`, and nothing when there is no corpus yet.
  *
@@ -88,7 +88,7 @@ export function rewriteLoreStart(argv: readonly string[], options: { cwd?: unkno
 
   const loreArgs = argv.slice(entryIndex + 1);
   // reason: a start that already carries a run value is the test's own business and is never touched.
-  if (loreArgs.includes("--mcp-server") || (env[HARNESS_RUN_ENV] ?? "") !== "") return undefined;
+  if ((env[HARNESS_RUN_ENV] ?? "") !== "") return undefined;
 
   // reason: the outer Claude Code session's own id (inherited in process.env) never names a test writer.
   const session = testSessionOf(env);

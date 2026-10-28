@@ -53,6 +53,47 @@ export interface GitPort {
   changedSince(sha: string, paths: string[]): Result<boolean, LoreError>;
   /** The subset of `paths` that `git diff --name-only <sha> HEAD -- <paths>` lists; sorted; empty = unchanged. */
   changedPaths(sha: string, paths: string[]): Result<string[], LoreError>;
+  /** `git show <rev>:<path>`, telling a commit git does not hold from a path the commit does not have. */
+  showFile(rev: string, path: string): Result<ShownFile, LoreError>;
+}
+
+/**
+ * What `git show <rev>:<path>` found. `unreachable` = `rev` names no commit in this repository (never fetched, or
+ * pruned); `path-absent` = the commit exists but holds no such path. Only an `err` means git itself could not answer.
+ */
+export type ShownFile =
+  | { readonly state: "present"; readonly content: string }
+  | { readonly state: "path-absent" }
+  | { readonly state: "unreachable" };
+
+/** Raw outcome of one git call, structurally the same as `OwnDiffGitOutcome`. */
+export interface GitShowOutcome {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/**
+ * The single implementation of "file content at a revision" (shared by {@link GitPort.showFile} and the own-diff
+ * judgment): probes the commit first so an unreachable commit is never read as an absent path.
+ *
+ * @param runGit - runs `git <args>` and never throws
+ * @param rev - a commit-ish
+ * @param path - repo-root-relative path
+ * @returns the content, `path-absent`, or `unreachable`; `err` when the commit probe itself could not run
+ */
+export function showFileAtRevision(
+  runGit: (args: readonly string[]) => GitShowOutcome,
+  rev: string,
+  path: string,
+): Result<ShownFile, LoreError> {
+  const commit = runGit(["cat-file", "-e", `${rev}^{commit}`]);
+  if (commit.status === null) return err({ code: "STORE_ERROR", message: `git unavailable for ${rev}: ${commit.stderr.trim()}` });
+  if (commit.status !== 0) return ok({ state: "unreachable" });
+  const shown = runGit(["show", `${rev}:${path}`]);
+  if (shown.status === null) return err({ code: "STORE_ERROR", message: `git unavailable for ${rev}:${path}: ${shown.stderr.trim()}` });
+  if (shown.status !== 0) return ok({ state: "path-absent" });
+  return ok({ state: "present", content: shown.stdout });
 }
 
 export type RuleVerification = "contradicted" | "stale" | "verified" | "unverified" | "unknown";

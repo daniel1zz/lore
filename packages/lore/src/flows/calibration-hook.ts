@@ -1,7 +1,7 @@
 /**
  * Implicit calibration capture hook — surface-neutral shared calling-layer module
  * invoked after a human's approve/reject decision succeeds, regardless of which
- * adapter (CLI, HTTP dashboard, MCP) carried that decision (SPEC-035 §3 D3,
+ * adapter (CLI, HTTP dashboard) carried that decision (SPEC-035 §3 D3,
  * SPEC-033 F1). Pairs the human decision against the doc's latest AI review
  * judgment (if any whose `doc_version` matches the version the human just acted
  * on) and records a `confirmed`/`overridden` calibration outcome via
@@ -18,8 +18,8 @@
  *   calls"). This module is NOT a service — it lives in `flows/`, a thin
  *   sequencing helper one level above the service layer, owned by no single
  *   adapter. Every adapter that adjudicates documents (CLI `approve`/`reject`,
- *   HTTP `/api/dashboard/docs/:id/approve|reject`, and any future MCP
- *   adjudication tool) calls THIS SAME function with its own
+ *   HTTP `/api/dashboard/docs/:id/approve|reject`, and any future
+ *   adjudication surface) calls THIS SAME function with its own
  *   `{judgmentService, telemetry}` — never a re-implementation, never a copy.
  *   The product is human-friendly AND AI-friendly: adjudication on ANY surface
  *   must feed the SAME calibration loop, or that surface silently starves the
@@ -39,7 +39,7 @@
  *   calibration record returns a LoreError) is NEVER silently dropped: it
  *   prints `warning: <approved|rejected>, but calibration record failed: <msg>`
  *   to stderr, records one telemetry event, and (when the caller supplied one)
- *   invokes `onWarning(message)` so an HTTP/MCP caller can surface it in its own
+ *   invokes `onWarning(message)` so an HTTP caller can surface it in its own
  *   response shape (e.g. `{ warnings: string[] }`) — while leaving the calling
  *   command's outcome (exit code / HTTP status) untouched. `onWarning` is
  *   strictly additive: omitting it (every pre-SPEC-033 CLI call site) preserves
@@ -74,7 +74,7 @@ export interface CalibrationHookDeps {
    * Optional partial-failure observer (SPEC-033 F1) — called with the same
    * human-readable message that is printed to stderr, ONLY on a genuine IO
    * failure branch (never on a silent no-op/skip). Omit for CLI call sites
-   * (stderr is the sole channel there); HTTP/MCP adapters pass one to collect
+   * (stderr is the sole channel there); the HTTP adapter passes one to collect
    * the message into their own response's `warnings: string[]`.
    */
   onWarning?: (message: string) => void;

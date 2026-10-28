@@ -1,7 +1,7 @@
 // @spawns packages/lore/src/index.ts
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
- * Architecture tree on the CLI + MCP surfaces (Baseline slice 3a, AC-BLS3-1 / BR-979), over a throwaway corpus.
+ * Architecture tree on the CLI surface (Baseline slice 3a, AC-BLS3-1 / BR-979), over a throwaway corpus.
  *
  * Spec: spec-baseline-slice-3a-architecture-tree-baseline-root (Design -> Architecture tree):
  *   - `lore baseline add <parent> --tree architecture --node root|section|module-card|standard|debt-registry`;
@@ -9,7 +9,6 @@
  *   - `lore rule add` on a standard allocates AS-n, on a debt-registry AD-n; the four-part standard flags
  *     (`--current-reality --target-rule --current-exception AD-n... --migration`) are stored all-or-nothing;
  *     `lore rule set` edits the four parts;
- *   - MCP `lore_baseline_add` / `lore_rule_add` / `lore_rule_set` accept the same fields;
  *   - `lore baseline tree` shows which tree each node belongs to.
  *
  * CONTRACT (the spec leaves these open):
@@ -21,24 +20,19 @@
  * The repo's own `.lore/` is never touched; the corpus is an `mkdtemp` outside the repo.
  *
  * Dimensions: HAPPY (5 node kinds, AS-1/AD-1), NEGATIVE (partial parts, AD-99, wrong parent / kind / tree),
- * STATE (set edits parts), REGRESSION (business add/tree unchanged), BOUNDARY (all-or-nothing), MCP acceptance.
+ * STATE (set edits parts), REGRESSION (business add/tree unchanged), BOUNDARY (all-or-nothing).
  *
  * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1
  */
 
-import { liveInvocation, LIVE_TEST_RUN } from "../../live-invocation.js";
-import { registerTestRun } from "../../helpers/test-run-identity.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
-import { LoreBaselineAddSchema, LoreRuleAddSchema, LoreRuleSetSchema, registerTools } from "../../../src/adapters/mcp/tools.js";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 
 setDefaultTimeout(300_000);
 
@@ -162,7 +156,7 @@ describe("lore rule add on architecture nodes", () => {
     const r = runLore(
       ["rule", "add", standard, "--statement", "Services return Result", ...RULE,
         "--current-reality", "some services throw", "--target-rule", "all return Result",
-        "--current-exception", "AD-1", "--migration", "convert per module", "--json"],
+        "--current-exception", "AD-1", "--migration", "convert per module", "--json", ...DECIDED_FLAGS],
       dir,
     );
     expect(r.exitCode).toBe(0);
@@ -189,7 +183,7 @@ describe("lore rule add on architecture nodes", () => {
 
   it("--current-exceptions-none stores an empty exception list; combined with --current-exception exits 2", () => {
     const four = ["--current-reality", "r", "--target-rule", "t", "--migration", "m"];
-    const none = runLore(["rule", "add", standard, "--statement", "Clean standard", ...RULE, ...four, "--current-exceptions-none"], dir);
+    const none = runLore(["rule", "add", standard, "--statement", "Clean standard", ...RULE, ...four, "--current-exceptions-none", ...DECIDED_FLAGS], dir);
     expect(none.exitCode).toBe(0);
     expect(none.stdout).toContain("Added AS-");
     const both = runLore(["rule", "add", standard, "--statement", "Both", ...RULE, ...four, "--current-exceptions-none", "--current-exception", "AD-1"], dir);
@@ -206,7 +200,7 @@ describe("lore rule add on architecture nodes", () => {
 
 describe("lore rule set edits the four parts", () => {
   it("updates current_reality and migration on AS-1, leaving target_rule", () => {
-    const r = runLore(["rule", "set", "AS-1", "--current-reality", "reality v2", "--migration", "migration v2", "--json"], dir);
+    const r = runLore(["rule", "set", "AS-1", "--current-reality", "reality v2", "--migration", "migration v2", "--json", ...DECIDED_FLAGS], dir);
     expect(r.exitCode).toBe(0);
     const rule = (JSON.parse(r.stdout) as { data: { rule: { current_reality: string; migration: string; target_rule: string } } }).data.rule;
     expect(rule.current_reality).toBe("reality v2");
@@ -216,7 +210,7 @@ describe("lore rule set edits the four parts", () => {
 
   it("replaces current_exceptions; a non-live id exits 4", () => {
     expect(runLore(["rule", "set", "AS-1", "--current-exception", "AD-99"], dir).exitCode).toBe(4);
-    expect(runLore(["rule", "set", "AS-1", "--current-exception", "AD-1"], dir).exitCode).toBe(0);
+    expect(runLore(["rule", "set", "AS-1", "--current-exception", "AD-1", ...DECIDED_FLAGS], dir).exitCode).toBe(0);
   });
 });
 
@@ -228,51 +222,5 @@ describe("lore baseline tree shows each node's tree", () => {
     const json = (JSON.parse(mustRun(["baseline", "tree", "--json"], dir).stdout) as { data: { slug: string; tree: string }[] }).data;
     expect(json.find((e) => e.slug === archRoot)?.tree).toBe("architecture");
     expect(json.find((e) => e.slug === businessRoot)?.tree).toBe("business");
-  });
-});
-
-describe("MCP tools accept the architecture fields", () => {
-  it("LoreBaselineAddSchema keeps `tree` and rejects an unknown tree", () => {
-    const parsed = LoreBaselineAddSchema.parse({ parent: "p", tree: "architecture", node: "standard", label: "l", title: "t", by: "a" });
-    expect((parsed as Record<string, unknown>)["tree"]).toBe("architecture");
-    expect(LoreBaselineAddSchema.safeParse({ parent: "p", tree: "bogus", node: "root", label: "l", title: "t", by: "a" }).success).toBe(false);
-  });
-
-  it("LoreRuleAddSchema and LoreRuleSetSchema keep the four parts", () => {
-    const four = { current_reality: "r", target_rule: "t", current_exceptions: ["AD-1"], migration: "m" };
-    const add = LoreRuleAddSchema.parse({ leaf: "l", statement: "s", confidence: "established", enforced_by: "guaranteed", examples: ["e"], by: "a", ...four });
-    expect(add).toMatchObject(four);
-    expect(LoreRuleSetSchema.parse({ rule: "AS-1", by: "a", ...four })).toMatchObject(four);
-  });
-
-  it("lore_baseline_add, lore_rule_add and lore_rule_set run end-to-end with the architecture fields", async () => {
-    const prevCwd = process.cwd();
-    const prevHome = process.env["HOME"];
-    process.chdir(dir);
-    process.env["HOME"] = dir;
-    const { app } = loadLoreApp({ surface: "http", inv: liveInvocation() });
-    try {
-      const server = new McpServer({ name: "arch", version: "0.0.0" });
-      registerTools(server, app, undefined, liveInvocation());
-      type Handler = (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult>;
-      const tools = (server as unknown as { _registeredTools: Record<string, { handler: Handler }> })._registeredTools;
-      // reason: an MCP write naming a run is verified at its first write (BR-1351); the run must be known to this corpus
-      registerTestRun(dir, LIVE_TEST_RUN);
-      const std2 = await tools["lore_baseline_add"]!.handler({ harness_run: LIVE_TEST_RUN, parent: archSection, tree: "architecture", node: "standard", label: "std2", title: "MCP Standard", by: ACTOR }, {});
-      expect(std2.isError).toBeFalsy();
-      const slug = (JSON.parse((std2.content[0] as { text: string }).text) as { slug: string }).slug;
-      const added = await tools["lore_rule_add"]!.handler(
-        { harness_run: LIVE_TEST_RUN, leaf: slug, statement: "MCP standard", confidence: "established", enforced_by: "guaranteed", examples: ["e"], by: ACTOR,
-          current_reality: "r", target_rule: "t", current_exceptions: ["AD-1"], migration: "m" }, {});
-      expect(added.isError).toBeFalsy();
-      expect((added.content[0] as { text: string }).text).toContain("AS-");
-      const set = await tools["lore_rule_set"]!.handler({ harness_run: LIVE_TEST_RUN, rule: "AS-1", by: ACTOR, migration: "mcp migration" }, {});
-      expect(set.isError).toBeFalsy();
-    } finally {
-      app.close();
-      process.chdir(prevCwd);
-      if (prevHome === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = prevHome;
-    }
   });
 });

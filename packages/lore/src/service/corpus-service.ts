@@ -95,7 +95,9 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
-import { findTraceActorFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
+import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
+import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
+import { pendingRevisionsOf } from "./baseline-items.js";
 import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -281,7 +283,7 @@ export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
  * writes an audit-trail `actor` and/or a `created_by` field (`create`/`set`/`delete`).
  *
  * - `by` — explicit actor value threaded from the caller's own resolution (CLI's
- *   `resolveActor`, an MCP tool's required `by` arg, or an HTTP bearer token's
+ *   `resolveActor`, an adapter-supplied actor, or an HTTP bearer token's
  *   API-key name). `undefined` falls through to `resolveWriteActor`'s env chain
  *   (`resolveActorWithSource`: session tier → OS username).
  * - `attributeCreatedBy` — when `true`, the SAME resolved actor ALSO stamps
@@ -318,6 +320,12 @@ export interface SetOptions extends WriteActorOpts {
    * `details.reason`. A note only — it relaxes no gate. Unlike `correction.reason` it needs no locked record.
    */
   readonly reason?: string;
+  /**
+   * The decision the writer supplies for this write (`lore set --reason --premise --alt ...`): required of an agent's
+   * change to a spec or ADR that is not a draft, or to a baseline node with an approved version (BR-1476), and
+   * recorded on the version row the write creates. Refused when incomplete; absent on every other write.
+   */
+  readonly decision?: DecisionDraft;
   /**
    * Plan slug (or id) a spec DEPRECATION is made for (`--plan`): names which of several claimed plans owns the
    * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
@@ -441,8 +449,14 @@ function findDedicatedExtraKeyViolation(
   for (const entry of guarded) {
     // reason: DC2-8 — a sub_type-scoped key (knowledge `uat`) guards only docs of that sub_type.
     if (entry.subType !== undefined && existing.extra["sub_type"] !== entry.subType) continue;
-    if (!jsonDeepEqual(existing.extra[entry.key], incomingExtra[entry.key])) {
-      return { key: entry.key, writer: entry.writer };
+    // reason: a `within` entry guards one field of a nested object (`milestone_review.traced_decisions`), not the whole object.
+    const fieldOf = (extra: Record<string, unknown>): unknown => {
+      if (entry.within === undefined) return extra[entry.key];
+      const outer = extra[entry.within];
+      return typeof outer === "object" && outer !== null ? (outer as Record<string, unknown>)[entry.key] : undefined;
+    };
+    if (!jsonDeepEqual(fieldOf(existing.extra), fieldOf(incomingExtra))) {
+      return { key: entry.within === undefined ? entry.key : `${entry.within}.${entry.key}`, writer: entry.writer };
     }
   }
   return null;
@@ -1241,6 +1255,45 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
   /** Present iff {@link setRuleChangeLanding} was called. */
   private ruleChangeLanding: RuleChangeLandingPort | undefined;
+
+  /**
+   * Arms the decision gate for `set` (BR-1476): an agent's change to a non-draft spec, ADR or baseline node is refused
+   * without a complete decision. Called once by each `app.ts` composition root; absent (every bare
+   * `new CorpusService(...)`) means ungated, exactly as before the gate existed.
+   */
+  setDecisionGate(gate: DecisionGate): void {
+    this.decisionGate = gate;
+  }
+
+  private decisionGate: DecisionGate | undefined;
+
+  /**
+   * The decision of a `set` write: `ok(undefined)` when none is required and none was supplied, the quoted record
+   * otherwise, or the `decision` refusal (exit 4). Spec, ADR and baseline targets only; a status-only write, a resend
+   * of the stored values and a draft carry none.
+   */
+  private async resolveSetDecision(
+    existing: DocRecord,
+    patch: DocPatch,
+    draft: DecisionDraft | undefined,
+  ): Promise<Result<DecisionRecord | undefined, LoreError>> {
+    const gate = this.decisionGate;
+    if (gate === undefined) return ok(undefined);
+    if (existing.type !== "spec" && existing.type !== "adr" && existing.type !== "baseline") return ok(undefined);
+    const changesMoreThanStatus =
+      (patch.title !== undefined && patch.title !== existing.title) ||
+      (patch.content !== undefined && bodyDiffers(existing.content, patch.content)) ||
+      (patch.priority !== undefined && patch.priority !== existing.priority) ||
+      (patch.slug !== undefined && patch.slug !== existing.slug) ||
+      (patch.tags !== undefined && !isDeepStrictEqual(patch.tags, existing.tags)) ||
+      (patch.extra !== undefined && !isDeepStrictEqual(patch.extra, existing.extra));
+    // reason: a baseline node's status is derived from its pending items (BR-1339), so "not a draft" for a node means it
+    // has an approved version: a pending revision does not make it a draft, only the never-approved marker does.
+    const targetIsDraft =
+      existing.type === "baseline" ? pendingRevisionsOf(existing).node?.initial === true : existing.status === "draft";
+    const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft, changesMoreThanStatus });
+    return gate.judgeChecked({ required, draft, kind: "document revision" });
+  }
 
   /**
    * Hands the corpus service the approval path a `set(status: "approved")` must take (BR-1071): the
@@ -2222,7 +2275,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         field: "extra.sub_type",
         message:
           'knowledge sub_type "handoff" may only be created via `lore handoff` — ' +
-          "direct creation through `lore create` / `lore_create` is not permitted",
+          "direct creation through `lore create` is not permitted",
         value: "handoff",
         rule: "BR-704",
       });
@@ -2243,7 +2296,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         field: "extra.sub_type",
         message:
           'knowledge sub_type "uat" may only be created via `lore uat record` — ' +
-          "direct creation through `lore create` / `lore_create` is not permitted",
+          "direct creation through `lore create` is not permitted",
         value: "uat",
         rule: "BR-705",
       });
@@ -2276,7 +2329,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         field: "extra.sub_type",
         message:
           'knowledge sub_type "milestone-review" may only be created by `lore assess` — ' +
-          "direct creation through `lore create` / `lore_create` is not permitted",
+          "direct creation through `lore create` is not permitted",
         value: MILESTONE_REVIEW_SUB_TYPE,
         rule: "BR-1372",
       });
@@ -3846,6 +3899,11 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // (when `opts.attributeCreatedBy` opts in — see WriteActorOpts) and the audit
     // entry's `actor` below — a single source of truth for "who made this write",
     // never two independently-resolved values that could disagree.
+    // BR-1476 — refused before anything is written: the last check of this method, so a patch refused on its own
+    // merits (a dedicated key, a bad slug, a gate) is refused for that reason first.
+    const decisionOutcome = await this.resolveSetDecision(existing, parsedPatch.data, opts?.decision);
+    if (!decisionOutcome.ok) return decisionOutcome;
+    const decision = decisionOutcome.value;
     const resolvedActor = this.resolveWriteActor(opts?.by);
     const versionRecord: VersionRecord = {
       doc_id: existing.id,
@@ -3870,6 +3928,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       // this row needing a special before/after carve-out.
       slug: docPatch.slug ?? existing.slug,
       ...(correction !== undefined ? { change_summary: `Correction: ${correction.reason.trim()}` } : {}),
+      ...(decision !== undefined ? { decision } : {}),
     };
 
     // SPEC-084 §Changed semantics "Kind-flip semantics" — a spec_kind

@@ -9,8 +9,8 @@
 A single CLI binary (`lore`) that:
 
 - **Stores** a typed, navigable corpus of project knowledge in local SQLite (`.lore/`), with full-text search, version history, and a review workflow
-- **Enforces** workflow discipline through deterministic gates that intercept non-conforming writes at the service layer — so the CLI, the MCP server, and the HTTP API are all governed identically
-- **Exposes** the same surface to AI agents (MCP server), humans (CLI + local web dashboard), and automation (HTTP API with bearer auth)
+- **Enforces** workflow discipline through deterministic gates that intercept non-conforming writes at the service layer — so the CLI and the HTTP API are both governed identically
+- **Exposes** the same surface to AI agents and humans (CLI + local web dashboard), and to automation (HTTP API with bearer auth)
 - **Syncs** the corpus across machines and teammates via an optional Turso embedded replica
 - **Centers** on the **PRD-as-living-root** model — every doc is reachable through a tree rooted at the product PRD, via MDX placeholder components that resolve to live subtrees on read
 
@@ -37,7 +37,7 @@ Put `dist/lore` on your `PATH` (a symlink works) to get the `lore` command every
 
 ## Quick Start
 
-One-time machine setup — installs the Claude Code integration (MCP registration, agents, skills) into `~/.claude`:
+One-time machine setup — installs the Claude Code integration (agents, skills, hooks) into `~/.claude`:
 
 ```bash
 lore setup --dry-run   # print the install plan, zero writes
@@ -104,7 +104,6 @@ Built for several agents working one repository at once:
 | Surface | Entry | For |
 |---|---|---|
 | CLI | `lore <command>` | humans, scripts, agents shelling out |
-| MCP server | `lore --mcp-server` | Claude Code, Cursor, and other MCP clients |
 | HTTP API | `lore serve` | automation, remote access (bearer-token auth) |
 | Web dashboard | `lore dashboard` | browsing and editing the corpus in a browser |
 
@@ -118,7 +117,6 @@ Set `sync.enabled: true` plus a `remote_url` and a `LORE_SYNC_TOKEN`, and the st
 
 ```
 packages/lore/src/adapters/cli/    ← citty CLI (default entry)
-packages/lore/src/adapters/mcp/    ← MCP stdio server
 packages/lore/src/adapters/http/   ← Bun.serve HTTP API
 packages/lore/src/service/         ← business logic + gates
 packages/lore/src/store/           ← async StoreInterface (SQLite / Turso / InMemory)

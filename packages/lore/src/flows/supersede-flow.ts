@@ -1,9 +1,9 @@
 /**
  * Supersede orchestration — composes `CorpusService.create` THEN
- * `ValidityService.invalidate` for `lore create <type> --supersedes <old>` (CLI) and
- * MCP `lore_create.supersedes` (SPEC-043 §Design Decisions D11). Mirrors
+ * `ValidityService.invalidate` for `lore create <type> --supersedes <old>` (CLI)
+ * (SPEC-043 §Design Decisions D11). Mirrors
  * `calibration-hook.ts`'s shape: a thin, surface-neutral sequencing helper living in
- * `flows/` (above the service layer, below the adapters) so CLI and MCP call the SAME
+ * `flows/` (above the service layer, below the adapters) so every caller uses the SAME
  * function rather than each re-implementing the two-call sequence.
  *
  * Public surface:
@@ -12,7 +12,7 @@
  *     invalidate `supersedes` naming the newly created doc as its successor.
  *   renderSupersedeRepairMessage(supersedesInput, newDocSlug) — the pinned D11 repair
  *     command string, shared by every caller so the wording can never drift between
- *     the CLI's stderr output and MCP's error-content payload.
+ *     the CLI's stderr output and any other error payload.
  *   SUPERSEDE_CREATE_ELIGIBLE_TYPES — the target-type eligibility set this function
  *     enforces (see its own doc comment for the eligibility rationale).
  *
@@ -20,7 +20,7 @@
  *   lives HERE, inside `createWithSupersedes`, and NOWHERE ELSE
  *   (task-mcp-lore-create-supersedes-still-creates-then-fails-the). It was originally
  *   fixed one layer up, inside the CLI's `commands/create.ts` — ABOVE this shared seam
- *   — so the MCP surface, which already called this function directly, never inherited
+ *   — so a surface that already called this function directly never inherited
  *   it and kept exhibiting the pre-fix create-then-fail behavior. A defect fixed on an
  *   adapter that documents a shared seam beneath it belongs IN the seam, not above it;
  *   this invariant is the mechanization of that lesson, not just its record.
@@ -28,8 +28,8 @@
  *   reintroduces the silent-rot hazard the whole spec exists to close). When `create()`
  *   succeeds but `invalidate()` fails, this function still returns `ok()` — the created
  *   doc is real and must not be hidden from the caller — but `SupersedeOrchestrationResult
- *   .supersedeError` carries the invalidate failure so CLI/MCP callers can report a
- *   nonzero exit / `isError` response naming the exact repair command via
+ *   .supersedeError` carries the invalidate failure so callers can report a
+ *   nonzero exit naming the exact repair command via
  *   {@link renderSupersedeRepairMessage}.
  * @invariant `ValidityService` remains the SOLE mutator of `extra.validity` (D2) — this
  *   function never touches it directly, only sequences the three already-existing
@@ -56,7 +56,7 @@ import type { InvalidateOpts, InvalidateResult } from "../service/validity-servi
 
 /**
  * Doc types `--supersedes`/`supersedes` (the CREATE-time compose flag on
- * `lore create <type> --supersedes <old>` and MCP `lore_create.supersedes`) may
+ * `lore create <type> --supersedes <old>`) may
  * target — DELIBERATELY NARROWER than `ValidityService.VALIDITY_ELIGIBLE_TYPES`
  * (which, since task-a-task-cannot-be-retracted-supersedes-emits-a-repair, also
  * accepts `task` for the STANDALONE `lore invalidate <task>` retraction path). This is
@@ -72,8 +72,8 @@ import type { InvalidateOpts, InvalidateResult } from "../service/validity-servi
  * Lives HERE, in the shared flow, and ONLY here (moved out of `commands/create.ts` by
  * task-mcp-lore-create-supersedes-still-creates-then-fails-the) — the CLI's original
  * Defect-1 fix declared and checked this constant locally, one layer above this
- * module, which is exactly why the MCP surface (already calling `createWithSupersedes`
- * directly) never saw the check. A future adapter that needs this predicate calls
+ * module, which is exactly why a surface already calling `createWithSupersedes`
+ * directly never saw the check. A future adapter that needs this predicate calls
  * `createWithSupersedes`; it never re-declares the set.
  * `tests/unit/adapters/validity-supersede-orchestration.test.ts` pins the
  * single-reference-module invariant with a repo-wide grep assertion.
@@ -132,8 +132,8 @@ export interface SupersedeOrchestrationResult {
  *     `supersedeError` on the return type) stays loud via the pre-existing repair-
  *     command mechanism: that failure is a genuine race, not a knowable-up-front
  *     precondition, and must not be silently swallowed either.
- *   - **Opt-in.** None — the precheck binds every caller of this function (both CLI
- *     and MCP), which is the point: neither adapter can bypass it or re-implement it
+ *   - **Opt-in.** None — the precheck binds every caller of this function (every
+ *     surface), which is the point: no adapter can bypass it or re-implement it
  *     more loosely.
  *
  * @param deps - Injected `get`/`create`/`invalidate` service calls.
@@ -197,7 +197,7 @@ export async function createWithSupersedes(
 
 /**
  * The pinned D11 repair-command message for a half-failed supersede — CLI stderr and
- * MCP error-content both render this SAME string (never independently authored, per
+ * any other error payload both render this SAME string (never independently authored, per
  * the "loud orphan, never silent" invariant).
  *
  * @example

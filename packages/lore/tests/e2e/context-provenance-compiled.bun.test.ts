@@ -9,8 +9,8 @@
  * re-prove those mechanisms in isolation (T1/T2/T3/T4 already have unit and
  * compiled coverage of their own pieces) but to prove the COMPOSITION across
  * surfaces actually holds once every piece is assembled: the verb + the
- * injection + the hook's own rendering (framing line), both the CLI and MCP
- * render paths for one shared render function (scope closure), the governance
+ * injection + the hook's own rendering (framing line), the CLI
+ * render path for the shared render function (scope closure), the governance
  * FEED prose against the SSOT array it must track (governance rule), a
  * genuinely out-of-tree fresh corpus (fresh install), and the DISTRIBUTION —
  * not merely storage — of both assets T2 and T4 edited (manifest parity).
@@ -46,16 +46,6 @@
  * `fresh install`) issue a single READ-ONLY `lore get`/`lore governance`
  * against the repo's real corpus/assets — never a write.
  *
- * The "scope closure" test's MCP half is a REAL `SQLiteStore`-backed `App`
- * (`createApp(dbPath)` against the SAME `.lore/lore.db` the compiled CLI just
- * wrote to) with `registerTools` run against a real `McpServer` and its
- * handler extracted from `_registeredTools` — the same registration/handler-
- * extraction shape `mcp-tools-feed.test.ts`/`mcp-session-tools.test.ts`
- * already use, upgraded from their `InMemoryStore` fixture to the real
- * on-disk corpus this suite's compiled CLI calls just populated. This proves
- * cross-surface consistency on genuinely shared, disk-backed state rather
- * than two independently-seeded fixtures that happen to agree.
- *
  * Coverage (one test per AC, matching the task's five `-t` filter strings —
  * each unique in this file):
  *   "framing line"    (AC-CP-10) — `lore governance bootstrap-framing` stdout
@@ -68,7 +58,7 @@
  *                      JSON INSIDE it, and that fenced JSON deep-equals a
  *                      direct `--injection` call in the same corpus; both
  *                      retired strings are absent from the hook source.
- *   "scope closure"    (AC-CP-4) — see MCP-surface note above.
+ *   "scope closure"    (AC-CP-4) — the compiled CLI's `feed session-resume` stdout.
  *   "governance rule"  (AC-CP-9) — the governance FEED text names every
  *                      `BOOTSTRAP_RESUME_CLOSURE_KEYS` member except
  *                      `resume_hint` (excluded by the handoff-neutrality
@@ -79,7 +69,7 @@
  *                      to itself (never this repo's `.lore/`), and both
  *                      `BOOTSTRAP_SCOPE_DECLARATION`/`RESUME_SCOPE_CLOSURE`
  *                      reproduce there by identity.
- *   "manifest parity"  (AC-CP-7) — the embedded manifest's sha256 for both
+ *   "manifest parity"  — the embedded manifest's sha256 for both
  *                      T2/T4-edited assets matches their CURRENT SSOT bytes
  *                      (proves the regeneration actually covers both, not
  *                      just one); `lore setup --claude-dir <throwaway>`
@@ -93,27 +83,21 @@
  *                      verb, asserted byte-identical to the same SSOT.
  *
  * @spec_ref spec-context-provenance-injected-corpus-global-state-and-a
- *   §Design Decisions D1-D6, §Acceptance Criteria AC-CP-4, AC-CP-6, AC-CP-7,
+ *   §Design Decisions D1-D6, §Acceptance Criteria AC-CP-4, AC-CP-6,
  *   AC-CP-9, AC-CP-10. Task task-t5-compiled-e2e-suite-proving-every-surface-from-a.
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   BOOTSTRAP_FRAMING_LINE,
   BOOTSTRAP_RESUME_CLOSURE_KEYS,
   RESUME_SCOPE_CLOSURE,
   SOURCE_CATEGORY_TOKENS,
 } from "@lore/core";
-import { createApp } from "../../src/app.js";
-import type { App } from "../../src/app.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 
@@ -207,34 +191,9 @@ afterAll(() => {
 
 // ─── "scope closure" (AC-CP-4) ──────────────────────────────────────────────
 
-type McpServerInternal = {
-  _registeredTools: Record<
-    string,
-    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
-  >;
-};
-
-function getToolHandler(
-  server: McpServer,
-  name: string,
-): (args: Record<string, unknown>) => Promise<CallToolResult> {
-  const internal = server as unknown as McpServerInternal;
-  const tool = internal._registeredTools[name];
-  if (!tool) throw new Error(`Tool not registered: ${name}`);
-  return (args) => tool.handler(args, {} as unknown);
-}
-
-function parseToolResult(result: CallToolResult): unknown {
-  const content = result.content[0];
-  if (!content || content.type !== "text") throw new Error("Expected text content");
-  return JSON.parse(content.text);
-}
-
-describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout and the in-process MCP response (D3)", () => {
+describe("AC-CP-4: resume ticket scope closure on the compiled CLI stdout (D3)", () => {
   let dir: string;
   let planSlug: string;
-  let app: App;
-  let server: McpServer;
 
   beforeAll(() => {
     dir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-scope-closure-")));
@@ -260,29 +219,12 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
       dir,
     );
     expect(handoffResult.exitCode).toBe(0);
-
-    // Real SQLiteStore-backed App against the SAME db the compiled CLI just
-    // wrote to — never InMemoryStore — so the MCP surface and the CLI stdout
-    // above operate on genuinely shared, disk-backed state.
-    app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
-    server = new McpServer({ name: "t5-scope-closure", version: "0.0.0" });
-    registerTools(server, app, undefined, liveInvocation());
   });
 
-  afterAll(() => {
-    app.close();
-  });
-
-  it("scope closure — RESUME_SCOPE_CLOSURE verbatim on both surfaces, naming every BOOTSTRAP_RESUME_CLOSURE_KEYS member", async () => {
+  it("scope closure — RESUME_SCOPE_CLOSURE verbatim on the CLI stdout, naming every BOOTSTRAP_RESUME_CLOSURE_KEYS member", async () => {
     const cliResult = runLore(["feed", "session-resume", "--plan", planSlug], dir);
     expect(cliResult.exitCode).toBe(0);
     expect(cliResult.stdout).toContain(RESUME_SCOPE_CLOSURE);
-
-    const call = getToolHandler(server, "lore_feed");
-    const mcpResult = await call({ checkpoint: "session-resume", plan: planSlug });
-    expect(mcpResult.isError).toBeFalsy();
-    const data = parseToolResult(mcpResult) as { feed: string };
-    expect(data.feed).toContain(RESUME_SCOPE_CLOSURE);
 
     expect(BOOTSTRAP_RESUME_CLOSURE_KEYS.size).toBeGreaterThan(0);
     for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
@@ -388,9 +330,9 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
   }, 60_000);
 });
 
-// ─── "manifest parity" (AC-CP-7) ────────────────────────────────────────────
+// ─── "manifest parity" ────────────────────────────────────────────
 
-describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T2/T4-edited assets (D5)", () => {
+describe("manifest parity: embedded manifest + lore setup distribution parity for both T2/T4-edited assets (D5)", () => {
   it("manifest parity — the embedded manifest reflects both edited assets' CURRENT bytes; the hook installs byte-identical; corpus-workflow.md (retired from machine install) is byte-identical via the binary's own governance verb instead", () => {
     const hookSsotBytes = readFileSync(HOOK_SSOT_PATH);
 
@@ -418,8 +360,7 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     const scratch = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-setup-")));
     const targetDir = join(scratch, ".claude");
 
-    // PATH="" forces `claude` ENOENT deterministically (mcp registration
-    // fails, exit 1) — never reaches this dev machine's real `claude` CLI
+    // PATH="" keeps setup from reaching any tool on this dev machine's PATH
     // (setup.test.ts's own established convention). Files still write.
     const setupResult = Bun.spawnSync([LORE_BIN, "setup", "--claude-dir", targetDir, "--yes"], {
       cwd: scratch,

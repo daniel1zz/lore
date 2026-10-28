@@ -4,8 +4,8 @@
  *
  * RED (TDD role) for `assets/hooks/pre-tool-harness-run.mjs` — spec
  * spec-run-identity-slice-1-harness-attested-runs-attested, D10 (the hook owns NO grammar:
- * it pipes every Bash call (spec D14: the run export prefixes every command) and every
- * `mcp__<server>__lore_<verb>` tool call, then pipes the payload to `lore run attest-input` and relays its hook JSON
+ * it pipes every Bash call (spec D14: the run export prefixes every command; no MCP branch since
+ * spec-remove-the-lore-mcp-server#AC-RMCP-6), then pipes the payload to `lore run attest-input` and relays its hook JSON
  * verbatim), D7 (fail-open), BR-1030. The hook does not exist yet, so every test here fails
  * on the missing script.
  *
@@ -14,7 +14,6 @@
  *   stdin : PreToolUse payload {"hook_event_name":"PreToolUse","tool_name":...,"tool_input":{...},...}
  *   Trigger (decided from the payload alone, no grammar):
  *     - tool_name "Bash" with a string tool_input.command (no command text is inspected)
- *     - tool_name starts with `mcp__lore__`
  *   Not triggered: exit 0, EMPTY stdout, `lore` never spawned.
  *   Triggered: spawn `lore run attest-input` with the raw stdin payload piped in
  *     (byte-identical), relay the child's stdout byte-for-byte, exit 0.
@@ -213,18 +212,22 @@ describe("pre-tool-harness-run.mjs — lore call: blind pipe + verbatim relay (D
     expect(stub.calls()).toHaveLength(1);
   });
 
-  it("an mcp__lore__lore_create payload is piped and relayed", () => {
-    const stub = makeStub({ stdout: REWRITTEN_B });
-    const payload = JSON.stringify({
+  it("spec-remove-the-lore-mcp-server#AC-RMCP-6: an mcp__lore__lore_get input passes through unchanged (not spawned); a Bash lore input is still rewritten", () => {
+    const stub = makeStub({ stdout: REWRITTEN_A });
+    const mcpPayload = JSON.stringify({
       hook_event_name: "PreToolUse",
       session_id: "sess-2",
-      tool_name: "mcp__lore__lore_create",
-      tool_input: { type: "knowledge", title: "t", content: "c" },
+      tool_name: "mcp__lore__lore_get",
+      tool_input: { id: "x" },
     });
-    const run = runHook(payload, stub.dir);
-    expect(run.stdout).toBe(REWRITTEN_B);
+    const mcpRun = runHook(mcpPayload, stub.dir);
+    expect(mcpRun.status).toBe(0);
+    expect(mcpRun.stdout).toBe("");
+    expect(stub.calls()).toHaveLength(0);
+
+    const bashRun = runHook(bashPayload("lore ready p"), stub.dir);
+    expect(bashRun.stdout).toBe(REWRITTEN_A);
     expect(stub.calls().map((c) => c.argv)).toEqual([["run", "attest-input"]]);
-    expect(stub.first().stdin).toBe(payload);
   });
 });
 

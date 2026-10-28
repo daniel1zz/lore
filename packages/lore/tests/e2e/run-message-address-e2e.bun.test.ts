@@ -122,8 +122,8 @@ beforeAll(() => {
 
   mustLore(["init"]);
   mustLore(["create", "prd", "--title", "E2E Root", "--content", "root", "--no-ai"]);
-  // `lore setup` installs the hooks into a Claude config directory; PATH="" keeps the MCP registration step from
-  // reaching a real `claude` (it then exits 1 after writing the files, as setup-freshness-cycle.bun.test.ts relies on).
+  // `lore setup` installs the hooks into a Claude config directory; PATH="" keeps any `claude` unreachable
+  // (setup registers no MCP server and exits 0 — task-skill-implement-lore-setup-registers-no-tool-server-and).
   claudeDir = join(root, "claude-config");
   const setup = spawnSync(LORE_BIN, ["setup", "--claude-dir", claudeDir, "--yes"], {
     cwd: corpus,

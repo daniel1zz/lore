@@ -2,7 +2,7 @@
  * Audit write-surface carrier (issue #128, AS-19, AC-BLC-1).
  *
  * Every audit entry records WHICH surface performed the write — SPEC-024's
- * `CallerSurface` (`cli` / `agent` / `mcp` / `http_cookie` / `http_token`) — as
+ * `CallerSurface` (`cli` / `agent` / `http_cookie` / `http_token`; legacy rows may carry `mcp`) — as
  * `details.surface`. It lives in `details` (not a new `audit` column) because
  * `details` is already inside the hash-chain payload (`computeAuditEntryHash`):
  * the surface is tamper-evident with no migration and no break of existing
@@ -12,7 +12,6 @@
  * call {@link stampAuditSurface} at their single audit insert point, and the
  * adapters declare their surface here, explicitly:
  *   - CLI    — `setProcessAuditSurface(detectCliSurface())` at boot (loader.ts)
- *   - MCP    — each tool call runs inside `runWithAuditSurface("mcp", …)` (mcp/tools.ts)
  *   - HTTP   — each authenticated request runs inside
  *              `runWithAuditSurface(actor.callerSurface, …)` (http/index.ts); the
  *              surface is per-REQUEST (cookie vs bearer), so a process-wide value
@@ -27,16 +26,16 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AuditEntry, CallerSurface } from "@lore/core";
+import type { AuditEntry, WritableCallerSurface } from "@lore/core";
 
-const requestSurface = new AsyncLocalStorage<CallerSurface>();
-let processSurface: CallerSurface | undefined;
+const requestSurface = new AsyncLocalStorage<WritableCallerSurface>();
+let processSurface: WritableCallerSurface | undefined;
 
 /**
  * Declare the surface for every write this process makes outside a
- * request-scoped {@link runWithAuditSurface} (CLI invocation, MCP server boot).
+ * request-scoped {@link runWithAuditSurface} (CLI invocation).
  */
-export function setProcessAuditSurface(surface: CallerSurface): void {
+export function setProcessAuditSurface(surface: WritableCallerSurface): void {
   processSurface = surface;
 }
 
@@ -52,7 +51,7 @@ export function clearProcessAuditSurface(): void {
 }
 
 /** Run `fn` (and everything it awaits) with `surface` as the request-scoped audit surface. */
-export function runWithAuditSurface<T>(surface: CallerSurface, fn: () => T): T {
+export function runWithAuditSurface<T>(surface: WritableCallerSurface, fn: () => T): T {
   return requestSurface.run(surface, fn);
 }
 
@@ -60,7 +59,7 @@ export function runWithAuditSurface<T>(surface: CallerSurface, fn: () => T): T {
  * The surface a write made right now would be recorded under, or `undefined`
  * when no adapter declared one.
  */
-export function currentAuditSurface(): CallerSurface | undefined {
+export function currentAuditSurface(): WritableCallerSurface | undefined {
   return requestSurface.getStore() ?? processSurface;
 }
 

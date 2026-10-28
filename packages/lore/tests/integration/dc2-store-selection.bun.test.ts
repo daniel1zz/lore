@@ -255,7 +255,7 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
   );
 
   it(
-    `${SPEC}#AC-DC2-22 (c) lore serve, lore --mcp-server (both through loadLoreApp) and a dashboard-mounted project select the same double`,
+    `${SPEC}#AC-DC2-22 (c) lore serve (through loadLoreApp) and a dashboard-mounted project select the same double`,
     async () => {
       const sb = await makeSandbox(syncSection(true, "libsql://127.0.0.1:1"), true);
       const double = await makeReplicaDouble(sb.dbPath);
@@ -264,11 +264,6 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
       const serve = loadRoute(sb, ["serve"], "http");
       expect(double.opens.map((c) => c.localPath)).toEqual([sb.dbPath]);
       serve.close();
-
-      // src/index.ts boots the MCP server with `loadLoreApp({ inv })`: the default "cli" surface
-      const mcp = loadRoute(sb, ["--mcp-server"], "cli");
-      expect(double.opens.map((c) => c.localPath)).toEqual([sb.dbPath, sb.dbPath]);
-      mcp.close();
 
       const out: string[] = [];
       const inv = buildTestInvocation({
@@ -279,7 +274,7 @@ describe("sync.enabled: every route goes through the replica or fails loud", () 
         io: { stdout: { write: (t) => out.push(t) }, stderr: { write: (t) => out.push(t) }, stdin: Readable.from([]), stdinIsTTY: false },
       });
       const mounted = await mountRegisteredProject(inv, sb.dbPath);
-      expect(double.opens.map((c) => c.remoteUrl)).toEqual(["libsql://127.0.0.1:1", "libsql://127.0.0.1:1", "libsql://127.0.0.1:1"]);
+      expect(double.opens.map((c) => c.remoteUrl)).toEqual(["libsql://127.0.0.1:1", "libsql://127.0.0.1:1"]);
       mounted.close();
     },
     60_000,

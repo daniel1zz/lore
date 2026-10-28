@@ -1,10 +1,10 @@
 /**
  * Phase scorecard assembly (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence,
- * "CLI + MCP surfaces + checklist_ref evidence") — the single derivation site for `lore
+ * "CLI surfaces + checklist_ref evidence") — the single derivation site for `lore
  * phase status <phase>`'s payload, mirroring the `flows/staleness-flow.ts` /
  * `flows/phase-feed-flow.ts` precedent: a NARROW injected dependency bundle
- * (`PhaseStatusFlowDeps`), never the full `App`, so CLI and MCP build the IDENTICAL
- * payload by construction — both call `buildPhaseStatusPayload` through the same
+ * (`PhaseStatusFlowDeps`), never the full `App`, so every caller builds the IDENTICAL
+ * payload by construction — each calls `buildPhaseStatusPayload` through the same
  * `phase-wiring.ts` deps binder, never two independently-authored renderers.
  *
  * Contract:
@@ -75,7 +75,7 @@ export interface PhaseStatusChecklistSummary {
   manual_selfattested: string[];
 }
 
-/** The `lore phase status <phase>` scorecard payload — CLI text render + `--json` + MCP `lore_phase_status` all consume this SAME shape. */
+/** The `lore phase status <phase>` scorecard payload — CLI text render + `--json` both consume this SAME shape. */
 export interface PhaseStatusPayload {
   phase_id: string;
   phase_slug: string;

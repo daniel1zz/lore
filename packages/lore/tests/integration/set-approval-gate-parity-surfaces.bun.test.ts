@@ -1,39 +1,35 @@
 // @spawns packages/lore/src/index.ts
 /**
  * AC-AP-2 (issues #65 #50, BR-1071) — `set ... status approved` gives the approve verdict through
- * every real write surface: MCP, CLI and HTTP.
+ * every real write surface: CLI and HTTP.
  *
  * One `createApp`-composed throwaway SQLite corpus (mkdtemp; never the repo's own `.lore/`) backs:
- *   - MCP  -> `registerTools` on an in-process McpServer (pattern: http/audit-surface.bun.test.ts)
  *   - CLI  -> `bun run src/index.ts` subprocess with cwd in the throwaway corpus
  *   - HTTP -> a real `startHttpServer` with a bearer token (`If-Match` carries the expected version)
  * Fixtures (documents, criteria, citations, judgments) are written through the same in-process app;
  * the surfaces under test only ever perform the `set` / `approve` itself.
  *
  * Dimension mapping:
- *   HAPPY:      (c) MCP judged spec, (f) HTTP PATCH with the current version
- *   NEGATIVE:   (a) MCP unjudged adr, (b) MCP plan under a draft spec, (d) CLI unjudged adr
+ *   HAPPY:      (f) HTTP PATCH with the current version
+ *   NEGATIVE:   (d) CLI unjudged adr
  *   BOUNDARY:   (e) HTTP stale version
- *   ERROR:      (a) (b) (d) refusals carry the approve path's code / stderr / exit code
+ *   ERROR:      (d) refusal carries the approve path's stderr / exit code
  *   STATE:      version-row counts before / after on every refusal
  *   REGRESSION: (e2) the stale-version guard survives the delegation (service level; green on main)
  *
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on AC-AP-2
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext, actedStore, liveIo, LIVE_TEST_RUN } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, actedStore, liveIo } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, DocRecord, LoreError, NewReviewJudgment, Result } from "@lore/core";
 import { createApp, type App } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { startHttpServer } from "../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapters/http/machine-auth.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -50,11 +46,6 @@ let baseUrl: string;
 let bearer: string;
 let counter = 0;
 
-type McpInternal = {
-  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
-};
-let tools: McpInternal["_registeredTools"];
-
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-set-approval-surfaces-"));
   mkdirSync(join(dir, ".lore"), { recursive: true });
@@ -62,10 +53,6 @@ beforeAll(async () => {
   app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   reader = actedStore(new SQLiteStore(dbPath));
   await must(app.corpusService.create({ type: "prd", title: "Surfaces root PRD", content: "root" } as CreateDocInput));
-
-  const mcp = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(mcp, app, undefined, liveInvocation());
-  tools = (mcp as unknown as McpInternal)._registeredTools;
 
   machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-set-approval-machine-")) });
   const key = await app.apiKeyStore.create("agent-key", "agent");
@@ -143,64 +130,6 @@ async function judge(docId: string): Promise<void> {
   };
   await must(app.judgmentService.record(judgment));
 }
-
-// ─── MCP ─────────────────────────────────────────────────────────────────────
-
-async function callMcp(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> {
-  const tool = tools[name];
-  if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-  const res = await tool.handler({ harness_run: LIVE_TEST_RUN, ...args }, {});
-  const first = res.content[0];
-  if (first === undefined || first.type !== "text") throw new Error("expected text content");
-  return { isError: res.isError === true, text: first.text };
-}
-
-function codeOf(text: string): string | undefined {
-  return /"code"\s*:\s*"([A-Z_]+)"/.exec(text)?.[1];
-}
-
-describe("AC-AP-2 MCP lore_set to approved", () => {
-  it("(a) unjudged adr: isError with the same error code lore_approve returns, and no new version row", async () => {
-    const a = await makeAdr("Surface mcp adr A");
-    const b = await makeAdr("Surface mcp adr B");
-    const beforeA = await versionRows(a.id);
-
-    const viaApprove = await callMcp("lore_approve", { id_or_slug: b.id, reviewer: "agent:mcp-test" });
-    const viaSet = await callMcp("lore_set", { id_or_slug: a.id, status: "approved" });
-
-    expect(viaApprove.isError).toBe(true);
-    expect(viaSet.isError).toBe(true);
-    expect(codeOf(viaApprove.text)).toBeDefined();
-    expect(codeOf(viaSet.text)).toBe(codeOf(viaApprove.text));
-    expect(await versionRows(a.id)).toEqual(beforeA);
-  });
-
-  it("(b) plan under a draft spec: isError naming plan-promote", async () => {
-    const spec = await makeSpec("Surface mcp governing spec", { cite: true });
-    const plan = await must(
-      app.corpusService.create({ type: "plan", title: next("Surface mcp plan"), parent_id: spec.id, content: "Plan body." } as CreateDocInput),
-    );
-    // reason: plans are judged by default (BR-281 / BR-1237); a judgment lets the refusal come from plan-promote.
-    await judge(plan.id);
-    const before = await versionRows(plan.id);
-
-    const viaSet = await callMcp("lore_set", { id_or_slug: plan.id, status: "approved" });
-
-    expect(viaSet.isError).toBe(true);
-    expect(viaSet.text).toContain("plan-promote");
-    expect(await versionRows(plan.id)).toEqual(before);
-  });
-
-  it("(c) judged spec citing a live rule: lore_set succeeds and the newest version action is 'approve'", async () => {
-    const spec = await makeSpec("Surface mcp judged spec", { cite: true });
-    await judge(spec.id);
-
-    const viaSet = await callMcp("lore_set", { id_or_slug: spec.id, status: "approved" });
-
-    expect(viaSet.isError).toBe(false);
-    expect((await versionRows(spec.id)).newestAction).toBe("approve");
-  });
-});
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 

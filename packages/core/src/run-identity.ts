@@ -5,8 +5,7 @@
  *   - types for runs, invocation identity and the claim decision;
  *   - the harness registry that derives a run id from harness ids (D2);
  *   - the single claim-conflict predicate used by task and phase claim paths (D6);
- *   - the per-call carrier of the run: one export line in front of a Bash command (D14) and the
- *     MCP-input rewrite (D10).
+ *   - the per-call carrier of the run: one export line in front of a Bash command (D14).
  *
  * @invariant No Node builtins, no I/O, no clock: every function is a pure
  *   function of its arguments (core barrel must stay browser-safe).
@@ -235,7 +234,7 @@ export function hasClaimConflict(holder: ClaimHolder, claimant: ClaimParty): Cla
 }
 
 // ---------------------------------------------------------------------------
-// Per-call run carrier (D14) and MCP input rewrite (D10)
+// Per-call run carrier (D14)
 // ---------------------------------------------------------------------------
 
 /** The environment variable that carries the per-call run into every lore process of one Bash call. */
@@ -254,9 +253,4 @@ export function prefixRunExport(command: string, run: RunId): string {
     throw new Error(`Run id ${JSON.stringify(run)} is not shell-safe; expected [A-Za-z0-9:._-]+`);
   }
   return `export ${HARNESS_RUN_ENV}='${run}'\n${command}`;
-}
-
-/** Return a copy of an MCP tool input carrying `harness_run: run`, overwriting any caller value. */
-export function rewriteMcpInput<T extends object>(input: T, run: RunId): T & { harness_run: RunId } {
-  return { ...input, harness_run: run };
 }

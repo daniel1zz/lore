@@ -119,6 +119,7 @@ import {
 } from "../decision-status-validation.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 
 /**
  * Advisory text printed when `CorpusService.set`'s internal approved→draft
@@ -192,6 +193,12 @@ export default defineLoreCommand({
         `command is '${ACCEPTED_DECISION_STATUS_VALUE}'; 'deprecated'/'superseded' are owned ` +
         `by 'lore invalidate'. Source: spec-adr-decision-status-has-a-create-surface-and-no-cli-update`,
     },
+    "requires-uat": {
+      type: "boolean",
+      description:
+        "[plan only] Declare extra.requires_uat: true, merged into the plan's existing extra " +
+        "(every other key, e.g. phases, is kept). Idempotent. Source: spec-remove-the-lore-mcp-server D3",
+    },
     correction: {
       type: "string",
       description:
@@ -199,6 +206,7 @@ export default defineLoreCommand({
         "task, a closed plan). Bypasses the record-edit gate, writes exactly one version and keeps the " +
         "status; the reason is stored in the version and the audit trail. Must be non-empty.",
     },
+    ...DECISION_FLAG_ARGS,
     plan: {
       type: "string",
       description:
@@ -341,6 +349,15 @@ export default defineLoreCommand({
       }
     }
 
+    // BR-1476 — the decision flags are parsed before the app loads; whether this write NEEDS a decision is the
+    // service's call (CorpusService.set), so a draft edit with no flags is untouched.
+    const decisionFlags = parseDecisionFlags(args);
+    if (!decisionFlags.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, decisionFlags.error) + "\n");
+      return exitCode(decisionFlags.error);
+    }
+    const decisionOpt = decisionFlags.value;
+
     const resolvedActor = resolveActor(inv);
     const { app, defaults } = loadLoreApp({ inv });
     try {
@@ -460,7 +477,11 @@ export default defineLoreCommand({
         const setResult = await app.corpusService.set(
           args.id,
           { content: newContent },
-          { by: resolvedActor, ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}) },
+          {
+            by: resolvedActor,
+            ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
+            ...(decisionOpt !== undefined ? { decision: decisionOpt } : {}),
+          },
         );
 
         if (!setResult.ok) {
@@ -598,6 +619,45 @@ export default defineLoreCommand({
         };
       }
 
+      // --requires-uat (spec-remove-the-lore-mcp-server D3, AC-RMCP-4): type-scoped to 'plan',
+      // read-merge-write like --kind (extra is patched wholesale by CorpusService.set), so
+      // extra.phases and every other key survive. Re-running on a plan that already declares it
+      // is a no-op (no version bump), mirroring --decision-status.
+      if (args["requires-uat"] === true) {
+        const resolveForUat = await app.corpusService.resolve(args.id);
+        if (!resolveForUat.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, resolveForUat.error) + "\n");
+          return exitCode(resolveForUat.error);
+        }
+        const getForUat = await app.corpusService.get(resolveForUat.value);
+        if (!getForUat.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, getForUat.error) + "\n");
+          return exitCode(getForUat.error);
+        }
+        const targetDocForUat = getForUat.value.doc;
+
+        if (targetDocForUat.type !== "plan") {
+          inv.io.stderr.write(
+            `Error: --requires-uat is only valid for type 'plan' (got '${targetDocForUat.type}').\n`,
+          );
+          exitCli(2);
+        }
+
+        const existingExtraForUat = (targetDocForUat.extra ?? {}) as Record<string, unknown>;
+        if (existingExtraForUat["requires_uat"] === true && Object.keys(patch).length === 0) {
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: targetDocForUat }, null, 2));
+          } else {
+            printLine(inv.io.stdout, `Updated ${targetDocForUat.slug} → v${targetDocForUat.version}`);
+            printLine(inv.io.stdout, "  (requires_uat already true — no change)");
+          }
+          return 0;
+        }
+
+        const baseExtra = (patch["extra"] ?? targetDocForUat.extra ?? {}) as Record<string, unknown>;
+        patch["extra"] = { ...baseExtra, requires_uat: true };
+      }
+
       // Prior status, captured BEFORE the write, so the demotion advisory below can
       // detect CorpusService's silent approved→draft auto-reset after the fact (DD-3,
       // spec-plan-closure-must-be-loud-terminality-divergence-silent). corpus-service.ts
@@ -670,6 +730,7 @@ export default defineLoreCommand({
         by: resolvedActor,
         ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
         ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
+        ...(decisionOpt !== undefined ? { decision: decisionOpt } : {}),
       });
 
       if (!result.ok) {

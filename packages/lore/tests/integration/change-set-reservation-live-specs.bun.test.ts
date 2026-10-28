@@ -26,6 +26,7 @@ import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../helpers/cli-li
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { CorpusWriteAuthority } from "../../src/service/foreign-corpus-write-guard.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -142,7 +143,7 @@ describe("AC-b: lore rule propose <spec> withdraw <BR-n>", () => {
     expect(text(refused)).toContain("record-edit");
     expect(await changeIds(owner)).toEqual([liveRuleId]);
 
-    const run = await lore(["rule", "propose", owner, "withdraw", liveRuleId, "--correction", "entry belongs to a split-off spec"]);
+    const run = await lore(["rule", "propose", owner, "withdraw", liveRuleId, "--correction", "entry belongs to a split-off spec", ...DECIDED_FLAGS]);
     expect(run.exitCode, text(run)).toBe(0);
     expect(await specState(owner)).toEqual({ status: "approved", version: before.version + 1 });
     expect(await changeIds(owner)).toEqual([]);

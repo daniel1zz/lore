@@ -412,7 +412,7 @@ export interface SearchHit {
  *
  * - "cli"        — human typing in a terminal (no agent env vars set)
  * - "agent"      — CLI invoked by an AI agent (CLAUDECODE=1, CI=true, LORE_AI_DEFAULT=off)
- * - "mcp"        — MCP tool call (in-process flag set by adapters/mcp/index.ts at startup)
+ * - "mcp"        — read-only: rows written before the MCP server was removed
  * - "http_cookie" — HTTP request authenticated via cookie session (dashboard / human)
  * - "http_token"  — HTTP request authenticated via bearer API token (agent-issued)
  *
@@ -421,10 +421,16 @@ export interface SearchHit {
 export type CallerSurface = "cli" | "agent" | "mcp" | "http_cookie" | "http_token";
 
 /**
+ * The surfaces a live process may write under: {@link CallerSurface} without the read-only "mcp".
+ * Every writer (`App.callerSurface`, `runWithAuditSurface`, AI-default resolution) takes this type, so a
+ * new row can never carry "mcp"; the read-side schemas keep the wider union to read old rows.
+ */
+export type WritableCallerSurface = Exclude<CallerSurface, "mcp">;
+
+/**
  * Identifies how the AI on/off decision was resolved.
  *
- * - "explicit_arg" — caller passed --ai or --no-ai (or ai: true/false in MCP)
- * - "config"       — ai.default_per_surface[surface] was set in config.yaml
+ * - "explicit_arg" — caller passed --ai or --no-ai * - "config"       — ai.default_per_surface[surface] was set in config.yaml
  * - "env"          — CLAUDECODE/CI/LORE_AI_DEFAULT env var drove agent surface (AI off)
  * - "cli_flag"     — built-in default for human-facing surfaces (AI on; --no-ai was not passed)
  *

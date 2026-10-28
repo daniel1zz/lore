@@ -1,5 +1,5 @@
 // @reads packages/lore/tests/unit/adapters/cli-anchor-resolution.bun.test.ts
-// @reads packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts
+// @reads packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts
 /**
  * `lore evidence` dropped-file guard — the protection that
  * task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a introduced,
@@ -37,7 +37,6 @@
  *               left alone (fail-open, documented); a case-filtered command is
  *               left to the filtered-pass guard
  *   ERROR:      every refusal is VALIDATION_ERROR on field output_tail, exit 4
- *   STATE:      a refused MCP call writes NO evidence row
  *   REGRESSION: --result fail / expected-fail and out-of-scope oracle kinds
  *               are untouched; the refusal never asserts a repo-specific
  *               two-runner convention
@@ -45,36 +44,17 @@
  * @spec_ref task-skill-implement-tg-32-evidence-precheck-follows-the-one
  */
 
-import { liveInvocation, actedStore } from "../../live-invocation.js";
-import { RecordLockService } from "../../../src/service/record-lock-service.js";
-import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { describe, it, expect, beforeEach } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { NoOpTelemetry, ok } from "@lore/core";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CreateDocInput, DocRecord, LoreError } from "@lore/core";
-import { InMemoryStore } from "../../../src/store/in-memory-store.js";
-import { CorpusService } from "../../../src/service/corpus-service.js";
-import { ReviewService } from "../../../src/service/review-service.js";
-import { VersionService } from "../../../src/service/version-service.js";
-import { OutlineService } from "../../../src/service/outline-service.js";
-import { MigrationService } from "../../../src/service/migration-service.js";
-import { TreeCheckService } from "../../../src/service/tree-check-service.js";
-import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
-import type { App } from "../../../src/app.js";
-import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
+import { describe, it, expect } from "vitest";
+import type { LoreError } from "@lore/core";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { findUnderMatchedPassRefusal } from "../../../src/adapters/cli/evidence-precheck.js";
-import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
-import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
-// reason: both named files must EXIST: the MCP surface refuses a missing oracle file (field `command`) before the
-// under-match guard speaks (field `output_tail`), so a deleted file turns the parity cases red for the wrong reason.
+// reason: both named files must EXIST: the CLI refuses a missing oracle file (field `command`) before the
+// under-match guard speaks (field `output_tail`), so a deleted file would turn the cases red for the wrong reason.
 const BUN_NAMED_FILE = "packages/lore/tests/unit/adapters/cli-anchor-resolution.bun.test.ts";
-const VITEST_NAMED_FILE = "packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts";
+const VITEST_NAMED_FILE = "packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts";
 
 /** The one-runner command this repo's own evidence now records for a `.bun.test.ts` file. */
 const ONE_RUNNER_BUN_FILE_COMMAND = `bunx --bun vitest run ${BUN_NAMED_FILE}`;
@@ -230,166 +210,5 @@ describe("findUnderMatchedPassRefusal — REGRESSION: out-of-scope oracle/result
     const mod = (await import("../../../src/adapters/cli/evidence-precheck.js")) as Record<string, unknown>;
     expect(mod["findMixedRunnerRefusal"]).toBeUndefined();
     expect(mod["findCrossRunnerTokens"]).toBeUndefined();
-  });
-});
-
-// ─── MCP gate parity ─────────────────────────────────────────────────────────
-
-const stubApiKeyStore = {} as ApiKeyStore;
-
-let store: InMemoryStore;
-let corpusService: CorpusService;
-
-/** Mirrors `evidence-completeness-guard.test.ts`'s fixture App verbatim. */
-function makeApp(): App {
-  store = actedStore(new InMemoryStore());
-  corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  return {
-    warn: () => undefined,
-    corpusService,
-    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    outlineService: new OutlineService(store),
-    migrationService: new MigrationService(store),
-    treeCheckService: new TreeCheckService(store),
-    apiKeyStore: stubApiKeyStore,
-    aiProviderService: null as unknown as App["aiProviderService"],
-    syncDocsService: null as unknown as App["syncDocsService"],
-    exportDocsService: null as unknown as App["exportDocsService"],
-    phaseService: null as unknown as App["phaseService"],
-    taskWorkflowService: new TaskWorkflowService(
-      store,
-      new NoOpTelemetry(),
-      { claimTtlMinutes: 120 },
-      async () => ok(new Set<string>()), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
-    ),
-    specKindService: null as unknown as App["specKindService"],
-    judgmentService: null as unknown as App["judgmentService"],
-    auditService: null as unknown as App["auditService"],
-    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
-    callerSurface: "mcp" as const,
-    resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
-    telemetry: new NoOpTelemetry(),
-    close: () => undefined,
-  };
-}
-
-type McpServerInternal = {
-  _registeredTools: Record<
-    string,
-    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
-  >;
-};
-
-function getToolHandler(
-  server: McpServer,
-  name: string,
-): (args: Record<string, unknown>) => Promise<CallToolResult> {
-  const internal = server as unknown as McpServerInternal;
-  const tool = internal._registeredTools[name];
-  if (!tool) throw new Error(`Tool not registered: ${name}`);
-  return (args) => tool.handler(args, {} as unknown);
-}
-
-function parseResult(result: CallToolResult): unknown {
-  const text = result.content[0];
-  if (!text || text.type !== "text") throw new Error("Expected text content");
-  return JSON.parse(text.text);
-}
-
-async function createTaskDoc(): Promise<string> {
-  const plan = await corpusService.create({
-    type: "plan",
-    title: "Mixed Runner Guard Parity Plan",
-    content: "body",
-  } as CreateDocInput);
-  if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);
-  const task = await corpusService.create({
-    type: "task",
-    title: "Mixed Runner Guard Parity Task",
-    parent_id: plan.value.id,
-    content: "body",
-    extra: { plan_id: plan.value.id },
-  } as CreateDocInput);
-  if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
-  return task.value.id;
-}
-
-async function readEvidenceCount(taskId: string): Promise<number> {
-  const doc = await corpusService.get(taskId);
-  if (!doc.ok) throw new Error(`get failed: ${JSON.stringify(doc.error)}`);
-  const evidence = doc.value.doc.extra["verification_evidence"];
-  return Array.isArray(evidence) ? evidence.length : 0;
-}
-
-let app: App;
-let server: McpServer;
-
-beforeEach(() => {
-  app = makeApp();
-  server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app, undefined, liveInvocation());
-});
-
-describe("MCP lore_evidence_add refuses exactly what the CLI refuses (dropped file)", () => {
-  const call = () => getToolHandler(server, "lore_evidence_add");
-
-  it("refuses the under-matched pass byte-identically to the shared decision", async () => {
-    const taskId = await createTaskDoc();
-
-    const result = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: TWO_FILE_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-      output_tail: TAIL_ONE_FILE,
-    });
-
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as ValidationError;
-    const shared = expectRefusedWithExitFour(refuseUnderMatched({ outputTail: TAIL_ONE_FILE }));
-    expect(error.code).toBe(shared.code);
-    expect(error.field).toBe(shared.field);
-    expect(error.message).toBe(shared.message);
-  });
-
-  it("STATE: the refused call writes no evidence row", async () => {
-    const taskId = await createTaskDoc();
-    expect(await readEvidenceCount(taskId)).toBe(0);
-
-    const refused = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: TWO_FILE_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-      output_tail: TAIL_ONE_FILE,
-    });
-    expect(refused.isError).toBe(true);
-    expect(await readEvidenceCount(taskId)).toBe(0);
-  });
-
-  // reason: a complete run clears THIS guard; the self-reported pass is then
-  // refused by the separate tail-proof requirement (names --capture), so the
-  // refusal wording — not the exit — is what proves which guard spoke
-  // (task-raise-the-evidence-tail-guard-s-predicate-to-its-own, D5).
-  it("CONTROL: a complete one-runner `.bun.test.ts` run clears this guard (D5 still demands --capture)", async () => {
-    const taskId = await createTaskDoc();
-
-    const result = await call()({
-      id_or_slug: taskId,
-      oracle: "test",
-      command: ONE_RUNNER_BUN_FILE_COMMAND,
-      result: "pass",
-      recorded_by: "agent:parity",
-      output_tail: TAIL_ONE_FILE,
-    });
-
-    expect(result.isError).toBe(true);
-    const error = parseResult(result) as { message: string };
-    expect(error.message).toContain("--capture");
-    expect(error.message).not.toMatch(/under_match|fewer test files/i);
-    expect(await readEvidenceCount(taskId)).toBe(0);
   });
 });

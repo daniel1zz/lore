@@ -73,7 +73,7 @@
  * Invariants:
  *   - Pure, browser-safe — no Node builtins (no `node:path`; command strings
  *     are built via plain string concatenation, mirroring this package's
- *     `merge-settings.ts`/`register-mcp.ts` precedent of keeping settings.json
+ *     `merge-settings.ts` precedent of keeping settings.json
  *     shaping logic import-safe from `@lore/dashboard`'s Vite bundle).
  *   - `buildHookSettingsEntries` does NOT know or care whether `claudeDir` is
  *     a real resolved path or the literal placeholder token `"{{lore:claude_dir}}"`
@@ -179,9 +179,8 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // subagent-trail.mjs — measures an isolated helper's changes at its end (spec-session-trail D13). timeout 10 s: it runs git against the helper's working copy.
   { file: "subagent-trail.mjs", runner: "node", event: "SubagentStop", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
 
-  // pre-tool-harness-run.mjs — pipes each Bash call (and every lore MCP tool call) through `lore run attest-input`, which puts one `export LORE_HARNESS_RUN='<run>'` line in front of the unchanged command (updatedInput only, never a permissionDecision — D12/D14). `lore` believes that per-call value only when it runs inside the named run's own harness process (verified by process ancestry), so a copied value cannot name another session's run. Keep the Bash matcher entry verbatim: AC-RV-8's falsifier mutates it.
+  // pre-tool-harness-run.mjs — pipes each Bash call through `lore run attest-input`, which puts one `export LORE_HARNESS_RUN='<run>'` line in front of the unchanged command (updatedInput only, never a permissionDecision — D12/D14). `lore` believes that per-call value only when it runs inside the named run's own harness process (verified by process ancestry), so a copied value cannot name another session's run. Keep the Bash matcher entry verbatim: AC-RV-8's falsifier mutates it.
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
-  { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
 
   // pre-helper-foreign-working-copy-gate.mjs — refuses a Write/Edit/MultiEdit/NotebookEdit by a worktree-isolated helper whose target is inside a git working copy that is not its own (the shared checkout, another worktree, another repo): harm that lands at once on someone else and cannot be undone by the actor (BR-1092). Never applies to the main session; writes outside every working copy are left to the turn-end helper-scope review.
   { file: "pre-helper-foreign-working-copy-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit" },

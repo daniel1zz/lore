@@ -11,7 +11,6 @@
  *     - every version row it writes carries harness_run R,
  *   on SQLiteStore AND InMemoryStore, because the stamp is applied at ONE store chokepoint
  *   (`withWriteContext(store, ctx)`, a StoreInterface decorator), not inside each service.
- *   One MCP `lore_batch` call with three operations stamps all three with the same R and the same N.
  *
  * Expected-behaviour table (written from the spec before the implementation was read):
  *   - audit row of a write made through a decorated store: `harness_run === R`, `actor === N`
@@ -28,7 +27,7 @@
  *
  * Every store/service below is real; the only injected thing is the run record, registered through
  * the store's own `insertRun` (AC-RID-4 interface) because no CLI registration exists yet.
- * MOCK RISK: none — no mocks. The MCP leg drives the real `lore --mcp-server` over stdio.
+ * MOCK RISK: none — no mocks.
  *
  * Fixture validity is proven by the control tests: they run the same write drivers over an
  * undecorated store and pass today, so a RED result in the matrix is missing stamping, not a
@@ -45,8 +44,6 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { AuditEntry, CreateDocInput, RunId, VersionRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -568,7 +565,7 @@ async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
 }
 
 describe("CLI chokepoint: `LORE_HARNESS_RUN=R lore <write>` (name N from the session tier) stamps the audit row at the composition root", () => {
-  /** The writer name ID_A's run derives — the only way a CLI/MCP write is named (BR-1055). */
+  /** The writer name ID_A's run derives — the only way a CLI write is named (BR-1055). */
   const NAME_A = ID_A.claimed;
 
   let dir = "";
@@ -623,74 +620,6 @@ describe("CLI chokepoint: `LORE_HARNESS_RUN=R lore <write>` (name N from the ses
     } finally {
       store.close();
     }
-  });
-});
-
-// ─── MCP: one lore_batch call, three operations, one identity ───────────────
-
-describe("MCP lore_batch: three operations in one call carry the same R and the same N (BR-1036)", () => {
-  let dir = "";
-
-  beforeAll(() => {
-    dir = corpusDir("attr-matrix-mcp-");
-  });
-
-  /** The server process runs under `actor`'s session identity — MCP calls carry no name argument (BR-1055). */
-  async function withClient<T>(actor: string, fn: (c: Client) => Promise<T>): Promise<T> {
-    const env = Object.fromEntries(Object.entries(cleanEnv({ HOME: dir, ...sessionEnvFor(actor) })).filter(([, v]) => typeof v === "string")) as Record<string, string>;
-    const transport = new StdioClientTransport({ command: "bun", args: ["run", ENTRY, "--mcp-server"], cwd: dir, env });
-    const client = new Client({ name: "attribution-matrix", version: "0.0.0" });
-    await client.connect(transport);
-    try {
-      return await fn(client);
-    } finally {
-      await client.close();
-    }
-  }
-
-  it("create, create and link in ONE batch call -> all audit rows share harness_run R and author N", async () => {
-    await registerInCorpus(dir, ID_A);
-    const since = new Date().toISOString();
-    const NAME_A = ID_A.claimed;
-    const create = (title: string) => ({ op: "create", args: { type: "knowledge", title, content: "body", extra: { sub_type: "reference" } } });
-    const result = await withClient(ID_A.claimed, (c) =>
-      c.callTool({
-        name: "lore_batch",
-        arguments: {
-          harness_run: ID_A.harnessRun,
-          operations: [
-            create("Batch one"),
-            create("Batch two"),
-            { op: "link", args: { from: "knowledge-batch-one", to: "knowledge-batch-two", type: "relates-to" } },
-          ],
-        },
-      }),
-    );
-    expect(result.isError ?? false).toBe(false);
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
-    // two creates + one link = at least three audit rows, every one of them attested the same way.
-    expect(rows.length).toBeGreaterThanOrEqual(3);
-    for (const row of rows) {
-      expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
-      expect((row.details as Record<string, unknown> | undefined)?.["name_source"]).toBe("run");
-    }
-    expect(new Set(rows.map((r) => r.actor)).size).toBe(1);
-  });
-
-  it("a batch with no harness_run is refused and writes none of its operations (no run is guessed, BR-1351)", async () => {
-    const since = new Date().toISOString();
-    const result = await withClient("agent:matrix-unattested", (c) =>
-      c.callTool({
-        name: "lore_batch",
-        arguments: {
-          operations: [{ op: "create", args: { type: "knowledge", title: "Unattested batch", content: "body", extra: { sub_type: "reference" } } }],
-        },
-      }),
-    );
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain("lore session start --human");
-    const rows = (await auditSince(dir, since)).filter((r) => (r.details as Record<string, unknown> | undefined)?.["title"] === "Unattested batch");
-    expect(rows).toHaveLength(0);
   });
 });
 

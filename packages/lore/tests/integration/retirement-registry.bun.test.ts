@@ -116,7 +116,7 @@ describe("install-asset rows", () => {
 
   beforeAll(() => {
     const seed = setup(["--claude-dir", claudeDir, "--yes"]);
-    if (seed.exitCode !== 1) throw new Error(`seed install: expected exit 1 (MCP fails under PATH=""), got ${seed.exitCode}\n${seed.stdout}\n${seed.stderr}`);
+    if (seed.exitCode !== 0) throw new Error(`seed install: expected exit 0 (task-skill-implement-lore-setup-registers-no-tool-server-and: setup registers no MCP server), got ${seed.exitCode}\n${seed.stdout}\n${seed.stderr}`);
     freshWrote = new Map(rows.map((row) => [row.id, existsSync(join(claudeDir, row.target))]));
 
     // Plant what an OLDER release left: the retired files on disk and tracked in the manifest.
@@ -151,7 +151,7 @@ describe("install-asset rows", () => {
   });
 
   it("fixture sanity: the converge ran and the dry run produced a plan", () => {
-    expect(convergeOut.exitCode).toBe(1); // MCP registration fails under PATH=""
+    expect(convergeOut.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
     expect(dryRunStdout.length).toBeGreaterThan(0);
   });
 
@@ -273,9 +273,9 @@ describe("settings-entry rows", () => {
     rmSync(sandbox, { recursive: true, force: true });
   });
 
-  it("converge completed (exit 1: MCP registration fails under PATH=\"\")", () => {
+  it("converge completed (exit 0: setup registers no MCP server)", () => {
     expect(converged.stdout).toContain("lore setup complete");
-    expect(converged.exitCode).toBe(1);
+    expect(converged.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
   });
 
   for (const row of rowsOf("settings-entry")) {

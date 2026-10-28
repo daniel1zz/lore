@@ -76,15 +76,14 @@
  *   value-comparing: a drop-only guard (refuse only when the key is absent) must
  *   NOT satisfy these tests (falsifier scenarios below). An `extra` that echoes
  *   the guarded keys byte-equal, and non-extra patches (title...), stay allowed.
- *   The refusal lives in CorpusService.set so ALL THREE entry points inherit it:
+ *   The refusal lives in CorpusService.set so BOTH entry points inherit it:
  *     1. the CLI `lore set` path  -> corpusService.set directly
- *     2. MCP `lore_set` handler   -> registerTools(...) handler, isError result
- *     3. HTTP PATCH /api/docs/:id -> handleApiRoute, non-2xx {ok:false,error}
+ *     2. HTTP PATCH /api/docs/:id -> handleApiRoute, non-2xx {ok:false,error}
  *
  * ── FALSIFIERS ──────────────────────────────────────────────────────────────
  *   - a drop-only guard turns the "replaced array" and "reordered array" cases red
  *     (key present, value different).
- *   - a guard wired only into the CLI path turns the MCP / HTTP cases red.
+ *   - a guard wired only into the CLI path turns the HTTP cases red.
  *
  * ── DIMENSIONS ──────────────────────────────────────────────────────────────
  *   HAPPY addRule / addNode / setDependsOn · NEGATIVE leaf-under-prd, retired
@@ -101,12 +100,10 @@
  * implemented". The InMemoryStore rule-registry methods are B2's (in flight).
  */
 
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { DEDICATED_EXTRA_KEYS, NoOpTelemetry, ok } from "@lore/core";
 import type { CreateDocInput, DocRecord, DocPatch } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -117,7 +114,6 @@ import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import type { ApiKeyStore, ActorContext } from "../../../src/adapters/http/auth.js";
 import type { App } from "../../../src/app.js";
@@ -183,7 +179,7 @@ function makeApp(): App {
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
     auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
-    callerSurface: "mcp" as const,
+    callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),
     close: () => undefined,
@@ -489,15 +485,11 @@ describe("RuleService baseline node verbs", () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// QA-2 — replace guard, three entry points
+// QA-2 — replace guard, two entry points
 // ═════════════════════════════════════════════════════════════════════════════
 
 type Refusal = { refused: boolean; text: string };
 type EntryPoint = { name: string; set: (idOrSlug: string, patch: DocPatch) => Promise<Refusal> };
-
-type McpServerInternal = {
-  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
-};
 
 const entryPoints: EntryPoint[] = [
   {
@@ -506,18 +498,6 @@ const entryPoints: EntryPoint[] = [
     set: async (idOrSlug, patch) => {
       const r = await corpusService.set(idOrSlug, patch, { by: "cli-test" });
       return { refused: !r.ok, text: r.ok ? "" : JSON.stringify(r.error) };
-    },
-  },
-  {
-    name: "MCP lore_set handler",
-    set: async (idOrSlug, patch) => {
-      const server = new McpServer({ name: "t", version: "0" });
-      registerTools(server, app, undefined, liveInvocation());
-      const tool = (server as unknown as McpServerInternal)._registeredTools["lore_set"];
-      if (!tool) throw new Error("lore_set not registered");
-      const res = await tool.handler({ id_or_slug: idOrSlug, ...patch, by: "mcp-test" }, {});
-      const first = res.content[0];
-      return { refused: res.isError === true, text: first && first.type === "text" ? first.text : "" };
     },
   },
   {

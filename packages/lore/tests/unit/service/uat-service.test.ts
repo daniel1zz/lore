@@ -8,8 +8,7 @@
  * `record()` refuses a non-`plan` target BEFORE creating anything (AC-4 ordering/no-orphan),
  * names the actual type + the plan-close consumer (AC-3), refuses every non-plan DocType
  * (AC-2), never disturbs a pre-existing mis-linked verdict (AC-6), and still returns the
- * pre-existing not-found error for an unresolvable target (AC-8). AC-5 (MCP surface parity
- * without touching mcp/tools.ts) lives in mcp-tools.test.ts.
+ * pre-existing not-found error for an unresolvable target (AC-8).
  *
  * Deterministic, zero-LLM — no AI provider anywhere on this path.
  *

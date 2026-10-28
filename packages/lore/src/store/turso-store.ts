@@ -122,7 +122,7 @@ import {
 } from "./migrations/migration-040.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
-import type { DecisionSubjectKey } from "./store-interface.js";
+import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
 import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
@@ -3246,6 +3246,42 @@ export class TursoStore implements StoreInterface {
               args: [since] as InValue[],
             })
           : await this.client.execute(`SELECT * FROM versions ORDER BY created_at ASC`);
+      return ok(rs.rows.map((row) => rowToVersionRecord(libsqlRowToVersionRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listDecisionVersions(query: DecisionVersionQuery): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+    const clauses: string[] = [];
+    const args: (string)[] = [];
+    if (query.docIds.length > 0) {
+      clauses.push(`doc_id IN (${query.docIds.map(() => "?").join(", ")})`);
+      args.push(...query.docIds);
+    }
+    for (const w of query.windows) {
+      clauses.push(w.to === undefined ? `(harness_run = ? AND created_at >= ?)` : `(harness_run = ? AND created_at >= ? AND created_at <= ?)`);
+      args.push(w.run, w.from, ...(w.to === undefined ? [] : [w.to]));
+    }
+    if (clauses.length === 0) return ok([]);
+    const sql = `SELECT * FROM versions WHERE decision IS NOT NULL AND (${clauses.join(" OR ")}) ORDER BY created_at ASC, doc_id ASC, version ASC`;
+      const rs = await this.client.execute({ sql, args: args as InValue[] });
+      return ok(rs.rows.map((row) => rowToVersionRecord(libsqlRowToVersionRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        since !== undefined
+          ? { sql: `SELECT * FROM versions WHERE decision IS NOT NULL AND created_at >= ? ORDER BY created_at ASC, doc_id ASC, version ASC`, args: [since] }
+          : { sql: `SELECT * FROM versions WHERE decision IS NOT NULL ORDER BY created_at ASC, doc_id ASC, version ASC`, args: [] },
+      );
       return ok(rs.rows.map((row) => rowToVersionRecord(libsqlRowToVersionRow(row))));
     } catch (e) {
       return wrapStoreError(e);

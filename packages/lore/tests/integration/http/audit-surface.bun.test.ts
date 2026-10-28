@@ -5,7 +5,6 @@
  * A create, a set and an approve are driven through each REAL surface and the
  * audit rows they wrote are read back from a real SQLite store:
  *   - CLI        → `bun run src/index.ts` subprocess in a mkdtemp corpus  → "cli"
- *   - MCP        → `registerTools` handlers (lore_create / lore_set / lore_approve) → "mcp"
  *   - HTTP cookie→ real `startHttpServer`, lore_sid session cookie         → "http_cookie"
  *   - HTTP token → same server, `Authorization: Bearer` API key            → "http_token"
  *
@@ -14,7 +13,7 @@
  * no migration and no break of the existing chain.
  *
  * Dimension mapping:
- *   HAPPY:      create/set/approve rows carry the expected surface on all four surfaces
+ *   HAPPY:      create/set/approve rows carry the expected surface on all three surfaces
  *   NEGATIVE:   no row written by a surface carries a DIFFERENT surface (every row is compared to the one expected value)
  *   BOUNDARY:   the set that moves a doc to in-review (a status-only patch) is audited too
  *   ERROR:      a write with no adapter-declared surface records no surface key (never a guess)
@@ -24,15 +23,13 @@
  * @spec_ref spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-1
  */
 
-import { liveInvocation, actedStore, liveIo } from "../../live-invocation.js";
+import { actedStore, liveIo } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { AuditEntry } from "@lore/core";
 import { clearProcessAuditSurface } from "../../../src/store/audit-surface.js";
@@ -42,7 +39,6 @@ import { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { SessionStore } from "../../../src/adapters/http/sessions.js";
 import { startHttpServer } from "../../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../../src/adapters/http/machine-auth.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { VersionService } from "../../../src/service/version-service.js";
@@ -155,48 +151,6 @@ describe("AC-BLC-1 CLI surface", () => {
       store.close();
     }
   }, 120_000);
-});
-
-// ─── MCP ─────────────────────────────────────────────────────────────────────
-
-type McpInternal = {
-  _registeredTools: Record<string, { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }>;
-};
-
-describe("AC-BLC-1 MCP surface", () => {
-  let rig: Rig;
-  beforeAll(() => {
-    rig = makeRig();
-  });
-  afterAll(() => {
-    rig.app.close();
-    rmSync(rig.tmpDir, { recursive: true, force: true });
-  });
-
-  it("lore_create, lore_set and lore_approve record surface 'mcp'", async () => {
-    const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, rig.app, undefined, liveInvocation());
-    const tools = (server as unknown as McpInternal)._registeredTools;
-    const call = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
-      const tool = tools[name];
-      if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-      const res = await tool.handler(args, {});
-      const first = res.content[0];
-      if (first === undefined || first.type !== "text") throw new Error("expected text content");
-      if (res.isError === true) throw new Error(`${name} errored: ${first.text}`);
-      return JSON.parse(first.text);
-    };
-    const created = (await call("lore_create", { type: "prd", title: "Surface MCP", content: "body", by: "agent:mcp-test" })) as {
-      id?: string;
-      data?: { id?: string };
-      doc?: { id?: string };
-    };
-    const docId = created.id ?? created.data?.id ?? created.doc?.id;
-    if (docId === undefined) throw new Error(`no id in create result: ${JSON.stringify(created)}`);
-    await call("lore_set", { id_or_slug: docId, patch: { status: "in-review" }, by: "agent:mcp-test" });
-    await call("lore_approve", { id_or_slug: docId, reviewer: "agent:mcp-test" });
-    expectAllRowsOn(await auditFor(rig.store, docId), "mcp");
-  });
 });
 
 // ─── HTTP (cookie + bearer) ──────────────────────────────────────────────────

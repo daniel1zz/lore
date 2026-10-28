@@ -183,7 +183,7 @@ export interface StoreFilters {
   /**
    * A `knowledge` document's `extra.sub_type`, as a RETRIEVAL predicate —
    * surfaced as `lore list --sub-type <v>` / `lore search --sub-type <v>` and
-   * the matching MCP `lore_list`/`lore_search` fields.
+   * the matching HTTP fields.
    *
    * ⛔ **Every implementation MUST apply this IN THE QUERY, never as a filter
    * over already-fetched rows.** `sub_type` lives in the untyped `extra` JSON
@@ -198,7 +198,7 @@ export interface StoreFilters {
    * built to fail.
    *
    * @remarks Only `knowledge` docs ever carry `extra.sub_type`, so this
-   *   composes with `type: "knowledge"`; the CLI/MCP surfaces REFUSE it
+   *   composes with `type: "knowledge"`; the CLI surface REFUSES it
    *   alongside any other `type` (usage error, exit 2) rather than returning a
    *   silently empty set. The store layer itself applies no such cross-field
    *   rule — it is a pure column predicate here, and a caller pairing it with
@@ -232,6 +232,15 @@ export interface StoreFilters {
    * nothing).
    */
   offset?: number;
+}
+
+/**
+ * Which decision-carrying version rows {@link StoreInterface.listDecisionVersions} selects: every version of a doc in
+ * `docIds`, plus every version written by `run` between `from` and `to` (inclusive ISO 8601; `to` absent = still open).
+ */
+export interface DecisionVersionQuery {
+  readonly docIds: readonly DocId[];
+  readonly windows: readonly { readonly run: string; readonly from: string; readonly to?: string }[];
 }
 
 export interface AuditFilters {
@@ -578,7 +587,7 @@ export interface StoreInterface {
    * Directly assigns the EXACT `ordinal` value passed in — the ONLY store
    * write path that does NOT compute `MAX(ordinal)+1` (SPEC-084 D7: "repair
    * migration uses an internal store path"). Deliberately NOT exposed via
-   * CLI/MCP/HTTP and not for any other caller — `insertWithAllocatedOrdinal`/
+   * CLI/HTTP and not for any other caller — `insertWithAllocatedOrdinal`/
    * `allocateOrdinalForExisting` remain the only two ALLOCATION sites (Plan
    * Invariant 2); this is a distinct, sanctioned TARGETED-ASSIGNMENT path
    * used exclusively by `OrdinalMigrationService`'s one-shot repair, whose
@@ -1167,6 +1176,22 @@ export interface StoreInterface {
    * @see PLAN task D (SPEC-035) — audit surface
    */
   listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
+
+  /**
+   * Version rows whose `decision` is non-null and that match `query` (a doc in `docIds`, or a `harness_run` inside a
+   * window), oldest first. Each row carries its parsed DecisionRecord; a stored value that no longer parses fails loud.
+   * Empty `docIds` and `windows` answer `ok([])` without a query.
+   */
+  listDecisionVersions(query: DecisionVersionQuery): Promise<Result<VersionRecord[], LoreError>>;
+
+  /**
+   * Every version row whose `decision` is non-null and whose `created_at >= since` (omit `since` for all), oldest first.
+   * The population `lore decision rates` counts; each row carries its parsed DecisionRecord (a stored value that no
+   * longer parses fails loud).
+   *
+   * @param since - ISO 8601 lower bound, inclusive
+   */
+  listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
 
   /**
    * The narrow twin of {@link listAllVersions} for {@link AuditService.verify}'s completeness join: only the four

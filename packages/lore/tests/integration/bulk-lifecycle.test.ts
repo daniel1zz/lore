@@ -3,7 +3,7 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part A; AC-LG-1..AC-LG-4; BR-1366, BR-1367)
  *
  * `lore bulk <archive|deprecate|close|done>`: preview then apply, rows that fail alone, draft -> deprecated,
- * and MCP parity (`lore_bulk` / `lore_done` / `lore_reject`) over a real McpServer + Client. Everything runs on a
+ * and the `archive --apply` exit code. Everything runs on a
  * throwaway corpus (`mkdtemp` + `lore init`, git tree kept clean) — never the repo's own `.lore/`.
  *
  * Dimensions: HAPPY (preview exit 3, apply exit 0), NEGATIVE (usage exits 2, unknown id), BOUNDARY (none selected
@@ -13,21 +13,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { docTypeSchema, getAllowedTransitions, isValidTransition } from "@lore/core";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
-import { liveInvocation, liveAmbient, actedStore, liveWriteContext } from "../live-invocation.js";
-import { registerRunInDb } from "../helpers/test-run-identity.js";
-import { createApp, type App } from "../../src/app.js";
-import { registerTools } from "../../src/adapters/mcp/tools.js";
-import { SQLiteStore } from "../../src/store/sqlite-store.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -334,142 +326,17 @@ describe("bulk lifecycle: draft can be abandoned", () => {
   });
 });
 
-interface ToolResult {
-  isError?: boolean;
-  content: { type: string; text: string }[];
-}
-const textOf = (r: ToolResult): string => r.content.map((c) => c.text).join("\n");
-
-describe("bulk lifecycle: mcp parity", () => {
-  let app: App | undefined;
-  let client: Client | undefined;
-  const RUN = "cc:session-bulk-parity-run";
-
-  async function openMcp(): Promise<Client> {
-    const dbPath = join(tmpDir, ".lore", "lore.db");
-    const store = actedStore(new SQLiteStore(dbPath)) as unknown as {
-      insertRun: (r: unknown) => Promise<{ ok: boolean; error?: unknown }>;
-      close?: () => void;
-    };
-    try {
-      const inserted = await store.insertRun({
-        id: RUN,
-        kind: "main",
-        harness: "claude-code",
-        sessionRef: RUN.replace(/^cc:/, ""),
-        agentRef: null,
-        agentType: null,
-        parentRunId: null,
-        branch: "main",
-        composition: { schemaVersion: 1, fragments: [{ id: "frag-1", sha256: "a".repeat(64) }] },
-        registeredAt: "2026-10-08T00:00:00.000Z",
-      });
-      if (!inserted.ok) throw new Error(`insertRun failed: ${JSON.stringify(inserted.error)}`);
-    } finally {
-      store.close?.();
-    }
-    // the run's harness is this test process (pid + start time): the tool server verifies a call's run by process ancestry
-    if (!registerRunInDb(dbPath, RUN)) throw new Error("registerRunInDb: no runs table in the fixture corpus");
-    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
-    const server = new McpServer({ name: "lore", version: "0.0.0-test" });
-    registerTools(server, app, undefined, liveInvocation());
-    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverT);
-    client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(clientT);
-    return client;
-  }
-
-  async function call(name: string, args: Record<string, unknown>): Promise<ToolResult> {
-    if (client === undefined) throw new Error("mcp client not open");
-    return (await client.callTool({ name, arguments: args })) as unknown as ToolResult;
-  }
-
-  afterEach(async () => {
-    await client?.close();
-    app?.close();
-    client = undefined;
-    app = undefined;
-  });
-
-  /** Normalised view of rows: what must be identical between the CLI and MCP for equivalent fixtures. */
-  const shape = (rows: BulkRow[]): unknown[] =>
-    rows.map((r) => ({ type: r.type, status: r.status, target: r.target, outcome: r.outcome, from: r.from_status, to: r.to_status, code: r.code, rule: r.rule, reason: r.slug === undefined ? r.reason : r.reason?.split(r.slug).join("<slug>") }));
-
-  it("mcp parity: tools are listed, and lore_bulk previews and applies the same rows as the CLI", async () => {
-    const setA = [createTask("Parity A1"), createTask("Parity A2")];
-    const setB = [createTask("Parity B1"), createTask("Parity B2")];
-    for (const slug of [...setA, ...setB]) addAttestedPass(slug);
-    const cliPreview = bulkJson(["archive", ...setA], tmpDir);
-    expect(cliPreview.exitCode).toBe(3);
-
-    const mcp = await openMcp();
-    const names = (await mcp.listTools()).tools.map((t) => t.name);
-    for (const name of ["lore_bulk", "lore_done", "lore_reject"]) expect(names).toContain(name);
-
-    // Same corpus, same selector: same rows (preview is read-only on both sides).
-    const mcpPreview = JSON.parse(textOf(await call("lore_bulk", { verb: "archive", ids: setA, harness_run: RUN }))) as {
-      mode: string;
-      rows: BulkRow[];
-    };
-    expect(mcpPreview.mode).toBe("preview");
-    expect(mcpPreview.rows).toEqual(cliPreview.rows);
-    const mcpWhere = JSON.parse(textOf(await call("lore_bulk", { verb: "archive", where: "type=task,status=draft", harness_run: RUN }))) as {
-      rows: BulkRow[];
-    };
-    expect(mcpWhere.rows.map((r) => r.slug).sort()).toEqual([...setA, ...setB].sort());
-
-    // Selector errors and a missing reason are refused, writing nothing.
-    const both = await call("lore_bulk", { verb: "archive", ids: setA, where: "type=task", harness_run: RUN });
-    expect(both.isError).toBe(true);
-    const noReason = await call("lore_bulk", { verb: "archive", ids: setB, apply: true, harness_run: RUN });
-    expect(noReason.isError).toBe(true);
-    expect(textOf(noReason)).toContain("reason");
-    expect(statusOf(setB[0] as string, tmpDir)).toBe("draft");
-
-    // Apply: MCP on set B, the CLI on set A (equivalent fixtures): same per-row result shape.
-    const mcpApply = JSON.parse(
-      textOf(await call("lore_bulk", { verb: "archive", ids: setB, apply: true, reason: "parity", harness_run: RUN })),
-    ) as { mode: string; rows: BulkRow[] };
-    const cliApply = bulkJson(["archive", ...setA, "--apply", "--reason", "parity"], tmpDir);
-    expect(mcpApply.mode).toBe("apply");
-    expect(shape(mcpApply.rows)).toEqual(shape(cliApply.rows));
-    expect(mcpApply.rows.map((r) => r.outcome)).toEqual(["OK", "OK"]);
-    expect(setB.map((s) => statusOf(s, tmpDir))).toEqual(["archived", "archived"]);
-  });
-
-  it("mcp parity: lore_done enforces the same floor as the CLI and lore_reject records its reason", async () => {
-    const withEvidence = createTask("Done via MCP");
-    const without = createTask("Refused via MCP");
-    const toReject = createTask("Rejected via MCP");
-    addAttestedPass(withEvidence);
-
-    const mcp = await openMcp();
-    expect(mcp).toBeDefined();
-    const done = await call("lore_done", { id_or_slug: withEvidence, harness_run: RUN });
-    expect(done.isError).not.toBe(true);
-    expect(statusOf(withEvidence, tmpDir)).toBe("archived");
-
-    const refused = await call("lore_done", { id_or_slug: without, harness_run: RUN });
-    expect(refused.isError).toBe(true);
-    const refusal = JSON.parse(textOf(refused)) as { code: string; rule: string };
-    expect(refusal.code).toBe("VALIDATION_ERROR");
-    expect(refusal.rule).toBe("BR-1292");
+describe("bulk lifecycle: archive --apply exit code", () => {
+  it("lore done refuses a task with no attested pass (the CLI half of the former lore_done parity case)", () => {
+    const without = createTask("Refused via CLI");
     expect(statusOf(without, tmpDir)).toBe("draft");
-    // The CLI refuses the same task for the same rule.
     const cliRefusal = runLore(["done", without], tmpDir);
     expect(cliRefusal.exitCode).toBe(4);
     expect(cliRefusal.stderr).toContain("[floor: attested-pass]");
-
-    const rejected = await call("lore_reject", { id_or_slug: toReject, reason: "wrong approach", harness_run: RUN });
-    expect(rejected.isError).not.toBe(true);
-    expect(runLore(["audit", toReject, "--json"], tmpDir).stdout).toContain("wrong approach");
-    const unknown = await call("lore_reject", { id_or_slug: "task-no-such-doc", harness_run: RUN });
-    expect(unknown.isError).toBe(true);
+    expect(statusOf(without, tmpDir)).toBe("draft");
   });
 
-  it("mcp parity: lore archive --apply exits 1 when a candidate failed (INVALID_TRANSITION), 0 when none did", () => {
+  it("lore archive --apply exits 1 when a candidate failed (INVALID_TRANSITION), 0 when none did", () => {
     patchLoreConfig(tmpDir, 'workflow:\n  gates:\n    "plan-close":\n      enabled: false\n');
     expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
     // An open task under an archived plan is an R4 candidate; in-review -> archived is not a legal step. BR-1379 no

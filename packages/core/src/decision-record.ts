@@ -45,14 +45,17 @@ export type WeightTableKind = (typeof WEIGHT_TABLE_KINDS)[number];
 const nonEmpty = z.string().min(1);
 
 /** A stored premise source. File sources carry the pinned `sha` and the `quote` lore read at write time. */
+export const fileSourceSchema = z.object({
+  kind: z.literal("file"),
+  path: nonEmpty,
+  lines: z.tuple([z.number().int().min(1), z.number().int().min(1)]),
+  sha: nonEmpty,
+  quote: z.string(),
+});
+export type FileSource = z.infer<typeof fileSourceSchema>;
+
 export const premiseSourceSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("file"),
-    path: nonEmpty,
-    lines: z.tuple([z.number().int().min(1), z.number().int().min(1)]),
-    sha: nonEmpty,
-    quote: z.string(),
-  }),
+  fileSourceSchema,
   z.object({ kind: z.literal("cmd"), command: nonEmpty, expect: nonEmpty }),
   z.object({ kind: z.literal("issue"), number: z.number().int().min(1) }),
   z.object({ kind: z.literal("doc"), slug: nonEmpty, version: z.number().int().min(1).optional() }),
@@ -69,6 +72,8 @@ export const decisionGateSchema = z.object({
   id: nonEmpty,
   verdict: z.enum(["pass", "fail"]),
   evidence: nonEmpty,
+  /** Set by lore when `evidence` parses as a file source: the pinned commit and the lines' text at write time. */
+  evidence_source: fileSourceSchema.optional(),
   computed: z.boolean(),
 });
 export type DecisionGate = z.infer<typeof decisionGateSchema>;
@@ -78,6 +83,8 @@ export const decisionScoreSchema = z.object({
   dimension: nonEmpty,
   value: z.union([z.literal(-1), z.literal(0), z.literal(1)]),
   evidence: nonEmpty,
+  /** Set by lore when `evidence` parses as a file source: the pinned commit and the lines' text at write time. */
+  evidence_source: fileSourceSchema.optional(),
 });
 export type DecisionScore = z.infer<typeof decisionScoreSchema>;
 

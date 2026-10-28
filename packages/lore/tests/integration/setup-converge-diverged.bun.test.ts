@@ -30,7 +30,7 @@
  * Coverage:
  *   HAPPY:      re-running `--yes` over a user-modified managed file leaves
  *               its bytes byte-unchanged, exit 0/1 (file work succeeds
- *               regardless of the unrelated MCP-under-PATH="" failure), and
+ *               exit 0 since setup registers no MCP server), and
  *               stdout lists the path plus a literal
  *               `lore setup --yes --force-diverged` repair line; `--json`'s
  *               receipt carries the path under `skippedDiverged`;
@@ -119,13 +119,12 @@ afterEach(() => {
   }
 });
 
-/** Fresh `--yes` converge into a never-before-installed `targetDir`. `PATH=""` makes MCP registration fail (exit 1) — file writes still land. */
+/** Fresh `--yes` converge into a never-before-installed `targetDir`. Setup registers no MCP server, so the install exits 0 (task-skill-implement-lore-setup-registers-no-tool-server-and). */
 function freshInstall(scratch: string, targetDir: string): void {
   const install = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-  if (install.exitCode !== 1) {
+  if (install.exitCode !== 0) {
     throw new Error(
-      `freshInstall: expected the seeding install to exit 1 (files written, MCP registration fails under ` +
-        `PATH=""), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
+      `freshInstall: expected the seeding install to exit 0 (task-skill-implement-lore-setup-registers-no-tool-server-and: setup registers no MCP server), got ${install.exitCode}.\nstdout: ${install.stdout}\nstderr: ${install.stderr}`,
     );
   }
 }
@@ -166,9 +165,8 @@ describe("lore setup --yes — converge diverged-skip default — HAPPY", () => 
     const mutatedShaBefore = sha256OfFile(mutatedFullPath);
 
     const converge = runSetup(["--claude-dir", targetDir, "--yes", "--json"], scratch);
-    // File work succeeds; MCP registration still fails under PATH="" — same exit-1 bucket
-    // every other mutating scenario in this suite family observes.
-    expect(converge.exitCode).toBe(1);
+    // task-skill-implement-lore-setup-registers-no-tool-server-and: file work succeeds and there is no MCP leg, so the converge exits 0.
+    expect(converge.exitCode).toBe(0);
 
     // Bytes are byte-unchanged — never silently overwritten.
     expect(readFileSync(mutatedFullPath, "utf8")).toBe(MUTATED_BYTES);
@@ -186,7 +184,7 @@ describe("lore setup --yes — converge diverged-skip default — HAPPY", () => 
     writeFileSync(join(targetDir, WATCHED_MANAGED_FILE), MUTATED_BYTES);
 
     const converge = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
-    expect(converge.exitCode).toBe(1);
+    expect(converge.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
     expect(converge.stdout).toContain(WATCHED_MANAGED_FILE);
     expect(converge.stdout).toContain("lore setup --yes --force-diverged");
   });
@@ -202,7 +200,7 @@ describe("lore setup --yes — converge diverged-skip default — HAPPY", () => 
     const expectedSha = sha256OfFile(join(REPO_ASSETS_ROOT, WATCHED_MANAGED_FILE));
 
     const converge = runSetup(["--claude-dir", targetDir, "--yes", "--force-diverged", "--json"], scratch);
-    expect(converge.exitCode).toBe(1); // MCP still fails under PATH=""
+    expect(converge.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     expect(sha256OfFile(mutatedFullPath)).toBe(expectedSha);
 
@@ -244,7 +242,7 @@ describe("lore setup — converge diverged-skip default — BOUNDARY", () => {
     const expectedSha = sha256OfFile(join(REPO_ASSETS_ROOT, WATCHED_MANAGED_FILE));
 
     const install = runSetup(["--claude-dir", targetDir, "--yes", "--json"], scratch);
-    expect(install.exitCode).toBe(1); // MCP still fails under PATH=""
+    expect(install.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     // D3: no "diverged" concept on a fresh install — the differing pre-existing file is
     // backed up (foreign content preserved) and overwritten with the target bytes, exactly
@@ -269,12 +267,12 @@ describe("lore setup — converge diverged-skip default — STATE", () => {
     writeFileSync(mutatedFullPath, MUTATED_BYTES);
 
     const first = runSetup(["--claude-dir", targetDir, "--yes", "--json"], scratch);
-    expect(first.exitCode).toBe(1);
+    expect(first.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
     const firstPayload = JSON.parse(first.stdout) as { data: { skippedDiverged: string[] } };
     expect(firstPayload.data.skippedDiverged).toEqual([WATCHED_MANAGED_FILE]);
 
     const second = runSetup(["--claude-dir", targetDir, "--yes", "--json"], scratch);
-    expect(second.exitCode).toBe(1);
+    expect(second.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
     const secondPayload = JSON.parse(second.stdout) as { data: { skippedDiverged: string[] } };
     expect(secondPayload.data.skippedDiverged).toEqual([WATCHED_MANAGED_FILE]);
 
@@ -294,7 +292,7 @@ describe("lore setup — converge diverged-skip default — REGRESSION", () => {
     writeFileSync(join(targetDir, WATCHED_MANAGED_FILE), MUTATED_BYTES);
 
     const converge = runSetup(["--claude-dir", targetDir, "--yes", "--json"], scratch);
-    expect(converge.exitCode).toBe(1);
+    expect(converge.exitCode).toBe(0); // task-skill-implement-lore-setup-registers-no-tool-server-and: no MCP leg any more
 
     const payload = JSON.parse(converge.stdout) as {
       data: { skippedDiverged: string[]; skipped: string[]; written: unknown[] };

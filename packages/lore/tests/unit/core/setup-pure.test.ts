@@ -2,17 +2,15 @@
 /**
  * @spec_ref SPEC-046 §Design ("`@lore/core` (pure, browser-safe)"), AC-046-A
  *
- * Six-dimension coverage for the three pure `@lore/core` setup modules that
+ * Six-dimension coverage for the pure `@lore/core` setup modules that
  * back `lore setup` (SPEC-046 P1 local safe installer):
  *   - setup-manifest.ts — setupEntrySchema/setupManifestSchema (Zod) + planInstall
  *   - merge-settings.ts — mergeSettings (settings.json hook merge)
- *   - register-mcp.ts — buildMcpAddArgs/buildMcpRemoveArgs (pure argv builders)
  *
  * Coverage:
  *   HAPPY:      planInstall on a clean target writes every payload file;
  *               mergeSettings against an empty existing config installs the
- *               lore hook entries; register-mcp argv builders produce the
- *               exact documented argv.
+ *               lore hook entries.
  *   NEGATIVE:   mergeSettings rejects malformed JSON / non-object top level /
  *               non-object `hooks` with err(VALIDATION_ERROR); an unknown
  *               setup-entry `kind` is rejected by the Zod schema.
@@ -28,8 +26,7 @@
  *               with the same entries is idempotent (changed: false).
  *   REGRESSION: a settings.json with foreign top-level keys and foreign
  *               matcher-groups survives the merge byte-for-byte on the
- *               untouched parts; register-mcp never returns a shared mutable
- *               array across calls; all three modules (plus the barrel) stay
+ *               untouched parts; both modules (plus the barrel) stay
  *               free of Node builtins — the browser-safety invariant
  *               `@lore/core`'s CLAUDE.md pins for `index.ts`.
  */
@@ -48,7 +45,6 @@ import {
   type AssetPayload,
 } from "@lore/core";
 import { mergeSettings, type SettingsHookEntry } from "@lore/core";
-import { buildMcpAddArgs, buildMcpRemoveArgs } from "@lore/core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CORE_SRC_DIR = join(__dirname, "../../../../core/src");
@@ -393,40 +389,6 @@ describe("merge-settings: mergeSettings", () => {
   });
 });
 
-// ─── register-mcp.ts ─────────────────────────────────────────────────────────
-
-describe("register-mcp: buildMcpAddArgs / buildMcpRemoveArgs", () => {
-  it("HAPPY: buildMcpAddArgs yields the exact documented argv", () => {
-    expect(buildMcpAddArgs("/usr/local/bin/lore")).toEqual([
-      "mcp",
-      "add",
-      "-s",
-      "user",
-      "lore",
-      "--",
-      "/usr/local/bin/lore",
-      "--mcp-server",
-    ]);
-  });
-
-  it("HAPPY: buildMcpRemoveArgs yields the exact documented argv", () => {
-    expect(buildMcpRemoveArgs()).toEqual(["mcp", "remove", "-s", "user", "lore"]);
-  });
-
-  it("BOUNDARY: an empty binPath is passed through verbatim (no validation at this pure layer)", () => {
-    expect(buildMcpAddArgs("")).toEqual(["mcp", "add", "-s", "user", "lore", "--", "", "--mcp-server"]);
-  });
-
-  it("REGRESSION: each call returns a fresh array — mutating one call's result never affects another's", () => {
-    const first = buildMcpAddArgs("/bin/lore-v1");
-    const second = buildMcpAddArgs("/bin/lore-v2");
-    first.push("--extra-mutation-marker");
-
-    expect(second).toEqual(["mcp", "add", "-s", "user", "lore", "--", "/bin/lore-v2", "--mcp-server"]);
-    expect(second).not.toContain("--extra-mutation-marker");
-  });
-});
-
 // ─── Cross-module: browser-safety (barrel node-free invariant) ─────────────
 
 describe("REGRESSION: setup modules stay browser-safe (no Node builtins)", () => {
@@ -442,15 +404,9 @@ describe("REGRESSION: setup modules stay browser-safe (no Node builtins)", () =>
     expect(NODE_BUILTIN_IMPORT.test(src)).toBe(false);
   });
 
-  it("register-mcp.ts imports no Node builtins", () => {
-    const src = readFileSync(join(CORE_SRC_DIR, "register-mcp.ts"), "utf-8");
-    expect(NODE_BUILTIN_IMPORT.test(src)).toBe(false);
-  });
-
-  it("the default barrel (index.ts) re-exports all three new modules", () => {
+  it("the default barrel (index.ts) re-exports the setup modules", () => {
     const barrel = readFileSync(join(CORE_SRC_DIR, "index.ts"), "utf-8");
     expect(barrel).toContain('export * from "./setup-manifest.js"');
     expect(barrel).toContain('export * from "./merge-settings.js"');
-    expect(barrel).toContain('export * from "./register-mcp.js"');
   });
 });

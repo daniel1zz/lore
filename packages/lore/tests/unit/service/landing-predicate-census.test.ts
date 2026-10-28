@@ -116,9 +116,7 @@ describe("the landing predicate census", () => {
     expect(text("service/milestone-review.ts")).toContain('if (landing.kind === "no-change") continue;');
     // lore get: reads the stored measured landing, never recomputes it
     expect(text("adapters/cli/commands/get.ts")).toContain("readMeasuredLanding(doc.extra)");
-    // the tool protocol and the post-landing archive reach the same done: no landing logic of their own
-    expect(text("adapters/mcp/tools.ts")).toContain("taskWorkflowService.done(args.id_or_slug");
-    expect(text("adapters/mcp/tools.ts")).not.toMatch(CALLS_LANDING_OF);
+    // the post-landing archive reaches the same done: no landing logic of its own
     expect(text("service/integrate-service.ts")).not.toMatch(CALLS_LANDING_OF);
   });
 

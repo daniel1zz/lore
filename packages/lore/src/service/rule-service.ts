@@ -43,7 +43,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { err, ok, validationError, type Result } from "@lore/core";
-import type { LoreError, DocRecord, DocStatus } from "@lore/core";
+import type { DecisionRecord, LoreError, DocRecord, DocStatus, WeightTableKind } from "@lore/core";
 import {
   ANY_RULE_ID_PATTERN,
   BASELINE_RULE_ID_PATTERN,
@@ -65,7 +65,9 @@ import {
   type RuleLifecycle,
 } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
-import { resolveWriteActorFor } from "../store/write-context-store.js";
+import { findWriteSourceFor, resolveWriteActorFor } from "../store/write-context-store.js";
+import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
+import { judgeRuleEdit } from "./rule-edit-decision.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { refuseLiveCommandRemoval, type MainTreePort } from "./main-tree-guard.js";
 import { resolveDoc } from "./resolve.js";
@@ -172,6 +174,20 @@ export interface BaselineTreeEntry {
 /** Result of one mutation attempt against a fresh read: the new extra, or a refusal. */
 type Mutation = Result<{ extra: Record<string, unknown>; summary: string; details: Record<string, unknown> }, LoreError>;
 
+/** Options of the node-part verbs (`set-label|depends|glossary|map`): the writer's name and, for a gated write, its decision. */
+export interface NodeWriteOpts {
+  by?: string;
+  /** The decision an agent supplies (BR-1476): required for a node with an approved version. */
+  decision?: DecisionDraft | undefined;
+}
+
+/** Marks a `writeLeafExtra` call as decision-gated; `draft` is what the writer supplied (absent when nothing). */
+interface NodeDecisionInput {
+  readonly draft: DecisionDraft | undefined;
+  /** Present for `rule set` (BR-1477): the patch and the rule as it reads before it, so the rule-specific gates apply. */
+  readonly ruleEdit?: { readonly patch: SetRulePatch; readonly current: BaselineRule };
+}
+
 /** One `lore baseline map` edit of the commands a leaf answers for (a site's rule is declared in code, BR-1344). */
 export interface CommandsChange {
   addCommands?: string[];
@@ -218,6 +234,16 @@ export class RuleService {
 
   setMainTreePort(port: MainTreePort): void {
     this.mainTree = port;
+  }
+
+  /**
+   * Armed by `app.ts` (both roots): an agent's `set-label|depends|glossary|map` on a node with an approved version is
+   * refused without a complete decision (BR-1476). Absent (a bare test construction) = ungated.
+   */
+  private decisionGate: DecisionGate | undefined;
+
+  setDecisionGate(gate: DecisionGate): void {
+    this.decisionGate = gate;
   }
 
   /**
@@ -277,7 +303,7 @@ export class RuleService {
   async addRule(
     leaf: string,
     input: AddRuleInput,
-    opts?: { by?: string },
+    opts?: { by?: string; decision?: DecisionDraft | undefined },
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
     // reason: first pass validates the rule's own fields only; "AS" is the one family that admits every
@@ -304,6 +330,9 @@ export class RuleService {
     if (!exceptions.ok) return exceptions;
     const gate = await this.authorizeCorpusWrite([target.value], "rule-add", opts?.by);
     if (!gate.ok) return gate;
+    // BR-1476 — an agent's add to a leaf with an approved version carries a decision; refused before the id is reserved.
+    const decided = await this.resolveNodeDecision(target.value, opts?.decision, undefined, "rule revision");
+    if (!decided.ok) return decided;
     const leafId = target.value.id;
 
     let lastStale: LoreError | undefined;
@@ -332,6 +361,7 @@ export class RuleService {
           ownerLeafId: base.id,
           status: statusFor(base.status, placeholderExtra),
           changeSummary: "Rule added (pending: not live until approved)",
+          ...(decided.value !== undefined ? { decision: decided.value } : {}),
         },
         family,
         auditDetails: { operation: "rule-add", pending: true },
@@ -359,7 +389,7 @@ export class RuleService {
   async setRule(
     ruleId: string,
     patch: SetRulePatch,
-    opts?: { by?: string },
+    opts?: { by?: string; decision?: DecisionDraft | undefined },
   ): Promise<Result<{ rule: BaselineRule; doc: DocRecord; revisionId: string | undefined }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
     if (!ANY_RULE_ID_PATTERN.test(ruleId)) {
@@ -417,6 +447,7 @@ export class RuleService {
           summary: `${patchSummary(patch)} (pending revision of ${ruleId})`,
           details: { rule_id: ruleId, operation: patch.moveTo !== undefined ? "rule-move" : "rule-set", fields: Object.keys(patch), pending: true },
         }),
+        { draft: opts?.decision, ruleEdit: { patch, current } },
       );
       if (!written.ok) {
         if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
@@ -485,14 +516,14 @@ export class RuleService {
   }
 
   /** Set a node's display label (`extra.label`). */
-  async setLabel(node: string, label: string, opts?: { by?: string }): Promise<Result<DocRecord, LoreError>> {
+  async setLabel(node: string, label: string, opts?: NodeWriteOpts): Promise<Result<DocRecord, LoreError>> {
     if (label.trim() === "") return err(validationError("label", "label must not be empty", undefined, "BR-616"));
     const target = await this.resolveBaselineDoc(node);
     if (!target.ok) return target;
     const gate = await this.authorizeCorpusWrite([target.value], "label-set", opts?.by);
     if (!gate.ok) return gate;
     return this.retryWrite(target.value.id, opts?.by, (doc) =>
-      nodePartMutation(doc, { label }, `Baseline label set to '${label}' (pending revision of the node)`, { operation: "label-set", label }));
+      nodePartMutation(doc, { label }, `Baseline label set to '${label}' (pending revision of the node)`, { operation: "label-set", label }), { draft: opts?.decision });
   }
 
   /**
@@ -502,7 +533,7 @@ export class RuleService {
   async setDependsOn(
     leaf: string,
     change: { add?: string[]; remove?: string[] },
-    opts?: { by?: string },
+    opts?: NodeWriteOpts,
   ): Promise<Result<DocRecord, LoreError>> {
     const add = change.add ?? [];
     const remove = change.remove ?? [];
@@ -535,7 +566,7 @@ export class RuleService {
       }
       const next = [...new Set([...current.filter((id) => !remove.includes(id)), ...add])];
       return nodePartMutation(doc, { depends_on: next }, `depends_on +${add.length} -${remove.length} (pending revision of the node)`, { operation: "depends-on", add, remove });
-    });
+    }, { draft: opts?.decision });
   }
 
   /**
@@ -547,7 +578,7 @@ export class RuleService {
   async setCommands(
     leaf: string,
     change: CommandsChange,
-    opts?: { by?: string },
+    opts?: NodeWriteOpts,
   ): Promise<Result<DocRecord, LoreError>> {
     const addCommands = (change.addCommands ?? []).map((c) => c.trim());
     const removeCommands = (change.removeCommands ?? []).map((c) => c.trim());
@@ -580,14 +611,14 @@ export class RuleService {
       return nodePartMutation(doc, { commands: nextCommands }, `commands +${addCommands.length} -${removeCommands.length} (pending revision of the node)`, {
         operation: "baseline-map", addCommands, removeCommands,
       });
-    });
+    }, { draft: opts?.decision });
   }
 
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
   async glossaryAdd(
     node: string,
     entry: { term: string; meaning: string; note?: string },
-    opts?: { by?: string },
+    opts?: NodeWriteOpts,
   ): Promise<Result<DocRecord, LoreError>> {
     const parsed = glossaryEntrySchema.safeParse(entry);
     if (!parsed.success) {
@@ -606,11 +637,11 @@ export class RuleService {
       return nodePartMutation(doc, { glossary: [...current, parsed.data] }, `Glossary + '${parsed.data.term}' (pending revision of the node)`, {
         operation: "glossary-add", term: parsed.data.term,
       });
-    });
+    }, { draft: opts?.decision });
   }
 
   /** Remove a glossary entry by exact term; an absent term is refused. */
-  async glossaryRemove(node: string, term: string, opts?: { by?: string }): Promise<Result<DocRecord, LoreError>> {
+  async glossaryRemove(node: string, term: string, opts?: NodeWriteOpts): Promise<Result<DocRecord, LoreError>> {
     const target = await this.resolveBaselineDoc(node, ["root", "branch"]);
     if (!target.ok) return target;
     const gate = await this.authorizeCorpusWrite([target.value], "glossary-remove", opts?.by);
@@ -623,7 +654,7 @@ export class RuleService {
       return nodePartMutation(doc, { glossary: current.filter((g) => g.term !== term) }, `Glossary - '${term}' (pending revision of the node)`, {
         operation: "glossary-remove", term,
       });
-    });
+    }, { draft: opts?.decision });
   }
 
   // ── read ───────────────────────────────────────────────────────────────────
@@ -785,12 +816,14 @@ export class RuleService {
     actor: string,
     summary: string,
     details: Record<string, unknown>,
+    decision?: DecisionRecord,
   ): Promise<Result<DocRecord, LoreError>> {
     const written = await this.writer.writeDoc({
       doc,
       patch: { extra, status },
       action: "update",
       changeSummary: summary,
+      ...(decision !== undefined ? { decision } : {}),
       auditAction: "update",
       auditDetails: details,
       lock: "none",
@@ -808,6 +841,7 @@ export class RuleService {
     doc: DocRecord,
     actor: string,
     mutate: (doc: DocRecord) => Mutation,
+    decisionInput?: NodeDecisionInput,
   ): Promise<Result<DocRecord, LoreError>> {
     const mutation = mutate(doc);
     if (!mutation.ok) return mutation;
@@ -818,7 +852,40 @@ export class RuleService {
       const issue = shape.error.issues[0];
       return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid baseline extra"));
     }
-    return this.commit(doc, mutation.value.extra, statusFor(doc.status, mutation.value.extra), actor, mutation.value.summary, mutation.value.details);
+    // BR-1476 — an agent's change to a node with an approved version carries a decision; refused here, after every
+    // refusal of the change itself and before the write, so nothing is written.
+    // reason: `rule add` is gated before its reservation (it never reaches this method); the node-part verbs and `rule set`
+    // pass `decisionInput`, any other caller passes none and is not gated here.
+    let decision: DecisionRecord | undefined;
+    if (decisionInput !== undefined) {
+      const judged = await this.resolveNodeDecision(doc, decisionInput.draft, decisionInput.ruleEdit);
+      if (!judged.ok) return judged;
+      decision = judged.value;
+    }
+    return this.commit(doc, mutation.value.extra, statusFor(doc.status, mutation.value.extra), actor, mutation.value.summary, mutation.value.details, decision);
+  }
+
+  /**
+   * The decision of a baseline write (`set-label|depends|glossary|map`): required of an agent when `doc` has an approved
+   * version (a node never approved carries the `initial` marker and is a draft); human parties carry none.
+   */
+  private async resolveNodeDecision(
+    doc: DocRecord,
+    draft: DecisionDraft | undefined,
+    ruleEdit?: NodeDecisionInput["ruleEdit"],
+    kind: WeightTableKind = "document revision",
+  ): Promise<Result<DecisionRecord | undefined, LoreError>> {
+    const gate = this.decisionGate;
+    if (gate === undefined) return ok(undefined);
+    const required = writeCarriesDecision({
+      writerSource: findWriteSourceFor(this.store),
+      targetIsDraft: pendingRevisionsOf(doc).node?.initial === true,
+      changesMoreThanStatus: true,
+    });
+    if (ruleEdit !== undefined) {
+      return judgeRuleEdit(gate, { carriesDecision: required, current: ruleEdit.current, patch: { ...ruleEdit.patch }, draft });
+    }
+    return gate.judgeChecked({ required, draft, kind });
   }
 
   /**
@@ -830,13 +897,14 @@ export class RuleService {
     docId: string,
     by: string | undefined,
     mutate: (doc: DocRecord) => Mutation,
+    decisionInput?: NodeDecisionInput,
   ): Promise<Result<DocRecord, LoreError>> {
     const actor = this.resolveActor(by);
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const fresh = await this.readLeaf(docId);
       if (!fresh.ok) return fresh;
-      const written = await this.writeLeafExtra(fresh.value, actor, mutate);
+      const written = await this.writeLeafExtra(fresh.value, actor, mutate, decisionInput);
       if (written.ok) return written;
       if (written.error.code !== "STALE_VERSION") return written;
       lastStale = written.error;

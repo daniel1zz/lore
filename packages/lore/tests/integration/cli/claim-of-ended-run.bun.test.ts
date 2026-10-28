@@ -5,7 +5,7 @@
  * #457 / BR-1058: a task claimed by run R1, after R1 ends (ended_at set) and while the claim is younger than the lease TTL,
  * is claimed by another run R2 without a steal, and the output names R1 as ended. A claim of a LIVE run still refuses.
  *
- * Real McpServer + registerTools over an in-memory transport (the claim path is shared with the CLI service), real SQLite
+ * The task service's claim (the one path the CLI verb calls; the lore MCP server is gone), real SQLite
  * corpus in a mkdtemp dir. Both runs are registered with the test process as their harness, so the tests stay valid once
  * run ancestry is verified. No new symbol is imported.
  *
@@ -17,17 +17,13 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readClaimRecord, type CreateDocInput, type RunId } from "@lore/core";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import { createApp, type App } from "../../../src/app.js";
-import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { createRealProcessTablePort } from "../../../src/adapters/process-table-port.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import { actedStore, liveAmbient, liveInvocation, liveWriteContext } from "../../live-invocation.js";
+import { actedStore, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 const STAMP = "2026-10-27T00:00:00.000Z";
 const R1 = "cc:ended-claim-r1";
@@ -41,11 +37,10 @@ function git(cwd: string, args: string[]): void {
   if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed (${proc.exitCode}): ${proc.stderr.toString()}`);
 }
 
-interface ToolResult {
-  isError?: boolean;
-  content: { type: string; text: string }[];
+interface ClaimOutcome {
+  isError: boolean;
+  text: string;
 }
-const textOf = (r: ToolResult): string => r.content.map((c) => c.text).join("\n");
 
 type SeedStore = {
   insertRun: (r: unknown) => Promise<{ ok: boolean; error?: unknown }>;
@@ -58,7 +53,6 @@ describe("AC-RV-10: a claim ends with its run", () => {
   let tmpRoot: string;
   let dbPath: string;
   let app: App;
-  let client: Client;
   let taskSlug: string;
 
   async function withStore<T>(body: (store: SeedStore) => Promise<T>): Promise<T> {
@@ -99,8 +93,9 @@ describe("AC-RV-10: a claim ends with its run", () => {
     });
   }
 
-  async function call(name: string, args: Record<string, unknown>): Promise<ToolResult> {
-    return (await client.callTool({ name, arguments: args })) as unknown as ToolResult;
+  async function claimAs(run: string, by: string): Promise<ClaimOutcome> {
+    const r = await app.taskWorkflowService.claim(taskSlug, { by, harnessRun: run as RunId });
+    return r.ok ? { isError: false, text: JSON.stringify(r.value) } : { isError: true, text: JSON.stringify(r.error) };
   }
 
   function claimedBy(): string | null {
@@ -131,40 +126,32 @@ describe("AC-RV-10: a claim ends with its run", () => {
     taskSlug = task.value.slug;
     await seedRun(R1);
     await seedRun(R2);
-
-    const server = new McpServer({ name: "lore", version: "0.0.0-test" });
-    registerTools(server, app, undefined, liveInvocation());
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-    client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(clientTransport);
   });
 
   afterEach(async () => {
-    await client.close();
     app.close();
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it("R1 ends: R2 claims the task without a steal, young claim included, and the output names R1 as ended", async () => {
-    const first = await call("lore_claim", { id_or_slug: taskSlug, harness_run: R1 });
-    expect(first.isError, textOf(first)).not.toBe(true);
+    const first = await claimAs(R1, BY_R1);
+    expect(first.isError, first.text).not.toBe(true);
     await endRun(R1);
 
-    const second = await call("lore_claim", { id_or_slug: taskSlug, harness_run: R2 });
-    expect(second.isError, textOf(second)).not.toBe(true);
-    expect(textOf(second)).toContain(R1);
-    expect(textOf(second)).toContain("ended");
+    const second = await claimAs(R2, BY_R2);
+    expect(second.isError, second.text).not.toBe(true);
+    expect(second.text).toContain(R1);
+    expect(second.text).toContain("ended");
     expect(claimedBy()).toBe(R2);
   });
 
   it("R1 is live: R2's claim still refuses, naming R1, and nothing changes hands (regression pin)", async () => {
-    const first = await call("lore_claim", { id_or_slug: taskSlug, harness_run: R1 });
-    expect(first.isError, textOf(first)).not.toBe(true);
+    const first = await claimAs(R1, BY_R1);
+    expect(first.isError, first.text).not.toBe(true);
 
-    const second = await call("lore_claim", { id_or_slug: taskSlug, harness_run: R2 });
+    const second = await claimAs(R2, BY_R2);
     expect(second.isError).toBe(true);
-    expect(textOf(second)).toContain(R1);
+    expect(second.text).toContain(R1);
     expect(claimedBy()).toBe(R1);
   });
 

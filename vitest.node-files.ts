@@ -32,7 +32,6 @@ export const NODE_PROJECT_FILES: Readonly<Record<string, string>> = {
   // lore: vi.mock interop
   "packages/lore/tests/unit/adapters/foreign-corpus-write-adapters.test.ts": VI_MOCK,
   "packages/lore/tests/unit/service/resolution-projector.test.ts": VI_MOCK_REAL_CALL,
-  "packages/lore/tests/unit/adapters/mcp-github-filing.test.ts": VI_MOCK_REAL_CALL,
   "packages/lore/tests/unit/service/github-filing-split-write.test.ts": VI_MOCK_REAL_CALL,
   // lore: Bun process-API semantics
   "packages/lore/tests/unit/hooks/session-bootstrap-injection.test.ts": BUN_PROCESS_SEMANTICS,

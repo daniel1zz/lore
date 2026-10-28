@@ -21,6 +21,7 @@ import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp } from "../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -55,7 +56,7 @@ function slugOf(stdout: string): string {
 }
 
 function addRule(leaf: string, statement: string): string {
-  const out = mustRun(["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
+  const out = mustRun(["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one", ...DECIDED_FLAGS]);
   const id = out.stdout.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${out.stdout}`);
   // a direct add is a pending add (not live, not citable) until its leaf is approved; the suite's override class is loosened
@@ -68,7 +69,7 @@ function addRule(leaf: string, statement: string): string {
 let leafOfRules = "";
 
 function retire(rule: string): void {
-  mustRun(["rule", "set", rule, "--lifecycle", "retired", "--note", "retired for the test"]);
+  mustRun(["rule", "set", rule, "--lifecycle", "retired", "--note", "retired for the test", ...DECIDED_FLAGS]);
   mustRun(["approve", leafOfRules, "--override-no-judgment"]);
 }
 
@@ -148,11 +149,11 @@ describe(`${SPEC_QUALIFIED} (a) repair without demotion`, () => {
     expect(statusOf(approvedSpec)).toBe("approved");
     expect(citesOf(approvedSpec, "AC-1")).toEqual([retiredA]);
 
-    const added = runLore(["ac", "cite", approvedSpec, "AC-1", liveRule]);
+    const added = runLore(["ac", "cite", approvedSpec, "AC-1", liveRule, ...DECIDED_FLAGS]);
     expect(added.exitCode).toBe(0);
     expect(statusOf(approvedSpec)).toBe("approved");
 
-    const removed = runLore(["ac", "cite", approvedSpec, "AC-1", retiredA, "--remove"]);
+    const removed = runLore(["ac", "cite", approvedSpec, "AC-1", retiredA, "--remove", ...DECIDED_FLAGS]);
     expect(removed.exitCode).toBe(0);
     expect(citesOf(approvedSpec, "AC-1")).toEqual([liveRule]);
     expect(statusOf(approvedSpec)).toBe("approved");
@@ -161,7 +162,7 @@ describe(`${SPEC_QUALIFIED} (a) repair without demotion`, () => {
 
 describe(`${SPEC_QUALIFIED} (b)(c) the gate still refuses what it must`, () => {
   it("(b) citing another retired rule is refused: exit 4, AC_CITE_REQUIRED naming it", () => {
-    const r = runLore(["ac", "cite", approvedSpec, "AC-1", retiredB]);
+    const r = runLore(["ac", "cite", approvedSpec, "AC-1", retiredB, ...DECIDED_FLAGS]);
     const out = `${r.stdout}${r.stderr}`;
     expect(r.exitCode).toBe(4);
     expect(out).toContain("AC_CITE_REQUIRED");
@@ -178,8 +179,8 @@ describe(`${SPEC_QUALIFIED} (b)(c) the gate still refuses what it must`, () => {
   });
 
   it("REGRESSION: an AC citing only live rules still takes a second live cite and loses one", () => {
-    expect(runLore(["ac", "cite", approvedSpec, "AC-1", liveRule2]).exitCode).toBe(0);
-    expect(runLore(["ac", "cite", approvedSpec, "AC-1", liveRule2, "--remove"]).exitCode).toBe(0);
+    expect(runLore(["ac", "cite", approvedSpec, "AC-1", liveRule2, ...DECIDED_FLAGS]).exitCode).toBe(0);
+    expect(runLore(["ac", "cite", approvedSpec, "AC-1", liveRule2, "--remove", ...DECIDED_FLAGS]).exitCode).toBe(0);
     expect(citesOf(approvedSpec, "AC-1")).toEqual([liveRule]);
   });
 });

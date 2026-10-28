@@ -21,9 +21,7 @@
  *   - Publisher / PipelineDeps / PublishNpmFlags / VerifyReport / PackResult /
  *     PipelineReport — the injected-port and data shapes.
  *
- * Design (mirrors `packages/lore/src/adapters/real-mcp-registrar.ts`'s
- * "one real implementation behind an injected port" shape, SPEC-046 P1
- * precedent):
+ * Design ("one real implementation behind an injected port"):
  *   - The REAL implementations (`realBuild`/`realAssemble`/`realVerify`/
  *     `RealPublisher`) live in this same file (this task's file anchors are
  *     `scripts/publish-npm.ts` + its own test — no new file elsewhere) and are
@@ -34,7 +32,7 @@
  *     a real build/pack/publish).
  *   - `node:child_process.spawn`, NOT `Bun.spawn` — the global `Bun` object is
  *     absent inside vitest's worker-thread pool (same rationale as
- *     `real-mcp-registrar.ts`'s module doc; this module's OWN unit test runs
+ *     the other `node:child_process` ports; this module's OWN unit test runs
  *     under `bunx vitest`, and while it never exercises the real spawns, the
  *     module must still type-check and load cleanly there).
  *   - `runPipeline` NEVER calls `deps.publisher.npmPublish` unless
@@ -345,8 +343,8 @@ interface CommandResult {
 /**
  * Spawns `cmd args` and collects its output, resolving once the process
  * closes. Never rejects — a spawn error (e.g. ENOENT) resolves with
- * `exitCode: -1` and the error message folded into `stderr`, mirroring
- * `real-mcp-registrar.ts`'s "never throws" port contract.
+ * `exitCode: -1` and the error message folded into `stderr`, a
+ * "never throws" port contract.
  */
 function spawnCollect(
   cmd: string,
@@ -791,7 +789,7 @@ async function realVerify(plan: PublishPlan): Promise<Result<VerifyReport, LoreE
   }
 }
 
-/** `node:child_process`-backed {@link Publisher}. Mirrors `real-mcp-registrar.ts`'s port shape. */
+/** `node:child_process`-backed {@link Publisher}. */
 class RealPublisher implements Publisher {
   async npmPack(plan: PublishPlan): Promise<Result<PackResult, LoreError>> {
     const stagingRootAbs = join(REPO_ROOT, plan.stagingRoot);

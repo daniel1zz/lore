@@ -17,7 +17,7 @@
  * STRUCTURED-`extra` LOSS NOTICE (task-the-shared-renderdocmarkdown-seam-still-drops-structured):
  * this command adds NO wiring for it and must not — `renderDocMarkdown` announces at the
  * SEAM, so both the rule slice and the `--parent` slice carry the notice by construction,
- * on the CLI and MCP surfaces alike. Before that fix, a `lore feed` pack silently dropped
+ * on every surface. Before that fix, a `lore feed` pack silently dropped
  * every structured `extra` value on a doc it quoted, to a reader that is a MACHINE about
  * to write. ⛔ Do not add a per-consumer notice here: a surface that must remember to ask
  * is the prose layer that let the original one-consumer fix ship as "done".
@@ -39,9 +39,9 @@
  * DISPATCH TABLE MEMBERSHIP (SPEC-070 review Fix F7 — dispatch-triplication fix):
  * `SPECIAL_CHECKPOINT_HANDLERS`'s key set is asserted (at MODULE INIT, fail loud,
  * `assertHandlersCoverDescriptor`) to cover every checkpoint named by
- * `../../../flows/feed-flow.js::SPECIAL_FEED_CHECKPOINTS` — the SAME descriptor
- * `adapters/mcp/tools.ts`'s `lore_feed` handler consumes for its own branch
- * membership + required-field validation + contradictory-combo rejection (Fix F8).
+ * `../../../flows/feed-flow.js::SPECIAL_FEED_CHECKPOINTS` — the descriptor
+ * that carries branch membership + required-field validation +
+ * contradictory-combo rejection (Fix F8).
  * Before this fix, "which checkpoints are special" was maintained independently in
  * three places with no test catching drift between them; a checkpoint added to the
  * descriptor without a matching entry here now throws at CLI startup instead of
@@ -70,8 +70,8 @@
  * dispatch pack over a REAL `TaskFeedFlowDeps` binding
  * (`../task-feed-wiring.js::buildTaskFeedFlowDeps`), with `workflow.task_feed.*`
  * config budgets resolved via `../task-feed-wiring.js::resolveTaskStartBudgets` —
- * the SAME construction a future MCP `lore_feed` task-start branch calls, so CLI/MCP
- * payloads stay deep-equal by construction (mirrors `phase-start`'s rationale).
+ * the construction any other task-start caller would use, so payloads stay
+ * deep-equal by construction (mirrors `phase-start`'s rationale).
  * Rendering (non-`--json`) goes through the exported `../task-feed-render.js::
  * renderTaskStartPack` (D7 — vitest-testable, reusable by a future claim-time print
  * or dashboard surface without touching this file).
@@ -146,8 +146,7 @@ type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefin
 // `../../../flows/feed-flow.js::renderResumeFeed`, the SAME function
 // `buildResumeFeed` calls to compute `.feed`. Print it verbatim; never
 // re-derive or re-append the closure text here — that would be the exact
-// dual-write drift the spec exists to close (`adapters/mcp/tools.ts`'s
-// session-resume branch inherits it the same way, via the same call).
+// dual-write drift the spec exists to close.
 async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<ExitReport> {
   const result = await buildResumeFeed(
     app,
@@ -251,7 +250,7 @@ function recordFeedTrace(app: App, inv: Invocation, checkpoint: string, docsServ
 }
 
 // SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS
-// descriptor (flows/feed-flow.ts, the SSOT the MCP `lore_feed` handler ALSO consumes)
+// descriptor (flows/feed-flow.ts, the SSOT)
 // names a checkpoint this file has no handler for — the CLI dispatch table's own
 // deterministic self-check that it hasn't silently drifted behind the SSOT. A checkpoint
 // present in the descriptor but absent here would otherwise silently fall through to the

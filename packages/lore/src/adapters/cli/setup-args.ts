@@ -44,7 +44,7 @@
  *     build --compile` a one-line script printing `Bun.main`).
  *   - In COMPILED mode, `process.execPath` is empirically the compiled
  *     binary's OWN absolute path (same probe) — used verbatim as `binPath`
- *     (the path registered with `claude mcp add`) and its PARENT directory's
+ *     (echoed in setup output) and its PARENT directory's
  *     sibling `assets/` as `assetsRoot` (the P1 "assets ships next to dist/"
  *     convention: `dirname(execPath)` is `<repo>/dist`, whose sibling is
  *     `<repo>/assets`). In DEV mode, both resolve relative to `repoRoot`
@@ -271,8 +271,7 @@ function resolveRealExecPath(execPath: string): string {
 }
 
 /**
- * Resolves the `binPath` registered with `claude mcp add` / passed to
- * `McpRegistrar.add`: the compiled binary's own REALPATH-resolved path when
+ * Resolves the `binPath` that setup echoes in its output: the compiled binary's own REALPATH-resolved path when
  * running compiled (see {@link resolveRealExecPath} — follows an npm
  * bin-symlink through to the real package's binary), else the repo's
  * (possibly not-yet-built) `dist/lore` path in dev mode.

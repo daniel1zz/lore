@@ -57,6 +57,7 @@ import { detectWorktreeBranch, type BranchMeasurement } from "../adapters/real-g
 import type { StoreInterface } from "../store/store-interface.js";
 import type { ReferenceBinding } from "./code-reference-index.js";
 import { reviewCoChange, type CoChangeRulesLoad, type GlobMatchFn } from "./co-change-review.js";
+import { showFileAtRevision } from "./rule-state-service.js";
 import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 
 /** Rule id: a change held by another live claim is refused. */
@@ -502,9 +503,13 @@ export class OwnDiffJudgment {
   }
 
   private showFile(rev: string, path: string): Result<string | null, LoreError> {
-    const shown = this.deps.git(this.deps.projectRoot, ["show", `${rev}:${path}`]);
-    if (shown.status !== 0) return err(gitFailure(`git show ${rev.slice(0, 12)}:${path}`, shown));
-    return ok(shown.stdout);
+    // reason: the shared reader tells an unreachable commit from an absent path; this caller refuses both as before.
+    const shown = showFileAtRevision((args) => this.deps.git(this.deps.projectRoot, args), rev, path);
+    if (!shown.ok) return shown;
+    if (shown.value.state !== "present") {
+      return err({ code: "STORE_ERROR", message: `integrate: judging the own diff failed: git show ${rev.slice(0, 12)}:${path} (${shown.value.state})` });
+    }
+    return ok(shown.value.content);
   }
 
   /** Every (changed file or symbol, live holder) pair whose anchors overlap; names the finest thing held. */

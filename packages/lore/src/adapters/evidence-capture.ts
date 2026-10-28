@@ -1,16 +1,13 @@
 /**
- * Runner-capture mechanism for `lore evidence` / `lore_evidence_add` — the ONE
+ * Runner-capture mechanism for `lore evidence` — the ONE
  * implementation of "lore spawns the oracle command itself and records its real
- * stdout+stderr", shared verbatim by the CLI (`cli/commands/evidence.ts`) and
- * the MCP adapter (`mcp/tools.ts`).
+ * stdout+stderr", used by the CLI (`cli/commands/evidence.ts`).
  *
  * Why this module exists (task-mcp-lore-evidence-add-cannot-set-capture-source-
  * and-has-no): the capture spawn was born INLINE in the CLI command
- * (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the), so MCP had
- * no way to reach it and an agent using lore THROUGH MCP was structurally
- * unable to produce a `capture_source: "runner"` row at all — while a
- * self-reported `pass` with no captured tail is REFUSED. That made a passing
- * oracle unrecordable over MCP. Extracting rather than re-implementing is
+ * (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the), and was
+ * extracted so every caller shares one implementation. Extracting rather than
+ * re-implementing is
  * deliberate: a second copy of this logic is exactly the divergence hazard
  * task-two-independent-copies-of-does-this-task-have-a-claim-now was filed
  * about, one layer down.
@@ -151,11 +148,9 @@ export interface CaptureRequest {
    * Working directory for the spawn — ALWAYS passed explicitly by the caller,
    * never defaulted inside this module. The CLI passes its own `process.cwd()`
    * (correct by construction: a fresh subprocess inherits the agent's real
-   * shell cwd). MCP passes the caller-declared `caller_cwd` and REFUSES the
-   * capture request outright when that field is absent — a long-lived stdio
-   * server's own `process.cwd()` is fixed at startup and is exactly the wrong
-   * value (see `mcp/tools.ts`'s `resolveMcpCallerCwd` JSDoc for why a
-   * wrong-but-plausible default is worse than an honest refusal).
+   * shell cwd). A long-lived server's own `process.cwd()` is fixed at startup
+   * and is exactly the wrong value, so a wrong-but-plausible default is worse
+   * than an honest refusal.
    */
   cwd: string;
   /** The `--result` / `result` the caller declared, cross-checked against the real exit code. */
@@ -165,17 +160,10 @@ export interface CaptureRequest {
    * `workflow.evidence.capture_timeout_ms` schema default — so a caller that
    * passes nothing behaves byte-identically to the pre-config constant.
    *
-   * BOTH surfaces resolve it from the project's own `.lore/config.yaml` via
-   * `resolveCaptureTimeoutMs`: the CLI in `cli/commands/evidence.ts`, and the MCP
-   * adapter in `mcp/tools.ts`'s `lore_evidence_add` handler — the latter calling
-   * its injected config GETTER per invocation so a long-lived stdio server
-   * observes a mid-session config edit (the residual that closed in
-   * task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed, face 3 item 1;
-   * behavioural oracle: the `CAPMCP-*` group in
-   * `tests/unit/adapters/mcp-evidence-capture.test.ts`, which asserts both
-   * directions of the knob plus a no-getter control). ⛔ A THIRD caller must pass
-   * it too — omitting it is silent and indistinguishable from a working knob on
-   * an exit-code-only check, which is exactly how the MCP gap survived.
+   * The CLI resolves it from the project's own `.lore/config.yaml` via
+   * `resolveCaptureTimeoutMs` in `cli/commands/evidence.ts`.
+   * ⛔ Any other caller must pass it too — omitting it is silent and
+   * indistinguishable from a working knob on an exit-code-only check.
    */
   timeoutMs?: number;
 }
@@ -484,9 +472,9 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
   //                   capture records nothing at all — never a row with
   //                   `timed_out: true`.)
   //   `runner`      — `"lore-cli"`, the only member of `ATTESTATION_RUNNERS`, and
-  //                   honest on BOTH surfaces: the process that performed this
-  //                   spawn is the lore binary itself (a CLI subprocess or the MCP
-  //                   stdio server), never a remote or third-party runner.
+  //                   honest: the process that performed this
+  //                   spawn is the lore binary itself (a CLI subprocess),
+  //                   never a remote or third-party runner.
   //
   // ⛔ FOUR attestation fields are deliberately ABSENT, and their absence is the
   // honest reading rather than an oversight: `first_seen` (SPEC-039 §M2) means a

@@ -1,7 +1,7 @@
 /**
  * Staleness-probe surface-neutral orchestration flow (SPEC-044 §Design Decisions D6, D9,
- * D11, D14). CLI (`lore review --staleness`) and MCP (`lore_staleness_probe`) both call
- * these functions instead of each re-implementing the fresh-escalate query or the
+ * D11, D14). CLI (`lore review --staleness`) calls
+ * these functions instead of re-implementing the fresh-escalate query or the
  * `lore invalidate` repair-command rendering. Mirrors `calibration-hook.ts`'s shape: a
  * NARROW injected dependency bundle (`StalenessFlowDeps`), never the full `App` — `App`
  * (`app.ts`) top-level-imports `bun:sqlite`, and this module must stay resolvable by
@@ -57,15 +57,14 @@ export interface StalenessFlowDeps {
 
 /**
  * Convenience binder — builds a {@link StalenessFlowDeps} bundle from a wired `App`, the
- * ONE definition site every adapter (CLI `review`/`status`/`bootstrap`, MCP
- * `lore_staleness_probe`/`lore_status`/`lore_bootstrap`) calls instead of each
+ * ONE definition site every adapter (CLI `review`/`status`/`bootstrap`) calls instead of each
  * re-implementing the same three-line adaptation. `import type { App }` is erased at
  * compile time (proven vitest-safe by the pre-existing `routes.ts` → this pattern —
  * `routes.test.ts` is a vitest suite that already transitively resolves an `import type
  * { App } from "../app.js"` inside `validity-state.ts` without ever touching
  * `bun:sqlite`), so this export does not compromise this module's own vitest-testability.
  *
- * @param app - A wired `App` instance (CLI/MCP adapters only)
+ * @param app - A wired `App` instance (CLI adapter only)
  * @example
  * const deps = buildStalenessFlowDeps(app);
  * const result = await listFreshStalenessEscalates(deps);
@@ -220,7 +219,7 @@ export async function renderSupersededCandidateNudge(
 
 // ─── D9 — Shared `--json` Probe Payload Construction ────────────────────────
 //
-// Lives here (not duplicated in `commands/review.ts` AND `adapters/mcp/tools.ts`) so
+// Lives here (not duplicated per caller) so
 // AC-SP-7's "payload deep-equals CLI --json" oracle is trivially true BY CONSTRUCTION —
 // both callers invoke the exact same function, never two independently-maintained
 // JSON-shaping implementations that could silently drift apart.
@@ -278,7 +277,7 @@ export interface StalenessBatchResultLike {
   skipped: { invalidated: number; too_young: number };
 }
 
-/** Full `--json`/MCP payload shape for both batch and single-doc staleness probe results. */
+/** Full `--json` payload shape for both batch and single-doc staleness probe results. */
 export interface StalenessProbeJsonPayload {
   probes: Record<string, unknown>[];
   skipped: { invalidated: number; too_young: number };
@@ -305,12 +304,12 @@ export async function buildStalenessBatchJsonPayload(
 }
 
 /**
- * The single-doc probe `--json`/MCP payload — the SAME `{probes, skipped,
+ * The single-doc probe `--json` payload — the SAME `{probes, skipped,
  * total_candidates, excluded_by_limit}` shape as the batch payload, just always exactly
  * one `probes[]` entry (`skipped` all-zero, `total_candidates`/`excluded_by_limit` fixed
  * at `1`/`0`) — a single-doc probe bypasses the selection/limit machinery entirely, so
  * there is nothing to count there. One shape for both modes keeps CLI `lore review <doc>
- * --staleness --json` and MCP `lore_staleness_probe {id_or_slug}` byte-identical
+ * --staleness --json` byte-identical across modes
  * (AC-SP-7), never two independently-authored envelopes.
  */
 export async function buildStalenessSingleJsonPayload(
@@ -326,16 +325,16 @@ export async function buildStalenessSingleJsonPayload(
   };
 }
 
-/** `--list`/MCP `list:true` payload shape — a pure read, structurally distinct from the probe shapes above (no candidate/limit machinery ran). */
+/** `--list` payload shape — a pure read, structurally distinct from the probe shapes above (no candidate/limit machinery ran). */
 export interface StalenessListJsonPayload {
   docs: Array<{ id: string; slug: string; title: string; confidence: number; blocking_questions: string[] }>;
   total: number;
 }
 
 /**
- * The `--list`/MCP `list:true` payload — `{docs, total}` — built directly from
- * {@link listFreshStalenessEscalates}'s result, the SAME shape CLI `--list --json` and
- * MCP `lore_staleness_probe {list:true}` both return verbatim (AC-SP-7).
+ * The `--list` payload — `{docs, total}` — built directly from
+ * {@link listFreshStalenessEscalates}'s result, the shape CLI `--list --json`
+ * returns verbatim (AC-SP-7).
  */
 export function buildStalenessListJsonPayload(entries: StalenessEscalateEntry[]): StalenessListJsonPayload {
   return {

@@ -1,7 +1,7 @@
 /**
  * Feed-before-produce PULL flow (IoC vertical-slice tech-spec §4.1/§11, P4 slice) —
- * shared, surface-neutral composition behind `lore feed <checkpoint>` (CLI) and
- * `lore_feed` (MCP). Both adapters call {@link buildFeed} so the feeding-pack text is
+ * shared, surface-neutral composition behind `lore feed <checkpoint>` (CLI).
+ * Callers use {@link buildFeed} so the feeding-pack text is
  * assembled through EXACTLY one code path — the same {@link renderDocMarkdown}
  * MDX-splice helper and the same `buildFeedingPack`/`renderFeedingPack` primitives
  * `lore gate spec-create` uses on a rule violation
@@ -17,7 +17,7 @@
  * before you write"), and it NEVER fails the caller — an unknown checkpoint, a missing
  * approved skill, or an unresolvable `--parent` all degrade to an advisory note rather
  * than an error. This mirrors the task objective: "feed is advisory context, never a
- * gate" — exit 0 (CLI) / a non-`isError` content block (MCP), always.
+ * gate" — exit 0 (CLI), always.
  *
  * Public surface:
  *   renderDocMarkdown(app, doc)              — MDX-splice a DocRecord's content,
@@ -84,8 +84,7 @@
  *                                               checkpoint set (session-resume/
  *                                               phase-start/task-start) + which
  *                                               field each requires, consumed by
- *                                               both `commands/feed.ts` and
- *                                               `adapters/mcp/tools.ts`
+ *                                               `commands/feed.ts`
  *   assertHandlersCoverDescriptor(d, h)      — fail-loud coverage check, called by
  *                                               `commands/feed.ts` at module init
  *
@@ -104,9 +103,8 @@
  * @invariant `renderResumeFeed`'s `RESUME_SCOPE_CLOSURE` block is woven in at exactly
  *   ONE place (spec-context-provenance-injected-corpus-global-state-and-a D3) —
  *   `commands/feed.ts`'s `handleSessionResume` prints `buildResumeFeed`'s
- *   `.feed` verbatim to stdout, and `adapters/mcp/tools.ts`'s `lore_feed`
- *   session-resume branch JSON-stringifies the SAME `ResumeFeedOutcome`
- *   (`.feed` field included) as its response text. Neither call site re-derives
+ *   `.feed` verbatim to stdout; any other call site consumes the SAME
+ *   `ResumeFeedOutcome` (`.feed` field included). No call site re-derives
  *   or duplicates the closure text — a surface that rendered its own copy is
  *   exactly the dual-write failure class this spec exists to close.
  * @invariant `renderResumeFeed`'s single-record path additionally appends
@@ -343,7 +341,7 @@ export interface FeedSkillPointer {
   readonly title: string;
 }
 
-/** Result of one `buildFeed` call — the shape both the CLI `--json` output and the `lore_feed` MCP tool return. */
+/** Result of one `buildFeed` call — the shape the CLI `--json` output returns. */
 export interface FeedOutcome {
   /** The checkpoint argument as supplied by the caller. */
   readonly checkpoint: string;
@@ -436,10 +434,10 @@ async function buildDiscoveredFeed(
  * from those two SSOTs, never a THIRD hand-maintained list. A checkpoint absent
  * from BOTH degrades to the pre-existing `type: null` / `"unknown checkpoint:
  * ..."` advisory note (unchanged — see this module's own invariant above and
- * the MCP `lore_feed` regression pinning that exact text for an unrecognized
+ * a regression pinning that exact text for an unrecognized
  * name); `commands/feed.ts`'s CLI dispatch additionally refuses that same case
  * with exit 2 BEFORE ever calling this function (AC-FR-1's sharper half) — this
- * function itself stays advisory-only and never fails, for MCP's "always
+ * function itself stays advisory-only and never fails, keeping its "always
  * succeeds" contract.
  *
  * Never fails: an unknown checkpoint, no approved skill, a lookup error, or an
@@ -547,9 +545,7 @@ function renderReadinessPointer(readiness: ResumeResult["readiness"]): string {
  * {@link renderResumeRecord}'s own doc for why the ordinals live one layer
  * lower, in `@lore/core`'s `renderHandoffContent`.
  *
- * Both `lore feed`/`commands/feed.ts` (CLI stdout) and `lore_feed`/
- * `adapters/mcp/tools.ts` (MCP `feed` field, JSON-stringified alongside the
- * rest of `ResumeFeedOutcome`) print/return this SAME string via
+ * `lore feed`/`commands/feed.ts` (CLI stdout) prints this string via
  * {@link buildResumeFeed} below — this is the ONE place the closure is woven
  * in, so the two surfaces cannot drift on whether it's present (module
  * invariant; the defect class this constant exists to close was measured
@@ -888,20 +884,20 @@ export type SpecialFeedCheckpointDescriptor = { readonly requiredArg: "task" | "
  * path above — `session-resume` (SPEC-041 D5), `phase-start` (SPEC-056 D5), `task-start`
  * (SPEC-070 D1). Before this fix, "which checkpoints are special" was maintained
  * independently in THREE places (this module's own header comment, `commands/feed.ts`'s
- * handler table, `adapters/mcp/tools.ts`'s `if` chain) — a silent three-way SSOT that
- * could drift without any test catching it. Both adapters now derive membership +
+ * handler table, and a since-removed adapter's `if` chain) — a silent three-way SSOT that
+ * could drift without any test catching it. Adapters now derive membership +
  * per-checkpoint required-field validation from THIS map:
  *   - `commands/feed.ts`'s `SPECIAL_CHECKPOINT_HANDLERS` table asserts, at MODULE INIT
  *     (via {@link assertHandlersCoverDescriptor}, fail loud — never a silent fallthrough
  *     to the generic `buildFeed` path), that every key here has a matching CLI handler.
- *   - `adapters/mcp/tools.ts`'s `lore_feed` handler looks up `SPECIAL_FEED_CHECKPOINTS[checkpoint]`
+ *   - any other feed adapter looks up `SPECIAL_FEED_CHECKPOINTS[checkpoint]`
  *     for contradictory-field-combo rejection (task-start+phase, phase-start+task, a
  *     non-special checkpoint carrying task or phase — Fix F8) AND for the
  *     "missing required field" `VALIDATION_ERROR` (`requiredArg` non-null and absent).
  *
  * Handler/branch BODIES stay adapter-local — their dependencies genuinely differ (the
- * CLI handler prints to stdout and sets `process.exitCode`; the MCP branch returns a
- * `CallToolResult`) — only the SET of checkpoint names + which field each requires is
+ * CLI handler prints to stdout and sets `process.exitCode`; another adapter's branch returns
+ * its own result shape) — only the SET of checkpoint names + which field each requires is
  * centralised here.
  */
 export const SPECIAL_FEED_CHECKPOINTS: Readonly<Record<string, SpecialFeedCheckpointDescriptor>> = {

@@ -1,7 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @spawns packages/lore/tests/integration/fixtures/autonomy-decide-driver.ts
 // @spawns assets/hooks/pre-bash-git-safety-gate.mjs
-// @reads packages/lore/src/adapters/mcp/**
 // @reads packages/lore/src/adapters/http/**
 /**
  * AC-AU-3 oracle — the human answers an escalation through a channel the agent cannot use.
@@ -15,7 +14,7 @@
  * the real `ps` reader (5b-ancestry), and the live reader's own chain.
  *
  * Halves (spec AC-AU-3): (1) non-TTY stdin -> exit 4 naming the TTY rule; (2) TTY + wrong nonce -> exit 4; (3) the
- * shipped PreToolUse hook denies `lore decide` (exit 2, rule name) and leaves git refusals alone; (4) no MCP tool /
+ * shipped PreToolUse hook denies `lore decide` (exit 2, rule name) and leaves git refusals alone; (4) no
  * HTTP route for decide; (5) agent-asserted record does not resolve; (5b) agent identity -> exit 4 agent-ancestry;
  * (5c) no nonce in any agent-readable output; (6) TTY + correct nonce -> exit 0, resolved, re-run proceeds.
  *
@@ -36,7 +35,6 @@ import {
   checkHumanChannelPreconditions,
 } from "../../src/service/human-channel.js";
 import { readLiveProcessTable } from "../../src/adapters/real-human-channel-port.js";
-import { LORE_MCP_TOOL_NAMES } from "../../src/adapters/mcp/tool-names.js";
 import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
 import { actedStore } from "../live-invocation.js";
 
@@ -212,8 +210,7 @@ describe("AC-AU-3 human channel", () => {
     expect(git.stderr).toMatch(/git-safety-gate/);
   }, { timeout: 60_000 });
 
-  it("(4) MCP and HTTP expose no decide tool or route", () => {
-    expect(LORE_MCP_TOOL_NAMES.filter((name) => /decid/i.test(name))).toEqual([]);
+  it("(4) HTTP exposes no decide route", () => {
     const offenders: string[] = [];
     const scan = (dir: string): void => {
       for (const entry of readdirSync(dir)) {
@@ -222,7 +219,6 @@ describe("AC-AU-3 human channel", () => {
         else if (path.endsWith(".ts") && /lore_decide|['"`]\/api\/[^'"`]*decide/.test(readFileSync(path, "utf8"))) offenders.push(path);
       }
     };
-    scan(join(PACKAGE_ROOT, "src", "adapters", "mcp"));
     scan(join(PACKAGE_ROOT, "src", "adapters", "http"));
     expect(offenders).toEqual([]);
   });

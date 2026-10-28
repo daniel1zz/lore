@@ -1,5 +1,5 @@
 /**
- * Shared CLI/MCP composition helper for `lore report-issue` / `lore_report_issue`
+ * Shared CLI composition helper for `lore report-issue`
  * (SPEC-072 T5) — resolves + narrows the consumer's `feedback.upstream` config
  * and orchestrates the LIVE GitHub filing path, so the two adapters never
  * independently re-derive this wiring. Mirrors the `phase-wiring.ts`/
@@ -40,11 +40,10 @@
  *   - `isGithubUpstreamCfg(cfg)` — type guard for the GITHUB branch. Kept
  *     exported for `tests/` and for symmetry with the vendor guard; ⛔ NO
  *     production caller may use it as a standalone shape policy any more —
- *     `commands/issues.ts`, `commands/report-issue.ts` AND
- *     `adapters/mcp/tools.ts`'s `lore_report_issue` all route through
- *     `classifyFeedbackUpstream`. (The MCP handler was the last holdout: it
- *     re-derived the chain with `isGithubUpstreamCfg` alone, which is exactly
- *     the site the vendor branch would have silently broken.)
+ *     `commands/issues.ts` and `commands/report-issue.ts` both route through
+ *     `classifyFeedbackUpstream`. (A caller that re-derives the chain with
+ *     `isGithubUpstreamCfg` alone is exactly the site the vendor branch would
+ *     have silently broken.)
  *   - `classifyFeedbackUpstream(config)` — the ONE shape-policy source both
  *     `commands/issues.ts` and `commands/report-issue.ts` consume
  *     (spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired D1):
@@ -78,18 +77,12 @@
  *     join, never two. Read-only by construction — see that function's own header.
  *
  * Invariants:
- *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
- *     handler despite internally calling `findLoreDbPath` (which
+ *   - `resolveConsumerCorpusRoot` internally calls `findLoreDbPath` (which
  *     `exitCli(1)`s on a miss) — `loadLoreApp()` already called it once,
- *     successfully, at MCP server STARTUP (`index.ts`'s `--mcp-server`
- *     branch), and `process.cwd()` does not change over the server's
- *     lifetime, so a per-call re-walk from the same cwd cannot newly fail.
- *     This mirrors the established precedent `loader.ts::loadProjectConfig`
- *     already sets (also re-calls `findLoreDbPath()` per MCP `lore_feed`
- *     "task-start" invocation, SPEC-070 F6).
+ *     successfully, at startup, so a per-call re-walk from the same cwd
+ *     cannot newly fail.
  *   - This module does NO actor resolution — the CLI resolves via
- *     `resolveActor` (fallback chain), MCP requires `by` explicitly
- *     (SPEC-025 precedent); both thread the resolved actor through
+ *     `resolveActor`; the caller threads the resolved actor through
  *     `GithubFilingContext.actor`, never through anything built here.
  *   - ⛔ `fileGithubIssue` NEVER writes the corpus (AC-GS-10): the former
  *     mint-a-task step and its split-write failure path are deleted. The
@@ -148,7 +141,7 @@ import type { CliIo } from "./output.js";
  * @returns absolute path to the consumer corpus root
  * @throws exitCli(1) via `findLoreDbPath` (unchanged CLI convention)
  *   when no `.lore/lore.db` is discoverable from `cwd` — see this module's
- *   header for why this is still safe to call from an MCP tool handler.
+ *   header for why a per-call re-walk is safe.
  */
 export function resolveConsumerCorpusRoot(io: CliIo, locator: CorpusLocator): string {
   const dbPath = findLoreDbPath(io, locator);
@@ -210,8 +203,7 @@ export type VendorUpstreamCfg = Extract<UpstreamCfg, { vendor: true }>;
  * key — so any chain written as `if (isGithubUpstreamCfg(cfg)) {...} else
  * {retired}` refuses a perfectly valid vendor-consent config with
  * {@link buildRetiredFeedbackUpstreamError}'s retired-SQLite message. That
- * two-branch shape is what `adapters/mcp/tools.ts`'s `lore_report_issue`
- * handler had, and it is the reason the vendor branch had to be added to
+ * two-branch shape is what a removed adapter handler had, and it is the reason the vendor branch had to be added to
  * {@link classifyFeedbackUpstream} rather than left to each caller.
  *
  * ⇒ ⛔ Do not rebuild the chain: call {@link classifyFeedbackUpstream} and read
@@ -263,12 +255,10 @@ export function isGithubUpstreamCfg(cfg: UpstreamCfg): cfg is GithubUpstreamCfg 
  * is the defect this classifier closes.
  *
  * Exported (spec-the-retired-shape-refusal-message-has-two-byte-identical
- * D1) so `adapters/mcp/tools.ts`'s `lore_report_issue` handler — reached only
- * via that file's own lazy `await import()`, not through
- * {@link classifyFeedbackUpstream} — calls this instead of holding its own
- * copy of the message. Before D1, the MCP copy had already drifted ("file
- * issue reports" vs. this function's "file/list issue reports") with no
- * oracle to catch it.
+ * D1) so a caller outside {@link classifyFeedbackUpstream} calls this instead
+ * of holding its own copy of the message. Before D1, such a copy had already
+ * drifted ("file issue reports" vs. this function's "file/list issue
+ * reports") with no oracle to catch it.
  *
  * Return type is narrowed to the `VALIDATION_ERROR` member (the
  * `Extract<LoreError, {code: "..."}>` pattern already used by
@@ -278,7 +268,7 @@ export function isGithubUpstreamCfg(cfg: UpstreamCfg): cfg is GithubUpstreamCfg 
  * (e.g. an equality probe comparing it against another VALIDATION_ERROR)
  * needs that without re-narrowing by `code` first; widening back to
  * `LoreError` at each call site (`classifyFeedbackUpstream`'s `"retired"`
- * branch, the MCP handler's `errorContent`) is a normal subtype-to-supertype
+ * branch) is a normal subtype-to-supertype
  * assignment.
  */
 export function buildRetiredFeedbackUpstreamError(): Extract<LoreError, { code: "VALIDATION_ERROR" }> {
@@ -326,7 +316,7 @@ export type FeedbackUpstreamClassification =
  * `vendor` declares CONSENT, not a destination, and the destination it consents
  * to is a GitHub repository reached through exactly the same
  * `GitHubIntakePort`. Collapsing it here means `fileGithubIssue`,
- * `resolveGithubIssueListing`, `resolveGithubStatusRows` and the MCP handler
+ * `resolveGithubIssueListing`, and `resolveGithubStatusRows`
  * need ZERO changes and cannot learn a second addressing path — the
  * "capability implemented but not wired" failure mode, closed by construction.
  *
@@ -349,18 +339,15 @@ export function classifyFeedbackUpstream(config: LoreConfig | undefined): Feedba
   // did before this branch existed.
   //
   // MEASURED minimal mutation (2026-08-25) — deleting THIS line reddens 3
-  // assertions: two in `tests/unit/adapters/feedback-upstream-vendor.test.ts`
-  // (`kind: "retired"` where `"github"` is expected) and one in
-  // `tests/unit/adapters/mcp-issue-shape-message-ssot.test.ts` (the MCP
-  // handler's error field becomes `feedback.upstream` instead of
-  // `severity,category`).
+  // assertions in `tests/unit/adapters/feedback-upstream-vendor.test.ts`
+  // (`kind: "retired"` where `"github"` is expected).
   //
   // ⛔ Deliberately NOT claimed: that the two guards' ORDER is what does the
   // work here. It is not — measured: SWAPPING these two `if`s leaves all 18
   // assertions GREEN, because the `retired` verdict is a fall-through at the
   // END rather than an `else` on the GitHub test. The order still matters to
   // any caller that hand-rolls the chain as `if (isGithubUpstreamCfg) {...}
-  // else {retired}` (the shape the MCP handler used to have), which is why
+  // else {retired}` (a shape a caller might hand-roll), which is why
   // `isVendorUpstreamCfg`'s JSDoc warns about it and why every production
   // caller routes through THIS function instead of rebuilding the chain.
   if (isVendorUpstreamCfg(cfg)) return { kind: "github", cfg: { repo: VENDOR_INTAKE_REPO } };
@@ -720,7 +707,7 @@ export interface ReproCheckEnvironment {
 
 /**
  * Runs {@link checkReproCommand} against the invocation's own PATH and cwd — the ONE composition of the lookups,
- * shared by the CLI flag and the MCP field so both refuse the same values.
+ * used by the CLI flag so it refuses the same values everywhere.
  *
  * @param command - the raw `--repro-command` / `repro_command` value
  * @param environment - the invocation's `env` and `cwd`
@@ -749,7 +736,7 @@ export function checkReproCommandForInvocation(command: string, environment: Rep
  * One-line refusal text for a failed repro check, naming the reason and offending word and pointing at `--repro-steps`.
  *
  * @param check - a `{ ok: false }` result
- * @returns the message both adapters print (CLI: usage error exit 2; MCP: VALIDATION_ERROR)
+ * @returns the message the CLI prints (usage error exit 2)
  */
 export function formatReproRefusal(check: Extract<ReproCheck, { ok: false }>): string {
   return (
@@ -793,7 +780,7 @@ export async function fileGithubIssue(
   cfg: GithubUpstreamCfg,
   ctx: GithubFilingContext,
 ): Promise<Result<GithubReportResult, LoreError>> {
-  // reason: the context is built once here so the CLI and MCP paths (both call this) and the minted task share one body.
+  // reason: the context is built once here so every path that calls this and the minted task share one body.
   const context = buildFilingContext(rawInput, cfg.repo, ctx);
   const input: GithubReportInput = context === undefined ? rawInput : { ...rawInput, context };
   const receiptsPath = join(ctx.consumerCorpusRoot, ".lore", RECEIPT_LOG_V2_FILENAME);

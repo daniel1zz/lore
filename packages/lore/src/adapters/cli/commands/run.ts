@@ -56,7 +56,6 @@ import { z } from "zod";
 import {
   deriveRunId,
   prefixRunExport,
-  rewriteMcpInput,
   type CompositionRecord,
   type RunId,
   type RunRecord,
@@ -82,13 +81,6 @@ type Action = (typeof ACTIONS)[number];
 const USAGE_EXIT = 2;
 const VALIDATION_EXIT = 4;
 const CLAUDE_CODE_HARNESS = "claude-code";
-/**
- * A lore MCP tool under ANY registered server name: `mcp__<server>__lore_<verb>` (#146, #202, BR-1093).
- * reason: twin of `LORE_MCP_TOOL` in assets/hooks/pre-tool-harness-run.mjs — that hook ships as a standalone
- * .mjs with no import path to this package, so the shape cannot be shared; change both together
- * (pinned by tests/integration/hooks/harness-run-any-server-name.test.ts, REAL_BINARY_NO_STUB block).
- */
-const LORE_MCP_TOOL = /^mcp__.+__lore_\w+$/;
 
 function isAction(value: string): value is Action {
   return (ACTIONS as readonly string[]).includes(value);
@@ -424,7 +416,6 @@ function runOfPayload(payload: PreToolUsePayload): RunId {
 function computeUpdatedInput(raw: string): Record<string, unknown> | null {
   try {
     const payload = preToolUsePayloadSchema.parse(JSON.parse(raw));
-    if (LORE_MCP_TOOL.test(payload.tool_name)) return rewriteMcpInput(payload.tool_input, runOfPayload(payload));
     const command = payload.tool_input["command"];
     if (payload.tool_name !== "Bash" || typeof command !== "string") return null;
     return { ...payload.tool_input, command: prefixRunExport(command, runOfPayload(payload)) };

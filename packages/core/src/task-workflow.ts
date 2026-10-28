@@ -105,8 +105,8 @@ void _completenessVerdictsCoverAll;
 
 /**
  * Oracle kinds an evidence entry may record. SSOT for this enum — the taxonomy
- * previously lived as three independent literal-array copies (this file,
- * `adapters/mcp/tools.ts`, `adapters/cli/commands/evidence.ts`); all now import
+ * previously lived as independent literal-array copies (this file,
+ * `adapters/cli/commands/evidence.ts`, and a since-removed adapter); all now import
  * this tuple instead of redeclaring it (SPEC-038 §7 D3, AC-ACODE-8).
  *
  * @invariant `acceptance.ts`'s `SCRIPT_ORACLES` is a type-checked subset of this
@@ -176,7 +176,7 @@ export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
  */
 export const RUNNER_UNATTESTED_CAPTURE_SOURCE = "runner-unattested" satisfies CaptureSource;
 
-/** Labels a PUBLIC write path (`lore evidence`, MCP `lore_evidence_add`) may carry — the runner-only label is excluded. */
+/** Labels a PUBLIC write path (`lore evidence`) may carry — the runner-only label is excluded. */
 export type PublicCaptureSource = Exclude<CaptureSource, typeof RUNNER_UNATTESTED_CAPTURE_SOURCE>;
 
 /**
@@ -390,7 +390,7 @@ export type StateStamp = z.infer<typeof stateStampSchema>;
  *   `ac_ref`'s division of labor. ADDITIVE field — every pre-SPEC-056 evidence entry
  *   (which never carries it) still parses unchanged (REGRESSION).
  * @invariant `attestation` is runner-issued ONLY — public write paths (CLI `lore evidence`,
- *   MCP `lore_evidence_add`) reject any input carrying this field with VALIDATION_ERROR
+ *   alike) reject any input carrying this field with VALIDATION_ERROR
  *   (SPEC-039 §4 D2); `TaskWorkflowService.recordVerifiedEvidence` is the sole injection
  *   point. Staying `.optional()` here is load-bearing, not a style choice: {@link extractEvidence}
  *   parses the WHOLE `verification_evidence` array in one `z.array(evidenceEntrySchema)`
@@ -404,7 +404,7 @@ export type StateStamp = z.infer<typeof stateStampSchema>;
  *   task. Omitted (never `false`) for a previously-seen command.
  * @invariant `result: "inconclusive"` (SPEC-061 §Scope D2) is RUNNER-ISSUED ONLY, the
  *   same restriction §M2 already places on `attestation` itself — public write paths
- *   (CLI `lore evidence`, MCP `lore_evidence_add`) reject any input carrying this value
+ *   (CLI `lore evidence`) reject any input carrying this value
  *   loud (`TaskWorkflowService._addEvidenceImpl`'s explicit runtime check, mirroring its
  *   pre-existing `attestation` `hasOwnProperty` guard). It marks a `script:test` AC whose
  *   process exited 0 but whose declared test-file path arguments were NOT all matched by
@@ -508,7 +508,7 @@ export type StateStamp = z.infer<typeof stateStampSchema>;
  * });
  *
  * @example
- * // runner-issued (SPEC-039) — never constructed by CLI/MCP input directly
+ * // runner-issued (SPEC-039) — never constructed by CLI input directly
  * evidenceEntrySchema.parse({
  *   oracle: "test", command: "bun test", result: "pass",
  *   recorded_at: "2026-07-08T10:00:00.000Z", recorded_by: "alice",
@@ -796,7 +796,7 @@ export const taskClaimSchema = z.object({
   by: z.string().min(1),
   at: z.string(),
   branch: z.string().optional(),
-  /** Auto-captured by the CLI as `os.hostname()`; explicit-only over MCP (SPEC-042 D2). */
+  /** Auto-captured by the CLI as `os.hostname()`; explicit-only elsewhere (SPEC-042 D2). */
   machine: z.string().optional(),
   /** ALWAYS explicit — never auto-captured from `process.cwd()` (SPEC-042 D2, review U2). */
   worktree: z.string().optional(),
@@ -1303,7 +1303,7 @@ export function isApprovedVerifyCommand(task: DocRecord, command: string): boole
  *      fail-loud, never a silent first-match guess (SPEC-039 §3).
  *
  * @param tasks - Candidate tasks (typically a plan's children via getPlanBundle)
- * @param opts.explicitTaskIdOrSlug - `--task` CLI flag / MCP `task` param, when given
+ * @param opts.explicitTaskIdOrSlug - `--task` CLI flag, when given
  * @param opts.nowIso - Caller-supplied current time (D10 time seam — never Date.now() here)
  * @param opts.ttlMinutes - Claim TTL in minutes, forwarded to {@link isClaimStale}
  * @returns `ok(task)` on unambiguous resolution; `err(VALIDATION_ERROR)` otherwise

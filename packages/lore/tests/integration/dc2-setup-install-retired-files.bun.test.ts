@@ -10,7 +10,7 @@
  *     a retired file already gone from disk) pass even with the old unconditional
  *     removal, so the fixtures here use an EDITED, PRESENT file.
  *
- * A `claude` shim on PATH exits 0 so MCP registration succeeds and a clean converge exits 0.
+ * A `claude` shim on PATH is kept from when setup registered an MCP server; setup no longer calls it (task-skill-implement-lore-setup-registers-no-tool-server-and) and a clean converge exits 0.
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";

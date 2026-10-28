@@ -18,8 +18,8 @@
  *   packages/lore/src/adapters/cli/report-issue-wiring.ts:135
  *     `return config?.feedback?.upstream;` inside `resolveFeedbackUpstreamCfg`
  *   — the ONLY dot-notation property read of `.feedback` anywhere in
- *   packages/lore/src/** or packages/core/src/**. Every other consumer (e.g.
- *   adapters/mcp/tools.ts calling `resolveFeedbackUpstreamCfg(getConfig?.())`) goes through the
+ *   packages/lore/src/** or packages/core/src/**. Every other consumer (e.g. the CLI report-issue command calling
+ *   `resolveFeedbackUpstreamCfg(config)`) goes through the
  *   exported accessor. Deliberately OUT of scope for this scan: the bracket-notation
  *   `config["feedback"]` / `existingFeedback?.["upstream"]` idempotency check inside
  *   `provisionFeedbackUpstream` (same file, WRITE path) — that is the self-provisioning
@@ -30,7 +30,7 @@
  * Method: read every `.ts` source file (excluding `.test.ts`/`.spec.ts`/`.bun.test.ts`/`.d.ts`)
  * under packages/lore/src and packages/core/src from disk via node:fs, strip comments and
  * string/template literals (preserving line numbers), then regex-scan for a dot-notation
- * `.feedback` property read. Comments/prose mentioning "feedback.upstream" (e.g.
+ * `.feedback` property read. Comments/prose mentioning "feedback.upstream" (e.g. the CLI report-issue command calling
  * `` `feedback.upstream.corpus_path` `` inside error-message strings or JSDoc) are NOT preceded
  * by a literal `.` before the word "feedback" in this codebase, so they do not match even
  * without stripping — proven by the synthetic + real-source tests below. Stripping is still

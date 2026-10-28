@@ -4,7 +4,7 @@
  * no filesystem, no bun:sqlite involvement (vitest-safe).
  */
 import { describe, expect, it } from "vitest";
-import type { InstallPlan, SetupEntry } from "@lore/core";
+import type { InstallPlan, WrittenSetupEntry } from "@lore/core";
 import type { SetupReceipt } from "../../../src/service/setup-service.js";
 import {
   renderInstallPlan,
@@ -15,7 +15,7 @@ import {
 
 const CTX: SetupRenderCtx = { targetDir: "/tmp/fake-claude-dir", binPath: "/usr/local/bin/lore" };
 
-function entry(path: string, kind: SetupEntry["kind"], writtenAt = "2026-07-16T00:00:00.000Z"): SetupEntry {
+function entry(path: string, kind: WrittenSetupEntry["kind"], writtenAt = "2026-07-16T00:00:00.000Z"): WrittenSetupEntry {
   return { path, kind, sha256: `sha-${path}`, written_at: writtenAt };
 }
 
@@ -24,7 +24,6 @@ function baseReceipt(overrides: Partial<SetupReceipt> = {}): SetupReceipt {
     written: [],
     skipped: [],
     backups: [],
-    mcp: "registered",
     manifestPath: "/tmp/fake-claude-dir/.lore-setup-manifest.json",
     // SPEC-076 T5 — SetupReceipt gained this required field; neither renderer this
     // suite exercises reads it, so an empty default keeps every existing fixture's
@@ -37,8 +36,8 @@ function baseReceipt(overrides: Partial<SetupReceipt> = {}): SetupReceipt {
 
 describe("renderInstallReceipt", () => {
   // HAPPY — a full first-ever install: several kinds written, some skipped, some backed
-  // up, MCP registered, manifest path present.
-  it("HAPPY: renders a full install with grouped kind counts, backups, and mcp registered", () => {
+  // up, manifest path present.
+  it("HAPPY: renders a full install with grouped kind counts, backups, and no MCP line", () => {
     const receipt = baseReceipt({
       written: [
         entry("skills/lore/SKILL.md", "skill"),
@@ -51,7 +50,6 @@ describe("renderInstallReceipt", () => {
       ],
       skipped: ["skills/lore-doctor/SKILL.md"],
       backups: ["settings.json"],
-      mcp: "registered",
     });
 
     const out = renderInstallReceipt(receipt, CTX);
@@ -63,52 +61,21 @@ describe("renderInstallReceipt", () => {
     expect(out).toContain("governance ✓");
     expect(out).toContain("Skipped: 1");
     expect(out).toContain("settings.json");
-    expect(out).toContain("MCP: registered ✓");
+    // task-skill-implement-lore-setup-registers-no-tool-server-and: setup output names no MCP server.
+    expect(out).not.toContain("MCP");
     expect(out).toContain("Manifest: /tmp/fake-claude-dir/.lore-setup-manifest.json");
     expect(out).toContain("Next steps:");
     expect(out).toContain("lore setup --project");
   });
 
-  // NEGATIVE — MCP outcomes that are NOT a clean success: claude absent (skipped, with
-  // the manual registration command surfaced) and a registrar failure (stderr tail).
-  describe("NEGATIVE: non-success mcp outcomes", () => {
-    it("shows MCP as skipped AND surfaces the manual registration command", () => {
-      const receipt = baseReceipt({ written: [entry("skills/lore/SKILL.md", "skill")], mcp: "skipped" });
+  // NEGATIVE — task-skill-implement-lore-setup-registers-no-tool-server-and: no receipt shape renders an MCP line or
+  // a manual `claude mcp add` recovery command.
+  it("NEGATIVE: never renders an MCP line or a manual registration command", () => {
+    const out = renderInstallReceipt(baseReceipt({ written: [entry("skills/lore/SKILL.md", "skill")] }), CTX);
 
-      const out = renderInstallReceipt(receipt, CTX);
-
-      expect(out).toContain("MCP: skipped");
-      expect(out).toContain("claude not found");
-      expect(out).toContain("claude mcp add -s user lore -- /usr/local/bin/lore --mcp-server");
-    });
-
-    it("shows MCP as skipped (already registered) — task-lore-setup-mcp-add-step-is-non-idempotent-already-exists", () => {
-      const receipt = baseReceipt({ written: [entry("skills/lore/SKILL.md", "skill")], mcp: "already_registered" });
-
-      const out = renderInstallReceipt(receipt, CTX);
-
-      expect(out).toContain("MCP: skipped (already registered)");
-      expect(out).not.toContain("MCP: registered ✓");
-      expect(out).not.toContain("MCP: failed");
-    });
-
-    it("shows MCP as failed with the caller-supplied stderr tail present in output", () => {
-      const receipt = baseReceipt({ written: [entry("skills/lore/SKILL.md", "skill")], mcp: "failed" });
-
-      const out = renderInstallReceipt(receipt, { ...CTX, mcpErrorTail: "claude: command exited with code 1" });
-
-      expect(out).toContain("MCP: failed");
-      expect(out).toContain("claude: command exited with code 1");
-    });
-
-    it("shows MCP as failed with no detail when no stderr tail was supplied", () => {
-      const receipt = baseReceipt({ mcp: "failed" });
-
-      const out = renderInstallReceipt(receipt, CTX);
-
-      expect(out).toContain("MCP: failed");
-      expect(out).not.toContain("MCP: failed (");
-    });
+    expect(out).not.toContain("MCP");
+    expect(out).not.toContain("claude mcp add");
+    expect(out.toLowerCase()).not.toContain("mcp");
   });
 
   // BOUNDARY — a re-run against an already-installed target: everything skipped, nothing
@@ -248,7 +215,6 @@ describe("renderUninstallReceipt", () => {
       written: [],
       skipped: ["skills/lore/SKILL.md"], // removed, no backup existed
       backups: installBackups, // restored from the same backup set install created
-      mcp: "registered",
     });
 
     const installOut = renderInstallReceipt(installReceipt, CTX);
@@ -263,29 +229,12 @@ describe("renderUninstallReceipt", () => {
     expect(uninstallOut).toContain("skills/lore/SKILL.md");
   });
 
-  it("renders MCP de-registration and manifest removal lines", () => {
-    const receipt = baseReceipt({ mcp: "registered" });
-
-    const out = renderUninstallReceipt(receipt, CTX);
+  it("renders the uninstall receipt with the manifest removal line and no MCP line", () => {
+    const out = renderUninstallReceipt(baseReceipt(), CTX);
 
     expect(out).toContain("✓ lore setup uninstalled from /tmp/fake-claude-dir");
-    expect(out).toContain("MCP removal: de-registered ✓");
+    // task-skill-implement-lore-setup-registers-no-tool-server-and: uninstall de-registers nothing.
+    expect(out).not.toContain("MCP");
     expect(out).toContain("Manifest removed: /tmp/fake-claude-dir/.lore-setup-manifest.json");
-  });
-
-  it("renders MCP removal as skipped when no tracked mcp entry existed", () => {
-    const receipt = baseReceipt({ mcp: "skipped" });
-
-    const out = renderUninstallReceipt(receipt, CTX);
-
-    expect(out).toContain("MCP removal: skipped (no tracked mcp entry)");
-  });
-
-  it("renders MCP removal as failed with a stderr tail when supplied", () => {
-    const receipt = baseReceipt({ mcp: "failed" });
-
-    const out = renderUninstallReceipt(receipt, { ...CTX, mcpErrorTail: "claude: not authenticated" });
-
-    expect(out).toContain("MCP removal: failed (claude: not authenticated)");
   });
 });

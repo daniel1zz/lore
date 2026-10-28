@@ -208,18 +208,17 @@ export type AiHttpConfig = z.infer<typeof AiHttpConfigSchema>;
 /**
  * Per-surface AI default overrides.
  * Keys are optional — absent keys fall back to SPEC-024 built-in defaults:
- *   cli: true, agent: false, mcp: false, http_cookie: true, http_token: false
+ *   cli: true, agent: false, http_cookie: true, http_token: false
  *
  * @example
  * // Disable AI for ALL surfaces (paranoid / CI setup):
- * { cli: false, agent: false, mcp: false, http_cookie: false, http_token: false }
+ * { cli: false, agent: false, http_cookie: false, http_token: false }
  *
  * Source: SPEC-024 §2.1, §8 Q2
  */
 export const AiDefaultPerSurfaceSchema = z.object({
   cli: z.boolean().optional(),
   agent: z.boolean().optional(),
-  mcp: z.boolean().optional(),
   http_cookie: z.boolean().optional(),
   http_token: z.boolean().optional(),
 }).strict();
@@ -278,7 +277,7 @@ export const AiConfigSchema = z
     /**
      * Per-surface AI default overrides (SPEC-024).
      * When absent, built-in defaults apply:
-     *   cli=true, agent=false, mcp=false, http_cookie=true, http_token=false
+     *   cli=true, agent=false, http_cookie=true, http_token=false
      * When a surface key is present, it overrides the built-in for that surface only.
      * source is reported as "config" in telemetry when this overrides the built-in.
      */

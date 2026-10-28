@@ -50,7 +50,6 @@
 // @reads src/routes
 // @reads tests/e2e/global-setup.ts
 // @reads tests/fixtures/review-prompt-v1.txt
-// @reads tests/unit/adapters/mcp-tools.test.ts
 // @reads tests/unit/service/demotion-rule-ssot.test.ts
 // @reads tests/unit/store/**
 /**

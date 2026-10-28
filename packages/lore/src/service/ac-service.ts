@@ -123,7 +123,7 @@ import {
   type AcVerifyMode,
   type FileExistsPort,
 } from "@lore/core";
-import type { AuditEntry, DocId, DocRecord } from "@lore/core";
+import type { AuditEntry, DecisionRecord, DocId, DocRecord } from "@lore/core";
 import type { CompanionDocWrite, StoreInterface } from "../store/store-interface.js";
 import { leafPlansToCompanionWrites } from "./rule-leaf-companion-writes.js";
 import type { AbandonmentPlan } from "./rule-landing-port.js";
@@ -138,6 +138,8 @@ import { admitAcWrite, applyAcChange, decorateCiteRefusal, pipeAdvisories, resol
 import type { CiteGateConfig } from "./ac-cite-gate.js";
 import { approvedRuleIdsOf } from "./baseline-items.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
+import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
+import { findWriteSourceFor } from "../store/write-context-store.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -173,6 +175,8 @@ export interface AcListResult {
 
 /** Options for {@link AcService.removeCriterion}. */
 export interface RemoveCriterionOpts {
+  /** The decision the writer supplies (BR-1479): required of an agent when the spec is not a draft. */
+  decision?: DecisionDraft | undefined;
   /** Remove even when task evidence still references this id (see class invariant). */
   force?: boolean;
   /** The calling actor — see {@link DeclarePathOpts.by}. */
@@ -284,6 +288,8 @@ export interface OraclePathContext {
  *   redeem).
  */
 export interface DeclarePathOpts {
+  /** The decision the writer supplies (BR-1479): required of an agent when the spec is not a draft. */
+  decision?: DecisionDraft | undefined;
   pathContext?: OraclePathContext;
   allowMissingPath?: string;
   /**
@@ -390,6 +396,16 @@ export class AcService {
    * by `adapters/cli/loader.ts`; absent ⇒ `citeCriterion` is ungated, byte-identical to before.
    */
   private writeAuthority: CorpusWriteAuthority | undefined;
+
+  /**
+   * Armed by `app.ts` (both roots): an agent's `add|set|rm|supersede|cite` on a spec that is not a draft is refused without a
+   * complete decision (BR-1479). Absent (a bare test construction) = ungated.
+   */
+  private decisionGate: DecisionGate | undefined;
+
+  setDecisionGate(gate: DecisionGate): void {
+    this.decisionGate = gate;
+  }
 
   /** Arms the claim-scoped corpus-write guard for {@link citeCriterion}. Called once per CLI process. */
   setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
@@ -517,6 +533,7 @@ export class AcService {
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "add", {
+      decision: opts.decision,
       ...(opts.by !== undefined ? { by: opts.by } : {}),
       ...(opts.onAdvisory !== undefined ? { onAdvisory: opts.onAdvisory } : {}),
       ...(declaration !== undefined ? { declaration } : {}),
@@ -546,7 +563,7 @@ export class AcService {
     acId: string,
     ruleIds: string[],
     flags: { remove?: boolean } = {},
-    opts: { by?: string } = {},
+    opts: { by?: string; decision?: DecisionDraft | undefined } = {},
   ): Promise<Result<{ criteria: AcceptanceCriterion[]; warnings: CiteWarning[] }, LoreError>> {
     if (ruleIds.length === 0) {
       return err({
@@ -610,6 +627,7 @@ export class AcService {
     const warnings = warningsResult.value;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "cite", {
+      decision: opts.decision,
       ...(opts.by !== undefined ? { by: opts.by } : {}),
       acId,
       auditDetails: {
@@ -781,7 +799,7 @@ export class AcService {
       spec,
       updated,
       "remove",
-      opts.by !== undefined ? { by: opts.by } : {},
+      { decision: opts.decision, ...(opts.by !== undefined ? { by: opts.by } : {}) },
     );
     if (!writeResult.ok) return writeResult;
     return ok(updated);
@@ -985,6 +1003,7 @@ export class AcService {
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", {
+      decision: opts.decision,
       ...(correction !== undefined ? { correctionReason: correction.reason.trim() } : {}),
       ...(opts.by !== undefined ? { by: opts.by } : {}),
       ...(opts.onAdvisory !== undefined ? { onAdvisory: opts.onAdvisory } : {}),
@@ -1018,7 +1037,7 @@ export class AcService {
     acId: string,
     by: { spec: string; ac: string },
     reason: string,
-    opts: { by?: string; plan?: string } = {},
+    opts: { by?: string; plan?: string; decision?: DecisionDraft | undefined } = {},
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const trimmedReason = reason.trim();
     if (trimmedReason.length === 0) {
@@ -1092,7 +1111,10 @@ export class AcService {
         rule: "BR-1330",
       });
     }
+    // reason: `lore ac supersede --reason` is also the decision's reason, so a reason-only draft is not a supplied decision.
     const written = await this.writeCriteria(spec, parsed.data, "supersede", {
+      decision: opts.decision,
+      reasonIsSharedFlag: true,
       by: actor,
       acId,
       auditDetails: { superseded_by: { spec: superseding.value.id, ac: by.ac, reason: trimmedReason } },
@@ -1311,6 +1333,10 @@ export class AcService {
     criteria: AcceptanceCriterion[],
     operation: "add" | "remove" | "set" | "cite" | "supersede" | "restore",
     opts: {
+      /** What the writer supplied as its decision (BR-1479); judged here, once, for every verb but `restore`. */
+      decision?: DecisionDraft | undefined;
+      /** The verb's own `--reason` is the decision's reason (see {@link DecisionGate.judge}). */
+      reasonIsSharedFlag?: boolean;
       status?: DocRecord["status"];
       acId?: string;
       declaration?: AllowMissingPathDeclaration;
@@ -1340,6 +1366,17 @@ export class AcService {
       );
     }
     const newStatus = opts.status ?? spec.status;
+
+    // BR-1479 — an agent's criteria write on a spec that is not a draft carries a decision; refused here, after every
+    // refusal of the change itself and before anything is written. `restore` undoes a retirement the owner rejected at
+    // a milestone review: it is that review's own act, not an agent's decision.
+    let decision: DecisionRecord | undefined;
+    if (operation !== "restore" && this.decisionGate !== undefined) {
+      const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft: spec.status === "draft", changesMoreThanStatus: true });
+      const judged = await this.decisionGate.judgeChecked({ required, draft: opts.decision, reasonIsSharedFlag: opts.reasonIsSharedFlag === true, kind: "document revision" });
+      if (!judged.ok) return judged;
+      decision = judged.value;
+    }
 
     // The citation gate (spec-baseline-slice-2 §C4) — decided by the SAME chokepoint module, before any
     // write, so a refusal leaves the spec's extra, version, status and version log untouched. A removal
@@ -1383,6 +1420,7 @@ export class AcService {
           : operation === "cite"
             ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
             : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
+      ...(decision !== undefined ? { decision } : {}),
       auditAction: "update",
       auditDetails: {
         ...(opts.auditDetails ?? {}),

@@ -663,8 +663,7 @@ describe("AC-GD-1 fresh-install clause: a genuinely fresh corpus materialises 12
       // capture_timeout_ms` directly would THROW on this exact tree, never merely
       // fail an equality check. `resolveCaptureTimeoutMs` is the REAL per-key
       // resolution seam production code calls (`packages/lore/src/adapters/
-      // evidence-capture.ts`, `adapters/cli/commands/evidence.ts`,
-      // `adapters/mcp/tools.ts`) — calling it here exercises that resolution, it does
+      // evidence-capture.ts`, `adapters/cli/commands/evidence.ts`) — calling it here exercises that resolution, it does
       // not re-derive the merge by hand.
       expect(resolveCaptureTimeoutMs(loaded.value)).toBe(1_200_000);
 

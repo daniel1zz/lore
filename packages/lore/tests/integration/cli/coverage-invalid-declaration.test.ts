@@ -11,6 +11,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 
 const corpora: MiniCorpus[] = [];
 afterEach(() => {
@@ -54,7 +55,7 @@ describe("coverage reports a declaration naming a dead rule", () => {
     const live = await coverage(c);
     expect(live.leafA.mapped_sites).toEqual([expect.objectContaining({ rule })]);
     expect(live.leafA.invalid_declarations).toEqual([]);
-    const retired = await c.run(["rule", "set", rule, "--lifecycle", "retired", "--note", "gone"]);
+    const retired = await c.run(["rule", "set", rule, "--lifecycle", "retired", "--note", "gone", ...DECIDED_FLAGS]);
     expect(retired.exitCode, retired.stdout + retired.stderr).toBe(0);
     const after = await coverage(c);
     expect(after.exitCode).toBe(0);

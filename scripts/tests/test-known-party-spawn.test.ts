@@ -5,7 +5,7 @@
  * spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and).
  *
  * Dimensions: HAPPY (source entry and compiled binary get a run; the run is registered with the test process as its
- * harness), NEGATIVE (opt-out, explicit run, MCP server, not-lore starts are untouched), BOUNDARY (session env names the
+ * harness), NEGATIVE (opt-out, explicit run, not-lore starts are untouched), BOUNDARY (session env names the
  * run; entry depth; no corpus yet), STATE (registration is idempotent), REGRESSION (the argv is never rewritten).
  */
 import { afterAll, describe, expect, it } from "vitest";
@@ -101,7 +101,6 @@ describe("rewriteLoreStart", () => {
 
   it.each([
     ["an env that already carries a run value", ["bun", "run", ENTRY, "claim", "t"], { [HARNESS_RUN_ENV]: "cc:mine" }],
-    ["the MCP server", ["bun", "run", ENTRY, "--mcp-server"], {}],
     ["a program that is not lore", ["git", "status"], {}],
     ["a lore entry deeper than the search depth", ["a", "b", "c", "d", "e", "f", "g", "h", ENTRY, "list"], {}],
   ])("NEGATIVE: %s is never rewritten", (_label, argv, env) => {

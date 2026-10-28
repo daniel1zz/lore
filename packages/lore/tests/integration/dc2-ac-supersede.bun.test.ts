@@ -19,6 +19,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { DECIDED_FLAGS, DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags";
 
 const ID = "spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-15";
 
@@ -114,7 +115,7 @@ beforeAll(async () => {
   const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-15 Root"]));
   const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "DC2-15 Branch"]));
   const leaf = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "DC2-15 Leaf"]));
-  const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
+  const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one", ...DECIDED_FLAGS]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
   // a direct add is a pending add: citable only once its leaf is approved (the override class is loosened above)
@@ -158,7 +159,7 @@ describe(ID, () => {
     const updateAudits = async (): Promise<number> =>
       (await must(["audit", specS, "--action", "update", "--json"])).match(/"action":\s*"update"/g)?.length ?? 0;
     const auditBefore = await updateAudits();
-    const ok = await lore(["ac", "supersede", specS, "AC-1", "--by", `${specS2}:AC-9`, "--reason", "r"]);
+    const ok = await lore(["ac", "supersede", specS, "AC-1", "--by", `${specS2}:AC-9`, "--reason", "r", ...DECIDED_FLAGS_OWN_REASON]);
     expect(ok.exitCode).toBe(0);
     const ac1 = (await criteriaOf(specS)).find((c) => c.id === "AC-1");
     expect(ac1?.superseded_by).toMatchObject({ spec: s2Id, ac: "AC-9", reason: "r" });

@@ -1,7 +1,7 @@
 /**
  * Shared `lore.tree.yaml` blueprint load+parse flow — pure refactor extraction,
- * NO behavior change. Three adapter call sites (`adapters/cli/commands/status.ts`,
- * `adapters/cli/commands/review.ts`, `adapters/mcp/tools.ts`) each independently
+ * NO behavior change. Several adapter call sites (`adapters/cli/commands/status.ts`,
+ * `adapters/cli/commands/review.ts`, and a since-removed adapter) each independently
  * re-implemented `existsSync(join(cwd, "lore.tree.yaml")) → readFileSync →
  * parseTreeBlueprint(raw)` with near-identical absent/invalid/ok branching. This
  * module is the single derivation site — mirrors `flows/drift-flow.ts`'s
@@ -13,7 +13,7 @@
  *     discriminated `BlueprintLoadResult` covering the three outcomes every call
  *     site branches on: absent file, invalid YAML/schema, or a successfully
  *     parsed blueprint. Each adapter translates `status` into its own control
- *     flow (the CLI's stderr text + exit code, MCP's `Result` envelope) — this
+ *     flow (the CLI's stderr text + exit code) — this
  *     function itself never writes to stderr/stdout and never calls
  *     `process.exit`.
  *
@@ -34,7 +34,7 @@ import type { LoreError, TreeBlueprint } from "@lore/core";
  *   `"skipped"`, never fatal).
  * - `"invalid"` — the file exists but failed YAML parse or schema validation;
  *   `error` is the `LoreError` `parseTreeBlueprint` produced, ready to hand to
- *   `formatError` (CLI) or return inside a `Result` (MCP).
+ *   `formatError` (CLI) or return inside a `Result`.
  * - `"ok"` — parsed successfully; `blueprint` is the validated `TreeBlueprint`.
  */
 export type BlueprintLoadResult =

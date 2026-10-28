@@ -27,7 +27,7 @@ Full pre-eviction file (per-prompt-version change narratives, per-spec design de
 - **Timeout watchdog** — `setTimeout` + `proc.kill("SIGTERM")` + `clearTimeout` on normal completion. The killer timer is ALWAYS cleared, to prevent stale-timer surprises on reuse.
 - **Hermetic judge spawn (SPEC-030 AC-HJ-1)** — `generate` never builds `Bun.spawn`'s `cwd`/`env`/`args` inline; it calls `buildHermeticSpawnSpec(cfg, {sourceEnv, tmpDir})` (`hermetic-spawn.ts`), a pure function so the sanitization is vitest-testable even though the call site is bun-only. The spec: neutral cwd (OS tmpdir, not the host project dir), sanitized env (denylist strips `CLAUDECODE` + `CLAUDE_*`; everything else, including auth vars, passes through), and — ONLY when the configured command's basename is `claude` — the official `--setting-sources ""` isolation flag. A custom judge command gets no injected flag. (`--bare` was rejected: it restricts auth to `ANTHROPIC_API_KEY`/`apiKeyHelper` only.)
 - **Template rendering is two-pass** — conditionals (`{{#key}}…{{/key}}`) before substitutions (`{{key}}`), so vars inside a collapsed block never partially expand.
-- **assess has no non-AI mode** (SPEC-026 D5) — `isAssessAiBraked(resolveAiDefault(undefined, surface, configDefaults))` is the ONLY correct gate: the built-in per-surface AI-off default (agent/mcp/http_token) must NOT brake assess, only an EXPLICIT config override should. ⛔ Checking `resolveAiDefault(...).ai === false` directly, without the source-tier check, braked assess on every agent/mcp call and defeated D5 entirely.
+- **assess has no non-AI mode** (SPEC-026 D5) — `isAssessAiBraked(resolveAiDefault(undefined, surface, configDefaults))` is the ONLY correct gate: the built-in per-surface AI-off default (agent/http_token) must NOT brake assess, only an EXPLICIT config override should. ⛔ Checking `resolveAiDefault(...).ai === false` directly, without the source-tier check, braked assess on every agent call and defeated D5 entirely.
 
 ## Files
 
@@ -49,5 +49,5 @@ Full pre-eviction file (per-prompt-version change narratives, per-spec design de
 ## Links
 
 - Depends on: [`@lore/core`](../../../../core/src/CLAUDE.md) (`AIProvider`, `AiProviderConfig`, `AiConfig`, `PlanBundle`, `Result`/`ok`/`err`/`LoreError`, `truncateSection`, `evidenceEntrySchema`, `computeAcCoverage`, `computeAssessmentFacts`, `AssessmentFacts`, `DiffMeta`, `specAcceptanceCriteriaSchema`, `AcceptanceCriterion`, `DocRecord`, `ReviewBundle`).
-- Used by: [`../service/ai-provider-service.ts`](../service/CLAUDE.md) (registry + provider map + templates), [`../../app.ts`](../../app.ts) (`buildProviderRegistry`), [`../adapters/mcp`](../adapters/mcp/CLAUDE.md) and [`../adapters/cli`](../adapters/cli/CLAUDE.md) (`isAssessAiBraked`).
+- Used by: [`../service/ai-provider-service.ts`](../service/CLAUDE.md) (registry + provider map + templates), [`../../app.ts`](../../app.ts) (`buildProviderRegistry`), [`../adapters/cli`](../adapters/cli/CLAUDE.md) (`isAssessAiBraked`).
 - Source: SPEC-017, SPEC-024, SPEC-026, SPEC-030, SPEC-034, SPEC-038, SPEC-039, SPEC-040, SPEC-053.

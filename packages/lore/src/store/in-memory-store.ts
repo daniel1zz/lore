@@ -95,7 +95,7 @@ import {
 import { stampAuditSurface } from "./audit-surface.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
-import type { DecisionSubjectKey } from "./store-interface.js";
+import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
 import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
@@ -1465,6 +1465,28 @@ export class InMemoryStore implements StoreInterface {
   async listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
     const matching = this.versions
       .filter((v) => since === undefined || v.created_at >= since)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return ok(matching.map((v) => ({ ...v })));
+  }
+
+  async listDecisionVersions(query: DecisionVersionQuery): Promise<Result<VersionRecord[], LoreError>> {
+    const docIds = new Set<string>(query.docIds);
+    const matching = this.versions
+      .filter((v) => v.decision != null)
+      .filter(
+        (v) =>
+          docIds.has(v.doc_id) ||
+          query.windows.some(
+            (w) => v.harness_run === w.run && v.created_at >= w.from && (w.to === undefined || v.created_at <= w.to),
+          ),
+      )
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return ok(matching.map((v) => ({ ...v })));
+  }
+
+  async listRecordedDecisions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    const matching = this.versions
+      .filter((v) => v.decision != null && (since === undefined || v.created_at >= since))
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
     return ok(matching.map((v) => ({ ...v })));
   }

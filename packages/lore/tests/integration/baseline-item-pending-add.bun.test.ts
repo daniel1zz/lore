@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store";
 import { specCitesLiveRuleInCorpus } from "../../src/service/spec-approval-citation";
 import { RULE_ARGS, createItemsCorpus, type ItemsCorpus } from "../helpers/baseline-items-corpus";
+import { DECIDED_FLAGS } from "../helpers/decision-flags";
 
 const TIMEOUT_MS = 120_000;
 const ADDED = "A rule added directly to an approved leaf.";
@@ -49,7 +50,7 @@ afterAll(() => corpus.cleanup());
 describe("AC-BIA-2: a direct rule add is not live until approved", () => {
   it("HAPPY/STATE: the add is pending: registry proposed, not listed on the leaf, other items approved", async () => {
     const before = corpus.node(corpus.leaf);
-    const added = await corpus.lore(["rule", "add", corpus.leaf, "--statement", ADDED, ...RULE_ARGS]);
+    const added = await corpus.lore(["rule", "add", corpus.leaf, "--statement", ADDED, ...RULE_ARGS, ...DECIDED_FLAGS]);
     expect(added.exitCode).toBe(0);
     expect(added.stdout).toContain("BR-2");
     expect(added.stdout).toContain("pending add");

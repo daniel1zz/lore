@@ -6,7 +6,7 @@
  *
  * One task claims a branch, records a clean captured pass, is released, and its branch and worktree vanish (the unchanged-work
  * shape). Then, all through the binary:
- *   - `lore_done` over the tool protocol (`dist/lore --mcp-server`, a real MCP client) archives it (exactly `archived`);
+ *   - `lore done` through the CLI archives it (exactly `archived`);
  *   - `lore get` prints `Landing: no-change`;
  *   - `lore set <plan> --status archived` (plan close) of the plan whose ONLY task has that landing exits 0;
  *   - the plan's milestone-review input adds no commit range for the task: the review fingerprint's landed-commit part is `none`
@@ -25,8 +25,6 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "n
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
@@ -36,9 +34,9 @@ import { collectRecordedRanges } from "../../src/service/task-commit-range.js";
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const DIST_LORE = join(PROJECT_ROOT, "dist", "lore");
 const ACTOR = "agent:landing-compiled-e2e";
-/** The run the agent integration vouches for on tool-protocol writes (normally set by its pre-tool hook). */
-const MCP_SESSION = "a77e57e1-aaaa-bbbb-cccc-333333333333";
-const MCP_RUN = `cc:${MCP_SESSION}`;
+/** The run the agent integration vouches for on the close (normally exported by its pre-tool hook; the run's harness is this test process, so ancestry verifies it). */
+const DONE_SESSION = "a77e57e1-aaaa-bbbb-cccc-333333333333";
+const DONE_RUN = `cc:${DONE_SESSION}`;
 
 interface Run {
   readonly exitCode: number;
@@ -58,8 +56,8 @@ function loreEnv(): Record<string, string> {
 
 let dir = "";
 
-function lore(args: string[]): Run {
-  const proc = Bun.spawnSync([DIST_LORE, ...args], { cwd: dir, env: loreEnv() });
+function lore(args: string[], extraEnv: Record<string, string> = {}): Run {
+  const proc = Bun.spawnSync([DIST_LORE, ...args], { cwd: dir, env: { ...loreEnv(), ...extraEnv } });
   const stdout = proc.stdout.toString();
   const stderr = proc.stderr.toString();
   return { exitCode: proc.exitCode ?? -1, stdout, stderr, text: `${stdout}\n${stderr}` };
@@ -116,18 +114,6 @@ function claimWithPass(plan: string, title: string, branch: string, declareEmpty
   return { task, wt };
 }
 
-async function callTool(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> {
-  const transport = new StdioClientTransport({ command: DIST_LORE, args: ["--mcp-server"], cwd: dir, env: loreEnv(), stderr: "pipe" });
-  const client = new Client({ name: "landing-compiled-e2e", version: "0.0.0" });
-  await client.connect(transport);
-  try {
-    const result = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
-    return { isError: result.isError === true, text: result.content.map((part) => part.text ?? "").join("\n") };
-  } finally {
-    await client.close();
-  }
-}
-
 let plan = "";
 let noChangeTask = "";
 let commitsTask = "";
@@ -137,7 +123,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-landing-compiled-"));
   makeCleanTreeRepo(dir);
   mustLore(["init"]);
-  mustLore(["run", "register", "--harness", "claude-code", "--session", MCP_SESSION, "--harness-pid", String(process.pid)]);
+  mustLore(["run", "register", "--harness", "claude-code", "--session", DONE_SESSION, "--harness-pid", String(process.pid)]);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   patchLoreConfig(
     dir,
@@ -188,10 +174,10 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
     expect(mustLore(["get", commitsTask])).toContain(`Landing: commits ${String(landing["tip"])}`);
   }, 300_000);
 
-  it("AC-ND-8 lore_done over the tool protocol archives the no-change task, and lore get shows `Landing: no-change`", async () => {
-    const result = await callTool("lore_done", { harness_run: MCP_RUN, id_or_slug: noChangeTask, declare_no_new_tests: "read-only" });
+  it("AC-ND-8 lore done through the CLI archives the no-change task, and lore get shows `Landing: no-change`", () => {
+    const result = lore(["done", noChangeTask, "--declare-no-new-tests", "read-only"], { LORE_HARNESS_RUN: DONE_RUN });
 
-    expect(result.isError, result.text).toBe(false);
+    expect(result.exitCode, result.text).toBe(0);
     const doc = docOf(noChangeTask);
     expect(doc.status).toBe("archived"); // exact: a deprecated task would be a false green
     expect((doc.extra["landing"] as Record<string, unknown>)["kind"]).toBe("no-change");
