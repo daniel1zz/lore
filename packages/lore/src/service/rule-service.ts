@@ -43,7 +43,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { err, ok, validationError, type Result } from "@lore/core";
-import type { DecisionRecord, LoreError, DocRecord, DocStatus } from "@lore/core";
+import type { DecisionRecord, LoreError, DocRecord, DocStatus, WeightTableKind } from "@lore/core";
 import {
   ANY_RULE_ID_PATTERN,
   BASELINE_RULE_ID_PATTERN,
@@ -331,7 +331,7 @@ export class RuleService {
     const gate = await this.authorizeCorpusWrite([target.value], "rule-add", opts?.by);
     if (!gate.ok) return gate;
     // BR-1476 — an agent's add to a leaf with an approved version carries a decision; refused before the id is reserved.
-    const decided = this.resolveNodeDecision(target.value, opts?.decision);
+    const decided = await this.resolveNodeDecision(target.value, opts?.decision, undefined, "rule revision");
     if (!decided.ok) return decided;
     const leafId = target.value.id;
 
@@ -858,7 +858,7 @@ export class RuleService {
     // pass `decisionInput`, any other caller passes none and is not gated here.
     let decision: DecisionRecord | undefined;
     if (decisionInput !== undefined) {
-      const judged = this.resolveNodeDecision(doc, decisionInput.draft, decisionInput.ruleEdit);
+      const judged = await this.resolveNodeDecision(doc, decisionInput.draft, decisionInput.ruleEdit);
       if (!judged.ok) return judged;
       decision = judged.value;
     }
@@ -869,11 +869,12 @@ export class RuleService {
    * The decision of a baseline write (`set-label|depends|glossary|map`): required of an agent when `doc` has an approved
    * version (a node never approved carries the `initial` marker and is a draft); human parties carry none.
    */
-  private resolveNodeDecision(
+  private async resolveNodeDecision(
     doc: DocRecord,
     draft: DecisionDraft | undefined,
     ruleEdit?: NodeDecisionInput["ruleEdit"],
-  ): Result<DecisionRecord | undefined, LoreError> {
+    kind: WeightTableKind = "document revision",
+  ): Promise<Result<DecisionRecord | undefined, LoreError>> {
     const gate = this.decisionGate;
     if (gate === undefined) return ok(undefined);
     const required = writeCarriesDecision({
@@ -884,7 +885,7 @@ export class RuleService {
     if (ruleEdit !== undefined) {
       return judgeRuleEdit(gate, { carriesDecision: required, current: ruleEdit.current, patch: { ...ruleEdit.patch }, draft });
     }
-    return gate.judge({ required, draft });
+    return gate.judgeChecked({ required, draft, kind });
   }
 
   /**

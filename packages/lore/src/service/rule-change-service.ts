@@ -169,11 +169,11 @@ export class RuleChangeService implements RuleChangeLandingPort {
    * The decision of a proposal: required of an agent when `spec` is not a draft (a proposal on a draft spec is decided
    * with the spec's approval); `ok(undefined)` when none is required and none was supplied.
    */
-  private resolveProposalDecision(spec: DocRecord, draft: DecisionDraft | undefined): Result<DecisionRecord | undefined, LoreError> {
+  private async resolveProposalDecision(spec: DocRecord, draft: DecisionDraft | undefined): Promise<Result<DecisionRecord | undefined, LoreError>> {
     const gate = this.decisionGate;
     if (gate === undefined) return ok(undefined);
     const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft: spec.status === "draft", changesMoreThanStatus: true });
-    return gate.judge({ required, draft });
+    return gate.judgeChecked({ required, draft, kind: "rule revision" });
   }
 
   /**
@@ -222,7 +222,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const authorized = await this.authorizeTarget(shaped.value, actor);
     if (!authorized.ok) return authorized;
     const leaf = authorized.value;
-    const decided = this.resolveProposalDecision(specResult.value, opts.decision);
+    const decided = await this.resolveProposalDecision(specResult.value, opts.decision);
     if (!decided.ok) return decided;
     const decision = decided.value;
 
@@ -703,7 +703,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const exit = await this.resolveLockExit(specResult.value, opts.correction);
     if (!exit.ok) return exit;
     const correctionReason = exit.value.correctionReason;
-    const decided = this.resolveProposalDecision(specResult.value, opts.decision);
+    const decided = await this.resolveProposalDecision(specResult.value, opts.decision);
     if (!decided.ok) return decided;
     const decision = decided.value;
 
@@ -809,7 +809,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const exit = await this.resolveLockExit(specResult.value, opts.correction);
     if (!exit.ok) return exit;
     const correctionReason = exit.value.correctionReason;
-    const decided = this.resolveProposalDecision(specResult.value, opts.decision);
+    const decided = await this.resolveProposalDecision(specResult.value, opts.decision);
     if (!decided.ok) return decided;
     const decision = decided.value;
 

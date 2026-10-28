@@ -469,7 +469,7 @@ export default defineLoreCommand({
           // reason: AC-AU-7 — the grant asks decide() (class ac-exempt) through the decision log on this same store.
           const overrides = createOverrideDecisionPort(new DecisionService({ store, executorRun: null }));
           const exemptions = new AcExemptionService(store, undefined, overrides);
-          exemptions.setDecisionGate(buildDecisionGate(inv.cwd));
+          exemptions.setDecisionGate(buildDecisionGate(inv.cwd, store));
           const result = await exemptions.grant({
             specIdOrSlug: args.spec as string,
             acId: args.id as string,

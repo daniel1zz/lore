@@ -1266,11 +1266,11 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    * otherwise, or the `decision` refusal (exit 4). Spec, ADR and baseline targets only; a status-only write, a resend
    * of the stored values and a draft carry none.
    */
-  private resolveSetDecision(
+  private async resolveSetDecision(
     existing: DocRecord,
     patch: DocPatch,
     draft: DecisionDraft | undefined,
-  ): Result<DecisionRecord | undefined, LoreError> {
+  ): Promise<Result<DecisionRecord | undefined, LoreError>> {
     const gate = this.decisionGate;
     if (gate === undefined) return ok(undefined);
     if (existing.type !== "spec" && existing.type !== "adr" && existing.type !== "baseline") return ok(undefined);
@@ -1286,7 +1286,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     const targetIsDraft =
       existing.type === "baseline" ? pendingRevisionsOf(existing).node?.initial === true : existing.status === "draft";
     const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft, changesMoreThanStatus });
-    return gate.judge({ required, draft });
+    return gate.judgeChecked({ required, draft, kind: "document revision" });
   }
 
   /**
@@ -3895,7 +3895,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // never two independently-resolved values that could disagree.
     // BR-1476 — refused before anything is written: the last check of this method, so a patch refused on its own
     // merits (a dedicated key, a bad slug, a gate) is refused for that reason first.
-    const decisionOutcome = this.resolveSetDecision(existing, parsedPatch.data, opts?.decision);
+    const decisionOutcome = await this.resolveSetDecision(existing, parsedPatch.data, opts?.decision);
     if (!decisionOutcome.ok) return decisionOutcome;
     const decision = decisionOutcome.value;
     const resolvedActor = this.resolveWriteActor(opts?.by);

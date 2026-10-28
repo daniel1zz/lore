@@ -151,7 +151,7 @@ export class AcExemptionService {
     // of the spec, so a complete decision is required but has no version row to be stored on: it is validated, not kept.
     if (this.decisionGate !== undefined) {
       const required = writeCarriesDecision({ writerSource: input.writerSource ?? findWriteSourceFor(this.store), targetIsDraft: spec.value.status === "draft", changesMoreThanStatus: true });
-      const judged = this.decisionGate.judge({ required, draft: input.decision, reasonIsSharedFlag: true });
+      const judged = await this.decisionGate.judgeChecked({ required, draft: input.decision, reasonIsSharedFlag: true, kind: "document revision" });
       if (!judged.ok) return judged;
     }
 

@@ -1373,7 +1373,7 @@ export class AcService {
     let decision: DecisionRecord | undefined;
     if (operation !== "restore" && this.decisionGate !== undefined) {
       const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft: spec.status === "draft", changesMoreThanStatus: true });
-      const judged = this.decisionGate.judge({ required, draft: opts.decision, reasonIsSharedFlag: opts.reasonIsSharedFlag === true });
+      const judged = await this.decisionGate.judgeChecked({ required, draft: opts.decision, reasonIsSharedFlag: opts.reasonIsSharedFlag === true, kind: "document revision" });
       if (!judged.ok) return judged;
       decision = judged.value;
     }

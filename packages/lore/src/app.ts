@@ -84,6 +84,7 @@ import { buildAuditVerifyRunner, type AuditVerifyRunner } from "./service/audit-
 import { StateBindingService } from "./service/state-binding-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
+import { WeightTableService } from "./service/weight-table-service.js";
 import { RuleService } from "./service/rule-service.js";
 import { RuleChangeService } from "./service/rule-change-service.js";
 import { RuleReadService } from "./service/rule-read-service.js";
@@ -486,6 +487,11 @@ export interface App {
    * `acService`; always wired in production.
    */
   requirementService?: RequirementService;
+  /**
+   * WeightTableService — the sole writer of a reference document's `extra.weight_table` (`lore weights set`, BR-1482);
+   * always wired in production.
+   */
+  weightTableService?: WeightTableService;
   /**
    * RuleService — the sole writer of a `baseline` doc's verb-owned `extra` keys (rules with
    * permanent `BR-n` ids, label, depends_on, glossary) and of baseline node creation
@@ -994,7 +1000,7 @@ function buildAppFromSqlite(
   corpusService.setRuleChangeLanding(ruleChangeService);
   // reason: BR-1476 — an agent's decision-carrying write is refused without its decision in the service layer, so CLI, MCP
   // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
-  const decisionGate = buildDecisionGate(ambient.cwd);
+  const decisionGate = buildDecisionGate(ambient.cwd, store);
   corpusService.setDecisionGate(decisionGate);
   ruleChangeService.setDecisionGate(decisionGate);
   return {
@@ -1104,6 +1110,7 @@ function buildAppFromSqlite(
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
+    weightTableService: armDecisionGate(new WeightTableService(store, corpusService), decisionGate),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
@@ -1439,7 +1446,7 @@ function buildAppFromTurso(
   corpusService.setRuleChangeLanding(ruleChangeService);
   // reason: BR-1476 — an agent's decision-carrying write is refused without its decision in the service layer, so CLI, MCP
   // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
-  const decisionGate = buildDecisionGate(ambient.cwd);
+  const decisionGate = buildDecisionGate(ambient.cwd, store);
   corpusService.setDecisionGate(decisionGate);
   ruleChangeService.setDecisionGate(decisionGate);
   return {
@@ -1544,6 +1551,7 @@ function buildAppFromTurso(
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
+    weightTableService: armDecisionGate(new WeightTableService(store, corpusService), decisionGate),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.

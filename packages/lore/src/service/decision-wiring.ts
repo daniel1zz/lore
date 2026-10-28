@@ -12,14 +12,17 @@
 
 import { DecisionGate } from "./decision-gate.js";
 import { SpawnDecisionGitPort } from "./decision-git-port.js";
+import type { StoreInterface } from "../store/store-interface.js";
+import { buildWeightTableLookup } from "./weight-table-service.js";
 
 /**
  * The decision gate of one composition root.
  *
  * @param cwd - the invocation's directory (`AppAmbient.cwd`)
+ * @param store - the corpus store, where a decision's weight table is looked up (BR-1482)
  */
-export function buildDecisionGate(cwd: string): DecisionGate {
-  return new DecisionGate(new SpawnDecisionGitPort(cwd));
+export function buildDecisionGate(cwd: string, store: StoreInterface): DecisionGate {
+  return new DecisionGate(new SpawnDecisionGitPort(cwd), buildWeightTableLookup(store));
 }
 
 /** A service that refuses its decision-carrying writes without a decision once armed (`RuleService`, `RuleChangeService`, `AcService`). */
