@@ -54,8 +54,8 @@ import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-s
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
-import { deriveCommitSetForPlan, describeCommitCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
-import { collectRecordedRanges } from "../../../service/task-commit-range.js";
+import { deriveLandingDiffForPlan, describeCommitCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
+import { readTaskLanding } from "../../../service/task-commit-range.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
@@ -280,11 +280,12 @@ export default defineLoreCommand({
         const bundle = await app.corpusService.getPlanBundle(ref);
         if (!bundle.ok) return bundle;
         const tasks = bundle.value.tasks;
-        const derivation = deriveCommitSetForPlan(
+        // reason: #459 — the diff is each landing's own `main_before..landing_commit`; a task without a landing record is
+        // named in `unlanded_tasks` (no commit-range fallback).
+        const derivation = deriveLandingDiffForPlan(
           inv.cwd,
-          tasks.map((t) => t.slug),
+          tasks.map((t) => ({ slug: t.slug, landing: readTaskLanding(t.extra) })),
           tasks.length > 0 && tasks.every((t) => t.status === "archived"),
-          collectRecordedRanges(tasks),
         );
         const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
         // reason: spec D6 — criteria citing a reworded rule are re-run through the same trusted runner as the stale
@@ -298,8 +299,7 @@ export default defineLoreCommand({
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
           diffSource: describeDiffSource(diffSource),
-          maxDiffChars: app.aiProviderService.assessMaxDiffChars,
-          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
+          maxDiffChars: app.aiProviderService.assessMaxDiffChars,          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
         });
       };
 

@@ -362,3 +362,144 @@ export function deriveCommitSetForPlan(
     warnings,
   };
 }
+
+/** One landing of a plan's tasks as the review measures it: the range `main_before..landing_commit` and its landed footprint. */
+export interface PlanLanding {
+  landing_commit: string;
+  main_before: string;
+  /** Slugs of the plan's tasks recorded as landing in this commit. */
+  task_slugs: string[];
+  /** This landing's `outside_anchors` (BR-1346); `undefined` when the landing did not measure it. */
+  outside_anchors: string[] | undefined;
+  /** `no-change` landings put nothing on main and contribute no diff. */
+  kind: "no-change" | "commits";
+}
+
+/** {@link CommitDerivationResult} for a diff built from landings, plus the facts the review gates read. */
+export interface LandingDerivationResult extends CommitDerivationResult {
+  /** Tasks of the plan with NO usable landing: named, no diff; regression and security become not-measured. */
+  unlanded_tasks: string[];
+  /** Every distinct landing of the plan (one per landing commit), in task order. */
+  landings: PlanLanding[];
+}
+
+/** The slice of a task the landing derivation reads (`landing` = parsed `extra.landing`, `undefined` = none). */
+export interface LandingTaskInput {
+  slug: string;
+  landing:
+    | {
+        main_before: string;
+        landing_commit: string;
+        kind: "no-change" | "commits";
+        outside_anchors?: string[] | undefined;
+      }
+    | undefined;
+}
+
+/**
+ * Builds a plan's review diff from each landing's own range: `git diff <main_before> <landing_commit>` per distinct
+ * landing. `main_before` is main's head when the branch landed, so commits other plans put on main between two
+ * landings are never in a landing's range (#459). A task with no landing record contributes nothing and is named in
+ * `unlanded_tasks`; there is NO commit-range fallback. Never throws: a landing whose objects are missing is a warning
+ * and its task is reported unlanded.
+ *
+ * @param cwd - repository root
+ * @param tasks - every task of the plan with its parsed landing
+ * @param allTasksArchived - whether every task is archived (zero commits then is `unverifiable_convention_mismatch`)
+ */
+export function deriveLandingDiffForPlan(
+  cwd: string,
+  tasks: readonly LandingTaskInput[],
+  allTasksArchived: boolean,
+): LandingDerivationResult {
+  const warnings: string[] = [];
+  const unlanded: string[] = [];
+  const withoutCommits: string[] = [];
+  const attribution: Record<string, TaskAttribution> = {};
+  const landings = new Map<string, PlanLanding>();
+  const landingCommits = new Map<string, string[]>();
+  const commitMap = new Map<string, { subject: string; taskSlugs: Set<string> }>();
+  const diffs: string[] = [];
+
+  const markUnlanded = (slug: string): void => {
+    unlanded.push(slug);
+    withoutCommits.push(slug);
+    attribution[slug] = "not_measured";
+  };
+
+  for (const task of tasks) {
+    const l = task.landing;
+    if (l === undefined) {
+      markUnlanded(task.slug);
+      continue;
+    }
+    const known = landings.get(l.landing_commit);
+    if (known !== undefined) {
+      known.task_slugs.push(task.slug);
+      attribution[task.slug] = "recorded_range";
+      for (const sha of landingCommits.get(l.landing_commit) ?? []) commitMap.get(sha)?.taskSlugs.add(task.slug);
+      if (known.kind === "no-change") withoutCommits.push(task.slug);
+      continue;
+    }
+    const entry: PlanLanding = {
+      landing_commit: l.landing_commit,
+      main_before: l.main_before,
+      task_slugs: [task.slug],
+      outside_anchors: l.outside_anchors,
+      kind: l.kind,
+    };
+    if (l.kind === "no-change") {
+      landings.set(l.landing_commit, entry);
+      attribution[task.slug] = "recorded_range";
+      withoutCommits.push(task.slug);
+      continue;
+    }
+    if (!commitExists(cwd, l.landing_commit) || !commitExists(cwd, l.main_before)) {
+      warnings.push(`${task.slug}: landing ${l.main_before}..${l.landing_commit} not found in this repository — the task is treated as unlanded`);
+      markUnlanded(task.slug);
+      continue;
+    }
+    const log = runGit(cwd, ["log", "--no-merges", "--reverse", "--format=%H%x09%s", `${l.main_before}..${l.landing_commit}`]);
+    if (!log.ok) {
+      warnings.push(log.warning);
+      markUnlanded(task.slug);
+      continue;
+    }
+    const diff = runGit(cwd, ["diff", l.main_before, l.landing_commit]);
+    if (!diff.ok) {
+      warnings.push(diff.warning);
+      markUnlanded(task.slug);
+      continue;
+    }
+    landings.set(l.landing_commit, entry);
+    attribution[task.slug] = "recorded_range";
+    const shas: string[] = [];
+    for (const c of parseLogLines(log.stdout)) {
+      shas.push(c.sha);
+      const existing = commitMap.get(c.sha);
+      if (existing) existing.taskSlugs.add(task.slug);
+      else commitMap.set(c.sha, { subject: c.subject, taskSlugs: new Set([task.slug]) });
+    }
+    landingCommits.set(l.landing_commit, shas);
+    diffs.push(diff.stdout);
+  }
+
+  const base = {
+    tasks_without_commits: withoutCommits,
+    tasks_not_measured: [...unlanded],
+    attribution,
+    excluded_merged_commit_count: 0,
+    warnings,
+    unlanded_tasks: unlanded,
+    landings: [...landings.values()],
+  };
+  if (commitMap.size === 0) {
+    return { ...base, status: allTasksArchived ? "unverifiable_convention_mismatch" : "no_commits_found", commits: [], diff_text: "" };
+  }
+  return {
+    ...base,
+    status: "derived",
+    commits: [...commitMap.entries()].map(([sha, e]) => ({ sha, subject: e.subject, matched_task_slugs: [...e.taskSlugs].sort() })),
+    diff_text: diffs.join(""),
+  };
+}
