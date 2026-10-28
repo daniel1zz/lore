@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
 import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
-import { err, ok, DEDICATED_EXTRA_KEYS, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -99,6 +99,7 @@ import type { TreeBlueprint } from "@lore/core";
 import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
 import { pendingRevisionsOf } from "./baseline-items.js";
+import { acceptedGatesOf } from "./gate-acceptance-service.js";
 import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -110,6 +111,7 @@ import {
 } from "./checkpoint-registry.js";
 import {
   assessMilestoneCurrency,
+  selectLatestMilestoneReview,
   MILESTONE_REVIEW_SUB_TYPE,
   type CitedRuleStateRow,
   type MilestoneReviewCurrency,
@@ -1368,7 +1370,22 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   private async acceptKnownDefects(
     plan: DocRecord,
     currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
+    reviewDocs: readonly DocRecord[],
   ): Promise<Result<MilestoneReviewCurrency, LoreError>> {
+    // reason: BR-1379/BR-1500 — a failed or not-measured gate is not covered by an open issue; only an acceptance
+    // bound to this failure's root cause lets it close, on the hand-close path exactly as in the review batch.
+    const latest = selectLatestMilestoneReview(reviewDocs);
+    const unacceptedGates = currency.failed.filter(
+      (dimension) => isGateDimension(dimension) && (latest === undefined || !acceptedGatesOf(plan, latest).includes(dimension)),
+    );
+    if (unacceptedGates.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gate:plan-close",
+        message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close: gate ${unacceptedGates.join(", ")} failed or was not measured in its review and was not accepted for this failure; an open issue does not accept a gate (accept it with \`lore assess ${plan.slug} --accept-gate <dimension>\` and a decision, or fix it and review again) (BR-1379, BR-1500)`,
+        rule: "BR-1500",
+      });
+    }
     const coverage = await this.coverageOfFailedDimensions(plan.id, currency.failed);
     if (!coverage.ok) {
       // reason: a missing open-issue reader is "not wired" (the gate refuses generically); a failed read of a named
@@ -3825,7 +3842,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
       let milestoneReview: MilestoneReviewCurrency = measuredReview;
       if (measuredReview.state === "failed") {
-        const accepted = await this.acceptKnownDefects(existing, measuredReview);
+        const accepted = await this.acceptKnownDefects(existing, measuredReview, reviewDocsResult.value);
         if (!accepted.ok) return accepted;
         milestoneReview = accepted.value;
       }

@@ -1412,7 +1412,7 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
   const FP_A = "a".repeat(64);
   const FP_B = "b".repeat(64);
 
-  /** A plan with one archived task and a stored failing review on regression and correctness_vs_acs. */
+  /** A plan with one archived task and a stored failing review on spec_conformance and design_necessity (non-gate dimensions: an open issue covers a gate nowhere, A7). */
   async function failingPlan() {
     const store = actedStore(new InMemoryStore());
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
@@ -1427,7 +1427,7 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
       plan_id: plan.id,
       fingerprint: planStateFingerprint(bundle.value.plan, bundle.value.tasks, bundle.value.spec),
       overall: "fail",
-      dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d === "regression" || d === "correctness_vs_acs" ? fail : pass])) as MilestoneReview["dimensions"],
+      dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d === "spec_conformance" || d === "design_necessity" ? fail : pass])) as MilestoneReview["dimensions"],
       decisions: [],
       prompt_version: "test",
       diff_source: "test",
@@ -1473,9 +1473,9 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
     const w = await failingPlan();
     w.states.set(1, "open").set(2, "open");
     const record = recorder(w);
-    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
-    expect((await record(w.plan, 2, "correctness_vs_acs", FP_B)).ok).toBe(true);
-    expect((await record(w.otherPlan, 2, "correctness_vs_acs", FP_B)).ok).toBe(true);
+    expect((await record(w.plan, 1, "spec_conformance", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 2, "design_necessity", FP_B)).ok).toBe(true);
+    expect((await record(w.otherPlan, 2, "design_necessity", FP_B)).ok).toBe(true);
 
     const closed = await closePlan(w);
     if (!closed.ok) throw new Error(JSON.stringify(closed.error));
@@ -1489,7 +1489,7 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
     const w = await failingPlan();
     w.states.set(1, "open");
     const record = recorder(w);
-    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 1, "spec_conformance", FP_A)).ok).toBe(true);
     const refused = await closePlan(w);
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
@@ -1504,8 +1504,8 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
     w.states.set(1, "open").set(2, "open");
     const record = recorder(w);
     // #1 and #2 are both open, but the plan records them for regression only
-    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
-    expect((await record(w.plan, 2, "regression", FP_B)).ok).toBe(true);
+    expect((await record(w.plan, 1, "spec_conformance", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 2, "spec_conformance", FP_B)).ok).toBe(true);
     expect((await closePlan(w)).ok).toBe(false);
   });
 
@@ -1513,10 +1513,10 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
     const w = await failingPlan();
     w.states.set(1, "open").set(2, "open");
     const record = recorder(w);
-    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 1, "spec_conformance", FP_A)).ok).toBe(true);
     const stored = await reload(w.store, w.plan.id);
     expect(stored.extra["issues"]).toBeUndefined();
-    expect(stored.extra["known_defects"]).toEqual([{ repo_id: REPO_ID, number: 1, dimension: "regression", fingerprint: FP_A }]);
+    expect(stored.extra["known_defects"]).toEqual([{ repo_id: REPO_ID, number: 1, dimension: "spec_conformance", fingerprint: FP_A }]);
     const issueTask = await seed(w.store, rawDoc("task", "issue 2", { issues: [{ repo_id: REPO_ID, number: 2 }] }, "approved"));
     expect((await w.corpus.link(w.plan.id, issueTask.id, "relates-to")).ok).toBe(true);
     expect((await closePlan(w)).ok).toBe(false);
@@ -1526,8 +1526,8 @@ describe("AC-PCR-4 plan close reads grouped issue coverage from the plan's known
     const w = await failingPlan();
     w.states.set(1, "open").set(2, "closed");
     const record = recorder(w);
-    expect((await record(w.plan, 1, "regression", FP_A)).ok).toBe(true);
-    expect((await record(w.plan, 2, "correctness_vs_acs", FP_B)).ok).toBe(true);
+    expect((await record(w.plan, 1, "spec_conformance", FP_A)).ok).toBe(true);
+    expect((await record(w.plan, 2, "design_necessity", FP_B)).ok).toBe(true);
     const refused = await closePlan(w);
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(JSON.stringify(refused.error)).toContain("#2");
@@ -1553,7 +1553,7 @@ describe("AC-PCR-4 an issue the batch just filed counts as open at the close of 
       plan_id: plan.id,
       fingerprint: planStateFingerprint(bundle.value.plan, bundle.value.tasks, bundle.value.spec),
       overall: "fail",
-      dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d === "regression" ? fail : pass])) as MilestoneReview["dimensions"],
+      dimensions: Object.fromEntries(MILESTONE_DIMENSIONS.map((d) => [d, d === "concurrency_safety" ? fail : pass])) as MilestoneReview["dimensions"],
       decisions: [],
       prompt_version: "test",
       diff_source: "test",
@@ -1570,7 +1570,7 @@ describe("AC-PCR-4 an issue the batch just filed counts as open at the close of 
     // the listing is empty: GitHub's list has not caught up with the issue filed moments ago, but its own read says open
     corpus.setPlanCloseIssuePort({ listOpenIssues: async () => ok({ repoId: REPO_ID, open: [] }), readIssue: async () => ok({ repoId: REPO_ID, state: "open" as const }) });
     const port = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, corpus.getPlanCloseIssuePort());
-    expect((await port.recordKnownDefects(plan.slug, { number: 9 }, [{ dimension: "regression", fingerprint: FP }])).ok).toBe(true);
+    expect((await port.recordKnownDefects(plan.slug, { number: 9 }, [{ dimension: "concurrency_safety", fingerprint: FP }])).ok).toBe(true);
 
     const closed = await corpus.set(plan.id, { status: "archived" });
     if (!closed.ok) throw new Error(JSON.stringify(closed.error));

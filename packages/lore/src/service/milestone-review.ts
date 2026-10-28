@@ -22,7 +22,7 @@ import { z } from "zod";
 import {
   err,
   ok,
-  failedDimensions,
+  filableDimensions,
   milestoneReviewSchema,
   specAcceptanceCriteriaSchema,
   type DocRecord,
@@ -212,10 +212,10 @@ export function assessMilestoneCurrency(
   if (latest.review.fingerprint !== current) {
     return { state: "stale", reviewed: latest.review.fingerprint, current, reviewSlug: latest.doc.slug };
   }
-  // reason: the plan-close gate reads FAILED dimensions only (BR-1372). Holding a plan open for a not-measured or unaccepted
-  // gate is the review batch's close rule (`ReviewBatchRunner`, BR-1379); the batch never archives past one, so the
-  // verdict stored here is read as before.
-  const failed = failedDimensions(latest.review.dimensions);
+  // reason: a gate that failed or was not measured holds the plan open on EVERY close path (BR-1379, BR-1500), so a
+  // not-measured gate is listed with the failed dimensions; `CorpusService` then lets only a gate accepted for that
+  // failure (`acceptedGatesOf`) through, whatever issue is open.
+  const failed = filableDimensions(latest.review.dimensions);
   if (failed.length > 0 || latest.review.overall === "fail") {
     return { state: "failed", failed, reviewSlug: latest.doc.slug };
   }

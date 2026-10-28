@@ -13,8 +13,12 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { ulid } from "ulidx";
 import {
+  DOC_TYPE_ROLE_MAP,
   MILESTONE_DIMENSIONS,
+  renderMilestoneReviewContent,
+  type DocId,
   blockingGates,
   err,
   filableDimensions,
@@ -26,6 +30,11 @@ import {
   type PlanBundle,
 } from "@lore/core";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
+import { CorpusService } from "../../src/service/corpus-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
+import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
+import { actedStore } from "../live-invocation.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, milestoneFactsFingerprint, planStateFingerprint, type FactsFingerprintInput } from "../../src/service/milestone-review.js";
@@ -185,7 +194,12 @@ async function runOne(world: World, slug: string, holder = "batch"): Promise<Bat
 function acceptGate(plan: WorldPlan, dimension: MilestoneDimension, issue: number): void {
   const extra = plan.bundle.plan.extra as Record<string, unknown>;
   const existing = (extra["known_defects"] as unknown[] | undefined) ?? [];
-  extra["known_defects"] = [...existing, { repo_id: 1, number: issue, dimension, fingerprint: "fp", gate_accepted: true }];
+  // the acceptance is bound to the root cause of the failure the fake judge gives this dimension (its cites)
+  const verdict = plan.verdicts[dimension];
+  const cites = verdict === "fail" ? [`src/${dimension}.ts`] : [`${dimension}:subject`];
+  const cause = rootCauseOf({ plan: plan.slug, dimension, reason: `${dimension} ${String(verdict)}`, reference: "fixture", cites, reviewSlug: "fixture" });
+  if (!cause.ok) throw new Error(JSON.stringify(cause.error));
+  extra["known_defects"] = [...existing, { repo_id: 1, number: issue, dimension, fingerprint: cause.value.fingerprint, gate_accepted: true }];
 }
 
 describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
@@ -374,5 +388,135 @@ describe("AC-AF-6 errors never read as a pass", () => {
     expect(row).toMatchObject({ outcome: "error", stage: "review" });
     expect(plan.archived).toBe(false);
     expect(world.errors.at(-1)?.message).toContain("suite store unreadable");
+  });
+});
+
+// ─── A hand close (`lore set <plan> --status archived`) holds the same gates ──────────────────────────────
+
+const HAND_REPO_ID = 7;
+const HAND_ISSUE = 11;
+
+function handDoc(type: DocRecord["type"], title: string, extra: Record<string, unknown>, status: DocRecord["status"], parentId: DocId | null = null): DocRecord {
+  const id = ulid() as DocId;
+  const now = new Date().toISOString();
+  return { id, slug: `${type}-${title.toLowerCase().replace(/\s+/g, "-")}-${id.slice(-6).toLowerCase()}`, type, role: DOC_TYPE_ROLE_MAP[type], title, status, priority: "medium", content: "", parent_id: parentId, created_at: now, updated_at: now, created_by: "hand-close-test", version: 1, deleted_at: null, tags: [], extra };
+}
+
+async function seedDoc(store: InMemoryStore, doc: DocRecord): Promise<DocRecord> {
+  const inserted = await store.insertWithProvenance(
+    doc,
+    { doc_id: doc.id, version: 1, content: doc.content, extra: doc.extra, status: doc.status, title: doc.title, action: "create", created_at: doc.created_at, created_by: "hand-close-test", slug: doc.slug },
+    { timestamp: doc.created_at, actor: "hand-close-test", session_id: doc.id, action: "create", doc_id: doc.id, details: { version: 1 } },
+  );
+  if (!inserted.ok) throw new Error(`seed failed: ${JSON.stringify(inserted.error)}`);
+  return inserted.value;
+}
+
+/** What a stored failure of `dimension` carries (a fail cites a file, a not-measured gate its subject). */
+function handCites(dimension: MilestoneDimension, verdict: "fail" | "not-measured", variant = ""): string[] {
+  return verdict === "fail" ? [`src/${dimension}${variant}.ts`] : [`${dimension}:subject${variant}`];
+}
+
+interface HandEntry {
+  readonly dimension: MilestoneDimension;
+  /** The failure the entry's fingerprint names (cites variant); default: the review's own failure. */
+  readonly causeVariant?: string;
+  readonly gateAccepted?: boolean;
+}
+
+/** A plan with one archived task, a current stored review with the given verdicts, and the given known-defect entries (issue open). */
+async function handWorld(verdicts: Partial<Record<MilestoneDimension, "fail" | "not-measured">>, entries: HandEntry[]) {
+  const store = actedStore(new InMemoryStore());
+  const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
+  const known = entries.map((entry) => {
+    const verdict = verdicts[entry.dimension] ?? "fail";
+    const cause = rootCauseOf({ plan: "p", dimension: entry.dimension, reason: "x", reference: "r", cites: handCites(entry.dimension, verdict, entry.causeVariant ?? ""), reviewSlug: "r" });
+    if (!cause.ok) throw new Error(JSON.stringify(cause.error));
+    return { repo_id: HAND_REPO_ID, number: HAND_ISSUE, dimension: entry.dimension, fingerprint: cause.value.fingerprint, ...(entry.gateAccepted === true ? { gate_accepted: true } : {}) };
+  });
+  const plan = await seedDoc(store, handDoc("plan", "Hand plan", known.length > 0 ? { known_defects: known } : {}, "approved"));
+  await seedDoc(store, handDoc("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
+  const bundle = await corpus.getPlanBundle(plan.id);
+  if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
+  const dimensions = Object.fromEntries(
+    MILESTONE_DIMENSIONS.map((d) => {
+      const verdict = verdicts[d] ?? "pass";
+      return [d, { verdict, reason: `${d} ${verdict}`, reference: "r", ...(verdict === "pass" ? {} : { cites: handCites(d, verdict) }) }];
+    }),
+  ) as MilestoneReview["dimensions"];
+  const review: MilestoneReview = {
+    plan_id: plan.id,
+    fingerprint: planStateFingerprint(bundle.value.plan, bundle.value.tasks, bundle.value.spec),
+    overall: MILESTONE_DIMENSIONS.some((d) => verdicts[d] === "fail") ? "fail" : "pass",
+    dimensions,
+    decisions: [],
+    prompt_version: "test",
+    diff_source: "test",
+  };
+  const doc = await corpus.createMilestoneReviewDoc({ type: "knowledge", title: "Review of hand plan", parent_id: plan.id, extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review }, content: renderMilestoneReviewContent(review) });
+  if (!doc.ok) throw new Error(JSON.stringify(doc.error));
+  const informs = await corpus.link(doc.value.id, plan.id, "informs");
+  if (!informs.ok) throw new Error(JSON.stringify(informs.error));
+  corpus.setPlanCloseIssuePort({
+    listOpenIssues: async () => ok({ repoId: HAND_REPO_ID, open: [] }),
+    readIssue: async () => ok({ repoId: HAND_REPO_ID, state: "open" as const }),
+  });
+  return {
+    plan,
+    close: () => corpus.set(plan.id, { status: "archived" }, { by: "t" }),
+    status: async () => {
+      const found = await store.find(plan.id);
+      if (!found.ok || found.value === null) throw new Error("plan missing");
+      return found.value.status;
+    },
+  };
+}
+
+describe("AC-AF-6 a hand close holds a failed or not-measured gate that was not accepted for this failure", () => {
+  it("AC-AF-6 NEGATIVE: a failed security gate with an OPEN known-defect issue is refused (exit 4) naming the gate; the plan stays open", async () => {
+    const w = await handWorld({ security: "fail" }, [{ dimension: "security" }]);
+    const closed = await w.close();
+    expect(closed.ok).toBe(false);
+    if (closed.ok) return;
+    expect(closed.error).toMatchObject({ code: "VALIDATION_ERROR", field: "gate:plan-close" });
+    expect(JSON.stringify(closed.error)).toContain("security");
+    expect(JSON.stringify(closed.error)).toContain("--accept-gate");
+    expect(await w.status()).toBe("approved");
+  });
+
+  it("AC-AF-6 NEGATIVE: a not-measured gate (overall pass) is refused naming the gate, with or without an open issue", async () => {
+    for (const entries of [[], [{ dimension: "regression" as const }]]) {
+      const w = await handWorld({ regression: "not-measured" }, entries);
+      const closed = await w.close();
+      expect(closed.ok).toBe(false);
+      if (!closed.ok) expect(JSON.stringify(closed.error)).toContain("regression");
+      expect(await w.status()).toBe("approved");
+    }
+  });
+
+  it("AC-AF-6 NEGATIVE: a failed correctness gate cannot be covered by an issue either", async () => {
+    const w = await handWorld({ correctness_vs_acs: "fail" }, [{ dimension: "correctness_vs_acs" }]);
+    const closed = await w.close();
+    expect(closed.ok).toBe(false);
+    if (!closed.ok) expect(JSON.stringify(closed.error)).toContain("correctness_vs_acs");
+  });
+
+  it("AC-AF-6 HAPPY: a gate accepted for this very failure closes by hand", async () => {
+    const w = await handWorld({ security: "fail" }, [{ dimension: "security", gateAccepted: true }]);
+    expect((await w.close()).ok).toBe(true);
+    expect(await w.status()).toBe("archived");
+  });
+
+  it("AC-AF-6 BOUNDARY: a gate accepted for a DIFFERENT failure of the same dimension does not close", async () => {
+    const w = await handWorld({ security: "fail" }, [{ dimension: "security", causeVariant: "-older", gateAccepted: true }]);
+    const closed = await w.close();
+    expect(closed.ok).toBe(false);
+    expect(await w.status()).toBe("approved");
+  });
+
+  it("AC-AF-6 REGRESSION: a failure of a non-gate dimension with an open issue still closes by hand", async () => {
+    const w = await handWorld({ design_necessity: "fail" }, [{ dimension: "design_necessity" }]);
+    expect((await w.close()).ok).toBe(true);
+    expect(await w.status()).toBe("archived");
   });
 });

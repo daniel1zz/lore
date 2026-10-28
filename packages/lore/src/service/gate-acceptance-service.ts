@@ -12,7 +12,7 @@
  *     agent's decision-carrying write): an incomplete one is a `decision` refusal (exit 4) naming each missing part, and
  *     nothing is written.
  *   - The gate must be failed or not-measured in the plan's CURRENT review; anything else has nothing to accept.
- *   - The acceptance is the plan's own `extra.known_defects` entry of that gate, flagged `gate_accepted`, naming the open
+ *   - The acceptance is the plan's own `extra.known_defects` entry of that gate AND that failure's root-cause fingerprint, flagged `gate_accepted`, naming the open
  *     issue the finding was filed under (filed or reused by root cause, like every finding), written in ONE versioned write
  *     that carries the decision on its version row.
  * Side-effect class: IO through the injected ports (issue filing, one document write).
@@ -23,6 +23,7 @@
 
 import {
   GATE_DIMENSIONS,
+  blockingGates,
   KNOWN_DEFECTS_FIELD,
   err,
   isGateDimension,
@@ -31,6 +32,7 @@ import {
   type DocRecord,
   type GateDimension,
   type LoreError,
+  type MilestoneReview,
   type PlanBundle,
   type Result,
 } from "@lore/core";
@@ -38,7 +40,7 @@ import type { DecisionDraft, DecisionGate } from "./decision-gate.js";
 import type { DocWritePort } from "./corpus-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
 import { planStateFingerprint, selectLatestMilestoneReview } from "./milestone-review.js";
-import type { FailedFinding } from "./root-cause-fingerprint.js";
+import { rootCauseOf, type FailedFinding } from "./root-cause-fingerprint.js";
 
 /** What the service reads and writes through. */
 export interface GateAcceptancePorts {
@@ -64,6 +66,27 @@ export interface GateAcceptance {
 
 function refuse(field: string, message: string): LoreError {
   return { code: "VALIDATION_ERROR", field, message, rule: "BR-1500" };
+}
+
+/**
+ * The blocking gates of a stored review that the plan accepted FOR THAT FAILURE: a `gate_accepted` known defect of the
+ * gate whose root-cause fingerprint equals the fingerprint of the review's current failure of that gate (BR-1500).
+ *
+ * reason: matching by dimension alone let an acceptance of one failure wave a later, different failure of the same gate
+ * through (AC-AF-7); a gate whose cause cannot be fingerprinted (no cite) is never accepted, the plan needs a new review.
+ *
+ * @param plan - the plan (slug and `extra.known_defects`)
+ * @param latest - the plan's latest stored review and its document
+ * @returns the accepted gates, in render order
+ */
+export function acceptedGatesOf(plan: Pick<DocRecord, "slug" | "extra">, latest: { readonly doc: Pick<DocRecord, "slug">; readonly review: MilestoneReview }): GateDimension[] {
+  const accepted = readKnownDefects(plan.extra).filter((entry) => entry.gate_accepted === true);
+  if (accepted.length === 0) return [];
+  return blockingGates(latest.review.dimensions).filter((dimension) => {
+    const judgment = latest.review.dimensions[dimension];
+    const cause = rootCauseOf({ plan: plan.slug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug: latest.doc.slug, causes: latest.review.causes });
+    return cause.ok && accepted.some((entry) => entry.dimension === dimension && entry.fingerprint === cause.value.fingerprint);
+  });
 }
 
 /** See the module header. */
@@ -139,10 +162,13 @@ export class GateAcceptanceService {
     if (!fresh.ok) return fresh;
     const current = fresh.value.plan;
     const entries = readKnownDefects(current.extra);
-    if (!entries.some((e) => e.dimension === dimension)) {
-      return err(refuse("accept-gate", `the issue of the ${dimension} finding was filed but no known defect of ${dimension} is recorded on ${plan.slug}; nothing was accepted`));
+    // reason: bound to THIS failure's root-cause fingerprint, never to the dimension: an older entry of the same gate
+    // with another fingerprint is a different failure and stays unflagged.
+    const fingerprint = group.cause.fingerprint;
+    if (!entries.some((e) => e.dimension === dimension && e.fingerprint === fingerprint)) {
+      return err(refuse("accept-gate", `the issue of the ${dimension} finding was filed but no known defect of ${dimension} with its root cause is recorded on ${plan.slug}; nothing was accepted`));
     }
-    const flagged = entries.map((e) => (e.dimension === dimension ? { ...e, gate_accepted: true as const } : e));
+    const flagged = entries.map((e) => (e.dimension === dimension && e.fingerprint === fingerprint ? { ...e, gate_accepted: true as const } : e));
     const written = await this.ports.writer.writeDoc({
       doc: current,
       patch: { extra: { ...(current.extra as Record<string, unknown>), [KNOWN_DEFECTS_FIELD]: flagged } },
@@ -150,7 +176,7 @@ export class GateAcceptanceService {
       changeSummary: `Accepted gate ${dimension} with a decision (issue #${String(group.issue.number)})`,
       decision,
       auditAction: "update",
-      auditDetails: { operation: "accept-gate", dimension, issue: group.issue.number, review: latest.doc.slug, rule: "BR-1500" },
+      auditDetails: { operation: "accept-gate", dimension, fingerprint, issue: group.issue.number, review: latest.doc.slug, rule: "BR-1500" },
       lock: "none",
       by: this.ports.by,
     });

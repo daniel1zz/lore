@@ -327,7 +327,7 @@ async function claimWindows(
 }
 
 /**
- * The plan's decisions (spec D4): version rows with a recorded decision that wrote one of the plan's targets, or that
+ * The plan's decisions (spec D4): version rows with a recorded decision that wrote one of the plan's targets (or the plan itself), or that
  * a run recorded in a `claim` audit row of one of the plan's tasks wrote between that claim and the task's archive.
  *
  * @param deps - the narrow store
@@ -338,7 +338,10 @@ export async function selectPlanDecisions(deps: DecisionStoreDeps, bundle: PlanB
   if (!docIds.ok) return docIds;
   const windows = await claimWindows(deps, bundle.tasks);
   if (!windows.ok) return windows;
-  const rows = await deps.store.listDecisionVersions({ docIds: docIds.value, windows: windows.value });
+  // reason: the plan's OWN version rows are targets too: `lore assess --accept-gate` records its decision on the plan
+  // (BR-1500), the only decision a plan write carries, and the re-check and rates must see it like any other.
+  const targetIds = [...new Set<DocId>([...docIds.value, bundle.plan.id])];
+  const rows = await deps.store.listDecisionVersions({ docIds: targetIds, windows: windows.value });
   if (!rows.ok) return rows;
   const slugs = new Map<string, string>();
   const selected: SelectedDecision[] = [];

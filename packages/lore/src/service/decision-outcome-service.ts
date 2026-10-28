@@ -387,7 +387,10 @@ export class DecisionOutcomeService {
   private async kindOf(row: VersionRecord): Promise<Result<string, LoreError>> {
     const versions = await this.deps.store.findVersions(row.doc_id, { limit: 1000 });
     if (!versions.ok) return versions;
-    const before = versions.value.find((v) => v.version === row.version - 1);
+    // reason: the version BEFORE is the nearest lower one, not `version - 1`: a plan's version numbers have gaps (writes that
+    // bump the version without a row), and a missing `version - 1` read as "rules changed" classed an accept-gate decision
+    // as a rule revision, so `lore decision rates --kind "document revision"` never counted it (BR-1500).
+    const before = versions.value.filter((v) => v.version < row.version).sort((a, b) => b.version - a.version)[0];
     const ruleFacts = (extra: Record<string, unknown> | undefined): string => {
       const pending = extra?.["pending"];
       const pendingRules = typeof pending === "object" && pending !== null ? (pending as Record<string, unknown>)["rules"] : undefined;
