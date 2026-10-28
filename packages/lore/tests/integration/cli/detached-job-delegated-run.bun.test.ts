@@ -1,6 +1,7 @@
 /**
  * @spec_ref spec-a-detached-lore-job-writes-under-a-child-run-delegated-by#AC-DJ-1
  * @task task-delegate-a-verified-child-run-to-detached-lore-jobs-fixes (resolves #501)
+ * @spawns packages/lore/src/index.ts
  *
  * A detached lore job (the post-integrate review batch) outlives `lore integrate`, is re-parented to pid 1 and so no
  * longer descends from the caller's harness. It writes under a CHILD run its verified caller registered for it: the
