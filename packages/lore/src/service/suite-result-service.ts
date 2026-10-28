@@ -157,17 +157,23 @@ export class SuiteResultService {
    *
    * @param suiteResultId - id of the stored result the re-run belongs to
    * @param files - repo-relative test files (at least one)
-   * @param runner - runs the files at the result's commit
+   * @param runner - runs the files at the result's commit (or at `atCommit`)
+   * @param atCommit - re-run at this commit instead (the landing's `main_before`); the rows are still attached to `suiteResultId` and carry this commit
    * @returns the stored per-file rows; `err` for an unknown result id, no files, a runner failure or a store failure
    */
-  async rerunFiles(suiteResultId: string, files: readonly string[], runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+  async rerunFiles(
+    suiteResultId: string,
+    files: readonly string[],
+    runner: CommitSuiteRunnerPort,
+    atCommit?: string,
+  ): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "rerunFiles needs at least one test file", rule: "BR-1497" });
     const found = await this.deps.store.getSuiteResult(suiteResultId);
     if (!found.ok) return found;
     if (found.value === null) {
       return err({ code: "VALIDATION_ERROR", field: "suite_result_id", message: `no stored suite result "${suiteResultId}"`, rule: "BR-1497" });
     }
-    const commit = found.value.commit_sha;
+    const commit = atCommit ?? found.value.commit_sha;
     const ran = await runner.runFiles(commit, files);
     if (!ran.ok) return ran;
     const measuredAt = this.deps.now();
@@ -188,6 +194,11 @@ export class SuiteResultService {
   /** The per-file re-runs stored for a result, in the order they ran. */
   listFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     return this.deps.store.listSuiteFileRuns(suiteResultId);
+  }
+
+  /** Every stored suite result, oldest first (the clearing lookup of regression-per-landing reads it). */
+  listResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
+    return this.deps.store.listSuiteResults();
   }
 
   /** The main-checked rows (red or green per measured commit) derived from every stored result, oldest first. */

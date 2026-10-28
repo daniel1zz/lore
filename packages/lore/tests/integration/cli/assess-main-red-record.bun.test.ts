@@ -121,7 +121,13 @@ async function storeSuite(suite: SuiteRun | undefined): Promise<void> {
 
 async function review(service: MilestoneReviewService, suite: SuiteRun | undefined) {
   await storeSuite(suite);
-  return service.review("plan-one", { diffText: DIFF, diffSource: "fixture", maxDiffChars: 100000, ...(suite !== undefined ? { suite } : {}) });
+  // reason: regression is the per-landing fact (BR-1496), not an attribution of the HEAD suite: a red suite stands in for
+  // landings that broke both files, so the regression finding is real while main-red recording stays independent of it.
+  const facts =
+    suite !== undefined && suite.status === "measured" && suite.failing_test_files.length > 0
+      ? { regression: [{ subject: "landing-1", verdict: "fail" as const, detail: "regression still red" }], regression_files: suite.failing_test_files.map((f) => f.file).sort() }
+      : undefined;
+  return service.review("plan-one", { diffText: DIFF, diffSource: "fixture", maxDiffChars: 100000, ...(facts !== undefined ? { facts } : {}), ...(suite !== undefined ? { suite } : {}) });
 }
 
 async function records() {

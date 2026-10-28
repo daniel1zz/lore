@@ -154,6 +154,8 @@ export interface MilestoneFacts {
   readonly attestation?: readonly MilestoneFactRow[];
   /** Regression per landing (full suite at each landing commit). */
   readonly regression?: readonly MilestoneFactRow[];
+  /** Files of regressions still uncleared (the regression finding's root cause), from `regression-per-landing`. */
+  readonly regression_files?: readonly string[];
   /** Files each landing touched outside its task's anchors. */
   readonly outside_anchors?: readonly { readonly landing: string; readonly files: readonly string[] }[];
   /** Tasks of the plan with no landing yet. */

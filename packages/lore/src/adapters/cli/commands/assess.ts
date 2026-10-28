@@ -51,6 +51,8 @@ import { err, ok, type DocId } from "@lore/core";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { suiteRunOfResult } from "../../../service/suite-result-service.js";
+import { regressionPerLanding } from "../../../service/regression-per-landing.js";
+import { createGitClearingSourceFinder } from "../assess-regression-clearing.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
@@ -62,7 +64,7 @@ import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
 import { failedDimensions, type MilestoneReview, type RetiredAcRef } from "@lore/core";
-import type { LoreError } from "@lore/core";
+import type { LoreError, MilestoneFacts } from "@lore/core";
 
 /** One plan's row of the batch result. */
 interface AssessRow {
@@ -301,7 +303,31 @@ export default defineLoreCommand({
           verifyRunner === undefined
             ? undefined
             : createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() });
+        // reason: BR-1496 — regression is measured per landing (suite at each landing commit from the store, failing files
+        // re-run at main_before and confirmed); without the suite-result store regression stays not-measured, never pass.
+        const suiteResults = app.suiteResultService;
+        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files"> = {};
+        if (suiteResults !== undefined) {
+          const measured = await regressionPerLanding(derivation.landings, derivation.unlanded_tasks, {
+            suites: suiteResults,
+            runner: createGitCommitSuiteRunner(inv.cwd, inv.env),
+            findClearingSource: createGitClearingSourceFinder(inv.cwd, inv.env, () => suiteResults.listResults()),
+          });
+          if (measured.ok) {
+            regressionFacts = { regression: measured.value.rows, regression_files: [...new Set(measured.value.uncleared.map((u) => u.file))].sort() };
+          } else {
+            inv.io.stderr.write(`Warning: regression per landing not measured for ${ref}: ${formatErrorFor(inv, measured.error)}\n`);
+          }
+        }
+        const facts: MilestoneFacts = {
+          ...regressionFacts,
+          outside_anchors: derivation.landings.flatMap((l) =>
+            l.outside_anchors !== undefined && l.outside_anchors.length > 0 ? [{ landing: l.landing_commit, files: l.outside_anchors }] : [],
+          ),
+          unlanded_tasks: derivation.unlanded_tasks,
+        };
         return reviewService.review(ref, {
+          facts,
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
           diffSource: describeDiffSource(diffSource),
