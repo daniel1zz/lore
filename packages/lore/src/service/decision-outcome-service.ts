@@ -33,7 +33,7 @@ import {
   type VersionRecord,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
-import { selectPlanDecisions } from "./decision-recheck.js";
+import { exemptionDecisionAddress, selectPlanDecisions } from "./decision-recheck.js";
 import { type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 import { selectLatestMilestoneReview } from "./milestone-review.js";
@@ -280,15 +280,31 @@ export class DecisionOutcomeService {
     const gateHolders = new Map<string, Set<string>>();
     const dimensionHolders = new Map<string, Set<string>>();
     const addresses = new Set<string>();
+    const entries: { address: string; record: DecisionRecord }[] = [];
     for (const row of population) {
       const address = await addressOf(row);
       if (!address.ok) return address;
-      addresses.add(address.value);
-      const record = row.decision as DecisionRecord;
-      for (const gate of record.gates ?? []) {
-        if (gate.verdict === "pass") addHolder(gateHolders, gate.id, address.value);
+      entries.push({ address: address.value, record: row.decision as DecisionRecord });
+    }
+    // Exemption decisions (#481, BR-1492) are decisions passed like version-row ones; an exemption is a document-level
+    // write, so its weight-table kind is "document revision".
+    const exemptions = await this.deps.store.listRecordedExemptionDecisions(since);
+    if (!exemptions.ok) return exemptions;
+    if (input.kind === undefined || input.kind === "document revision") {
+      for (const row of exemptions.value) {
+        if (row.decision === undefined) continue;
+        const doc = await this.deps.store.find(row.doc_id);
+        if (!doc.ok) return doc;
+        if (doc.value === null) return err(refuse("decision", `an exemption row names a missing document ${row.doc_id}.`));
+        entries.push({ address: exemptionDecisionAddress(doc.value.slug, row.ac_id, row.granted_at), record: row.decision });
       }
-      for (const score of record.scores ?? []) addHolder(dimensionHolders, score.dimension, address.value);
+    }
+    for (const { address, record } of entries) {
+      addresses.add(address);
+      for (const gate of record.gates ?? []) {
+        if (gate.verdict === "pass") addHolder(gateHolders, gate.id, address);
+      }
+      for (const score of record.scores ?? []) addHolder(dimensionHolders, score.dimension, address);
     }
 
     const reviews = await this.allReviewDocs(since);
@@ -327,7 +343,7 @@ export class DecisionOutcomeService {
     return ok({
       kind: input.kind ?? null,
       since: since ?? null,
-      decisions: population.length,
+      decisions: entries.length,
       gates: rowsOf(gateHolders),
       dimensions: rowsOf(dimensionHolders),
       decisionsInNoPlan: inNoPlan,
@@ -336,7 +352,7 @@ export class DecisionOutcomeService {
         tracedLinks: windowTraced,
         tracedLinksPerReview: reviews.value.inWindow.length === 0 ? null : windowTraced / reviews.value.inWindow.length,
         archivedTasks: archived.value.length,
-        decisionsPerArchivedTask: archived.value.length === 0 ? null : population.length / archived.value.length,
+        decisionsPerArchivedTask: archived.value.length === 0 ? null : entries.length / archived.value.length,
       },
     });
   }
