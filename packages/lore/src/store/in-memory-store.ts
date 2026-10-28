@@ -1166,6 +1166,28 @@ export class InMemoryStore implements StoreInterface {
     );
   }
 
+  /** @see StoreInterface.listDecisionExemptions */
+  async listDecisionExemptions(query: DecisionVersionQuery): Promise<Result<AcExemptionRow[], LoreError>> {
+    const docIds = new Set<string>(query.docIds);
+    const matching = [...this.acExemptions.values()]
+      .filter((r) => r.decision != null)
+      .filter(
+        (r) =>
+          docIds.has(r.doc_id) ||
+          query.windows.some((w) => r.harness_run === w.run && r.granted_at >= w.from && (w.to === undefined || r.granted_at <= w.to)),
+      )
+      .sort((a, b) => a.granted_at.localeCompare(b.granted_at));
+    return ok(matching.map((r) => ({ ...r })));
+  }
+
+  /** @see StoreInterface.listRecordedExemptionDecisions */
+  async listRecordedExemptionDecisions(since?: string): Promise<Result<AcExemptionRow[], LoreError>> {
+    const matching = [...this.acExemptions.values()]
+      .filter((r) => r.decision != null && (since === undefined || r.granted_at >= since))
+      .sort((a, b) => a.granted_at.localeCompare(b.granted_at));
+    return ok(matching.map((r) => ({ ...r })));
+  }
+
   /** @see StoreInterface.listAcCites — a computed view of the live specs (see {@link listRuleRegistry}'s reason). */
   async listAcCites(): Promise<Result<AcCiteRow[], LoreError>> {
     return ok(deriveAcCites([...this.docs.values()]));
