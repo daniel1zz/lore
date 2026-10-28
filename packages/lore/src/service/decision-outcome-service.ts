@@ -32,6 +32,7 @@ import {
   type TracedDecision,
   type VersionRecord,
 } from "@lore/core";
+import { approvedRulesOf } from "./baseline-items.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { exemptionDecisionAddress, selectPlanDecisions } from "./decision-recheck.js";
 import { type DocWritePort } from "./corpus-service.js";
@@ -390,7 +391,7 @@ export class DecisionOutcomeService {
     const ruleFacts = (extra: Record<string, unknown> | undefined): string => {
       const pending = extra?.["pending"];
       const pendingRules = typeof pending === "object" && pending !== null ? (pending as Record<string, unknown>)["rules"] : undefined;
-      return JSON.stringify([extra?.["rules"] ?? null, pendingRules ?? null, extra?.["rule_changes"] ?? null]);
+      return JSON.stringify([extra === undefined ? null : approvedRulesOf({ extra }), pendingRules ?? null, extra?.["rule_changes"] ?? null]);
     };
     return ok(ruleFacts(before?.extra) !== ruleFacts(row.extra) ? "rule revision" : "document revision");
   }
