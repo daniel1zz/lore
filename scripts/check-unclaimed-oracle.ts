@@ -246,13 +246,16 @@ export function extractTestNamePatternValues(command: string): string[] {
   return values;
 }
 
+/** A git pathspec-magic prefix (`:!`, `:^`, `:(`): the path after it is EXCLUDED, so it is never an oracle's owner file. */
+const GIT_PATHSPEC_MAGIC_RE = /^:[!^(]/;
+
 /** Every whitespace-delimited token in `command` that names a test file under this repo's `.test.ts(x)` / `.bun.test.ts` convention. */
 export function extractTestFilePaths(command: string): string[] {
   return command
     .trim()
     .split(/\s+/)
     .map(stripQuotes)
-    .filter((t) => TEST_FILE_TOKEN_RE.test(t));
+    .filter((t) => !GIT_PATHSPEC_MAGIC_RE.test(t) && TEST_FILE_TOKEN_RE.test(t));
 }
 
 // ─── Pure: cross-reference ──────────────────────────────────────────────────

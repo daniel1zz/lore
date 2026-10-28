@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { extractTestFilePaths } from "../check-unclaimed-oracle.js";
 import { collectScriptAcs, evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -396,4 +397,21 @@ describe("check-ac-oracle-ownership — deprecated specs and ledger end to end",
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
+});
+
+describe("extractTestFilePaths — git pathspec exclusions are never an oracle's owner", () => {
+  it("skips a quoted ':!' exclusion and returns only the real owner", () => {
+    expect(
+      extractTestFilePaths("git grep x -- a ':!packages/x/y.test.ts' && bun run test:file packages/z.test.ts"),
+    ).toEqual(["packages/z.test.ts"]);
+  });
+
+  it("skips ':^' and ':(exclude)' magic tokens", () => {
+    expect(extractTestFilePaths("git grep x -- :^p.test.ts")).toEqual([]);
+    expect(extractTestFilePaths("git grep x -- ':(exclude)p.test.ts'")).toEqual([]);
+  });
+
+  it("still returns ordinary test file tokens", () => {
+    expect(extractTestFilePaths("bun run test:file packages/z.test.ts")).toEqual(["packages/z.test.ts"]);
+  });
 });
