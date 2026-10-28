@@ -14,6 +14,7 @@
  * @spec_ref spec-baseline-coverage-cannot-silently-regress-one-program#AC-BCR-4
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
 
 const corpora: MiniCorpus[] = [];
@@ -75,7 +76,7 @@ describe("AC-BCR-4 root coverage and undeclared commands", () => {
   it("declaring the command on a leaf (hyphen spelling accepted) clears it: exit 0 again", async () => {
     const c = await fullyCovered();
     registerGamma(c);
-    expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma-add"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma-add", ...DECIDED_FLAGS])).exitCode).toBe(0);
     const r = await c.run(["baseline", "coverage", c.root]);
     expect(r.exitCode, r.stdout + r.stderr).toBe(0);
   }, 120_000);

@@ -15,6 +15,7 @@
  * BOUNDARY (a leaf declaring only live commands is untouched), REGRESSION (status silent today).
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
 
 const corpora: MiniCorpus[] = [];
@@ -41,7 +42,7 @@ async function withStaleGamma(approved: boolean): Promise<MiniCorpus> {
   corpora.push(c);
   c.writeSource(`${MINI_CLI}/index.ts`, REGISTRY_ABG);
   c.writeSource(`${MINI_CLI}/commands/gamma.ts`, `export default { run() { return 0; } };\n`);
-  expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma"])).exitCode).toBe(0);
+  expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma", ...DECIDED_FLAGS])).exitCode).toBe(0);
   c.writeSource(`${MINI_CLI}/index.ts`, REGISTRY_AB);
   return c;
 }
@@ -61,14 +62,14 @@ describe("approving a baseline leaf refuses while it declares a command absent f
     expect(refused.stderr).toContain(`"gamma"`);
     expect(refused.stderr).toContain(`lore baseline map ${c.leafA} --remove-command "gamma"`);
     expect(refused.stderr).not.toContain(`"alpha"`);
-    expect((await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma", ...DECIDED_FLAGS])).exitCode).toBe(0);
     // removing the declaration drops the pending revision: the leaf reads as its approved self again
     expect(await statusLineOf(c, c.leafA)).toContain(`(${c.leafA}, approved)`);
   }, 120_000);
 
   it("approving the branch holding an approved stale leaf refuses too, naming the leaf", async () => {
     const c = await withStaleGamma(true);
-    expect((await c.runRaw(["baseline", "set-label", c.branch, "A new branch label"])).exitCode).toBe(0);
+    expect((await c.runRaw(["baseline", "set-label", c.branch, "A new branch label", ...DECIDED_FLAGS])).exitCode).toBe(0);
     expect((await c.run(["review", c.branch])).exitCode).toBe(0);
     const refused = await c.run(["approve", c.branch]);
     expect(refused.exitCode, refused.stdout + refused.stderr).toBe(4);
@@ -85,7 +86,7 @@ describe("approving a baseline leaf refuses while it declares a command absent f
 
   it("a leaf declaring only live commands approves untouched", async () => {
     const c = await withStaleGamma(false);
-    expect((await c.run(["baseline", "map", c.leafB, "--command", "alpha"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", c.leafB, "--command", "alpha", ...DECIDED_FLAGS])).exitCode).toBe(0);
     expect((await c.run(["review", c.leafB])).exitCode).toBe(0);
     const ok = await c.run(["approve", c.leafB]);
     expect(ok.exitCode, ok.stdout + ok.stderr).toBe(0);
@@ -106,7 +107,7 @@ describe("approving a baseline leaf refuses while it declares a command absent f
 
   it("status reports an empty list once the stale declaration is removed", async () => {
     const c = await withStaleGamma(true);
-    await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma"]);
+    await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma", ...DECIDED_FLAGS]);
     const json = await c.run(["status", "--json"]);
     const data = (JSON.parse(json.stdout) as { data: { absent_declared_commands: unknown[] } }).data;
     expect(data.absent_declared_commands).toEqual([]);

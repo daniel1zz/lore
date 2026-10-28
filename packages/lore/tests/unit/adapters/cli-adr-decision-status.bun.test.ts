@@ -39,6 +39,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -244,7 +245,7 @@ describe("lore set --decision-status accepted — REGRESSION", () => {
     expect(promoteResult.exitCode).toBe(0);
     expect((await getDoc(tmpDir, slug)).status).toBe("approved");
 
-    const acceptResult = await runLore(["set", slug, "--decision-status", "accepted"], tmpDir);
+    const acceptResult = await runLore(["set", slug, "--decision-status", "accepted", ...DECIDED_FLAGS], tmpDir);
     expect(acceptResult.exitCode).toBe(0);
 
     const after = await getDoc(tmpDir, slug);

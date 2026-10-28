@@ -14,6 +14,7 @@
  * @spec_ref spec-baseline-coverage-refuses-only-undeclared-commands-a-site#AC-BCG-1
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
 
 const corpora: MiniCorpus[] = [];
@@ -67,7 +68,7 @@ describe("AC-BCG-1 coverage is report-only for sites", () => {
     const refused = await c.run(["baseline", "coverage", c.root]);
     expect(refused.exitCode, refused.stdout + refused.stderr).toBe(1);
     expect(refused.stdout).toContain("undeclared   gamma add");
-    expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma-add"])).exitCode).toBe(0);
+    expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma-add", ...DECIDED_FLAGS])).exitCode).toBe(0);
     const cleared = await c.run(["baseline", "coverage", c.root]);
     expect(cleared.exitCode, cleared.stdout + cleared.stderr).toBe(0);
   }, 120_000);
