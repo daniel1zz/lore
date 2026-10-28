@@ -142,7 +142,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   it("HAPPY/STATE: a rule move records ONE pending revision of the rule; it stays on its leaf until approved", async () => {
     const source0 = corpus.node(corpus.leaf);
     const dest0 = corpus.node(otherLeaf);
-    const moved = await corpus.lore(["rule", "set", "BR-1", "--move-to", otherLeaf]);
+    const moved = await corpus.lore(["rule", "set", "BR-1", "--move-to", otherLeaf, ...DECIDED]);
     expect(moved.exitCode).toBe(0);
     const source = corpus.node(corpus.leaf);
     const dest = corpus.node(otherLeaf);
@@ -194,7 +194,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
 
   it("REGRESSION: an export mirror shows the approved text, never the pending revision as if it were approved", async () => {
     await corpus.must(["set", corpus.leaf, "--content", "PENDING-BODY-NOBODY-APPROVED", ...DECIDED]);
-    await corpus.must(["rule", "add", corpus.leaf, "--statement", "PENDING-RULE-NOBODY-APPROVED", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e"]);
+    await corpus.must(["rule", "add", corpus.leaf, "--statement", "PENDING-RULE-NOBODY-APPROVED", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e", ...DECIDED]);
     const exported = await corpus.lore(["export-docs", "--type", "baseline", "--force"]);
     expect(exported.exitCode).toBe(0);
     const mirrorDir = join(corpus.dir, "docs", "requirements", "baseline");

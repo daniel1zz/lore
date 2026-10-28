@@ -21,6 +21,8 @@ import type { AcExemptionRow, StoreInterface } from "../store/store-interface.js
 import { createHash } from "node:crypto";
 import { resolveDoc } from "./resolve.js";
 import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
+import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
+import { findWriteSourceFor } from "../store/write-context-store.js";
 
 // reason: the 10% budget has ONE home, `ac-cite-gate.ts`, because the citation gate's feeding pack reports
 // the remaining headroom and must never disagree with what `grant` enforces. Re-exported so every existing
@@ -39,6 +41,13 @@ export interface GrantAcExemptionInput {
   expiresAt: string;
   /** Actor granting the exemption. Required, non-blank. */
   by: string;
+  /** The decision the writer supplies (BR-1479); `reason` is the exemption's own reason, shared with the decision. */
+  decision?: DecisionDraft | undefined;
+  /**
+   * The writer's name source (`run | human | ...`) when the caller's store carries no write context (the CLI's exemption
+   * handle is a bare store): the invocation identity's `claimedSource`. Absent = read from the store's write context.
+   */
+  writerSource?: string | null | undefined;
 }
 
 /** One exemption as shown to callers; `state` is derived from the `now` of the query. */
@@ -96,6 +105,16 @@ export class AcExemptionService {
   ) {}
 
   /**
+   * Armed by the CLI composition: an agent's grant on a spec that is not a draft is refused without a complete decision
+   * (BR-1479). Absent (a bare construction) = ungated.
+   */
+  private decisionGate: DecisionGate | undefined;
+
+  setDecisionGate(gate: DecisionGate): void {
+    this.decisionGate = gate;
+  }
+
+  /**
    * Grant one exemption.
    *
    * @throws (as `Result`) VALIDATION_ERROR — blank reason/actor, missing/unparseable/past expiry, unknown AC,
@@ -126,6 +145,14 @@ export class AcExemptionService {
     }
     if (!criteriaOf(spec.value).some((c) => c.id === input.acId)) {
       return err(validationError("ac_id", `Spec ${spec.value.slug} declares no criterion "${input.acId}".`, input.acId, "BR-971"));
+    }
+
+    // BR-1479 — after every input check, before anything is written. An exemption is a row of its own table, not a version
+    // of the spec, so a complete decision is required but has no version row to be stored on: it is validated, not kept.
+    if (this.decisionGate !== undefined) {
+      const required = writeCarriesDecision({ writerSource: input.writerSource ?? findWriteSourceFor(this.store), targetIsDraft: spec.value.status === "draft", changesMoreThanStatus: true });
+      const judged = this.decisionGate.judge({ required, draft: input.decision, reasonIsSharedFlag: true });
+      if (!judged.ok) return judged;
     }
 
     // reason: AC-AU-7 — granting an exemption is DECIDED (class ac-exempt), not self-granted; after every input check,

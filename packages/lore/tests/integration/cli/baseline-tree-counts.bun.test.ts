@@ -21,6 +21,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 
 setDefaultTimeout(300_000);
 
@@ -124,7 +125,7 @@ describe("lore baseline tree rule counts (AC-BLC-6, BR-674)", () => {
   });
 
   it("STATE: retiring a debt entry moves it from live to retired in the row (no rule enters deprecated since D4)", () => {
-    mustRun(["rule", "set", "AD-2", "--lifecycle", "retired", "--note", "paid down"]);
+    mustRun(["rule", "set", "AD-2", "--lifecycle", "retired", "--note", "paid down", ...DECIDED_FLAGS]);
     expect(rowOf(debtRegistry)).toContain("[rules: live 2 / deprecated 0 / retired 0]"); // pending until approved
     approveFixtureNodes(dir, "all");
     expect(rowOf(debtRegistry)).toContain("[rules: live 1 / deprecated 0 / retired 1]");

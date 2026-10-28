@@ -118,12 +118,18 @@ export class DecisionGate {
    *
    * @param request.required - the write carries a decision ({@link writeCarriesDecision})
    * @param request.draft - what the writer supplied; absent when it supplied nothing
+   * @param request.reasonIsSharedFlag - the verb's own `--reason` doubles as the decision's reason (`ac supersede`, `ac exempt`),
+   *   so a draft holding nothing but a reason is not a supplied decision unless the write requires one
    * @returns `ok(undefined)` when nothing is required and nothing was supplied; `ok(record)` with every file premise
    *   quoted and pinned; otherwise the `decision` refusal naming each missing or unreadable part.
    */
-  judge(request: { readonly required: boolean; readonly draft: DecisionDraft | undefined }): Result<DecisionRecord | undefined, LoreError> {
+  judge(request: {
+    readonly required: boolean;
+    readonly draft: DecisionDraft | undefined;
+    readonly reasonIsSharedFlag?: boolean;
+  }): Result<DecisionRecord | undefined, LoreError> {
     const { draft } = request;
-    const supplied = draft !== undefined && isNonEmptyDraft(draft);
+    const supplied = draft !== undefined && isNonEmptyDraft(request.reasonIsSharedFlag === true ? withoutReason(draft) : draft);
     if (!supplied && !request.required) return ok(undefined);
 
     const reason = draft?.reason?.trim() ?? "";
@@ -239,6 +245,12 @@ export class DecisionGate {
     }
     return ok(normalized);
   }
+}
+
+/** The draft without its reason (see `DecisionGate.judge`'s `reasonIsSharedFlag`). */
+function withoutReason(draft: DecisionDraft): DecisionDraft {
+  const { reason: _reason, ...rest } = draft;
+  return rest;
 }
 
 /** Whether the writer supplied anything at all (an all-empty draft counts as none). */

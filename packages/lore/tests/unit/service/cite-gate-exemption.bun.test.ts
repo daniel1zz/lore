@@ -20,6 +20,7 @@ import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { approvePending } from "../../helpers/approve-baseline.js";
+import { DECIDED_DRAFT } from "../../helpers/decision-flags.js";
 import { liveAmbient, liveWriteContext, actedStore } from "../../live-invocation.js";
 
 const PROJECT = { name: "exempt", author: "tester" };
@@ -132,7 +133,7 @@ describe("cite gate admits exempted uncited criteria (#105)", () => {
   });
 
   it("an exempted criterion revised to cite a retired rule is refused and nothing is written", async () => {
-    await must(await app.ruleService!.setRule("BR-2", { lifecycle: "retired", note: "gone" }, { by: "agent:seed" }), "retire BR-2");
+    await must(await app.ruleService!.setRule("BR-2", { lifecycle: "retired", note: "gone" }, { by: "agent:seed", decision: DECIDED_DRAFT }), "retire BR-2");
     await approvePending(side, leafId); // the retirement is a pending revision until approved
     await exempt("AC-E-1", FUTURE);
     const before = await version();

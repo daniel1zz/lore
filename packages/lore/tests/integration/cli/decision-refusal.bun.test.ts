@@ -17,9 +17,16 @@
  *
  * MOCK RISK: none — files and processes are real; the git port is exercised by decision-premise-quote.bun.test.ts.
  *
- * Shared with T2b's AC-DR-5 (decision-refusal of rule proposals and criteria writes); only AC-DR-2 cases live here now.
+ * Shared with T2b's AC-DR-5 (decision-refusal of rule proposals and criteria writes): the AC-DR-5 cases follow the AC-DR-2 ones.
+ *
+ * AC-DR-5 — `lore rule propose` (a correction on a spec that is not a draft) and `lore ac add|set|rm|supersede|cite|exempt` on
+ * a spec that is not a draft are refused without a decision (exit exactly 4, field `decision`, change set / criteria
+ * unchanged); on a draft spec each succeeds without one; a complete decision lands and is recorded on the version row.
+ * `lore ac exempt` writes an exemption row, not a version, so it is refused but a supplied decision has no version row to sit on.
+ * Dimensions: NEGATIVE (each verb), BOUNDARY (draft spec), HAPPY (decision recorded), STATE (nothing written), REGRESSION (human).
  *
  * @spec_ref AC-DR-2
+ * @spec_ref AC-DR-5
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -332,5 +339,164 @@ describe("AC-DR-2: a direct CorpusService.set call (the service every adapter re
   it("a status-only direct call by the agent (what a bulk archive does) needs no decision", async () => {
     const res = await app.corpusService.set(adrId, { status: "archived" });
     expect(res.ok, JSON.stringify(res.ok ? "" : res.error)).toBe(true);
+  });
+});
+
+describe("AC-DR-5: rule proposals and criteria writes on a spec that is not a draft need a decision", () => {
+  let corpus: PartyCorpus;
+  /** Approved: a locked record. `rule propose --correction`, `ac set --correction` and `ac supersede` reach it. */
+  let lockedSpec: string;
+  /** In review: not a draft and not locked, so every `ac` verb reaches the write (and so the decision gate). */
+  let reviewSpec: string;
+  let draftSpec: string;
+  let otherSpec: string;
+  let leaf: string;
+
+  const dbPath = (): string => join(corpus.dir, ".lore", "lore.db");
+  function sql<T>(body: (db: Database) => T): T {
+    const db = new Database(dbPath(), { readonly: true });
+    try {
+      return body(db);
+    } finally {
+      db.close();
+    }
+  }
+  const extraOf = (slug: string): string => sql((db) => (db.query("SELECT extra FROM docs WHERE slug = ?").get(slug) as { extra: string }).extra);
+  const versionsOf = (slug: string): number =>
+    sql((db) => (db.query("SELECT COUNT(*) AS n FROM versions v JOIN docs d ON d.id = v.doc_id WHERE d.slug = ?").get(slug) as { n: number }).n);
+  const exemptions = (): number => sql((db) => (db.query("SELECT COUNT(*) AS n FROM ac_exemptions").get() as { n: number }).n);
+  const latestDecision = (slug: string): { reason: string } | null =>
+    sql((db) => {
+      const row = db
+        .query("SELECT v.decision AS decision FROM versions v JOIN docs d ON d.id = v.doc_id WHERE d.slug = ? ORDER BY v.version DESC LIMIT 1")
+        .get(slug) as { decision: string | null } | null;
+      return row?.decision == null ? null : (JSON.parse(row.decision) as { reason: string });
+    });
+
+  const statement = (n: number): string => `the command exits exactly ${n} and records no revision`;
+  const addCriterion = (spec: string, id: string): void => {
+    corpus.setup(["ac", "add", spec, id, "--statement", statement(4), "--mode", "human"]);
+  };
+  /** `ownReason`: the verb's own --reason is the decision's reason (supersede, exempt), so only premise and alternative are missing. */
+  const expectDecisionRefusal = (run: LoreRun, ownReason = false): void => {
+    expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(4);
+    expect(run.stderr).toContain("a decision is required");
+    if (ownReason) expect(run.stderr).not.toContain("reason (");
+    else expect(run.stderr).toContain("reason (");
+    expect(run.stderr).toContain("premise of tier S..C");
+    expect(run.stderr).toContain("alternative (");
+  };
+
+  beforeAll(() => {
+    corpus = createPartyCorpus("dr5");
+    const prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "DR5 PRD", "--content", "root", "--no-ai"]));
+    const node = (parent: string, kind: string, label: string): string => {
+      const made = corpus.setup(["baseline", "add", parent, "--node", kind, "--label", label, "--title", `DR5 ${label}`]);
+      const slug = made.stdout.match(/Created baseline \w+ (\S+) \(/)?.[1];
+      if (slug === undefined) throw new Error(`no slug in: ${made.stdout}`);
+      return slug;
+    };
+    leaf = node(node(node(prd, "root", "Root"), "branch", "Branch"), "leaf", "Leaf");
+    const spec = (title: string): string =>
+      corpus.slugOf(corpus.setup(["create", "spec", "--title", title, "--no-ai", "--content", "## Goal\n\nbody"]));
+    lockedSpec = spec("DR5 locked spec");
+    reviewSpec = spec("DR5 review spec");
+    draftSpec = spec("DR5 draft spec");
+    otherSpec = spec("DR5 other spec");
+    for (const slug of [lockedSpec, reviewSpec, draftSpec]) for (const id of ["AC-D5-1", "AC-D5-2", "AC-D5-3", "AC-D5-4", "AC-D5-5"]) addCriterion(slug, id);
+    addCriterion(otherSpec, "AC-D5-OTHER");
+    const approve = new Database(dbPath());
+    try {
+      approve.query("UPDATE docs SET status = 'approved' WHERE slug = ?").run(lockedSpec);
+      approve.query("UPDATE docs SET status = 'in-review' WHERE slug = ?").run(reviewSpec);
+    } finally {
+      approve.close();
+    }
+    expect(corpus.lore(["session", "start", "--human", "dana"]).exitCode).toBe(0);
+  });
+
+  afterAll(() => corpus.cleanup());
+
+  describe("lore rule propose --correction on a spec that is not a draft", () => {
+    const propose = (spec: string, extra: readonly string[] = []): string[] => [
+      "rule", "propose", spec, "add", "--leaf", leaf, "--statement", "An owner is named on every claim.", "--example", "a claim names its owner",
+      "--enforced-by", "both", ...extra,
+    ];
+
+    it("with no decision: exit 4 naming each missing part; the change set and versions are unchanged", () => {
+      const before = [extraOf(lockedSpec), versionsOf(lockedSpec)];
+      const run = corpus.lore(propose(lockedSpec, ["--correction", "fix the change set"]), AGENT);
+      expectDecisionRefusal(run);
+      expect([extraOf(lockedSpec), versionsOf(lockedSpec)]).toEqual(before);
+    });
+
+    it("with a complete decision: lands and the spec's version row records it", () => {
+      const run = corpus.lore(propose(lockedSpec, ["--correction", "fix the change set", ...DECISION_FLAGS]), AGENT);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(latestDecision(lockedSpec)?.reason).toBe("the label misleads readers");
+    });
+
+    it("on a draft spec: succeeds with no decision and records none", () => {
+      const run = corpus.lore(propose(draftSpec), AGENT);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(latestDecision(draftSpec)).toBeNull();
+    });
+
+    it("as a human party on the locked spec: succeeds with no decision", () => {
+      const run = corpus.lore(propose(lockedSpec, ["--correction", "a person fixes it"]), HUMAN);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+    });
+  });
+
+  describe("lore ac verbs on a spec that is not a draft", () => {
+    const verbs: ReadonlyArray<{ name: string; args: (spec: string, n: number) => string[] }> = [
+      { name: "add", args: (spec, n) => ["ac", "add", spec, `AC-D5-NEW${n}`, "--statement", statement(4), "--mode", "human"] },
+      { name: "set", args: (spec) => ["ac", "set", spec, "AC-D5-1", "--statement", "the command exits exactly 4 and names the field"] },
+      { name: "rm", args: (spec) => ["ac", "rm", spec, "AC-D5-2"] },
+      { name: "supersede", args: (spec) => ["ac", "supersede", spec, "AC-D5-3", "--by", `${otherSpec}:AC-D5-OTHER`, "--reason", "replaced by the other spec"] },
+      { name: "cite", args: (spec) => ["ac", "cite", spec, "AC-D5-4", "BR-1"] },
+      { name: "exempt", args: (spec) => ["ac", "exempt", spec, "AC-D5-5", "--reason", "no rule yet", "--expires", "2099-01-01T00:00:00Z"] },
+    ];
+
+    it.each(verbs)("$name with no decision: exit 4 naming each missing part; criteria and versions unchanged", ({ name, args }) => {
+      const before = [extraOf(reviewSpec), versionsOf(reviewSpec), exemptions()];
+      const run = corpus.lore(args(reviewSpec, 1), AGENT);
+      expectDecisionRefusal(run, name === "supersede" || name === "exempt");
+      expect([extraOf(reviewSpec), versionsOf(reviewSpec), exemptions()]).toEqual(before);
+    });
+
+    it.each(verbs)("$name on a draft spec succeeds with no decision and records none", ({ name, args }) => {
+      const run = corpus.lore(args(draftSpec, 2), AGENT);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      if (name !== "exempt") expect(latestDecision(draftSpec)).toBeNull();
+    });
+
+    it("on the locked spec: ac set --correction and ac supersede with no decision are refused too (exit 4, field decision)", () => {
+      const before = [extraOf(lockedSpec), versionsOf(lockedSpec)];
+      const set = corpus.lore(["ac", "set", lockedSpec, "AC-D5-1", "--statement", "the command exits exactly 4 and names the field", "--correction", "wording"], AGENT);
+      expectDecisionRefusal(set);
+      const supersede = corpus.lore(["ac", "supersede", lockedSpec, "AC-D5-3", "--by", `${otherSpec}:AC-D5-OTHER`, "--reason", "replaced by the other spec"], AGENT);
+      expectDecisionRefusal(supersede, true);
+      expect([extraOf(lockedSpec), versionsOf(lockedSpec)]).toEqual(before);
+    });
+
+    it("ac supersede keeps its own --reason as the decision's reason: with premise and alternative it lands and records it", () => {
+      const run = corpus.lore(["ac", "supersede", lockedSpec, "AC-D5-3", "--by", `${otherSpec}:AC-D5-OTHER`, "--reason", "replaced", "--premise", "p|issue:#9|A", "--alt", "keep|no"], AGENT);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(latestDecision(lockedSpec)?.reason).toBe("replaced");
+    });
+
+    it("ac add as a human party on the in-review spec succeeds with no decision", () => {
+      const run = corpus.lore(["ac", "add", reviewSpec, "AC-D5-HUMAN", "--statement", statement(4), "--mode", "human"], HUMAN);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(latestDecision(reviewSpec)).toBeNull();
+    });
+
+    // reason: last, because an `ac set` on a spec that is not a draft demotes it to draft (a contract edit).
+    it("ac set with a complete decision lands and the version row records it", () => {
+      const run = corpus.lore(["ac", "set", reviewSpec, "AC-D5-1", "--statement", "the command exits exactly 4 and names the field", ...DECISION_FLAGS], AGENT);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(latestDecision(reviewSpec)?.reason).toBe("the label misleads readers");
+    });
   });
 });

@@ -57,6 +57,7 @@ import { liveInvocation, liveAmbient, liveWriteContext, actedStore, runHandlerFo
 /** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
 let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
 
@@ -856,7 +857,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     await addAcceptanceCriterion(specId, "AC-PARITY-3", false);
     const rule = seedLiveRule();
     loreCli(["ac", "cite", specId, "AC-PARITY-3", rule]);
-    loreCli(["rule", "set", rule, "--lifecycle", "retired", "--note", "superseded for the test"]);
+    loreCli(["rule", "set", rule, "--lifecycle", "retired", "--note", "superseded for the test", ...DECIDED_FLAGS]);
     approveFixtureNodes(tmpDir, "all"); // the retirement is a pending revision until approved; the gate measures approved rules
     writeAiConfig("ghost-ai-binary-not-installed-xyz");
 

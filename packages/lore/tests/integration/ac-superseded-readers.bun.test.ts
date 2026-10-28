@@ -28,6 +28,7 @@ import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { actedStore } from "../live-invocation.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { approvePending } from "../helpers/approve-baseline.js";
+import { DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags.js";
 
 let dir = "";
 let specS = "";
@@ -181,7 +182,7 @@ describe("a superseded criterion is read as superseded by every coverage and flo
   }, 120_000);
 
   it("(1) ac list coverage reads `superseded` for the superseded criterion only", async () => {
-    await must(["ac", "supersede", specS, "AC-1", "--by", `${specS2}:AC-9`, "--reason", "replaced by S2 AC-9"]);
+    await must(["ac", "supersede", specS, "AC-1", "--by", `${specS2}:AC-9`, "--reason", "replaced by S2 AC-9", ...DECIDED_FLAGS_OWN_REASON]);
     const states = await coverageStates(specS);
     expect(states["AC-1"]).toBe("superseded");
     expect(states["AC-2"]).toBe("none");
