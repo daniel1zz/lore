@@ -140,9 +140,6 @@ import {
   computeAuditEntryHash,
   computeFtsShadowValues,
   decisionToColumn,
-  AC_EXEMPTION_COLUMNS,
-  rowToAcExemption,
-  type AcExemptionDbRow,
   detectParentCycleViaAncestry,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
@@ -188,7 +185,6 @@ import { applyMigration038 } from "./migrations/migration-038.js";
 import { applyMigration039 } from "./migrations/migration-039.js";
 import { applyMigration040 } from "./migrations/migration-040.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
-import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1029,25 +1025,6 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-030 — safe to ignore, the failure below is what to report.
-        }
-        throw error;
-      }
-    }
-
-    if (currentVersion < 42 && 42 <= ceiling) {
-      // reason: migration-042 is two-phase like 041: the nullable `ac_exemptions.decision` / `harness_run` columns are added only
-      // where `PRAGMA table_info` lacks them, then one BEGIN/COMMIT string bumps user_version; a second run changes nothing.
-      try {
-        for (const { table, column, ddl } of MIGRATION_042_ADD_COLUMNS) {
-          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
-          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
-        }
-        this.db.exec(MIGRATION_042_SQL);
-      } catch (error) {
-        try {
-          this.db.exec("ROLLBACK;");
-        } catch {
-          // reason: same as migration-041 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3240,10 +3217,10 @@ export class SQLiteStore implements StoreInterface {
       }
       this.db
         .prepare(
-          `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at, decision, harness_run)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at, decisionToColumn(row.decision), row.harness_run ?? null);
+        .run(row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at);
       this.db.run("COMMIT");
       return ok({ ...row });
     } catch (e) {
@@ -3261,43 +3238,11 @@ export class SQLiteStore implements StoreInterface {
   async listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>> {
     try {
       const rows = this.db
-        .prepare(`SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions ORDER BY doc_id, ac_id`)
-        .all() as AcExemptionDbRow[];
-      return ok(rows.map(rowToAcExemption));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
-  /** @see StoreInterface.listDecisionExemptions */
-  async listDecisionExemptions(query: DecisionVersionQuery): Promise<Result<AcExemptionRow[], LoreError>> {
-    try {
-      const clauses: string[] = [];
-      const args: string[] = [];
-      if (query.docIds.length > 0) {
-        clauses.push(`doc_id IN (${query.docIds.map(() => "?").join(", ")})`);
-        args.push(...query.docIds);
-      }
-      for (const w of query.windows) {
-        clauses.push(w.to === undefined ? `(harness_run = ? AND granted_at >= ?)` : `(harness_run = ? AND granted_at >= ? AND granted_at <= ?)`);
-        args.push(w.run, w.from, ...(w.to === undefined ? [] : [w.to]));
-      }
-      if (clauses.length === 0) return ok([]);
-      const sql = `SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions WHERE decision IS NOT NULL AND (${clauses.join(" OR ")}) ORDER BY granted_at ASC, doc_id ASC, ac_id ASC`;
-      return ok((this.db.prepare(sql).all(...args) as AcExemptionDbRow[]).map(rowToAcExemption));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
-  /** @see StoreInterface.listRecordedExemptionDecisions */
-  async listRecordedExemptionDecisions(since?: string): Promise<Result<AcExemptionRow[], LoreError>> {
-    try {
-      const rows =
-        since !== undefined
-          ? (this.db.prepare(`SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions WHERE decision IS NOT NULL AND granted_at >= ? ORDER BY granted_at ASC, doc_id ASC, ac_id ASC`).all(since) as AcExemptionDbRow[])
-          : (this.db.prepare(`SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions WHERE decision IS NOT NULL ORDER BY granted_at ASC, doc_id ASC, ac_id ASC`).all() as AcExemptionDbRow[]);
-      return ok(rows.map(rowToAcExemption));
+        .prepare(
+          "SELECT doc_id, ac_id, reason, expires_at, granted_by, granted_at FROM ac_exemptions ORDER BY doc_id, ac_id",
+        )
+        .all() as AcExemptionRow[];
+      return ok(rows);
     } catch (e) {
       return wrapStoreError(e);
     }

@@ -3,9 +3,7 @@
  *
  * Purpose: select the decisions that belong to a plan, re-verify each file / command source they rest on against git
  *   and a read-only re-run, and report findings; a wrong-when-written finding fails `snapshot_accuracy`.
- * Exemption decisions (#481, BR-1492) are selected beside version rows: the exemptions of the plan's spec, and those a
- *   plan task's claim run granted within its window; address `<spec slug>#exempt:<AC id>@<granted_at>`.
- * Public surface: selectPlanDecisions, exemptionDecisionAddress, recheckDecision, recheckPlanDecisions, isRerunnableCommand,
+ * Public surface: selectPlanDecisions, recheckDecision, recheckPlanDecisions, isRerunnableCommand,
  *   applyDecisionFindings, createWorktreeCommandRunner, CommandRunnerPort, DecisionRecheckDeps; the judged half:
  *   buildJudgedDecisionInputs, judgedFindingsOf, rerunCitingCriteria, CriterionRerunPort.
  * Invariants:
@@ -72,7 +70,7 @@ export interface CommandRunnerPort {
 export interface DecisionRecheckDeps {
   readonly store: Pick<
     StoreInterface,
-    "listDecisionVersions" | "listDecisionExemptions" | "queryAudit" | "findBySlug" | "find" | "findLinks" | "findVersions" | "listRuleRegistry" | "listAcCites"
+    "listDecisionVersions" | "queryAudit" | "findBySlug" | "find" | "findLinks" | "findVersions" | "listRuleRegistry" | "listAcCites"
   >;
   readonly git: GitPort;
   readonly runner: CommandRunnerPort;
@@ -85,18 +83,9 @@ export type DecisionStoreDeps = Pick<DecisionRecheckDeps, "store">;
 export interface SelectedDecision {
   readonly address: string;
   readonly record: DecisionRecord;
-  /** The document the decision's write changed, and the version it created (absent for an exemption decision: no version row). */
+  /** The document the decision's write changed, and the version it created. */
   readonly docId: DocId;
-  readonly version?: number;
-}
-
-/**
- * The address an exemption decision's findings name: `<spec slug>#exempt:<AC id>@<granted_at>` (granted_at is the ISO grant
- * instant, so a renewed exemption of the same criterion is a different address). It is not a `<slug>@<version>` address, so
- * `lore decision trace` cannot name it; `lore decision rates` and the milestone re-check use it as the decision's identity.
- */
-export function exemptionDecisionAddress(specSlug: string, acId: string, grantedAt: string): string {
-  return `${specSlug}#exempt:${acId}@${grantedAt}`;
+  readonly version: number;
 }
 
 const SHELL_META = /[;&|<>`$(){}\\\n\r]/;
@@ -349,31 +338,11 @@ export async function selectPlanDecisions(deps: DecisionStoreDeps, bundle: PlanB
     if (!slug.ok) return slug;
     selected.push({ address: `${slug.value}@${row.version}`, record: row.decision, docId: row.doc_id, version: row.version });
   }
-  // Exemption decisions (#481): the exemptions of the plan's spec, and those a plan task's claim run granted within its window.
-  const exemptions = await deps.store.listDecisionExemptions({
-    docIds: bundle.spec !== undefined ? [bundle.spec.id] : [],
-    windows: windows.value,
-  });
-  if (!exemptions.ok) return exemptions;
-  for (const row of exemptions.value) {
-    if (row.decision === undefined) continue;
-    const slug = await slugOfDoc(deps, row.doc_id, slugs);
-    if (!slug.ok) return slug;
-    const address = exemptionDecisionAddress(slug.value, row.ac_id, row.granted_at);
-    if (seen.has(address)) continue;
-    seen.add(address);
-    selected.push({ address, record: row.decision, docId: row.doc_id });
-  }
   return ok(selected);
 }
 
 async function slugOf(deps: DecisionStoreDeps, row: VersionRecord, cache: Map<string, string>): Promise<Result<string, LoreError>> {
   if (row.slug !== undefined) return ok(row.slug);
-  return slugOfDoc(deps, row.doc_id, cache);
-}
-
-async function slugOfDoc(deps: DecisionStoreDeps, docId: DocId, cache: Map<string, string>): Promise<Result<string, LoreError>> {
-  const row = { doc_id: docId };
   const cached = cache.get(row.doc_id);
   if (cached !== undefined) return ok(cached);
   const doc = await deps.store.find(row.doc_id);
@@ -423,7 +392,7 @@ function describeSource(source: DecisionRecord["premises"][number]["source"]): s
 /** The rule a decision's `before` replaced: the rule of the written version whose statement changed from `before`. */
 async function locateReworded(
   deps: DecisionStoreDeps,
-  decision: SelectedDecision & { readonly version: number },
+  decision: SelectedDecision,
   before: string,
 ): Promise<Result<{ readonly id: string; readonly after: string } | undefined, LoreError>> {
   const versions = await deps.store.findVersions(decision.docId, { limit: 1000 });
@@ -489,8 +458,7 @@ export async function buildJudgedDecisionInputs(deps: DecisionStoreDeps, bundle:
       inputs.push({ ...base, citing: [] });
       continue;
     }
-    // reason: an exemption decision has no version row to compare against, so a `before` on it can never be located.
-    const located = decision.version === undefined ? ok(undefined) : await locateReworded(deps, { ...decision, version: decision.version }, before);
+    const located = await locateReworded(deps, decision, before);
     if (!located.ok) return located;
     if (located.value === undefined) {
       inputs.push({ ...base, unlocatedBefore: before, citing: [] });

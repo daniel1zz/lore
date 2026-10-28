@@ -44,7 +44,6 @@ import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
-import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -196,8 +195,6 @@ import {
   computeAuditEntryHash,
   computeFtsShadowValues,
   decisionToColumn,
-  AC_EXEMPTION_COLUMNS,
-  rowToAcExemption,
   detectParentCycleViaAncestry,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
@@ -484,20 +481,6 @@ function libsqlRowToLinkRow(row: Row): LinkRow {
     created_at: rowStr(row, "created_at"),
     created_by: rowStr(row, "created_by"),
   };
-}
-
-/** Maps one libsql `ac_exemptions` row (selected with `AC_EXEMPTION_COLUMNS`) to an `AcExemptionRow`. */
-function libsqlRowToAcExemption(row: Row): AcExemptionRow {
-  return rowToAcExemption({
-    doc_id: rowStr(row, "doc_id"),
-    ac_id: rowStr(row, "ac_id"),
-    reason: rowStr(row, "reason"),
-    expires_at: rowStr(row, "expires_at"),
-    granted_by: rowStr(row, "granted_by"),
-    granted_at: rowStr(row, "granted_at"),
-    decision: rowStrOrNull(row, "decision"),
-    harness_run: rowStrOrNull(row, "harness_run"),
-  });
 }
 
 function libsqlRowToVersionRow(row: Row): VersionRow {
@@ -1258,16 +1241,6 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_041_SQL);
-      }
-
-      if (currentVersion < 42) {
-        // reason: migration-042 is two-phase like 041: the nullable `ac_exemptions.decision` / `harness_run` columns are added only
-        // where `PRAGMA table_info` lacks them, then one BEGIN/COMMIT string bumps user_version.
-        for (const { table, column, ddl } of MIGRATION_042_ADD_COLUMNS) {
-          const info = await this.client.execute(`PRAGMA table_info(${table})`);
-          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
-        }
-        await this.client.executeMultiple(MIGRATION_042_SQL);
       }
     })();
 
@@ -4026,9 +3999,9 @@ export class TursoStore implements StoreInterface {
         return err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive));
       }
       await tx.execute({
-        sql: `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at, decision, harness_run)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at, decisionToColumn(row.decision), row.harness_run ?? null],
+        sql: `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at],
       });
       await tx.commit();
       return ok({ ...row });
@@ -4049,46 +4022,19 @@ export class TursoStore implements StoreInterface {
   async listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>> {
     try {
       await this.ensureReady();
-      const rs = await this.client.execute(`SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions ORDER BY doc_id, ac_id`);
-      return ok(rs.rows.map(libsqlRowToAcExemption));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
-  /** @see StoreInterface.listDecisionExemptions */
-  async listDecisionExemptions(query: DecisionVersionQuery): Promise<Result<AcExemptionRow[], LoreError>> {
-    try {
-      await this.ensureReady();
-      const clauses: string[] = [];
-      const args: string[] = [];
-      if (query.docIds.length > 0) {
-        clauses.push(`doc_id IN (${query.docIds.map(() => "?").join(", ")})`);
-        args.push(...query.docIds);
-      }
-      for (const w of query.windows) {
-        clauses.push(w.to === undefined ? `(harness_run = ? AND granted_at >= ?)` : `(harness_run = ? AND granted_at >= ? AND granted_at <= ?)`);
-        args.push(w.run, w.from, ...(w.to === undefined ? [] : [w.to]));
-      }
-      if (clauses.length === 0) return ok([]);
-      const sql = `SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions WHERE decision IS NOT NULL AND (${clauses.join(" OR ")}) ORDER BY granted_at ASC, doc_id ASC, ac_id ASC`;
-      const rs = await this.client.execute({ sql, args: args as InValue[] });
-      return ok(rs.rows.map(libsqlRowToAcExemption));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
-  /** @see StoreInterface.listRecordedExemptionDecisions */
-  async listRecordedExemptionDecisions(since?: string): Promise<Result<AcExemptionRow[], LoreError>> {
-    try {
-      await this.ensureReady();
       const rs = await this.client.execute(
-        since !== undefined
-          ? { sql: `SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions WHERE decision IS NOT NULL AND granted_at >= ? ORDER BY granted_at ASC, doc_id ASC, ac_id ASC`, args: [since] }
-          : { sql: `SELECT ${AC_EXEMPTION_COLUMNS} FROM ac_exemptions WHERE decision IS NOT NULL ORDER BY granted_at ASC, doc_id ASC, ac_id ASC`, args: [] },
+        "SELECT doc_id, ac_id, reason, expires_at, granted_by, granted_at FROM ac_exemptions ORDER BY doc_id, ac_id",
       );
-      return ok(rs.rows.map(libsqlRowToAcExemption));
+      return ok(
+        rs.rows.map((r) => ({
+          doc_id: rowStr(r, "doc_id"),
+          ac_id: rowStr(r, "ac_id"),
+          reason: rowStr(r, "reason"),
+          expires_at: rowStr(r, "expires_at"),
+          granted_by: rowStr(r, "granted_by"),
+          granted_at: rowStr(r, "granted_at"),
+        })),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }
