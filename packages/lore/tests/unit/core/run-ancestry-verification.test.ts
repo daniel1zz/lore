@@ -16,7 +16,7 @@
  *   - selfPid: where the walk starts (production passes process.pid)
  *   - `cause` is a stable machine name; `error` is the human text with the wording the spec's table names.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -233,5 +233,98 @@ describe("real process-table port: ps comes from fixed system locations, never P
     const port = createRealProcessTablePort({ env: process.env, cwd: dir });
     expect(await port.startTimeOf(pid)).toBeNull();
     expect(await port.parentOf(pid)).toBeNull();
+  });
+});
+
+describe("real process-table port: an empty `ps` read is never 'no such process' (#418 flaky ps)", () => {
+  type PortOptions = Parameters<typeof createRealProcessTablePort>[0];
+  type Runner = NonNullable<PortOptions["spawn"]>;
+  const empty = (): ReturnType<Runner> => ({ status: 0, stdout: "", stderr: "", pid: 1, output: [], signal: null });
+  const realRun: Runner = (binary, args, options) => spawnSync(binary, [...args], options as never) as ReturnType<Runner>;
+  /** Empty for the first `emptyReads` calls, then the real answer. */
+  const flaky = (emptyReads: number): { runner: Runner; calls: () => number } => {
+    let calls = 0;
+    return { runner: (binary, args, options) => (++calls <= emptyReads ? empty() : realRun(binary, args, options)), calls: () => calls };
+  };
+  const port = (spawnFn: Runner) => createRealProcessTablePort({ env: process.env, cwd: tmpdir(), spawn: spawnFn });
+  const runRow = (startTime: string | null): RunRow => ({
+    id: "cc:S", registeredAt: T0, endedAt: null, endReason: null, parentRunId: null, agentRef: null,
+    process: { pid: process.pid, startTime, worktree: null },
+  });
+
+  it("(a) one empty read then the real row: the walk reads the row, no refusal", async () => {
+    expect(await port(flaky(1).runner).parentOf(process.pid)).toBe(process.ppid);
+    expect(await port(flaky(2).runner).startTimeOf(process.pid)).not.toBeNull();
+    const start = await port(realRun).startTimeOf(process.pid);
+    const verify = await loadVerify();
+    const verdict = await verify({ run: "cc:S", record: runRow(start), table: port(flaky(1).runner), selfPid: process.pid });
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("(b) empty on every attempt for a LIVE pid: process-table-unreadable, never 'exited'", async () => {
+    const t = port(() => empty());
+    await expect(t.parentOf(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    await expect(t.startTimeOf(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    await expect(t.inspect(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    await expect(t.resolveHarnessPid(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    const verify = await loadVerify();
+    const verdict = await verify({ run: "cc:S", record: runRow(T0), table: t, selfPid: process.pid });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.cause).toBe("process-table-unreadable");
+  });
+
+  it("(b2) retries a bounded number of times (3 reads) before deciding", async () => {
+    let calls = 0;
+    const t = port(() => {
+      calls++;
+      return empty();
+    });
+    await expect(t.parentOf(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    expect(calls).toBe(3);
+  });
+
+  it("(c) empty on every attempt for a DEAD pid: gone (null), i.e. 'has exited'", async () => {
+    const child = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+    const pid = child.pid as number;
+    await new Promise((resolve) => child.on("exit", resolve));
+    const t = port(() => empty());
+    expect(await t.parentOf(pid)).toBeNull();
+    expect(await t.startTimeOf(pid)).toBeNull();
+    expect(await t.inspect(pid)).toBeNull();
+    expect(await t.resolveHarnessPid(pid)).toBeNull();
+  });
+
+  it("(d) a spawn that times out is process-table-unreadable (injected ETIMEDOUT)", async () => {
+    const timedOut: Runner = () => ({
+      status: null, stdout: "", stderr: "", pid: 1, output: [], signal: "SIGKILL",
+      error: Object.assign(new Error("spawnSync ps ETIMEDOUT"), { code: "ETIMEDOUT" }),
+    });
+    const t = port(timedOut);
+    await expect(t.parentOf(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    await expect(t.inspect(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+    await expect(t.resolveHarnessPid(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+  });
+
+  it("(d2) a hung ps binary is SIGKILLed at the timeout and reported unreadable", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ps-hang-"));
+    try {
+      writeFileSync(join(dir, "ps"), "#!/bin/sh\nexec sleep 30\n");
+      chmodSync(join(dir, "ps"), 0o755);
+      const t = createRealProcessTablePort({ env: process.env, cwd: dir, psPaths: [join(dir, "ps")], timeoutMs: 300 });
+      const began = Date.now();
+      await expect(t.parentOf(process.pid)).rejects.toBeInstanceOf(ProcessTableUnreadableError);
+      expect(Date.now() - began).toBeLessThan(10_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("(e) `lore run register`'s measurement (resolveHarnessPid then inspect) survives a flaky first read", async () => {
+    const f = flaky(1);
+    const t = port(f.runner);
+    const pid = await t.resolveHarnessPid(process.pid);
+    expect(pid).not.toBeNull();
+    const inspected = await t.inspect(pid as number);
+    expect(inspected?.startTime).not.toBeNull();
   });
 });
