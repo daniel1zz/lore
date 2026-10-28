@@ -122,6 +122,10 @@ function argsWithinSpec(args: readonly string[], spec: FlagSpec): boolean {
       continue;
     }
     if (eq === -1 && spec.bare.has(name)) continue;
+    // A cluster of bare short flags (`-rn`): every letter must itself be a permitted bare flag.
+    if (eq === -1 && /^-[A-Za-z]{2,}$/.test(word) && [...word.slice(1)].every((letter) => spec.bare.has(`-${letter}`))) continue;
+    // `-<k>` (git log -1) is a count, not a program-running flag.
+    if (spec === GIT_LOG_FLAGS && /^-\d+$/.test(word)) continue;
     return false;
   }
   return true;
