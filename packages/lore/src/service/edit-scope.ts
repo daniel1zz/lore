@@ -36,7 +36,7 @@ import {
 } from "@lore/core";
 import { findAnchorOverlapConflict, type AnchorOverlapConflict, type SiblingClaimInfo } from "./gate-predicates.js";
 import type { IgnoreProbeFn } from "./git-ignore-probe.js";
-import type { OpenClaimsOfWorkingCopy } from "./run-service.js";
+import type { OpenClaimsOfWorkingCopy, OpenProjectClaim } from "./run-service.js";
 import type { buildAnchorGateContext } from "./checkpoint-registry.js";
 
 /** One open claim of a working copy, as `lore anchor scope --json` prints it. */
@@ -55,8 +55,23 @@ export interface EditScopeReport {
   readonly not_measured: readonly string[];
 }
 
+/** One open claim of the project as `lore anchor scope --all --json` prints it. */
+export interface ProjectEditScopeClaim extends EditScopeClaim {
+  /** The working copy the claim was recorded for; `null` = none recorded or not resolvable. */
+  readonly working_copy: string | null;
+}
+
+/** The `data` of `lore anchor scope --all --json`: every open claim of the project, `working_copy` null (no single copy). */
+export interface ProjectEditScopeReport {
+  readonly working_copy: null;
+  readonly claims: readonly ProjectEditScopeClaim[];
+  readonly not_measured: readonly string[];
+}
+
 /** Ports `declareEditPath` / `readEditScope` need; `anchor.ts` wires them from the App. */
 export interface EditScopeDeps {
+  /** Every open claim of the project, whatever working copy it names ({@link readEditScope} with `{all: true}`). */
+  openClaimsOfProject(): Promise<Result<readonly OpenProjectClaim[], LoreError>>;
   openClaimsOfWorkingCopy(workingCopy: string): Promise<Result<OpenClaimsOfWorkingCopy, LoreError>>;
   getTask(slug: string): Promise<Result<DocRecord, LoreError>>;
   /** Every task document (the sibling universe). */
@@ -168,7 +183,29 @@ function judgeIgnore(path: string, run: ReturnType<IgnoreProbeFn>): boolean | st
  * @param workingCopy - Absolute working-copy directory.
  * @returns ok(report); the port's error when a claim cannot be read.
  */
-export async function readEditScope(deps: EditScopeDeps, workingCopy: string): Promise<Result<EditScopeReport, LoreError>> {
+export async function readEditScope(deps: EditScopeDeps, workingCopy: string): Promise<Result<EditScopeReport, LoreError>>;
+/**
+ * `{ all: true }`: the open claims of EVERY working copy of the project (BR-1493), each with the working copy it was
+ * recorded for (`null` = none recorded or not resolvable). Never fails on an unresolvable worktree: such a claim still
+ * holds its anchors, so it is listed with `working_copy: null`.
+ */
+export async function readEditScope(deps: EditScopeDeps, scope: { readonly all: true }): Promise<Result<ProjectEditScopeReport, LoreError>>;
+export async function readEditScope(
+  deps: EditScopeDeps,
+  target: string | { readonly all: true },
+): Promise<Result<EditScopeReport | ProjectEditScopeReport, LoreError>> {
+  if (typeof target !== "string") {
+    const open = await deps.openClaimsOfProject();
+    if (!open.ok) return open;
+    const claims: ProjectEditScopeClaim[] = open.value.map((row) => ({
+      task: row.slug,
+      anchors: row.file_anchors,
+      holder_run: row.holder_run,
+      working_copy: row.working_copy ?? null,
+    }));
+    return ok({ working_copy: null, claims, not_measured: [] });
+  }
+  const workingCopy = target;
   const open = await deps.openClaimsOfWorkingCopy(workingCopy);
   if (!open.ok) return open;
   const claims: EditScopeClaim[] = [];

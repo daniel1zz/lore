@@ -67,6 +67,8 @@
  * PreToolUse hook `pre-edit-anchor-gate.mjs` calls, so a helper's edit outside its claim's anchors is declared or
  * denied BEFORE it happens:
  *   scope   --worktree <dir> [--json]        The open claims recorded for a working copy, with anchors and holder run.
+ *   scope   --all [--json]                   The open claims of EVERY working copy of the project (BR-1493), each
+ *                                            with its working copy; the gate reads it for an unreadable shell write.
  *   declare <task> <path> --worktree <dir>   Add one out-of-anchor path to the claimed task unless another live
  *                                            claim overlaps it (the task-claim gate's overlap predicate); exit 4
  *                                            naming that claim and its task. A path already covered, or git-ignored
@@ -394,17 +396,22 @@ export default defineLoreCommand({
     }),
 
     scope: defineLoreCommand({
-      meta: { name: "scope", description: "List the open task claims recorded for a working copy, with their anchors and holder run" },
+      meta: { name: "scope", description: "List the open task claims recorded for a working copy (or, with --all, for every working copy of the project), with their anchors and holder run" },
       args: {
-        worktree: { type: "string", description: "Working-copy directory the claims were recorded for", required: true },
+        worktree: { type: "string", description: "Working-copy directory the claims were recorded for (required unless --all)" },
+        all: { type: "boolean", description: "List the open claims of EVERY working copy of the project (BR-1493); each row names its working copy" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
+        if (!args.all && (typeof args.worktree !== "string" || args.worktree === "")) {
+          inv.io.stderr.write("lore anchor scope: --worktree <dir> is required unless --all is given\n");
+          return 2;
+        }
         const { app } = loadLoreApp({ inv });
         try {
-          const report = await readEditScope(buildEditScopeDeps(app), args.worktree as string);
+          const report = args.all ? await readEditScope(buildEditScopeDeps(app), { all: true }) : await readEditScope(buildEditScopeDeps(app), args.worktree as string);
           if (!report.ok) {
             inv.io.stderr.write(formatErrorFor(inv, report.error) + "\n");
             return exitCode(report.error);

@@ -30,7 +30,7 @@
  *
  * Anything inside the helper's own worktree (including its gitignored `.scratch/`), and anything
  * in no git working copy at all (session scratchpad, /tmp, `mktemp -d`). The latter is NOT this
- * hook's job: the turn-end helper-scope review keeps reporting those.
+ * hook's job: integrate's own-diff judgment (BR-1346) is the check left for those.
  *
  * The target is canonicalised before comparison (relative paths resolved against the payload
  * `cwd`, `..` collapsed, symlinks resolved on the deepest existing ancestor), so neither a `..`

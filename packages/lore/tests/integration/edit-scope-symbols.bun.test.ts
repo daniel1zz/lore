@@ -410,6 +410,9 @@ describe("a shell write whose target cannot be read is refused only while anothe
   });
 
   it("AC-USW-2: the same command is allowed when the only live claim is the helper's own", () => {
+    // release refuses a worktree with uncommitted changes (A's earlier shell write to held/dirty.ts), so commit them first.
+    git(fx.wtA, "add", "-A");
+    git(fx.wtA, "commit", "-qm", "A wip", "--allow-empty");
     mustLore(["release", fx.taskA], fx.wtA, RUN_A, ACTOR_A);
     try {
       const r = bashAsB(PY_VARIABLE_TARGET);
