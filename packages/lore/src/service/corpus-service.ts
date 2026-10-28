@@ -223,7 +223,7 @@ const FALLBACK_SPEC_CREATE_RULE_MARKDOWN = `## Rules a candidate spec must satis
 This is a BUILT-IN fallback: no approved \`knowledge\` doc with
 \`extra.sub_type: "skill"\` and \`extra.skill.applies_to: "spec"\` exists in
 this corpus yet. Seed your own team-editable version with
-\`lore create knowledge --sub-type skill\` (title, content, then
+\`lore create knowledge --sub-type skill --parent <prd-or-spec>\` (title, content, then
 \`extra.skill.applies_to: "spec"\`) to replace this fallback.
 `;
 
@@ -255,28 +255,21 @@ function describeLandingFailure(error: LoreError): string {
 }
 
 /**
- * Doc types eligible for the create-time orphan advisory
- * (task-create-time-orphan-advisory-warn-or-default-parent-to-root, dogfood finding
- * 2026-07-25) — `spec`/`task` are excluded because `createDocInputSchema`'s superRefine
- * already mandates their `parent_id` (a parentless create of either fails VALIDATION_ERROR
- * before `_createImpl` ever reaches the advisory computation below, so they could never
- * trigger it anyway); `prd` is excluded because it IS the root the advisory would name.
+ * Doc types whose creation is refused without a parent (BR-709, spec
+ * documents-that-need-a-parent-are-refused-without-one-an-ad D1): every knowledge sub-type, a decision record
+ * and a plan. `spec` is parentless by contract (BR-1/BR-2), `task` is mandated a parent by the input schema,
+ * and `prd` is the root.
  */
-const ORPHAN_ADVISORY_TYPES: ReadonlySet<DocType> = new Set(["adr", "plan", "knowledge"]);
+const PARENT_REQUIRED_TYPES: ReadonlySet<DocType> = new Set(["adr", "plan", "knowledge"]);
+
+/** How many candidate parents of one type the parentless refusal names (the message stays one screen). */
+const PARENT_CANDIDATES_PER_TYPE = 5;
 
 /**
- * `CorpusService.create`'s return value — a `DocRecord` plus an OPTIONAL,
- * non-persisted `orphan_advisory` string (task-create-time-orphan-advisory-...). The
- * advisory is NEVER written to the `docs` table (see `_createImpl`'s final `return`) —
- * it exists purely so the calling adapter (CLI/MCP/HTTP) can surface a one-line,
- * non-blocking repair hint. Structurally a superset of `DocRecord`, so every
- * pre-existing caller that only destructures known `DocRecord` fields (or treats the
- * value as a plain `DocRecord`) keeps compiling unchanged — `createHandoffDoc`/
- * `createUatDoc` deliberately keep their OWN return type as plain `DocRecord` (their
- * internal-bypass callers, `SessionService.writeHandoff`/`UatService.record`, don't
- * consume the advisory) even though both share this same `_createImpl` body.
+ * `CorpusService.create`'s return value. Kept as a named alias of `DocRecord` so the write-port types
+ * (`DocWritePort`, rule-service) keep one name for "what a create returns".
  */
-export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
+export type CreateDocResult = DocRecord;
 
 /**
  * Actor-attribution options shared by every mutating `CorpusService` method that
@@ -2350,6 +2343,13 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       });
     }
 
+    // BR-709/BR-701: a knowledge record (every sub-type), decision record or plan needs a parent. Refused here,
+    // in the service, so the CLI, HTTP, dashboard and every internal creator (handoff, UAT verdict, fidelity
+    // sample, milestone review) behave identically (D2); nothing is resolved or written first.
+    if (PARENT_REQUIRED_TYPES.has(data.type) && !data.parent_id) {
+      return this.refuseMissingParent(data.type);
+    }
+
     // Resolve parent if provided
     let resolvedParentId: DocId | null = null;
     // reason: captured alongside resolvedParentId so the spec-create gate below (and
@@ -2892,60 +2892,43 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // error.
     await this.writeProvenanceLink(insertResult.value, resolvedActor);
 
-    // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
-    // parent-to-root). reason: skipped entirely for the internal handoff/uat bypass
-    // paths (`opts.allowHandoff`/`opts.allowUat`) — those knowledge docs are linked to
-    // their subject via a graph `informs` edge, not `parent_id`, so a null parent there
-    // is expected shape, not an omission the advisory should ever flag.
-    const orphanAdvisory =
-      opts?.allowHandoff !== true && opts?.allowUat !== true
-        ? await this.computeOrphanAdvisory(data.type, resolvedParentId, insertResult.value.slug)
-        : undefined;
-
-    return ok(
-      orphanAdvisory !== undefined
-        ? { ...insertResult.value, orphan_advisory: orphanAdvisory }
-        : insertResult.value,
-    );
+    return ok(insertResult.value);
   }
 
   /**
-   * Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
-   * parent-to-root, dogfood finding 2026-07-25): a non-blocking, informational note —
-   * never an error, never a parent mutation — for a parentless adr/plan/knowledge
-   * create WHILE a root PRD already exists in the corpus.
+   * Refusal for a knowledge record, decision record or plan created without a parent (BR-709, BR-701; spec
+   * documents-that-need-a-parent-are-refused-without-one-an-ad D1/D5).
    *
-   * @invariant Orchestrator decision: ADVISORY-ONLY, never default-parenting. Silently
-   *   changing `parent_id` on a flagless create would be implicit magic; the SPEC-069
-   *   `--adhoc` auto-parenting precedent (`_createImpl`'s ad-hoc task block above) only
-   *   fires under an EXPLICIT `--adhoc` flag, never implicitly for a plain create.
-   * @invariant Deliberately silent when no root PRD exists yet — the SAME pre-PRD-
-   *   exploration deadlock rationale `spec`/`task`'s mandatory `parent_id` was carved
-   *   around (module header, "Gap" section of the governing task). Reuses the EXACT
-   *   "first PRD" lookup the ad-hoc auto-parenting block above already uses
-   *   (`store.findMany({type:"prd"})[0]`) — no second root-finding heuristic introduced.
-   * @param type - The doc's type; only `ORPHAN_ADVISORY_TYPES` members can trigger this.
-   * @param resolvedParentId - The already-resolved parent id (`null` = no parent supplied).
-   * @param slug - The just-created doc's own slug, named in the repair command.
-   * @returns `undefined` when not applicable (wrong type, parent supplied, no root PRD,
-   *   or the root-PRD lookup itself failed — a read failure degrades silently rather
-   *   than turning a successful create into an error) — a fact, never surfaced as an
-   *   error; a one-line repair-command string otherwise.
+   * Names `--parent` and lists, per allowed parent type ({@link PARENT_TYPE_CONTRACT}), up to
+   * {@link PARENT_CANDIDATES_PER_TYPE} live documents that could take the new document. When no document of any
+   * allowed type exists it says to create the requirements document first. Never writes anything and never picks
+   * a parent for the caller (D1: no silent default).
+   *
+   * @param type - The type being created (a {@link PARENT_REQUIRED_TYPES} member).
+   * @returns The refusal (`VALIDATION_ERROR`, exit 4); or the store error when a candidate lookup fails.
    */
-  private async computeOrphanAdvisory(
-    type: DocType,
-    resolvedParentId: DocId | null,
-    slug: string,
-  ): Promise<string | undefined> {
-    if (resolvedParentId !== null || !ORPHAN_ADVISORY_TYPES.has(type)) return undefined;
-    const prdsResult = await this.store.findMany({ type: "prd" });
-    if (!prdsResult.ok) return undefined;
-    const rootPrd = prdsResult.value[0];
-    if (!rootPrd) return undefined;
-    return (
-      `Advisory: '${slug}' has no parent — consider ` +
-      `\`lore link ${slug} ${rootPrd.slug} --type parent\` to attach it to the root PRD.`
-    );
+  private async refuseMissingParent(type: DocType): Promise<Result<never, LoreError>> {
+    const lines: string[] = [];
+    for (const parentType of PARENT_TYPE_CONTRACT[type as "adr" | "plan" | "knowledge"]) {
+      const found = await this.store.findMany({ type: parentType });
+      if (!found.ok) return found;
+      const live = found.value.filter((doc) => doc.deleted_at === null);
+      if (live.length === 0) continue;
+      const shown = live.slice(0, PARENT_CANDIDATES_PER_TYPE).map((doc) => doc.slug).join(", ");
+      const more = live.length > PARENT_CANDIDATES_PER_TYPE ? `, ... (${String(live.length)} in all)` : "";
+      lines.push(`  ${parentType}: ${shown}${more}`);
+    }
+    const guidance =
+      lines.length === 0
+        ? "no document that could take it exists yet - create the requirements document first " +
+          "(`lore create prd --title <title>`), then pass it as --parent"
+        : `pass --parent <slug> naming the document it concerns; candidates:\n${lines.join("\n")}`;
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "parent_id",
+      message: `a ${type === "adr" ? "decision record (adr)" : type} needs a parent: ${guidance}`,
+      rule: "BR-709",
+    });
   }
 
   /**

@@ -911,7 +911,19 @@ export class SessionService {
           rule: "BR-339",
         });
       }
-      // prds.length === 0 → parentId stays null (parentless — legal for knowledge docs).
+      if (prds.length === 0) {
+        // BR-709: a handoff is a knowledge record and needs a parent; with no plan_ref and no requirements document
+        // there is nothing to file it under, and no default is invented (spec D1).
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "plan_ref",
+          message:
+            "a handoff needs a parent: pass --plan <plan> to file it under that plan, or create the " +
+            "requirements document first (`lore create prd --title <title>`) so it can be filed under it; " +
+            "this corpus has neither a --plan given nor a requirements document",
+          rule: "BR-709",
+        });
+      }
     }
 
     const createInput: CreateDocInput = {

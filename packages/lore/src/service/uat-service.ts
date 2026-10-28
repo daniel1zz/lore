@@ -146,7 +146,7 @@ export class UatService {
           `consumer of a UAT verdict — it reads the latest verdict informs-linked to a ` +
           `plan doc, so a verdict attached to a ${target.type} would never be read by ` +
           `anything. There is no supported way to record a UAT verdict without a plan: ` +
-          `if none exists yet, create one first (\`lore create plan ...\`) and record ` +
+          `if none exists yet, create one first (\`lore create plan --parent <spec-or-prd> ...\`) and record ` +
           `the verdict against it.`,
         rule: "BR-561",
       });
@@ -156,6 +156,8 @@ export class UatService {
     const input: CreateDocInput = {
       type: "knowledge",
       title: `UAT — ${planIdOrSlug}`,
+      // BR-570: the verdict is filed under the plan it judges (its parent), as well as informs-linked to it below.
+      parent_id: planId,
       content: renderUatContent(verdict),
       extra: { sub_type: "uat", uat: verdict },
     };

@@ -1618,11 +1618,11 @@ function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string 
       break;
     case "adr":
       lines.push(correction);
-      lines.push(replace("write a new ADR (lore create adr)", "`supersedes`"));
+      lines.push(replace("write a new ADR (lore create adr --parent <spec-or-prd>)", "`supersedes`"));
       break;
     case "knowledge":
       lines.push(correction);
-      lines.push(replace("write a new knowledge doc (lore create knowledge)", "`relates-to`"));
+      lines.push(replace("write a new knowledge doc (lore create knowledge --parent <doc>)", "`relates-to`"));
       lines.push("A claim that stopped being true: lore invalidate (keeps the record, marks it invalid).");
       break;
     case "task":
@@ -1633,7 +1633,7 @@ function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string 
     case "phase":
       lines.push(
         `The plan is closed (archived or deprecated), so it and its phases are records. ` +
-          replace("open a new plan (lore create plan)", "`relates-to`"),
+          replace("open a new plan (lore create plan --parent <spec-or-prd>)", "`relates-to`"),
       );
       break;
     default:

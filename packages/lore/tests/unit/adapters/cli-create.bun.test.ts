@@ -1227,15 +1227,13 @@ describe("lore create — --requires-uat (SPEC-058 hotfix)", () => {
   });
 });
 
-// ─── Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
-// parent-to-root) ──────────────────────────────────────────────────────────────
+// ─── Parentless knowledge is refused (BR-709; replaced the warn-only orphan advisory) ──────────
 
-describe("lore create — orphan advisory", () => {
-  it("HAPPY: parentless knowledge --sub-type retro, root PRD exists → advisory printed to stderr, exit stays 0", async () => {
+describe("lore create — parentless knowledge is refused", () => {
+  it("HAPPY refusal: parentless knowledge --sub-type retro, root PRD exists → exit 4, names --parent and the PRD, nothing created", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
 
-    // Root PRD first, so the corpus has one for the advisory to point at.
     const prdOutput = captureOutput();
     const prdExit = captureExit();
     try {
@@ -1259,17 +1257,14 @@ describe("lore create — orphan advisory", () => {
       output.restore();
     }
 
-    // Advisory-only — never a failure.
-    expect(exit.code).toBeUndefined();
-    expect(output.stdout.join("\n")).toContain("Created knowledge document");
+    expect(exit.code).toBe(4);
+    expect(output.stdout.join("\n")).not.toContain("Created knowledge document");
     const errText = output.stderr.join("\n");
-    expect(errText).toContain("⚠");
-    expect(errText).toContain("lore link");
-    expect(errText).toContain("--type parent");
+    expect(errText).toContain("--parent");
     expect(errText).toContain(String(prdSlug));
   });
 
-  it("NEGATIVE: parentless knowledge --sub-type retro, NO root PRD in this corpus → no advisory (pre-PRD exploration stays silent)", async () => {
+  it("NEGATIVE refusal: parentless knowledge, NO document that could take it → exit 4, says to create the requirements document first", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
 
@@ -1283,12 +1278,11 @@ describe("lore create — orphan advisory", () => {
       output.restore();
     }
 
-    expect(exit.code).toBeUndefined();
-    expect(output.stdout.join("\n")).toContain("Created knowledge document");
-    expect(output.stderr).toHaveLength(0);
+    expect(exit.code).toBe(4);
+    expect(output.stderr.join("\n")).toContain("create the requirements document first");
   });
 
-  it("BOUNDARY: knowledge created WITH --parent (root PRD also exists) → no advisory", async () => {
+  it("BOUNDARY: knowledge created WITH --parent succeeds, nothing on stderr", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
 

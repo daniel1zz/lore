@@ -5,7 +5,7 @@
  *   reproducible sample of (criterion, rule) citation pairs, asks an AI judge whether each is faithful, and returns
  *   the record. It never writes.
  * Public surface: {@link drawFidelitySample}, {@link buildCitationPairs}, {@link renderJudgeInput},
- *   {@link runFidelity}, types {@link CitationPair}, {@link FidelityRecord}, {@link FidelityVerdict}.
+ *   {@link runFidelity}, {@link resolveFidelityParentId}, types {@link CitationPair}, {@link FidelityRecord}, {@link FidelityVerdict}.
  * Invariants:
  *   - Same pool + size + seed => the identical ordered sample (BR-963); size > pool is refused.
  *   - Every rule/criterion/reason text reaches the judge only between `<<DATA-nonce>>` and
@@ -29,9 +29,10 @@ import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection, validationError } from "@lore/core";
-import type { AIProvider, DocRecord, LoreError, Result } from "@lore/core";
+import type { AIProvider, DocId, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { approvedRulesOf } from "./baseline-items.js";
+import { resolveDoc } from "./resolve.js";
 
 /** A rule cited by more than this share of the live-rule-citing criteria is a catch-all. */
 export const CATCH_ALL_THRESHOLD_SHARE = 0.05;
@@ -459,5 +460,39 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
     not_seen: notSeen,
     catch_all: catchAll,
     threshold_share: CATCH_ALL_THRESHOLD_SHARE,
+  });
+}
+
+/**
+ * The parent a stored fidelity sample is filed under (BR-709): the one spec every sampled citation belongs to when
+ * the sample measures a single spec (the most specific document it measures), else the requirements document.
+ * No default is invented (spec documents-that-need-a-parent-are-refused-without-one-an-ad D1).
+ *
+ * @param store - The corpus store.
+ * @param record - The finished sample; each verdict key reads `<spec-slug>#<ac>-><rule>`.
+ * @returns The parent's id; VALIDATION_ERROR when the sample spans several specs and the corpus has not exactly one
+ *   requirements document.
+ * @example
+ *   const parent = await resolveFidelityParentId(store, record); // ok(<spec id>) for a one-spec sample
+ */
+export async function resolveFidelityParentId(store: StoreInterface, record: FidelityRecord): Promise<Result<DocId, LoreError>> {
+  const specSlugs = [...new Set(record.verdicts.map((v) => v.key.split("#")[0] as string))];
+  if (specSlugs.length === 1) {
+    const spec = await resolveDoc(store, specSlugs[0] as string);
+    if (!spec.ok) return spec;
+    return ok(spec.value.id);
+  }
+  const prds = await store.findMany({ type: "prd" });
+  if (!prds.ok) return prds;
+  const live = prds.value.filter((d) => d.deleted_at === null);
+  if (live.length === 1) return ok((live[0] as DocRecord).id);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "parent_id",
+    message:
+      live.length === 0
+        ? "a fidelity sample needs a parent: it measures several specs and this corpus has no requirements document; create the requirements document first (`lore create prd --title <title>`)"
+        : `a fidelity sample needs a parent: it measures several specs and this corpus has ${live.length} requirements documents (${live.map((d) => d.slug).join(", ")}), so none is chosen for it`,
+    rule: "BR-709",
   });
 }

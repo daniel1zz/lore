@@ -70,6 +70,19 @@ export interface MigrationResult {
   errors: FileError[];
   link_resolution: { created: number; broken: number };
   warnings: string[];
+  /**
+   * Imported knowledge records, decision records and plans that ended without a parent (BR-709). The import is
+   * exempt from the parent refusal (a bulk import of historical data must not stop half-way), so each such
+   * document is listed here and stays visible to the tree check.
+   */
+  parentless_imports: ParentlessImport[];
+}
+
+/** One imported document of a type that needs a parent (knowledge, adr, plan) that has none after the import. */
+export interface ParentlessImport {
+  slug: string;
+  type: DocType;
+  file: string;
 }
 
 export interface MigrateOpts {
@@ -232,6 +245,7 @@ export class MigrationService {
         errors: [],
         link_resolution: { created: 0, broken: 0 },
         warnings: ["dry-run: no documents written"],
+        parentless_imports: [],
       });
     }
 
@@ -264,10 +278,12 @@ export class MigrationService {
     const importResult = await this.importDocs(parsedDocs, opts, importErrors);
     if (!importResult.ok) return importResult;
 
-    const { imported, already_existed, warnings, v1IdToNewId } = importResult.value;
+    const { imported, already_existed, warnings, v1IdToNewId, importedDocs } = importResult.value;
 
     await this.resolveParents(parsedDocs, v1IdToNewId, warnings);
     const linkResolution = await this.resolveLinks(parsedDocs, v1IdToNewId);
+    const parentlessImports = await this.listParentlessImports(importedDocs);
+    if (!parentlessImports.ok) return parentlessImports;
 
     return ok({
       imported,
@@ -276,7 +292,30 @@ export class MigrationService {
       errors: importErrors,
       link_resolution: linkResolution,
       warnings,
+      parentless_imports: parentlessImports.value,
     });
+  }
+
+  /**
+   * The imported documents of a parent-requiring type (knowledge, adr, plan) that have no parent once the parent
+   * back-fill has run (BR-709: the import is exempt from the refusal but must list them).
+   *
+   * @param importedDocs - Every document this run inserted.
+   * @returns Their slugs, types and source files, in import order; the store error when a re-read fails.
+   */
+  private async listParentlessImports(
+    importedDocs: ReadonlyArray<{ id: DocId; slug: string; type: DocType; file: string }>,
+  ): Promise<Result<ParentlessImport[], LoreError>> {
+    const listed: ParentlessImport[] = [];
+    for (const imported of importedDocs) {
+      if (imported.type !== "knowledge" && imported.type !== "adr" && imported.type !== "plan") continue;
+      const found = await this.store.find(imported.id);
+      if (!found.ok) return found;
+      if (found.value !== null && found.value.parent_id === null) {
+        listed.push({ slug: imported.slug, type: imported.type, file: imported.file });
+      }
+    }
+    return ok(listed);
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────
@@ -292,6 +331,7 @@ export class MigrationService {
         already_existed: number;
         warnings: string[];
         v1IdToNewId: Map<string, DocId>;
+        importedDocs: Array<{ id: DocId; slug: string; type: DocType; file: string }>;
       },
       LoreError
     >
@@ -303,6 +343,7 @@ export class MigrationService {
     let already_existed = 0;
     const warnings: string[] = [];
     const v1IdToNewId = new Map<string, DocId>();
+    const importedDocs: Array<{ id: DocId; slug: string; type: DocType; file: string }> = [];
 
     // Build a set of existing v1 original IDs to detect re-runs. A STORE_ERROR here
     // MUST abort the whole import — silently treating it as "no existing docs" would
@@ -403,10 +444,11 @@ export class MigrationService {
       }
 
       v1IdToNewId.set(doc.v1Id, newId);
+      importedDocs.push({ id: newId, slug, type: mappingResult.type, file: doc.filePath });
       imported += 1;
     }
 
-    return ok({ imported, already_existed, warnings, v1IdToNewId });
+    return ok({ imported, already_existed, warnings, v1IdToNewId, importedDocs });
   }
 
   /**

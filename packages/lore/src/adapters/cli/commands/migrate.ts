@@ -776,6 +776,12 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, `  ${w}`);
         }
       }
+      if (migResult.parentless_imports.length > 0) {
+        printLine(inv.io.stdout, `\nImported without a parent (${migResult.parentless_imports.length}; the tree check reports them until each is filed with \`lore link <doc> <parent> --type parent\`):`);
+        for (const d of migResult.parentless_imports) {
+          printLine(inv.io.stdout, `  ${d.type} ${d.slug} (${d.file})`);
+        }
+      }
       if (migResult.errors.length > 0) {
         printLine(inv.io.stdout, "\nErrors:");
         for (const e of migResult.errors.slice(0, 10)) {
