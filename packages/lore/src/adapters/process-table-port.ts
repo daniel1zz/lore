@@ -18,7 +18,7 @@
  *   - `signal` never throws: ESRCH -> `gone`, EPERM -> `denied`.
  * Side-effect class: IO (spawns `ps`/`lsof`, reads `/proc`, sends signals).
  */
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
 import type { Measured } from "../service/worktree-removal-test.js";
@@ -155,7 +155,19 @@ export interface RealProcessTableOptions {
   readonly cwd: string;
   /** Absolute `ps` candidates, first existing wins. Default {@link SYSTEM_PS_PATHS}; never searched on PATH. */
   readonly psPaths?: readonly string[];
+  /** The `spawnSync` that runs `ps` (injectable so a test can model a flaky `ps`). Default: `node:child_process` `spawnSync`. */
+  readonly spawn?: PsSpawn;
+  /** Kill (SIGKILL) a `ps` that runs longer than this; a timeout is an unreadable table. Default {@link PS_TIMEOUT_MS}. */
+  readonly timeoutMs?: number;
 }
+
+/** The slice of `spawnSync` the port uses to run `ps`. */
+export type PsSpawn = (binary: string, args: readonly string[], options: SpawnSyncOptionsWithStringEncoding) => SpawnSyncReturns<string>;
+
+/** Per-`ps` spawn limit. reason: a `ps` that hangs under load must fail loud, not stall every lore write. */
+export const PS_TIMEOUT_MS = 5000;
+/** Reads of one pid before an exit-0-empty answer is believed (macOS `ps -p <live pid>` sometimes prints nothing, #418). */
+export const PS_EMPTY_READ_ATTEMPTS = 3;
 
 /**
  * Fixed system locations of `ps`. reason: `ps` answers "who is my ancestor" for run verification, so it must never be
@@ -183,14 +195,47 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
         signal: null,
       };
     }
-    return spawnSync(binary, [...args], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env), ...extra });
+    const spawnPs = options.spawn ?? spawnSync;
+    return spawnPs(binary, args, {
+      cwd: options.cwd,
+      encoding: "utf8",
+      env: psEnv(options.env),
+      timeout: options.timeoutMs ?? PS_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      ...extra,
+    });
+  };
+
+  /**
+   * `ps -p <pid>` output text for ONE pid, or `null` when the pid does not exist.
+   * reason: on macOS `ps -p <live pid>` occasionally exits 0 with empty output (#418); that is never "process gone".
+   * It is re-read, and if still empty `kill(pid, 0)` decides: ESRCH = gone, alive/EPERM = unreadable (never fail open).
+   * @throws {ProcessTableUnreadableError} `ps` could not run, timed out, failed, or an existing pid read as empty.
+   */
+  const readPidText = (pid: number, columns: string): string | null => {
+    for (let attempt = 0; attempt < PS_EMPTY_READ_ATTEMPTS; attempt++) {
+      const run = runPs(["-o", columns, "-p", String(pid)]);
+      if (run.error !== undefined) throw new ProcessTableUnreadableError(`ps could not run (${run.error.message})`);
+      const text = (run.stdout ?? "").trim();
+      if (run.status !== 0) {
+        // reason: `ps -p <absent pid>` exits 1 with an empty listing; any other non-zero exit is a failure.
+        if (text === "" && (run.stderr ?? "").trim() === "") return null;
+        throw new ProcessTableUnreadableError(`ps exited ${String(run.status ?? "abnormally")}`);
+      }
+      if (text !== "") return text;
+    }
+    try {
+      process.kill(pid, 0);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ESRCH") return null;
+    }
+    throw new ProcessTableUnreadableError(`ps printed nothing for pid ${String(pid)} ${String(PS_EMPTY_READ_ATTEMPTS)} times although the process exists`);
   };
 
   const inspect = async (pid: number): Promise<ProcessInspection | null> => {
     if (!Number.isInteger(pid) || pid <= 0) return null;
-    const run = runPs(["-o", "stat=,lstart=", "-p", String(pid)]);
-    if (run.error !== undefined || run.status !== 0) return null;
-    const text = (run.stdout ?? "").trim();
+    const text = readPidText(pid, "stat=,lstart=");
+    if (text === null) return null;
     const match = /^(\S+)\s+(.*)$/.exec(text);
     if (match === null) return null;
     return { zombie: (match[1] as string).startsWith("Z"), startTime: parseLstart(match[2] as string) };
@@ -199,14 +244,8 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
   /** `ps -o ppid=,lstart= -p <pid>`: the row of one pid, `null` when it does not exist; throws when `ps` cannot run. */
   const readRow = (pid: number): { ppid: number; startTime: string | null } | null => {
     if (!Number.isInteger(pid) || pid <= 0) return null;
-    const run = runPs(["-o", "ppid=,lstart=", "-p", String(pid)]);
-    if (run.error !== undefined) throw new ProcessTableUnreadableError(`ps could not run (${run.error.message})`);
-    // reason: `ps -p <absent pid>` exits 1 with an empty listing; any other non-zero exit with output text is a failure.
-    const text = (run.stdout ?? "").trim();
-    if (run.status !== 0) {
-      if (text === "" && (run.stderr ?? "").trim() === "") return null;
-      throw new ProcessTableUnreadableError(`ps exited ${String(run.status ?? "abnormally")}`);
-    }
+    const text = readPidText(pid, "ppid=,lstart=");
+    if (text === null) return null;
     const match = /^(\d+)\s+(.*)$/.exec(text);
     if (match === null) return null;
     return { ppid: Number.parseInt(match[1] as string, 10), startTime: parseLstart(match[2] as string) };
@@ -254,9 +293,9 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
       let current = pid;
       for (let hop = 0; hop <= MAX_SHELL_HOPS; hop++) {
         if (!Number.isInteger(current) || current <= 1) return null;
-        const run = runPs(["-o", "ppid=,comm=", "-p", String(current)]);
-        if (run.error !== undefined || run.status !== 0) return null;
-        const match = /^\s*(\d+)\s+(.*)$/.exec((run.stdout ?? "").trim());
+        const text = readPidText(current, "ppid=,comm=");
+        if (text === null) return null;
+        const match = /^\s*(\d+)\s+(.*)$/.exec(text);
         if (match === null) return null;
         const command = basename((match[2] as string).replace(/^-/, ""));
         if (!SHELL_WRAPPERS.has(command)) return current;
