@@ -409,14 +409,15 @@ describe("milestone review gates close", () => {
     const bad = makePlan("FAILMARK batch");
     installJudge(
       judgeAnswer(),
-      judgeAnswer({ regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis", cites: ["src/old-path.ts"] } }),
+      // spec change (milestone-6): regression is measured, so the judged failure here is concurrency_safety.
+      judgeAnswer({ concurrency_safety: { verdict: "fail", reason: "two writers lose an update", reference: "Postgres MVCC", cites: ["src/old-path.ts"] } }),
     );
     const byIds = assessRows([good.plan, bad.plan]);
     expect(byIds.exitCode).toBe(1);
     const byPlan = new Map(byIds.rows.map((r) => [r.plan, r]));
     expect(byPlan.get(good.plan)?.outcome).toBe("PASS");
     expect(byPlan.get(bad.plan)?.outcome).toBe("FAIL");
-    expect(byPlan.get(bad.plan)?.failed).toEqual(["regression"]);
+    expect(byPlan.get(bad.plan)?.failed).toEqual(["concurrency_safety"]);
     // --where selects the same plans through the bulk selector.
     const byWhere = assessRows(["--where", "type=plan,status=approved"]);
     expect(byWhere.rows.map((r) => r.plan).sort()).toEqual([good.plan, bad.plan].sort());
@@ -556,10 +557,10 @@ describe("milestone review gates close", () => {
     const noDiff = await service.review("plan-p1", { diffSource: "none", maxDiffChars: 100_000, suite });
     expect(noDiff.ok).toBe(true);
     expect(stored[1]?.dimensions["regression"]?.verdict).toBe("pass");
-    // a run that was not measured is never read as a failure.
+    // a run that was not measured is never read as a failure, and (spec change, milestone-6) never as a pass either.
     const unmeasured = await service.review("plan-p1", { diffText: diff, diffSource: "test", maxDiffChars: 100_000, suite: { status: "not_measured", reason: "no main" } });
     expect(unmeasured.ok).toBe(true);
-    expect(stored[2]?.dimensions["regression"]?.verdict).toBe("pass");
+    expect(stored[2]?.dimensions["regression"]?.verdict).toBe("not-measured");
   });
 
   it("milestone review gates close: snapshot_accuracy fails only on a contradicted cited rule; stale and unknown are n/a with the reason", { timeout: 60_000 }, async () => {
@@ -634,7 +635,8 @@ describe("milestone review gates close", () => {
     expect(refreshed.ok).toBe(true);
     expect(ran).toEqual([{ plan: "plan-a", acIds: ["AC-A"] }]);
     expect((await service.review("plan-a", { diffSource: "none", maxDiffChars: 1000 })).ok).toBe(true);
-    expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("na");
+    // spec change (milestone-6): the judge's "looks stale" is ignored; the verified rule decides, so the dimension passes.
+    expect(stored[0]?.dimensions["snapshot_accuracy"]?.verdict).toBe("pass");
     expect(stored[0]?.overall).toBe("pass");
   });
 
@@ -660,18 +662,18 @@ describe("milestone review gates close", () => {
     expect(stored[0]?.dimensions["snapshot_accuracy"]?.reason).toContain("stale");
   });
 
-  /** A plan whose review fails on `security` and `regression`, with the fake GitHub configured as the upstream. */
+  /** A plan whose review fails on `concurrency_safety` and `security` (both judged), with the fake GitHub configured as the upstream. */
   function makeFailedPlan(title: string): string {
     configureGithubUpstream();
     const { plan } = makePlan(title);
     installJudge(
       judgeAnswer({
         security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection", cites: ["src/shell-runner.ts"] },
-        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis", cites: ["src/old-path.ts"] },
+        concurrency_safety: { verdict: "fail", reason: "two writers lose an update", reference: "Postgres MVCC", cites: ["src/old-path.ts"] },
       }),
       judgeAnswer(),
     );
-    expect(assessRows([plan]).rows[0]?.failed).toEqual(["regression", "security"]);
+    expect(assessRows([plan]).rows[0]?.failed).toEqual(["concurrency_safety", "security"]);
     return plan;
   }
 
@@ -727,7 +729,7 @@ describe("milestone review gates close", () => {
     installJudge(
       judgeAnswer({
         security: { verdict: "fail", reason: "unvalidated input reaches a shell", reference: "OWASP command injection", cites: ["src/shell-runner.ts"] },
-        regression: { verdict: "fail", reason: "breaks the old path", reference: "Kayenta canary analysis", cites: ["src/old-path.ts"] },
+        concurrency_safety: { verdict: "fail", reason: "two writers lose an update", reference: "Postgres MVCC", cites: ["src/old-path.ts"] },
       }),
       judgeAnswer(),
     );
@@ -740,10 +742,10 @@ describe("milestone review gates close", () => {
     // body carries the finding and the full fingerprint.
     const posts = readFileSync(join(judgeDir, "gh-state", "posts.log"), "utf8").trim().split("\n");
     expect(posts).toHaveLength(2);
-    expect(posts[0]).toMatch(/^regression: .* \[fp:[0-9a-f]{12}\]$/);
+    expect(posts[0]).toMatch(/^concurrency_safety:.* \[fp:[0-9a-f]{12}\]$/);
     expect(posts[1]).toMatch(/^security: .* \[fp:[0-9a-f]{12}\]$/);
     const listed = JSON.parse(readFileSync(join(judgeDir, "gh-state", "issues.json"), "utf8")) as { body: string }[];
-    expect(listed[0]?.body).toContain("breaks the old path");
+    expect(listed[0]?.body).toContain("two writers lose an update");
     expect(listed[1]?.body).toContain("unvalidated input reaches a shell");
     // the issues are recorded on the plan, so plan close accepts the failing review.
     const closed = close(plan);
