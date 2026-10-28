@@ -75,4 +75,10 @@ describe("check-create-guidance", () => {
     expect(r.status).toBe(1);
     expect(r.out).toContain("--spec");
   });
+
+  it("passes on the guidance this repository ships", () => {
+    const result = spawnSync("bun", [SCRIPT], { encoding: "utf8" });
+    expect(`${result.stdout}${result.stderr}`).toContain("check-create-guidance PASS");
+    expect(result.status).toBe(0);
+  });
 });
