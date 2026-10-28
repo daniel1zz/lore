@@ -16,13 +16,13 @@
  */
 
 import { err, ok, specAcceptanceCriteriaSchema, validationError } from "@lore/core";
-import type { DocRecord, LoreError, Result } from "@lore/core";
+import type { DecisionRecord, DocRecord, LoreError, Result } from "@lore/core";
 import type { AcExemptionRow, StoreInterface } from "../store/store-interface.js";
 import { createHash } from "node:crypto";
 import { resolveDoc } from "./resolve.js";
 import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
-import { findWriteSourceFor } from "../store/write-context-store.js";
+import { findWriteRunFor, findWriteSourceFor } from "../store/write-context-store.js";
 
 // reason: the 10% budget has ONE home, `ac-cite-gate.ts`, because the citation gate's feeding pack reports
 // the remaining headroom and must never disagree with what `grant` enforces. Re-exported so every existing
@@ -48,6 +48,11 @@ export interface GrantAcExemptionInput {
    * handle is a bare store): the invocation identity's `claimedSource`. Absent = read from the store's write context.
    */
   writerSource?: string | null | undefined;
+  /**
+   * The run writing the grant, stored on the exemption row so the milestone re-check can select its decision by claim
+   * window. Same provenance as `writerSource` (the CLI passes `inv.identity.harnessRun`); absent = read from the store's write context.
+   */
+  writerRun?: string | null | undefined;
 }
 
 /** One exemption as shown to callers; `state` is derived from the `now` of the query. */
@@ -148,11 +153,14 @@ export class AcExemptionService {
     }
 
     // BR-1479 — after every input check, before anything is written. An exemption is a row of its own table, not a version
-    // of the spec, so a complete decision is required but has no version row to be stored on: it is validated, not kept.
+    // of the spec, so the judged decision is stored on the exemption row itself (migration-042, BR-1492, #481) where the
+    // milestone re-check and `lore decision rates` read it like a version-row decision.
+    let judgedDecision: DecisionRecord | undefined;
     if (this.decisionGate !== undefined) {
       const required = writeCarriesDecision({ writerSource: input.writerSource ?? findWriteSourceFor(this.store), targetIsDraft: spec.value.status === "draft", changesMoreThanStatus: true });
       const judged = await this.decisionGate.judgeChecked({ required, draft: input.decision, reasonIsSharedFlag: true, kind: "document revision" });
       if (!judged.ok) return judged;
+      judgedDecision = judged.value;
     }
 
     // reason: AC-AU-7 — granting an exemption is DECIDED (class ac-exempt), not self-granted; after every input check,
@@ -175,6 +183,7 @@ export class AcExemptionService {
     const satisfied = await this.satisfiedKeys();
     if (!satisfied.ok) return satisfied;
     const nowIso = now.toISOString();
+    const writerRun = input.writerRun ?? findWriteRunFor(this.store);
     return this.store.insertAcExemptionCapped(
       {
         doc_id: spec.value.id,
@@ -183,6 +192,8 @@ export class AcExemptionService {
         expires_at: new Date(expiresMs).toISOString(),
         granted_by: by,
         granted_at: nowIso,
+        ...(judgedDecision !== undefined ? { decision: judgedDecision } : {}),
+        ...(writerRun !== undefined ? { harness_run: writerRun } : {}),
       },
       { liveCriteria: live.value, maxActive: maxActiveExemptions(live.value), now: nowIso, satisfied: satisfied.value },
     );

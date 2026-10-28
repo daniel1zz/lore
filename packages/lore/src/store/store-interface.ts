@@ -389,6 +389,10 @@ export interface AcExemptionRow {
   granted_by: string;
   /** ISO 8601 grant time. */
   granted_at: string;
+  /** The judged DecisionRecord the grant was made with (migration-042); absent = none (older row, draft or human grant). */
+  decision?: DecisionRecord;
+  /** The run that wrote the grant (migration-042); absent = not recorded. The milestone re-check selects by it. */
+  harness_run?: string;
 }
 
 /** Cap input of {@link StoreInterface.insertAcExemptionCapped}. */
@@ -418,6 +422,10 @@ export interface AcExemptionRow {
   granted_by: string;
   /** ISO 8601 grant time. */
   granted_at: string;
+  /** The judged DecisionRecord the grant was made with (migration-042); absent = none (older row, draft or human grant). */
+  decision?: DecisionRecord;
+  /** The run that wrote the grant (migration-042); absent = not recorded. The milestone re-check selects by it. */
+  harness_run?: string;
 }
 
 /** Cap input of {@link StoreInterface.insertAcExemptionCapped}. */
@@ -1002,6 +1010,16 @@ export interface StoreInterface {
 
   /** Every `ac_exemptions` row (active and expired), sorted by (doc_id, ac_id). */
   listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>>;
+
+  /**
+   * The exemption rows whose `decision` is non-null and that either exempt a criterion of one of `query.docIds`, or were
+   * granted (`granted_at`) by `window.run` within a window; oldest grant first. The exemption twin of
+   * {@link listDecisionVersions}.
+   */
+  listDecisionExemptions(query: DecisionVersionQuery): Promise<Result<AcExemptionRow[], LoreError>>;
+
+  /** Every exemption row whose `decision` is non-null and `granted_at >= since` (omit for all), oldest first: the `lore decision rates` population. */
+  listRecordedExemptionDecisions(since?: string): Promise<Result<AcExemptionRow[], LoreError>>;
 
   /**
    * Insert one `ac_exemptions` row under the cap in ONE write transaction (count active rows, then

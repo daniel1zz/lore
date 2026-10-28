@@ -227,6 +227,17 @@ export function findWriteSourceFor(store: StoreInterface): string | undefined {
   return effectiveIdentity(context).claimedSource ?? undefined;
 }
 
+/**
+ * The run (`harness_run`) of the party writing through `store` right now — the request's under HTTP, else the context's
+ * own — or `undefined` when the store has no write context or the identity names no run. A pure read; a write that goes
+ * through no stamped store method (the exemption insert) asks it for the run its row must carry.
+ */
+export function findWriteRunFor(store: StoreInterface): string | undefined {
+  const context = readWriteContext(store);
+  if (context === undefined) return undefined;
+  return effectiveIdentity(context).harnessRun ?? undefined;
+}
+
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {
   return { ...record, ...stamp };
 }
