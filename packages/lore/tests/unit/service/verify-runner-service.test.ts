@@ -873,7 +873,7 @@ describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attest
       slug: "spec-match",
     });
     const otherSpec = makeSpec([scriptAc("AC-OTHER-1", "cmd-x")], { id: "spec-other", slug: "spec-other" });
-    const task = makeAdhocTask("adhoc-1", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const task = makeAdhocTask("adhoc-1", { extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: "spec-match" } });
 
     const executor = makeExecutor([ok({ exitCode: 0, outputTail: "out", durationMs: 10, timedOut: false })]);
     const recorder = makeRecordVerifiedEvidence([ok(makeTask("adhoc-1", { version: 2 }))]);
@@ -896,7 +896,7 @@ describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attest
     // by task-verifyadhoctask-stamps-ac-ref-on-its-runner-attested) — cross-
     // validated through the ad-hoc governing-AC port
     // (`resolveAdhocGoverningAcIds` → `CorpusService.
-    // resolveDeclaredAcIdsForAdhocTask` → the SAME `resolveGoverningSpecByAcScope`
+    // resolveDeclaredAcIdsForAdhocTask` → the SAME `resolveRecordedGoverningSpec`
     // search this method itself ran above), not the plan-only `parent_id` walk
     // (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref removed that
     // structural impossibility first). STATE — asserted alongside the REST of
@@ -916,7 +916,7 @@ describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attest
       id: "spec-super",
       slug: "spec-super",
     });
-    const task = makeAdhocTask("adhoc-2", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const task = makeAdhocTask("adhoc-2", { extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: "spec-super" } });
     const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false })]);
     const recorder = makeRecordVerifiedEvidence([ok(makeTask("adhoc-2", { version: 2 }))]);
     const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
@@ -931,7 +931,7 @@ describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attest
 
   it("STATE — the M2 command-provenance approval gate still applies (proves real delegation to the shared execution tail)", async () => {
     const spec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-gated", slug: "spec-gated" });
-    const task = makeAdhocTask("adhoc-3", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const task = makeAdhocTask("adhoc-3", { extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: "spec-gated" } });
     const executor = makeExecutor([]);
     const recorder = makeRecordVerifiedEvidence([]);
     const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
@@ -959,7 +959,7 @@ describe("ERROR — AC-069-16: flipping recordAcRef for the ad-hoc channel opens
     // resolveAdhocGoverningAcIds cross-validation) than the pre-flight checks
     // this suite's NEGATIVE/ERROR describe blocks already cover.
     const spec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-bypass", slug: "spec-bypass" });
-    const task = makeAdhocTask("adhoc-bypass", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const task = makeAdhocTask("adhoc-bypass", { extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: "spec-bypass" } });
     const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
     const recorder = makeRecordVerifiedEvidence([
       err({
@@ -1055,11 +1055,11 @@ describe("NEGATIVE — verifyAdhocTask refuses structurally-invalid inputs befor
     expect(executor.callCount).toBe(0);
   });
 
-  it("zero candidate specs declare the scope in full — VALIDATION_ERROR field 'ac_scope', 'matches no'", async () => {
+  it("no governing spec recorded — VALIDATION_ERROR field 'governing_spec', names lore scope spec (BR-1495)", async () => {
     const executor = makeExecutor([]);
     const recorder = makeRecordVerifiedEvidence([]);
     const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
-    const task = makeAdhocTask("adhoc-6", { extra: { adhoc: true, ac_scope: ["AC-NOWHERE"] } });
+    const task = makeAdhocTask("adhoc-6", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
     const unrelatedSpec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-1", slug: "spec-1" });
 
     const result = await service.verifyAdhocTask(task, [unrelatedSpec], { by: "runner", nowIso: NOW });
@@ -1067,8 +1067,8 @@ describe("NEGATIVE — verifyAdhocTask refuses structurally-invalid inputs befor
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
     if (result.error.code !== "VALIDATION_ERROR") return;
-    expect(result.error.field).toBe("ac_scope");
-    expect(result.error.message).toContain("matches no");
+    expect(result.error.field).toBe("governing_spec");
+    expect(result.error.message).toContain("lore scope spec");
     expect(executor.callCount).toBe(0);
   });
 
@@ -1077,7 +1077,7 @@ describe("NEGATIVE — verifyAdhocTask refuses structurally-invalid inputs befor
     const recorder = makeRecordVerifiedEvidence([]);
     const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
     const spec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-1", slug: "spec-1" });
-    const task = makeAdhocTask("adhoc-7", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const task = makeAdhocTask("adhoc-7", { extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: "spec-1" } });
 
     const result = await service.verifyAdhocTask(task, [spec], {
       by: "runner",
@@ -1093,31 +1093,35 @@ describe("NEGATIVE — verifyAdhocTask refuses structurally-invalid inputs befor
   });
 });
 
-describe("ERROR — ac_scope matching MULTIPLE candidate specs is ambiguous and refused", () => {
-  it("VALIDATION_ERROR field 'ac_scope', message names every matched spec slug, never guesses", async () => {
+describe("STATE — two specs declare the same criterion id; the RECORDED spec decides (BR-1495, #496)", () => {
+  it("resolves to the recorded spec and executes ITS command, never a guess", async () => {
     const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
-    const executor = makeExecutor([]);
-    const recorder = makeRecordVerifiedEvidence([]);
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("adhoc-8", { version: 2 }))]);
     const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
 
-    // reason: AC-* ids are unique only WITHIN one spec's declared criteria
-    // (never enforced globally) — two independent specs each declaring an
-    // "AC-SHARED-1" is a legitimate corpus state this method must handle by
-    // refusing, never by picking one arbitrarily.
+    // reason: AC-* ids are unique only WITHIN one spec's declared criteria — two specs each declaring
+    // "AC-SHARED-1" is a legitimate corpus state; the task's recorded spec picks between them.
     const specA = makeSpec([scriptAc("AC-SHARED-1", "cmd-a")], { id: "spec-a", slug: "spec-a" });
     const specB = makeSpec([scriptAc("AC-SHARED-1", "cmd-b")], { id: "spec-b", slug: "spec-b" });
-    const task = makeAdhocTask("adhoc-8", { extra: { adhoc: true, ac_scope: ["AC-SHARED-1"] } });
+    const task = makeAdhocTask("adhoc-8", { extra: { adhoc: true, ac_scope: ["AC-SHARED-1"], governing_spec: "spec-b" } });
 
     const result = await service.verifyAdhocTask(task, [specA, specB], { by: "runner", nowIso: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code !== "VALIDATION_ERROR") return;
-    expect(result.error.field).toBe("ac_scope");
-    expect(result.error.message).toContain("ambiguous");
-    expect(result.error.message).toContain("spec-a");
-    expect(result.error.message).toContain("spec-b");
-    expect(executor.callCount).toBe(0);
+    expect(result.ok).toBe(true);
+    expect(executor.callCount).toBe(1);
+    expect(JSON.stringify(executor.calls)).toContain("cmd-b");
+    expect(JSON.stringify(executor.calls)).not.toContain("cmd-a");
+  });
+
+  it("a deprecated recorded spec still resolves (BR-1494)", async () => {
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("adhoc-9", { version: 2 }))]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const old = makeSpec([scriptAc("AC-OLD-1", "cmd-old")], { id: "spec-old", slug: "spec-old", status: "deprecated" });
+    const task = makeAdhocTask("adhoc-9", { extra: { adhoc: true, ac_scope: ["AC-OLD-1"], governing_spec: "spec-old" } });
+    const result = await service.verifyAdhocTask(task, [old], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
   });
 });
 

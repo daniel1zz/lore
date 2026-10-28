@@ -643,9 +643,11 @@ describe("lore evidence — forged --attestation is rejected outright (SPEC-051 
 //     control.
 
 /** Create a SPEC-069 `--adhoc` task (no --parent/--plan-id), declaring `acScope` via `--ac-scope`. */
-function createAdhocTask(title: string, acScope: readonly string[] = []): string {
+function createAdhocTask(title: string, acScope: readonly string[] = [], governingSpec?: string): string {
   const args = ["create", "task", "--title", title, "--adhoc", "--no-ai", "--content", "body"];
   for (const acId of acScope) args.push("--ac-scope", acId);
+  // BR-118: a non-empty scope records its governing spec.
+  if (governingSpec !== undefined) args.push("--spec", governingSpec);
   const r = runLore(args, tmpDir);
   if (r.exitCode !== 0) throw new Error(`create adhoc task failed: ${r.stderr}`);
   return extractSlug(r.stdout);
@@ -655,8 +657,10 @@ describe("lore verify — SPEC-069 ad-hoc-task runner path", () => {
   it("REGRESSION (RED pin): passing an ad-hoc task's own slug as PLAN still refuses with the pre-existing leaky message", () => {
     // reason: --adhoc task creation parents to the corpus root PRD — a PRD must
     // exist first (unrelated to the assertion below, purely a creation precondition).
-    createPrd("RedPin PRD");
-    const adhocTask = createAdhocTask("RedPin Adhoc Task", ["AC-ADHOC-RED-1"]);
+    const redPinPrd = createPrd("RedPin PRD");
+    const redPinSpec = createSpec("RedPin Spec", redPinPrd);
+    declareScriptAc(redPinSpec, "AC-ADHOC-RED-1", "true");
+    const adhocTask = createAdhocTask("RedPin Adhoc Task", ["AC-ADHOC-RED-1"], redPinSpec);
 
     // reason: this is the OLD, unsupported shape (a non-plan id passed as the
     // PLAN positional) — deliberately left alone. The NEW supported shape is
@@ -672,7 +676,7 @@ describe("lore verify — SPEC-069 ad-hoc-task runner path", () => {
     const prdSlug = createPrd("Adhoc Green PRD");
     const specSlug = createSpec("Adhoc Green Spec", prdSlug);
     declareScriptAc(specSlug, "AC-ADHOC-G1", "true");
-    const adhocTask = createAdhocTask("Adhoc Green Task", ["AC-ADHOC-G1"]);
+    const adhocTask = createAdhocTask("Adhoc Green Task", ["AC-ADHOC-G1"], specSlug);
 
     const result = runLore(["verify", "--task", adhocTask, "--allow-new-commands"], tmpDir);
 
@@ -720,20 +724,20 @@ describe("lore verify — SPEC-069 ad-hoc-task runner path", () => {
     expect(result.stderr).not.toContain("Expected a plan document");
   });
 
-  it("ERROR: ac_scope matching AC ids declared on TWO independent specs is ambiguous and refused", () => {
+  it("STATE: AC ids declared on TWO independent specs resolve to the spec the task recorded (#496)", () => {
     const prdA = createPrd("Ambiguous PRD A");
     const specA = createSpec("Ambiguous Spec A", prdA);
     declareScriptAc(specA, "AC-SHARED-ADHOC-1", "true");
     const prdB = createPrd("Ambiguous PRD B");
     const specB = createSpec("Ambiguous Spec B", prdB);
     declareScriptAc(specB, "AC-SHARED-ADHOC-1", "true");
-    const adhocTask = createAdhocTask("Ambiguous Adhoc Task", ["AC-SHARED-ADHOC-1"]);
+    const adhocTask = createAdhocTask("Ambiguous Adhoc Task", ["AC-SHARED-ADHOC-1"], specB);
 
     const result = runLore(["verify", "--task", adhocTask, "--allow-new-commands"], tmpDir);
 
-    expect(result.exitCode).toBe(4);
-    expect(result.stderr).toContain("ambiguous");
-    expect(result.stderr).toContain(specA);
-    expect(result.stderr).toContain(specB);
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stdout).toContain("AC-SHARED-ADHOC-1");
+    // the recorded spec decides: spec A, which declares the same id, never makes it ambiguous
+    expect(specA).not.toBe(specB);
   });
 });

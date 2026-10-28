@@ -204,7 +204,7 @@ import {
   resolveTargetTask,
   extractDeclaredAcScope,
   isAcInDeclaredScope,
-  resolveGoverningSpecByAcScope,
+  resolveRecordedGoverningSpec,
   isApprovedVerifyCommand,
   countExplicitPathArgs,
   parseExecutedUnits,
@@ -1070,7 +1070,7 @@ export class VerifyRunnerService {
    *   used to pass `recordAcRef: false` here. `appendEvidenceEntry` now BRANCHES
    *   on `task.extra.adhoc` — an ad-hoc task's `ac_ref` resolves via the injected
    *   `resolveAdhocGoverningAcIds` port (`CorpusService.resolveDeclaredAcIdsForAdhocTask`,
-   *   which runs the SAME `resolveGoverningSpecByAcScope` search this class's own
+   *   which runs the SAME `resolveRecordedGoverningSpec` lookup this class's own
    *   `verifyAdhocTask` runs, `@lore/core`) instead of the plan-only walk — so
    *   supplying `ac_ref` from THIS method for an ad-hoc task now succeeds, and
    *   an undeclared criterion id is refused (AC-069-16 — no new bypass) exactly
@@ -1470,21 +1470,12 @@ export class VerifyRunnerService {
    * mirroring this class's existing "adapter resolves IO, service decides"
    * split for `getPlanBundle` itself — no NEW constructor port is needed).
    *
-   * Governing-spec resolution (measured 2026-08-01: no structural plan/spec
-   * link exists for an ad-hoc task — a real corpus task implementing an AC on a
-   * named spec, `task-ac-ll-8-guards-the-loader-strip-not-the-no-sync-bearing`,
-   * carries NO `ac_scope` and NO link to that spec; the association exists only
-   * in prose). The task's declared `extra.ac_scope` must name AC ids that are
-   * declared, IN FULL, on EXACTLY ONE candidate spec's `acceptance_criteria` —
-   * zero or multiple matching specs REFUSE loud (`VALIDATION_ERROR`). This
-   * method never guesses which spec governs an ad-hoc task: `AC-*` ids are
-   * unique only WITHIN one spec's declared criteria (`specAcceptanceCriteriaSchema`),
-   * never enforced globally, so guessing wrong would silently attest a real
-   * script command against the wrong spec's acceptance criteria. The actual
-   * search (zero/multi-match refusal included) is `resolveGoverningSpecByAcScope`
-   * (`@lore/core`) — shared verbatim with `CorpusService.resolveDeclaredAcIdsForAdhocTask`
-   * (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref) so the two
-   * surfaces can never disagree about which spec governs a given ad-hoc task.
+   * Governing-spec resolution: no structural plan/spec link exists for an ad-hoc
+   * task, so it RECORDS its spec (`extra.governing_spec`, BR-1495) and this method
+   * resolves through `resolveRecordedGoverningSpec` (`@lore/core`) — the lookup
+   * `CorpusService.resolveDeclaredAcIdsForAdhocTask` shares. `AC-*` ids are unique
+   * only WITHIN one spec, so there is no search by id. A deprecated spec and a
+   * superseded criterion still resolve (BR-1494).
    *
    * Every step AFTER spec resolution (declared-scope selection, M2 approval
    * gate, execution, freshness/completeness guards, attested evidence write) is
@@ -1506,7 +1497,7 @@ export class VerifyRunnerService {
    * carry-ac-ref` fixed that: `appendEvidenceEntry` now resolves an ad-hoc
    * task's `ac_ref` via the injected `resolveAdhocGoverningAcIds` port →
    * `CorpusService.resolveDeclaredAcIdsForAdhocTask` → this SAME
-   * `resolveGoverningSpecByAcScope` search — so supplying `ac_ref` from this
+   * `resolveRecordedGoverningSpec` lookup — so supplying `ac_ref` from this
    * method is cross-validated the same way a plan-owned task's is, and a
    * criterion id the resolved governing spec does not declare is still refused
    * (AC-069-16 — no new bypass): that refusal surfaces as a `recordVerifiedEvidence`
@@ -1518,7 +1509,7 @@ export class VerifyRunnerService {
    *   this by id/slug; this method does no id resolution of its own).
    * @param candidateSpecs - Every `spec`-typed doc in the corpus (caller-fetched,
    *   e.g. `corpusService.listFull({type: "spec"}).docs`) — filtered here down
-   *   to the ones that fully declare the task's ac_scope.
+   *   to the task's recorded governing spec.
    * @param opts - Same `VerifyPlanOpts` `verifyPlan` accepts.
    * @returns Same `VerifyPlanResult` contract as `verifyPlan`.
    * @throws (as `Result`) VALIDATION_ERROR — `task` is not type "task"; task is
@@ -1583,12 +1574,7 @@ export class VerifyRunnerService {
     // Shared search (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref)
     // — SAME function `CorpusService.resolveDeclaredAcIdsForAdhocTask` calls, so
     // the two surfaces can never disagree about which spec governs this task.
-    const resolveResult = resolveGoverningSpecByAcScope(
-      declared,
-      candidateSpecs,
-      `ad-hoc task "${task.slug}"`,
-      opts.nowIso,
-    );
+    const resolveResult = resolveRecordedGoverningSpec(task, candidateSpecs, `ad-hoc task "${task.slug}"`);
     if (!resolveResult.ok) return resolveResult;
     const { spec, criteria } = resolveResult.value;
 

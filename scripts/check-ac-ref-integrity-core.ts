@@ -29,7 +29,7 @@
  *   - resolveGoverningSpec(task, docsById, allSpecs) — governing-spec resolution for BOTH
  *     plan-bound tasks (structural task -> plan -> plan's parent spec walk) AND
  *     `--adhoc` tasks (SPEC-069 D2, no plan/spec structural link at all) — the adhoc
- *     branch delegates to the SAME `resolveGoverningSpecByAcScope` (`@lore/core`)
+ *     branch delegates to the SAME `resolveRecordedGoverningSpec` (`@lore/core`)
  *     that `TaskWorkflowService.addEvidence`/`CorpusService.resolveDeclaredAcIdsForAdhocTask`/
  *     `VerifyRunnerService.verifyAdhocTask` already use, so this detector can never
  *     disagree with the write path about which spec governs a given ad-hoc task
@@ -74,15 +74,12 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   extractEvidence,
-  extractDeclaredAcScope,
-  resolveGoverningSpecByAcScope,
+  extractGoverningSpecRef,
+  resolveRecordedGoverningSpec,
   specAcceptanceCriteriaSchema,
   type DocRecord,
   type DocId,
 } from "@lore/core";
-
-/** Script-layer clock: the one wall-clock read feeding core's `nowIso` parameter. */
-const defaultNow = (): string => new Date().toISOString();
 
 // ─── Dangling ref shape ────────────────────────────────────────────────────
 
@@ -122,29 +119,15 @@ export interface DanglingRef {
  *   - `structural-walk-failed` — task is NOT `--adhoc`
  *     (`task.extra.adhoc !== true`) and the task -> plan -> spec walk broke at
  *     either hop (missing parent, wrong doc type at either hop).
- *   - `adhoc-scope-absent` — task IS `--adhoc` but declares no `ac_scope` at
- *     all (`extractDeclaredAcScope` returns `undefined`) — nothing to search with.
- *   - `adhoc-scope-empty` — task IS `--adhoc` and its `ac_scope` is the
- *     explicit EMPTY array (`[]`, `--ac-scope ""` — "this task claims
- *     nothing", distinct from omitting the flag). An empty scope is
- *     vacuously "covered" by every candidate spec, so it must be refused
- *     BEFORE reaching {@link resolveGoverningSpecByAcScope} (see that
- *     function's own `@param declaredAcScope` doc: callers must never pass
- *     an empty array in) — never silently resolved to whichever spec is
- *     scanned first.
- *   - `adhoc-scope-no-match` — task IS `--adhoc`, `ac_scope` is non-empty, but
- *     `resolveGoverningSpecByAcScope` found ZERO specs whose declared
- *     `acceptance_criteria` fully cover it.
- *   - `adhoc-scope-ambiguous` — task IS `--adhoc`, `ac_scope` is non-empty,
- *     but `resolveGoverningSpecByAcScope` found MORE THAN ONE covering spec —
- *     never guessed, so this detector can never silently pick the wrong one.
+ *   - `adhoc-spec-unrecorded` — task IS `--adhoc` and records no governing spec
+ *     (`extra.governing_spec` absent). Nothing is inferred from its scope ids.
+ *   - `adhoc-spec-not-found` — task IS `--adhoc` and records a spec that is not a
+ *     spec in this corpus.
  */
 export const GOVERNING_SPEC_FAILURE_REASONS = [
   "structural-walk-failed",
-  "adhoc-scope-absent",
-  "adhoc-scope-empty",
-  "adhoc-scope-no-match",
-  "adhoc-scope-ambiguous",
+  "adhoc-spec-unrecorded",
+  "adhoc-spec-not-found",
 ] as const;
 
 /** Derived TypeScript union for a governing-spec resolution failure — see {@link GOVERNING_SPEC_FAILURE_REASONS}. */
@@ -183,12 +166,11 @@ export interface GoverningSpecResolution {
  *     reporting + ledger keying), not just its declared ids.
  *   - `--adhoc` (SPEC-069 D2 — parent is structurally the root PRD, so the
  *     walk above can NEVER succeed for it): delegates to the SHARED
- *     `resolveGoverningSpecByAcScope` (`@lore/core`) — the EXACT search
+ *     `resolveRecordedGoverningSpec` (`@lore/core`) — the EXACT lookup
  *     `CorpusService.resolveDeclaredAcIdsForAdhocTask` and
- *     `VerifyRunnerService.verifyAdhocTask` already run. Never re-implemented
- *     here (task-check-ac-ref-integrity-re-implements-governing-spec: a
- *     private copy of this search is what drifted narrower than the write
- *     path in the first place).
+ *     `VerifyRunnerService.verifyAdhocTask` run (the spec the task recorded,
+ *     BR-1495). Never re-implemented here (task-check-ac-ref-integrity-re-implements-
+ *     governing-spec: a private copy is what drifted from the write path before).
  *
  * @returns A {@link GoverningSpecResolution} — never a bare `DocRecord | null`,
  *   so a caller can report WHY resolution failed instead of one collapsed fact.
@@ -197,17 +179,16 @@ export interface GoverningSpecResolution {
  * resolveGoverningSpec(task, docsById, [spec]);
  * // => { spec, failureReason: null } (when task.parent_id === plan.id)
  * @example
- * resolveGoverningSpec(adhocTaskWithEmptyScope, new Map(), [spec]);
- * // => { spec: null, failureReason: "adhoc-scope-empty" }
+ * resolveGoverningSpec(adhocTaskWithNoRecordedSpec, new Map(), [spec]);
+ * // => { spec: null, failureReason: "adhoc-spec-unrecorded" }
  */
 export function resolveGoverningSpec(
   task: DocRecord,
   docsById: ReadonlyMap<DocId, DocRecord>,
   allSpecs: readonly DocRecord[],
-  now: () => string = defaultNow,
 ): GoverningSpecResolution {
   if (task.extra["adhoc"] === true) {
-    return resolveGoverningSpecForAdhocTask(task, allSpecs, now());
+    return resolveGoverningSpecForAdhocTask(task, allSpecs);
   }
   return resolveGoverningSpecForPlanBoundTask(task, docsById);
 }
@@ -228,44 +209,18 @@ function resolveGoverningSpecForPlanBoundTask(
 }
 
 /**
- * The `--adhoc` branch — see {@link resolveGoverningSpec}'s adhoc branch.
- * Mirrors `CorpusService.resolveDeclaredAcIdsForAdhocTask`'s own
- * absent-vs-empty-vs-search sequencing exactly (same three refusal shapes,
- * same order), so a task that the write path would refuse an `ac_ref`
- * against is reported with the SAME named reason here.
+ * The `--adhoc` branch — see {@link resolveGoverningSpec}'s adhoc branch. The spec is the one the task
+ * recorded (`extra.governing_spec`); there is no search by scope id.
  */
 function resolveGoverningSpecForAdhocTask(
   task: DocRecord,
   allSpecs: readonly DocRecord[],
-  nowIso: string,
 ): GoverningSpecResolution {
-  const declared = extractDeclaredAcScope(task);
-  if (declared === undefined) {
-    return { spec: null, failureReason: "adhoc-scope-absent" };
+  if (extractGoverningSpecRef(task) === undefined) {
+    return { spec: null, failureReason: "adhoc-spec-unrecorded" };
   }
-  if (declared.length === 0) {
-    return { spec: null, failureReason: "adhoc-scope-empty" };
-  }
-
-  const resolved = resolveGoverningSpecByAcScope(declared, allSpecs, `task "${task.slug}"`, nowIso);
-  if (!resolved.ok) {
-    // `resolveGoverningSpecByAcScope`'s own documented contract (@lore/core
-    // acceptance.ts `@throws`) names exactly these two refusal shapes and
-    // spells out the distinguishing word for each: "matches no ... in full"
-    // for zero candidates covering the scope, vs "... — ambiguous." for more
-    // than one. Reading that documented word back out of the returned
-    // LoreError is NOT re-deriving the search (this function never re-counts
-    // covering specs itself) — it is reading the ONE search's own verdict.
-    // `LoreError` is a wide discriminated union (most variants carry no
-    // `message`); this function only ever returns `VALIDATION_ERROR` or
-    // `STORE_ERROR` (both do), but the `in` guard keeps this correct even if
-    // that ever changes, rather than asserting a shape TS cannot see.
-    const message = "message" in resolved.error ? resolved.error.message : "";
-    const failureReason: GoverningSpecFailureReason = message.includes("ambiguous")
-      ? "adhoc-scope-ambiguous"
-      : "adhoc-scope-no-match";
-    return { spec: null, failureReason };
-  }
+  const resolved = resolveRecordedGoverningSpec(task, allSpecs, `task "${task.slug}"`);
+  if (!resolved.ok) return { spec: null, failureReason: "adhoc-spec-not-found" };
   return { spec: resolved.value.spec, failureReason: null };
 }
 
@@ -306,14 +261,13 @@ export function extractDeclaredAcIds(spec: DocRecord): Set<string> {
 export function findDanglingRefs(
   tasks: readonly DocRecord[],
   docsById: ReadonlyMap<DocId, DocRecord>,
-  now: () => string = defaultNow,
 ): DanglingRef[] {
   const allSpecs = Array.from(docsById.values()).filter((doc) => doc.type === "spec");
   const seen = new Set<string>();
   const results: DanglingRef[] = [];
 
   for (const task of tasks) {
-    const resolution = resolveGoverningSpec(task, docsById, allSpecs, now);
+    const resolution = resolveGoverningSpec(task, docsById, allSpecs);
     const declaredIds = resolution.spec !== null ? extractDeclaredAcIds(resolution.spec) : new Set<string>();
 
     for (const entry of extractEvidence(task)) {

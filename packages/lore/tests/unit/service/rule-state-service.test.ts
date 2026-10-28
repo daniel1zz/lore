@@ -317,7 +317,7 @@ interface World {
   /** a plan-member task (`extra.plan_id`) carrying evidence */
   task(slug: string, plan: DocRecord, evidence: EvidenceEntry[]): Promise<DocRecord>;
   /** an ad-hoc task: no plan lineage, parented under the root PRD, declaring `ac_scope` */
-  adhocTask(slug: string, acScope: string[], evidence: EvidenceEntry[]): Promise<DocRecord>;
+  adhocTask(slug: string, acScope: string[], evidence: EvidenceEntry[], governingSpec?: DocRecord): Promise<DocRecord>;
 }
 
 async function newWorld(): Promise<World> {
@@ -351,10 +351,15 @@ async function newWorld(): Promise<World> {
     plan: (slug, spec) => put(store, rawDoc("plan", slug, {}, spec.id)),
     task: (slug, plan, evidence) =>
       put(store, rawDoc("task", slug, { plan_id: plan.id, verification_evidence: evidence }, plan.id)),
-    adhocTask: (slug, acScope, evidence) =>
+    adhocTask: (slug, acScope, evidence, governingSpec) =>
       put(
         store,
-        rawDoc("task", slug, { ac_scope: acScope, adhoc: true, verification_evidence: evidence }, prd.id),
+        rawDoc(
+          "task",
+          slug,
+          { ac_scope: acScope, adhoc: true, verification_evidence: evidence, ...(governingSpec !== undefined ? { governing_spec: governingSpec.id } : {}) },
+          prd.id,
+        ),
       ),
   };
 }
@@ -733,7 +738,19 @@ describe("AC-BLS1-5 evidence attribution through plan lineage", () => {
     expect(res.ambiguous_ac_ref).toBe(2);
   });
 
-  it("an ad-hoc task whose ac_ref matches exactly ONE spec is attributed to it (not ambiguous)", async () => {
+  it("an ad-hoc task that recorded its governing spec is attributed to it (not ambiguous)", async () => {
+    const w = await newWorld();
+    await w.leaf("leaf-a", ["BR-1"]);
+    const spec = await w.spec("spec-one", [scriptAc("AC-ONLY-1", ["BR-1"])]);
+    await w.adhocTask("task-adhoc", ["AC-ONLY-1"], [
+      attested("AC-ONLY-1", "pass", T0, { head_sha: OLD, worktree_dirty: false }),
+    ], spec);
+    const res = await runFull(w, new CountingGit());
+    expect(res.ambiguous_ac_ref).toBe(0);
+    expect(entry(res, "BR-1").state).toBe("verified");
+  });
+
+  it("an ad-hoc task with NO recorded spec attributes nothing, even when exactly one spec declares the id (BR-1495)", async () => {
     const w = await newWorld();
     await w.leaf("leaf-a", ["BR-1"]);
     await w.spec("spec-one", [scriptAc("AC-ONLY-1", ["BR-1"])]);
@@ -741,8 +758,22 @@ describe("AC-BLS1-5 evidence attribution through plan lineage", () => {
       attested("AC-ONLY-1", "pass", T0, { head_sha: OLD, worktree_dirty: false }),
     ]);
     const res = await runFull(w, new CountingGit());
+    expect(res.ambiguous_ac_ref).toBe(1);
+    expect(entry(res, "BR-1").state).toBe("unverified");
+  });
+
+  it("two specs declare the id: the recorded one is credited, the other stays unverified (#496)", async () => {
+    const w = await newWorld();
+    await w.leaf("leaf-a", ["BR-1", "BR-2"]);
+    const one = await w.spec("spec-one", [scriptAc("AC-DUP-1", ["BR-1"])]);
+    await w.spec("spec-two", [scriptAc("AC-DUP-1", ["BR-2"])]);
+    await w.adhocTask("task-adhoc", ["AC-DUP-1"], [
+      attested("AC-DUP-1", "pass", T0, { head_sha: OLD, worktree_dirty: false }),
+    ], one);
+    const res = await runFull(w, new CountingGit());
     expect(res.ambiguous_ac_ref).toBe(0);
     expect(entry(res, "BR-1").state).toBe("verified");
+    expect(entry(res, "BR-2").state).toBe("unverified");
   });
 
   it("counts mode reports the same ambiguous_ac_ref", async () => {

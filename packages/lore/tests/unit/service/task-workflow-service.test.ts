@@ -1128,7 +1128,7 @@ describe("STATE / REGRESSION — evidence without ac_ref never invokes the port 
 // Unlike the stub-port blocks above, these wire REAL CorpusService ports (both
 // resolveDeclaredAcIds AND resolveDeclaredAcIdsForAdhocTask), mirroring app.ts's
 // production wiring exactly — the whole point of this fix is genuine cross-
-// service resolution (the shared `resolveGoverningSpecByAcScope` search), not
+// service resolution (the shared `resolveRecordedGoverningSpec` lookup), not
 // just how appendEvidenceEntry reacts to an arbitrary port Result.
 
 function makeServicesWithRealAcPorts(ttl = 120) {
@@ -1177,30 +1177,28 @@ async function createSpecWithCriteria(
 async function createAdhocTask(
   cs: CorpusService,
   acScope: string[],
+  governingSpec?: string,
   title = "Ad-hoc task",
 ): Promise<string> {
   const result = await cs.create({
     type: "task",
     title,
     content: "found mid-plan",
-    extra: { adhoc: true, ac_scope: acScope },
+    extra: { adhoc: true, ac_scope: acScope, ...(governingSpec !== undefined ? { governing_spec: governingSpec } : {}) },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create adhoc task: ${JSON.stringify(result.error)}`);
   return result.value.id;
 }
 
 describe("REGRESSION — the pre-fix unconditional plan-only walk no longer reproduces for an --adhoc task", () => {
-  it("an --adhoc task's ac_ref no longer fails with 'Expected a plan document' — the ad-hoc branch resolves via ac_scope instead", async () => {
-    // reason: pre-fix, appendEvidenceEntry called resolveDeclaredAcIds(task.parent_id)
-    // UNCONDITIONALLY whenever ac_ref was supplied — an ad-hoc task's parent_id is
-    // the root PRD, so that call always refused `Expected a plan document; got type
-    // 'prd'` (measured via a git-stash repro against the pre-fix source: real CLI
-    // invocation `lore evidence <adhoc-task> --ac AC-RED-1` exited 4 with exactly
-    // this message). This test pins the OLD message is GONE for an ad-hoc task with
-    // no declared ac_scope — the refusal is now the ac_scope-absent one instead.
+  it("an --adhoc task's ac_ref no longer fails with 'Expected a plan document' — the ad-hoc branch resolves via the recorded spec instead", async () => {
+    // reason: pre-fix, appendEvidenceEntry called resolveDeclaredAcIds(task.parent_id) UNCONDITIONALLY
+    // whenever ac_ref was supplied — an ad-hoc task's parent_id is the root PRD, so that call always
+    // refused `Expected a plan document; got type 'prd'`. An ad-hoc task with no recorded spec now
+    // refuses naming `lore scope spec` instead.
     const { corpusService, taskWorkflowService } = makeServicesWithRealAcPorts();
     await createRootPrd(corpusService);
-    const taskId = await createAdhocTask(corpusService, []); // no ac_scope declared
+    const taskId = await createAdhocTask(corpusService, []); // empty scope, no spec recorded
 
     const result = await taskWorkflowService.addEvidence(taskId, evidence({ ac_ref: "AC-ANY-1" }));
     expect(result.ok).toBe(false);
@@ -1208,16 +1206,17 @@ describe("REGRESSION — the pre-fix unconditional plan-only walk no longer repr
     expect(result.error.code).toBe("VALIDATION_ERROR");
     if (result.error.code !== "VALIDATION_ERROR") return;
     expect(result.error.message).not.toMatch(/Expected a plan document/);
-    expect(result.error.field).toBe("ac_scope");
+    expect(result.error.field).toBe("governing_spec");
+    expect(result.error.message).toContain("lore scope spec");
   });
 });
 
-describe("HAPPY — an --adhoc task's ac_ref resolves via its declared ac_scope and is stored (AC-2)", () => {
-  it("ac_ref is written to extra.verification_evidence when ac_scope resolves to exactly one spec", async () => {
+describe("HAPPY — an --adhoc task's ac_ref resolves through its recorded spec and is stored (AC-2)", () => {
+  it("ac_ref is written to extra.verification_evidence when the recorded spec declares it", async () => {
     const { corpusService, acService, taskWorkflowService } = makeServicesWithRealAcPorts();
     const prdId = await createRootPrd(corpusService);
     const specId = await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-ADHOC-1")]);
-    const taskId = await createAdhocTask(corpusService, ["AC-ADHOC-1"]);
+    const taskId = await createAdhocTask(corpusService, ["AC-ADHOC-1"], specId);
 
     const result = await taskWorkflowService.addEvidence(taskId, evidence({ ac_ref: "AC-ADHOC-1" }));
     expect(result.ok).toBe(true);
@@ -1235,106 +1234,62 @@ describe("HAPPY — an --adhoc task's ac_ref resolves via its declared ac_scope 
   });
 });
 
-describe("NEGATIVE — CONTROL (a): an --ac id belonging to no spec is refused loud, never guessed (AC-3)", () => {
-  it("ac_scope matching zero specs fails VALIDATION_ERROR field 'ac_scope'", async () => {
-    const { corpusService, taskWorkflowService } = makeServicesWithRealAcPorts();
+describe("NEGATIVE — a scope id the recorded spec does not declare is refused at create (BR-1495)", () => {
+  it("create refuses field 'ac_scope', naming the declared ids", async () => {
+    const { corpusService } = makeServicesWithRealAcPorts();
     const prdId = await createRootPrd(corpusService);
-    await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-UNRELATED-1")]);
-    const taskId = await createAdhocTask(corpusService, ["AC-NOWHERE-1"]);
+    const specId = await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-UNRELATED-1")]);
+    const created = await corpusService.create({
+      type: "task",
+      title: "bad scope",
+      content: "x",
+      extra: { adhoc: true, ac_scope: ["AC-NOWHERE-1"], governing_spec: specId },
+    } as CreateDocInput);
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    expect(created.error.code).toBe("VALIDATION_ERROR");
+    if (created.error.code !== "VALIDATION_ERROR") return;
+    expect(created.error.field).toBe("ac_scope");
+    expect(created.error.message).toContain("AC-UNRELATED-1");
+  });
 
-    const result = await taskWorkflowService.addEvidence(taskId, evidence({ ac_ref: "AC-NOWHERE-1" }));
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code !== "VALIDATION_ERROR") return;
-    expect(result.error.field).toBe("ac_scope");
-    expect(result.error.message).toContain("matches no");
+  it("create without a spec refuses field 'governing_spec', naming --spec", async () => {
+    const { corpusService } = makeServicesWithRealAcPorts();
+    await createRootPrd(corpusService);
+    const created = await corpusService.create({
+      type: "task",
+      title: "no spec",
+      content: "x",
+      extra: { adhoc: true, ac_scope: ["AC-ANY-1"] },
+    } as CreateDocInput);
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    if (created.error.code !== "VALIDATION_ERROR") throw new Error("expected VALIDATION_ERROR");
+    expect(created.error.field).toBe("governing_spec");
+    expect(created.error.message).toContain("--spec");
   });
 });
 
-describe("ERROR — CONTROL (b): an --ac id matching MULTIPLE specs is ambiguous and refused (AC-3)", () => {
-  it("ac_scope matching two specs fails VALIDATION_ERROR field 'ac_scope', naming both spec slugs", async () => {
+describe("STATE — two specs declare the same id; the recorded spec decides (BR-1495, #496)", () => {
+  it("evidence resolves AC-SHARED-1 against the recorded spec only", async () => {
     const { corpusService, taskWorkflowService } = makeServicesWithRealAcPorts();
     const prdId = await createRootPrd(corpusService);
-    const specAId = await createSpecWithCriteria(
-      corpusService,
-      prdId,
-      [aiAc("AC-SHARED-1")],
-      "Spec A",
-    );
-    const specBId = await createSpecWithCriteria(
-      corpusService,
-      prdId,
-      [aiAc("AC-SHARED-1")],
-      "Spec B",
-    );
-    const taskId = await createAdhocTask(corpusService, ["AC-SHARED-1"]);
+    const specAId = await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-SHARED-1")], "Spec A");
+    await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-SHARED-1")], "Spec B");
+    const taskId = await createAdhocTask(corpusService, ["AC-SHARED-1"], specAId);
 
     const result = await taskWorkflowService.addEvidence(taskId, evidence({ ac_ref: "AC-SHARED-1" }));
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code !== "VALIDATION_ERROR") return;
-    expect(result.error.field).toBe("ac_scope");
-    expect(result.error.message).toContain("ambiguous");
-
-    const specA = await corpusService.get(specAId);
-    const specB = await corpusService.get(specBId);
-    if (specA.ok) expect(result.error.message).toContain(specA.value.doc.slug);
-    if (specB.ok) expect(result.error.message).toContain(specB.value.doc.slug);
-  });
-});
-
-describe("BOUNDARY — an --adhoc task with absent/empty ac_scope refuses before touching any spec (AC-3 support)", () => {
-  it("no ac_scope declared at all fails VALIDATION_ERROR field 'ac_scope', names the repair command", async () => {
-    const { corpusService, taskWorkflowService } = makeServicesWithRealAcPorts();
-    await createRootPrd(corpusService);
-    const result0 = await corpusService.create({
-      type: "task",
-      title: "No-scope adhoc",
-      content: "x",
-      extra: { adhoc: true },
-    } as CreateDocInput);
-    if (!result0.ok) throw new Error("adhoc create failed");
-
-    const result = await taskWorkflowService.addEvidence(
-      result0.value.id,
-      evidence({ ac_ref: "AC-ANY-1" }),
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code !== "VALIDATION_ERROR") return;
-    expect(result.error.field).toBe("ac_scope");
-    expect(result.error.message).toContain("no declared ac_scope");
+    expect(result.ok).toBe(true);
   });
 
-  it("an EMPTY ac_scope array fails VALIDATION_ERROR field 'ac_scope', distinct message from absent", async () => {
-    const { corpusService, taskWorkflowService } = makeServicesWithRealAcPorts();
-    await createRootPrd(corpusService);
-    const taskId = await createAdhocTask(corpusService, []);
-
-    const result = await taskWorkflowService.addEvidence(taskId, evidence({ ac_ref: "AC-ANY-1" }));
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    if (result.error.code !== "VALIDATION_ERROR") return;
-    expect(result.error.field).toBe("ac_scope");
-    expect(result.error.message).toContain("declares no acceptance criterion");
-  });
-});
-
-describe("STATE — an ac_ref not declared on the correctly-resolved governing spec is rejected (AC-3 support)", () => {
-  it("ac_scope resolves unambiguously, but the supplied --ac id isn't among that spec's declared ids", async () => {
+  it("an ac_ref the recorded spec does not declare is rejected, even if another spec declares it", async () => {
     const { corpusService, taskWorkflowService } = makeServicesWithRealAcPorts();
     const prdId = await createRootPrd(corpusService);
-    await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-ADHOC-2")]);
-    const taskId = await createAdhocTask(corpusService, ["AC-ADHOC-2"]);
+    const specAId = await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-ADHOC-2")], "Spec A");
+    await createSpecWithCriteria(corpusService, prdId, [aiAc("AC-NOT-DECLARED")], "Spec B");
+    const taskId = await createAdhocTask(corpusService, ["AC-ADHOC-2"], specAId);
 
-    const result = await taskWorkflowService.addEvidence(
-      taskId,
-      evidence({ ac_ref: "AC-NOT-DECLARED" }),
-    );
+    const result = await taskWorkflowService.addEvidence(taskId, evidence({ ac_ref: "AC-NOT-DECLARED" }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");

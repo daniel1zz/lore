@@ -44,13 +44,10 @@
  *   - isAcInDeclaredScope(declaredScope, acId) — the ONE declared-`ac_scope`
  *     membership predicate (adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task
  *     §Public Interface), consumed by `lore verify`'s selection + refusals
- *   - resolveGoverningSpecByAcScope(declaredAcScope, candidateSpecs, subjectLabel) —
- *     the ONE governing-spec search for a doc with no structural plan/spec link
- *     (an `--adhoc` task, SPEC-069 D2) — finds the single spec whose declared
- *     acceptance_criteria fully covers declaredAcScope, refusing loud on zero or
- *     multiple matches. Shared by `VerifyRunnerService.verifyAdhocTask` and
- *     `CorpusService.resolveDeclaredAcIdsForAdhocTask` so the two surfaces can
- *     never disagree about which spec governs a given ad-hoc task.
+ *   - resolveRecordedGoverningSpec(task, candidateSpecs, subjectLabel) — the ONE governing-spec lookup
+ *     for an `--adhoc` task (SPEC-069 D2): reads the spec the task RECORDED in `extra.governing_spec`
+ *     (BR-1495), never a search by criterion id; accepts a deprecated spec and a superseded criterion
+ *     (BR-1494). `checkScopeDeclaredOnSpec` is the matching write-side check.
  *   - acFalsifierSchema / AcFalsifier — a DECLARED falsifier on a script-mode
  *     criterion (spec-falsifiability-reachability-a-feedable-checkpoint-an
  *     §D2) — a repo-relative path + literal find/replace + the EXACT exit
@@ -83,7 +80,6 @@ import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
 import { ANY_RULE_ID_PATTERN } from "./baseline.js";
-import { isInvalidated } from "./validity.js";
 import {
   extractEvidence,
   resolveOracleGeneration,
@@ -1158,10 +1154,10 @@ export function partitionDeclaredScopeBySupersession(
   return { superseded, live };
 }
 
-// ─── Governing-Spec Resolution by Declared ac_scope ────────────────────────
+// ─── Governing-Spec Resolution through the RECORDED spec ────────────────────
 
 /**
- * One resolved "this spec governs that ac_scope" match — the spec doc plus its
+ * One resolved "this spec governs that task" match — the spec doc plus its
  * already-schema-parsed acceptance criteria (avoids a second `safeParse` by the
  * caller).
  */
@@ -1171,103 +1167,92 @@ export interface GoverningSpecMatch {
 }
 
 /**
- * Finds the ONE spec, among `candidateSpecs`, whose `acceptance_criteria` fully
- * covers `declaredAcScope` — the SINGLE governing-spec search shared by every
- * surface that needs to resolve which spec governs a doc with NO structural
- * plan/spec link (an `--adhoc` task, SPEC-069 §Design Decisions D2, whose parent
- * is the corpus root PRD by construction). Both `VerifyRunnerService.verifyAdhocTask`
- * (`lore verify --task <adhoc-task>`) and `CorpusService.resolveDeclaredAcIdsForAdhocTask`
- * (`lore evidence`'s `ac_ref` cross-entity validation) call this EXACT function —
- * extracted here (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref) so
- * the two surfaces can never disagree about which spec governs a given ad-hoc task.
- *
- * `AC-*` ids are unique only WITHIN one spec's declared criteria
- * (`specAcceptanceCriteriaSchema`'s `superRefine`), never enforced globally — this
- * function therefore NEVER guesses: zero or multiple fully-covering specs both
- * refuse loud rather than picking one arbitrarily, which could silently attest a
- * real command (or store a real evidence `ac_ref`) against the wrong spec's
- * acceptance criteria.
- *
- * @param declaredAcScope - The doc's non-empty declared `ac_scope`. The caller
- *   MUST have already distinguished ABSENT (`undefined`, via `extractDeclaredAcScope`,
- *   phase.ts) and EMPTY (`[]`) from a real scope — this function does not
- *   special-case an empty array beyond treating it as "covered by every
- *   candidate spec" (`[].every(...)` is vacuously true), which would silently
- *   "resolve" to whichever spec happens to be scanned first whenever ≥1
- *   candidate exists. Callers must never pass an empty array in.
- * @param candidateSpecs - Every `spec`-typed doc to search (caller-fetched, e.g.
- *   `corpusService.listFull({type: "spec"}).docs` or `store.findMany({type: "spec"})`).
- * @param subjectLabel - Human-readable subject for error messages, e.g.
- *   `ad-hoc task "my-task-slug"` — keeps each caller's refusal worded for its
- *   own context without duplicating the search/ambiguity logic itself.
- * @param nowIso - The caller's clock reading (core reads no wall-clock): a spec whose
- *   `invalid_at` is at or before it is not live and is skipped, like a deprecated one.
- * @returns `ok({spec, criteria})` for the ONE fully-covering spec.
- * @throws (as `Result`) VALIDATION_ERROR field `ac_scope` — zero candidate specs
- *   fully cover `declaredAcScope` ("matches no"), or more than one does
- *   ("ambiguous", naming every matched spec's slug).
- *
- * @example
- * resolveGoverningSpecByAcScope(["AC-1"], [specA, specB], 'ad-hoc task "t"', nowIso);
- * // => ok({ spec: specA, criteria: [...] }) when only specA declares AC-1 in full
+ * The spec an ad-hoc task RECORDED as governing its criteria (`extra.governing_spec`, a spec id or
+ * slug), or `undefined` when none is recorded. The single reader of that field.
  */
-export function resolveGoverningSpecByAcScope(
-  declaredAcScope: readonly string[],
+export function extractGoverningSpecRef(task: DocRecord): string | undefined {
+  const raw = task.extra["governing_spec"];
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+/** The refusal for an ad-hoc task that has no recorded governing spec; names the command that records one. */
+export function governingSpecMissingError(taskSlug: string): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "governing_spec",
+    message:
+      `ad-hoc task "${taskSlug}" records no governing spec, so its criteria cannot be resolved ` +
+      `(an --adhoc task has no plan/spec link) — record one with 'lore scope spec ${taskSlug} <spec>' ` +
+      "(on create: --spec <spec>).",
+    value: taskSlug,
+    rule: "BR-1495",
+  };
+}
+
+/**
+ * Resolves an ad-hoc task's criteria through the spec it recorded (`extra.governing_spec`) and nothing
+ * else — the ONE governing-spec lookup every reader shares (evidence `--ac`, `lore verify --task`,
+ * `check-ac-ref-integrity`, AC coverage). There is no search by criterion id: an id is unique only
+ * within one spec, so a bare-id lookup breaks when a later spec reuses the id (issue #496).
+ *
+ * The recorded spec is accepted whatever its status (a deprecated or invalidated spec still governs
+ * the history that cites it) and every criterion it declares is returned, superseded ones included
+ * (BR-1494): an archived task's evidence must stay addressable.
+ *
+ * @param task - The ad-hoc task.
+ * @param candidateSpecs - Every `spec`-typed doc (caller-fetched).
+ * @param subjectLabel - Human-readable subject for the refusal, e.g. `ad-hoc task "slug"`.
+ * @returns `ok({spec, criteria})`; `criteria` is empty when the spec declares none.
+ * @throws (as `Result`) VALIDATION_ERROR field `governing_spec` — none recorded, or the recorded id/slug
+ *   names no spec in `candidateSpecs`.
+ */
+export function resolveRecordedGoverningSpec(
+  task: DocRecord,
   candidateSpecs: readonly DocRecord[],
   subjectLabel: string,
-  nowIso: string,
 ): Result<GoverningSpecMatch, LoreError> {
-  const declaredSet = new Set(declaredAcScope);
-  const matches: GoverningSpecMatch[] = [];
-  // Only LIVE specs can govern: a deprecated or invalidated spec that still declares the
-  // id must not make a live spec ambiguous (report #237). Two live candidates still are.
-  for (const candidate of candidateSpecs) {
-    if (candidate.status === "deprecated" || isInvalidated(candidate, nowIso)) continue;
-    const parsed = specAcceptanceCriteriaSchema.safeParse(candidate.extra["acceptance_criteria"]);
-    if (!parsed.success || parsed.data.length === 0) continue;
-    const specIds = new Set(parsed.data.map((c) => c.id));
-    const coversAll = [...declaredSet].every((id) => specIds.has(id));
-    if (coversAll) matches.push({ spec: candidate, criteria: parsed.data });
-  }
-
-  if (matches.length === 0) {
+  const ref = extractGoverningSpecRef(task);
+  if (ref === undefined) return err(governingSpecMissingError(task.slug));
+  const spec = candidateSpecs.find((candidate) => candidate.id === ref || candidate.slug === ref);
+  if (spec === undefined) {
     return err({
       code: "VALIDATION_ERROR",
-      field: "ac_scope",
-      message:
-        `${subjectLabel}'s declared ac_scope (${[...declaredAcScope].join(", ")}) matches no ` +
-        "spec's acceptance_criteria in full — cannot infer a governing spec without a " +
-        "structural plan/spec link (SPEC-069 D2). Ensure ac_scope names AC ids that all " +
-        "exist on exactly one spec.",
-      value: [...declaredAcScope],
-      rule: "BR-183",
+      field: "governing_spec",
+      message: `${subjectLabel} records governing spec "${ref}", which is not a spec in this corpus — re-record it with 'lore scope spec ${task.slug} <spec>'.`,
+      value: ref,
+      rule: "BR-1495",
     });
   }
-  if (matches.length > 1) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "ac_scope",
-      message:
-        `${subjectLabel}'s declared ac_scope (${[...declaredAcScope].join(", ")}) matches ` +
-        `${matches.length} specs (${matches.map((m) => m.spec.slug).join(", ")}) — ambiguous. ` +
-        "Never guess which spec governs a task; narrow the declared ac_scope to AC ids " +
-        "unique to a single spec.",
-      value: matches.map((m) => m.spec.slug),
-      rule: "BR-183",
-    });
-  }
+  const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+  return ok({ spec, criteria: parsed.success ? parsed.data : [] });
+}
 
-  const matched = matches[0];
-  if (matched === undefined) {
-    // Unreachable — `matches.length` is exactly 1 here (both the zero- and
-    // multi-match branches above already returned). Guards
-    // `noUncheckedIndexedAccess` without an unsafe non-null assertion.
-    return err({
-      code: "STORE_ERROR",
-      message: "internal error: governing-spec match lost between length check and read",
-    });
-  }
-  return ok(matched);
+/**
+ * The declared-scope check for an ad-hoc task (BR-1495): every id in `scopeIds` must be declared on
+ * `spec` (superseded criteria count as declared, BR-1494).
+ *
+ * @returns `ok(undefined)`, or VALIDATION_ERROR field `ac_scope` naming the undeclared ids and the
+ *   ids the spec does declare (exit 4).
+ */
+export function checkScopeDeclaredOnSpec(
+  scopeIds: readonly string[],
+  spec: DocRecord,
+  subjectLabel: string,
+): Result<undefined, LoreError> {
+  const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+  const declared = parsed.success ? parsed.data.map((c) => c.id) : [];
+  const declaredSet = new Set(declared);
+  const undeclared = scopeIds.filter((id) => !declaredSet.has(id));
+  if (undeclared.length === 0) return ok(undefined);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "ac_scope",
+    message:
+      `${subjectLabel}: ac_scope id(s) ${undeclared.join(", ")} are not declared on spec "${spec.slug}". ` +
+      `Declared ids: ${declared.length > 0 ? declared.join(", ") : "(none)"}.`,
+    value: undeclared,
+    rule: "BR-1495",
+  });
 }
 
 // ─── Mode-foreign criterion detail (ONE validator for `ac add` and `ac set`) ──

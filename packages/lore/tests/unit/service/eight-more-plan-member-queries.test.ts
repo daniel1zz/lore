@@ -184,7 +184,7 @@ describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-sti
       type: "task",
       title: "Adhoc",
       content: "body",
-      extra: { adhoc: true, ac_scope: ["AC-1"], verification_evidence: [passEvidence("AC-1")] },
+      extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: spec.id, verification_evidence: [passEvidence("AC-1")] },
     } as CreateDocInput);
     if (!adhocResult.ok) throw new Error(`Failed to create adhoc task: ${JSON.stringify(adhocResult.error)}`);
 
