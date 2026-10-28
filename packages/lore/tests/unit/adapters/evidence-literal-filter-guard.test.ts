@@ -313,8 +313,8 @@ describe("findFilteredPassRefusal — REGRESSION (byte-identical control)", () =
         "summary reports 0 matched test cases, so the exit-0 this pass rests on proves nothing " +
         "(fix the filter or the test title, then re-run). A filter that matches nothing still exits " +
         "0 with every test reported skipped, so this pass is unproven. Re-run the command, capture " +
-        "the runner's summary lines, and pass them via --output-tail (or --output-tail-file; MCP: " +
-        "output_tail); or record the run honestly with --result fail / expected-fail.",
+        "the runner's summary lines, and pass them via --output-tail (or --output-tail-file); " +
+        "or record the run honestly with --result fail / expected-fail.",
     );
   });
 
