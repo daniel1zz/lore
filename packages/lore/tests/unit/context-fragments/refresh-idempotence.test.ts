@@ -89,6 +89,7 @@ describe("AC-CTX-3 init/refresh idempotence with D15 lore rules files", () => {
       "lore-corpus-workflow-feed.md",
       "lore-corpus-workflow-overview.md",
       "lore-corpus-workflow-produce.md",
+      "lore-decision-records.md",
       "lore-dispatch-bundle.md",
       "lore-evidence-attestation.md",
       "lore-worktree-dispatch.md",
