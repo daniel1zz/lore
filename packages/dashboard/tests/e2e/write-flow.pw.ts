@@ -27,8 +27,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, expect, type Page } from "@playwright/test";
 
-const API_ORIGIN = "http://localhost:8787";
-
 /**
  * Create a requirements document out-of-band and return its slug: the parent a plan created through the
  * New doc form must name (BR-709 refuses a plan without one). The page must already carry the session cookie.
