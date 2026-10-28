@@ -59,6 +59,7 @@ import {
   type VersionRecord,
 } from "@lore/core";
 import { judgedDecisionsAnswerSchema, type JudgedDecisionInput } from "../ai/milestone-review-template.js";
+import { approvedRulesOf } from "./baseline-items.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import type { GitPort } from "./rule-state-service.js";
 import { resolveVerifyEnv } from "./verify-spawn.js";
@@ -431,10 +432,9 @@ async function locateReworded(
   if (!versions.ok) return versions;
   const statements = (version: number): Map<string, string> => {
     const row = versions.value.find((v) => v.version === version);
-    const rules = row?.extra["rules"];
     const found = new Map<string, string>();
-    if (!Array.isArray(rules)) return found;
-    for (const rule of rules as unknown[]) {
+    if (row === undefined) return found;
+    for (const rule of approvedRulesOf(row)) {
       const candidate = rule as { id?: unknown; statement?: unknown };
       if (typeof candidate.id === "string" && typeof candidate.statement === "string") found.set(candidate.id, candidate.statement);
     }
