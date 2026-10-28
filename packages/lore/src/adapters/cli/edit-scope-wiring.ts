@@ -95,6 +95,8 @@ export function buildEditScopeDeps(app: App): EditScopeDeps {
   const runService = app.runService;
   return {
     openClaimsOfWorkingCopy: (workingCopy) => runService.openClaimsOfWorkingCopy(workingCopy),
+    openClaimsOfProject: () => runService.openClaimsOfProject(),
+    claimIsLive: (task, nowIso, endedRuns) => app.taskWorkflowService.isClaimLive(task, nowIso, endedRuns),
     getTask: async (slug) => {
       const found = await app.corpusService.get(slug);
       return found.ok ? { ok: true, value: found.value.doc } : found;

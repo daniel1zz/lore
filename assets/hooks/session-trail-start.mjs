@@ -7,8 +7,8 @@
  *                   markers older than 90 days removed), then session.json {started_at} once.
  *   SubagentStart → helpers/<agent_id>.json {run, started_at, end_count: 0}.
  *
- * Dispatches on the payload's `hook_event_name`; any other event does nothing. Not registered in
- * the shipped roster here (a later task owns distribution-hooks.ts); tests call it with `node`.
+ * Dispatches on the payload's `hook_event_name`; any other event does nothing. Registered on SessionStart
+ * and SubagentStart in the shipped roster (`distribution-hooks.ts`); tests call it with `node`.
  *
  * Contract (spec D13, BR-1092): writes NOTHING to stdout or stderr on any path and always exits 0.
  * A payload without a usable session_id, malformed stdin or an unwritable state base all end

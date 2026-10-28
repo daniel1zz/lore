@@ -160,6 +160,15 @@ export interface OpenClaimsOfWorkingCopy {
   readonly not_measured: readonly string[];
 }
 
+/** One open claim of the project: task, current anchors, holding run and the working copy it was recorded for. */
+export interface OpenProjectClaim {
+  readonly slug: string;
+  readonly file_anchors: readonly string[];
+  readonly holder_run: string | null;
+  /** Resolved directory of the claim's worktree; `undefined` = none recorded or not resolvable. */
+  readonly working_copy: string | undefined;
+}
+
 export class RunService {
   constructor(
     private readonly store: RunStore,
@@ -486,6 +495,30 @@ export class RunService {
       });
     }
     return ok({ tasks: open.sort((a, b) => a.slug.localeCompare(b.slug)), not_measured: notMeasured });
+  }
+
+  /**
+   * Every open claim of the whole project (BR-1493: `lore anchor scope --all`), whatever working copy it was recorded
+   * for. Each row carries the claim's recorded `worktree` value and the directory it resolves to, or `undefined` when
+   * the claim recorded none or it could not be resolved (the claim still holds its anchors, so it is listed anyway).
+   *
+   * @returns ok(rows sorted by slug); STORE_ERROR from the store.
+   */
+  async openClaimsOfProject(): Promise<Result<readonly OpenProjectClaim[], LoreError>> {
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const rows: OpenProjectClaim[] = [];
+    for (const task of tasks.value) {
+      const claim = extractHeldClaim(task);
+      if (claim === undefined) continue;
+      let workingCopy: string | undefined;
+      if (claim.worktree !== undefined && claim.worktree !== "" && this.worktreeProbe !== undefined) {
+        const resolution = resolveClaimWorktree(this.worktreeProbe, claim.worktree, this.repoRoot);
+        if (resolution.kind === "resolved") workingCopy = resolution.path;
+      }
+      rows.push({ slug: task.slug, file_anchors: extractFileAnchors(task), holder_run: claim.harness_run ?? null, working_copy: workingCopy });
+    }
+    return ok(rows.sort((a, b) => a.slug.localeCompare(b.slug)));
   }
 
   /**
