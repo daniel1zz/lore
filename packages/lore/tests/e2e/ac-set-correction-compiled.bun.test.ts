@@ -33,6 +33,7 @@ import { tmpdir } from "os";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 
 setDefaultTimeout(120_000);
 
@@ -148,7 +149,7 @@ describe("lore ac set --correction, compiled binary (AC-CC-2)", () => {
   });
 
   it("(a) --statement with --correction exits 0, prints the correction line, get shows Corrections: 1 and Status approved", async () => {
-    const r = await runLore(["ac", "set", spec, AC_ID, "--statement", "Corrected statement of the criterion.", "--correction", "r"]);
+    const r = await runLore(["ac", "set", spec, AC_ID, "--statement", "Corrected statement of the criterion.", "--correction", "r", ...DECIDED_FLAGS]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("(correction recorded: r)");
     const out = await mustLore(["get", spec]);
@@ -160,7 +161,7 @@ describe("lore ac set --correction, compiled binary (AC-CC-2)", () => {
   it("(e) a correction declaring the four --falsifier-* flags exits 0 and ac list --json shows the falsifier", async () => {
     const r = await runLore([
       "ac", "set", spec, AC_ID, "--falsifier-path", "src/a.ts", "--falsifier-find", "return 1",
-      "--falsifier-replace", "return 2", "--falsifier-exit-code", "1", "--allow-missing-path", "fixture path", "--correction", "declare falsifier",
+      "--falsifier-replace", "return 2", "--falsifier-exit-code", "1", "--allow-missing-path", "fixture path", "--correction", "declare falsifier", ...DECIDED_FLAGS,
     ]);
     expect(r.exitCode).toBe(0);
     const verify = (await criteriaJson())[0]?.verify as { falsifier?: Record<string, unknown> } | undefined;

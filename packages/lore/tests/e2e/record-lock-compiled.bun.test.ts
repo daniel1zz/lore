@@ -23,6 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
@@ -136,7 +137,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
   });
 
   it("lore set --correction exits 0, then get shows Standing: record, locked (approved) and Corrections: 1", () => {
-    const set = runLore(["set", lockedSpec, "--content", "## Overview\n\nOriginal body, typo fixed.\n", "--correction", "typo", "--reason", "fix a typo", "--premise", "the typo fix keeps the meaning|cmd:echo typo ~ typo|C", "--alt", "leave the typo|it would stay wrong"]);
+    const set = runLore(["set", lockedSpec, "--content", "## Overview\n\nOriginal body, typo fixed.\n", "--correction", "typo", ...DECIDED_FLAGS]);
     expect(set.exitCode, set.stderr).toBe(0);
     const out = mustLore(["get", lockedSpec]);
     expect(out).toContain("Standing: record");

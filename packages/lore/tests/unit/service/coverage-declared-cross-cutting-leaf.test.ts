@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 
 const corpora: MiniCorpus[] = [];
 afterEach(() => {
@@ -41,7 +42,7 @@ async function build(): Promise<Fx> {
   await c.mapAllSites(c.leafA, "alpha");
   const out = await must(c, ["baseline", "add", c.branch, "--node", "leaf", "--label", "lc", "--title", "BCR Leaf C"]);
   const leafC = (out.match(/Slug:\s+(\S+)/) ?? out.match(/Created baseline \w+ (\S+) \(/))?.[1] as string;
-  const ruleOut = await must(c, ["rule", "add", leafC, "--statement", "Cross-cutting guard refuses.", "--example", "a refusal", "--confidence", "observed", "--enforced-by", "guaranteed"]);
+  const ruleOut = await must(c, ["rule", "add", leafC, "--statement", "Cross-cutting guard refuses.", "--example", "a refusal", "--confidence", "observed", "--enforced-by", "guaranteed", ...DECIDED_FLAGS]);
   const rule = ruleOut.match(/BR-\d+/)?.[0] as string;
   const betaSite = (await c.sitesOf("beta"))[0] as string;
   return { c, leafC, rule, betaSite };

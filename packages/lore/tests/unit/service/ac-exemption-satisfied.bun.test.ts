@@ -21,6 +21,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { AcExemptionService } from "../../../src/service/ac-exemption-service.js";
 import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { approvePending } from "../../helpers/approve-baseline.js";
+import { DECIDED_DRAFT } from "../../helpers/decision-flags.js";
 import { exemptionHeadroom, indexBaseline, satisfiedExemptionKeys } from "../../../src/service/ac-cite-gate.js";
 import { exemptionState } from "../../../src/store/store-shared.js";
 import { liveAmbient, liveWriteContext, actedStore } from "../../live-invocation.js";
@@ -124,7 +125,7 @@ describe("exemption satisfied state (BR-959)", () => {
   it("a cite of a retired rule does not satisfy the exemption (control)", async () => {
     await must(await cite(1, "BR-2"), "cite while BR-2 is live");
     await must(await grant(1), "grant 1"); // cited-live at grant time: satisfied already
-    await must(await app.ruleService!.setRule("BR-2", { lifecycle: "retired", note: "gone" }, { by: "agent:seed" }), "retire BR-2");
+    await must(await app.ruleService!.setRule("BR-2", { lifecycle: "retired", note: "gone" }, { by: "agent:seed", decision: DECIDED_DRAFT }), "retire BR-2");
     await approvePending(side, leafId); // the retirement is a pending revision until approved
     expect(await counts()).toMatchObject({ active: 1, satisfied: 0 });
     expect(await headroom()).toBe(0);

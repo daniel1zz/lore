@@ -23,6 +23,7 @@ import { dropLoreConfigKey } from "../../helpers/patch-lore-config.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 
 setDefaultTimeout(300_000);
 
@@ -87,7 +88,7 @@ function approve(slug: string): RunResult {
 
 function addRule(statement: string): string {
   const out = mustRun(
-    ["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"],
+    ["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one", ...DECIDED_FLAGS],
     dir,
   );
   const id = out.stdout.match(/\bBR-\d+\b/)?.[0];
@@ -141,7 +142,7 @@ describe("AC-BLS3B-2: a spec needs a citing criterion to be approved", () => {
   it("NEGATIVE: a spec citing only a retired rule is still refused", () => {
     const spec = newSpec("SAC Retired Cite Spec");
     mustRun(["ac", "cite", spec, AC_ID, retiredRule], dir);
-    mustRun(["rule", "set", retiredRule, "--lifecycle", "retired", "--note", "superseded for the test"], dir);
+    mustRun(["rule", "set", retiredRule, "--lifecycle", "retired", "--note", "superseded for the test", ...DECIDED_FLAGS], dir);
     approveFixtureNodes(dir, "all"); // the retirement is a pending revision until approved
     const before = docOf(spec, dir);
     const r = approve(spec);

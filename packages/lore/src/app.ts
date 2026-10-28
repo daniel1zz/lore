@@ -51,7 +51,7 @@ import {
   AiConfigSchema,
 } from "@lore/core";
 import { err, ok, type DecisionFinding, type PlanBundle, type Result, type LoreError } from "@lore/core";
-import { createWorktreeCommandRunner, recheckPlanDecisions } from "./service/decision-recheck.js";
+import { buildJudgedDecisionInputs, createWorktreeCommandRunner, recheckPlanDecisions } from "./service/decision-recheck.js";
 import type { WritableCallerSurface, AiDefaultSource, InvocationIdentity, Invocation } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
@@ -84,6 +84,7 @@ import { buildAuditVerifyRunner, type AuditVerifyRunner } from "./service/audit-
 import { StateBindingService } from "./service/state-binding-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
+import { WeightTableService } from "./service/weight-table-service.js";
 import { RuleService } from "./service/rule-service.js";
 import { RuleChangeService } from "./service/rule-change-service.js";
 import { RuleReadService } from "./service/rule-read-service.js";
@@ -486,6 +487,11 @@ export interface App {
    * `acService`; always wired in production.
    */
   requirementService?: RequirementService;
+  /**
+   * WeightTableService — the sole writer of a reference document's `extra.weight_table` (`lore weights set`, BR-1482);
+   * always wired in production.
+   */
+  weightTableService?: WeightTableService;
   /**
    * RuleService — the sole writer of a `baseline` doc's verb-owned `extra` keys (rules with
    * permanent `BR-n` ids, label, depends_on, glossary) and of baseline node creation
@@ -986,8 +992,9 @@ function buildAppFromSqlite(
   corpusService.setRuleChangeLanding(ruleChangeService);
   // reason: BR-1476 — an agent's decision-carrying write is refused without its decision in the service layer, so CLI, MCP
   // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
-  const decisionGate = buildDecisionGate(ambient.cwd);
+  const decisionGate = buildDecisionGate(ambient.cwd, store);
   corpusService.setDecisionGate(decisionGate);
+  ruleChangeService.setDecisionGate(decisionGate);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
@@ -1089,12 +1096,13 @@ function buildAppFromSqlite(
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService),
+    acService: armDecisionGate(new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService), decisionGate),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
+    weightTableService: armDecisionGate(new WeightTableService(store, corpusService), decisionGate),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
@@ -1121,6 +1129,7 @@ function buildAppFromSqlite(
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
+      judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1429,8 +1438,9 @@ function buildAppFromTurso(
   corpusService.setRuleChangeLanding(ruleChangeService);
   // reason: BR-1476 — an agent's decision-carrying write is refused without its decision in the service layer, so CLI, MCP
   // and HTTP refuse alike; one gate per root, its git questions asked at the invoking checkout's repository.
-  const decisionGate = buildDecisionGate(ambient.cwd);
+  const decisionGate = buildDecisionGate(ambient.cwd, store);
   corpusService.setDecisionGate(decisionGate);
+  ruleChangeService.setDecisionGate(decisionGate);
   return {
     warn: warnSinkOf(ambient.io.stderr),
     corpusService,
@@ -1527,12 +1537,13 @@ function buildAppFromTurso(
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService),
+    acService: armDecisionGate(new AcService(store, recordLockService, { citeGate: citeGateRaw }, corpusService), decisionGate),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
+    weightTableService: armDecisionGate(new WeightTableService(store, corpusService), decisionGate),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
@@ -1559,6 +1570,7 @@ function buildAppFromTurso(
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
+      judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the

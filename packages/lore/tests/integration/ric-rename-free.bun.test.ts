@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildMiniCorpus, MINI_CLI, type MiniCorpus } from "../helpers/coverage-mini-corpus.js";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -71,7 +72,7 @@ const lineOf = (text: string, needle: string): number => text.split("\n").findIn
 beforeAll(async () => {
   c = await buildMiniCorpus();
   ruleA = c.ruleOf.get(c.leafA) as string;
-  const added = await mustRun(["rule", "add", c.leafA, "--statement", "A second fixture rule of leaf A holds", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "fixture example"]);
+  const added = await mustRun(["rule", "add", c.leafA, "--statement", "A second fixture rule of leaf A holds", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "fixture example", ...DECIDED_FLAGS]);
   ruleB = added.match(/BR-\d+/)?.[0] as string;
   c.writeSource(SHARED_REL, `import { err } from "./result.js";\nexport function checkShared() {\n  return err({ code: "ALPHA_BAD", rule: "${ruleA}" });\n}\n`);
 });

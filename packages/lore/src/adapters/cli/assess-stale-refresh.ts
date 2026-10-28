@@ -5,7 +5,7 @@
  *
  * Purpose: turn "stale" (anchors changed after the last attested pass) into "verified" or "contradicted" before a
  *   review judges snapshot accuracy, without ad-hoc command spawning.
- * Public surface: createVerifyStaleRefresher, VerifyStaleRefresherDeps.
+ * Public surface: createVerifyStaleRefresher, VerifyStaleRefresherDeps, createAppCriterionRerunner.
  * Invariants:
  *   - Commands run in the execution root supplied by the caller (the batch's throwaway main worktree), never here.
  *   - EVERY refresh row lands on the reusable per-AC ad-hoc task (SPEC-069: `extra.adhoc`, `ac_scope` = [that AC]),
@@ -21,9 +21,10 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { ok, type DocRecord, type LoreError, type Result } from "@lore/core";
+import { err, ok, type DocRecord, type LoreError, type Result } from "@lore/core";
+import type { CriterionRerunPort } from "../../service/decision-recheck.js";
 import type { StaleAcRefresherPort } from "../../service/milestone-review-inputs.js";
-import type { VerifyRunnerService } from "../../service/verify-runner-service.js";
+import type { VerifyPlanResult, VerifyRunnerService } from "../../service/verify-runner-service.js";
 import type { App } from "../../app.js";
 
 /** Dependencies of {@link createVerifyStaleRefresher}. */
@@ -50,7 +51,7 @@ export function createVerifyStaleRefresher(deps: VerifyStaleRefresherDeps): Stal
   return {
     runAcs: async (_planRef, acIds): Promise<Result<void, LoreError>> => {
       for (const acId of acIds) {
-        const refreshed = await refreshOnAdhocTask(deps, acId);
+        const refreshed = await runOnAdhocTask(deps, acId);
         if (!refreshed.ok) return refreshed;
       }
       return ok(undefined);
@@ -70,7 +71,15 @@ export function createAppStaleRefresher(
   verify: Pick<VerifyRunnerService, "verifyAdhocTask">,
   opts: { readonly executionRoot: string; readonly by: string; readonly nowIso: () => string },
 ): StaleAcRefresherPort {
-  return createVerifyStaleRefresher({
+  return createVerifyStaleRefresher(createAppStaleRefresherDeps(app, verify, opts));
+}
+
+function createAppStaleRefresherDeps(
+  app: Pick<App, "corpusService">,
+  verify: Pick<VerifyRunnerService, "verifyAdhocTask">,
+  opts: { readonly executionRoot: string; readonly by: string; readonly nowIso: () => string },
+): VerifyStaleRefresherDeps {
+  return {
     verify,
     listDocs: async (type) => {
       const listed = await app.corpusService.listFull({ type });
@@ -84,7 +93,33 @@ export function createAppStaleRefresher(
     executionRoot: opts.executionRoot,
     by: opts.by,
     nowIso: opts.nowIso,
-  });
+  };
+}
+
+/**
+ * The criterion re-run behind the milestone's decision check (spec-a-decision-carrying-write-records-its-decision-on-its
+ * D6): the SAME trusted runner and ad-hoc task as the stale refresh, but it reports whether the criterion passed.
+ *
+ * @param app - the corpus service the ad-hoc lookup and creation go through
+ * @param verify - the trusted runner
+ * @param opts - the execution root, the actor and the clock
+ * @returns a port; a runner refusal or a result that is not a clean pass/fail of that criterion is an `err` (unverifiable)
+ */
+export function createAppCriterionRerunner(
+  app: Pick<App, "corpusService">,
+  verify: Pick<VerifyRunnerService, "verifyAdhocTask">,
+  opts: { readonly executionRoot: string; readonly by: string; readonly nowIso: () => string },
+): CriterionRerunPort {
+  const deps = createAppStaleRefresherDeps(app, verify, opts);
+  return {
+    rerun: async (spec, acId) => {
+      const ran = await runOnAdhocTask(deps, acId, spec.slug);
+      if (!ran.ok) return ran;
+      const row = ran.value.results.find((r) => r.ac_id === acId);
+      if (row === undefined) return err({ code: "STORE_ERROR", message: `the runner reported no result for ${spec.slug} ${acId}` });
+      return ok({ passed: row.result === "pass", detail: `${row.result} (exit ${String(row.exit_code)})` });
+    },
+  };
 }
 
 function declaresOnly(task: DocRecord, acId: string): boolean {
@@ -92,7 +127,7 @@ function declaresOnly(task: DocRecord, acId: string): boolean {
   return task.extra["adhoc"] === true && Array.isArray(scope) && scope.length === 1 && scope[0] === acId;
 }
 
-async function refreshOnAdhocTask(deps: VerifyStaleRefresherDeps, acId: string): Promise<Result<void, LoreError>> {
+async function runOnAdhocTask(deps: VerifyStaleRefresherDeps, acId: string, specSlug?: string): Promise<Result<VerifyPlanResult, LoreError>> {
   const { listDocs, createAdhocTask } = deps;
   const tasks = await listDocs("task");
   if (!tasks.ok) return tasks;
@@ -104,7 +139,9 @@ async function refreshOnAdhocTask(deps: VerifyStaleRefresherDeps, acId: string):
     if (!created.ok) return created;
     task = created.value;
   }
-  const run = await deps.verify.verifyAdhocTask(task, specs.value, {
+  // reason: a criterion id is only unique within its spec; the re-run names its spec so a shared id never matches two.
+  const candidates = specSlug === undefined ? specs.value : specs.value.filter((spec) => spec.slug === specSlug);
+  const run = await deps.verify.verifyAdhocTask(task, candidates, {
     acIds: [acId],
     by: deps.by,
     nowIso: deps.nowIso(),
@@ -112,5 +149,5 @@ async function refreshOnAdhocTask(deps: VerifyStaleRefresherDeps, acId: string):
     milestoneRefresh: true,
     executionRoot: { root: deps.executionRoot, mode: "worktree" },
   });
-  return run.ok ? ok(undefined) : run;
+  return run;
 }

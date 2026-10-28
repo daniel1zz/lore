@@ -18,7 +18,8 @@
  *     is HEAD when the writer gave none, and a file with uncommitted changes plus no `sha` is refused (the lines the
  *     writer read are not the lines lore would pin).
  *   - A supplied decision is validated whether or not the write required one: an incomplete decision is never stored.
- *   - Weight-table and score validation is NOT here (DR-T3): `scores` / `weight_table` / `gates` / `refs` pass through.
+ *   - `judge` is stage one (completeness, quoting) and passes `scores` / `weight_table` through; weight-table and score
+ *     validation (BR-1482) is {@link DecisionGate.judgeChecked}, which every service entry calls.
  * Side-effect class: IO only through the injected {@link DecisionGitPort} (read-only); otherwise pure.
  *
  * Source: spec-a-decision-carrying-write-records-its-decision-on-its, "Which writes carry a decision", "Refusal", D2, D9;
@@ -45,6 +46,8 @@ import {
   type Premise,
   type PremiseDraft,
   type Result,
+  type WeightTable,
+  type WeightTableKind,
 } from "@lore/core";
 
 /** The `field` of every decision refusal. */
@@ -75,6 +78,22 @@ export interface DecisionGitPort {
   hasUncommittedChanges(path: string): GitAnswer<boolean>;
   /** The lines of `path` at `sha`; `null` when the file does not exist at that commit (or the commit is unknown). */
   readLinesAt(sha: string, path: string): GitAnswer<readonly string[] | null>;
+}
+
+/** A weight-table document as the lookup found it (the gate decides whether it is usable). */
+export interface WeightTableFacts {
+  /** `docs.status` of the document now. */
+  readonly status: string;
+  /** `docs.version` of the document now: the approved version is the current one while the status is `approved`. */
+  readonly currentVersion: number;
+  /** The valid `extra.weight_table`; `undefined` when the document holds none (it is not a weight table). */
+  readonly table: WeightTable | undefined;
+}
+
+/** The read-only question the gate asks about a decision's `--weight-table <slug>@<version>`; injected so a test never opens a store. */
+export interface WeightTableLookup {
+  /** The document `slug`, or `ok(null)` when none exists. */
+  find(slug: string): Promise<Result<WeightTableFacts | null, LoreError>>;
 }
 
 /** What decides whether a write carries a decision. */
@@ -111,19 +130,75 @@ function refuse(message: string): LoreError {
 
 /** The gate. One instance per composition root, holding the git port of the corpus's repository. */
 export class DecisionGate {
-  constructor(private readonly git: DecisionGitPort) {}
+  /**
+   * @param git - read-only git questions for file premises
+   * @param weightTables - how a decision's weight table is looked up; absent (a bare test construction) = a decision that
+   *   names scores or a table is refused by {@link DecisionGate.judgeChecked}, never passed unchecked
+   */
+  constructor(private readonly git: DecisionGitPort, private readonly weightTables?: WeightTableLookup) {}
+
+  /**
+   * {@link DecisionGate.judge} plus the weight-table and score validation (BR-1482): the entry every service uses.
+   *
+   * @param request - as {@link DecisionGate.judge}, plus `kind`, the weight-table kind the command fixes
+   *   (`rule revision` for `rule set|add|propose`, `document revision` for every other command)
+   * @returns the judged record, or the `decision` refusal for: scores without `weight_table`; a table that does not exist,
+   *   is not a weight table, is not the approved version, or is of another kind than `kind`; a score on a dimension the
+   *   table lacks. Nothing is written on a refusal.
+   */
+  async judgeChecked(
+    request: Parameters<DecisionGate["judge"]>[0] & { readonly kind: WeightTableKind },
+  ): Promise<Result<DecisionRecord | undefined, LoreError>> {
+    const judged = this.judge(request);
+    if (!judged.ok || judged.value === undefined) return judged;
+    const checked = await this.checkWeights(judged.value, request.kind);
+    return checked.ok ? judged : checked;
+  }
+
+  private async checkWeights(record: DecisionRecord, kind: WeightTableKind): Promise<Result<void, LoreError>> {
+    const scores = record.scores ?? [];
+    const ref = record.weight_table;
+    if (ref === undefined) {
+      if (scores.length === 0) return ok(undefined);
+      return err(refuse(`scores need a weight table: --weight-table <slug>@<version> of the approved "${kind}" weight table. Nothing was written.`));
+    }
+    if (this.weightTables === undefined) return err(refuse("no weight-table lookup is wired, so the decision's weight table cannot be checked. Nothing was written."));
+    const found = await this.weightTables.find(ref.slug);
+    if (!found.ok) return found;
+    const label = `${ref.slug}@${ref.version}`;
+    if (found.value === null) return err(refuse(`weight table ${label} does not exist. Nothing was written.`));
+    const facts = found.value;
+    if (facts.table === undefined) return err(refuse(`${ref.slug} is not a weight table (it holds no extra.weight_table). Nothing was written.`));
+    if (facts.status !== "approved" || facts.currentVersion !== ref.version) {
+      return err(refuse(`weight table ${label} is not the approved version (now v${facts.currentVersion}, status ${facts.status}). Nothing was written.`));
+    }
+    if (facts.table.kind !== kind) {
+      return err(refuse(`weight table ${label} is of kind "${facts.table.kind}"; this command's decision needs a "${kind}" table. Nothing was written.`));
+    }
+    const lacking = [...new Set(scores.map((score) => score.dimension).filter((dimension) => !(dimension in facts.table!.dimensions)))];
+    if (lacking.length > 0) {
+      return err(refuse(`dimension(s) ${lacking.map((d) => `"${d}"`).join(", ")} are not in weight table ${label} (it has: ${Object.keys(facts.table.dimensions).join(", ")}). Nothing was written.`));
+    }
+    return ok(undefined);
+  }
 
   /**
    * Resolve a write's decision.
    *
    * @param request.required - the write carries a decision ({@link writeCarriesDecision})
    * @param request.draft - what the writer supplied; absent when it supplied nothing
+   * @param request.reasonIsSharedFlag - the verb's own `--reason` doubles as the decision's reason (`ac supersede`, `ac exempt`),
+   *   so a draft holding nothing but a reason is not a supplied decision unless the write requires one
    * @returns `ok(undefined)` when nothing is required and nothing was supplied; `ok(record)` with every file premise
    *   quoted and pinned; otherwise the `decision` refusal naming each missing or unreadable part.
    */
-  judge(request: { readonly required: boolean; readonly draft: DecisionDraft | undefined }): Result<DecisionRecord | undefined, LoreError> {
+  judge(request: {
+    readonly required: boolean;
+    readonly draft: DecisionDraft | undefined;
+    readonly reasonIsSharedFlag?: boolean;
+  }): Result<DecisionRecord | undefined, LoreError> {
     const { draft } = request;
-    const supplied = draft !== undefined && isNonEmptyDraft(draft);
+    const supplied = draft !== undefined && isNonEmptyDraft(request.reasonIsSharedFlag === true ? withoutReason(draft) : draft);
     if (!supplied && !request.required) return ok(undefined);
 
     const reason = draft?.reason?.trim() ?? "";
@@ -239,6 +314,12 @@ export class DecisionGate {
     }
     return ok(normalized);
   }
+}
+
+/** The draft without its reason (see `DecisionGate.judge`'s `reasonIsSharedFlag`). */
+function withoutReason(draft: DecisionDraft): DecisionDraft {
+  const { reason: _reason, ...rest } = draft;
+  return rest;
 }
 
 /** Whether the writer supplied anything at all (an all-empty draft counts as none). */

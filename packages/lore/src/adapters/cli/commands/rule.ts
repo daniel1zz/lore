@@ -55,6 +55,8 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
+import type { DecisionDraft } from "../../../service/decision-gate.js";
 
 /** citty/mri yields one string for a single occurrence of a repeatable flag, an array for >= 2, `undefined` for none. */
 function repeatable(value: unknown): string[] | undefined {
@@ -119,6 +121,13 @@ function fourPartFromArgs(args: Record<string, unknown>): { ok: true; parts: Fou
 }
 
 type FourPartFlags = Pick<AddRuleInput, "current_reality" | "target_rule" | "current_exceptions" | "migration">;
+
+/** The decision flags of one invocation, or the exit report of the malformed-flag refusal (BR-1476; the service decides whether one is required). */
+function decisionOf(inv: Invocation, args: Record<string, unknown>, json: boolean): { draft: DecisionDraft | undefined } | ExitReport {
+  const parsed = parseDecisionFlags(args);
+  if (!parsed.ok) return reportFailure(inv, parsed.error, json);
+  return { draft: parsed.value };
+}
 
 function failUsage(io: CliIo, message: string, json: boolean): ExitReport {
   if (json) printLine(io.stdout, JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
@@ -247,12 +256,15 @@ export default defineLoreCommand({
         "enforced-by": { type: "string", description: "[add | modify] guaranteed | both | prompt-only" },
         note: { type: "string", description: "[retire] Why the rule is no longer true" },
         correction: { type: "string", description: "Fix a LOCKED spec's change set as an audited correction; the value is the reason (BR-1069)" },
+        ...DECISION_FLAG_ARGS,
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const json = args.json === true;
+        const decision = decisionOf(inv, args, json);
+        if (typeof decision === "number") return decision;
         const op = args.op as string;
         const examples = repeatable(args.example);
         let input: ProposeRuleChangeInput;
@@ -298,6 +310,7 @@ export default defineLoreCommand({
           const result = await app.ruleChangeService.propose(args.spec as string, input, {
             by: resolveActor(inv),
             ...(args.correction !== undefined ? { correction: { reason: args.correction as string } } : {}),
+            decision: decision.draft,
           });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const { change, doc } = result.value;
@@ -410,11 +423,14 @@ export default defineLoreCommand({
         "current-exception": { type: "string", description: "[architecture standard, repeatable] A live debt entry id (AD-n) that excepts this standard today" },
         "current-exceptions-none": { type: "boolean", description: "[architecture standard] State that the standard has no current exceptions (empty list)" },
         migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
+        ...DECISION_FLAG_ARGS,
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
+        const decision = decisionOf(inv, args, args.json === true);
+        if (typeof decision === "number") return decision;
         const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRuleService(inv.io, app);
@@ -428,7 +444,7 @@ export default defineLoreCommand({
             examples: repeatable(args.example) ?? [],
             ...four.parts,
           };
-          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv) });
+          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv), decision: decision.draft });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version, pending: true, status: result.value.doc.status } }, null, 2));
@@ -458,11 +474,14 @@ export default defineLoreCommand({
         lifecycle: { type: "string", description: "retired (never back to live; `deprecated` is refused — see `lore rule propose <spec> retire`)" },
         note: { type: "string", description: "Retirement note — required with --lifecycle retired, stored as retired_note" },
         "move-to": { type: "string", description: "Destination baseline leaf (ID or slug); the BR-n id is unchanged" },
+        ...DECISION_FLAG_ARGS,
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
+        const decision = decisionOf(inv, args, args.json === true);
+        if (typeof decision === "number") return decision;
         const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRuleService(inv.io, app);
@@ -480,7 +499,7 @@ export default defineLoreCommand({
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
             ...four.parts,
           };
-          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv) });
+          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv), decision: decision.draft });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version, revision_id: result.value.revisionId ?? null, pending: result.value.revisionId !== undefined, status: result.value.doc.status } }, null, 2));

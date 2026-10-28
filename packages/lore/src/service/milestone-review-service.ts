@@ -44,6 +44,7 @@ import {
 import {
   buildMilestoneReviewPrompt,
   MILESTONE_REVIEW_PROMPT_VERSION,
+  type JudgedDecisionInput,
   type MilestoneTaskInput,
 } from "../ai/milestone-review-template.js";
 import { decisionDetailSchema, type DecisionLogRow } from "../store/decision-log.js";
@@ -56,7 +57,7 @@ import {
   type CitedRuleStateRow,
   type MainRedLedgerPort,
 } from "./milestone-review.js";
-import { applyDecisionFindings } from "./decision-recheck.js";
+import { applyDecisionFindings, judgedFindingsOf, rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
 import {
   applyRegressionFloor,
   applySnapshotRule,
@@ -91,6 +92,11 @@ export interface MilestoneReviewDeps {
    * measured ports: a service without it records no decision findings.
    */
   readonly recheckDecisions?: (bundle: PlanBundle) => Promise<Result<DecisionFinding[], LoreError>>;
+  /**
+   * The plan's recorded decisions as the judge reads them (`buildJudgedDecisionInputs`, spec D6). Optional like the
+   * other measured ports: a service without it puts no decisions section to the judge and records no judged findings.
+   */
+  readonly judgedDecisionInputs?: (bundle: PlanBundle) => Promise<Result<JudgedDecisionInput[], LoreError>>;
 }
 
 /** Per-run inputs the adapter measured. */
@@ -102,6 +108,8 @@ export interface MilestoneReviewOptions {
   readonly maxDiffChars: number;
   /** The batch's one full-suite run (`lore assess` measures it once); absent = none supplied for this review. */
   readonly suite?: SuiteRun;
+  /** Runs one criterion in this run's execution context; absent = the re-run of criteria citing a reworded rule is not done. */
+  readonly rerunCriterion?: CriterionRerunPort;
 }
 
 /** A stored review and its document. */
@@ -279,6 +287,9 @@ export class MilestoneReviewService {
     const touched = opts.diffText !== undefined && opts.diffText.length > 0 ? touchedFilesOfDiff(opts.diffText) : undefined;
     const attribution =
       opts.suite !== undefined ? attributeSuiteFailures(opts.suite, touched) : { attributed: [], unattributed: [] };
+    const judgedInputsResult = this.deps.judgedDecisionInputs !== undefined ? await this.deps.judgedDecisionInputs(bundle) : ok<JudgedDecisionInput[]>([]);
+    if (!judgedInputsResult.ok) return judgedInputsResult;
+    const judgedInputs = judgedInputsResult.value;
     const prompt = buildMilestoneReviewPrompt({
       suiteSection: renderSuiteSection(opts.suite, attribution, touched !== undefined),
       plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },
@@ -286,24 +297,28 @@ export class MilestoneReviewService {
       tasks,
       citedRules: citedRulesResult.value,
       decisions,
+      recordedDecisions: judgedInputs,
       ...(opts.diffText !== undefined ? { diffText: opts.diffText } : {}),
       diffSource: opts.diffSource,
       maxDiffChars: opts.maxDiffChars,
     });
 
-    const judged = await this.judgeWithRetry(prompt, bundle.plan.title);
+    const judged = await this.judgeWithRetry(prompt, bundle.plan.title, judgedInputs);
     if (!judged.ok) return judged;
     // reason: both measured inputs are applied AFTER the judge so it cannot waive them (Part D): an attributed
     // failing test file fails regression; snapshot_accuracy fails only on a contradicted cited rule.
     const decisionFindingsResult = this.deps.recheckDecisions !== undefined ? await this.deps.recheckDecisions(bundle) : ok<DecisionFinding[]>([]);
     if (!decisionFindingsResult.ok) return decisionFindingsResult;
-    const decisionFindings = decisionFindingsResult.value;
+    // reason: one list — the deterministic re-check, the judge's objections and the criterion re-runs all land in
+    // `decision_findings`; only a wrong-when-written one changes a verdict (`applyDecisionFindings`).
+    const rerun = opts.rerunCriterion !== undefined ? await rerunCitingCriteria(judgedInputs, opts.rerunCriterion) : [];
+    const decisionFindings = [...decisionFindingsResult.value, ...judged.value.findings, ...rerun];
     // reason: a wrong-when-written decision premise fails snapshot_accuracy AFTER the cited-rule rule so neither the judge
     // nor that rule can turn it back into a pass or an n/a (spec D5).
     const dimensions = applyDecisionFindings(
       applySnapshotRule(
         applyRegressionFloor(
-          applyDeterministicDimensionRules(judged.value.dimensions),
+          applyDeterministicDimensionRules(judged.value.output.dimensions),
           attribution,
           opts.suite?.status === "measured" ? opts.suite.commit : undefined,
         ),
@@ -362,7 +377,8 @@ export class MilestoneReviewService {
   private async judgeWithRetry(
     prompt: string,
     title: string,
-  ): Promise<Result<ReturnType<typeof llmMilestoneOutputSchema.parse>, LoreError>> {
+    inputs: readonly JudgedDecisionInput[],
+  ): Promise<Result<{ output: LlmMilestoneOutput; findings: DecisionFinding[] }, LoreError>> {
     let currentPrompt = prompt;
     let lastProblem = "";
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -371,14 +387,21 @@ export class MilestoneReviewService {
       const extracted = extractAssessmentJson(raw.value);
       if (extracted.ok) {
         const parsed = llmMilestoneOutputSchema.safeParse(extracted.value);
-        if (parsed.success) return ok(parsed.data);
-        lastProblem = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        if (parsed.success) {
+          // reason: llmMilestoneOutputSchema strips unknown keys, so the decisions answer is read from the raw object.
+          const answered = judgedFindingsOf(inputs, (extracted.value as { decisions?: unknown }).decisions);
+          if (answered.ok) return ok({ output: parsed.data, findings: answered.value });
+          lastProblem = answered.error;
+        } else {
+          lastProblem = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        }
       } else {
         lastProblem = "message" in extracted.error ? extracted.error.message : extracted.error.code;
       }
       currentPrompt =
         `${prompt}\n\nYour previous answer was rejected: ${lastProblem}\n` +
-        "Answer again with ONE JSON object containing all seven dimensions, each with verdict, reason and reference, and a non-empty cites list on every failed finding.";
+        "Answer again with ONE JSON object containing all seven dimensions, each with verdict, reason and reference, and a non-empty cites list on every failed finding" +
+        (inputs.length > 0 ? `, and a \`decisions\` array with one answer for each of: ${inputs.map((i) => i.address).join(", ")}.` : ".");
     }
     return err(aiError(`the judge did not return a valid seven-dimension review after one retry: ${lastProblem}`));
   }

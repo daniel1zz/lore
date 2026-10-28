@@ -43,5 +43,10 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
   spec: [{ key: "rule_changes", writer: "lore rule propose" }],
   // reason: DC2-8 — a recorded UAT verdict is writer-owned evidence; `lore set` replaces `extra`
   // wholesale, so without this entry a `lore_set` could flip `extra.uat.verdict` on every route.
-  knowledge: [{ key: "uat", writer: "lore uat record", subType: "uat" }],
+  knowledge: [
+    { key: "uat", writer: "lore uat record", subType: "uat" },
+    // reason: BR-1482 — a weight table is the scale every scored decision is weighed on; only `lore weights set` writes it
+    // (it checks the sum, the one-table-per-kind rule and, for an approved table, the decision citing a drill-down).
+    { key: "weight_table", writer: "lore weights set", subType: "reference" },
+  ],
 };

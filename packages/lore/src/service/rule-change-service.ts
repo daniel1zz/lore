@@ -45,7 +45,7 @@
  */
 
 import { err, ok, validationError, type Result } from "@lore/core";
-import type { DocRecord, DocStatus, LoreError, RuleChange } from "@lore/core";
+import type { DecisionRecord, DocRecord, DocStatus, LoreError, RuleChange } from "@lore/core";
 import {
   baselineExtraSchema,
   resolveStatusAfterContractEdit,
@@ -58,7 +58,8 @@ import {
 /** How a rule is enforced: `guaranteed` | `both` | `prompt-only` (the baseline rule schema's own enum). */
 export type RuleEnforcement = BaselineRule["enforced_by"];
 import type { StoreInterface } from "../store/store-interface.js";
-import { resolveWriteActorFor } from "../store/write-context-store.js";
+import { findWriteSourceFor, resolveWriteActorFor } from "../store/write-context-store.js";
+import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { RecordLockService } from "./record-lock-service.js";
@@ -95,6 +96,8 @@ export interface ProposeOpts {
   by?: string;
   /** The audited exit for a LOCKED spec (BR-1069): why this write is a fix, not a change. */
   correction?: { reason: string };
+  /** The decision the writer supplies (BR-1478): required of an agent when the spec is not a draft. */
+  decision?: DecisionDraft | undefined;
 }
 
 /** Result of {@link RuleChangeService.changes}. */
@@ -153,6 +156,27 @@ export class RuleChangeService implements RuleChangeLandingPort {
   }
 
   /**
+   * Armed by `app.ts` (both roots): an agent's proposal on a spec that is not a draft is refused without a complete
+   * decision (BR-1478). Absent (a bare test construction) = ungated.
+   */
+  private decisionGate: DecisionGate | undefined;
+
+  setDecisionGate(gate: DecisionGate): void {
+    this.decisionGate = gate;
+  }
+
+  /**
+   * The decision of a proposal: required of an agent when `spec` is not a draft (a proposal on a draft spec is decided
+   * with the spec's approval); `ok(undefined)` when none is required and none was supplied.
+   */
+  private async resolveProposalDecision(spec: DocRecord, draft: DecisionDraft | undefined): Promise<Result<DecisionRecord | undefined, LoreError>> {
+    const gate = this.decisionGate;
+    if (gate === undefined) return ok(undefined);
+    const required = writeCarriesDecision({ writerSource: findWriteSourceFor(this.store), targetIsDraft: spec.status === "draft", changesMoreThanStatus: true });
+    return gate.judgeChecked({ required, draft, kind: "rule revision" });
+  }
+
+  /**
    * Arms the claim-scoped corpus-write guard (same context `RuleService` receives). Absent ⇒ every write is
    * ungated, exactly as before the guard existed.
    */
@@ -198,6 +222,9 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const authorized = await this.authorizeTarget(shaped.value, actor);
     if (!authorized.ok) return authorized;
     const leaf = authorized.value;
+    const decided = await this.resolveProposalDecision(specResult.value, opts.decision);
+    if (!decided.ok) return decided;
+    const decision = decided.value;
 
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
@@ -209,8 +236,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
         ? `Correction: ${correctionReason}`
         : `Rule change proposed: ${shaped.value.op} ${shaped.value.op === "add" ? "(new rule)" : shaped.value.id}`;
       const written = shaped.value.op === "add"
-        ? await this.writeAdd(spec, shaped.value, leaf, status, summary, actor)
-        : await this.writeAmend(spec, shaped.value, status, summary, actor, correctionReason);
+        ? await this.writeAdd(spec, shaped.value, leaf, status, summary, actor, decision)
+        : await this.writeAmend(spec, shaped.value, status, summary, actor, correctionReason, decision);
       if (!written.ok) {
         if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
         return written;
@@ -576,6 +603,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     status: DocStatus,
     summary: string,
     actor: string,
+    decision: DecisionRecord | undefined,
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     if (leaf === undefined) return err(validationError("leaf", "an add needs a resolved baseline leaf"));
     let stored: RuleChange | undefined;
@@ -586,6 +614,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         ownerLeafId: leaf.id,
         status,
         changeSummary: summary,
+        ...(decision !== undefined ? { decision } : {}),
         buildExtra: (ruleId) => {
           stored = { ...change, id: ruleId, leaf: leaf.slug };
           return { ...spec.extra, rule_changes: [...ruleChangesOf(spec.extra), stored] };
@@ -608,13 +637,14 @@ export class RuleChangeService implements RuleChangeLandingPort {
     summary: string,
     actor: string,
     correctionReason: string | undefined,
+    decision: DecisionRecord | undefined,
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const checked = await this.checkAmendable(spec, change);
     if (!checked.ok) return checked;
     const existing = ruleChangesOf(spec.extra);
     const replaced = existing.some((c) => c.id === change.id);
     const next = replaced ? existing.map((c) => (c.id === change.id ? change : c)) : [...existing, change];
-    return this.writeChangeSet(spec, next, change, status, summary, actor, correctionReason);
+    return this.writeChangeSet(spec, next, change, status, summary, actor, correctionReason, change.op, decision);
   }
 
   /**
@@ -630,12 +660,14 @@ export class RuleChangeService implements RuleChangeLandingPort {
     actor: string,
     correctionReason: string | undefined,
     auditChangeOp: string = change.op,
+    decision?: DecisionRecord,
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const written = await this.writer.writeDoc({
       doc: spec,
       patch: { extra: { ...spec.extra, rule_changes: next }, status },
       action: "update",
       changeSummary: summary,
+      ...(decision !== undefined ? { decision } : {}),
       auditAction: "update",
       auditDetails: {
         operation: "rule-propose",
@@ -671,6 +703,9 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const exit = await this.resolveLockExit(specResult.value, opts.correction);
     if (!exit.ok) return exit;
     const correctionReason = exit.value.correctionReason;
+    const decided = await this.resolveProposalDecision(specResult.value, opts.decision);
+    if (!decided.ok) return decided;
+    const decision = decided.value;
 
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
@@ -713,8 +748,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
         : `Rule change proposed: amend ${amended.id}`;
       // A moved leaf re-points the registry row in the SAME transaction as the spec write; otherwise a plain write.
       const written = target !== undefined && target.slug !== entry.value.leaf
-        ? await this.writeRepoint(spec, next, amended, target, status, summary, actor, correctionReason)
-        : await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
+        ? await this.writeRepoint(spec, next, amended, target, status, summary, actor, correctionReason, decision)
+        : await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason, amended.op, decision);
       if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
       return written;
     }
@@ -731,6 +766,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     summary: string,
     actor: string,
     correctionReason: string | undefined,
+    decision: DecisionRecord | undefined,
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const written = await this.writer.repointProposedRule({
       write: {
@@ -741,6 +777,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         toLeafId: target.id,
         status,
         changeSummary: summary,
+        ...(decision !== undefined ? { decision } : {}),
       },
       auditDetails: {
         operation: "rule-propose",
@@ -772,6 +809,9 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const exit = await this.resolveLockExit(specResult.value, opts.correction);
     if (!exit.ok) return exit;
     const correctionReason = exit.value.correctionReason;
+    const decided = await this.resolveProposalDecision(specResult.value, opts.decision);
+    if (!decided.ok) return decided;
+    const decision = decided.value;
 
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
@@ -796,7 +836,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
         ? `Correction: ${correctionReason}`
         : `Rule change withdrawn: ${entry.op} ${entry.id}`;
       const next = existing.filter((c) => c.id !== input.id);
-      const written = await this.writeChangeSet(spec, next, entry, status, summary, actor, correctionReason, "withdraw");
+      const written = await this.writeChangeSet(spec, next, entry, status, summary, actor, correctionReason, "withdraw", decision);
       if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
       return written;
     }
