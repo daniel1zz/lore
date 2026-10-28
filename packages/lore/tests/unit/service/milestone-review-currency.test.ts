@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { MILESTONE_DIMENSIONS, type DocRecord, type MilestoneReview } from "@lore/core";
+import { JUDGED_DIMENSIONS, MILESTONE_DIMENSIONS, type DocRecord, type MilestoneReview } from "@lore/core";
 import {
   MILESTONE_REVIEW_SUB_TYPE,
   assessMilestoneCurrency,
@@ -216,12 +216,14 @@ describe("buildMilestoneReviewPrompt", () => {
     citedRules: [{ rule_id: "BR-5", state: "stale" }],
     decisions: [{ class: "ac-exempt", document: "task-a", summary: "exempt" }],
     diffSource: "derived",
-    maxDiffChars: 100,
+    mode: "full" as const,
   };
 
-  it("HAPPY: names all seven dimensions, the evidence trust, the rule state and the decisions", () => {
+  // spec change (milestone-6): the prompt asks only the four judged dimensions; the other three are measured facts.
+  it("HAPPY: asks the judged dimensions, the evidence trust, the rule state and the decisions", () => {
     const prompt = buildMilestoneReviewPrompt({ ...input, diffText: "diff --git a/src/x.ts b/src/x.ts\n+x" });
-    for (const d of MILESTONE_DIMENSIONS) expect(prompt).toContain(d);
+    for (const d of JUDGED_DIMENSIONS) expect(prompt).toContain(d);
+    expect(MILESTONE_DIMENSIONS.length).toBe(7);
     expect(prompt).toContain("[attested] test pass: bun test");
     expect(prompt).toContain("BR-5: stale");
     expect(prompt).toContain("ac-exempt on task-a: exempt");
@@ -231,10 +233,12 @@ describe("buildMilestoneReviewPrompt", () => {
     expect(buildMilestoneReviewPrompt({ ...input, diffSource: "none: no commits" })).toContain("No diff is available (none: no commits)");
   });
 
-  it("BOUNDARY: a diff over the budget is cut by file and the prompt says so", () => {
-    const big = `diff --git a/src/a.ts b/src/a.ts\n${"+a\n".repeat(200)}diff --git a/src/b.ts b/src/b.ts\n${"+b\n".repeat(200)}`;
-    const prompt = buildMilestoneReviewPrompt({ ...input, diffText: big, maxDiffChars: 400 });
-    expect(prompt).toContain("was cut by file");
-    expect(prompt).toContain("files not shown were not reviewed");
+  // spec change (BR-1499): the prompt never cuts a diff; unseen files are named instead.
+  it("BOUNDARY: the diff is shown whole and files no call shows are named", () => {
+    const big = `diff --git a/src/a.ts b/src/a.ts\n${"+a\n".repeat(200)}`;
+    const prompt = buildMilestoneReviewPrompt({ ...input, diffText: big, unseenFiles: ["src/huge.ts"] });
+    expect(prompt).toContain(big);
+    expect(prompt).toContain("NOT shown to any call");
+    expect(prompt).toContain("src/huge.ts");
   });
 });

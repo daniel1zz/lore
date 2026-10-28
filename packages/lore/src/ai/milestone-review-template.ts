@@ -1,31 +1,40 @@
 /**
- * Milestone review prompt: the one prompt `lore assess` sends the judge for a plan (BR-1372).
+ * Milestone review prompt: the judgment-layer prompt `lore assess` sends the judge for a plan (BR-1372, BR-1499).
  *
- * Purpose: render the plan's landed diff, documents, attested task evidence, cited-rule state and the milestone
- *   decisions into a seven-dimension review request whose answer parses with `llmMilestoneOutputSchema`.
- * Public surface: MILESTONE_REVIEW_PROMPT_VERSION, MilestoneReviewPromptInput, buildMilestoneReviewPrompt,
- *   JudgedDecisionInput, judgedDecisionsAnswerSchema.
+ * Purpose: render the plan's documents, facts table and landed diff (or a chunk of it) into a request that asks ONLY
+ *   what no tool measures: spec_conformance, design_necessity, concurrency_safety, security, and one verdict per
+ *   AI-mode criterion. The facts dimensions (correctness_vs_acs, regression, snapshot_accuracy) are never asked.
+ * Public surface: MILESTONE_REVIEW_PROMPT_VERSION, MilestoneReviewPromptInput, MilestonePromptMode,
+ *   buildMilestoneReviewPrompt, askedDimensionsOf, JudgedDecisionInput, judgedDecisionsAnswerSchema,
+ *   MilestoneEvidenceLine, MilestoneTaskInput, DiffChunkSummary.
  * Invariants:
- *   - The prompt names all seven dimensions from `MILESTONE_DIMENSIONS` (the single list), never a restated copy.
- *   - A diff over `maxDiffChars` is cut by file (`truncateDiffByFile`), and the prompt says so: a judge told nothing
- *     about a cut would read a partial diff as a complete one.
- *   - A diff that is absent is said to be absent, with the reason; the judge is told to judge from the documents.
- *   - The recorded decisions are a section of their own (premise quotes, alternatives, old and new rule statement); the
- *     judge answers them in a top-level `decisions` array beside `dimensions`, and only when the section lists some.
+ *   - The asked dimensions come from `JUDGED_DIMENSIONS` (the single list) filtered by the call's mode; the prompt
+ *     never names a facts dimension as something to judge, and says the facts table may be cited, never overruled.
+ *   - This builder NEVER cuts the diff: the service chunks by file within the budget (BR-1499), so a diff given here is
+ *     shown whole. A file that no call shows is named in the prompt as not seen.
+ *   - A diff that is absent is said to be absent, with the reason.
+ *   - The recorded decisions are a section of their own; the judge answers them in a top-level `decisions` array, and
+ *     only in a mode that asks them (full, summary) and only when the section lists some.
  * Side-effect class: pure.
  *
  * Reference: Kayenta automated canary analysis (several metrics judged separately; promotion needs all to pass) and
- * Google's engineering code review guide (the dimensions of a review). Source: spec-lean-governance-batch-verbs-
- * judgment-only-at-milestones Part D; adr-ai-decision-standard-four-checks-references-from-excellent.
+ * Google's engineering code review guide (the dimensions of a review). Source: spec-the-milestone-review-measures-its-
+ * facts-per-landing-and (Judgment layer, D6); adr-ai-decision-standard-four-checks-references-from-excellent.
  */
 
 import { z } from "zod";
-import { MILESTONE_DIMENSIONS, type MilestoneDecisionRef } from "@lore/core";
-import { truncateDiffByFile } from "./diff-truncation.js";
+import { JUDGED_DIMENSIONS, type JudgedDimension, type MilestoneDecisionRef, type MilestoneFacts } from "@lore/core";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
 
-/** Stamped on every stored review (`prompt_version`). */
-export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-5";
+/** Stamped on every stored review (`prompt_version`). milestone-6: judgment layer only, facts table, file chunks. */
+export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-6";
+
+/**
+ * Which call this prompt is. `full`: every judged dimension on the whole diff (one call). `chunk`: security and
+ * concurrency_safety on one file chunk. `summary`: spec_conformance, design_necessity and the AI-mode criteria on the
+ * full file list plus chunk summaries (the diff itself did not fit one call).
+ */
+export type MilestonePromptMode = "full" | "chunk" | "summary";
 
 /** One task's evidence row as the judge sees it. */
 export interface MilestoneEvidenceLine {
@@ -72,46 +81,63 @@ export const judgedDecisionAnswerSchema = z.object({
 });
 export const judgedDecisionsAnswerSchema = z.array(judgedDecisionAnswerSchema);
 
+/** What one file chunk contains, for the summary call (deterministic counts, no AI). */
+export interface DiffChunkSummary {
+  readonly index: number;
+  readonly files: readonly { readonly path: string; readonly added: number; readonly removed: number }[];
+}
+
 /** Everything the prompt renders. */
 export interface MilestoneReviewPromptInput {
+  readonly mode: MilestonePromptMode;
   readonly plan: { readonly slug: string; readonly title: string; readonly content: string };
   readonly spec?: { readonly slug: string; readonly title: string; readonly content: string };
   readonly tasks: readonly MilestoneTaskInput[];
   readonly citedRules: readonly CitedRuleStateRow[];
   readonly decisions: readonly MilestoneDecisionRef[];
+  /** The measured facts table; absent parts render as "not measured". */
+  readonly facts?: MilestoneFacts;
   /** The plan's recorded decisions to judge (spec D6); absent or empty = none to judge. */
   readonly recordedDecisions?: readonly JudgedDecisionInput[];
-  /** The plan's landed diff, or `undefined` when none could be derived. */
+  /** The diff this call shows (whole diff in `full`, one chunk in `chunk`); `undefined` in `summary` or when none could be derived. */
   readonly diffText?: string;
   /** Human-readable account of how the diff was obtained (or why it is absent). */
   readonly diffSource: string;
-  readonly maxDiffChars: number;
+  /** Every file of the plan's diff (summary mode lists them all). */
+  readonly allFiles?: readonly string[];
+  /** Chunk summaries (summary mode). */
+  readonly chunkSummaries?: readonly DiffChunkSummary[];
+  /** Files no call shows the judge (listed in every mode that names the diff). */
+  readonly unseenFiles?: readonly string[];
   /** The batch's full-suite run as it concerns this plan (`renderSuiteSection`); absent = a bare prompt build. */
   readonly suiteSection?: string;
 }
 
-const DIMENSION_GUIDE: Readonly<Record<(typeof MILESTONE_DIMENSIONS)[number], string>> = {
-  correctness_vs_acs:
-    "Does the landed work satisfy every acceptance criterion the plan claims? Read the attested evidence below; a pass " +
-    "that no trusted runner produced is a self-report. List any milestone decisions below here: each is an override " +
-    "that was applied and is waiting for this review.",
-  spec_conformance: "Does the landed work do what the spec and plan say, no less and no more?",
-  regression: "Did the change break behaviour that existed before it? Name the behaviour at risk and what covers it. Read the " +
-    "full-suite section below: it is one run on main for the whole batch; a failing file counts against this plan only " +
-    "when the section attributes it to this plan.",
+const DIMENSION_GUIDE: Readonly<Record<JudgedDimension, string>> = {
+  spec_conformance:
+    "Does the landed work do what the spec and plan say, no less and no more? The facts table lists files landings " +
+    "touched outside their task's anchors: a helper may legitimately sit outside, but a file that adds behaviour the " +
+    "spec does not ask for is a fail.",
   design_necessity:
     "Is each technical choice needed? For EVERY technical choice name the external product or practice it follows in " +
     "`reference` (for example: Kayenta canary analysis, Postgres MVCC, the Google code review guide). A choice with no " +
     "external reference you can name is a fail.",
-  snapshot_accuracy:
-    "Do the documents describe what the code now does? Read the cited-rule state below: fail ONLY for a rule whose " +
-    "state is contradicted (a failing run of its citing criterion, so the document and the code disagree). A stale " +
-    "rule only means a code anchor changed since its last attested pass; stale evidence was re-verified before this " +
-    "review, so a rule still shown stale, and an unknown (no code anchor, dirty tree, no recorded commit) or " +
-    "unverified rule, is na, never a fail.",
   concurrency_safety: "Can two sessions, writers or processes doing this at once corrupt state or lose a write?",
   security: "Does the change open a path for untrusted input, leaked credentials or an unchecked privilege?",
 };
+
+/**
+ * The judged dimensions a call of `mode` asks.
+ *
+ * @param mode - the call's mode
+ * @returns `full`: all four; `chunk`: concurrency_safety and security; `summary`: spec_conformance and design_necessity
+ */
+export function askedDimensionsOf(mode: MilestonePromptMode): readonly JudgedDimension[] {
+  const chunkOnly: readonly JudgedDimension[] = ["concurrency_safety", "security"];
+  if (mode === "full") return JUDGED_DIMENSIONS;
+  if (mode === "chunk") return JUDGED_DIMENSIONS.filter((d) => chunkOnly.includes(d));
+  return JUDGED_DIMENSIONS.filter((d) => !chunkOnly.includes(d));
+}
 
 function renderEvidence(lines: readonly MilestoneEvidenceLine[]): string {
   if (lines.length === 0) return "  (no evidence recorded)";
@@ -145,76 +171,147 @@ function renderRecordedDecisions(input: MilestoneReviewPromptInput): string {
   ].join("\n");
 }
 
-function renderDiff(input: MilestoneReviewPromptInput): string {
+function renderFactRows(title: string, rows: readonly { subject: string; verdict: string; detail: string }[] | undefined): string[] {
+  if (rows === undefined) return [`${title}: not measured (no result was supplied).`];
+  if (rows.length === 0) return [`${title}: none.`];
+  return [`${title}:`, "| Subject | Verdict | Detail |", "|---|---|---|", ...rows.map((r) => `| ${r.subject} | ${r.verdict} | ${r.detail.replace(/\|/g, "/")} |`)];
+}
+
+/** The facts table: criteria attestation, regression per landing, outside-anchor files with their landings, cited-rule state. */
+function renderFacts(input: MilestoneReviewPromptInput): string {
+  const facts = input.facts;
+  const outside =
+    facts?.outside_anchors === undefined
+      ? ["Files outside their task's anchors: not measured (no per-landing diff was supplied)."]
+      : facts.outside_anchors.every((o) => o.files.length === 0)
+        ? ["Files outside their task's anchors: none."]
+        : [
+            "Files outside their task's anchors (landing -> files):",
+            ...facts.outside_anchors.filter((o) => o.files.length > 0).map((o) => `- ${o.landing}: ${o.files.join(", ")}`),
+          ];
+  const rules =
+    input.citedRules.length === 0
+      ? ["Cited rule state: no rule is cited by the plan's spec."]
+      : [
+          "Cited rule state:",
+          ...input.citedRules.map((r) => `- ${r.rule_id}: ${r.state}${r.unknown_reason !== undefined ? ` (${r.unknown_reason})` : ""}`),
+        ];
+  const unlanded = facts?.unlanded_tasks !== undefined && facts.unlanded_tasks.length > 0 ? [`Tasks with no landing yet: ${facts.unlanded_tasks.join(", ")}.`] : [];
+  return [
+    "These facts were measured by tools. You may cite them; you may never overrule them, and you give no verdict on them.",
+    "",
+    ...renderFactRows("Criteria attestation", facts?.attestation),
+    "",
+    ...renderFactRows("Regression per landing", facts?.regression),
+    "",
+    ...outside,
+    "",
+    ...rules,
+    ...unlanded,
+    "",
+    input.suiteSection ?? "No full-suite run was supplied for this review.",
+  ].join("\n");
+}
+
+function renderUnseen(unseen: readonly string[] | undefined): string {
+  if (unseen === undefined || unseen.length === 0) return "";
+  return `\nFiles NOT shown to any call (too large for one call; they are not reviewed): ${unseen.join(", ")}.`;
+}
+
+function renderDiffSection(input: MilestoneReviewPromptInput): string {
+  if (input.mode === "summary") {
+    const files = input.allFiles ?? [];
+    const summaries = (input.chunkSummaries ?? [])
+      .map((c) => `- chunk ${String(c.index + 1)}: ${c.files.map((f) => `${f.path} (+${String(f.added)} -${String(f.removed)})`).join(", ")}`)
+      .join("\n");
+    return (
+      `Source: ${input.diffSource}\nThe diff is too large for one call, so its text is not shown here: security and concurrency_safety were ` +
+      `judged per file chunk. Judge from the full file list and the chunk summaries.\n\nAll files (${String(files.length)}): ${files.join(", ")}\n\n` +
+      `Chunk summaries:\n${summaries.length > 0 ? summaries : "(none)"}${renderUnseen(input.unseenFiles)}`
+    );
+  }
   if (input.diffText === undefined || input.diffText.length === 0) {
     return `No diff is available (${input.diffSource}). Judge from the documents and evidence, and say so in the reasons that depend on code.`;
   }
-  if (input.diffText.length <= input.maxDiffChars) return `Source: ${input.diffSource}\n\n${input.diffText}`;
-  const cut = truncateDiffByFile(input.diffText, input.maxDiffChars);
-  return (
-    `Source: ${input.diffSource}\nThe diff is ${input.diffText.length} characters and was cut by file to fit ` +
-    `${input.maxDiffChars}; files not shown were not reviewed.\n\n${cut.text}`
-  );
+  const label = input.mode === "chunk" ? "This is ONE file chunk of a larger diff; judge only what it shows." : "";
+  return `Source: ${input.diffSource}\n${label}${renderUnseen(input.unseenFiles)}\n\n${input.diffText}`;
+}
+
+function renderCriteria(input: MilestoneReviewPromptInput): string {
+  const criteria = input.facts?.ai_criteria ?? [];
+  if (criteria.length === 0) return "None.";
+  return [
+    "Give ONE verdict (pass or fail) and a reason for each criterion below, judged against its rubric, in `criteria`.",
+    "",
+    criteria.map((c) => `## ${c.spec}:${c.ac}\n  rubric: ${c.rubric}`).join("\n\n"),
+  ].join("\n");
 }
 
 /**
- * Builds the milestone review prompt.
+ * Builds the milestone judgment prompt.
  *
- * @param input - the plan, spec, tasks with evidence, cited-rule state, milestone decisions and diff
- * @returns the prompt text; the judge answers with one JSON object `{"dimensions": {<dimension>: {verdict, reason, reference, cites}}}`
+ * @param input - the call's mode, the plan, spec, tasks with evidence, facts table, milestone decisions and diff (or chunk)
+ * @returns the prompt text; the judge answers with one JSON object `{"dimensions": {<asked dimension>: {verdict, reason, reference, cites}}}`
+ *   plus `criteria` and `decisions` where the mode asks them
  * @example
- * buildMilestoneReviewPrompt({ plan, tasks: [], citedRules: [], decisions: [], diffSource: "none", maxDiffChars: 24000 });
+ * buildMilestoneReviewPrompt({ mode: "full", plan, tasks: [], citedRules: [], decisions: [], diffSource: "none" });
  */
 export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): string {
-  const dims = MILESTONE_DIMENSIONS.map((d) => `- ${d}: ${DIMENSION_GUIDE[d]}`).join("\n");
+  const asked = askedDimensionsOf(input.mode);
+  const dims = asked.map((d) => `- ${d}: ${DIMENSION_GUIDE[d]}`).join("\n");
+  const asksCriteria = input.mode !== "chunk" && (input.facts?.ai_criteria ?? []).length > 0;
+  const asksDecisions = input.mode !== "chunk" && (input.recordedDecisions ?? []).length > 0;
   const tasks = input.tasks
     .map((t) => `## Task ${t.slug} (${t.status}): ${t.title}\n${t.content}\nEvidence:\n${renderEvidence(t.evidence)}`)
     .join("\n\n");
-  const rules =
-    input.citedRules.length === 0
-      ? "No rule is cited by the plan's spec."
-      : input.citedRules
-          .map((r) => `- ${r.rule_id}: ${r.state}${r.unknown_reason !== undefined ? ` (${r.unknown_reason})` : ""}`)
-          .join("\n");
   const decisions =
     input.decisions.length === 0
       ? "None."
       : input.decisions.map((d) => `- ${d.class} on ${d.document}: ${d.summary}`).join("\n");
   const spec = input.spec === undefined ? "The plan has no spec." : `# Spec ${input.spec.slug}: ${input.spec.title}\n${input.spec.content}`;
-  return [
-    "You are the milestone reviewer for a finished plan. Judge it on seven dimensions, each separately.",
+  const shape =
+    '{"dimensions": {' +
+    asked.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}`).join(", ") +
+    "}" +
+    (asksCriteria ? ', "criteria": [{"spec": "<spec slug>", "ac": "<AC id>", "verdict": "pass|fail", "reason": "..."}]' : "") +
+    (asksDecisions
+      ? ', "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
+        '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]'
+      : "") +
+    "}";
+  const head = [
+    `You are the milestone reviewer for a finished plan. Judge ONLY the dimensions listed below, each separately: ${asked.join(", ")}.`,
+    "Everything else (criteria attestation, regression, cited-rule state) was measured by tools and appears in the facts table; do not judge it.",
     "For each dimension give a verdict (pass, fail or na), a reason that cites what you saw, and a reference.",
-    "For every dimension you fail (except regression and snapshot_accuracy, which are measured) also give `cites`: a non-empty",
-    "list of the stable things the finding is about: acceptance-criterion ids, rule ids, file paths or symbols. Use the same",
-    "cite for the same defect on every review; cites identify the defect, so never put prose or wording in them.",
-    "Overall the plan passes only if no dimension fails. Use na only when the dimension cannot apply.",
+    "For every dimension you fail also give `cites`: a non-empty list of the stable things the finding is about: acceptance-criterion",
+    "ids, rule ids, file paths or symbols. Use the same cite for the same defect on every review; cites identify the defect, so never put prose in them.",
+    "Use na only when the dimension cannot apply. Never answer for something you were not shown.",
     "",
     "# Dimensions",
     dims,
     "",
     "# Output",
-    'Reply with ONE JSON object and nothing else: {"dimensions": {' +
-      MILESTONE_DIMENSIONS.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}`).join(", ") +
-      "}" +
-      ((input.recordedDecisions ?? []).length > 0
-        ? ', "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
-          '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]'
-        : "") +
-      "}",
+    `Reply with ONE JSON object and nothing else: ${shape}`,
     "",
     `# Plan ${input.plan.slug}: ${input.plan.title}`,
     input.plan.content,
     "",
     spec,
     "",
+  ];
+  if (input.mode === "chunk") {
+    return [...head, "# Facts table", renderFacts(input), "", "# Diff chunk", renderDiffSection(input)].join("\n");
+  }
+  return [
+    ...head,
     "# Tasks and attested evidence",
     tasks.length === 0 ? "(no tasks)" : tasks,
     "",
-    "# Cited rule state",
-    rules,
+    "# Facts table",
+    renderFacts(input),
     "",
-    "# Full-suite run on main (regression input)",
-    input.suiteSection ?? "No full-suite run was supplied for this review.",
+    "# AI-mode criteria (judge each against its rubric)",
+    renderCriteria(input),
     "",
     "# Milestone decisions awaiting this review",
     decisions,
@@ -223,6 +320,6 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     renderRecordedDecisions(input),
     "",
     "# Landed diff",
-    renderDiff(input),
+    renderDiffSection(input),
   ].join("\n");
 }

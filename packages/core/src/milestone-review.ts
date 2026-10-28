@@ -34,9 +34,24 @@ export type MilestoneDimension = (typeof MILESTONE_DIMENSIONS)[number];
 /** Dimensions whose root cause is measured (suite failing set, contradicted rules), never taken from the judge's cites. */
 export const MEASURED_CAUSE_DIMENSIONS: readonly MilestoneDimension[] = ["regression", "snapshot_accuracy"];
 
-/** One dimension's verdict. */
-export const dimensionVerdictSchema = z.enum(["pass", "fail", "na"]);
+/**
+ * One dimension's verdict. `not-measured` means the fact could not be established (a file never shown to the judge, a
+ * criterion with no bound attestation): it is carried through as its own value and is never collapsed into `pass`.
+ * `overallMilestoneVerdict` still fails only on `fail`; what a not-measured gate does to plan close is decided by the
+ * gate rules, not here.
+ */
+export const dimensionVerdictSchema = z.enum(["pass", "fail", "na", "not-measured"]);
 export type DimensionVerdict = z.infer<typeof dimensionVerdictSchema>;
+
+/** The four dimensions only the AI judges (no tool measures them); the other three are facts the tools measure. */
+export const JUDGED_DIMENSIONS = ["spec_conformance", "design_necessity", "concurrency_safety", "security"] as const;
+export type JudgedDimension = (typeof JUDGED_DIMENSIONS)[number];
+
+/** The dimensions computed from measured facts; an AI verdict on one of them is ignored. */
+export const FACT_DIMENSIONS = ["correctness_vs_acs", "regression", "snapshot_accuracy"] as const;
+
+/** A verdict the AI judge may give: it can never answer `not-measured` (only the review can know that). */
+export const judgeVerdictSchema = z.enum(["pass", "fail", "na"]);
 
 /** A dimension judgment: verdict, the reason for it, and the reference (an external practice, a doc, a commit). */
 export const dimensionJudgmentSchema = z.object({
@@ -74,6 +89,94 @@ export const llmMilestoneOutputSchema = z
     }
   });
 export type LlmMilestoneOutput = z.infer<typeof llmMilestoneOutputSchema>;
+
+/** One judged dimension as the AI returns it. */
+export const judgedDimensionAnswerSchema = z.object({
+  verdict: judgeVerdictSchema,
+  reason: z.string().trim().min(1),
+  reference: z.string().trim(),
+  cites: z.array(z.string().trim().min(1)).optional(),
+});
+
+/** One AI-mode criterion's verdict from the judge. */
+export const aiCriterionAnswerSchema = z.object({
+  spec: z.string().min(1).optional(),
+  ac: z.string().min(1),
+  verdict: z.enum(["pass", "fail"]),
+  reason: z.string().trim().min(1),
+});
+export type AiCriterionAnswer = z.infer<typeof aiCriterionAnswerSchema>;
+
+/**
+ * The judge's answer to one call over a subset of the judged dimensions (all four for a one-call review, security and
+ * concurrency_safety for a file chunk, the other two for the summary call). Keys outside `dimensions` are stripped, so
+ * an AI verdict on a facts dimension never reaches the review. A failed finding must cite what it is about.
+ *
+ * @param dimensions - the judged dimensions this call asked
+ * @returns the zod schema of the answer
+ */
+export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
+  const shape = Object.fromEntries(dimensions.map((d) => [d, judgedDimensionAnswerSchema])) as Record<string, typeof judgedDimensionAnswerSchema>;
+  return z
+    .object({ dimensions: z.object(shape), criteria: z.array(aiCriterionAnswerSchema).optional() })
+    .superRefine((output, ctx) => {
+      for (const d of dimensions) {
+        const j = output.dimensions[d];
+        if (j !== undefined && j.verdict === "fail" && (j.cites ?? []).length === 0) {
+          ctx.addIssue({ code: "custom", path: ["dimensions", d, "cites"], message: "a failed finding must cite at least one AC id, rule id, file path or symbol" });
+        }
+      }
+    });
+}
+
+/** One row of the facts table: a criterion's attestation, or one landing's regression. */
+export interface MilestoneFactRow {
+  /** Criterion `<spec>:<ac>` or landing commit, whichever the row is about. */
+  readonly subject: string;
+  readonly verdict: "pass" | "fail" | "not-measured";
+  /** What decided it (attestation id, failing files, why not measured). */
+  readonly detail: string;
+}
+
+/** An AI-mode criterion the judge rules on, with its rubric. */
+export interface AiCriterionInput {
+  readonly spec: string;
+  readonly ac: string;
+  readonly rubric: string;
+}
+
+/**
+ * The measured facts the judgment prompt carries as a table and the review reads to compute the facts dimensions.
+ * Each part is optional: a part nobody measured is absent, which the review reports as not measured, never as pass.
+ */
+export interface MilestoneFacts {
+  /** Script criteria attestation (`correctness_vs_acs` input). */
+  readonly attestation?: readonly MilestoneFactRow[];
+  /** Regression per landing (full suite at each landing commit). */
+  readonly regression?: readonly MilestoneFactRow[];
+  /** Files each landing touched outside its task's anchors. */
+  readonly outside_anchors?: readonly { readonly landing: string; readonly files: readonly string[] }[];
+  /** Tasks of the plan with no landing yet. */
+  readonly unlanded_tasks?: readonly string[];
+  /** AI-mode criteria of the plan's task scopes. */
+  readonly ai_criteria?: readonly AiCriterionInput[];
+}
+
+/** What the judgment layer did, stored on the review: calls, tokens, time, and the files no call showed. */
+export const judgmentRecordSchema = z.object({
+  calls: z.number().int().min(0),
+  /** Summed over the calls that reported usage; absent when no call reported any (never 0 for "unknown"). */
+  tokens_in: z.number().int().min(0).optional(),
+  tokens_out: z.number().int().min(0).optional(),
+  duration_ms: z.number().int().min(0),
+  files_total: z.number().int().min(0),
+  /** Files shown in no call; any gate judged with one of these is `not-measured`. */
+  unseen_files: z.array(z.string().min(1)),
+  ai_criteria: z.array(
+    z.object({ spec: z.string().min(1), ac: z.string().min(1), verdict: z.enum(["pass", "fail", "not-measured"]), reason: z.string().min(1) }),
+  ),
+});
+export type JudgmentRecord = z.infer<typeof judgmentRecordSchema>;
 
 /** A `milestone` decision (BR-1370) the review lists under correctness. */
 export const milestoneDecisionRefSchema = z.object({
@@ -156,6 +259,8 @@ export const milestoneReviewSchema = z.object({
   decision_findings: z.array(decisionFindingSchema).optional(),
   /** Escaped defects traced to a decision; written only by `lore decision trace`, idempotent by the triple. */
   traced_decisions: z.array(tracedDecisionSchema).optional(),
+  /** The judgment layer's calls, tokens, time and unseen files; absent on a review stored before it was recorded. */
+  judgment: judgmentRecordSchema.optional(),
   prompt_version: z.string().min(1),
   /** How the diff was obtained, e.g. `auto_derived:derived` or `none`. */
   diff_source: z.string().min(1),
