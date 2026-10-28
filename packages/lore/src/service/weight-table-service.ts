@@ -7,7 +7,7 @@
  * Public surface: {@link WeightTableService} (`set`, `setDecisionGate`), {@link buildWeightTableLookup}, {@link SetWeightTableInput}.
  * Invariants:
  *   - The target is a live knowledge document with `extra.sub_type: "reference"`; anything else is `VALIDATION_ERROR` (exit 4).
- *   - One live document per kind: another live (not deleted, not archived) holder is refused, naming it.
+ *   - One live document per kind: another live (not deleted, archived, deprecated or invalidated) holder is refused, naming it.
  *   - Changing an existing table of a non-draft document is decision-carrying for an agent run (the gate's own rule) and its
  *     decision must hold a premise whose source is a milestone-review document or an issue (a traced drill-down).
  *   - A write to an approved table demotes the document to `draft`: the new weights are not the approved version until a
@@ -21,6 +21,7 @@
 import { isDeepStrictEqual } from "node:util";
 import {
   err,
+  isInvalidated,
   ok,
   weightTableSchema,
   WEIGHT_TABLE_KINDS,
@@ -54,6 +55,11 @@ export interface SetWeightTableInput {
 
 function refuse(field: string, message: string, value?: unknown): LoreError {
   return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}), rule: WEIGHT_RULE };
+}
+
+/** Whether `doc` still holds its kind: not deleted, archived, deprecated or invalidated (`extra.validity`). */
+function isLive(doc: DocRecord, nowIso: string): boolean {
+  return doc.deleted_at == null && doc.status !== "archived" && doc.status !== "deprecated" && !isInvalidated(doc, nowIso);
 }
 
 /** Whether `doc` is a live reference document. */
@@ -155,8 +161,9 @@ export class WeightTableService implements DecisionGated {
   private async findOtherHolder(doc: DocRecord, kind: string): Promise<Result<DocRecord | undefined, LoreError>> {
     const candidates = await this.store.findMany({ type: "knowledge", sub_type: "reference" });
     if (!candidates.ok) return candidates;
+    const nowIso = new Date().toISOString();
     const holder = candidates.value.find(
-      (other) => other.id !== doc.id && other.status !== "archived" && other.deleted_at == null && readTable(other)?.kind === kind,
+      (other) => other.id !== doc.id && isLive(other, nowIso) && readTable(other)?.kind === kind,
     );
     return ok(holder);
   }
