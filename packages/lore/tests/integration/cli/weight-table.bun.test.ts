@@ -254,4 +254,27 @@ describe("AC-DR-10: weight tables and score validation", () => {
       expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(4);
     });
   });
+
+  // Last on purpose: these retire the shared tables, which every test above relies on.
+  describe("a retired table no longer holds its kind", () => {
+    it("AC-DR-10: a deprecated holder frees its kind for another reference document", async () => {
+      const next = await createReference("Replacement document revision weights");
+      const held = await corpus.lore(["weights", "set", next, "--kind", "document revision", "--dimension", "a=1"]);
+      expect(held.exitCode, `${held.stdout}${held.stderr}`).toBe(4);
+      await corpus.must(["set", docTable, "--status", "deprecated"]);
+      const run = await corpus.lore(["weights", "set", next, "--kind", "document revision", "--dimension", "a=1"]);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(docRow(next).extra["weight_table"]).toEqual({ kind: "document revision", dimensions: { a: 1 } });
+    });
+
+    it("AC-DR-10: an invalidated holder frees its kind for the document that supersedes it", async () => {
+      const next = await createReference("Replacement rule revision weights");
+      const held = await corpus.lore(["weights", "set", next, "--kind", "rule revision", "--dimension", "a=1"]);
+      expect(held.exitCode, `${held.stdout}${held.stderr}`).toBe(4);
+      await corpus.must(["invalidate", ruleTable, "--superseded-by", next, "--reason", "r"]);
+      const run = await corpus.lore(["weights", "set", next, "--kind", "rule revision", "--dimension", "a=1"]);
+      expect(run.exitCode, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(docRow(next).extra["weight_table"]).toEqual({ kind: "rule revision", dimensions: { a: 1 } });
+    });
+  });
 });
