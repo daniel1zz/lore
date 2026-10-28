@@ -24,6 +24,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-t
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { retirementAssessFields } from "../../src/service/retired-ac-service.js";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -89,7 +90,12 @@ function installJudge(pass: string, fail: string): void {
   const script = join(judgeDir, "judge.sh");
   writeFileSync(
     script,
-    `#!/bin/sh\ninput=$(cat)\nprintf '%s\\n=====PROMPT=====\\n' "$input" >> "${join(judgeDir, "prompts.txt")}"\ncase "$input" in *FAILMARK*) cat "${join(judgeDir, "fail.json")}";; *) cat "${join(judgeDir, "pass.json")}";; esac\n`,
+    // reason: a plan that accepted a gate carries its accept-gate decision on its version row, and the review judges every
+    // recorded decision of the plan (spec "Outcome link and rates"); the prompt lists each as `## <address>` with one premise
+    // (DECIDED_FLAGS), so the fake judge answers every listed address with its premise supported.
+    `#!/bin/sh\ninput=$(cat)\nprintf '%s\\n=====PROMPT=====\\n' "$input" >> "${join(judgeDir, "prompts.txt")}"\ncase "$input" in *FAILMARK*) answer=$(cat "${join(judgeDir, "fail.json")}");; *) answer=$(cat "${join(judgeDir, "pass.json")}");; esac\n` +
+      `addrs=$(printf '%s\\n' "$input" | grep -o '^## [^ ]*@[0-9][0-9]*' | sed 's/^## //' | sort -u)\n` +
+      `if [ -n "$addrs" ]; then\n  decisions=$(printf '%s\\n' "$addrs" | awk 'BEGIN{printf "["} {printf "%s{\\"decision\\":\\"%s\\",\\"premises_supported\\":[true]}", (NR>1?",":""), $0} END{printf "]"}')\n  printf '%s' "$answer" | sed "s/}\\$/,\\"decisions\\":$decisions}/"\nelse\n  printf '%s' "$answer"\nfi\n`,
   );
   chmodSync(script, 0o755);
   patchLoreConfig(tmpDir, {
@@ -128,6 +134,18 @@ function statusOf(slug: string): string {
 
 function close(plan: string): RunResult {
   return runLore(["set", plan, "--status", "archived"], tmpDir);
+}
+
+/**
+ * Accepts the plan's regression and security gates (BR-1500), then closes it by hand. A plan of this suite lands no commit,
+ * so its review measures those gates as not-measured and a hand close holds them (BR-1379, BR-1500); the tests that use
+ * this are about what happens AFTER the gates (retirements, known defects), so they accept the gates first. An acceptance
+ * with nothing to accept (the gate passes, or no review exists) is refused and ignored here on purpose.
+ */
+function closeAccepted(plan: string): RunResult {
+  configureGithubUpstream();
+  for (const dimension of ["regression", "security"]) runLore(["assess", plan, "--accept-gate", dimension, ...DECIDED_FLAGS], tmpDir);
+  return close(plan);
 }
 
 /**
@@ -345,7 +363,7 @@ describe("milestone review gates close", () => {
     expect(review.rows).toHaveLength(1);
     expect(review.rows[0]?.outcome).toBe("PASS");
     expect(review.rows[0]?.review).toMatch(/^knowledge-milestone-review/);
-    const closed = close(plan);
+    const closed = closeAccepted(plan);
     expect(closed.exitCode, closed.stderr).toBe(0);
     expect(statusOf(plan)).toBe("archived");
   });
@@ -388,7 +406,7 @@ describe("milestone review gates close", () => {
     expect(stale.stderr).toContain("MILESTONE_REVIEW_STALE");
     expect(statusOf(plan)).toBe("approved");
     expect(assessRows([plan]).exitCode).toBe(0);
-    const closed = close(plan);
+    const closed = closeAccepted(plan);
     expect(closed.exitCode, closed.stderr).toBe(0);
   });
 
@@ -424,7 +442,7 @@ describe("milestone review gates close", () => {
     expect(byWhere.rows.map((r) => r.plan).sort()).toEqual([good.plan, bad.plan].sort());
     expect(byWhere.exitCode).toBe(1);
     // the passing plan closes, the failing one does not.
-    expect(close(good.plan).exitCode).toBe(0);
+    expect(closeAccepted(good.plan).exitCode).toBe(0);
     expect(close(bad.plan).exitCode).toBe(4);
   });
 
@@ -728,7 +746,7 @@ describe("milestone review gates close", () => {
     expect(close(plan).exitCode).toBe(4);
     // all open: the close is accepted and the audit records the issue numbers.
     setIssueState(numbers[1] as number, "open");
-    const accepted = close(plan);
+    const accepted = closeAccepted(plan);
     expect(accepted.exitCode, accepted.stderr).toBe(0);
     expect(statusOf(plan)).toBe("archived");
     const audit = runLore(["audit", plan, "--json"], tmpDir);
@@ -759,8 +777,8 @@ describe("milestone review gates close", () => {
     const listed = JSON.parse(readFileSync(join(judgeDir, "gh-state", "issues.json"), "utf8")) as { body: string }[];
     expect(listed[0]?.body).toContain("two writers lose an update");
     expect(listed[1]?.body).toContain("unvalidated input reaches a shell");
-    // the issues are recorded on the plan, so plan close accepts the failing review.
-    const closed = close(plan);
+    // the issues are recorded on the plan, so plan close accepts the failing review (its gates accepted first).
+    const closed = closeAccepted(plan);
     expect(closed.exitCode, closed.stderr).toBe(0);
     expect(statusOf(plan)).toBe("archived");
     expect(runLore(["audit", plan, "--json"], tmpDir).stdout).toContain("accepted with known defects: #1, #2");
@@ -787,7 +805,7 @@ describe("milestone review gates close", () => {
     expect(assessRows([plan]).rows[0]).toMatchObject({ pending_decision: row.pending_decision }); // a second run raises nothing new
     expect(pendingIds()).toHaveLength(1);
 
-    const waiting = close(plan);
+    const waiting = closeAccepted(plan);
     expect(waiting.exitCode).toBe(4);
     expect(waiting.stderr).toContain("lore pending --ask");
     expect(statusOf(plan)).toBe("approved");
@@ -810,20 +828,21 @@ describe("milestone review gates close", () => {
     expect(assessRows([plan]).exitCode).toBe(0);
     answerPending("Reject");
 
-    const refused = close(plan);
+    const refused = closeAccepted(plan);
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("rejected");
     expect(statusOf(plan)).toBe("approved");
     expect(acSuperseded(specs.old, "AC-OLD-1")).toBe(false);
     expect(acSuperseded(specs.old, "AC-OLD-2")).toBe(false);
-    expect(close(plan).exitCode).toBe(4); // still refused on a second try: restoring is not re-planning
+    expect(closeAccepted(plan).exitCode).toBe(4); // still refused on a second try: restoring is not re-planning
 
     // re-planning: a task change gives the plan a new state, the refusal lifts and the review is stale until re-run
     const replanned = runLore(["set", task, "--content", "re-planned after the rejected retirement"], tmpDir);
     expect(replanned.exitCode, replanned.stderr).toBe(0);
     addPass(task);
-    expect(assessRows([plan]).exitCode).toBe(0);
-    const closed = close(plan);
+    const rereview = assessRows([plan]);
+    expect(rereview.exitCode, `${rereview.stderr}${JSON.stringify(rereview.rows)}`).toBe(0);
+    const closed = closeAccepted(plan);
     expect(closed.exitCode, closed.stderr).toBe(0);
   });
 
@@ -835,7 +854,7 @@ describe("milestone review gates close", () => {
     const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: { spec: string; ac: string }[] };
     expect(row.retired_acs).toMatchObject([{ spec, ac: "AC-DOOM-1" }]);
     answerPending("Reject");
-    expect(close(plan).exitCode).toBe(4);
+    expect(closeAccepted(plan).exitCode).toBe(4);
     expect(statusOf(spec)).toBe("draft");
   });
 
@@ -845,7 +864,7 @@ describe("milestone review gates close", () => {
     expect(row.retired_acs).toBeUndefined();
     expect(row.pending_decision).toBeUndefined();
     expect(pendingIds()).toHaveLength(0);
-    expect(close(plan).exitCode).toBe(0);
+    expect(closeAccepted(plan).exitCode).toBe(0);
   });
 
   it("milestone review gates close: a retirement made BEFORE the plan existed is not attributed to it", { timeout: 300_000 }, () => {
@@ -854,7 +873,7 @@ describe("milestone review gates close", () => {
     const row = assessRows([plan]).rows[0] as AssessRow & { retired_acs?: unknown };
     expect(row.retired_acs).toBeUndefined();
     expect(pendingIds()).toHaveLength(0);
-    expect(close(plan).exitCode).toBe(0);
+    expect(closeAccepted(plan).exitCode).toBe(0);
   });
 
   it("milestone review gates close: retirements made by runs claiming tasks of plan A only are attributed to plan A only", { timeout: 300_000 }, () => {
@@ -871,7 +890,7 @@ describe("milestone review gates close", () => {
     expect(reviewB.retired_acs).toBeUndefined();
     expect(reviewB.pending_decision).toBeUndefined();
     expect(pendingIds()).toEqual([reviewA.pending_decision]);
-    expect(close(b.plan).exitCode).toBe(0);
+    expect(closeAccepted(b.plan).exitCode).toBe(0);
   });
 
   it("milestone review gates close: a run claiming tasks in two plans is refused naming both; --plan resolves it and attributes to that plan only", { timeout: 300_000 }, () => {
@@ -923,7 +942,7 @@ describe("milestone review gates close", () => {
     expect(row.retired_acs).toBeUndefined();
     expect(row.pending_decision).toBeUndefined();
     expect(pendingIds()).toHaveLength(0);
-    expect(close(plan).exitCode).toBe(0);
+    expect(closeAccepted(plan).exitCode).toBe(0);
   });
 
   it("milestone review gates close: a pending decision whose list changed to empty is withdrawn and the plan no longer awaits the owner", { timeout: 300_000 }, () => {
@@ -938,7 +957,7 @@ describe("milestone review gates close", () => {
     expect(after.retired_acs).toBeUndefined();
     expect(after.pending_decision).toBeUndefined();
     expect(pendingIds()).toHaveLength(0);
-    expect(close(plan).exitCode).toBe(0);
+    expect(closeAccepted(plan).exitCode).toBe(0);
   });
 
   it("milestone review gates close: an unattributed old deprecation whose spec has no version history does not error settle for an unrelated plan (#353)", { timeout: 300_000 }, () => {
@@ -993,8 +1012,10 @@ describe("milestone review gates close", () => {
     const refused = close(plan);
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("MILESTONE_REVIEW_FAILED");
-    expect(refused.stderr).toContain("BR-1372");
-    expect(refused.stderr).toContain("--file-issues");
+    // the failed security gate is held by name, and only an acceptance for this failure (never an issue) lets it close
+    expect(refused.stderr).toContain("security");
+    expect(refused.stderr).toContain("BR-1500");
+    expect(refused.stderr).toContain("--accept-gate");
     expect(statusOf(plan)).toBe("approved");
   });
 
@@ -1022,7 +1043,7 @@ describe("milestone review gates close", () => {
     expect(ruleState(ruleId)).toBe("retired"); // abandoned with the deprecation (BR-1307)
     assessRows([plan]);
     answerPending("Reject");
-    expect(close(plan).exitCode).toBe(4);
+    expect(closeAccepted(plan).exitCode).toBe(4);
     expect(statusOf(spec)).toBe("draft");
     expect(ruleState(ruleId)).toBe("proposed"); // revived in the same write as the status restore
     assessRows([plan]); // a second settle changes nothing
