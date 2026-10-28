@@ -131,33 +131,6 @@ export function commitRangeFromLanding(landing: TaskLanding, recordedAt: string)
 /** A usable range: only the `recorded` shape carries commits. */
 export type MeasuredCommitRange = Extract<TaskCommitRange, { state: "recorded" }>;
 
-/** What assess gets per task: a usable range (+ branch hint), or the reason the range is not measured. */
-export type CollectedRange = { base?: string; head: string; worktree?: string };
-
-/**
- * slug -> usable range for every task that has one (tasks done before this feature, or recorded
- * `not-measured`, are simply absent — the assess derivation then falls back to the slug search).
- */
-export function collectRecordedRanges(
-  tasks: ReadonlyArray<{ slug: string; extra?: Record<string, unknown> | undefined }>,
-): Map<string, CollectedRange> {
-  const ranges = new Map<string, CollectedRange>();
-  for (const task of tasks) {
-    // reason: the landing record outranks `commit_range` — a later re-claim can rewrite the latter, never the former.
-    const landing = readTaskLanding(task.extra);
-    if (landing !== undefined) {
-      // reason: a no-change landing (the one predicate, `landingOf`) put no commit on main: it contributes no commit range.
-      if (landing.kind === "no-change") continue;
-      ranges.set(task.slug, { head: landing.branch_head, base: landing.main_before, worktree: landing.branch });
-      continue;
-    }
-    const range = readMeasuredCommitRange(task.extra);
-    if (range === undefined) continue;
-    ranges.set(task.slug, { head: range.head, worktree: range.worktree, ...(range.base !== undefined ? { base: range.base } : {}) });
-  }
-  return ranges;
-}
-
 /**
  * Reads `extra.commit_range` off a task's `extra`. Returns `undefined` when absent (a task done
  * before this feature) and when malformed — a malformed value is never trusted as a range, so

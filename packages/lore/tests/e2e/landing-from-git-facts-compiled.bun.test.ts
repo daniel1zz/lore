@@ -29,7 +29,6 @@ import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-t
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { latestLandingCommit } from "../../src/service/milestone-review.js";
-import { collectRecordedRanges } from "../../src/service/task-commit-range.js";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const DIST_LORE = join(PROJECT_ROOT, "dist", "lore");
@@ -197,8 +196,6 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
 
     expect(latestLandingCommit([noChange])).toBe("none");
     expect(latestLandingCommit([commits])).toBe((commits.extra["landing"] as Record<string, unknown>)["landing_commit"]);
-    expect([...collectRecordedRanges([{ slug: noChange.slug, extra: noChange.extra }]).keys()]).toEqual([]);
-    expect([...collectRecordedRanges([{ slug: commits.slug, extra: commits.extra }]).keys()]).toEqual([commits.slug]);
     expect(latestLandingCommit([noChange, commits])).toBe(latestLandingCommit([commits]));
   }, 300_000);
 });
