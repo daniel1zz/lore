@@ -95,7 +95,9 @@ export interface NewDocModalProps {
 
 const DOC_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
-const TYPES_REQUIRING_PARENT: DocType[] = ["task"];
+// reason: BR-709 — the service refuses a knowledge record, decision record (adr) or plan without a parent, so the form
+// marks the parent required for them as it does for a task.
+const TYPES_REQUIRING_PARENT: DocType[] = ["task", "adr", "plan", "knowledge"];
 
 /**
  * Doc types that never take a parent (BR-1, BR-2, AS-18 of the product baseline):
@@ -286,6 +288,11 @@ export function NewDocModal({
     // attribute, so the real gate belongs in handleSubmit, not only in JSX.
     if (isCreateBlockedType(docType)) return;
     setValidationError(null);
+
+    if (TYPES_REQUIRING_PARENT.includes(docType) && parentId.trim() === "") {
+      setValidationError(`Choose a parent document — a ${docType} needs one.`);
+      return;
+    }
 
     const payload = buildPayload();
     // Client-side Zod validation (AC-DASH-WRITE-10).

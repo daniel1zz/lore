@@ -9,6 +9,7 @@
  * handoff keeps every file and its run).
  */
 
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 import { describe, expect, it } from "vitest";
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
@@ -57,16 +58,19 @@ function trailOf(fileCount: number, unmeasuredTurns: number): SessionTrail {
 function makeService(trail: SessionTrail) {
   const store = actedStore(new InMemoryStore());
   const corpus = new Corpus(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  return new SessionService(store, {
+  const service = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10080,
     createHandoffDoc: corpus.createHandoffDoc.bind(corpus),
     readTrail: () => trail,
   });
+  return { service, corpus };
 }
 
 async function write(fileCount: number, unmeasuredTurns = 0) {
-  const svc = makeService(trailOf(fileCount, unmeasuredTurns));
+  const { service: svc, corpus } = makeService(trailOf(fileCount, unmeasuredTurns));
+  // reason: BR-709 — a handoff is filed under the requirements document when it names no plan, so the corpus needs one.
+  await ensureRequirementsDocId(corpus);
   const r = await svc.writeHandoff(
     { by: "claude", task_refs: [], modified_files: [], key_decisions: [], next_steps: ["merge it"] },
     undefined,

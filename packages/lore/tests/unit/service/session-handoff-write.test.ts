@@ -128,8 +128,8 @@ describe("SessionService.writeHandoff — STATE: four-way parent resolution", ()
     expect(result.value.parent_id).toBe(prd.id);
   });
 
-  it("(c) no plan_ref, zero PRDs → parent_id is null (legal for knowledge docs)", async () => {
-    const { sessionService } = makeServices();
+  it("(c) no plan_ref, zero PRDs → refused (VALIDATION_ERROR) naming --plan and the requirements document; nothing written", async () => {
+    const { corpusService, sessionService } = makeServices();
 
     const result = await sessionService.writeHandoff({
       by: "claude",
@@ -139,9 +139,14 @@ describe("SessionService.writeHandoff — STATE: four-way parent resolution", ()
       next_steps: ["continue"],
     });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.parent_id).toBeNull();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    const text = JSON.stringify(result.error);
+    expect(text).toContain("--plan");
+    expect(text).toContain("requirements document");
+    const listed = await corpusService.list({ type: "knowledge" });
+    expect(listed.ok && listed.value.docs.length).toBe(0);
   });
 
   it("(d) no plan_ref, >1 PRDs → err(VALIDATION_ERROR) requiring plan_ref", async () => {
@@ -226,7 +231,8 @@ describe("SessionService.writeHandoff — ERROR (AC-SL-12)", () => {
 
 describe("SessionService.writeHandoff — degraded handoff (AC-SL-12)", () => {
   it("degraded: true renders the exact DEGRADED_HANDOFF_MARKER string, imported not hardcoded", async () => {
-    const { sessionService } = makeServices();
+    const { corpusService, sessionService } = makeServices();
+    await ensureRequirementsDocId(corpusService);
     const result = await sessionService.writeHandoff({
       by: "stop-hook",
       task_refs: [],

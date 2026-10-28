@@ -376,6 +376,7 @@ describe("task-lore-uat-record — non-plan target is refused before any write",
     // the guarded seam + store.addLink, bypassing UatService.record's new type check
     // entirely, exactly as the pre-fix code path would have done for an ADR target.
     const created = await corpusService.createUatDoc({
+      parent_id: await ensureRequirementsDocId(corpusService),
       type: "knowledge",
       title: "Legacy mis-linked verdict",
       content: "body",

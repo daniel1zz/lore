@@ -121,7 +121,8 @@ describe("SessionService.resume — HAPPY: direct --handoff targeting skips deri
 
 describe("SessionService.resume — STATE: age + TTL warning", () => {
   it("a handoff older than handoffTtlMinutes gets ttl_warning: true with a matching age_minutes", async () => {
-    const { store, sessionService } = makeServices(1); // 1-minute TTL
+    const { store, corpusService, sessionService } = makeServices(1); // 1-minute TTL
+    await ensureRequirementsDocId(corpusService); // BR-709: a handoff is filed under the requirements document
 
     const written = await sessionService.writeHandoff({
       by: "alice",
@@ -145,7 +146,8 @@ describe("SessionService.resume — STATE: age + TTL warning", () => {
   });
 
   it("a fresh handoff (age well under TTL) gets ttl_warning: false", async () => {
-    const { store, sessionService } = makeServices(10080);
+    const { store, corpusService, sessionService } = makeServices(10080);
+    await ensureRequirementsDocId(corpusService); // BR-709: a handoff is filed under the requirements document
 
     const written = await sessionService.writeHandoff({
       by: "alice",
@@ -170,7 +172,8 @@ describe("SessionService.resume — STATE: age + TTL warning", () => {
 
 describe("SessionService.resume — BOUNDARY: output_tail cap round-trip", () => {
   it("output_tail at exactly the 2000-char cap round-trips losslessly through content", async () => {
-    const { sessionService } = makeServices();
+    const { corpusService, sessionService } = makeServices();
+    await ensureRequirementsDocId(corpusService); // BR-709: a handoff is filed under the requirements document
     const tail = "y".repeat(2000);
 
     const written = await sessionService.writeHandoff({

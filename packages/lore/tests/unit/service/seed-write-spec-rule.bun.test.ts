@@ -84,7 +84,31 @@ afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
+describe("seedWriteSpecRule without a requirements document (BR-709)", () => {
+  // NEGATIVE — the seed never invents a parent: with no requirements document the service's refusal surfaces
+  it("fails loud with the service's refusal naming the requirements document, and writes nothing", async () => {
+    await expect(seedWriteSpecRule(app)).rejects.toThrow(SeedWriteSpecRuleError);
+    try {
+      await seedWriteSpecRule(app);
+    } catch (e) {
+      expect(e).toBeInstanceOf(SeedWriteSpecRuleError);
+      if (e instanceof SeedWriteSpecRuleError) {
+        expect(e.operation).toBe("create");
+        expect(JSON.stringify(e.loreError)).toContain("create the requirements document first");
+      }
+    }
+    const listResult = await app.corpusService.list({ type: "knowledge" });
+    expect(listResult.ok && listResult.value.docs.length).toBe(0);
+  });
+});
+
 describe("seedWriteSpecRule", () => {
+  // reason: BR-709 — the seeded knowledge doc is filed under the corpus's requirements document, so these
+  // cases start from a corpus that has one (a fresh `lore init` corpus has none).
+  beforeEach(async () => {
+    await ensureRequirementsDocId(app.corpusService);
+  });
+
   // HAPPY
   it("creates exactly one approved knowledge/skill doc on first run", async () => {
     const result = await seedWriteSpecRule(app);

@@ -27,6 +27,7 @@
  * @spec_ref SPEC-103
  */
 
+import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { describe, it, expect, vi } from "vitest";
@@ -203,6 +204,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   it("creating a handoff doc (via createHandoffDoc) lands approved", async () => {
     const { corpusService } = await makeApp();
     const doc = await corpusService.createHandoffDoc({
+      parent_id: await ensureRequirementsDocId(corpusService),
       type: "knowledge",
       title: "Handoff X",
       content: "# H",
@@ -215,6 +217,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   it("creating a uat verdict doc (via createUatDoc) lands approved", async () => {
     const { corpusService } = await makeApp();
     const doc = await corpusService.createUatDoc({
+      parent_id: await ensureRequirementsDocId(corpusService),
       type: "knowledge",
       title: "UAT X",
       content: "# U",

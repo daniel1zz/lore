@@ -156,7 +156,7 @@ export default defineLoreCommand({
     parent: {
       type: "string",
       description:
-        "Parent document ID or slug (refused for a spec: a spec takes no parent — relate it to the trees with `lore ac cite`)",
+        "Parent document ID or slug. REQUIRED for knowledge (every sub-type), adr and plan: without it the create is refused (exit 4) and the refusal lists the documents that could take it (BR-709). A task takes its plan (--plan-id). Refused for a spec: a spec takes no parent — relate it to the trees with `lore ac cite`",
     },
     content: {
       type: "string",
@@ -651,24 +651,6 @@ export default defineLoreCommand({
         const repairMsg = renderSupersedeRepairMessage(args.supersedes!, doc.slug);
         inv.io.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatErrorFor(inv, supersedeError)})\n`);
         reported = exitCode(supersedeError);
-      }
-
-      // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
-      // parent-to-root) — CorpusService.create computes this typed, non-persisted
-      // `orphan_advisory` field; it never prints anything itself (services stay
-      // adapter-agnostic). This is the sole render site for text mode, mirroring
-      // resolveActor's OS-fallback advisory convention (utils.ts: "⚠ " to stderr,
-      // never affecting the exit code). The --json payload above already carries the
-      // field verbatim (it's a real key on `doc`, spread/passed through as-is) — no
-      // separate JSON-mode branch is needed.
-      // reason: `doc`'s evolving `let` type unions `CreateDocResult` (the direct
-      // create() branch) with the plain `DocRecord` createWithSupersedes's port
-      // declares (the --supersedes branch, which never surfaces this field) — a
-      // narrow read-only cast is the correct way to consult an OPTIONAL field only
-      // one union member statically carries, without widening the port's own type.
-      const orphanAdvisory = (doc as { orphan_advisory?: string }).orphan_advisory;
-      if (typeof orphanAdvisory === "string") {
-        inv.io.stderr.write(`⚠ ${orphanAdvisory}\n`);
       }
 
       // Non-resolving `file_anchors` advisory (task-a-mistyped-task-file-anchor-

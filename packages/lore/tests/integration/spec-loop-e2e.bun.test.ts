@@ -347,10 +347,11 @@ async function countDocs(): Promise<number> {
 describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
   it("gate-blocked create -> corrected create -> gate-blocked promote -> AC added -> gate-passed promote", async () => {
     // ── setup: seed the write-spec rule doc + a legal PRD parent ──
+    // reason: BR-709 - the seed files the rule doc under the corpus requirements document, so the PRD comes first.
+    const prdSlug = await createPrd("spec-loop-e2e PRD");
     const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     await seedWriteSpecRule(app);
     app.close();
-    const prdSlug = await createPrd("spec-loop-e2e PRD");
     suppressJudgeAdvisory();
 
     // ── STATE: before any spec exists, corpus has zero specs ──

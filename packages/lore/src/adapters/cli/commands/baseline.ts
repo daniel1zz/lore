@@ -69,7 +69,7 @@ import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-po
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { buildProviderRegistry } from "../../../ai/registry.js";
 import { adoptCommand } from "./baseline-adopt.js";
-import { runFidelity } from "../../../service/fidelity-sample.js";
+import { resolveFidelityParentId, runFidelity } from "../../../service/fidelity-sample.js";
 import type { FidelityRecord } from "../../../service/fidelity-sample.js";
 import { printLine } from "../output.js";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
@@ -483,8 +483,11 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     if (!result.ok) return reportFidelityFailure(inv, result.error, json);
     const record = result.value;
     const share = `${(record.faithful_share * 100).toFixed(1)}% faithful`;
+    const parentId = await resolveFidelityParentId(store, record);
+    if (!parentId.ok) return reportFidelityFailure(inv, parentId.error, json);
     const created = await app.corpusService.create({
       type: "knowledge",
+      parent_id: parentId.value,
       title: `Baseline fidelity (${record.mode}) seed ${String(record.seed)}: ${share}`,
       extra: { sub_type: "research" },
       content: renderFidelityContent(record),

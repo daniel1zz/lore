@@ -113,9 +113,20 @@ export async function seedWriteSpecRule(app: App): Promise<SeedResult> {
   const existing = listResult.value.docs.find((doc) => doc.title === WRITE_SPEC_RULE_TITLE);
 
   if (existing === undefined) {
+    // reason: BR-709 — a knowledge record needs a parent, and write-spec rules apply corpus-wide, so this seed files
+    // the doc under the corpus's requirements document. It is this script's own explicit choice, never a service
+    // default (spec documents-that-need-a-parent-are-refused-without-one-an-ad D1). With no requirements document
+    // yet, no parent is passed and the service's refusal ("create the requirements document first") surfaces as the
+    // create failure: this seed never invents a parent.
+    const prdResult = await app.corpusService.list({ type: "prd" });
+    if (!prdResult.ok) {
+      throw new SeedWriteSpecRuleError("list", prdResult.error);
+    }
+    const requirementsDoc = prdResult.value.docs[0];
     const createResult = await app.corpusService.create({
       type: "knowledge",
       title: WRITE_SPEC_RULE_TITLE,
+      ...(requirementsDoc !== undefined ? { parent_id: requirementsDoc.id } : {}),
       content: WRITE_SPEC_RULE_CONTENT,
       extra: SKILL_EXTRA,
     });

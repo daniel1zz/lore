@@ -89,23 +89,41 @@ describe("NewDocModal", () => {
       expect(payload.parent_id).toBeUndefined();
     });
 
-    it("creates a plan with a trimmed title and no parent_id", async () => {
+    it("creates a plan with a trimmed title and its required parent_id", async () => {
       const user = userEvent.setup();
       const { onCreate } = renderModal();
 
       await selectType(user, "plan");
       await user.type(screen.getByLabelText(/Title/), "  My New Plan  ");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       expect(onCreate).toHaveBeenCalledTimes(1);
       const payload = onCreate.mock.calls[0]?.[0];
       expect(payload.type).toBe("plan");
       expect(payload.title).toBe("My New Plan");
-      expect(payload.parent_id).toBeUndefined();
+      expect(payload.parent_id).toBe("01HPARENT000000000000000001");
     });
   });
 
   describe("negative", () => {
+    it.each(["knowledge", "adr", "plan"] as const)(
+      "BR-709: %s without a parent marks the parent required and sends nothing",
+      async (docType) => {
+        const user = userEvent.setup();
+        const { onCreate } = renderModal();
+
+        await selectType(user, docType);
+        await user.type(screen.getByLabelText(/Title/), "No parent here");
+        expect(screen.getByLabelText(/Parent ID/)).toBeInTheDocument();
+        expect(screen.getByText(/Parent ID/).textContent).toContain("*");
+        await user.click(screen.getByRole("button", { name: "Create" }));
+
+        expect(onCreate).not.toHaveBeenCalled();
+        expect(screen.getByText(/needs one/)).toBeInTheDocument();
+      },
+    );
+
     it("never creates a spec, even forcing the form's native submit past the disabled Create button", async () => {
       const user = userEvent.setup();
       const { onCreate } = renderModal();
@@ -251,11 +269,12 @@ describe("NewDocModal", () => {
       expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
     });
 
-    it("ISSUE-003 regression: the default 'knowledge' type is submittable with just a title", async () => {
+    it("ISSUE-003 regression: the default 'knowledge' type is submittable with a title and its required parent (BR-709)", async () => {
       const user = userEvent.setup();
       const { onCreate } = renderModal();
 
       await user.type(screen.getByLabelText(/Title/), "My First Note");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
       expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -271,6 +290,7 @@ describe("NewDocModal", () => {
 
       await selectType(user, "adr");
       await user.type(screen.getByLabelText(/Title/), "My ADR");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
       await user.selectOptions(screen.getByLabelText("Decision status"), "accepted");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -284,6 +304,7 @@ describe("NewDocModal", () => {
 
       await selectType(user, "knowledge");
       await user.type(screen.getByLabelText(/Title/), "My Knowledge Doc");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
       await user.selectOptions(screen.getByLabelText("Sub-type"), "retro");
       await user.click(screen.getByRole("button", { name: "Create" }));
 

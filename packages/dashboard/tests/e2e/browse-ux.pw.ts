@@ -142,8 +142,10 @@ test.describe("SPEC-036 dashboard browsing UX", () => {
     const onlyATitle = `E2E Filter Only TagA ${runId}`;
 
     test("seed: two plan docs, one carrying both tags, one carrying only tagA", async () => {
-      await createDoc(page, { type: "plan", title: bothTitle, tags: [tagA, tagB] });
-      await createDoc(page, { type: "plan", title: onlyATitle, tags: [tagA] });
+      // reason: BR-709 - a plan is refused without a parent, so both are filed under one fixture PRD.
+      const filterPrd = await createDoc(page, { type: "prd", title: `E2E Filter PRD ${runId}` });
+      await createDoc(page, { type: "plan", title: bothTitle, parent_id: filterPrd.id, tags: [tagA, tagB] });
+      await createDoc(page, { type: "plan", title: onlyATitle, parent_id: filterPrd.id, tags: [tagA] });
     });
 
     test("selecting type + status filters updates the URL and survives reload", async () => {
