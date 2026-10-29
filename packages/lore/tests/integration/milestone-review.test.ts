@@ -1,6 +1,7 @@
 // @spawns assets/hooks/post-ask-decide.mjs
 // @spawns packages/lore/src/index.ts
 // @reads assets/**
+// @layer cli-batch AC-AF-7
 /**
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D; AC-LG-12; BR-1372)
  *
@@ -34,6 +35,9 @@ interface RunResult {
 
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
+
+/** The bound of one `--accept-gate` spawn (it runs no suite): well below the 300 s test timeout, generous for a loaded machine. */
+const ACCEPT_GATE_BOUND_MS = 90_000;
 
 /** Extra environment of every spawn: the fake `gh` first on PATH and its state directory (set in `beforeEach`). */
 let extraEnv: Record<string, string> = {};
@@ -443,10 +447,35 @@ describe("milestone review gates close", () => {
     expect(byWhere.exitCode).toBe(1);
     // the passing plan closes, the failing one does not.
     expect(closeAccepted(good.plan).exitCode).toBe(0);
+    expect(closeAccepted(bad.plan).exitCode).toBe(4);
+  });
+
+  it("AC-AF-7 accepting the regression gate of a judged-failing plan completes (exit 0) within a bound and the plan stays held by its judged failure", { timeout: 300_000 }, () => {
+    const bad = makePlan("FAILMARK accept");
+    installJudge(
+      judgeAnswer(),
+      judgeAnswer({ concurrency_safety: { verdict: "fail", reason: "two writers lose an update", reference: "Postgres MVCC", cites: ["src/old-path.ts"] } }),
+    );
+    expect(assessRows([bad.plan]).rows[0]?.outcome).toBe("FAIL");
+    configureGithubUpstream();
+    // reason: the call used to be dropped from the batch test for hanging until the test timeout (BR-1500 follow-up); a
+    // spawn that outlives the bound is killed by spawnSync and reports status null, so a hang fails here in seconds, not minutes.
+    const started = Date.now();
+    const proc = spawnSync("bun", ["run", INDEX_TS, "assess", bad.plan, "--accept-gate", "regression", ...DECIDED_FLAGS], {
+      cwd: tmpDir,
+      encoding: "utf8",
+      timeout: ACCEPT_GATE_BOUND_MS,
+      env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:milestone-review-test", ...extraEnv },
+    });
+    expect(proc.signal, `accept-gate did not finish within ${ACCEPT_GATE_BOUND_MS} ms`).toBeNull();
+    expect(proc.status, proc.stderr).toBe(0);
+    expect(proc.stdout).toContain("Accepted gate regression");
+    expect(Date.now() - started).toBeLessThan(ACCEPT_GATE_BOUND_MS);
+    // the judged concurrency_safety failure still holds the plan: an accepted regression gate does not close it.
     expect(close(bad.plan).exitCode).toBe(4);
   });
 
-  it("milestone review gates close: usage errors exit 2 and store nothing", { timeout: 300_000 }, () => {
+  it("milestone review gates close: usage errors exit 2 and store nothing",{ timeout: 300_000 }, () => {
     const { plan } = makePlan("Usage");
     expect(runLore(["assess"], tmpDir).exitCode).toBe(2);
     expect(runLore(["assess", plan, "--where", "type=plan"], tmpDir).exitCode).toBe(2);
