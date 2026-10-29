@@ -28,6 +28,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createApp } from "../../src/app";
+import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
@@ -175,6 +177,32 @@ async function claimOn(slug: string, tree: Tree, session: string, extra: readonl
 async function redIn(tree: Tree, slug: string, session: string): Promise<void> {
   const out = await loreIn(tree.path, ["evidence", slug, "--oracle", "test", "--command", RED_COMMAND, "--result", "expected-fail", "--capture"], sessionEnv(session));
   if (out.exitCode !== 0) throw new Error(`capture red failed: ${out.text}`);
+}
+
+/** Rewrites the branch recorded on a task's stored claim, through the store (the CLI refuses to create a shared branch). */
+async function recordClaimBranchThroughStore(slug: string, branch: string): Promise<void> {
+  const app = createApp(join(fixture.dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+  try {
+    const found = await app.corpusService.get(slug);
+    if (!found.ok) throw new Error(`seed: ${slug} not found: ${JSON.stringify(found.error)}`);
+    const doc = found.value.doc;
+    const claim = doc.extra["claim"] as Record<string, unknown> | undefined;
+    if (claim === undefined) throw new Error(`seed: ${slug} holds no claim to rewrite`);
+    const updated = await app.corpusService.writeDoc({
+      doc,
+      patch: { extra: { ...doc.extra, claim: { ...claim, branch } } },
+      action: "update",
+      changeSummary: `fixture: claim records branch ${branch}`,
+      auditAction: "update",
+      auditDetails: { operation: "fixture-shared-branch" },
+      lock: "none",
+      by: String(claim["by"]),
+      now: new Date().toISOString(),
+    });
+    if (!updated.ok) throw new Error(`seed: claim rewrite failed: ${JSON.stringify(updated.error)}`);
+  } finally {
+    app.close();
+  }
 }
 
 const finishIn = (tree: Tree, slug: string, session: string, extra: readonly string[] = []): Promise<Out> =>
@@ -388,8 +416,11 @@ describe("AC-DCS1-16: finish reports every unmet item at once and refuses before
     const second = await approvedTask(await fixture.createPlan("Finish shared plan two"), ["tests/x-3.test.ts"], "Finish shared two", ["AC-FX-1"]);
     const tree = addWorktree("shared");
     await claimOn(first, tree, "dcs1-fin-shared-b");
-    // reason: `lore claim` refuses a second task on one working copy, so the second claim names ANOTHER working copy but records the same branch.
-    await claimOn(second, addWorktree("shared-other"), "dcs1-fin-shared-c", ["--branch", tree.branch]);
+    // reason: `lore claim` itself refuses a code claim on a branch another live claim records (shared-branch, AC-DCS1-14), so the CLI
+    // can no longer build this state. The second task is claimed on its own branch, then its stored claim is made to record the
+    // first task's branch through the store: finish's own refusal is asserted unchanged.
+    await claimOn(second, addWorktree("shared-other"), "dcs1-fin-shared-c");
+    await recordClaimBranchThroughStore(second, tree.branch);
     commitIn(tree, { "src/g.ts": "export const g = 1;\n" });
     const rowsBefore = (await rowsOf(first)).length;
     const out = await finishIn(tree, first, "dcs1-fin-shared-b");

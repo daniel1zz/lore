@@ -22,6 +22,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createApp } from "../../src/app";
+import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
@@ -101,6 +103,31 @@ async function approvedTask(plan: string, kind: "code" | "check" | "corpus", ins
   const slug = await fixture.createTask({ plan, kind, title: `Start ${kind} task ${sequence}`, acScope: kind === "corpus" ? [] : ["AC-FX-1"] });
   await fixture.mustRun(kind === "code" ? ["approve", slug, "--red-waiver", "fixture: the start tests add no test"] : ["approve", slug]);
   return slug;
+}
+
+/** Leaves an approved task with no kind and no contract (the shape of a task approved before kinds), through the service layer: approve now refuses it. */
+async function stripKindAndContractThroughStore(slug: string): Promise<void> {
+  const app = createApp(join(fixture.dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+  try {
+    const found = await app.corpusService.get(slug);
+    if (!found.ok) throw new Error(`seed: ${slug} not found: ${JSON.stringify(found.error)}`);
+    const doc = found.value.doc;
+    const { kind: _kind, done_contract: _contract, ...rest } = doc.extra as Record<string, unknown>;
+    const written = await app.corpusService.writeDoc({
+      doc,
+      patch: { extra: rest },
+      action: "update",
+      changeSummary: "fixture: a task approved before kinds existed",
+      auditAction: "update",
+      auditDetails: { operation: "fixture-kindless" },
+      lock: "none",
+      by: doc.created_by,
+      now: new Date().toISOString(),
+    });
+    if (!written.ok) throw new Error(`seed: strip failed: ${JSON.stringify(written.error)}`);
+  } finally {
+    app.close();
+  }
 }
 
 const startFrom = (cwd: string, slug: string, session: string, extra: readonly string[] = []): Promise<Out> => loreIn(cwd, ["start", slug, ...extra], session);
@@ -319,6 +346,31 @@ describe("lore start creates the worktree on the contract base, installs, claims
     expect(sharedOut.text).toContain("shared-branch");
     expect(sharedOut.text).toContain(holder);
     expect(await claimOf(other)).toBeUndefined();
+  });
+
+  it("AC-DCS1-14: a task without a kind is refused by claim and by start as kind-missing, naming lore migrate done-contract", async () => {
+    // A task approved before kinds existed: no kind, no contract (the migration's own fixture shape).
+    const slug = await approvedTask(planMain, "code");
+    await stripKindAndContractThroughStore(slug);
+    const before = worktreeList();
+    const branchesBefore = branchList();
+    const started = await startFrom(fixture.dir, slug, "start-s14-kindless");
+    expect(started.exitCode, started.text).toBe(4);
+    expect(started.text).toContain("kind-missing");
+    expect(started.text).toContain("lore migrate done-contract");
+    expect(worktreeList()).toBe(before);
+    expect(branchList()).toBe(branchesBefore);
+
+    // Neither an unanchored task with a worktree nor one with no worktree is claimed: the old anchor-based rule is gone.
+    const tree = join(scratch, "kindless-wt");
+    fixture.git(["worktree", "add", "-q", "-b", "dcs1-kindless", tree, "main"]);
+    for (const extra of [[], ["--worktree", tree]] as const) {
+      const claimed = await loreIn(fixture.dir, ["claim", slug, ...extra], "start-s14-kindless");
+      expect(claimed.exitCode, claimed.text).toBe(4);
+      expect(claimed.text).toContain("kind-missing");
+      expect(claimed.text).toContain("lore migrate done-contract");
+    }
+    expect(await claimOf(slug)).toBeUndefined();
   });
 
   it("AC-DCS1-14: a first claim from a worktree whose extra commits are all on the integration branch exits 0; one commit on neither exits 4 first-claim-off-main", async () => {

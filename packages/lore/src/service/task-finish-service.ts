@@ -67,7 +67,7 @@ export interface TaskFinishDeps {
   readonly workflow: {
     deriveFinishAdditions(task: DocRecord, claim: TaskClaim, contract: DoneContract): Result<DoneContractOracle[], LoreError>;
     recordFinishRun(input: FinishRunWrite): Promise<Result<DocRecord, LoreError>>;
-    isClaimLive(task: DocRecord, nowIso: string, endedRuns: Map<string, boolean>): Promise<Result<boolean, LoreError>>;
+    findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>>;
   };
   readonly verify: Pick<VerifyRunnerService, "verifyPlan" | "verifyAdhocTask" | "runContractOracles">;
 }
@@ -180,7 +180,8 @@ export class TaskFinishService {
       return err(refusal("no-claim", `${task.slug} holds no claim by your run; take it with \`lore start ${task.slug}\` first.`));
     }
 
-    const shared = await this.sharedBranchHolder(task, branch, input.nowIso);
+    // reason: AC-DCS1-14 — one shared-branch rule: the workflow service's, the same one `claim` applies.
+    const shared = await this.deps.workflow.findSharedBranchHolder(task, branch, input.nowIso);
     if (!shared.ok) return shared;
     if (shared.value !== undefined) return err(refusal("shared-branch", shared.value));
 
@@ -271,30 +272,6 @@ export class TaskFinishService {
       const entry = row as { result?: string; attestation?: unknown; capture_source?: string };
       return (entry.result === "expected-fail" || entry.result === "fail") && entry.attestation !== undefined && entry.capture_source === "runner";
     });
-  }
-
-  /** The message naming the other live claim (or the integration branch) that makes `branch` shared, else `undefined`. */
-  private async sharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>> {
-    const planId = task.extra["plan_id"];
-    if (typeof planId === "string" && planId !== "") {
-      const plan = await this.deps.store.find(planId as DocRecord["id"]);
-      if (!plan.ok) return plan;
-      if (plan.value !== null && plan.value.extra["integration_branch"] === branch) {
-        return ok(`branch ${branch} is the integration branch of the plan of ${task.slug}; work on its own branch (\`lore start ${task.slug}\`).`);
-      }
-    }
-    const tasks = await this.deps.store.findMany({ type: "task" });
-    if (!tasks.ok) return tasks;
-    const endedRuns = new Map<string, boolean>();
-    for (const other of tasks.value) {
-      if (other.id === task.id) continue;
-      const held = extractHeldClaim(other);
-      if (held === undefined || (held.branch ?? held.worktree) !== branch) continue;
-      const live = await this.deps.workflow.isClaimLive(other, nowIso, endedRuns);
-      if (!live.ok) return live;
-      if (live.value) return ok(`branch ${branch} is also recorded by the live claim of ${other.slug}; each task needs its own branch.`);
-    }
-    return ok(undefined);
   }
 
   /** The root of the claim's worktree when `cwd` is inside it, else `not-in-claim-worktree`. */

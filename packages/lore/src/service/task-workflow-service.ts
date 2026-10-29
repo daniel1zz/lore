@@ -451,7 +451,7 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
  * Refuses a claim under a name of the done-contract spec (AC-DCS1-14); nothing is written. The name opens the message so a
  * caller and a test match it without parsing `details`.
  */
-function refuseClaimByKind(name: "kind-has-no-claim" | "shared-branch", message: string): Result<never, LoreError> {
+function refuseClaimByKind(name: "kind-has-no-claim" | "kind-missing" | "shared-branch", message: string): Result<never, LoreError> {
   return err({ code: "VALIDATION_ERROR", field: "claim", message: `${name}: ${message}`, value: { refusal: name } });
 }
 
@@ -3347,8 +3347,15 @@ export class TaskWorkflowService {
       });
     }
 
-    // reason: AC-DCS1-14 — a check or corpus task changes no branch and is finished from the shared checkout; it is never claimed.
+    // reason: D39 — there is no transitional path: every task has a kind, and one without it is refused by name, never guessed.
     const taskKind = readTaskKind(task);
+    if (taskKind === undefined) {
+      return refuseClaimByKind(
+        "kind-missing",
+        `${task.slug} has no kind (code, check or corpus), so it cannot be claimed. Run \`lore migrate done-contract\` to give every task its kind and contract.`,
+      );
+    }
+    // reason: AC-DCS1-14 — a check or corpus task changes no branch and is finished from the shared checkout; it is never claimed.
     if (taskKind === "check" || taskKind === "corpus") {
       return refuseClaimByKind(
         "kind-has-no-claim",
@@ -3357,13 +3364,8 @@ export class TaskWorkflowService {
     }
 
     // reason: BR-1468 as modified by AC-DCS1-14 — a code task changes files, so its claim needs its own branch: a no-branch
-    // claim has no tip to measure. A task of no known kind (created before kinds) keeps the anchor-based rule. A refresh that
-    // already holds a branch is fine.
-    if (
-      opts.worktree === undefined &&
-      readClaimRecord(task)?.worktree === undefined &&
-      (taskKind === "code" || extractFileAnchors(task).length > 0)
-    ) {
+    // claim has no tip to measure. A refresh that already holds a branch is fine.
+    if (opts.worktree === undefined && readClaimRecord(task)?.worktree === undefined) {
       return refuseClaim(task.slug, "work-needs-branch");
     }
 
@@ -3655,7 +3657,7 @@ export class TaskWorkflowService {
    * The message naming why `branch` is shared (it is the integration branch of the plan of `task`, or another live claim
    * records it), else `undefined`.
    */
-  private async findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>> {
+  async findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>> {
     const integration = await this.readPlanIntegrationBranch(task);
     if (!integration.ok) return integration;
     if (integration.value === branch) {

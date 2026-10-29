@@ -30,6 +30,7 @@ import type { ClaimOpts } from "./task-workflow-service.js";
 /** The named refusals of `lore start`, each stated once. */
 export const START_REFUSALS = [
   "not-approved",
+  "kind-missing",
   "contract-missing",
   "use-finish",
   "worktree-exists",
@@ -117,6 +118,11 @@ export class TaskStartService {
       return err(refusal("not-approved", `${task.slug} is ${task.status}; only an approved task is started (\`lore approve ${task.slug}\`).`));
     }
     const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
+    const kind = stored.success ? stored.data.kind : task.extra["kind"];
+    // reason: D39 — no transitional path: a task without a kind is refused by name, never treated as code.
+    if (kind !== "code" && kind !== "check" && kind !== "corpus") {
+      return err(refusal("kind-missing", `${task.slug} has no kind (code, check or corpus). Run \`lore migrate done-contract\` to give every task its kind and contract.`));
+    }
     if (!stored.success) {
       return err(refusal("contract-missing", `${task.slug} holds no done contract; it is compiled at approve (\`lore approve ${task.slug}\`).`));
     }
