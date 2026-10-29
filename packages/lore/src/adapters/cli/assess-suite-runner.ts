@@ -14,6 +14,9 @@
  *   - Every command runs in its OWN process group; a timeout ends the whole group (SIGTERM, then SIGKILL after a grace), so
  *     the run returns within timeout + grace and no process of the tree survives. A timed-out suite is `not_measured` with
  *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file.
+ *   - A failed group signal never escapes a timer callback (it would leave the promise unsettled): EPERM is followed by a
+ *     liveness probe (macOS returns EPERM for a group holding only unreaped zombies); no live member = ended, otherwise the
+ *     failure is recorded in the result (`killFailure`), the run is `not_measured` / a failed file with that cause.
  *   - The throwaway worktree is removed on every exit path; a failed removal is returned as an error, never ignored.
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
@@ -24,7 +27,7 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { spawn as spawnChild } from "node:child_process";
+import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
@@ -59,6 +62,8 @@ export interface ProcessLimits {
   readonly timeoutMs: number;
   /** Time between SIGTERM and SIGKILL of the process group. */
   readonly graceMs: number;
+  /** The group-signal primitive (`process.kill(-pid, signal)`); injectable so tests can make it fail. */
+  readonly kill?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 const DEFAULT_LIMITS: ProcessLimits = { timeoutMs: SUITE_TIMEOUT_MS, graceMs: KILL_GRACE_MS };
@@ -68,15 +73,54 @@ interface Spawned {
   readonly output: string;
   /** Set when the limit ended the command's process group; `status` is then 1 and `output` ends with the timeout cause. */
   readonly timeout?: { readonly limitMs: number; readonly elapsedMs: number };
+  /** Set when a group signal failed and live members remain (or could not be ruled out); `output` ends with it. */
+  readonly killFailure?: string;
 }
 
-/** Sends `signal` to the whole process group led by `pid`; an already-empty group is fine, anything else is not. */
-function signalGroup(pid: number, signal: NodeJS.Signals): void {
+const defaultKill = (pid: number, signal: NodeJS.Signals): void => {
+  process.kill(-pid, signal);
+};
+
+/**
+ * Whether the process group `pgid` still has a member that is not a zombie. `ps -ax -o pid=,pgid=,stat=` is used
+ * because it behaves the same on macOS and Linux (`ps -g` means something else on macOS) and shows the Z state;
+ * `kill(-pgid, 0)` cannot tell, it answers EPERM on macOS for a group of zombies only.
+ *
+ * @returns the live member count, or an error text when the process table cannot be read
+ */
+function countLiveGroupMembers(pgid: number): { readonly live: number } | { readonly error: string } {
   try {
-    process.kill(-pid, signal);
+    const table = execFileSync("ps", ["-ax", "-o", "pid=,pgid=,stat="], { encoding: "utf8" });
+    let live = 0;
+    for (const line of table.split("\n")) {
+      const [, group, state] = line.trim().split(/\s+/);
+      if (group === String(pgid) && state !== undefined && !state.startsWith("Z")) live += 1;
+    }
+    return { live };
   } catch (cause) {
-    // reason: ESRCH means every member already left, which is the goal; any other failure must surface.
-    if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+    return { error: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
+/**
+ * Sends `signal` to the whole process group led by `pid`. NEVER throws (it runs inside timer callbacks, where a throw
+ * would leave the spawn promise unsettled, A10). ESRCH = group already empty. EPERM = on macOS the group holds only
+ * zombies, or the signal is genuinely refused: probed with {@link countLiveGroupMembers}; none live counts as ended.
+ *
+ * @returns `undefined` when the group is ended or was signalled, else the failure text to record
+ */
+function signalGroup(pid: number, signal: NodeJS.Signals, kill: (pid: number, signal: NodeJS.Signals) => void): string | undefined {
+  try {
+    kill(pid, signal);
+    return undefined;
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return undefined;
+    const text = `${signal} to process group ${pid} failed: ${code ?? (cause instanceof Error ? cause.message : String(cause))}`;
+    if (code !== "EPERM") return text;
+    const members = countLiveGroupMembers(pid);
+    if ("error" in members) return `${text}; liveness probe failed: ${members.error}`;
+    return members.live === 0 ? undefined : `${text}; ${members.live} live member(s) remain`;
   }
 }
 
@@ -93,6 +137,12 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
     let output = "";
     let timeout: Spawned["timeout"];
     let settled = false;
+    const kill = limits.kill ?? defaultKill;
+    const killFailures: string[] = [];
+    const signal = (target: number, name: NodeJS.Signals): void => {
+      const failure = signalGroup(target, name, kill);
+      if (failure !== undefined) killFailures.push(failure);
+    };
     const timers: NodeJS.Timeout[] = [];
     const collect = (chunk: Buffer): void => {
       output += chunk.toString("utf8");
@@ -107,18 +157,22 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
       child.stdout?.destroy();
       child.stderr?.destroy();
       // reason: stragglers of a finished command (grandchildren) must not outlive it; the group is the command's tree.
-      if (child.pid !== undefined) signalGroup(child.pid, "SIGKILL");
+      if (child.pid !== undefined) signal(child.pid, "SIGKILL");
+      const killFailure = killFailures.length === 0 ? undefined : killFailures.join("; ");
+      const killNote = killFailure === undefined ? "" : `\nprocess group could not be ended: ${killFailure}`;
       if (timeout !== undefined) {
+        const ended = killFailure === undefined ? "its process group was ended" : "its process group could not be ended";
         resolve({
           status: 1,
-          output: `${output}\ncommand \`${command} ${args.join(" ")}\` timed out after ${timeout.elapsedMs} ms (limit ${timeout.limitMs} ms); its process group was ended`,
+          output: `${output}\ncommand \`${command} ${args.join(" ")}\` timed out after ${timeout.elapsedMs} ms (limit ${timeout.limitMs} ms); ${ended}${killNote}`,
           timeout,
+          ...(killFailure === undefined ? {} : { killFailure }),
         });
       } else if (status === null) {
         // reason: a spawn that never started (ENOENT) or was killed has status null; it is a failure with its own message.
-        resolve({ status: 1, output: `${output}\n${failure ?? "terminated by signal"}` });
+        resolve({ status: 1, output: `${output}\n${failure ?? "terminated by signal"}${killNote}`, ...(killFailure === undefined ? {} : { killFailure }) });
       } else {
-        resolve({ status, output });
+        resolve({ status: killFailure === undefined ? status : 1, output: `${output}${killNote}`, ...(killFailure === undefined ? {} : { killFailure }) });
       }
     };
     child.on("error", (error) => finish(null, error.message));
@@ -132,8 +186,8 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
     timers.push(
       setTimeout(() => {
         timeout = { limitMs: limits.timeoutMs, elapsedMs: Date.now() - startedMs };
-        signalGroup(pid, "SIGTERM");
-        timers.push(setTimeout(() => signalGroup(pid, "SIGKILL"), limits.graceMs));
+        signal(pid, "SIGTERM");
+        timers.push(setTimeout(() => signal(pid, "SIGKILL"), limits.graceMs));
         timers.push(setTimeout(() => finish(null, undefined), limits.graceMs + PIPE_DRAIN_MS));
       }, limits.timeoutMs),
     );
@@ -378,6 +432,10 @@ async function measure(root: string, commit: string, env: NodeJS.ProcessEnv, lim
     }
     const ran = await spawn("bun", ["run", script], root, env, limits);
     // reason: a run the timeout ended is incomplete, not red: stored `unrunnable` with this cause and retried by a later batch (BR-1497).
+    if (ran.killFailure !== undefined) {
+      // reason: a tree that could not be ended leaves stragglers that corrupt the measurement; incomplete, not red (A10).
+      return { status: "not_measured", reason: `\`${command}\` left its process group running: ${ran.killFailure}` };
+    }
     if (ran.timeout !== undefined) {
       return { status: "not_measured", reason: `\`${command}\` timed out after ${ran.timeout.elapsedMs} ms (limit ${ran.timeout.limitMs} ms); its process group was ended` };
     }
