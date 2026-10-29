@@ -533,6 +533,51 @@ describe("AC-DCS1-7: the contract is evaluated against the landed tree (the rule
   });
 });
 
+describe("AC-DCS1-7: an ac oracle resolves across the plan's parent spec and every spec it implements", () => {
+  /** A second spec with one script criterion, linked to `planSlug` with `implements`. */
+  async function implementedSpec(planSlug: string, acId: string, command: string): Promise<string> {
+    const spec = (await fixture.mustRun(["create", "spec", "--title", `Implemented ${acId} ${(sequence += 1)}`, "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)![1]!;
+    await fixture.mustRun(["ac", "add", spec, acId, "--statement", "Implemented criterion.", "--mode", "script", "--oracle", "test", "--command", command]);
+    await fixture.mustRun(["link", planSlug, spec, "--type", "implements"]);
+    return spec;
+  }
+
+  /** Lands a task scoped to `acId`, then records every oracle except the AC (whose command the caller records or withholds). */
+  async function landedForAc(planSlug: string, acId: string): Promise<Built> {
+    const built = await buildBranchTask({ plan: planSlug, acScope: [acId] });
+    await integrate(built);
+    await recordStandard(built, ["ac"], fixture.dir);
+    return built;
+  }
+
+  it("AC-DCS1-7: an AC declared only by an implements-linked spec resolves there: its live command is judged, and the task archives", async () => {
+    const planSlug = await newPlan("Implements plan");
+    await implementedSpec(planSlug, "AC-IMPL-1", "echo impl1");
+    const built = await landedForAc(planSlug, "AC-IMPL-1");
+    await expectFloor(built.slug, "contract-oracles", "AC-IMPL-1", "echo impl1");
+    await capturePassIn(fixture.dir, built.slug, "echo impl1");
+    const out = await fixture.run(["done", built.slug]);
+    expect(out.exitCode, `${out.stdout}${out.stderr}`).toBe(0);
+    expect(await statusOf(built.slug)).toBe("archived");
+  });
+
+  it("AC-DCS1-7: an AC declared by two specs of the plan is refused with the cause ac-oracle-ambiguous naming both specs", async () => {
+    const planSlug = await newPlan("Ambiguous plan");
+    const other = await implementedSpec(planSlug, "AC-FX-1", "echo fx1-other");
+    const built = await landedForAc(planSlug, "AC-FX-1");
+    await capturePassIn(fixture.dir, built.slug, AC_COMMAND, ["--ac", "AC-FX-1"]);
+    await expectFloor(built.slug, "contract-oracles", "ac-oracle-ambiguous", fixture.spec, other);
+  });
+
+  it("AC-DCS1-7: an AC declared by no spec of the plan is refused with the unresolved cause naming the criterion", async () => {
+    const planSlug = await newPlan("Absent plan");
+    const spec = await implementedSpec(planSlug, "AC-GONE-9", "echo gone9");
+    const built = await landedForAc(planSlug, "AC-GONE-9");
+    await fixture.mustRun(["ac", "rm", spec, "AC-GONE-9"]);
+    await expectFloor(built.slug, "contract-oracles", "AC-GONE-9", "no governing spec declares this criterion");
+  });
+});
+
 describe("AC-DCS1-8: plan close and archive --apply judge each member by the same stored-contract floors", () => {
   /** Approves the plan (so it can be closed) and returns the slug. */
   async function closablePlan(): Promise<string> {
