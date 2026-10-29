@@ -1,5 +1,6 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * done-contract-write-set-compiled.bun.test.ts — a claim declares its write set; overlap, oracle additions and edit-time
  * declarations use it (spec-done-contract-compiled-at-approve-task-kinds-write-sets), observed through the `lore` command tree
@@ -27,6 +28,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
+import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
@@ -57,6 +59,8 @@ beforeAll(async () => {
       integrate: { floor_command: "true" },
     },
   });
+  // reason: the task-claim gate requires an approved ancestor spec (BR-104); approving one needs a live cited rule.
+  await citeSpecViaAsyncCli((args) => fixture.mustRun(args), fixture.dir, undefined, fixture.spec, "AC-FX-1");
   await fixture.mustRun(["approve", fixture.spec]);
   installShippedGuard(fixture.dir, join(mkdtempSync(join(tmpdir(), "dcs1-ws-guard-")), "hooks"));
   fixture.git(["checkout", "-q", "--detach", "main"]);
