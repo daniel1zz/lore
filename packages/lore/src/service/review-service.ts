@@ -49,6 +49,8 @@ import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
 import { REOPEN_AUDIT_ACTION, REOPEN_OPERATION, type RecordLockService } from "./record-lock-service.js";
 import { findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
+import { redWaiverNotCode } from "./done-contract-compile.js";
+import type { ApproveContractPort } from "./done-contract-service.js";
 import { ANY_RULE_ID_PATTERN } from "@lore/core";
 import {
   appendApprovedRule,
@@ -138,6 +140,11 @@ export interface PendingFilters {
 export interface ApproveOpts {
   /** Reviewer identity — defaults to "system" if omitted */
   reviewer?: string;
+  /**
+   * AC-DCS1-5 — the reason the red run of a code task is waived (`lore approve --red-waiver "<reason>"`), stored verbatim as the
+   * contract's `red_waiver_reason`. A blank reason is refused; a document that is not a code task refuses `red-waiver-not-code`.
+   */
+  redWaiverReason?: string;
   /**
    * SPEC-103 §Mechanisms M2, §Design Decisions D3 — the audited escape hatch for
    * the anti-lottery worst-decision-wins gate: the id of an EXISTING `review_judgments`
@@ -334,6 +341,17 @@ export class ReviewService {
   }
 
   private baselineDeclarations: BaselineDeclarationPort | undefined;
+
+  /**
+   * Wires the done-contract compile (AC-DCS1-1): approving a task asks it for the contract stored in the approving write. Set by
+   * `app.ts` at every composition site; absent (a bare unit-test construction) = a task is approved without a contract, and a
+   * `--red-waiver` is refused (it could not be stored).
+   */
+  setDoneContractPort(port: ApproveContractPort): void {
+    this.doneContracts = port;
+  }
+
+  private doneContracts: ApproveContractPort | undefined;
 
   private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     return resolveDoc(this.store, idOrSlug);
@@ -903,13 +921,19 @@ export class ReviewService {
       });
     }
 
+    // reason: AC-DCS1-1, AC-DCS1-2, AC-DCS1-5 — the done contract of a task is compiled HERE: after the transition and override
+    // checks, before the write, so a refusal (uncompilable contract, a waiver on a non-code task) writes nothing, and the contract
+    // rides in the SAME write as the status change (one version, one audit row).
+    const contractPatch = await this.compileContractFor(doc, opts?.redWaiverReason);
+    if (!contractPatch.ok) return contractPatch;
+
     // reason: SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was used) rides on this SAME
     // audit row rather than a second entry — one audited event, "approved, and here's the escape hatch that let it
     // through." `override_no_judgment` (iff `--override-no-judgment`) rides on the SAME row for the SAME reason; the
     // two are mutually exclusive (validated above). The route adds the `version` join key (SPEC-035 §2).
     const approved = await this.writer.writeDoc({
       doc,
-      patch: { status: "approved" },
+      patch: { status: "approved", ...contractPatch.value },
       action: "approve",
       auditAction: "approve",
       auditDetails: {
@@ -968,6 +992,26 @@ export class ReviewService {
       ...updatedDoc,
       ...(reachabilityAdvisories.length > 0 ? { reachability_advisories: reachabilityAdvisories } : {}),
     });
+  }
+
+  /**
+   * The `extra` patch that stores a task's compiled done contract, or `{}` for a document that is not a task. A red waiver is
+   * validated here for every document type: blank is refused, anything but a code task refuses `red-waiver-not-code`.
+   */
+  private async compileContractFor(doc: DocRecord, redWaiverReason: string | undefined): Promise<Result<{ extra?: Record<string, unknown> }, LoreError>> {
+    if (redWaiverReason !== undefined && redWaiverReason.trim() === "") {
+      return err({ code: "VALIDATION_ERROR", field: "red-waiver", message: "--red-waiver needs a non-blank reason: say why this code task has no red run to record.", value: redWaiverReason });
+    }
+    if (doc.type !== "task") {
+      return redWaiverReason === undefined ? ok({}) : err(redWaiverNotCode(doc.slug, `a ${doc.type}, not a task`));
+    }
+    if (this.doneContracts === undefined) {
+      if (redWaiverReason === undefined) return ok({});
+      return err({ code: "VALIDATION_ERROR", field: "red-waiver", message: "--red-waiver requires done-contract wiring, which this ReviewService instance lacks", value: redWaiverReason });
+    }
+    const compiled = await this.doneContracts.compileForApprove(doc, redWaiverReason === undefined ? {} : { redWaiverReason });
+    if (!compiled.ok) return compiled;
+    return ok({ extra: { ...doc.extra, done_contract: compiled.value } });
   }
 
   // ─── Per-item approval of a baseline node (BR-1338) ─────────────────────────

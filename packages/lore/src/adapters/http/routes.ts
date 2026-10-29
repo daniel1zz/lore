@@ -27,7 +27,8 @@ import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
-import { formatTaskKindRequiredMessage, isActivePlan, isTaskKind } from "@lore/core";
+import { isActivePlan } from "@lore/core";
+import { requireTaskKindOnCreate } from "./task-kind-input.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
 import { computeValidityState } from "../../flows/validity-state.js";
@@ -387,32 +388,6 @@ async function handleListDocs(url: URL, app: App): Promise<Response> {
   // reason: no limit/offset is passed above, so filtering after the fetch cannot shorten a page.
   const docs = result.value.docs.filter(isActivePlan);
   return jsonOk({ ...result.value, docs, total: docs.length });
-}
-
-/**
- * AC-DCS1-4 (BR-1488): the HTTP create route requires a task kind. The kind is read from the top-level `kind` field or from
- * `extra.kind` (a top-level one is moved into `extra`, the only place a task stores it); a missing or unknown one is a 400
- * naming the three kinds. Documents of any other type pass through untouched.
- *
- * @param body - the parsed request body
- * @returns the input to create, or the refusal (a `VALIDATION_ERROR` on field `kind`)
- */
-function requireTaskKindOnCreate(
-  body: Record<string, unknown>,
-):
-  | { readonly ok: true; readonly input: CreateDocInput }
-  | { readonly ok: false; readonly error: { code: "VALIDATION_ERROR"; field: string; message: string } } {
-  if (body["type"] !== "task") return { ok: true, input: body as unknown as CreateDocInput };
-  const extra = typeof body["extra"] === "object" && body["extra"] !== null ? (body["extra"] as Record<string, unknown>) : {};
-  const { kind: topLevelKind, ...rest } = body;
-  const kind = topLevelKind ?? extra["kind"];
-  if (!isTaskKind(kind)) {
-    return {
-      ok: false,
-      error: { code: "VALIDATION_ERROR", field: "kind", message: formatTaskKindRequiredMessage(kind, "kind") },
-    };
-  }
-  return { ok: true, input: { ...rest, extra: { ...extra, kind } } as unknown as CreateDocInput };
 }
 
 async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Promise<Response> {

@@ -55,13 +55,13 @@
 
 import { invocationOf } from "../command-invocation.js";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
-import { taskClaimSchema } from "@lore/core";
+import { doneContractSchema, taskClaimSchema } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { printLine } from "../output.js";
 import { refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
-import { renderDefinitionOfDone } from "../definition-of-done-render.js";
+import { renderDefinitionOfDone, renderDoneContract } from "../definition-of-done-render.js";
 
 export default defineLoreCommand({
   meta: {
@@ -158,14 +158,26 @@ export default defineLoreCommand({
 
       // reason: BR-1357 — the definition of done is computed by the done floors' own predicates
       // (`TaskWorkflowService.describeDefinitionOfDone`); a phase claim has no done floors, so it carries none.
+      // reason: AC-DCS1-1 — an approved task holds its contract (fixed at approve); the claim prints THAT. Only a task with no
+      // stored contract (approved before contracts existed) falls back to the recomputed definition.
+      const storedContract = doneContractSchema.safeParse(result.value.extra["done_contract"]);
       const definitionOfDone =
-        result.value.type === "task" ? await app.taskWorkflowService.describeDefinitionOfDone(result.value) : undefined;
+        result.value.type === "task" && !storedContract.success
+          ? await app.taskWorkflowService.describeDefinitionOfDone(result.value)
+          : undefined;
 
       if (args.json) {
         printLine(
           inv.io.stdout,
           JSON.stringify(
-            { ok: true, data: { doc: result.value, ...(definitionOfDone !== undefined ? { definition_of_done: definitionOfDone } : {}) } },
+            {
+              ok: true,
+              data: {
+                doc: result.value,
+                ...(definitionOfDone !== undefined ? { definition_of_done: definitionOfDone } : {}),
+                ...(storedContract.success ? { done_contract: storedContract.data } : {}),
+              },
+            },
             null,
             2,
           ),
@@ -174,6 +186,9 @@ export default defineLoreCommand({
       }
 
       printLine(inv.io.stdout, `Claimed ${result.value.slug} by ${by} (v${result.value.version})`);
+      if (storedContract.success) {
+        for (const line of renderDoneContract(storedContract.data)) printLine(inv.io.stdout, line);
+      }
       if (definitionOfDone !== undefined) {
         for (const line of renderDefinitionOfDone(definitionOfDone)) printLine(inv.io.stdout, line);
       }

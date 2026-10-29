@@ -133,6 +133,8 @@ import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
+import { DoneContractService } from "./service/done-contract-service.js";
+import { createRealDoneContractGit } from "./adapters/real-done-contract-git.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -1774,6 +1776,16 @@ function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService)
 }
 
 /**
+ * Hands the done-contract compile to the approval path (AC-DCS1-1, AC-DCS1-2): `ReviewService.approve` of a task compiles and
+ * stores its contract through this port. One wiring, called at BOTH composition sites (SQLite and Turso); the three commands
+ * come from `workflow.done_contract` (any may be absent: a code task then refuses with the matching cause).
+ */
+function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string): void {
+  const commands = config?.workflow?.done_contract ?? {};
+  app.reviewService.setDoneContractPort(new DoneContractService(store, commands, createRealDoneContractGit(repoRoot)));
+}
+
+/**
  * Builds the post-archive issue step and hands it to every service that commits an archive
  * (spec-archiving-the-work-that-resolves-a-defect-report-closes D4). The closer exists only for a
  * GitHub-repo `feedback.upstream` — NOT the vendor-consent shape, which names the lore vendor's own
@@ -2117,6 +2129,7 @@ function createAppUnscoped(
       buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
+    wireDoneContract(sqliteApp, sqliteStore, config, repoRoot);
     wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
   }
@@ -2230,6 +2243,7 @@ function createAppUnscoped(
         buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
+    wireDoneContract(tursoApp, store, config, repoRoot);
     wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };
   } catch (e) {
