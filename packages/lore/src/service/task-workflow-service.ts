@@ -292,6 +292,7 @@ import type { AuditEntry, LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
   doneContractSchema,
+  specAcceptanceCriteriaSchema,
   type DoneContract,
   type DoneContractOracle,
   taskClaimSchema,
@@ -4242,14 +4243,22 @@ export class TaskWorkflowService {
     }
 
     // The oracles to judge: the contract's, minus the removed, each with the command a pass row must have run.
-    const criteria = await this.resolveFloorCriteria(task);
+    const bySpec = await this.criteriaBySpec(task);
+    if (!bySpec.ok) return bySpec;
     const evaluated: EvaluatedOracle[] = [];
     for (const oracle of contractOracles) {
       if (removed.some((gone) => gone.id === oracle.id)) continue;
       if (oracle.id.startsWith("ac:")) {
         const acId = oracle.id.slice("ac:".length);
-        const live = criteria.ok && criteria.value !== null ? criteria.value.find((criterion) => criterion.id === acId) : undefined;
-        if (live === undefined) evaluated.push({ id: oracle.id, command: undefined, unresolved: "no governing spec declares this criterion any more" });
+        // reason: an id is resolved across the plan's parent spec and every spec it implements; one match is used, none and
+        // several are named causes (never a guess between two specs).
+        const found = bySpec.value.flatMap((group) => {
+          const criterion = group.criteria.find((candidate) => candidate.id === acId);
+          return criterion === undefined ? [] : [{ spec: group.spec, criterion }];
+        });
+        const live = found.length === 1 ? found[0]!.criterion : undefined;
+        if (found.length > 1) evaluated.push({ id: oracle.id, command: undefined, unresolved: `ac-oracle-ambiguous: declared by ${found.map((hit) => hit.spec).join(" and ")}` });
+        else if (live === undefined) evaluated.push({ id: oracle.id, command: undefined, unresolved: "no governing spec declares this criterion any more" });
         else if (live.verify.mode !== "script") evaluated.push({ id: oracle.id, command: undefined, unresolved: "the criterion is no longer script-mode" });
         else evaluated.push({ id: oracle.id, command: live.verify.command });
       } else {
@@ -4300,6 +4309,44 @@ export class TaskWorkflowService {
       cause: "evidence-stale",
       detail: `the row ran on ${head.slice(0, 12)}, which is not a ${contract.base_branch} commit containing the compile commit ${contract.compiled_at_commit.slice(0, 12)}`,
     };
+  }
+
+  /**
+   * The criteria of every spec that governs `task`, grouped by spec: the plan's parent spec and every spec the plan links with
+   * `implements` (the same set the compile at approve reads). An ad-hoc task has the one spec its recorded governing spec names.
+   * An ac id is then resolved against these groups: found in one spec, in none, or in several (ambiguous).
+   */
+  private async criteriaBySpec(task: DocRecord): Promise<Result<Array<{ spec: string; criteria: AcceptanceCriterion[] }>, LoreError>> {
+    if (task.extra["adhoc"] === true) {
+      const adhoc = await this.resolveAdhocGoverningAcCriteria(task);
+      if (!adhoc.ok) return adhoc;
+      return ok([{ spec: "the governing spec", criteria: adhoc.value }]);
+    }
+    const planId = typeof task.extra["plan_id"] === "string" && task.extra["plan_id"] !== "" ? (task.extra["plan_id"] as DocId) : task.parent_id;
+    if (planId === null) return ok([]);
+    const plan = await this.store.find(planId);
+    if (!plan.ok) return plan;
+    if (plan.value === null || plan.value.type !== "plan") return ok([]);
+    const specs: DocRecord[] = [];
+    if (plan.value.parent_id !== null) {
+      const parent = await this.store.find(plan.value.parent_id);
+      if (!parent.ok) return parent;
+      if (parent.value !== null && parent.value.type === "spec") specs.push(parent.value);
+    }
+    const links = await this.store.findLinks(plan.value.id, "out");
+    if (!links.ok) return links;
+    for (const link of links.value) {
+      if (link.link_type !== "implements") continue;
+      const target = await this.store.find(link.to_id);
+      if (!target.ok) return target;
+      if (target.value !== null && target.value.type === "spec" && !specs.some((known) => known.id === target.value?.id)) specs.push(target.value);
+    }
+    return ok(
+      specs.map((spec) => {
+        const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+        return { spec: spec.slug, criteria: parsed.success ? parsed.data : [] };
+      }),
+    );
   }
 
   /**
