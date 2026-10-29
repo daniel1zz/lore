@@ -244,6 +244,20 @@ export interface SetCriterionPatch {
   falsifier?: unknown;
 }
 
+/**
+ * Mark a falsifier candidate as naming a symbol the task has yet to create (`--falsifier-new-symbol`,
+ * AC-DCS1-3). Pure; the single place the `new_symbol` key is written, shared by `ac add` and `ac set`.
+ *
+ * @param falsifier - the shaped candidate from the CLI (`undefined` when no `--falsifier-*` flag was passed)
+ * @param newSymbol - whether `--falsifier-new-symbol` was passed
+ * @returns the candidate with `new_symbol: true` merged in when marked; otherwise the candidate untouched, so an
+ *   unmarked falsifier never carries the key (and a `set` without the flag replaces the object and so clears it).
+ */
+export function markFalsifierNewSymbol(falsifier: unknown, newSymbol: boolean): unknown {
+  if (falsifier === undefined || typeof falsifier !== "object" || falsifier === null) return falsifier;
+  return { ...falsifier, ...(newSymbol ? { new_symbol: true } : {}) };
+}
+
 // ─── D8 Declaration-Time Path-Existence Check ──────────────────────────────
 // (task-promote-the-oracle-file-existence-primitives-into-lore,
 //  spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.3/D8)
