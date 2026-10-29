@@ -18,7 +18,7 @@
  *     nothing at all.
  *   - a check or corpus task is finished from the shared checkout, with no claim, no worktree and no subagent (AC-DCS1-19..21):
  *     the checkout is measured first (main working copy, HEAD = tip of main, clean tree), the run may change no file
- *     (`kind-wrote-files`), the rows are written once under `expectedVersion: task.version` and the task is archived by `done`.
+ *     (`kind-wrote-files`), the rows are written once, guarded by the task version this run read, and the task is archived by `done`.
  * Side-effect class: runs oracle processes through the verify runner; git reads; one corpus write.
  *
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-15, AC-DCS1-16, AC-DCS1-17), ledger D28, D33.
