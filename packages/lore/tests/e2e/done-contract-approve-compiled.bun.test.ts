@@ -578,23 +578,18 @@ describe("the done contract compiled at approve", () => {
     });
 
     it("AC-DCS1-1: lore claim of the approved task prints the stored contract (ids and commands), not a recomputed definition", async () => {
-      // A claim needs an approved spec and plan above the task (the task-claim gate), so this one gets its own pair.
-      const specOut = await cf.mustRun(["create", "spec", "--title", "Claim Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
-      const claimSpec = specOut.match(/Slug:\s+(\S+)/)?.[1] ?? "";
-      await cf.mustRun(["ac", "add", claimSpec, "AC-CL-1", "--statement", "Claim criterion.", "--mode", "script", "--oracle", "test", "--command", "echo cl1"]);
-      await cf.mustRun(["approve", claimSpec]);
-      const claimPlanOut = await cf.mustRun(["create", "plan", "--title", "Claim Plan", "--parent", claimSpec, "--content", "## Plan\n\nBody.\n", "--no-ai"]);
-      const claimPlan = claimPlanOut.match(/Slug:\s+(\S+)/)?.[1] ?? "";
-      await cf.mustRun(["approve", claimPlan]);
-      const slug = await cf.createTask({ plan: claimPlan, kind: "code", title: "Claim prints contract", anchors: [TEST_FILE], acScope: ["AC-CL-1"] });
+      // reason: the task-claim gate wants an approved spec (which needs a cited baseline rule); the claim's gates are not this
+      // criterion's subject, so the fixture switches that one checkpoint off.
+      patchLoreConfig(cf.dir, { workflow: { gates: { "task-claim": { enabled: false } } } });
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Claim prints contract", anchors: [TEST_FILE], acScope: ["AC-FX-1"] });
       expect((await cf.run(["approve", slug])).exitCode).toBe(0);
       const worktree = join(cf.dir, "..", `dcs1-wt-${Date.now()}`);
       cf.git(["worktree", "add", "-q", "-b", "dcs1-claim-branch", worktree]);
       try {
         const claimed = await cf.run(["claim", slug, "--worktree", "dcs1-claim-branch"]);
         expect(claimed.exitCode, claimed.stderr + claimed.stdout).toBe(0);
-        expect(claimed.stdout).toContain("ac:AC-CL-1");
-        expect(claimed.stdout).toContain("echo cl1");
+        expect(claimed.stdout).toContain("ac:AC-FX-1");
+        expect(claimed.stdout).toContain("echo fx1");
         expect(claimed.stdout).toContain(`test:${TEST_FILE}`);
         expect(claimed.stdout).toContain(TEST_COMMAND);
         expect(claimed.stdout).toContain("typecheck");
