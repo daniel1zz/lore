@@ -60,7 +60,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `PlanIntegrationBranchService` | sole writer of a plan's `extra.integration_branch` (`lore plan integration-branch`) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files |
 | `PhaseService` | add/list/remove/rename/migrate on `plan.extra.phases` |
-| `TaskWorkflowService` | addEvidence/claim/release/done/ready/declareRedFirst — evidence log, advisory claim lease, four-floor archival walk, computed readiness over `blocks` links (own telemetry) |
+| `TaskWorkflowService` | addEvidence/claim/release/done/ready — evidence log, advisory claim lease, stored-contract archival walk (`DONE_FLOOR_ORDER`), computed readiness over `blocks` links (own telemetry) |
 | `PhaseWorkflowService` | Same verb set scoped to `phase` docs; own `phase-claim` checkpoint; `recordChecklistVerifiedEvidence` is the sole `attestation` injection point for checklist-linked evidence |
 | `PhaseMigrationService` | One-shot idempotent task→phase sweep (`lore migrate tasks-to-phases`) |
 | `ExportDocsService` | One-way corpus→file exporter; collision-safe `.lore/export-index.json`; MDX-spliced output |

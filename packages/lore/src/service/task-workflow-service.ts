@@ -1438,7 +1438,7 @@ function declaredTestFileAnchors(task: DocRecord): string[] {
  * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
  * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
  * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
- * `readRedFirstDeclared`/`isRedRunResult` immediately above: a small, pure,
+ * `isRedRunResult` above: a small, pure,
  * synchronous predicate over already-read data, never a store call of its
  * own.
  *
@@ -3832,33 +3832,12 @@ export class TaskWorkflowService {
    *   - `opts.overrideReason` IS supplied but is blank/whitespace-only — refused here
    *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
    *     CLI usage error, exit 2, before this service is ever called);
-   *   - the task declares `extra.red_first: true` (task-red-first-discipline-is-asked-
-   *     for-in-prose-but-never) and holds no `"expected-fail"`/`"fail"` evidence entry —
-   *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
-   *     discipline, checked AFTER the `result:pass` floor above so neither floor can
-   *     mask the other; a task that never sets the flag never reaches this check;
-   *   - the task has DECLARED `extra.ac_scope` (the KEY being present is the trigger —
-   *     an EXPLICITLY EMPTY `[]` arms this floor exactly as a populated array does,
-   *     task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed) but NEITHER
-   *     `extra.red_first: true` NOR a `"expected-fail"`/`"fail"` evidence entry
-   *     (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — a FOURTH,
-   *     INDEPENDENT floor: the red-first floor above INVERTED to opt-OUT for every task
-   *     that never called `lore red-first`. Mutually exclusive with the red-first floor
-   *     by construction (a task WITH `extra.red_first: true` is governed by that floor
-   *     alone — see {@link requiresNoNewTestsDeclaration}'s own JSDoc), so neither floor
-   *     can ever double-fire on the same task. Bypasses via `opts.noNewTestsReason` ONLY
-   *     (the SAME audited-escape shape as `overrideReason` — mandatory, non-blank,
-   *     persisted verbatim); a task with NO `ac_scope` key at all never reaches this
-   *     check, and the refusal message distinguishes the empty declaration from a
-   *     populated one rather than rendering an empty id list;
-   *   - `opts.noNewTestsReason` IS supplied but is blank/whitespace-only — refused here
-   *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
-   *     CLI usage error, exit 2, before this service is ever called);
-   *   - a declared test-file anchor (task-every-ac-oracle-is-t-scoped-so-the-file-
-   *     passes-is-attested) holds no `oracle:"test"` `result:"pass"` evidence entry
-   *     whose command runs that exact file with no case-name filter — a FIFTH,
-   *     INDEPENDENT floor checked AFTER the four above, naming every unsatisfied
-   *     anchor; a task declaring no test-file anchors never reaches this check;
+   *   - the stored contract's floors are unmet, in the order of {@link DONE_FLOOR_ORDER}:
+   *     not-landed, missing-oracle-file, attested-pass (counted by the evidence rule of
+   *     the contract's kind), latest-attested-fail, red-first (`red_required`, waivable
+   *     only at approve), unfiltered-test-file (every `test:` oracle), contract-oracles
+   *     (the `ac:` and typecheck oracles), foreign-claim. A task holding no contract is
+   *     refused: the contract is compiled at approve and never recomputed here;
    *   - a FRESH claim (same `isClaimStale` freshness test `claim()`/`ready()` use) is
    *     held by a DIFFERENT actor than `opts.by` — a STALE claim, or a fresh claim held
    *     by `opts.by` itself, never blocks.
@@ -3880,16 +3859,12 @@ export class TaskWorkflowService {
    * the freshly-read `task.status` each call).
    *
    * @param idOrSlug - Task document ULID or slug
-   * @param opts - `{ by, source?, overrideReason?, noNewTestsReason? }` — see {@link
-   *   DoneOpts.overrideReason} for the audited attestation-floor escape hatch and
-   *   {@link DoneOpts.noNewTestsReason} for the audited no-new-tests escape hatch
+   * @param opts - `{ by, source?, overrideReason? }` — see {@link
+   *   DoneOpts.overrideReason} for the audited attestation-floor escape hatch
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no runner-attested passing
-   *   evidence and no (or a blank) `overrideReason` / a red_first claim with no red
-   *   evidence row / a declared ac_scope with no red_first opt-in, no red evidence
-   *   row, and no (or a blank) `noNewTestsReason` / an unsatisfied test-file-anchor
-   *   unfiltered-run floor / fresh foreign claim / illegal lifecycle step — the last
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / an unmet floor of the stored
+   *   contract, `details.floor` naming it / a task with no stored contract / fresh foreign claim / illegal lifecycle step — the last
    *   one structurally unreachable given `computeArchiveWalk`'s own base-graph-only
    *   steps, kept as a fail-loud guard rather than a non-null assertion), STALE_VERSION
    */
@@ -6311,14 +6286,8 @@ export class TaskWorkflowService {
    * each individual audited step, not just the first. `undefined` (the common case —
    * an attested pass already satisfied the floor) adds neither key.
    *
-   * `escapes.noNewTestsReason` (task-a-non-empty-output-tail-can-be-hand-authored-
-   * prose-and-the) — the SAME per-step, every-step persistence, independent of
-   * `overrideReason` (a walk can carry both, either, or neither key set, since the
-   * two floors are evaluated independently in `_doneImpl`): present iff this call
-   * used the audited no-new-tests escape hatch, merged onto every step's audit
-   * `details` as `no_new_tests_reason` + `no_new_tests_declared: true`. `undefined`
-   * (the common case — no `ac_scope` KEY at all, an opted-in red_first claim, or a
-   * genuine red evidence row already satisfied the floor) adds neither key.
+   * `escapes.removedOracles` (AC-DCS1-30) — the test-file oracles this task's landing deleted; they are written to
+   * `done_contract.removed_oracles` in this same write (the first step of the walk).
    */
   private async writeTaskStatus(
     task: DocRecord,
