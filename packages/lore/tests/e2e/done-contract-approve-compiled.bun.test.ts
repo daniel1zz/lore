@@ -11,6 +11,11 @@
  *   Task "kind, config keys and the create and set surfaces":
  *     AC-DCS1-4  the task kind is required on every creation path and immutable once the task is approved
  *     AC-DCS1-9  the three `workflow.done_contract.*` config keys are validated and set for this repository
+ *   Task "approve compiles and stores the done-contract":
+ *     AC-DCS1-1  approve stores the compiled contract; claim prints it
+ *     AC-DCS1-2  an uncompilable contract is refused with every cause and nothing is written
+ *     AC-DCS1-5  the red run is waived once at approve (--red-waiver)
+ *     AC-DCS1-4  (also) the dashboard create route requires a kind
  *
  * Oracle: the command tree in-process (`runLoreInProcess`, the function the binary's entry calls) over `mkdtemp` + `lore init`
  * in a clean git repository, HOME outside every repository; the repository's own `.lore/` is only READ (AC-DCS1-9 reads its
@@ -214,7 +219,9 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
     const echoed = await httpJson("PATCH", `/api/docs/${id}`, { extra: approved.extra });
     expect(echoed.status).toBe(200);
     expect((await fixture.readTask(slug)).extra["kind"]).toBe("code");
-    expect((await fixture.readTask(slug)).extra["done_contract"]).toBeUndefined();
+    // the contract is the one the approve compiled, never the one the refused sets carried.
+    expect((await fixture.readTask(slug)).extra["done_contract"]).toEqual(approved.extra["done_contract"]);
+    expect((approved.extra["done_contract"] as { compiled_at_commit: string }).compiled_at_commit).not.toBe("0".repeat(40));
   });
 
   it("AC-DCS1-4: a draft task's done_contract cannot be written by a wholesale set either, but its kind can", async () => {
