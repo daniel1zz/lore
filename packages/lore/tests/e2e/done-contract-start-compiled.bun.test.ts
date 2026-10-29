@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * done-contract-start-compiled.bun.test.ts — `lore start` creates the worktree on the contract base, installs, claims and prints
  * the contract (spec-done-contract-compiled-at-approve-task-kinds-write-sets), observed through the `lore` command tree
