@@ -4,12 +4,16 @@
  * Purpose: make "what did the suite say at commit X" a stored fact: the first lookup of a commit runs the suite once and
  *   stores it, every later lookup reads the store and runs nothing; the main red/green state the review records is
  *   derived from the same rows, so there is no second record of one run.
- * Public surface: SuiteResultService, CommitSuiteRunnerPort, FileRunOutcome, suiteRunOfResult, deriveMainCheckedRows.
+ * Public surface: SuiteResultService, CommitSuiteRunnerPort, FileRunOutcome, SingleFileRunKind, singleFileRunKey, suiteRunOfResult,
+ *   deriveMainCheckedRows.
  * Invariants:
  *   - A commit has at most one `measured` result. A run that could not complete (the runner reports not-measured or
  *     fails) is stored as `unrunnable` with its cause and attempt number, and the NEXT lookup runs again as a new
  *     result (new id, `attempt + 1`); an `unrunnable` result is never returned as a cached answer.
  *   - Stored rows are never edited. Per-file re-runs (`rerunFiles`) are separate rows attached to a result id.
+ *   - A single-file run (`runSingleFile`, regression at the assessed commit) is stored keyed by (commit, file): its
+ *     `suite_result_id` column holds {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit
+ *     that never had a full suite can still carry file runs and a later review reads them back (BR-1496).
  *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
  *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
  * Side-effect class: stateful (store writes, runner IO through the injected port).
@@ -106,6 +110,18 @@ export function deriveMainCheckedRows(results: readonly SuiteResultRecord[]): Ma
     });
   }
   return rows;
+}
+
+/** Why a single file was run at a commit: a bisection probe, or the confirmation of one end of a transition (spec D6). */
+export type SingleFileRunKind = "bisect" | "confirm";
+
+/**
+ * The value stored in `suite_file_runs.suite_result_id` for a single-file run at `commit`.
+ * reason: the table has no foreign key and no (commit, file) column pair of its own; keying by this string avoids a
+ * migration and makes "what did this file do at this commit" one indexed read (`listFileRuns`).
+ */
+export function singleFileRunKey(kind: SingleFileRunKind, commit: string): string {
+  return `file-${kind}@${commit}`;
 }
 
 /** Readable text of any LoreError (not every member carries a `message`). */
@@ -238,12 +254,43 @@ export class SuiteResultService {
     return ok(rows);
   }
 
+  /**
+   * Runs ONE test file at `commit` (always runs; the caller reads {@link listFileRuns} with {@link singleFileRunKey} first)
+   * and stores the outcome keyed by (commit, file, kind).
+   *
+   * @param commit - the commit to run at (a full sha)
+   * @param file - repo-relative test file
+   * @param kind - `bisect` probe or `confirm` run; they are stored apart so a confirmation is always an independent run
+   * @param runner - runs the file at the commit
+   * @returns the stored row; `err` when the runner fails or reports no outcome, or the store fails
+   */
+  async runSingleFile(commit: string, file: string, kind: SingleFileRunKind, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord, LoreError>> {
+    const ran = await runner.runFiles(commit, [file]);
+    if (!ran.ok) return ran;
+    const outcome = ran.value.find((o) => o.file === file);
+    if (outcome === undefined) {
+      return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} at ${commit}` });
+    }
+    const row: SuiteFileRunRecord = {
+      suite_result_id: singleFileRunKey(kind, commit),
+      commit_sha: commit,
+      file,
+      exit_code: outcome.exit_code,
+      output_tail: outcome.output_tail,
+      duration_ms: outcome.duration_ms,
+      measured_at: this.deps.now(),
+    };
+    const inserted = await this.deps.store.insertSuiteFileRuns([row]);
+    if (!inserted.ok) return inserted;
+    return ok(row);
+  }
+
   /** The per-file re-runs stored for a result, in the order they ran. */
   listFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     return this.deps.store.listSuiteFileRuns(suiteResultId);
   }
 
-  /** Every stored suite result, oldest first (the clearing lookup of regression-per-landing reads it). */
+  /** Every stored suite result, oldest first (regression at the assessed commit reads the known state of each commit from it). */
   listResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
     return this.deps.store.listSuiteResults();
   }

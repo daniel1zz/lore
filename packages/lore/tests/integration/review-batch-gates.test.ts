@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-6, BR-1379, BR-1500)
+ * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-6, AC-AO-4, BR-1379, BR-1500)
  *
  * The review batch under `--close` holds a plan open for a failed or not-measured gate and closes it with known defects
  * for any other failure; the facts fingerprint moves with exactly the facts a verdict reads. Everything is injected: a
@@ -8,8 +8,8 @@
  *
  * Dimensions: HAPPY (non-gate failures close as accepted with known defects; an accepted gate closes), NEGATIVE (a failed
  * or not-measured gate keeps the plan open with its issue filed; a plain known defect never closes a gate), BOUNDARY (`na`
- * never blocks), STATE (an unchanged facts fingerprint is not re-judged, a changed one is), REGRESSION (the fingerprint
- * ignores main's HEAD).
+ * never blocks), STATE (a kept-open plan is re-judged only on the triggers of spec AO, see review-batch-no-per-landing.test.ts),
+ * REGRESSION (the fingerprint ignores main's HEAD).
  */
 
 import { describe, expect, it } from "vitest";
@@ -133,7 +133,6 @@ class World {
       acquireLease: () => lease.acquire(),
       settleRetirement: async () => ok({ state: "none" as const }),
       measureSuite: async () => undefined,
-      factsFingerprint: async () => ok(this.factsFingerprint),
       reviewPlan: async (ref) => this.judge(ref),
       closePlan: async (ref) => {
         this.find(ref).archived = true;
@@ -304,26 +303,14 @@ describe("AC-AF-6 failures of the other dimensions close as accepted with known 
 });
 
 describe("AC-AF-6 the review is re-made when its facts changed, never because main moved", () => {
-  it("AC-AF-6 STATE: an unchanged facts fingerprint is not re-judged; a changed one is", async () => {
+  it("AC-AF-6 STATE: a kept-open plan with unchanged facts is not re-judged by a later batch", async () => {
     const world = new World();
     world.add(makePlan("p-sec", { security: "fail" }));
     await runOne(world, "p-sec");
     expect(world.judgeCalls).toBe(1);
     expect((await runOne(world, "p-sec", "b2")).reviewed).toBe(false);
+    expect((await runOne(world, "p-sec", "b3")).reviewed).toBe(false);
     expect(world.judgeCalls).toBe(1);
-    world.factsFingerprint = "facts-2";
-    expect((await runOne(world, "p-sec", "b3")).reviewed).toBe(true);
-    expect(world.judgeCalls).toBe(2);
-  });
-
-  it("AC-AF-6 STATE: a review stored before the facts fingerprint existed is re-made once", async () => {
-    const world = new World();
-    const plan = world.add(makePlan("p-old", { security: "fail" }));
-    await runOne(world, "p-old");
-    const review = plan.docs[0]?.extra["milestone_review"] as Record<string, unknown>;
-    delete review["facts_fingerprint"];
-    expect((await runOne(world, "p-old", "b2")).reviewed).toBe(true);
-    expect((await runOne(world, "p-old", "b3")).reviewed).toBe(false);
   });
 
   const base: FactsFingerprintInput = {
@@ -377,17 +364,24 @@ describe("AC-AF-6 the review is re-made when its facts changed, never because ma
 });
 
 describe("AC-AF-6 errors never read as a pass", () => {
-  it("AC-AF-6 ERROR: a failing facts measurement is an errored attempt (audit row), the plan is not closed", async () => {
+  it("AC-AF-6 ERROR: a landing lookup that fails is an errored attempt (audit row), the plan is not closed", async () => {
     const world = new World();
-    const plan = world.add(makePlan("p-err"));
-    await runOne(world, "p-err");
-    plan.archived = false;
-    const failing = world.ports("b2", { factsFingerprint: async () => err<LoreError>({ code: "STORE_ERROR", message: "suite store unreadable" }) });
+    const plan = world.add(makePlan("p-err", { regression: "fail" }));
+    const judge = world.judge.bind(world);
+    const withCauses = async (ref: string) => {
+      const judged = await judge(ref);
+      if (!judged.ok) return judged;
+      const review = { ...judged.value.review, assessed_commit: "a".repeat(40), failing_fact_files: ["a.test.ts"], causes: { regression_files: ["a.test.ts"], suite_failing_files: ["a.test.ts"] } };
+      judged.value.doc.extra["milestone_review"] = review;
+      return ok({ doc: judged.value.doc, review });
+    };
+    await world.runner().runBatch(["p-err"], world.ports("b1", { reviewPlan: withCauses }));
+    const failing = world.ports("b2", { changedFilesSince: async () => err<LoreError>({ code: "STORE_ERROR", message: "git diff failed" }) });
     const run = await world.runner().runBatch(["p-err"], failing);
     const row = run.ok && run.value.state === "ran" ? run.value.rows[0] : undefined;
     expect(row).toMatchObject({ outcome: "error", stage: "review" });
     expect(plan.archived).toBe(false);
-    expect(world.errors.at(-1)?.message).toContain("suite store unreadable");
+    expect(world.errors.at(-1)?.message).toContain("git diff failed");
   });
 });
 

@@ -155,19 +155,26 @@ export interface MilestoneFacts {
   readonly attestation?: readonly MilestoneFactRow[];
   /** The evidence row that decided each criterion (`subject` = `<spec>:<ac>`); the review fingerprint hashes these (BR-1498). */
   readonly attestation_ids?: readonly { readonly subject: string; readonly id: string }[];
-  /** Regression per landing (full suite at each landing commit). */
+  /** Regression at the assessed commit: one row for the head suite, one per red file (BR-1496). */
   readonly regression?: readonly MilestoneFactRow[];
-  /** Files of regressions still uncleared (the regression finding's root cause), from `regression-per-landing`. */
+  /** Files charged to the plan as regressions (the regression finding's root cause), from `regression-at-head`. */
   readonly regression_files?: readonly string[];
+  /** Main's head when the review measured (the assessed commit); stored on the review so the batch can tell which landings came after it. */
+  readonly assessed_commit?: string;
+  /** Files named by the failing facts (red test files; a file a failing criterion's command names); a later landing changing one re-opens the review. */
+  readonly failing_fact_files?: readonly string[];
   /** Files each landing touched outside its task's anchors. */
   readonly outside_anchors?: readonly { readonly landing: string; readonly files: readonly string[] }[];
   /** Tasks of the plan with no landing yet. */
   readonly unlanded_tasks?: readonly string[];
   /** AI-mode criteria of the plan's task scopes. */
   readonly ai_criteria?: readonly AiCriterionInput[];
-  /** The stored suite result id each landing was measured from; the review fingerprint hashes them (BR-1497, AC-AF-6). */
+  /**
+   * The stored results the verdict read, hashed by the review fingerprint (BR-1497, AC-AF-6). `landing` is the key:
+   * the assessed commit (its suite result id) and `<file>@<commit>:<kind>` for each single-file run read.
+   */
   readonly landing_result_ids?: readonly { readonly landing: string; readonly id: string }[];
-  /** Id of the stored main suite result consulted for clearing; present only while a regression existed to clear. */
+  /** Retired: regression is no longer cleared against a later main result (it is measured at main's head). Never set. */
   readonly clearing_result_id?: string;
 }
 
@@ -268,6 +275,10 @@ export const milestoneReviewSchema = z.object({
   decision_findings: z.array(decisionFindingSchema).optional(),
   /** Escaped defects traced to a decision; written only by `lore decision trace`, idempotent by the triple. */
   traced_decisions: z.array(tracedDecisionSchema).optional(),
+  /** Main's head when the review measured; the batch compares it with main to see whether a landing touched `failing_fact_files`. Absent on a review stored before it existed. */
+  assessed_commit: z.string().min(1).optional(),
+  /** Files named by the failing facts, sorted; absent when nothing failed or the review predates the field. */
+  failing_fact_files: z.array(z.string().min(1)).optional(),
   /** The judgment layer's calls, tokens, time and unseen files; absent on a review stored before it was recorded. */
   judgment: judgmentRecordSchema.optional(),
   prompt_version: z.string().min(1),
