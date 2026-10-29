@@ -344,8 +344,8 @@ export class ReviewService {
 
   /**
    * Wires the done-contract compile (AC-DCS1-1): approving a task asks it for the contract stored in the approving write. Set by
-   * `app.ts` at every composition site; absent (a bare unit-test construction) = a task is approved without a contract, and a
-   * `--red-waiver` is refused (it could not be stored).
+   * `app.ts` at every composition site; absent = approving a task is refused (`done-contract-port-missing`), nothing written.
+   * A unit test that approves a task passes `tests/helpers/done-contract-stub-port.ts`.
    */
   setDoneContractPort(port: ApproveContractPort): void {
     this.doneContracts = port;
@@ -1005,9 +1005,14 @@ export class ReviewService {
     if (doc.type !== "task") {
       return redWaiverReason === undefined ? ok({}) : err(redWaiverNotCode(doc.slug, `a ${doc.type}, not a task`));
     }
+    // reason: D43 — approve of a task always compiles or refuses; a missing port is a wiring fault, never an approval without a contract.
     if (this.doneContracts === undefined) {
-      if (redWaiverReason === undefined) return ok({});
-      return err({ code: "VALIDATION_ERROR", field: "red-waiver", message: "--red-waiver requires done-contract wiring, which this ReviewService instance lacks", value: redWaiverReason });
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "done_contract",
+        message: `done-contract-port-missing: this ReviewService has no done-contract port, so ${doc.slug} cannot be approved (a task is approved with its contract or not at all). The composition root must call setDoneContractPort.`,
+        value: { refusal: "done-contract-port-missing" },
+      });
     }
     const compiled = await this.doneContracts.compileForApprove(doc, redWaiverReason === undefined ? {} : { redWaiverReason });
     if (!compiled.ok) return compiled;
