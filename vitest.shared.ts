@@ -14,6 +14,15 @@ import { readRecorderAliases, readRecorderMockRedirect } from "./scripts/test-re
 // would arm the worker but not its children; scripts/test-isolation-setup.ts measures the result.
 armSandboxEnv(fileURLToPath(new URL(".", import.meta.url)));
 
+// reason: a test run is hermetic about identity (#503). An agent session exports its own LORE_HARNESS_RUN to every Bash call
+// (#418); a test run started there would hand it to every `lore` it spawns against a throwaway corpus, where that run is
+// unknown and the call is refused. Removed HERE, at config load in the runner's main process (same reason as the sandbox
+// marker above: workers and children spawned without an explicit env inherit the STARTUP environment under Bun; a
+// setupFiles/globalSetup deletion would not reach them). Both configs import this module, so both runners are covered.
+// Identity in tests comes only from packages/lore/tests/helpers/test-run-identity.ts and scripts/test-known-party-spawn.ts,
+// which set the variable deliberately on the children they start.
+delete process.env["LORE_HARNESS_RUN"];
+
 /** Env var naming the throwaway HOME of this run (lets a nested run reuse its parent's and the teardown remove it). */
 export const THROWAWAY_HOME_ENV = "LORE_TEST_THROWAWAY_HOME";
 
