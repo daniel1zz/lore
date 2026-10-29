@@ -1,5 +1,6 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * done-contract-check-corpus-compiled.bun.test.ts — a check or corpus task is finished in the shared checkout, with no claim, no
  * worktree and no subagent, and is archived on contract rows (spec-done-contract-compiled-at-approve-task-kinds-write-sets),
@@ -235,7 +236,7 @@ describe("AC-DCS1-19: a check or corpus task finishes at main's head with no cla
       const doc = found.value.doc;
       const claimed = await app.corpusService.writeDoc({
         doc,
-        patch: { extra: { ...doc.extra, claim: { by: "agent:session-legacy00", at: new Date().toISOString() } } },
+        patch: { extra: { ...doc.extra, claim: { by: "agent:session-legacy00", at: new Date().toISOString(), harness_run: "dcs1-legacy-run" } } },
         action: "update",
         changeSummary: "fixture: a legacy no-branch claim",
         auditAction: "update",
