@@ -177,7 +177,7 @@ describe("lore start creates the worktree on the contract base, installs, claims
     // The default worktree already exists too: the lease is checked FIRST, so this is 5, not worktree-exists (4).
     const second = await startFrom(fixture.dir, slug, "start-s14-other");
     expect(second.exitCode, second.text).toBe(5);
-    expect(second.text).toContain("CLAIM_CONFLICT");
+    expect(second.text).toContain("is claimed by");
     expect(second.text).toContain("start-s14-holder");
     expect(worktreeList()).toBe(before);
     expect(branchList()).toBe(branchesBefore);

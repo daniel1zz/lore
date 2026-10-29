@@ -145,6 +145,8 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     release: () => import("./commands/release.js"),
     // finish (AC-DCS1-15..17) — runs every oracle of the stored done contract in the claim worktree and keeps the claim finished.
     finish: () => import("./commands/finish.js"),
+    // start (AC-DCS1-13, AC-DCS1-14) — creates the task's worktree on the contract base, installs, claims and prints the contract.
+    start: () => import("./commands/start.js"),
     evidence: () => import("./commands/evidence.js"),
     // done (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3) —
     // evidence-validated atomic lifecycle walk to archived; see commands/done.ts's

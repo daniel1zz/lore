@@ -370,6 +370,7 @@ import {
   resolveClaimHead,
   type AnchorRemovalVerdict,
   type ListedWorktree,
+  type ProbeResult,
   type RecordedWorktree,
   type WorktreeGitProbe,
   type WorktreeOutcome,
@@ -444,6 +445,21 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
     value: name,
     rule: "BR-1468",
   });
+}
+
+/**
+ * Refuses a claim under a name of the done-contract spec (AC-DCS1-14); nothing is written. The name opens the message so a
+ * caller and a test match it without parsing `details`.
+ */
+function refuseClaimByKind(name: "kind-has-no-claim" | "shared-branch", message: string): Result<never, LoreError> {
+  return err({ code: "VALIDATION_ERROR", field: "claim", message: `${name}: ${message}`, value: { refusal: name } });
+}
+
+/** The kind of a task: its stored contract's kind, else the kind it was created with; `undefined` for a task that has neither. */
+export function readTaskKind(task: DocRecord): "code" | "check" | "corpus" | undefined {
+  const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
+  const kind = stored.success ? stored.data.kind : task.extra["kind"];
+  return kind === "code" || kind === "check" || kind === "corpus" ? kind : undefined;
 }
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -3331,12 +3347,22 @@ export class TaskWorkflowService {
       });
     }
 
-    // reason: BR-1468 — work that changes files needs its own branch: a no-branch claim has no tip to measure, so it is
-    // allowed only for a task that declares no file anchor (corpus-only work). A refresh that already holds a branch is fine.
+    // reason: AC-DCS1-14 — a check or corpus task changes no branch and is finished from the shared checkout; it is never claimed.
+    const taskKind = readTaskKind(task);
+    if (taskKind === "check" || taskKind === "corpus") {
+      return refuseClaimByKind(
+        "kind-has-no-claim",
+        `${task.slug} is a ${taskKind} task: it is never claimed. Run \`lore finish ${task.slug}\` from the shared checkout.`,
+      );
+    }
+
+    // reason: BR-1468 as modified by AC-DCS1-14 — a code task changes files, so its claim needs its own branch: a no-branch
+    // claim has no tip to measure. A task of no known kind (created before kinds) keeps the anchor-based rule. A refresh that
+    // already holds a branch is fine.
     if (
       opts.worktree === undefined &&
       readClaimRecord(task)?.worktree === undefined &&
-      extractFileAnchors(task).length > 0
+      (taskKind === "code" || extractFileAnchors(task).length > 0)
     ) {
       return refuseClaim(task.slug, "work-needs-branch");
     }
@@ -3353,6 +3379,22 @@ export class TaskWorkflowService {
 
     const gateResult = await this.enforceClaimGate(task, opts, nowIso, declaredWriteSet);
     if (!gateResult.ok) return gateResult;
+
+    // reason: AC-DCS1-14 — a branch tip is one claim's own: a code claim on the plan's integration branch or on a branch another
+    // live claim records is refused (named `shared-branch`, before the one-working-copy-one-task rule would refuse it under another
+    // name), so finish and landing never judge two tasks by one tip. The branch is the one the claim will record.
+    if (taskKind === "code") {
+      let recordedBranch = opts.branch;
+      if (recordedBranch === undefined && opts.worktree !== undefined) {
+        const measured = await this.detectBranch(opts.worktree);
+        if (measured.status === "measured") recordedBranch = measured.branch;
+      }
+      if (recordedBranch !== undefined) {
+        const shared = await this.findSharedBranchHolder(task, recordedBranch, nowIso);
+        if (!shared.ok) return shared;
+        if (shared.value !== undefined) return refuseClaimByKind("shared-branch", shared.value);
+      }
+    }
 
     const holderResult = await this.refuseWhileWorkingCopyHoldsUnlandedTask(task, opts);
     if (!holderResult.ok) return holderResult;
@@ -3579,6 +3621,61 @@ export class TaskWorkflowService {
   }
 
   /**
+   * Refuses while another run holds a live claim on `task` (BR-1040): the lease check `lore start` makes FIRST, with the very
+   * predicate `claim()` uses (`hasClaimConflict` over the effective staleness), so the two verbs never disagree.
+   *
+   * @param task - the task about to be started
+   * @param party - the acting run
+   * @param nowIso - the one reading of "now"
+   * @returns `ok` when the task is free, the party's own, or held by a stale or ended run; `CLAIM_CONFLICT` (exit 5) otherwise
+   */
+  async refuseClaimHeldByAnotherRun(task: DocRecord, party: { by: string; harnessRun?: RunId | null }, nowIso: string): Promise<Result<void, LoreError>> {
+    const existingClaim = readClaimRecord(task);
+    if (existingClaim === undefined) return ok(undefined);
+    const stale = await this.isClaimEffectivelyStale(existingClaim, nowIso, new Map());
+    if (!stale.ok) return stale;
+    const holder = buildClaimHolder(existingClaim, stale.value);
+    if (hasClaimConflict(holder, buildClaimParty(party)).kind === "conflict") {
+      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
+    }
+    return ok(undefined);
+  }
+
+  /** The integration branch the plan of `task` declares, else `undefined` (no plan, or a plan declaring none). */
+  private async readPlanIntegrationBranch(task: DocRecord): Promise<Result<string | undefined, LoreError>> {
+    const planId = task.extra["plan_id"];
+    if (typeof planId !== "string" || planId === "") return ok(undefined);
+    const plan = await this.store.find(planId as DocRecord["id"]);
+    if (!plan.ok) return plan;
+    const branch = plan.value?.extra["integration_branch"];
+    return ok(typeof branch === "string" && branch !== "" ? branch : undefined);
+  }
+
+  /**
+   * The message naming why `branch` is shared (it is the integration branch of the plan of `task`, or another live claim
+   * records it), else `undefined`.
+   */
+  private async findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>> {
+    const integration = await this.readPlanIntegrationBranch(task);
+    if (!integration.ok) return integration;
+    if (integration.value === branch) {
+      return ok(`branch ${branch} is the integration branch of the plan of ${task.slug}; work on its own branch (\`lore start ${task.slug}\`).`);
+    }
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const endedRuns = new Map<string, boolean>();
+    for (const other of tasks.value) {
+      if (other.id === task.id) continue;
+      const held = extractHeldClaim(other);
+      if (held === undefined || (held.branch ?? held.worktree) !== branch) continue;
+      const live = await this.isClaimLive(other, nowIso, endedRuns);
+      if (!live.ok) return live;
+      if (live.value) return ok(`branch ${branch} is also recorded by the live claim of ${other.slug}; each task needs its own branch.`);
+    }
+    return ok(undefined);
+  }
+
+  /**
    * BR-1353: a task's FIRST claim from a linked worktree is refused when the worktree's HEAD carries commits not on
    * the integration branch. A claim starts from main; commits carried in from another unlanded branch would be
    * judged as this task's own at landing. A later claim on a branch an earlier claim of this task already recorded
@@ -3623,7 +3720,20 @@ export class TaskWorkflowService {
 
     const integration = probe.integrationBranch(target);
     if (!integration.ok) return unreadable("the integration branch", integration.reason);
-    const ahead = probe.countCommits(target, `${integration.value}..HEAD`);
+    // reason: BR-1353 as modified by AC-DCS1-14 — a worktree cut at the plan's integration branch carries the earlier tasks'
+    // commits; those are the plan's own landed work, so only commits on neither main nor that branch count.
+    const planBranch = await this.readPlanIntegrationBranch(task);
+    if (!planBranch.ok) return planBranch;
+    let ahead: ProbeResult<number>;
+    if (planBranch.value === undefined) {
+      ahead = probe.countCommits(target, `${integration.value}..HEAD`);
+    } else {
+      const counted = createGitRunner(target)(["rev-list", "--count", "HEAD", `^${integration.value}`, `^${planBranch.value}`]);
+      const parsed = counted.ok ? Number(counted.stdout.trim()) : Number.NaN;
+      if (!counted.ok) ahead = { ok: false, reason: counted.reason };
+      else if (Number.isInteger(parsed) && parsed >= 0) ahead = { ok: true, value: parsed };
+      else ahead = { ok: false, reason: `unparseable rev-list count "${counted.stdout.trim()}"` };
+    }
     if (!ahead.ok) return unreadable(`the commit count ${integration.value}..HEAD in ${target}`, ahead.reason);
     if (ahead.value === 0) return ok(undefined);
 

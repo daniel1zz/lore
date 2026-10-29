@@ -135,6 +135,7 @@ import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { DoneContractService } from "./service/done-contract-service.js";
 import { TaskFinishService } from "./service/task-finish-service.js";
+import { TaskStartService } from "./service/task-start-service.js";
 import { createRealDoneContractGit } from "./adapters/real-done-contract-git.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
@@ -368,6 +369,11 @@ export interface App {
    * write. Wired by {@link wireDoneContract} at both composition sites; optional like the services it composes.
    */
   taskFinishService?: TaskFinishService;
+  /**
+   * `lore start` (AC-DCS1-13, AC-DCS1-14): creates the task's worktree on the contract base, installs, claims and prints the
+   * contract. Wired by {@link wireDoneContract} at both composition sites.
+   */
+  taskStartService?: TaskStartService;
   /**
    * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
    * siblings so hand-built App stubs stay valid; both composition roots wire it.
@@ -1795,6 +1801,8 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   if (app.verifyRunnerService !== undefined) {
     app.taskFinishService = new TaskFinishService({ store, workflow: app.taskWorkflowService, verify: app.verifyRunnerService });
   }
+  // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
+  app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService });
 }
 
 /**
