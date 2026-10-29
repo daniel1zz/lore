@@ -63,10 +63,18 @@ async function readRows(listDocs: ListDocsPort): Promise<Result<AttestationRow[]
  */
 export async function measurePlanAttestation(
   _listDocs: ListDocsPort,
-  _bundle: PlanBundle,
+  bundle: PlanBundle,
   _main: unknown,
 ): Promise<Result<Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria">, LoreError>> {
-  return err({ code: "STORE_ERROR", message: "criteria are measured once at the assessed commit (measurePlanCriteriaAtHead); the landing-bound reader is retired" });
+  // reason: no criterion runs through this stub, so script criteria are not-measured (never pass) and a plan with no
+  // criterion in scope is still `na`, exactly as measurePlanCriteriaAtHead decides it.
+  const facts = await measureCriteriaAtHead({
+    scopes: planCriterionScopes(bundle.spec, bundle.tasks),
+    headCommit: "",
+    runner: { attestAtHead: async () => err({ code: "STORE_ERROR", message: "criteria are measured once at the assessed commit by measurePlanCriteriaAtHead; this call site is not switched yet" }) },
+    readRows: async () => ok([]),
+  });
+  return ok({ attestation: facts.rows, attestation_ids: facts.deciding_ids, ai_criteria: facts.ai_criteria });
 }
 
 /**
