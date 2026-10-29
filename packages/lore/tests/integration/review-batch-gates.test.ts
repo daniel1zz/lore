@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-6, AC-AO-4, BR-1379, BR-1500)
+ * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-6, BR-1379, BR-1500)
  *
  * The review batch under `--close` holds a plan open for a failed or not-measured gate and closes it with known defects
  * for any other failure; the facts fingerprint moves with exactly the facts a verdict reads. Everything is injected: a

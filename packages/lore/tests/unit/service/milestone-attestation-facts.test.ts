@@ -1,6 +1,7 @@
 /**
  * @spec_ref spec-a-plan-s-tests-and-criteria-are-measured-once-at-its (AC-AO-3, BR-1498)
- * @layer reader tests of corpus inputs; the decisions (criteria run once at the assessed commit) are owned by criteria-at-head.test.ts
+ * @layer reader AC-AO-3
+ * (reader tests of corpus inputs; the decisions, criteria run once at the assessed commit, are owned by criteria-at-head.test.ts)
  *
  * Readers of the corpus for the criteria facts, over hand-built docs (no corpus, no git is touched). The landing-bound
  * cases this file held (bound-to-landing attestations, the post-landing batch attesting at landing commits) are superseded
