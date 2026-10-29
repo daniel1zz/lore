@@ -49,7 +49,7 @@ export function createGitLandingAttester(
     landingCommit: string,
     criteria: readonly { readonly spec_slug: string; readonly ac_id: string }[],
   ): Promise<Result<void, LoreError>> => {
-    const prepared = prepareDependencies(root, suiteChildEnv(env));
+    const prepared = await prepareDependencies(root, suiteChildEnv(env));
     if (prepared !== undefined) return err({ code: "STORE_ERROR", message: prepared });
     const rerunner = rerunnerAt(root);
     for (const criterion of criteria) {
