@@ -4834,7 +4834,9 @@ export class TaskWorkflowService {
     // worktree this reads). One git call (`rev-parse HEAD`); the base comes from the claim audit row.
     const measuredLanding = landing.verdict?.state === "landed" ? landing.verdict : undefined;
     // reason: commitless work has no commit range to record; nothing is written for it (and so nothing for a rival closer to race).
-    if (measuredLanding?.kind !== "no-change") {
+    // reason: the stored landing (measured from its own range at integrate) outranks the re-measured verdict, which reads the current claim.
+    const landedKind = readMeasuredLanding(task.extra)?.kind ?? measuredLanding?.kind;
+    if (landedKind !== "no-change") {
       const rangeRecorded = await this.recordCommitRange(task, nowIso, opts.by);
       if (!rangeRecorded.ok) return rangeRecorded;
       task = rangeRecorded.value;
@@ -5063,13 +5065,17 @@ export class TaskWorkflowService {
         };
         continue;
       }
+      // reason: BR-1372/BR-1496 — the landing's `kind` is a fact of ITS range (main_before..landing_commit), never of the
+      // claim's current start_head: a task re-claimed on its own branch head before integrate carries start_head == tip, and
+      // reading that made real landings `no-change`. The record then states start = main_before and tip = the landed branch head.
+      const rangeKind = mainBefore === landing.landing_commit ? "no-change" : "commits";
       const record: TaskLanding = {
         ...landing,
         main_before: mainBefore,
         recorded_at: nowIso,
-        kind: verdict.kind,
-        start_head: verdict.start_head,
-        tip: verdict.tip,
+        kind: rangeKind,
+        start_head: mainBefore,
+        tip: landing.branch_head,
         integration_head: landing.main_after,
         measured_at: nowIso,
       };
@@ -5176,10 +5182,11 @@ export class TaskWorkflowService {
     verdict: Extract<LandingVerdict, { state: "landed" }>,
     nowIso: string,
   ): Record<string, unknown> | undefined {
-    const stored = readMeasuredLanding(task.extra);
-    if (stored !== undefined && stored.kind === verdict.kind && stored.start_head === verdict.start_head && stored.tip === verdict.tip) {
-      return undefined;
-    }
+    // reason: BR-1336/BR-1372 — a landing `lore integrate` recorded is immutable: a later claim/release/done re-measures the
+    // work from the CURRENT claim (a re-claim's start_head, another task's landing as the tip) and would overwrite the
+    // integrate-time facts with that. A stored measured landing is therefore never rewritten; `done` only completes a record
+    // that lacks them.
+    if (readMeasuredLanding(task.extra) !== undefined) return undefined;
     const existing = task.extra["landing"];
     const base = typeof existing === "object" && existing !== null ? (existing as Record<string, unknown>) : {};
     return {

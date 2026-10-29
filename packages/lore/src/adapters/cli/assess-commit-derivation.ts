@@ -61,11 +61,12 @@ export interface CommitDerivationResult {
 }
 
 /**
- * The one-line "N commits, excluding M merged in from main" summary of a derivation — the
- * single rendering both the stderr announcement and the persisted `Diff source:` line use.
+ * The one-line "N landing(s) (each main_before..landing_commit), M commit(s)" summary of a landing-derived diff — the
+ * single rendering both the stderr announcement and the persisted `Diff source:` line use. A diff is built from landings,
+ * never from a commit range, so the wording names landings.
  */
-export function describeCommitCount(commitCount: number, excludedMergedCount: number): string {
-  return `${String(commitCount)} commit(s), excluding ${String(excludedMergedCount)} merged in from main`;
+export function describeLandingCount(landingCount: number, commitCount: number): string {
+  return `${String(landingCount)} landing(s), each main_before..landing_commit (${String(commitCount)} commit(s))`;
 }
 
 /**
@@ -77,7 +78,7 @@ export type DiffSourceRecord =
   | { mode: "explicit_diff_file"; path: string }
   /** MCP-only override — the caller passed pre-acquired `diff_text` directly (MCP has no subprocess/file-read seam of its own). */
   | { mode: "explicit_diff_text" }
-  | ({ mode: "auto_derived" } & CommitDerivationResult);
+  | ({ mode: "auto_derived" } & CommitDerivationResult & { landings?: readonly PlanLanding[] });
 
 /** Runs one git subprocess; never throws — failures are reported via the returned shape. */
 function runGit(cwd: string, args: string[]): { ok: true; stdout: string } | { ok: false; warning: string } {
@@ -116,7 +117,10 @@ export interface PlanLanding {
   task_slugs: string[];
   /** This landing's `outside_anchors` (BR-1346); `undefined` when the landing did not measure it. */
   outside_anchors: string[] | undefined;
-  /** `no-change` landings put nothing on main and contribute no diff. */
+  /**
+   * MEASURED from the range, never copied from the stored label: `no-change` iff `main_before === landing_commit` (the
+   * landing put nothing on main), else `commits`.
+   */
   kind: LandingKind;
 }
 
@@ -145,7 +149,8 @@ export interface LandingTaskInput {
  * Builds a plan's review diff from each landing's own range: `git diff <main_before> <landing_commit>` per distinct
  * landing. `main_before` is main's head when the branch landed, so commits other plans put on main between two
  * landings are never in a landing's range (#459). A task with no landing record contributes nothing and is named in
- * `unlanded_tasks`; there is NO commit-range fallback. Never throws: a landing whose objects are missing is a warning
+ * `unlanded_tasks`; there is NO commit-range fallback. A landing whose `main_before` equals its `landing_commit` contributes
+ * nothing and its tasks are named in `tasks_without_commits`; the stored `kind` is never consulted. Never throws: a landing whose objects are missing is a warning
  * and its task is reported unlanded.
  *
  * @param cwd - repository root
@@ -191,9 +196,11 @@ export function deriveLandingDiffForPlan(
       main_before: l.main_before,
       task_slugs: [task.slug],
       outside_anchors: l.outside_anchors,
-      kind: l.kind,
+      kind: l.main_before === l.landing_commit ? "no-change" : "commits",
     };
-    if (l.kind === "no-change") {
+    // reason: spec "Diff" (BR-1372) — the stored `kind` label is never trusted: only an empty range (main_before ==
+    // landing_commit) contributes nothing; a landing labelled no-change whose range is non-empty is measured below.
+    if (entry.kind === "no-change") {
       landings.set(l.landing_commit, entry);
       attribution[task.slug] = "recorded_range";
       withoutCommits.push(task.slug);

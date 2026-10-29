@@ -24,7 +24,7 @@
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-1, BR-1496, D1)
  */
 
-import { err, ok, type LandingKind, type LoreError, type MilestoneFactRow, type Result } from "@lore/core";
+import { err, ok, type LoreError, type MilestoneFactRow, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { loreErrorText, type CommitSuiteRunnerPort } from "./suite-result-service.js";
 
@@ -33,8 +33,8 @@ export interface RegressionLandingInput {
   readonly landing_commit: string;
   readonly main_before: string;
   readonly task_slugs: readonly string[];
-  /** `no-change` landings put nothing on main: nothing to measure. */
-  readonly kind: LandingKind;
+  // reason: no `kind` here on purpose — a landing with main_before == landing_commit has nothing to measure; a stored label
+  // never decides (BR-1496, AC-AF-1).
 }
 
 /** The newest stored main suite result at or after the plan's last landing (a measured one), or none. */
@@ -187,7 +187,8 @@ export async function regressionPerLanding(
 ): Promise<Result<RegressionPerLanding, LoreError>> {
   const outcomes: LandingRegression[] = [];
   for (const landing of landings) {
-    outcomes.push(landing.kind === "no-change" ? { status: "no-change", landing: landing.landing_commit } : await measureLanding(landing, ports));
+    // reason: BR-1496 — measured from the range, never from the stored `kind` label: only main_before == landing_commit is empty.
+    outcomes.push(landing.main_before === landing.landing_commit ? { status: "no-change", landing: landing.landing_commit } : await measureLanding(landing, ports));
   }
   const charged: RegressionFinding[] = outcomes.flatMap((o) =>
     o.status === "measured" ? o.regressions.map((file) => ({ file, landing: o.landing })) : [],
@@ -198,7 +199,7 @@ export async function regressionPerLanding(
   let clearingResultId: string | undefined;
   let clearingError: string | undefined;
   if (charged.length > 0) {
-    const source = await ports.findClearingSource(landings.filter((l) => l.kind === "commits").map((l) => l.landing_commit));
+    const source = await ports.findClearingSource(landings.filter((l) => l.main_before !== l.landing_commit).map((l) => l.landing_commit));
     if (!source.ok) {
       clearingError = loreErrorText(source.error);
     } else if (source.value !== null) {

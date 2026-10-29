@@ -43,8 +43,8 @@ export function latestLandingCommit(tasks: readonly Pick<DocRecord, "extra">[]):
   for (const task of tasks) {
     const landing = readTaskLanding(task.extra);
     if (landing === undefined) continue;
-    // reason: a no-change landing (the one predicate, `landingOf`) moved nothing onto main: it adds no commit range to the review.
-    if (landing.kind === "no-change") continue;
+    // reason: a landing whose range is empty (main_before == landing_commit) moved nothing onto main; the stored `kind` label is never trusted.
+    if (landing.main_before === landing.landing_commit) continue;
     if (newest === undefined || landing.recorded_at > newest.at) newest = { at: landing.recorded_at, commit: landing.landing_commit };
   }
   return newest?.commit ?? "none";
@@ -60,7 +60,7 @@ export function landedCommitsOf(tasks: readonly Pick<DocRecord, "extra">[]): str
   const commits = new Set<string>();
   for (const task of tasks) {
     const landing = readTaskLanding(task.extra);
-    if (landing === undefined || landing.kind === "no-change") continue;
+    if (landing === undefined || landing.main_before === landing.landing_commit) continue;
     commits.add(landing.landing_commit);
   }
   return [...commits];
