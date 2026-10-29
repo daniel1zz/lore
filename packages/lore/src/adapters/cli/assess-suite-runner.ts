@@ -13,11 +13,15 @@
  *   - The suite commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
  *   - Every command runs in its OWN process group; a timeout ends the whole group (SIGTERM, then SIGKILL after a grace), so
  *     the run returns within timeout + grace and no process of the tree survives. A timed-out suite is `not_measured` with
- *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file.
+ *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file with `incomplete` set.
  *   - A failed group signal never escapes a timer callback (it would leave the promise unsettled): EPERM is followed by a
  *     liveness probe (macOS returns EPERM for a group holding only unreaped zombies); no live member = ended, otherwise the
  *     failure is recorded in the result (`killFailure`), the run is `not_measured` / a failed file with that cause.
  *   - The throwaway worktree is removed on every exit path; a failed removal is returned as an error, never ignored.
+ *   - A run that was killed leaves its worktree behind; every run first removes the registered `lore-assess-suite-*` worktrees
+ *     whose directory is gone or whose owner pid (recorded in the directory name) is not alive, and never one a live process
+ *     owns (`assess-stale-worktrees.ts`). A per-file re-run that times out or leaves its process group running is a
+ *     failed file whose outcome carries `incomplete` (single-file bisection refuses it, BR-1496).
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -28,7 +32,7 @@
  */
 
 import { execFileSync, spawn as spawnChild } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
@@ -40,6 +44,7 @@ import {
   type SuiteRunnerPort,
 } from "../../service/milestone-review-inputs.js";
 import { loreErrorText, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../service/suite-result-service.js";
+import { assessWorktreeDirPrefix, pruneStaleAssessWorktrees, type StaleWorktreePorts } from "./assess-stale-worktrees.js";
 
 /** The plan-close chain script (`bun run check:plan-close`). */
 export const PLAN_CLOSE_SCRIPT = "check:plan-close";
@@ -274,6 +279,40 @@ export function createGitSuiteRunner(
 /** The script a single test file is re-run with (`bun run test:file <file>`); a project without it cannot re-run files. */
 export const FILE_TEST_SCRIPT = "test:file";
 
+/** The real git / filesystem / process effects of the stale-worktree pruner for the repository at `repo`. */
+function realStaleWorktreePorts(repo: string, env: NodeJS.ProcessEnv): StaleWorktreePorts {
+  return {
+    listRegisteredWorktrees: async () => {
+      const listed = await spawn("git", ["worktree", "list", "--porcelain"], repo, env);
+      if (listed.status !== 0) return err({ code: "STORE_ERROR", message: `could not list worktrees: ${listed.output.trim()}` });
+      return ok(listed.output.split("\n").filter((line) => line.startsWith("worktree ")).map((line) => line.slice("worktree ".length).trim()));
+    },
+    directoryExists: (path) => existsSync(path),
+    directoryAgeMs: (path) => {
+      try {
+        return Date.now() - statSync(path).mtimeMs;
+      } catch {
+        // reason: an unreadable age is reported as unknown; the pruner keeps such a worktree (it never guesses a live run dead).
+        return undefined;
+      }
+    },
+    isProcessAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (cause) {
+        // reason: EPERM means the process exists but belongs to another user: alive. Only ESRCH proves it is gone.
+        return (cause as NodeJS.ErrnoException).code === "EPERM";
+      }
+    },
+    removeDirectory: (path) => rmSync(path, { recursive: true, force: true }),
+    pruneRegistrations: async () => {
+      const pruned = await spawn("git", ["worktree", "prune"], repo, env);
+      return pruned.status === 0 ? ok(undefined) : err({ code: "STORE_ERROR", message: `could not prune stale worktrees: ${pruned.output.trim()}` });
+    },
+  };
+}
+
 /**
  * Runs `work` in a throwaway detached worktree of `commit`, removed afterwards whatever happens. The ONE worktree
  * mechanic shared by the suite runs and the post-landing attestation (BR-1498).
@@ -293,7 +332,10 @@ export async function runInThrowawayWorktree<T>(
   const top = await spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
   if (top.status !== 0) return err({ code: "STORE_ERROR", message: `not inside a git checkout: ${top.output.trim()}` });
   const repo = top.output.trim();
-  const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
+  const pruned = await pruneStaleAssessWorktrees(realStaleWorktreePorts(repo, env));
+  if (!pruned.ok) return pruned;
+  // reason: the owner pid is in the directory name so ownership is recorded atomically with creation (assess-stale-worktrees.ts).
+  const scratch = mkdtempSync(join(tmpdir(), assessWorktreeDirPrefix(process.pid)));
   let outcome: Result<T, LoreError>;
   try {
     const added = await spawn("git", ["worktree", "add", "--detach", scratch, commit], repo, env);
@@ -312,8 +354,8 @@ export async function runInThrowawayWorktree<T>(
   } catch (cause) {
     return err({ code: "STORE_ERROR", message: `could not remove the throwaway worktree ${scratch}: ${cause instanceof Error ? cause.message : String(cause)}` });
   }
-  const pruned = await spawn("git", ["worktree", "prune"], repo, env);
-  if (pruned.status !== 0) return err({ code: "STORE_ERROR", message: `could not prune the throwaway worktree ${scratch}: ${pruned.output.trim()}` });
+  const prunedOwn = await spawn("git", ["worktree", "prune"], repo, env);
+  if (prunedOwn.status !== 0) return err({ code: "STORE_ERROR", message: `could not prune the throwaway worktree ${scratch}: ${prunedOwn.output.trim()}` });
   return outcome;
 }
 
@@ -385,7 +427,10 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
         for (const file of files) {
           const startedMs = Date.now();
           const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv, limits);
-          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs });
+          // reason: a run the timeout ended (or whose tree could not be ended) is a failed file for a re-run (AC-AF-2) but did not
+          // COMPLETE: `incomplete` lets a caller that must not read it as red (single-file bisection, BR-1496) refuse it.
+          const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
+          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
         }
         return outcomes;
       }),

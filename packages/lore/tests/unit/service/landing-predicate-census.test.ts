@@ -77,7 +77,7 @@ describe("the landing predicate census", () => {
     const readers = filesMatching(COMPARES_KIND);
     expect(readers).toEqual([
       // reason: the review's diff, its commit list and the regression measure read the landing's RANGE (main_before..landing_commit),
-      // never the stored label: assess-commit-derivation.ts, milestone-review.ts and regression-per-landing.ts compare no kind (A11).
+      // never the stored label: assess-commit-derivation.ts, milestone-review.ts and regression-at-head.ts compare no kind (A11).
       "packages/lore/src/adapters/cli/commands/get.ts", // prints `Landing: no-change` / `Landing: commits <tip>`
       "packages/lore/src/service/task-workflow-service.ts", // a no-change landing needs no commit-range write at done
     ]);

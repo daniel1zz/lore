@@ -4,14 +4,14 @@
  *
  * Purpose: the pure half of the two measured inputs of a review. (1) The plan-close chain plus the full test suite run
  *   ONCE for a whole `lore assess` batch on main's HEAD (`SuiteRun`), recorded as main's red/green state and shown to the judge as
- *   context only (regression itself is measured per landing). (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
+ *   context only (regression itself is measured at main's head by single-file bisection). (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
  *   `unknown` and `unverified` are n/a with the reason, and stale evidence is re-verified once per batch beforehand.
  * Public surface: SuiteRun, SuiteCommandResult, FailingTestFile, parseFailingTestFiles, touchedFilesOfDiff,
  *   renderSuiteSection, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport,
  *   SuiteRunnerPort.
  * Invariants:
  *   - A suite that was not measured is `status: "not_measured"` with a reason; it is never read as a pass.
- *   - Regression is NOT decided here: `regression-per-landing.ts` measures it per landing (BR-1496); a red file on main's
+ *   - Regression is NOT decided here: `regression-at-head.ts` measures it at the assessed commit (BR-1496); a red file on main's
  *     HEAD is never charged to a plan by itself.
  *   - The snapshot rule turns a verdict into fail only for a contradicted rule, and into na when none is contradicted.
  * Side-effect class: pure (no IO, no clock).
@@ -90,7 +90,7 @@ export function touchedFilesOfDiff(diffText: string): Set<string> {
 
 /**
  * The prompt section carrying the batch's one suite run on main's HEAD. It is context for the judge only: regression
- * is measured per landing (`regression-per-landing.ts`, the facts table), and a failing file here is never charged to
+ * is measured by `regression-at-head.ts` (the facts table), and a failing file here is never charged to
  * a plan by itself.
  */
 export function renderSuiteSection(suite: SuiteRun | undefined): string {
@@ -100,7 +100,7 @@ export function renderSuiteSection(suite: SuiteRun | undefined): string {
   if (suite.status === "not_measured") {
     return `The full-suite run on main was NOT measured: ${suite.reason}.`;
   }
-  const lines = [`One run for the whole batch, on main at ${suite.commit} (context only; regression is measured per landing in the facts table):`];
+  const lines = [`One run for the whole batch, on main at ${suite.commit} (context only; regression is measured in the facts table):`];
   for (const c of suite.commands) lines.push(`- \`${c.command}\` exit ${String(c.exit_code)}`);
   for (const s of suite.skipped) lines.push(`- \`${s.command}\` not run: ${s.reason}`);
   lines.push(
