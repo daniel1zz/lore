@@ -36,6 +36,9 @@ interface LandingJson {
   readonly main_after: string;
   readonly landing_commit: string;
   readonly recorded_at: string;
+  readonly kind?: string;
+  readonly start_head?: string;
+  readonly tip?: string;
 }
 
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -220,5 +223,30 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(landed.exitCode, landed.text).toBe(0);
     expect(landed.text).toContain("recorded on no task");
     expect(landingOf(old)).toEqual(oldLanding);
+  }, 300_000);
+
+  it("(5) the landing's kind is measured from its own range, and a later re-claim, release and done never rewrite the record (BR-1372, BR-1336)", () => {
+    makeBranch("feat-five");
+    const task = createTask("Five");
+    // the claim comes AFTER the branch's commit, so the claim's start_head equals the branch tip: the old derivation read that as no-change
+    mustRun(["claim", task, "--worktree", "feat-five"]);
+    const before = git(["rev-parse", "main"]);
+    expect(integrate("feat-five").exitCode).toBe(0);
+    const recorded = landingOf(task);
+    expect(recorded?.kind).toBe("commits");
+    expect(recorded?.start_head).toBe(before);
+    expect(recorded?.tip).toBe(recorded?.branch_head);
+
+    mustRun(["claim", task, "--worktree", "feat-five"]);
+    expect(landingOf(task)).toEqual(recorded);
+    mustRun(["release", task]);
+    expect(landingOf(task)).toEqual(recorded);
+    mustRun(["claim", task]);
+    expect(landingOf(task)).toEqual(recorded);
+    mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
+    mustRun(["release", task]);
+    mustRun(["set", planSlug, "--status", "approved"]);
+    mustRun(["done", task]);
+    expect(landingOf(task)).toEqual(recorded);
   }, 300_000);
 });

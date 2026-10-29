@@ -4835,8 +4835,8 @@ export class TaskWorkflowService {
     const measuredLanding = landing.verdict?.state === "landed" ? landing.verdict : undefined;
     // reason: commitless work has no commit range to record; nothing is written for it (and so nothing for a rival closer to race).
     // reason: the stored landing (measured from its own range at integrate) outranks the re-measured verdict, which reads the current claim.
-    const landedKind = readMeasuredLanding(task.extra)?.kind ?? measuredLanding?.kind;
-    if (landedKind !== "no-change") {
+    const kind = readMeasuredLanding(task.extra)?.kind ?? measuredLanding?.kind;
+    if (kind !== "no-change") {
       const rangeRecorded = await this.recordCommitRange(task, nowIso, opts.by);
       if (!rangeRecorded.ok) return rangeRecorded;
       task = rangeRecorded.value;
@@ -5049,11 +5049,13 @@ export class TaskWorkflowService {
       // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
       // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
       // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).
-      const startHead = readClaimRecord(task)?.start_head ?? TaskWorkflowService.claimBaseFor(rows, landing.branch);
-      const verdict: LandingVerdict =
-        startHead === undefined
-          ? { state: "unmeasurable", reason: `no claim of this task recorded a start commit for ${landing.branch}` }
-          : landingOf({ start_head: startHead, branches: [landing.branch], worktrees: [], end_tip: landing.branch_head }, this.landingFacts());
+      // reason: BR-1372/BR-1496 — the predicate is fed the LANDING's own range start (main_before), never the claim's current
+      // start_head: a task re-claimed on its own branch head before integrate carries start_head == tip, and reading that made
+      // real landings `no-change`. `kind` is still produced only by {@link landingOf}; its start is a fact of the landing.
+      const verdict: LandingVerdict = landingOf(
+        { start_head: mainBefore, branches: [landing.branch], worktrees: [], end_tip: landing.branch_head },
+        this.landingFacts(),
+      );
       if (verdict.state !== "landed") {
         firstFailure ??= {
           code: "VALIDATION_ERROR",
@@ -5065,17 +5067,13 @@ export class TaskWorkflowService {
         };
         continue;
       }
-      // reason: BR-1372/BR-1496 — the landing's `kind` is a fact of ITS range (main_before..landing_commit), never of the
-      // claim's current start_head: a task re-claimed on its own branch head before integrate carries start_head == tip, and
-      // reading that made real landings `no-change`. The record then states start = main_before and tip = the landed branch head.
-      const rangeKind = mainBefore === landing.landing_commit ? "no-change" : "commits";
       const record: TaskLanding = {
         ...landing,
         main_before: mainBefore,
         recorded_at: nowIso,
-        kind: rangeKind,
-        start_head: mainBefore,
-        tip: landing.branch_head,
+        kind: verdict.kind,
+        start_head: verdict.start_head,
+        tip: verdict.tip,
         integration_head: landing.main_after,
         measured_at: nowIso,
       };

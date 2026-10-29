@@ -76,10 +76,9 @@ describe("the landing predicate census", () => {
   it("BOUNDARY: a reader that compares or declares a kind is not a producer", () => {
     const readers = filesMatching(COMPARES_KIND);
     expect(readers).toEqual([
-      "packages/lore/src/adapters/cli/assess-commit-derivation.ts", // a no-change landing contributes no diff to the review
+      // reason: the review's diff, its commit list and the regression measure read the landing's RANGE (main_before..landing_commit),
+      // never the stored label: assess-commit-derivation.ts, milestone-review.ts and regression-per-landing.ts compare no kind (A11).
       "packages/lore/src/adapters/cli/commands/get.ts", // prints `Landing: no-change` / `Landing: commits <tip>`
-      "packages/lore/src/service/milestone-review.ts", // `if (landing.kind === "no-change") continue;`
-      "packages/lore/src/service/regression-per-landing.ts", // a no-change landing has no suite to measure
       "packages/lore/src/service/task-workflow-service.ts", // a no-change landing needs no commit-range write at done
     ]);
     for (const file of readers) expect(filesMatching(PRODUCES_KIND)).not.toContain(file);
@@ -109,12 +108,13 @@ describe("the landing predicate census", () => {
     const workflow = text("service/task-workflow-service.ts");
     // integrate's record: the kind, start and tip come from landingOf over the branch's facts
     const record = workflow.slice(workflow.indexOf("async recordLanding("));
-    expect(record).toMatch(/landingOf\(\s*\{ start_head: startHead, branches: \[landing\.branch\]/);
+    expect(record).toMatch(/landingOf\(\s*\{ start_head: mainBefore, branches: \[landing\.branch\]/);
     // lore done and evidence counting: one measurement feeds the floor, the counting rule and the landing write
     expect(workflow).toMatch(/const verdict: LandingVerdict = landingOf\(/);
     expect(workflow).toContain("countsAsLandedPass(");
-    // milestone review: the literal skip the spec names
-    expect(text("service/milestone-review.ts")).toContain('if (landing.kind === "no-change") continue;');
+    // milestone review: skips a landing by its measured range, never by the stored label (A11)
+    expect(text("service/milestone-review.ts")).toContain("landing.main_before === landing.landing_commit");
+    expect(text("service/milestone-review.ts")).not.toMatch(COMPARES_KIND);
     // lore get: reads the stored measured landing, never recomputes it
     expect(text("adapters/cli/commands/get.ts")).toContain("readMeasuredLanding(doc.extra)");
     // the post-landing archive reaches the same done: no landing logic of its own

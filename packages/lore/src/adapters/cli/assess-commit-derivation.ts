@@ -15,7 +15,6 @@
  */
 
 import { spawnSync } from "node:child_process";
-import type { LandingKind } from "@lore/core";
 
 /** Explicit maxBuffer — the 1 MiB spawnSync default silently truncates a growing diff/log payload. */
 const GIT_MAX_BUFFER = 20 * 1024 * 1024;
@@ -118,10 +117,10 @@ export interface PlanLanding {
   /** This landing's `outside_anchors` (BR-1346); `undefined` when the landing did not measure it. */
   outside_anchors: string[] | undefined;
   /**
-   * MEASURED from the range, never copied from the stored label: `no-change` iff `main_before === landing_commit` (the
-   * landing put nothing on main), else `commits`.
+   * MEASURED from the range, never copied from the stored `kind` label: `true` iff `main_before === landing_commit` (the
+   * landing put nothing on main, so it contributes no diff).
    */
-  kind: LandingKind;
+  range_empty: boolean;
 }
 
 /** {@link CommitDerivationResult} for a diff built from landings, plus the facts the review gates read. */
@@ -139,7 +138,6 @@ export interface LandingTaskInput {
     | {
         main_before: string;
         landing_commit: string;
-        kind: LandingKind;
         outside_anchors?: string[] | undefined;
       }
     | undefined;
@@ -188,7 +186,7 @@ export function deriveLandingDiffForPlan(
       known.task_slugs.push(task.slug);
       attribution[task.slug] = "recorded_range";
       for (const sha of landingCommits.get(l.landing_commit) ?? []) commitMap.get(sha)?.taskSlugs.add(task.slug);
-      if (known.kind === "no-change") withoutCommits.push(task.slug);
+      if (known.range_empty) withoutCommits.push(task.slug);
       continue;
     }
     const entry: PlanLanding = {
@@ -196,11 +194,11 @@ export function deriveLandingDiffForPlan(
       main_before: l.main_before,
       task_slugs: [task.slug],
       outside_anchors: l.outside_anchors,
-      kind: l.main_before === l.landing_commit ? "no-change" : "commits",
+      range_empty: l.main_before === l.landing_commit,
     };
     // reason: spec "Diff" (BR-1372) — the stored `kind` label is never trusted: only an empty range (main_before ==
     // landing_commit) contributes nothing; a landing labelled no-change whose range is non-empty is measured below.
-    if (entry.kind === "no-change") {
+    if (entry.range_empty) {
       landings.set(l.landing_commit, entry);
       attribution[task.slug] = "recorded_range";
       withoutCommits.push(task.slug);
