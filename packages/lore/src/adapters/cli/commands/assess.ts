@@ -60,8 +60,8 @@ import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { suiteRunOfResult } from "../../../service/suite-result-service.js";
 import { regressionAtHead } from "../../../service/regression-at-head.js";
-import { measurePlanAttestation, type ListDocsPort } from "../assess-attestation-wiring.js";
-import { createGitMainFirstParent } from "../assess-main-first-parent.js";
+import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "../assess-attestation-wiring.js";
+import { createGitHeadCriteriaRunner } from "../assess-landing-attester.js";
 import { createGitChangedFilesSince, createGitFileExistsAt, createGitFirstParentHistory } from "../assess-regression-git.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
@@ -74,7 +74,7 @@ import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
 import { failedDimensions, type MilestoneReview, type RetiredAcRef } from "@lore/core";
-import type { LoreError, MilestoneFacts } from "@lore/core";
+import type { LoreError, MilestoneFacts, PlanBundle } from "@lore/core";
 
 /** One plan's row of the batch result. */
 interface AssessRow {
@@ -260,6 +260,20 @@ export default defineLoreCommand({
       // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
       // reason: main's head as the one batch suite run measured it (set by `measureSuite`); regression reads that commit, never a newer main.
       let assessedCommit: string | undefined;
+      type CriteriaFacts = Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria">;
+      // reason: criteria measured in the suite's worktree by `measureSuite`, keyed by the plan ref the batch uses (BR-1498).
+      const criteriaByPlan = new Map<string, CriteriaFacts>();
+      /** Runs a plan's script criteria once at `commit` (in `worktreeRoot` when given, else a throwaway worktree of the commit). */
+      const measureCriteria = async (bundle: PlanBundle, commit: string, worktreeRoot?: string): Promise<CriteriaFacts> => {
+        const verifyRunner = app.verifyRunnerService;
+        if (verifyRunner === undefined) return {};
+        return measurePlanCriteriaAtHead(
+          listDocsOf(app),
+          bundle,
+          { commit, ...(worktreeRoot !== undefined ? { worktreeRoot } : {}) },
+          createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) => createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() })),
+        );
+      };
 
       const measureSuite = async (suiteRefs: readonly string[]): Promise<SuiteRun | undefined> => {
         if (suiteRefs.length === 0) return undefined;
@@ -290,20 +304,30 @@ export default defineLoreCommand({
         const suiteResults = app.suiteResultService;
         if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
         const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
-        // reason: A1 noted the stale cited-rule refresh was skipped on a stored-result hit. It now runs, in a worktree at the
-        // measured commit, whether or not the suite result was cached (`lookupOrRunWith`), and only when some plan cites a
-        // stale rule (so a batch with nothing stale opens no worktree for it).
+        // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
+        // rule) and the plans' script criteria (BR-1498, AC-AO-3): `lookupOrRunWith` rides the suite's own worktree on a fresh
+        // run and opens one worktree for this work alone on a stored hit, so criteria run once per review either way.
         const stale = refreshStale === undefined ? ok(false) : await reviewService.hasStaleCitations(suiteRefs);
         if (!stale.ok) return { status: "not_measured", reason: formatErrorFor(inv, stale.error) };
-        if (refreshStale === undefined || !stale.value) {
+        if (verifyRunner === undefined) {
           const looked = await suiteResults.lookupOrRun("main", runner);
           if (looked.ok) assessedCommit = looked.value.commit_sha;
           return looked.ok ? suiteRunOfResult(looked.value) : { status: "not_measured", reason: formatErrorFor(inv, looked.error) };
         }
-        const refreshed = await suiteResults.lookupOrRunWith("main", runner, (root) => refreshStale(root));
+        const refreshed = await suiteResults.lookupOrRunWith("main", runner, async (root, commit) => {
+          if (refreshStale !== undefined && stale.value) await refreshStale(root);
+          for (const ref of suiteRefs) {
+            const bundle = await app.corpusService.getPlanBundle(ref);
+            if (!bundle.ok) {
+              inv.io.stderr.write(`Warning: criteria not measured for ${ref}: ${formatErrorFor(inv, bundle.error)}\n`);
+              continue;
+            }
+            criteriaByPlan.set(ref, await measureCriteria(bundle.value, commit, root));
+          }
+        });
         if (!refreshed.ok) return { status: "not_measured", reason: formatErrorFor(inv, refreshed.error) };
         if (refreshed.value.workError !== undefined) {
-          inv.io.stderr.write(`Warning: stale cited-rule refresh could not run: ${formatErrorFor(inv, refreshed.value.workError)}\n`);
+          inv.io.stderr.write(`Warning: the worktree work (stale-rule refresh, criteria) could not run: ${formatErrorFor(inv, refreshed.value.workError)}\n`);
         }
         assessedCommit = refreshed.value.result.commit_sha;
         return suiteRunOfResult(refreshed.value.result);
@@ -377,12 +401,16 @@ export default defineLoreCommand({
             inv.io.stderr.write(`Warning: regression at head not measured for ${ref}: ${formatErrorFor(inv, measured.error)}\n`);
           }
         }
-        // reason: BR-1498 — correctness is decided from attestations bound to main from each task's landing; AI-mode
-        // criteria go to the judge. Unreadable inputs leave attestation absent (not-measured), never pass.
-        let attestationFacts: Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria"> = {};
-        const attested = await measurePlanAttestation(listDocsOf(app), bundle.value, createGitMainFirstParent(inv.cwd, inv.env));
-        if (attested.ok) attestationFacts = attested.value;
-        else inv.io.stderr.write(`Warning: criteria attestation not measured for ${ref}: ${formatErrorFor(inv, attested.error)}\n`);
+        // reason: BR-1498 — criteria run once at the assessed commit, in the suite's worktree (`measureSuite`); only when that
+        // did not happen for this plan are they run here in a worktree of the commit. Anything that cannot run leaves
+        // criteria absent (not-measured), never pass.
+        let attestationFacts: CriteriaFacts = criteriaByPlan.get(ref) ?? {};
+        if (!criteriaByPlan.has(ref)) {
+          const commit = assessedCommit !== undefined ? ok(assessedCommit) : resolveAssessedCommit(inv.cwd, inv.env);
+          if (!commit.ok) inv.io.stderr.write(`Warning: criteria not measured for ${ref}: ${formatErrorFor(inv, commit.error)}\n`);
+          else if (app.verifyRunnerService === undefined) inv.io.stderr.write(`Warning: criteria not measured for ${ref}: the verify runner is not wired in this app\n`);
+          else attestationFacts = await measureCriteria(bundle.value, commit.value);
+        }
         const facts: MilestoneFacts = {
           ...regressionFacts,
           ...attestationFacts,

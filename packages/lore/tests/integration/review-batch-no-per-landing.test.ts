@@ -76,7 +76,6 @@ class World {
   readonly docs: DocRecord[] = [];
   judgeCalls = 0;
   suiteRuns = 0;
-  attestations = 0;
   landingLookups: string[] = [];
   /** What the next judgment stores. */
   shape: JudgeShape = { verdicts: {} };
@@ -129,10 +128,6 @@ class World {
       measureSuite: async () => {
         this.suiteRuns += 1;
         return undefined;
-      },
-      attestLanded: async () => {
-        this.attestations += 1;
-        return ok(undefined);
       },
       reviewPlan: async () => this.judge(),
       closePlan: async () => ok(undefined),
@@ -196,7 +191,6 @@ async function keptOpenWorld(extra: Partial<JudgeShape> = {}): Promise<World> {
   const first = await batch(world, "first");
   expect(first).toMatchObject({ outcome: "kept-open", reviewed: true });
   world.suiteRuns = 0;
-  world.attestations = 0;
   world.judgeCalls = 0;
   return world;
 }
@@ -207,12 +201,11 @@ const changedFiles = (files: readonly string[]) => async (commit: string) => {
 };
 
 describe("the post-landing batch measures nothing per landing", () => {
-  it("AC-AO-4 an unrelated landing runs no suite, attests no criterion and re-reviews nothing", async () => {
+  it("AC-AO-4 an unrelated landing runs no suite and re-reviews nothing (the batch has no criteria step at all)", async () => {
     const world = await keptOpenWorld();
     const row = await batch(world, "after-unrelated", { changedFilesSince: changedFiles([UNRELATED_FILE]) });
     expect(row).toMatchObject({ outcome: "kept-open", reviewed: false });
     expect(world.suiteRuns).toBe(0);
-    expect(world.attestations).toBe(0);
     expect(world.judgeCalls).toBe(0);
   });
 

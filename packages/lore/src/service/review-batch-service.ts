@@ -148,12 +148,6 @@ export interface BatchRunPorts {
   /** Measures the batch's one full-suite run. */
   readonly measureSuite: (planRefs: readonly string[]) => Promise<SuiteRun | undefined>;
   /**
-   * A step run only when the plan is about to be judged (never per landing), before the judgment reads attestation.
-   * Optional (absent = no step); an `err` is an errored attempt (audit row), never a skipped step. The batch itself
-   * schedules no attestation at a landing commit (spec D3); the criteria run at the assessed commit belongs to the review.
-   */
-  readonly attestLanded?: (planRef: string) => Promise<Result<unknown, LoreError>>;
-  /**
    * The files changed on main since `commit` (the review's assessed commit). The batch re-reviews a kept-open plan when one
    * of them is a file its failing facts name. Optional: absent, no landing can trigger a re-review (nothing is guessed).
    */
@@ -386,13 +380,6 @@ export class ReviewBatchRunner {
       const due = await this.landingReopensReview(planSlug, latest.review, bundle.plan, latest, ports);
       if (!due.ok) return fail("review", fingerprint, due.error, false);
       factsChanged = due.value;
-    }
-    if (planStateChanged || factsChanged) {
-      // reason: criteria attestation, when wired, runs once per judgment (never per landing) and BEFORE the judgment reads it.
-      if (ports.attestLanded !== undefined) {
-        const attested = await ports.attestLanded(ref);
-        if (!attested.ok) return fail("review", fingerprint, attested.error, false);
-      }
     }
     if (planStateChanged || factsChanged) {
       const suite = await measureOnce();

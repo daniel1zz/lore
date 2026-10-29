@@ -52,48 +52,6 @@ async function readRows(listDocs: ListDocsPort): Promise<Result<AttestationRow[]
 }
 
 /**
- * Transitional stub: the per-landing criteria attestation is retired (AC-AO-3). Always an `err`, so a caller that still
- * uses it leaves criteria not-measured (never pass) until the B2 patch switches it to {@link measurePlanCriteriaAtHead}.
- *
- * @deprecated delete with the assess.ts patch.
- * @param _listDocs - unused
- * @param _bundle - unused
- * @param _main - unused
- * @returns an `err` naming the retirement
- */
-export async function measurePlanAttestation(
-  _listDocs: ListDocsPort,
-  bundle: PlanBundle,
-  _main: unknown,
-): Promise<Result<Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria">, LoreError>> {
-  // reason: no criterion runs through this stub, so script criteria are not-measured (never pass) and a plan with no
-  // criterion in scope is still `na`, exactly as measurePlanCriteriaAtHead decides it.
-  const facts = await measureCriteriaAtHead({
-    scopes: planCriterionScopes(bundle.spec, bundle.tasks),
-    headCommit: "",
-    runner: { attestAtHead: async () => err({ code: "STORE_ERROR", message: "criteria are measured once at the assessed commit by measurePlanCriteriaAtHead; this call site is not switched yet" }) },
-    readRows: async () => ok([]),
-  });
-  return ok({ attestation: facts.rows, attestation_ids: facts.deciding_ids, ai_criteria: facts.ai_criteria });
-}
-
-/**
- * Transitional stub: the post-landing criteria attestation is retired (AC-AO-3, AC-AO-4); attests nothing.
- *
- * @deprecated delete with the assess.ts patch.
- * @returns an empty report
- */
-export async function attestPlanLanding(
-  _listDocs: ListDocsPort,
-  _bundle: PlanBundle,
-  _main: unknown,
-  _attester: unknown,
-  _warn: (line: string) => void,
-): Promise<Result<{ readonly attested: readonly never[]; readonly failures: readonly never[] }, LoreError>> {
-  return ok({ attested: [], failures: [] });
-}
-
-/**
  * Runs the plan's script criteria once at the assessed commit and returns the criteria facts.
  *
  * @param listDocs - corpus reader

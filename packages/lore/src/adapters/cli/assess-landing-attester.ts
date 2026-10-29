@@ -24,26 +24,6 @@ import { loreErrorText } from "../../service/suite-result-service.js";
 import { prepareDependencies, runInThrowawayWorktree, suiteChildEnv } from "./assess-suite-runner.js";
 
 /**
- * Transitional stub (see the module header of `assess-main-first-parent.ts`): the per-landing attester is retired; this
- * returns a port that attests nothing so `commands/assess.ts` still compiles until the B2 patch removes its call.
- *
- * @deprecated delete with the assess.ts patch (AC-AO-3).
- * @param _cwd - unused
- * @param _env - unused
- * @param _rerunnerAt - unused
- * @param _suiteStep - unused
- * @returns a port whose `attestAt` succeeds without running anything
- */
-export function createGitLandingAttester(
-  _cwd: string,
-  _env: NodeJS.ProcessEnv,
-  _rerunnerAt: (executionRoot: string) => CriterionRerunPort,
-  _suiteStep?: unknown,
-): { readonly attestAt: (landingCommit: string, criteria: readonly HeadCriterionRef[]) => Promise<Result<void, LoreError>> } {
-  return { attestAt: async () => ok(undefined) };
-}
-
-/**
  * @param cwd - any directory inside the project's checkout
  * @param env - the environment git and dependency installation run with
  * @param rerunnerAt - builds the trusted criterion runner for an execution root (the assessed commit's worktree)
