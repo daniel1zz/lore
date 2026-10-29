@@ -521,8 +521,8 @@ describe("AC-DCS1-7: the contract is evaluated against the landed tree (the rule
     // still lands afterwards, and its claim history still names it.
     await fixture.mustRun(["release", bystander.slug]);
     await integrate(deleter);
-    await integrate(bystander);
     await recordStandard(deleter, ["file"], fixture.dir);
+    await integrate(bystander);
     await recordStandard(bystander, ["file"], fixture.dir);
 
     const fine = await fixture.run(["done", deleter.slug]);
@@ -591,7 +591,7 @@ describe("AC-DCS1-8: plan close and archive --apply judge each member by the sam
     expect(closed.exitCode, `${closed.stdout}${closed.stderr}`).toBe(0);
     expect(closed.stdout).toContain(`Cascade skipped: ${late.slug} (red-first)`);
     // One straggler gets its red run afterwards; the other stays without.
-    await captureRedIn(late.worktree, late.slug);
+    await captureRedIn(fixture.dir, late.slug);
 
     const applied = await fixture.run(["archive", "--apply"]);
     expect(applied.exitCode, `${applied.stdout}${applied.stderr}`).toBe(0);

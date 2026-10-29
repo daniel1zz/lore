@@ -633,6 +633,12 @@ export const evidenceEntrySchema = z.object({
        * head): the pass counts only when `head_sha` equals it. Written by the evidence write path, never by a caller.
        */
       main_head: z.string().regex(/^[0-9a-f]{40}$/, "main_head must be a 40-hex git sha").optional(),
+      /**
+       * The landing commit (`extra.landing.landing_commit`) of the landing `lore integrate` recorded this row for (AC-DCS1-27 (b)):
+       * a pass `lore done` counts for a code oracle without comparing trees while it names the task's newest landing. Written by
+       * `lore integrate` only (never by a public write path, like the enclosing `attestation`); absent on every other row.
+       */
+      recorded_at_landing: z.string().regex(/^[0-9a-f]{40}$/, "recorded_at_landing must be a 40-hex git sha").optional(),
     })
     .optional(),
 });

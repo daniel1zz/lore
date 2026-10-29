@@ -21,8 +21,6 @@ import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import {
   definitionOfDone,
   findMissingUnfilteredTestFileRuns,
-  readRedFirstDeclared,
-  requiresNoNewTestsDeclaration,
 } from "../../src/service/task-workflow-service.js";
 
 const TEST_TIMEOUT_MS = 120_000;
@@ -159,8 +157,8 @@ describe("AC-LB-5 claim prints the definition of done", () => {
         // floor 3 (unfiltered-test-file): with no evidence every anchored test file is still missing
         expect(dod.unfiltered_pass_files).toEqual(findMissingUnfilteredTestFileRuns(doc, [], undefined));
         expect(dod.unfiltered_pass_files).toEqual([...new Set(extractFileAnchors(doc).filter(isTestFileAnchor))]);
-        // floors 2 and 4 (red-first / no-new-tests): red is owed iff either floor arms with no evidence
-        expect(dod.red_required).toBe(readRedFirstDeclared(doc) || requiresNoNewTestsDeclaration(doc, []));
+        // the red-first floor: a code task owes a red run unless the approve-time waiver says otherwise
+        expect(dod.red_required).toBe(doc.extra["kind"] === "code");
       }
     },
     TEST_TIMEOUT_MS,

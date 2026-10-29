@@ -380,6 +380,20 @@ function formatFieldShape(field: HiddenExtraField): string {
   }
 }
 
+/**
+ * The `Removed oracles` section of `lore get <task>` (AC-DCS1-30): one line per test-file oracle the task's landing deleted,
+ * with the reason and the landed commit. Empty input yields no lines (no section).
+ */
+export function formatRemovedOracleLines(
+  removed: readonly { readonly id: string; readonly path: string; readonly reason: string; readonly landed_commit: string }[],
+): string[] {
+  if (removed.length === 0) return [];
+  return [
+    "Removed oracles:",
+    ...removed.map((entry) => `  ${entry.id}  ${entry.path}  ${entry.reason}  (landed ${entry.landed_commit.slice(0, 12)})`),
+  ];
+}
+
 /** One known defect with the live state read for display. */
 export interface KnownDefectDisplayRow {
   readonly number: number;

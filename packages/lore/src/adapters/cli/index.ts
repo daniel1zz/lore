@@ -178,10 +178,6 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // dedicated writer for a task's/phase's `extra.ac_scope`, the anchor
     // command's sibling; see commands/scope.ts's module header.
     scope: () => import("./commands/scope.js"),
-    // red-first (task-red-first-discipline-is-asked-for-in-prose-but-never) —
-    // dedicated writer for a task's `extra.red_first`; see commands/red-first.ts's
-    // module header.
-    "red-first": () => import("./commands/red-first.js"),
     // refs (spec-prose-about-code-is-bound-to-what-it-describes-one D2) — read verb over the
     // one reverse index of code references; see commands/refs.ts's module header.
     refs: () => import("./commands/refs.js"),

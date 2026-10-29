@@ -331,8 +331,6 @@ async function seedFloorFixture(app: App): Promise<FloorFixture> {
   await giveAttestedPass(app, t1);
   const t2 = await makeTask(app, plan, "T2 no evidence");
   const t3 = await makeTask(app, plan, "T3 red-first without red row");
-  const declared = await app.taskWorkflowService.declareRedFirst(t3.id, { by: "tester" });
-  if (!declared.ok) throw new Error(`declareRedFirst failed: ${JSON.stringify(declared.error)}`);
   await giveAttestedPass(app, t3);
   const t4 = await makeTask(app, plan, "T4 fresh claim");
   const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });

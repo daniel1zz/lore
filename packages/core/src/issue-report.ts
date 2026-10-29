@@ -434,10 +434,10 @@ export function buildUnconfiguredUpstreamRemedy(): LoreError {
  * verifiable — it makes the claim AUDITABLE, which is the achievable goal and
  * the same standard `lore create task --adhoc --ac-scope ""` now holds a human
  * author to. Consequence, deliberately accepted: the declared key ARMS `lore
- * done`'s no-new-tests floor for a filed report, so an upstream maintainer
- * closing one must record a red evidence row or the audited
- * `--declare-no-new-tests "<reason>"` — which is the correct standard for a bug
- * fix, and reachable either way.
+ * done`'s red requirement for a filed report (the stored contract's `red_required`),
+ * so an upstream maintainer closing one must record a red evidence row or waive it
+ * at approve with `lore approve --red-waiver "<reason>"` — which is the correct
+ * standard for a bug fix, and reachable either way.
  *
  * §M6: `p.severity`/`p.category` ride along inside the `{...p}` spread. Because
  * they are OPTIONAL on {@link IssueReportPayload} and the caller omits the KEY

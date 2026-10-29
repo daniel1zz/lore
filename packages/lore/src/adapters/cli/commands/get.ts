@@ -95,7 +95,8 @@ import {
   loadVersionAttributions,
   type WriteAttribution,
 } from "../../../service/attribution-report.js";
-import { composeWithStructuredExtraNotice, formatKnownDefectLines, type KnownDefectDisplayRow, type RenderedBodyFacts } from "../get-render.js";
+import { doneContractSchema } from "@lore/core";
+import { composeWithStructuredExtraNotice, formatKnownDefectLines, formatRemovedOracleLines, type KnownDefectDisplayRow, type RenderedBodyFacts } from "../get-render.js";
 import { readKnownDefects } from "@lore/core";
 import type { LockState } from "@lore/core";
 import type { StoreInterface } from "../../../store/store-interface.js";
@@ -140,6 +141,12 @@ async function loadSpecRelations(
       rows.push({ number: entry.number, dimension: entry.dimension, state });
     }
     return ok({ json: { known_defects_live: rows }, lines: formatKnownDefectLines(rows) });
+  }
+  if (doc.type === "task") {
+    // reason: AC-DCS1-30 — the oracles the task's landing deleted left its evaluation set; the section names each with its reason.
+    const contract = doneContractSchema.safeParse(doc.extra["done_contract"]);
+    const removed = contract.success ? (contract.data.removed_oracles ?? []) : [];
+    return ok({ json: {}, lines: formatRemovedOracleLines(removed) });
   }
   return ok({ json: {}, lines: [] });
 }
