@@ -66,6 +66,7 @@ beforeAll(async () => {
   // reason: the criteria below are declared while the spec is still a draft, so no decision is needed to add them.
   await fixture.mustRun(["ac", "add", fixture.spec, "AC-FX-RED", "--statement", "A criterion that is red before the work.", "--mode", "script", "--oracle", "test", "--command", RED_COMMAND]);
   await fixture.mustRun(["ac", "add", fixture.spec, "AC-FX-MISSING", "--statement", "A criterion whose runner does not exist.", "--mode", "script", "--oracle", "test", "--command", MISSING_RUNNER_COMMAND]);
+  await fixture.mustRun(["ac", "add", fixture.spec, "AC-FX-NOSUMMARY", "--statement", "A criterion that exits 1 and prints no test summary.", "--mode", "script", "--oracle", "test", "--command", "sh -c 'exit 1'"]);
   await citeSpecViaAsyncCli((args) => fixture.mustRun(args), fixture.dir, undefined, fixture.spec, "AC-FX-1");
   await fixture.mustRun(["approve", fixture.spec]);
   execFileSync("sh", ["-c", "printf '.claude/\\n' >> .git/info/exclude"], { cwd: fixture.dir });
@@ -506,6 +507,17 @@ describe("AC-DCS1-17: finish --red records runner-produced reds only", () => {
     expect(notRunnable.text).toContain("ac:AC-FX-MISSING");
     expect(notRunnable.text).toMatch(/127|not runnable|not found/);
     expect((await rowsOf(missing)).length).toBe(missingBefore);
+
+    // a command that exits 1 but prints no runner summary proves no failed test, so it is no red either
+    const silent = await approvedTask(plan, ["tests/x-3.test.ts"], "Red without a summary", ["AC-FX-NOSUMMARY"]);
+    const silentTree = addWorktree("red-silent");
+    await claimOn(silent, silentTree, "dcs1-fin-reds");
+    commitIn(silentTree, { "src/n.ts": "export const n = 1;\n" });
+    const silentBefore = (await rowsOf(silent)).length;
+    const noSummary = await finishIn(silentTree, silent, "dcs1-fin-reds", ["--red"]);
+    expect(noSummary.exitCode, noSummary.text).toBe(4);
+    expect(noSummary.text).toContain("ac:AC-FX-NOSUMMARY");
+    expect((await rowsOf(silent)).length).toBe(silentBefore);
   });
 
   it("AC-DCS1-17: --red on a code task with red_required false, and on a check task, is red-not-required naming the reason and records nothing", async () => {
