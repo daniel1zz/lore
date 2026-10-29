@@ -2224,8 +2224,6 @@ export type WorktreeCleanlinessStatus =
 export interface WorktreeCleanlinessCheck {
   status: WorktreeCleanlinessStatus;
   paths: string[];
-  /** Why git could not answer; set only for an existing absolute worktree whose state could not be read (`not-measured-not-a-repo`). */
-  cause?: string;
 }
 
 /** Wall-clock budget for the `git` subprocesses this guard shells — generous enough for a cold-cache `status --porcelain` on a large tree, bounded so a hung/unreachable filesystem (e.g. a stale network mount) cannot hang an evidence/release call indefinitely. */
@@ -2288,8 +2286,7 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
       timeout: WORKTREE_GIT_TIMEOUT_MS,
     });
     if (result.error !== undefined || result.status !== 0) {
-      const cause = result.error !== undefined ? result.error.message : `git status exited ${result.status}: ${String(result.stderr ?? "").trim()}`;
-      return { status: "not-measured-not-a-repo", paths: [], cause };
+      return { status: "not-measured-not-a-repo", paths: [] };
     }
 
     // reason: deliberately naive porcelain-line parsing — no shell/diff-
@@ -2305,9 +2302,20 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
       return { status: "measured-clean", paths: [] };
     }
     return { status: "measured-dirty", paths: lines.map((line) => line.slice(3).trim()) };
-  } catch (cause) {
-    return { status: "not-measured-not-a-repo", paths: [], cause: cause instanceof Error ? cause.message : String(cause) };
+  } catch {
+    return { status: "not-measured-not-a-repo", paths: [] };
   }
+}
+
+/**
+ * Why git cannot read the state of an existing worktree: the error or exit of `git status --porcelain` there, in words. Asked only
+ * AFTER {@link measureWorktreeCleanliness} said `not-measured-not-a-repo`, so the release refusal can name its cause.
+ */
+function describeInspectionFailure(worktree: string): string {
+  const result = spawnSync("git", ["status", "--porcelain"], { cwd: worktree, encoding: "utf8", timeout: WORKTREE_GIT_TIMEOUT_MS });
+  if (result.error !== undefined) return result.error.message;
+  if (result.status !== 0) return `git status exited ${result.status}: ${String(result.stderr ?? "").trim()}`;
+  return "git answered on a second read; retry the release";
 }
 
 /**
@@ -6340,14 +6348,15 @@ export class TaskWorkflowService {
     // reason: BR-144 — a recorded worktree that exists but whose git state cannot be read is refused, never released as if clean.
     // A relative value is a branch name (nothing to measure), and a vanished path has nothing left to lose: both release.
     if (refuseUninspectable && check.status === "not-measured-not-a-repo" && isAbsolute(worktree)) {
+      const cause = describeInspectionFailure(worktree);
       return {
         code: "VALIDATION_ERROR",
         field: "worktree-uninspectable",
         message:
           `worktree-uninspectable: ${actionLabel} for task "${task.slug}" — its claim's recorded worktree "${worktree}" exists but its git state ` +
-          `cannot be read (${check.cause ?? "unknown cause"}), so uncommitted work cannot be ruled out. The claim stays held; repair the worktree ` +
+          `cannot be read (${cause}), so uncommitted work cannot be ruled out. The claim stays held; repair the worktree ` +
           `(or remove it) and release again.`,
-        value: { refusal: "worktree-uninspectable", worktree, cause: check.cause },
+        value: { refusal: "worktree-uninspectable", worktree, cause },
         rule: "BR-144",
       };
     }
