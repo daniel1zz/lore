@@ -1,6 +1,7 @@
 // @spawns assets/hooks/post-ask-decide.mjs
 // @spawns packages/lore/src/index.ts
 // @reads assets/**
+// @layer cli-batch AC-AF-7
 /**
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D; AC-LG-12; BR-1372)
  *
