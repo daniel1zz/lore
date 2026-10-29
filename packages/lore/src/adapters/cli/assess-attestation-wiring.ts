@@ -1,85 +1,119 @@
 /**
- * Wiring of the criteria-attestation facts into `lore assess` (BR-1498): reads the corpus's stamped attestations, decides
- * the plan's criteria from bound evidence, and (in the batch) attests landed criteria at their landing commits.
+ * Wiring of the criteria-at-head facts into `lore assess` (BR-1498): resolves the assessed commit, runs the plan's script
+ * criteria once there and decides `correctness_vs_acs` from the attestations that run made.
  *
  * Purpose: keep `commands/assess.ts` thin; the decisions live in `service/milestone-attestation-facts.ts`.
- * Public surface: measurePlanAttestation, attestPlanLanding.
+ * Public surface: measurePlanCriteriaAtHead, resolveAssessedCommit, ListDocsPort.
  * Invariants:
- *   - Reads only; `attestPlanLanding` writes attested evidence through the injected landing attester and nothing else.
- *   - A failed corpus read is an `err` (the caller leaves attestation unmeasured, never pass).
- *   - A failed attestation of one landing is a warning line, not an error: its criteria stay not-measured, named in the review.
- * Side-effect class: IO through the injected corpus reader, git port and attester.
+ *   - Reads the corpus after the run; writes attested evidence only through the injected runner.
+ *   - A failed corpus read or an unresolvable head is an `err` or a not-measured fact, never pass.
+ * Side-effect class: IO through the injected corpus reader, runner and (for `resolveAssessedCommit`) a read-only git spawn.
  *
- * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-3, BR-1498)
+ * @spec_ref spec-a-plan-s-tests-and-criteria-are-measured-once-at-its (AC-AO-3, BR-1498)
  */
 
-import { ok, type DocRecord, type LoreError, type MilestoneFacts, type PlanBundle, type Result } from "@lore/core";
+import { spawnSync } from "node:child_process";
+import { err, ok, type DocRecord, type LoreError, type MilestoneFacts, type PlanBundle, type Result } from "@lore/core";
 import {
-  attestLandedCriteria,
-  attestationFacts,
   attestationRowsOf,
+  measureCriteriaAtHead,
   planCriterionScopes,
-  type CriterionScope,
   type AttestationRow,
-  type LandingAttesterPort,
-  type LandingAttestationReport,
-  type MainFirstParentPort,
+  type HeadCriteriaRunnerPort,
 } from "../../service/milestone-attestation-facts.js";
 
 /** Reads every live doc of a type (`CorpusService.listFull` shape). */
 export type ListDocsPort = (type: "spec" | "plan" | "task") => Promise<Result<DocRecord[], LoreError>>;
 
-async function loadInputs(listDocs: ListDocsPort, bundle: PlanBundle): Promise<Result<{ scopes: CriterionScope[]; rows: AttestationRow[] }, LoreError>> {
+/**
+ * The full sha of main's head: the commit a review measures at.
+ *
+ * @param cwd - any directory inside the project's checkout
+ * @param env - the environment git runs with
+ * @param mainRef - the ref that is main (default `main`)
+ * @returns the sha, or an `err` naming git's complaint
+ */
+export function resolveAssessedCommit(cwd: string, env: NodeJS.ProcessEnv, mainRef = "main"): Result<string, LoreError> {
+  const ran = spawnSync("git", ["rev-parse", "--verify", `${mainRef}^{commit}`], { cwd, env, encoding: "utf8" });
+  const sha = ran.stdout.trim();
+  return ran.status === 0 && sha.length > 0
+    ? ok(sha)
+    : err({ code: "STORE_ERROR", message: `could not resolve ${mainRef}: ${(ran.stderr ?? "").trim() || (ran.error?.message ?? "git failed")}` });
+}
+
+async function readRows(listDocs: ListDocsPort): Promise<Result<AttestationRow[], LoreError>> {
   const specs = await listDocs("spec");
   if (!specs.ok) return specs;
   const plans = await listDocs("plan");
   if (!plans.ok) return plans;
   const tasks = await listDocs("task");
   if (!tasks.ok) return tasks;
-  return ok({ scopes: planCriterionScopes(bundle.spec, bundle.tasks), rows: attestationRowsOf(specs.value, plans.value, tasks.value) });
+  return ok(attestationRowsOf(specs.value, plans.value, tasks.value));
 }
 
 /**
- * The attestation facts of a plan: fact rows, AI-mode criteria for the judge and the deciding attestation ids.
+ * Transitional stub: the per-landing criteria attestation is retired (AC-AO-3). Always an `err`, so a caller that still
+ * uses it leaves criteria not-measured (never pass) until the B2 patch switches it to {@link measurePlanCriteriaAtHead}.
  *
- * @param listDocs - corpus reader
- * @param bundle - the plan bundle
- * @param main - main's first-parent history
- * @returns the part of `MilestoneFacts` this module owns
+ * @deprecated delete with the assess.ts patch.
+ * @param _listDocs - unused
+ * @param _bundle - unused
+ * @param _main - unused
+ * @returns an `err` naming the retirement
  */
 export async function measurePlanAttestation(
-  listDocs: ListDocsPort,
+  _listDocs: ListDocsPort,
   bundle: PlanBundle,
-  main: MainFirstParentPort,
+  _main: unknown,
 ): Promise<Result<Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria">, LoreError>> {
-  const inputs = await loadInputs(listDocs, bundle);
-  if (!inputs.ok) return inputs;
-  const facts = await attestationFacts(inputs.value.scopes, inputs.value.rows, main);
+  // reason: no criterion runs through this stub, so script criteria are not-measured (never pass) and a plan with no
+  // criterion in scope is still `na`, exactly as measurePlanCriteriaAtHead decides it.
+  const facts = await measureCriteriaAtHead({
+    scopes: planCriterionScopes(bundle.spec, bundle.tasks),
+    headCommit: "",
+    runner: { attestAtHead: async () => err({ code: "STORE_ERROR", message: "criteria are measured once at the assessed commit by measurePlanCriteriaAtHead; this call site is not switched yet" }) },
+    readRows: async () => ok([]),
+  });
   return ok({ attestation: facts.rows, attestation_ids: facts.deciding_ids, ai_criteria: facts.ai_criteria });
 }
 
 /**
- * Attests the plan's landed script criteria at their landing commits (the post-landing batch step).
+ * Transitional stub: the post-landing criteria attestation is retired (AC-AO-3, AC-AO-4); attests nothing.
+ *
+ * @deprecated delete with the assess.ts patch.
+ * @returns an empty report
+ */
+export async function attestPlanLanding(
+  _listDocs: ListDocsPort,
+  _bundle: PlanBundle,
+  _main: unknown,
+  _attester: unknown,
+  _warn: (line: string) => void,
+): Promise<Result<{ readonly attested: readonly never[]; readonly failures: readonly never[] }, LoreError>> {
+  return ok({ attested: [], failures: [] });
+}
+
+/**
+ * Runs the plan's script criteria once at the assessed commit and returns the criteria facts.
  *
  * @param listDocs - corpus reader
  * @param bundle - the plan bundle
- * @param main - main's first-parent history
- * @param attester - runs criteria at a landing commit
- * @param warn - receives one line per landing that could not be attested
+ * @param head - the assessed commit and, when the review has one, the suite's throwaway worktree at it
+ * @param runner - runs criteria at a commit through `lore verify`
+ * @returns the part of `MilestoneFacts` this module owns (`attestation_ids` are the attestations made at the commit)
  */
-export async function attestPlanLanding(
+export async function measurePlanCriteriaAtHead(
   listDocs: ListDocsPort,
   bundle: PlanBundle,
-  main: MainFirstParentPort,
-  attester: LandingAttesterPort,
-  warn: (line: string) => void,
-): Promise<Result<LandingAttestationReport, LoreError>> {
-  const inputs = await loadInputs(listDocs, bundle);
-  if (!inputs.ok) return inputs;
-  const report = await attestLandedCriteria(inputs.value.scopes, inputs.value.rows, main, attester);
-  if (!report.ok) return report;
-  for (const failure of report.value.failures) {
-    warn(`Warning: could not attest ${failure.criteria.join(", ")} at landing ${failure.landing_commit}: ${failure.message}`);
-  }
-  return report;
+  head: { readonly commit: string; readonly worktreeRoot?: string },
+  runner: HeadCriteriaRunnerPort,
+): Promise<Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria">> {
+  const facts = await measureCriteriaAtHead({
+    scopes: planCriterionScopes(bundle.spec, bundle.tasks),
+    headCommit: head.commit,
+    runner,
+    ...(head.worktreeRoot !== undefined ? { worktreeRoot: head.worktreeRoot } : {}),
+    readRows: () => readRows(listDocs),
+  });
+  return { attestation: facts.rows, attestation_ids: facts.deciding_ids, ai_criteria: facts.ai_criteria };
 }
