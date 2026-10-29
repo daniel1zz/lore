@@ -64,6 +64,24 @@ describe("check-create-guidance", () => {
     expect(r.status).toBe(1);
   });
 
+  it("scans the repo-root CLAUDE.md and exits 1 for an example without --parent", () => {
+    const r = run({
+      "assets/a.md": `${SPEC_LINE}lore create plan --parent <spec>\n`,
+      "CLAUDE.md": "Findings go to the corpus (`lore create knowledge --sub-type retro`).\n",
+    });
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("CLAUDE.md:1 lacks --parent");
+  });
+
+  it("exits 0 when the root CLAUDE.md example names --parent", () => {
+    const r = run({
+      "assets/a.md": `${SPEC_LINE}lore create plan --parent <spec>\n`,
+      "CLAUDE.md": "Findings go to the corpus (`lore create knowledge --sub-type retro --parent <plan>`).\n",
+    });
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("examples=2 withParent=2");
+  });
+
   it("exits 1 on an empty scan", () => {
     const r = run({ "assets/a.md": SPEC_LINE });
     expect(r.status).toBe(1);

@@ -41,7 +41,7 @@ Repo-wide invariants. Current-state architecture (modules, layers, standards, de
 
 - ⛔ Eval every skill, hook, agent and gate we depend on; a broken or misleading one is a defect — fix it now or record the correct path.
 - ⛔ Fix a lore defect at its mechanism root, on a surface that SHIPS (binary output, or `assets/` + manifest), and verify it from a fresh consumer install — never only in this repo, this machine's `~/.claude/`, or a hand-edited consumer config.
-- New findings go only to the corpus (`lore create knowledge --sub-type retro`); this file never carries incident narratives.
+- New findings go only to the corpus (`lore create knowledge --sub-type retro --parent <plan or spec it reviews>`); this file never carries incident narratives.
 - ⛔ A problem found here is fixed now when simple (≤2 files, an existing oracle proves the fix, no approved-spec behaviour changes), else file it as an issue (`lore report-issue`, also in this repo); a task names the issues it resolves, never a task whose subject is the problem (BR-1153).
 - Standing lessons (oracle design, mirror export, test selection, governance tooling quirks) and their slugs: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
