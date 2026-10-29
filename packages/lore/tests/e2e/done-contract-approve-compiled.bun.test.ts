@@ -26,6 +26,7 @@ import { join } from "node:path";
 import * as yaml from "yaml";
 import { createApp, type App } from "../../src/app";
 import { handleApiRoute } from "../../src/adapters/http/routes";
+import { handleDashboardRoute } from "../../src/adapters/http/dashboard-routes";
 import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { DONE_CONTRACT_CONFIG, makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "../helpers/gh-issue-stub";
@@ -83,6 +84,20 @@ async function httpJson(method: string, path: string, body: unknown): Promise<{ 
     const req = new Request(url.toString(), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const res = await handleApiRoute(req, url, app, HTTP_ACTOR);
     if (res === null) throw new Error(`no route answered ${method} ${path}`);
+    return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+  } finally {
+    app.close();
+  }
+}
+
+/** One request to the dashboard route table as a cookie session (the only kind of caller that may write there). */
+async function dashboardJson(method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+  const app = openApp();
+  try {
+    const url = new URL(`http://localhost${path}`);
+    const req = new Request(url.toString(), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const res = await handleDashboardRoute(req, url, app, { name: "test-user", session_id: "done-contract-dashboard", callerSurface: "http_cookie" });
+    if (res === null) throw new Error(`no dashboard route answered ${method} ${path}`);
     return { status: res.status, json: (await res.json()) as Record<string, unknown> };
   } finally {
     app.close();
@@ -411,15 +426,15 @@ describe("AC-DCS1-4: the dashboard create route requires a kind too (BR-1488)", 
     const before = await countDocs("task");
     const base = { type: "task", title: "Dashboard task", content: "x", parent_id: planId };
 
-    const missing = await httpJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [] } });
+    const missing = await dashboardJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [] } });
     expect(missing.status, JSON.stringify(missing.json)).toBe(400);
     expect(namesAllKinds(JSON.stringify(missing.json)), JSON.stringify(missing.json)).toBe(true);
 
-    const unknown = await httpJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test" } });
+    const unknown = await dashboardJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test" } });
     expect(unknown.status, JSON.stringify(unknown.json)).toBe(400);
     expect(await countDocs("task")).toBe(before);
 
-    const given = await httpJson("POST", "/api/dashboard/docs", { ...base, title: "Dashboard task kind", extra: { plan_id: planId, ac_scope: [], kind: "check" } });
+    const given = await dashboardJson("POST", "/api/dashboard/docs", { ...base, title: "Dashboard task kind", extra: { plan_id: planId, ac_scope: [], kind: "check" } });
     expect(given.status, JSON.stringify(given.json)).toBe(201);
     const created = (given.json["data"] as { doc?: { slug: string } } | undefined)?.doc ?? (given.json as { doc?: { slug: string } }).doc;
     expect(created?.slug, JSON.stringify(given.json)).toBeDefined();
@@ -427,7 +442,7 @@ describe("AC-DCS1-4: the dashboard create route requires a kind too (BR-1488)", 
     expect(await countDocs("task")).toBe(before + 1);
 
     // A document that is not a task needs no kind.
-    const knowledge = await httpJson("POST", "/api/dashboard/docs", { type: "knowledge", title: "Dashboard knowledge", content: "x", parent_id: planId, extra: { sub_type: "research" } });
+    const knowledge = await dashboardJson("POST", "/api/dashboard/docs", { type: "knowledge", title: "Dashboard knowledge", content: "x", parent_id: planId, extra: { sub_type: "research" } });
     expect(knowledge.status, JSON.stringify(knowledge.json)).toBe(201);
   });
 });
@@ -563,15 +578,23 @@ describe("the done contract compiled at approve", () => {
     });
 
     it("AC-DCS1-1: lore claim of the approved task prints the stored contract (ids and commands), not a recomputed definition", async () => {
-      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Claim prints contract", anchors: [TEST_FILE], acScope: ["AC-FX-1"] });
+      // A claim needs an approved spec and plan above the task (the task-claim gate), so this one gets its own pair.
+      const specOut = await cf.mustRun(["create", "spec", "--title", "Claim Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+      const claimSpec = specOut.match(/Slug:\s+(\S+)/)?.[1] ?? "";
+      await cf.mustRun(["ac", "add", claimSpec, "AC-CL-1", "--statement", "Claim criterion.", "--mode", "script", "--oracle", "test", "--command", "echo cl1"]);
+      await cf.mustRun(["approve", claimSpec]);
+      const claimPlanOut = await cf.mustRun(["create", "plan", "--title", "Claim Plan", "--parent", claimSpec, "--content", "## Plan\n\nBody.\n", "--no-ai"]);
+      const claimPlan = claimPlanOut.match(/Slug:\s+(\S+)/)?.[1] ?? "";
+      await cf.mustRun(["approve", claimPlan]);
+      const slug = await cf.createTask({ plan: claimPlan, kind: "code", title: "Claim prints contract", anchors: [TEST_FILE], acScope: ["AC-CL-1"] });
       expect((await cf.run(["approve", slug])).exitCode).toBe(0);
       const worktree = join(cf.dir, "..", `dcs1-wt-${Date.now()}`);
       cf.git(["worktree", "add", "-q", "-b", "dcs1-claim-branch", worktree]);
       try {
         const claimed = await cf.run(["claim", slug, "--worktree", "dcs1-claim-branch"]);
         expect(claimed.exitCode, claimed.stderr + claimed.stdout).toBe(0);
-        expect(claimed.stdout).toContain("ac:AC-FX-1");
-        expect(claimed.stdout).toContain("echo fx1");
+        expect(claimed.stdout).toContain("ac:AC-CL-1");
+        expect(claimed.stdout).toContain("echo cl1");
         expect(claimed.stdout).toContain(`test:${TEST_FILE}`);
         expect(claimed.stdout).toContain(TEST_COMMAND);
         expect(claimed.stdout).toContain("typecheck");
