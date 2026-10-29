@@ -13,15 +13,15 @@
  *   - The suite commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
  *   - Every command runs in its OWN process group; a timeout ends the whole group (SIGTERM, then SIGKILL after a grace), so
  *     the run returns within timeout + grace and no process of the tree survives. A timed-out suite is `not_measured` with
- *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is an `err`.
+ *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file with `incomplete` set.
  *   - A failed group signal never escapes a timer callback (it would leave the promise unsettled): EPERM is followed by a
  *     liveness probe (macOS returns EPERM for a group holding only unreaped zombies); no live member = ended, otherwise the
  *     failure is recorded in the result (`killFailure`), the run is `not_measured` / a failed file with that cause.
  *   - The throwaway worktree is removed on every exit path; a failed removal is returned as an error, never ignored.
  *   - A run that was killed leaves its worktree behind; every run first removes the registered `lore-assess-suite-*` worktrees
  *     whose directory is gone or whose owner pid (recorded in the directory name) is not alive, and never one a live process
- *     owns (`assess-stale-worktrees.ts`). A per-file re-run that times out or leaves its process group running is an `err`
- *     (the run did not complete), never a failed file.
+ *     owns (`assess-stale-worktrees.ts`). A per-file re-run that times out or leaves its process group running is a
+ *     failed file whose outcome carries `incomplete` (single-file bisection refuses it, BR-1496).
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -427,12 +427,10 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
         for (const file of files) {
           const startedMs = Date.now();
           const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv, limits);
-          // reason: a run the timeout ended (or whose tree could not be ended) did not complete; reading its exit 1 as "red"
-          // would charge a plan for a hang. It is an err, so the file is not measured (BR-1496).
-          if (ran.timeout !== undefined || ran.killFailure !== undefined) {
-            throw new Error(`\`bun run ${FILE_TEST_SCRIPT} ${file}\` did not complete at ${commit}: ${ran.killFailure ?? `timed out after ${String(ran.timeout?.elapsedMs)} ms`}`);
-          }
-          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs });
+          // reason: a run the timeout ended (or whose tree could not be ended) is a failed file for a re-run (AC-AF-2) but did not
+          // COMPLETE: `incomplete` lets a caller that must not read it as red (single-file bisection, BR-1496) refuse it.
+          const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
+          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
         }
         return outcomes;
       }),

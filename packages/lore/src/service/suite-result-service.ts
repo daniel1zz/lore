@@ -32,6 +32,8 @@ export interface FileRunOutcome {
   readonly exit_code: number;
   readonly output_tail: string;
   readonly duration_ms: number;
+  /** Set when the run did not complete (timeout, process tree not ended): `exit_code` is then a failure, not a test result. */
+  readonly incomplete?: string;
 }
 
 /** What the service needs from a git-backed runner: resolve a ref, run the suite at a commit, re-run named files at a commit. */
@@ -262,7 +264,7 @@ export class SuiteResultService {
    * @param file - repo-relative test file
    * @param kind - `bisect` probe or `confirm` run; they are stored apart so a confirmation is always an independent run
    * @param runner - runs the file at the commit
-   * @returns the stored row; `err` when the runner fails or reports no outcome, or the store fails
+   * @returns the stored row; `err` when the runner fails, reports no outcome or an incomplete one (not stored), or the store fails
    */
   async runSingleFile(commit: string, file: string, kind: SingleFileRunKind, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord, LoreError>> {
     const ran = await runner.runFiles(commit, [file]);
@@ -270,6 +272,10 @@ export class SuiteResultService {
     const outcome = ran.value.find((o) => o.file === file);
     if (outcome === undefined) {
       return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} at ${commit}` });
+    }
+    // reason: a timed-out run says nothing about the file; storing it as a red row would charge a plan for a hang (BR-1496).
+    if (outcome.incomplete !== undefined) {
+      return err({ code: "STORE_ERROR", message: `${file} did not complete at ${commit}: ${outcome.incomplete}` });
     }
     const row: SuiteFileRunRecord = {
       suite_result_id: singleFileRunKey(kind, commit),

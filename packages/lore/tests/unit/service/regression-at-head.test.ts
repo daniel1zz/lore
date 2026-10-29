@@ -197,6 +197,20 @@ describe("regression at the assessed commit", () => {
     expect(dimensionOf(r.rows).verdict).toBe("not-measured");
   });
 
+  it("AC-AO-1 a single-file run that timed out is not stored as red and makes the file not-measured, never charged", async () => {
+    const f = build({ commits: 10, files: { [FILE]: { redFrom: 6 } } });
+    const timedOut: CommitSuiteRunnerPort = {
+      ...f.ports.runner,
+      runFiles: async (_commit, files) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 1, output_tail: "", duration_ms: 1, incomplete: "timed out after 3600000 ms" }))),
+    };
+    const r = await measure({ ...f, ports: { ...f.ports, runner: timedOut } }, [landingAt(6)]);
+    expect(r.files[0]).toMatchObject({ file: FILE, outcome: "not-measured" });
+    expect(JSON.stringify(r.files[0])).toContain("timed out");
+    expect(r.charged).toEqual([]);
+    const stored = await f.service.listFileRuns(`file-confirm@${f.head}`);
+    expect(stored.ok && stored.value).toEqual([]);
+  });
+
   it("AC-AO-1 an unrunnable head suite makes regression not-measured and runs no single file", async () => {
     const f = build({ commits: 10, files: { [FILE]: { redFrom: 6 } }, unrunnableHead: true });
     const r = await measure(f, [landingAt(6)]);
