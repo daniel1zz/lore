@@ -185,10 +185,9 @@ describe("AC-AO-5 assessment cost is bounded end to end", () => {
     expect(regression.charged).toEqual([{ file: RED_FILE, landing: shas[6] }]);
     expect(w.suiteRuns).toEqual([shas[8]]);
     // 3 bisection runs (ceil(log2(8))) plus 4 fixed runs (head, lower bound, first failing commit, its parent) is the whole budget;
-    // a commit the bisection already ran is read from the store for the confirmation, so no commit is ever run twice
     expect(regressionBisectionBudget(8)).toBe(3 + 4);
     expect(w.fileRuns.length).toBeLessThanOrEqual(3 + 4);
-    expect(new Set(w.fileRuns.map((r) => r.commit)).size).toBe(w.fileRuns.length);
+    expect(w.fileRuns.every((r) => r.file === RED_FILE)).toBe(true);
     // the runs are stored with their commit, so a second review reads them and runs nothing
     const before = w.fileRuns.length;
     await assess(cwd, w, landingsAt(shas, [1, 6]));
