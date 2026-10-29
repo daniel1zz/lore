@@ -764,6 +764,37 @@ describe("the done contract compiled at approve", () => {
       expect(await auditCount(slug)).toBe(auditBefore);
     });
 
+    it("AC-DCS1-5: a task that already holds a contract is never recompiled (a waiver cannot be added by approving again): done-contract-already-stored, nothing written", async () => {
+      // A draft that holds a contract cannot be made through the verbs (the key is locked), so it is seeded in-process, the way
+      // a task approved before a rollback would look.
+      const app = createApp(join(cf.dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+      let slug = "";
+      try {
+        const planDoc = await app.corpusService.get(planMain);
+        if (!planDoc.ok) throw new Error("plan not found");
+        const stored = { compiled_at_commit: cf.git(["rev-parse", "main"]), kind: "code", base_branch: "main", oracles: [], red_required: true, landing_route: "main", new_symbols: [], added_oracles: [] };
+        const created = await app.corpusService.create({
+          type: "task",
+          title: "Already holds a contract",
+          content: "x",
+          parent_id: planDoc.value.doc.id,
+          extra: { plan_id: planDoc.value.doc.id, ac_scope: [], kind: "code", done_contract: stored },
+        });
+        if (!created.ok) throw new Error(`seed failed: ${JSON.stringify(created.error)}`);
+        slug = created.value.slug;
+      } finally {
+        app.close();
+      }
+      const before = await cf.readTask(slug);
+      const refused = await cf.run(["approve", slug, "--red-waiver", "waive it afterwards"]);
+      expect(refused.exitCode, refused.stderr).toBe(4);
+      expect(refused.stderr).toContain("done-contract-already-stored");
+      const after = await cf.readTask(slug);
+      expect(after.status).toBe("draft");
+      expect(after.version).toBe(before.version);
+      expect((after.extra["done_contract"] as StoredContract).red_required).toBe(true);
+    });
+
     it("AC-DCS1-5: --red-waiver on a check or corpus task exits 4 red-waiver-not-code and writes nothing", async () => {
       for (const kind of ["check", "corpus"] as const) {
         const slug = await cf.createTask({ plan: planMain, kind, title: `Waiver on ${kind}`, acScope: kind === "check" ? ["AC-FX-1"] : [] });
