@@ -4955,19 +4955,6 @@ export class TaskWorkflowService {
     return [...copies.values()];
   }
 
-  /**
-   * The `base_sha` of the most recent claim of a task that named `branch` (as its `branch` or its `worktree`), from
-   * the claim audit rows (they survive release); `undefined` when no such claim recorded one.
-   */
-  private static claimBaseFor(auditRows: readonly AuditEntry[], branch: string): string | undefined {
-    const named = auditRows
-      .filter((row) => row.details?.["branch"] === branch || row.details?.["worktree"] === branch)
-      .filter((row) => typeof row.details?.["base_sha"] === "string" && row.details["base_sha"] !== "")
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const latest = named[named.length - 1]?.details?.["base_sha"];
-    return typeof latest === "string" ? latest : undefined;
-  }
-
   /** The branch checked out in `worktree`, read through the injected git port; `undefined` when it cannot be measured. */
   private async measuredBranchOf(worktree: string): Promise<string | undefined> {
     const measurement = await this.detectBranch(worktree);
@@ -5030,21 +5017,23 @@ export class TaskWorkflowService {
         slugs.push(task.slug);
         continue;
       }
-      // reason: BR-1336 — a branch found already on main has no merge to measure; the range starts at this task's own
-      // claim base (the audit row survives release). A claim that recorded none is a failure naming the task, never a guess.
+      // reason: BR-1336/BR-1372 — a branch found already on main has no merge of this call to measure; the range starts where
+      // main stood before the merge that brought the branch head onto it ({@link LandingGitFacts.landingStartOf}), a fact of
+      // history that no claim or re-claim can move. Never the claim's base_sha (a re-claim at the branch head made it the tip).
+      // A branch that reached main without a merge has no such start: a failure naming the task, never a guess.
       let mainBefore = landing.main_before;
       if (baseFromClaim === true) {
-        const claimBase = TaskWorkflowService.claimBaseFor(rows, landing.branch);
-        if (claimBase === undefined) {
+        const start = this.landingFacts().landingStartOf(landing.landing_commit);
+        if (!start.ok) {
           firstFailure ??= {
             code: "VALIDATION_ERROR",
-            field: "claim.base_sha",
-            message: `${task.slug}: no claim of this task recorded a base_sha for ${landing.branch}, so its landing range has no start`,
+            field: "extra.landing.main_before",
+            message: `${task.slug}: the landing range of ${landing.branch} has no measurable start (${start.reason})`,
             value: task.slug,
           };
           continue;
         }
-        mainBefore = claimBase;
+        mainBefore = start.value;
       }
       // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
       // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
