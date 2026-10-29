@@ -11,6 +11,10 @@
  *     the project does not define is reported as skipped with that reason, never invented.
  *   - The run happens in `git worktree add --detach <tmp> main`; the worktree is removed afterwards, success or not.
  *   - The suite commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
+ *   - Every command runs in its OWN process group; a timeout ends the whole group (SIGTERM, then SIGKILL after a grace), so
+ *     the run returns within timeout + grace and no process of the tree survives. A timed-out suite is `not_measured` with
+ *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file.
+ *   - The throwaway worktree is removed on every exit path; a failed removal is returned as an error, never ignored.
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -20,7 +24,7 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn as spawnChild } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
@@ -40,21 +44,100 @@ export const PLAN_CLOSE_SCRIPT = "check:plan-close";
 export const FULL_TEST_SCRIPT = "test";
 
 const OUTPUT_TAIL_CHARS = 4000;
-const MAX_BUFFER = 256 * 1024 * 1024;
+/** Per-command output kept in memory (the tail): enough for failing-file parsing, bounded against a runaway child. */
+const MAX_OUTPUT_CHARS = 16 * 1024 * 1024;
 const SUITE_TIMEOUT_MS = 60 * 60 * 1000;
+/** After SIGTERM to the process group, how long the group may take to leave before SIGKILL. */
+const KILL_GRACE_MS = 10 * 1000;
+/** After the child exited or the group was killed, how long to wait for the stdio pipes before closing them ourselves. */
+const PIPE_DRAIN_MS = 2000;
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"] as const;
+
+/** Time limits of one spawned command; the defaults are the production values. */
+export interface ProcessLimits {
+  /** Wall time after which the command's whole process group is ended. */
+  readonly timeoutMs: number;
+  /** Time between SIGTERM and SIGKILL of the process group. */
+  readonly graceMs: number;
+}
+
+const DEFAULT_LIMITS: ProcessLimits = { timeoutMs: SUITE_TIMEOUT_MS, graceMs: KILL_GRACE_MS };
 
 interface Spawned {
   readonly status: number;
   readonly output: string;
+  /** Set when the limit ended the command's process group; `status` is then 1 and `output` ends with the timeout cause. */
+  readonly timeout?: { readonly limitMs: number; readonly elapsedMs: number };
 }
 
-function spawn(command: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Spawned {
-  const result = spawnSync(command, [...args], { cwd, env, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: SUITE_TIMEOUT_MS });
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  // reason: a spawn that never started (ENOENT) or was killed has status null; it is a failure with its own message.
-  if (result.status === null) return { status: 1, output: `${output}\n${result.error?.message ?? "terminated by signal"}` };
-  return { status: result.status, output };
+/** Sends `signal` to the whole process group led by `pid`; an already-empty group is fine, anything else is not. */
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch (cause) {
+    // reason: ESRCH means every member already left, which is the goal; any other failure must surface.
+    if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+  }
+}
+
+/**
+ * Runs one command in its OWN process group and returns within `limits.timeoutMs + limits.graceMs + PIPE_DRAIN_MS`.
+ * The former `spawnSync(..., {timeout})` signalled only the direct child; grandchildren kept the stdio pipes open and
+ * spawnSync never returned (`lore assess` hung 10 h on 2026-10-29, BR-1497). The timeout now ends the group (SIGTERM,
+ * then SIGKILL) and reports the cause in `timeout`.
+ */
+function spawn(command: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, limits: ProcessLimits = DEFAULT_LIMITS): Promise<Spawned> {
+  return new Promise((resolve) => {
+    const startedMs = Date.now();
+    const child = spawnChild(command, [...args], { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    let timeout: Spawned["timeout"];
+    let settled = false;
+    const timers: NodeJS.Timeout[] = [];
+    const collect = (chunk: Buffer): void => {
+      output += chunk.toString("utf8");
+      if (output.length > MAX_OUTPUT_CHARS) output = output.slice(output.length - MAX_OUTPUT_CHARS);
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+    const finish = (status: number | null, failure: string | undefined): void => {
+      if (settled) return;
+      settled = true;
+      for (const timer of timers) clearTimeout(timer);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      // reason: stragglers of a finished command (grandchildren) must not outlive it; the group is the command's tree.
+      if (child.pid !== undefined) signalGroup(child.pid, "SIGKILL");
+      if (timeout !== undefined) {
+        resolve({
+          status: 1,
+          output: `${output}\ncommand \`${command} ${args.join(" ")}\` timed out after ${timeout.elapsedMs} ms (limit ${timeout.limitMs} ms); its process group was ended`,
+          timeout,
+        });
+      } else if (status === null) {
+        // reason: a spawn that never started (ENOENT) or was killed has status null; it is a failure with its own message.
+        resolve({ status: 1, output: `${output}\n${failure ?? "terminated by signal"}` });
+      } else {
+        resolve({ status, output });
+      }
+    };
+    child.on("error", (error) => finish(null, error.message));
+    child.on("close", (status) => finish(status, undefined));
+    child.on("exit", (code) => {
+      // reason: the exit status is known now; a grandchild holding the pipes must not delay or lose it.
+      timers.push(setTimeout(() => finish(code, "terminated by signal"), PIPE_DRAIN_MS));
+    });
+    const pid = child.pid;
+    if (pid === undefined) return;
+    timers.push(
+      setTimeout(() => {
+        timeout = { limitMs: limits.timeoutMs, elapsedMs: Date.now() - startedMs };
+        signalGroup(pid, "SIGTERM");
+        timers.push(setTimeout(() => signalGroup(pid, "SIGKILL"), limits.graceMs));
+        timers.push(setTimeout(() => finish(null, undefined), limits.graceMs + PIPE_DRAIN_MS));
+      }, limits.timeoutMs),
+    );
+  });
 }
 
 /** Variables of the agent harness / lore session that a clean checkout's `bun run test` never carries. */
@@ -153,22 +236,31 @@ export async function runInThrowawayWorktree<T>(
   commit: string,
   work: (root: string) => Promise<T>,
 ): Promise<Result<T, LoreError>> {
-  const top = spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
+  const top = await spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
   if (top.status !== 0) return err({ code: "STORE_ERROR", message: `not inside a git checkout: ${top.output.trim()}` });
   const repo = top.output.trim();
   const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
+  let outcome: Result<T, LoreError>;
   try {
-    const added = spawn("git", ["worktree", "add", "--detach", scratch, commit], repo, env);
+    const added = await spawn("git", ["worktree", "add", "--detach", scratch, commit], repo, env);
     if (added.status !== 0) {
-      return err({ code: "STORE_ERROR", message: `could not create the throwaway worktree: ${added.output.trim()}` });
+      outcome = err({ code: "STORE_ERROR", message: `could not create the throwaway worktree: ${added.output.trim()}` });
+    } else {
+      outcome = ok(await work(scratch));
     }
-    return ok(await work(scratch));
   } catch (cause) {
-    return err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-    spawn("git", ["worktree", "prune"], repo, env);
+    outcome = err({ code: "STORE_ERROR", message: `suite run failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}` });
   }
+  // reason: cleanup runs on every exit path and a failed removal is returned (fail loud), never ignored: a leftover
+  // `lore-assess-suite-*` worktree was found after the 2026-10-29 hang.
+  try {
+    rmSync(scratch, { recursive: true, force: true });
+  } catch (cause) {
+    return err({ code: "STORE_ERROR", message: `could not remove the throwaway worktree ${scratch}: ${cause instanceof Error ? cause.message : String(cause)}` });
+  }
+  const pruned = await spawn("git", ["worktree", "prune"], repo, env);
+  if (pruned.status !== 0) return err({ code: "STORE_ERROR", message: `could not prune the throwaway worktree ${scratch}: ${pruned.output.trim()}` });
+  return outcome;
 }
 
 /**
@@ -178,11 +270,12 @@ export async function runInThrowawayWorktree<T>(
  *
  * @param cwd - any directory inside the project's checkout
  * @param env - the environment the commands run with
+ * @param limits - time limits of each suite / install / per-file command (production defaults when omitted)
  * @returns a port; every method returns a Result and never throws
  */
-export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv): CommitSuiteRunnerPort {
-  const repoRootOf = (): Result<string, LoreError> => {
-    const top = spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
+export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, limits: ProcessLimits = DEFAULT_LIMITS): CommitSuiteRunnerPort {
+  const repoRootOf = async (): Promise<Result<string, LoreError>> => {
+    const top = await spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
     if (top.status !== 0) return err({ code: "STORE_ERROR", message: `not inside a git checkout: ${top.output.trim()}` });
     return ok(top.output.trim());
   };
@@ -192,19 +285,19 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
 
   return {
     resolveCommit: async (ref) => {
-      const repo = repoRootOf();
+      const repo = await repoRootOf();
       if (!repo.ok) return repo;
-      const commit = spawn("git", ["rev-parse", "--verify", `${ref}^{commit}`], repo.value, env);
+      const commit = await spawn("git", ["rev-parse", "--verify", `${ref}^{commit}`], repo.value, env);
       if (commit.status !== 0) return err({ code: "STORE_ERROR", message: `no commit \`${ref}\` to measure: ${commit.output.trim()}` });
       const sha = commit.output.trim();
-      const tree = spawn("git", ["rev-parse", "--verify", `${sha}^{tree}`], repo.value, env);
+      const tree = await spawn("git", ["rev-parse", "--verify", `${sha}^{tree}`], repo.value, env);
       if (tree.status !== 0) return err({ code: "STORE_ERROR", message: `no tree for commit ${sha}: ${tree.output.trim()}` });
       return ok({ commit: sha, tree: tree.output.trim() });
     },
 
     runSuite: async (commit, inWorktree) => {
       const ran = await inThrowawayWorktree(commit, async (root) => {
-        const measured = measure(root, commit, suiteChildEnv(env));
+        const measured = await measure(root, commit, suiteChildEnv(env), limits);
         if (inWorktree !== undefined) await inWorktree(root, commit);
         return measured;
       });
@@ -217,7 +310,7 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
 
     withWorktree: async (commit, work) => {
       const ran = await inThrowawayWorktree(commit, async (root) => {
-        const prepared = prepareDependencies(root, suiteChildEnv(env));
+        const prepared = await prepareDependencies(root, suiteChildEnv(env), limits);
         if (prepared !== undefined) throw new Error(prepared);
         await work(root);
       });
@@ -227,7 +320,7 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
     runFiles: async (commit, files) =>
       inThrowawayWorktree(commit, async (root) => {
         const childEnv = suiteChildEnv(env);
-        const prepared = prepareDependencies(root, childEnv);
+        const prepared = await prepareDependencies(root, childEnv, limits);
         if (prepared !== undefined) throw new Error(prepared);
         const manifestPath = join(root, "package.json");
         const manifest = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { scripts?: Record<string, string> }) : {};
@@ -237,7 +330,7 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
         const outcomes: FileRunOutcome[] = [];
         for (const file of files) {
           const startedMs = Date.now();
-          const ran = spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv);
+          const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv, limits);
           outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs });
         }
         return outcomes;
@@ -246,17 +339,17 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv):
 }
 
 /** Installs dependencies in a fresh worktree when the project has some; returns the failure text, or `undefined` when ready. */
-export function prepareDependencies(root: string, env: NodeJS.ProcessEnv): string | undefined {
+export async function prepareDependencies(root: string, env: NodeJS.ProcessEnv, limits: ProcessLimits = DEFAULT_LIMITS): Promise<string | undefined> {
   const manifestPath = join(root, "package.json");
   if (!existsSync(manifestPath)) return undefined;
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { dependencies?: object; devDependencies?: object };
   const hasDependencies = Object.keys(manifest.dependencies ?? {}).length + Object.keys(manifest.devDependencies ?? {}).length > 0;
   if (!hasDependencies || existsSync(join(root, "node_modules"))) return undefined;
-  const installed = spawn("bun", ["install", "--frozen-lockfile"], root, env);
+  const installed = await spawn("bun", ["install", "--frozen-lockfile"], root, env, limits);
   return installed.status === 0 ? undefined : `dependency install in the throwaway worktree failed: ${tail(installed.output).trim()}`;
 }
 
-function measure(root: string, commit: string, env: NodeJS.ProcessEnv): SuiteRun {
+async function measure(root: string, commit: string, env: NodeJS.ProcessEnv, limits: ProcessLimits): Promise<SuiteRun> {
   const manifestPath = join(root, "package.json");
   if (!existsSync(manifestPath)) {
     return {
@@ -272,7 +365,7 @@ function measure(root: string, commit: string, env: NodeJS.ProcessEnv): SuiteRun
     dependencies?: object;
     devDependencies?: object;
   };
-  const prepared = prepareDependencies(root, env);
+  const prepared = await prepareDependencies(root, env, limits);
   if (prepared !== undefined) return { status: "not_measured", reason: prepared };
   const commands: SuiteCommandResult[] = [];
   const skipped: { command: string; reason: string }[] = [];
@@ -283,7 +376,11 @@ function measure(root: string, commit: string, env: NodeJS.ProcessEnv): SuiteRun
       skipped.push({ command, reason: `package.json defines no "${script}" script` });
       continue;
     }
-    const ran = spawn("bun", ["run", script], root, env);
+    const ran = await spawn("bun", ["run", script], root, env, limits);
+    // reason: a run the timeout ended is incomplete, not red: stored `unrunnable` with this cause and retried by a later batch (BR-1497).
+    if (ran.timeout !== undefined) {
+      return { status: "not_measured", reason: `\`${command}\` timed out after ${ran.timeout.elapsedMs} ms (limit ${ran.timeout.limitMs} ms); its process group was ended` };
+    }
     combined += `\n${ran.output}`;
     commands.push({ command, exit_code: ran.status, output_tail: tail(ran.output) });
   }

@@ -11,7 +11,12 @@
  * `main-checked` row is written any more; an unrunnable result checks nothing).
  */
 
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createGitCommitSuiteRunner } from "../../../src/adapters/cli/assess-suite-runner.js";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import {
@@ -285,4 +290,157 @@ describe("suite-result store: per-file re-runs", () => {
     const listed = await service.listFileRuns(looked.value.id);
     expect(listed.ok && listed.value).toEqual([]);
   });
+});
+
+/**
+ * The real git runner against a throwaway repo whose `test` / `test:file` scripts run a fake suite: a node process that
+ * ignores SIGTERM and spawns a grandchild that ignores SIGTERM too and holds stdout open (the shape of the 2026-10-29
+ * hang, where a test's hung `lore` child kept `spawnSync` waiting for 10 h).
+ */
+describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () => {
+  const TIMEOUT_MS = 1500;
+  const GRACE_MS = 500;
+  // timeout + grace + pipe drain (2 s) + slack for git/bun start-up and worktree removal
+  const WALL_BOUND_MS = TIMEOUT_MS + GRACE_MS + 2000 + 8000;
+  const dirs: string[] = [];
+  const killers: number[] = [];
+
+  afterEach(() => {
+    for (const pid of killers.splice(0)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // reason: the pid is already gone, which is what the tests assert.
+      }
+    }
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const git = (cwd: string, ...args: string[]): string => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8" });
+
+  /** A repo with one commit; `scripts` are the package.json scripts, `files` the committed helper files. */
+  function makeRepo(scripts: Record<string, string>, files: Record<string, string>): { repo: string; commit: string; pidFile: string } {
+    const base = mkdtempSync(join(tmpdir(), "suite-timeout-test-"));
+    dirs.push(base);
+    const repo = join(base, "repo");
+    mkdirSync(repo);
+    git(repo, "init", "-q");
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "fixture", scripts }));
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(repo, name), content);
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "fixture");
+    return { repo, commit: git(repo, "rev-parse", "HEAD").trim(), pidFile: join(base, "pids.txt") };
+  }
+
+  /** hang.js: records its own pid and a SIGTERM-immune grandchild's pid (one per line), then never exits. */
+  function hangScript(pidFile: string): string {
+    return [
+      'const { spawn } = require("node:child_process");',
+      'const fs = require("node:fs");',
+      'process.on("SIGTERM", () => {});',
+      'const grand = spawn(process.execPath, ["-e", "process.on(\'SIGTERM\', () => {}); setInterval(() => process.stdout.write(\'.\'), 200)"], { stdio: ["ignore", "inherit", "inherit"] });',
+      `fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + "\\n" + grand.pid + "\\n");`,
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+  }
+
+  const readPids = (pidFile: string): number[] => {
+    const pids = readFileSync(pidFile, "utf8").split("\n").filter((l) => l !== "").map(Number);
+    killers.push(...pids);
+    return pids;
+  };
+
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  async function allGone(pids: readonly number[]): Promise<boolean> {
+    for (let i = 0; i < 40; i++) {
+      if (pids.every((pid) => !alive(pid))) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  }
+
+  const worktreeCount = (repo: string): number => git(repo, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
+
+  it("AC-AF-2 a suite whose tree ignores SIGTERM is ended within timeout + grace, stored unrunnable naming the timeout and elapsed ms, no process survives and the worktree is gone", async () => {
+    const { repo, commit, pidFile } = makeRepo({ test: "node hang.js" }, {});
+    writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "hang");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    expect(head).not.toBe(commit);
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
+    const { service, store } = build();
+    const startedMs = Date.now();
+    const looked = await service.lookupOrRun(head, runner);
+    const wallMs = Date.now() - startedMs;
+    expect(wallMs).toBeLessThan(WALL_BOUND_MS);
+    expect(looked.ok && looked.value).toMatchObject({ status: "unrunnable", attempt: 1, commands: [] });
+    const cause = looked.ok ? (looked.value.cause ?? "") : "";
+    expect(cause).toMatch(/timed out after \d+ ms/);
+    expect(cause).toContain("bun run test");
+    const stored = await store.listSuiteResultsForCommit(head);
+    expect(stored.ok && stored.value.map((r) => r.status)).toEqual(["unrunnable"]);
+    expect(await allGone(readPids(pidFile))).toBe(true);
+    expect(worktreeCount(repo)).toBe(1);
+  }, 30_000);
+
+  it("AC-AF-2 a per-file re-run whose tree ignores SIGTERM is ended within the limit, reported as a failed file with the timeout cause, tree gone, worktree gone", async () => {
+    const { repo, pidFile } = makeRepo({ "test:file": "node hang.js" }, {});
+    writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "hang");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
+    const startedMs = Date.now();
+    const ran = await runner.runFiles(head, ["x.test.ts"]);
+    expect(Date.now() - startedMs).toBeLessThan(WALL_BOUND_MS);
+    if (!ran.ok) throw new Error(`runFiles failed: ${JSON.stringify(ran.error)}`);
+    expect(ran.value[0]).toMatchObject({ file: "x.test.ts", exit_code: 1 });
+    expect(ran.value[0]?.output_tail).toMatch(/timed out after \d+ ms/);
+    expect(await allGone(readPids(pidFile))).toBe(true);
+    expect(worktreeCount(repo)).toBe(1);
+  }, 30_000);
+
+  it("AC-AF-2 work in the same worktree (the landed-criteria attestation) runs in it and the worktree is removed afterwards, also when the work throws", async () => {
+    const { repo, commit } = makeRepo({ test: "true" }, {});
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
+    if (runner.withWorktree === undefined) throw new Error("runner has no withWorktree");
+    let seenRoot = "";
+    const done = await runner.withWorktree(commit, async (root) => {
+      seenRoot = root;
+      expect(existsSync(join(root, "package.json"))).toBe(true);
+    });
+    expect(done.ok).toBe(true);
+    expect(existsSync(seenRoot)).toBe(false);
+    const thrown = await runner.withWorktree(commit, async (root) => {
+      seenRoot = root;
+      throw new Error("attestation blew up");
+    });
+    expect(thrown.ok).toBe(false);
+    expect(existsSync(seenRoot)).toBe(false);
+    expect(worktreeCount(repo)).toBe(1);
+  }, 30_000);
+
+  it("AC-AF-2 a normal run is unchanged: a green suite is measured with its exit code, a red one keeps its exit code and tail", async () => {
+    const green = makeRepo({ test: "echo all-green" }, {});
+    const greenRun = await createGitCommitSuiteRunner(green.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS }).runSuite(green.commit);
+    expect(greenRun.ok && greenRun.value).toMatchObject({ status: "measured", commit: green.commit, failing_test_files: [] });
+    if (greenRun.ok && greenRun.value.status === "measured") {
+      expect(greenRun.value.commands).toHaveLength(1);
+      expect(greenRun.value.commands[0]).toMatchObject({ command: "bun run test", exit_code: 0 });
+      expect(greenRun.value.commands[0]?.output_tail).toContain("all-green");
+    }
+    const redRepo = makeRepo({ test: "echo boom; exit 3" }, {});
+    const redRun = await createGitCommitSuiteRunner(redRepo.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS }).runSuite(redRepo.commit);
+    expect(redRun.ok && redRun.value.status === "measured" && redRun.value.commands[0]).toMatchObject({ exit_code: 3 });
+    expect(worktreeCount(green.repo)).toBe(1);
+  }, 30_000);
 });
