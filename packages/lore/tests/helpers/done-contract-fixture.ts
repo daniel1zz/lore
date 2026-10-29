@@ -94,12 +94,21 @@ function slugOf(stdout: string, what: string): string {
   return slug;
 }
 
+/** Options of {@link makeDoneContractFixture}. */
+export interface MakeFixtureOptions {
+  /**
+   * `false` leaves the three `workflow.done_contract.*` keys out of the config (default: they are seeded). A test whose subject
+   * is NOT the contract uses it so that its setup never depends on the config schema that the test is about.
+   */
+  readonly seedDoneContractConfig?: boolean;
+}
+
 /**
  * Builds the fixture: a clean git repository, `lore init`, a requirements document, a spec and the three config keys.
  *
  * @returns the fixture; call `dispose()` in `afterAll`.
  */
-export async function makeDoneContractFixture(): Promise<DoneContractFixture> {
+export async function makeDoneContractFixture(options: MakeFixtureOptions = {}): Promise<DoneContractFixture> {
   const dir = mkdtempSync(join(tmpdir(), "lore-done-contract-"));
   mkdirSync(FIXTURE_HOME_OUTSIDE_REPO, { recursive: true });
   makeCleanTreeRepo(dir);
@@ -122,7 +131,10 @@ export async function makeDoneContractFixture(): Promise<DoneContractFixture> {
   await mustRun(["init"]);
   // reason: a spec/adr approval needs a review judgment by default; the fixture's specs are fixture steps, not the subject.
   patchLoreConfig(dir, {
-    workflow: { review: { judgment_required_types: [] }, done_contract: { ...DONE_CONTRACT_CONFIG } },
+    workflow: {
+      review: { judgment_required_types: [] },
+      ...(options.seedDoneContractConfig === false ? {} : { done_contract: { ...DONE_CONTRACT_CONFIG } }),
+    },
   });
 
   await mustRun(["create", "prd", "--title", "Fixture PRD", "--content", "Root requirements.", "--no-ai"]);

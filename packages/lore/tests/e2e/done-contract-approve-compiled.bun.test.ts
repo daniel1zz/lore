@@ -30,7 +30,7 @@ import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "../helpers/gh-issue-stub";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
-import { patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config";
+import { dropLoreConfigKey, patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 240_000 });
@@ -48,7 +48,9 @@ let fixture: DoneContractFixture;
 let plan = "";
 
 beforeAll(async () => {
-  fixture = await makeDoneContractFixture();
+  // reason: this file's criteria so far are about the kind and the config keys; the corpus setup must not depend on the
+  // config schema AC-DCS1-9 tests, so the keys are written by that test's own cases.
+  fixture = await makeDoneContractFixture({ seedDoneContractConfig: false });
   plan = await fixture.createPlan("Kind plan");
 });
 
@@ -327,7 +329,8 @@ describe("AC-DCS1-9: the three done_contract config keys are validated and set f
       const ok = await fixture.run(["list", "--type", "task"]);
       expect(ok.exitCode, ok.stderr).toBe(0);
     } finally {
-      patchLoreConfig(fixture.dir, { workflow: { done_contract: { ...valid } } });
+      // back to the state of the other tests: no keys (the fixture of this file seeds none).
+      dropLoreConfigKey(fixture.dir, ["workflow", "done_contract"]);
     }
   });
 });
