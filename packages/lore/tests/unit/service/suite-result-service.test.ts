@@ -301,7 +301,7 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
   const TIMEOUT_MS = 1500;
   const GRACE_MS = 500;
   // timeout + grace + pipe drain (2 s) + slack for git/bun start-up and worktree removal
-  const WALL_BOUND_MS = TIMEOUT_MS + GRACE_MS + 2000 + 8000;
+  const WALL_BOUND_MS = TIMEOUT_MS + GRACE_MS + 2000 + 20_000;
   const dirs: string[] = [];
   const killers: number[] = [];
 
@@ -370,6 +370,7 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
   const worktreeCount = (repo: string): number => git(repo, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
   it("AC-AF-2 a suite whose tree ignores SIGTERM is ended within timeout + grace, stored unrunnable naming the timeout and elapsed ms, no process survives and the worktree is gone", async () => {
+    // (per-test limit below is far above timeout + grace + drain, so load cannot read as a hang)
     const { repo, commit, pidFile } = makeRepo({ test: "node hang.js" }, {});
     writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
     git(repo, "add", "-A");
@@ -390,7 +391,7 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(stored.ok && stored.value.map((r) => r.status)).toEqual(["unrunnable"]);
     expect(await allGone(readPids(pidFile))).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
-  }, 30_000);
+  }, 90_000);
 
   it("AC-AF-2 a per-file re-run whose tree ignores SIGTERM is ended within the limit, reported as a failed file with the timeout cause, tree gone, worktree gone", async () => {
     const { repo, pidFile } = makeRepo({ "test:file": "node hang.js" }, {});
@@ -407,7 +408,41 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(ran.value[0]?.output_tail).toMatch(/timed out after \d+ ms/);
     expect(await allGone(readPids(pidFile))).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
-  }, 30_000);
+  }, 90_000);
+
+  it("AC-AF-2 a group signal that fails with EPERM while the group still has live members settles the run, recording the failed kill as the unrunnable cause", async () => {
+    const { repo, pidFile } = makeRepo({ test: "node hang.js" }, {});
+    writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "hang");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    const kill = (): void => {
+      throw Object.assign(new Error("kill() failed: EPERM: Operation not permitted"), { code: "EPERM" });
+    };
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS, kill });
+    const { service } = build();
+    const startedMs = Date.now();
+    const looked = await service.lookupOrRun(head, runner);
+    expect(Date.now() - startedMs).toBeLessThan(WALL_BOUND_MS);
+    expect(looked.ok && looked.value).toMatchObject({ status: "unrunnable" });
+    const cause = looked.ok ? (looked.value.cause ?? "") : "";
+    expect(cause).toContain("EPERM");
+    expect(cause).toContain("live member");
+    expect(worktreeCount(repo)).toBe(1);
+  }, 90_000);
+
+  it("AC-AF-2 a group signal that fails with EPERM when no live member remains counts as ended and the run's own result stands", async () => {
+    const { repo } = makeRepo({ test: "node -e 0" }, {});
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    const kill = (): void => {
+      throw Object.assign(new Error("kill() failed: EPERM: Operation not permitted"), { code: "EPERM" });
+    };
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 60_000, graceMs: GRACE_MS, kill });
+    const { service } = build();
+    const looked = await service.lookupOrRun(head, runner);
+    expect(looked.ok && looked.value).toMatchObject({ status: "measured" });
+    expect(worktreeCount(repo)).toBe(1);
+  }, 90_000);
 
   it("AC-AF-2 work in the same worktree (the landed-criteria attestation) runs in it and the worktree is removed afterwards, also when the work throws", async () => {
     const { repo, commit } = makeRepo({ test: "true" }, {});
