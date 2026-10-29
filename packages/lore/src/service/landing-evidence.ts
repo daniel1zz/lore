@@ -18,6 +18,31 @@
 
 import { specAcceptanceCriteriaSchema, type DocRecord } from "@lore/core";
 import { attestedRunKey, indexLatestAttestedRuns } from "./attested-ac-runs.js";
+import type { GitRunner } from "./evidence-binding.js";
+
+/** The commit-containment facts the second evidence rule (check and corpus tasks, AC-DCS1-19) reads from git. */
+export interface CommitContainment {
+  /** Whether `descendant` is `ancestor` or has it in its history; `false` for an unknown `descendant` or a git failure (fail closed). */
+  readonly containsCommit: (descendant: string | undefined, ancestor: string) => boolean;
+  /** Whether `commit` is `branch`'s tip or in its history; `false` for an unknown `commit` or a git failure (fail closed). */
+  readonly isOnBranch: (commit: string | undefined, branch: string) => boolean;
+}
+
+/**
+ * The one containment measure behind "a row counts at a main commit that contains `compiled_at_commit`": both questions are
+ * `git merge-base --is-ancestor`, and a commit git cannot answer for never counts.
+ *
+ * @param git - the repository's git runner
+ * @example
+ * commitContainment(git).containsCommit(rowHead, contract.compiled_at_commit); // => true when the row ran at or after the compile
+ */
+export function commitContainment(git: GitRunner): CommitContainment {
+  const isAncestor = (ancestor: string, descendant: string): boolean => git(["merge-base", "--is-ancestor", ancestor, descendant]).ok;
+  return {
+    containsCommit: (descendant, ancestor) => descendant !== undefined && isAncestor(ancestor, descendant),
+    isOnBranch: (commit, branch) => commit !== undefined && isAncestor(commit, branch),
+  };
+}
 
 /** The docs the measure reads. `specs` must hold every spec (ad-hoc evidence attribution needs all of them). */
 export interface LandingEvidenceInput {

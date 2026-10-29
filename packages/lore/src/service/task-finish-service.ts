@@ -16,14 +16,16 @@
  *     as unmet and leaves no row.
  *   - `--red` runs only the AC oracles, records `expected-fail` rows only when EVERY oracle is a proven red, and otherwise writes
  *     nothing at all.
- *   - a check or corpus task is finished from the shared checkout by another flow (AC-DCS1-19..21); it is refused here by name.
+ *   - a check or corpus task is finished from the shared checkout, with no claim, no worktree and no subagent (AC-DCS1-19..21):
+ *     the checkout is measured first (main working copy, HEAD = tip of main, clean tree), the run may change no file
+ *     (`kind-wrote-files`), the rows are written once under `expectedVersion: task.version` and the task is archived by `done`.
  * Side-effect class: runs oracle processes through the verify runner; git reads; one corpus write.
  *
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-15, AC-DCS1-16, AC-DCS1-17), ledger D28, D33.
  */
 
 import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import {
   CAPTURE_TAIL_CHARS,
   doneContractSchema,
@@ -36,19 +38,24 @@ import {
   type DoneContractOracle,
   type LoreError,
   type Result,
+  type RunId,
   type TaskClaim,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { createGitRunner, type GitRunner } from "./evidence-binding.js";
+import { decideStampOutcome, probeGitState } from "./git-state-stamp.js";
 import { resolveDoc } from "./resolve.js";
-import type { FinishRunWrite, VerifiedEvidenceInput } from "./task-workflow-service.js";
+import type { DoneOpts, FinishRunWrite, VerifiedEvidenceInput } from "./task-workflow-service.js";
 import type { ContractOracleToRun, VerifyPlanResult, VerifyRunnerService } from "./verify-runner-service.js";
 
 /** The named refusals of `lore finish`, each stated once. */
 export const FINISH_REFUSALS = [
   "contract-missing",
   "red-not-required",
-  "finish-kind-unsupported",
+  "not-shared-checkout",
+  "head-not-main-tip",
+  "shared-checkout-dirty",
+  "kind-wrote-files",
   "no-claim",
   "shared-branch",
   "not-in-claim-worktree",
@@ -68,6 +75,8 @@ export interface TaskFinishDeps {
     deriveFinishAdditions(task: DocRecord, claim: TaskClaim, contract: DoneContract): Result<DoneContractOracle[], LoreError>;
     recordFinishRun(input: FinishRunWrite): Promise<Result<DocRecord, LoreError>>;
     findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>>;
+    /** Archives a check or corpus task whose rows were just recorded (the same `lore done` floors judge them). */
+    done(idOrSlug: string, opts: DoneOpts): Promise<Result<unknown, LoreError>>;
   };
   readonly verify: Pick<VerifyRunnerService, "verifyPlan" | "verifyAdhocTask" | "runContractOracles">;
 }
@@ -117,6 +126,25 @@ interface OracleResult {
 
 function refusal(name: FinishRefusal, message: string, value?: unknown): LoreError {
   return { code: "VALIDATION_ERROR", field: name, message: `${name}: ${message}`, value: { refusal: name, ...(value !== undefined ? { detail: value } : {}) } };
+}
+
+/** The oracle of a corpus task that `finish` proves itself, from the file comparison (it has no command of its own). */
+const CORPUS_ORACLE_ID = "corpus:files-unchanged";
+
+/** The refusal of a check or corpus run that changed files; it names only the paths changed during the run. */
+function kindWroteFiles(paths: readonly string[]): LoreError {
+  return refusal(
+    "kind-wrote-files",
+    `the oracles changed ${paths.length} file(s) in the shared checkout: ${paths.join(", ")}. A check or corpus task changes no file (a corpus task changes the corpus only through lore commands); nothing was recorded.`,
+    paths,
+  );
+}
+
+/** The paths \`git status --porcelain\` lists (ignored paths are not listed), or why git could not answer. */
+function readChangedPaths(git: GitRunner): { readonly ok: true; readonly paths: string[] } | { readonly ok: false; readonly reason: string } {
+  const status = git(["status", "--porcelain", "--untracked-files=all"]);
+  if (!status.ok) return status;
+  return { ok: true, paths: status.stdout.split("\n").filter((line) => line.trim() !== "").map((line) => line.slice(3).trim()) };
 }
 
 function toUnmetItem(result: OracleResult): UnmetItem {
@@ -169,9 +197,8 @@ export class TaskFinishService {
         return err(refusal("red-not-required", `${task.slug} waived its red run at approve (${contract.red_waiver_reason ?? "no reason recorded"}).`));
       }
     }
-    if (contract.kind !== "code") {
-      return err(refusal("finish-kind-unsupported", `${task.slug} is a ${contract.kind} task: it is finished from the shared checkout, not from a claim worktree.`));
-    }
+    // reason: AC-DCS1-19 — a check or corpus task holds no claim and has no worktree: it is finished from the shared checkout.
+    if (contract.kind !== "code") return this.finishInSharedCheckout(task, contract, input);
 
     const claim = extractHeldClaim(task);
     // reason: a claim taken with `--worktree <branch>` (the dispatch protocol) records the branch NAME as its worktree.
@@ -237,17 +264,13 @@ export class TaskFinishService {
       unmet.push({ name: "red-first", cause: "no runner-produced red run is on record (run `lore finish --red` before the work, or waive it at approve)" });
     }
 
-    const written = await this.deps.workflow.recordFinishRun({
-      taskSlug: task.slug,
-      expectedVersion: task.version,
+    const written = await this.writeRun(task, input, {
       holderRun: input.harnessRun,
-      by: input.by,
       // reason: any recorded `fail` row satisfies the red-first floor, so only a proven red is recorded as one (BR-1077).
       entries: collected.filter((row) => row.result !== "fail" || isProvenFail(row)),
       additions: additions.value,
       ...(unmet.length === 0 ? { finished_commit: preRunHead } : {}),
       recheck,
-      nowIso: input.nowIso,
     });
     if (!written.ok) return written;
     if (unmet.length > 0) {
@@ -262,6 +285,159 @@ export class TaskFinishService {
       added_oracles: additions.value.map((oracle) => oracle.id),
       next_step: `lore land ${task.slug}`,
     });
+  }
+
+  /**
+   * The ONE corpus write of every finish path (AC-DCS1-15, AC-DCS1-19, AC-DCS1-20): a compare-and-swap on the task version this
+   * run read, so a rival write during the oracles makes it exit 5 with nothing recorded.
+   */
+  private writeRun(
+    task: DocRecord,
+    input: FinishInput,
+    run: Pick<FinishRunWrite, "holderRun" | "entries" | "additions" | "recheck"> & { readonly finished_commit?: string },
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.deps.workflow.recordFinishRun({
+      taskSlug: task.slug,
+      expectedVersion: task.version,
+      by: input.by,
+      nowIso: input.nowIso,
+      ...run,
+    });
+  }
+
+  /**
+   * Finishes a check or corpus task from the shared checkout (AC-DCS1-19..21): measures the checkout before anything runs, runs the
+   * contract's oracles at that commit with no claim and no worktree, refuses `kind-wrote-files` when the run changed a file, proves
+   * `corpus:files-unchanged` for a corpus task, records every row in one write and archives the task when its rows count.
+   */
+  private async finishInSharedCheckout(task: DocRecord, contract: DoneContract, input: FinishInput): Promise<Result<FinishOutcome, LoreError>> {
+    const placed = this.measureSharedCheckout(contract, input.cwd, task.slug);
+    if (!placed.ok) return placed;
+    const { root, head: preRunHead } = placed.value;
+    const rootGit = createGitRunner(root);
+
+    const oracles: DoneContractOracle[] = [];
+    for (const oracle of [...contract.oracles, ...contract.added_oracles]) {
+      if (!oracles.some((known) => known.id === oracle.id)) oracles.push(oracle);
+    }
+    const collected: VerifiedEvidenceInput[] = [];
+    const results: OracleResult[] = [];
+    const startedAt = Date.now();
+    const before = probeGitState(root);
+    const run = await this.runOracles(task, oracles, input, root, collected, results, "corpus_root");
+    if (!run.ok) return run;
+
+    const after = readChangedPaths(rootGit);
+    if (!after.ok) return err(refusal("shared-checkout-dirty", `the state of ${root} cannot be read after the run (${after.reason}); nothing was recorded.`));
+    const changedFiles = after.paths;
+    if (changedFiles.length > 0) return err(kindWroteFiles(changedFiles));
+
+    if (oracles.some((oracle) => oracle.id === CORPUS_ORACLE_ID)) {
+      // reason: the one oracle with no command of its own is proved here, from the comparison that just passed (AC-DCS1-21).
+      collected.push({
+        oracle: "other",
+        command: CORPUS_ORACLE_ID,
+        result: "pass",
+        recorded_by: input.by,
+        capture_source: "runner",
+        output_tail: `no file changed in ${root} while the oracles ran`,
+        attestation: {
+          runner: "lore-cli",
+          exit_code: 0,
+          duration_ms: Date.now() - startedAt,
+          timed_out: false,
+          execution_root: root,
+          execution_mode: "corpus_root",
+          ...decideStampOutcome(before, probeGitState(root)),
+        },
+      });
+      results.push({ name: CORPUS_ORACLE_ID, passed: true, cause: "passed" });
+    }
+
+    const recheck: FinishRunWrite["recheck"] = () => {
+      const now = createGitRunner(root);
+      const headNow = now(["rev-parse", "HEAD"]);
+      const tip = now(["rev-parse", `refs/heads/${contract.base_branch}`]);
+      if (!headNow.ok || headNow.stdout.trim() !== preRunHead || !tip.ok || tip.stdout.trim() !== preRunHead) {
+        return { ok: false, path: root, reason: `HEAD or ${contract.base_branch} of ${root} moved while the oracles ran (it was ${preRunHead}); nothing was recorded. Run lore finish again.` };
+      }
+      const status = readChangedPaths(now);
+      if (!status.ok || status.paths.length > 0) {
+        return { ok: false, path: root, reason: `${root} changed while the oracles ran; nothing was recorded. Run lore finish again.` };
+      }
+      return { ok: true };
+    };
+
+    const unmet = results.filter((result) => !result.passed).map(toUnmetItem);
+    const written = await this.writeRun(task, input, {
+      holderRun: null,
+      entries: collected.filter((row) => row.result !== "fail" || isProvenFail(row)),
+      additions: [],
+      recheck,
+    });
+    if (!written.ok) return written;
+    if (unmet.length > 0) {
+      const lines = unmet.map((item) => `  - ${item.name}: ${item.cause}`);
+      return err(refusal("finish-unmet", `${task.slug} is not finished: ${unmet.length} item(s) unmet. Every oracle ran; the rows that could be measured are recorded and nothing is archived.\n${lines.join("\n")}`, unmet.map((item) => item.name)));
+    }
+    // reason: the rows just recorded are the evidence `done` judges by the second rule (a main commit containing the compile commit);
+    // one that does not count is refused by `done` with its floor, and the rows stay.
+    const archived = await this.deps.workflow.done(task.slug, { by: input.by, source: "cli", ...(input.harnessRun !== null ? { harnessRun: input.harnessRun as RunId } : {}) });
+    if (!archived.ok) return archived;
+    return ok({
+      slug: task.slug,
+      mode: "finished",
+      head: preRunHead,
+      oracles: results.map((result) => ({ id: result.name, result: "pass" })),
+      added_oracles: [],
+      next_step: `${task.slug} is archived`,
+    });
+  }
+
+  /**
+   * Measures the shared checkout before anything runs: the main working copy (git dir equals the common dir; never a linked
+   * worktree), HEAD equal to the tip of the contract's base branch (never the branch NAME, the checkout is detached, BR-1342) and a
+   * clean tree. Each refusal records nothing and runs no oracle.
+   */
+  private measureSharedCheckout(contract: DoneContract, cwd: string, slug: string): Result<{ root: string; head: string }, LoreError> {
+    const git = createGitRunner(cwd);
+    const top = git(["rev-parse", "--show-toplevel"]);
+    const gitDir = git(["rev-parse", "--git-dir"]);
+    const common = git(["rev-parse", "--git-common-dir"]);
+    if (!top.ok || !gitDir.ok || !common.ok) {
+      return err(refusal("not-shared-checkout", `${cwd} is not inside a git working copy; run \`lore finish ${slug}\` from the shared checkout. Nothing ran.`));
+    }
+    const root = realpathSync(top.stdout.trim());
+    let linked: boolean;
+    try {
+      linked = realpathSync(resolve(cwd, gitDir.stdout.trim())) !== realpathSync(resolve(cwd, common.stdout.trim()));
+    } catch (cause) {
+      return err(refusal("not-shared-checkout", `the git directory of ${cwd} cannot be read (${cause instanceof Error ? cause.message : String(cause)}). Nothing ran.`));
+    }
+    if (linked) {
+      return err(refusal("not-shared-checkout", `${root} is a linked worktree; a ${contract.kind} task is finished in the shared checkout (the main working copy). Nothing ran.`));
+    }
+    const rootGit = createGitRunner(root);
+    const head = rootGit(["rev-parse", "HEAD"]);
+    const tip = rootGit(["rev-parse", `refs/heads/${contract.base_branch}`]);
+    if (!head.ok || !tip.ok) {
+      return err(refusal("head-not-main-tip", `HEAD or ${contract.base_branch} of ${root} cannot be read (${!head.ok ? head.reason : !tip.ok ? tip.reason : ""}). Nothing ran.`));
+    }
+    if (head.stdout.trim() !== tip.stdout.trim()) {
+      return err(
+        refusal(
+          "head-not-main-tip",
+          `HEAD is ${head.stdout.trim()} but the tip of ${contract.base_branch} is ${tip.stdout.trim()}; run \`git checkout --detach ${contract.base_branch}\` in ${root}, then \`lore finish ${slug}\` again. Nothing ran and nothing was recorded.`,
+          { head: head.stdout.trim(), tip: tip.stdout.trim() },
+        ),
+      );
+    }
+    const dirty = readChangedPaths(rootGit);
+    if (!dirty.ok) return err(refusal("shared-checkout-dirty", `the state of ${root} cannot be read (${dirty.reason}); nothing ran.`));
+    if (dirty.paths.length > 0) {
+      return err(refusal("shared-checkout-dirty", `${root} has uncommitted or untracked files (${dirty.paths.join(", ")}); commit or remove them, then finish again. Nothing ran and nothing was recorded.`, dirty.paths));
+    }
+    return ok({ root, head: head.stdout.trim() });
   }
 
   /** Whether the task already holds a runner-produced red row (a `fail` or `expected-fail` row of a runner). */
@@ -304,17 +480,20 @@ export class TaskFinishService {
     root: string,
     collected: VerifiedEvidenceInput[],
     results: OracleResult[],
+    mode: "worktree" | "corpus_root" = "worktree",
   ): Promise<Result<void, LoreError>> {
     const baseOpts = {
       by: input.by,
       nowIso: input.nowIso,
-      executionRoot: { root, mode: "worktree" as const },
+      executionRoot: { root, mode },
       commandsApprovedByContract: true,
     };
     const acIds = oracles.filter((oracle) => oracle.id.startsWith("ac:")).map((oracle) => oracle.id.slice("ac:".length));
     const others: ContractOracleToRun[] = [];
     for (const oracle of input.red ? [] : oracles) {
       if (oracle.id.startsWith("ac:")) continue;
+      // reason: proved by `finishInSharedCheckout` itself from the file comparison, never spawned.
+      if (oracle.id === CORPUS_ORACLE_ID) continue;
       const runnable = oracleToRun(oracle);
       if (runnable === undefined) {
         results.push({ name: oracle.id, passed: false, cause: "this oracle has no command finish can run" });
@@ -393,16 +572,7 @@ export class TaskFinishService {
     if (names.length > 0) {
       return err(refusal("red-not-measured", `${names.join(", ")} did not produce a red the runner can prove (a command that could not start, exit 126/127, or no failed test in its summary is never a red, BR-1077). Nothing was recorded.`, names));
     }
-    const written = await this.deps.workflow.recordFinishRun({
-      taskSlug: task.slug,
-      expectedVersion: task.version,
-      holderRun: input.harnessRun as string,
-      by: input.by,
-      entries: rows,
-      additions: [],
-      recheck,
-      nowIso: input.nowIso,
-    });
+    const written = await this.writeRun(task, input, { holderRun: input.harnessRun as string, entries: rows, additions: [], recheck });
     if (!written.ok) return written;
     return ok({
       slug: task.slug,

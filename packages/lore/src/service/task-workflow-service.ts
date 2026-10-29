@@ -356,6 +356,7 @@ import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
 import { describeLoreError } from "./gate-enforcer.js";
 import { deriveWriteSetAdditions, withAddedOracles } from "./done-contract-service.js";
+import { commitContainment } from "./landing-evidence.js";
 import { createGitRunner, deletedByDiff, missingOracleFiles, pathExistsAt, treesIdentical, type GitRunner, type TestFileOracle } from "./evidence-binding.js";
 import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 import type { StampOutcome } from "./git-state-stamp.js";
@@ -913,8 +914,11 @@ export interface FinishRunWrite {
   readonly taskSlug: string;
   /** The task version `lore finish` read before it ran anything; the write is refused (exit 5) when the task moved on. */
   readonly expectedVersion: number;
-  /** The run that holds the claim; the write is refused (exit 5) when another run holds it by the time of the write. */
-  readonly holderRun: string;
+  /**
+   * The run that holds the claim; the write is refused (exit 5) when another run holds it by the time of the write. `null` for a
+   * check or corpus task, which holds no claim (AC-DCS1-19): the write then touches no claim.
+   */
+  readonly holderRun: string | null;
   /** Who is recorded as the writer of the rows and the version. */
   readonly by: string;
   /** Every runner-attested row of the run (each stamped by the runner with the commit it ran on). */
@@ -2806,12 +2810,21 @@ export class TaskWorkflowService {
     if (task.version !== input.expectedVersion) {
       return err({ code: "STALE_VERSION", id: task.id, expected: input.expectedVersion, actual: task.version });
     }
+    const storedContract = doneContractSchema.safeParse(task.extra["done_contract"]);
     const claim = extractHeldClaim(task);
-    const holder = claim === undefined ? undefined : (claim.harness_run ?? null);
-    if (claim === undefined || holder === null || holder !== input.holderRun) {
-      // reason: a lease that vanished or was taken over during the run is a lost race, exit 5, never a write onto someone else's claim.
-      const current = claim ?? { by: "(no claim)", at: input.nowIso };
-      return err(buildClaimConflictError(task.id, current, buildClaimHolder(current, false), input.nowIso));
+    if (input.holderRun === null) {
+      // reason: AC-DCS1-19 — a check or corpus task is never claimed: its rows are written with no lease at all. A code task
+      // reaches this write only through its claim, so a claim-less write onto one is refused, never defaulted.
+      if (!storedContract.success || storedContract.data.kind === "code") {
+        return err({ code: "VALIDATION_ERROR", field: "done_contract", message: `${task.slug} is not a check or corpus task; a claim-less finish write is only for those kinds.`, value: input.taskSlug });
+      }
+    } else {
+      const holder = claim === undefined ? undefined : (claim.harness_run ?? null);
+      if (claim === undefined || holder === null || holder !== input.holderRun) {
+        // reason: a lease that vanished or was taken over during the run is a lost race, exit 5, never a write onto someone else's claim.
+        const current = claim ?? { by: "(no claim)", at: input.nowIso };
+        return err(buildClaimConflictError(task.id, current, buildClaimHolder(current, false), input.nowIso));
+      }
     }
     const collected: EvidenceEntry[] = [];
     for (const entry of input.entries) {
@@ -2822,11 +2835,12 @@ export class TaskWorkflowService {
     if (existing.length + collected.length > 50) return evidenceLogFull(existing.length);
 
     const newExtra: Record<string, unknown> = { ...task.extra, verification_evidence: [...existing, ...collected] };
-    let writtenClaim: TaskClaim = { ...claim, at: input.nowIso };
-    if (input.finished_commit !== undefined) writtenClaim = markClaimFinished(writtenClaim, input.finished_commit, input.nowIso);
-    newExtra["claim"] = writtenClaim;
-    const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
-    if (stored.success && input.additions.length > 0) newExtra["done_contract"] = withAddedOracles(stored.data, input.additions);
+    if (input.holderRun !== null && claim !== undefined) {
+      let writtenClaim: TaskClaim = { ...claim, at: input.nowIso };
+      if (input.finished_commit !== undefined) writtenClaim = markClaimFinished(writtenClaim, input.finished_commit, input.nowIso);
+      newExtra["claim"] = writtenClaim;
+    }
+    if (storedContract.success && input.additions.length > 0) newExtra["done_contract"] = withAddedOracles(storedContract.data, input.additions);
 
     const still = input.recheck();
     if (!still.ok) return err({ code: "CONFLICT", path: still.path, message: still.reason });
@@ -4500,9 +4514,14 @@ export class TaskWorkflowService {
     const contract = contractResult.value;
     const stampBinding = await loadStampBindingContext(this.store, [task]);
     if (!stampBinding.ok) return stampBinding;
-    const measured = await this.measureLanding(task);
-    if (!measured.ok) return measured;
-    const landing = measured.value;
+    // reason: AC-DCS1-19 — a check or corpus task lands nothing (route `none`) and is never claimed, so a claim it still holds (a
+    // legacy no-branch claim, converted by the migration) is not measured: its rows are judged only by the second evidence rule.
+    let landing: LandingMeasure = { armed: false, mode: "unclaimed" };
+    if (contract.kind === "code") {
+      const measured = await this.measureLanding(task);
+      if (!measured.ok) return measured;
+      landing = measured.value;
+    }
     const refuse = (refusal: DoneFloorRefusal | null): Result<ContractJudgement, LoreError> => ok({ refusal, removed: [], landing });
 
     const unlanded = this.notLandedRefusal(task, landing);
@@ -4514,7 +4533,7 @@ export class TaskWorkflowService {
 
     // The oracle set: the contract's plus added_oracles, never fewer (AC-DCS1-11), each listed once. While the claim exists the
     // write-set additions are derived again here (they are written at release / run end, and a done before either still sees them).
-    const heldClaim = extractHeldClaim(task);
+    const heldClaim = contract.kind === "code" ? extractHeldClaim(task) : undefined;
     let judgedContract: DoneContract = contract;
     if (heldClaim !== undefined) {
       const derived = this.deriveClaimAdditions(task, heldClaim, contract);
@@ -4614,11 +4633,11 @@ export class TaskWorkflowService {
    * `lore integrate` at the newest landing, or the git tree of the commit it ran on is the tree of the landed commit. A check or
    * corpus task: the row counts iff it ran on a commit of the base branch that contains the compile commit.
    */
-  private bindRow(git: GitRunner, contract: DoneContract, row: EvidenceEntry, landedCommit: string | undefined): RowBinding {
-    const head = row.attestation?.head_sha;
+  private bindRow(git: GitRunner, contract: DoneContract, entry: EvidenceEntry, landedCommit: string | undefined): RowBinding {
+    const head = entry.attestation?.head_sha;
     if (contract.kind === "code") {
       if (landedCommit === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the task has no landing record, so there is no landed commit to compare the row with" };
-      if (row.attestation?.recorded_at_landing === landedCommit) return { counts: true };
+      if (entry.attestation?.recorded_at_landing === landedCommit) return { counts: true };
       if (head === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the row records no commit it ran on" };
       const verdict = treesIdentical(git, head, landedCommit);
       if (verdict.state === "identical") return { counts: true };
@@ -4626,9 +4645,9 @@ export class TaskWorkflowService {
       return { counts: false, cause: "evidence-unmeasurable", detail: verdict.reason };
     }
     if (head === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the row records no commit it ran on" };
-    const containsCompile = git(["merge-base", "--is-ancestor", contract.compiled_at_commit, head]);
-    const onBase = git(["merge-base", "--is-ancestor", head, contract.base_branch]);
-    if (containsCompile.ok && onBase.ok) return { counts: true };
+    const row = { head_sha: head };
+    const { containsCommit, isOnBranch } = commitContainment(git);
+    if (containsCommit(row.head_sha, contract.compiled_at_commit) && isOnBranch(row.head_sha, contract.base_branch)) return { counts: true };
     return {
       counts: false,
       cause: "evidence-stale",
@@ -5001,7 +5020,11 @@ export class TaskWorkflowService {
     const claim = readClaimRecord(task);
     // reason: AC-DCS1-18 — a finished claim is the implementer's hand-over of work whose rows the floors above just judged; the
     // closer (another run) is who `lore done` / `lore land` exists for, so the lease is no obstacle to it and `done` releases it.
-    const finishedHandOver = claim !== undefined && this.finishedCommitInForce(claim) !== undefined;
+    // reason: AC-DCS1-19 — a check or corpus task is never claimed; a claim it still holds is a legacy no-branch claim, ignored by
+    // the floors and released (forced) by the archive, exactly as a finished hand-over is.
+    const heldKind = doneContractSchema.safeParse(task.extra["done_contract"]);
+    const claimlessKind = heldKind.success && heldKind.data.kind !== "code";
+    const finishedHandOver = claim !== undefined && (claimlessKind || this.finishedCommitInForce(claim) !== undefined);
     if (claim !== undefined && !finishedHandOver) {
       // reason: BR-1056 — the holder is a RUN, not a name: two runs deriving the same name must not pass for
       // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
