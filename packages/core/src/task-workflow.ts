@@ -73,6 +73,7 @@ import type { Result, LoreError } from "./errors.js";
 import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./types.js";
 import type { CompletenessVerdict } from "./attestation-completeness.js";
 import { isTerminalStatus } from "./lifecycle.js";
+import { MAX_FILE_ANCHORS, extractFileAnchors, normalizeFileAnchors } from "./file-anchors.js";
 
 /**
  * `attestation.completeness`'s value set, mirrored here (not re-derived) from
@@ -858,6 +859,12 @@ export const taskClaimSchema = z.object({
    * The newest write wins, so a branch the harness removed without a release still has its last known tip.
    */
   end_tip: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  /**
+   * The files the claim declares it will touch (`lore claim --write-set`, plus every edit-time `lore anchor declare`).
+   * It judges OVERLAP only (the task-claim gate and the ready report); the oracle set never shrinks to it. Absent ⇒ the
+   * task's approved anchors are the write set ({@link effectiveWriteSet}). No count cap: the 50-anchor cap bounds approved anchors.
+   */
+  write_set: z.array(z.string().min(1)).optional(),
 }).refine((claim) => claim.branch === undefined || claim.start_head !== undefined, {
   // reason: after the one-time back-fill an open branch claim always has a sha start (no unmeasured variant, no read-time default).
   message: "a branch claim needs a sha start_head",
@@ -882,6 +889,8 @@ export interface ClaimCaptureInput {
   harness_run?: string | null;
   /** See {@link taskClaimSchema}'s `start_head` — a carried-forward value wins over this one. */
   start_head?: string;
+  /** See {@link taskClaimSchema}'s `write_set` — an omitted value on a same-holder refresh keeps the recorded set. */
+  write_set?: readonly string[];
 }
 
 /**
@@ -966,6 +975,8 @@ export function buildTaskClaim(
   // reason: a same-holder refresh continues the same work, so the start it recorded first stays the start.
   const startHead = base?.start_head ?? input.start_head;
   const endTip = base?.end_tip;
+  // reason: a same-holder refresh continues the same work, so the files it declared (at claim and at edit time) stay declared.
+  const writeSet = input.write_set ?? base?.write_set;
 
   return {
     by: input.by,
@@ -980,7 +991,42 @@ export function buildTaskClaim(
     ...(input.harness_run !== undefined ? { harness_run: input.harness_run } : {}),
     ...(startHead !== undefined ? { start_head: startHead } : {}),
     ...(endTip !== undefined ? { end_tip: endTip } : {}),
+    ...(writeSet !== undefined ? { write_set: [...writeSet] } : {}),
   };
+}
+
+/**
+ * Validates and normalizes the entries of a claim write set with the anchor grammar (repo-relative POSIX path, a trailing `/`
+ * for a directory, `path#Symbol`), WITHOUT the 50-entry cap: that cap bounds a task's approved anchors, never a claim's write
+ * set. Duplicates after normalization are dropped, first occurrence wins.
+ *
+ * @example
+ * normalizeWriteSet(["./src/a.ts", "src/a.ts", "tests/"]) // => ok(["src/a.ts", "tests/"])
+ */
+export function normalizeWriteSet(entries: readonly string[]): Result<string[], LoreError> {
+  const normalized: string[] = [];
+  for (let from = 0; from < entries.length; from += MAX_FILE_ANCHORS) {
+    // reason: the grammar check lives in normalizeFileAnchors; it is fed one cap-sized slice at a time so that only the cap is not applied.
+    const slice = normalizeFileAnchors(entries.slice(from, from + MAX_FILE_ANCHORS));
+    if (!slice.ok) return slice;
+    for (const entry of slice.value) if (!normalized.includes(entry)) normalized.push(entry);
+  }
+  return ok(normalized);
+}
+
+/**
+ * The files a task is judged to touch for overlap: its held claim's declared write set, else its approved anchors.
+ * Both overlap computations (the task-claim gate's sibling context and the ready report's anchor conflicts) call this and
+ * nothing else, so they cannot disagree.
+ *
+ * @example
+ * effectiveWriteSet(taskWithClaimWriteSet) // => the claim's write_set
+ * effectiveWriteSet(taskHoldingNoClaim)    // => its file_anchors
+ */
+export function effectiveWriteSet(task: DocRecord): string[] {
+  const claim = extractHeldClaim(task);
+  if (claim === undefined) return extractFileAnchors(task);
+  return claim.write_set ?? extractFileAnchors(task);
 }
 
 /**

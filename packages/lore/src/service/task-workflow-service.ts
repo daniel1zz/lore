@@ -306,6 +306,8 @@ import {
   deriveSessions,
   sessionIdDiscriminator,
   normalizeFileAnchors,
+  normalizeWriteSet,
+  effectiveWriteSet,
   extractFileAnchors,
   fileAnchorPath,
   anchorsOverlap,
@@ -351,6 +353,7 @@ import { resolveDoc } from "./resolve.js";
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
 import { describeLoreError } from "./gate-enforcer.js";
+import { deriveWriteSetAdditions, withAddedOracles } from "./done-contract-service.js";
 import { createGitRunner, deletedByDiff, missingOracleFiles, pathExistsAt, treesIdentical, type GitRunner, type TestFileOracle } from "./evidence-binding.js";
 import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 import type { StampOutcome } from "./git-state-stamp.js";
@@ -476,6 +479,12 @@ export interface ClaimOpts {
    * per call — never carried forward on a refresh.
    */
   corpusScope?: string;
+  /**
+   * The files this claim declares it will touch (`lore claim --write-set`, repeatable; anchor grammar, no count cap).
+   * It judges overlap only (AC-DCS1-10). Absent ⇒ the task's approved anchors are the write set; a same-holder refresh that
+   * omits it keeps the recorded one.
+   */
+  writeSet?: readonly string[];
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
@@ -1166,10 +1175,11 @@ export async function buildEffectiveAnchorGateContext(
   siblings: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  candidateWriteSet?: readonly string[],
 ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
   return applyEffectiveSiblingStaleness(
     store,
-    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes),
+    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes, candidateWriteSet),
     siblings,
     nowIso,
     ttlMinutes,
@@ -2387,6 +2397,13 @@ export class TaskWorkflowService {
   private readonly repoRoot: string | undefined;
 
   /**
+   * `workflow.done_contract.test_file`: the command template (containing `{file}`) a write-set addition runs a test file with,
+   * the same one the approve-time contract used. Set by the composition root ({@link setTestFileTemplate}); absent on a bare
+   * construction, where deriving an addition for a changed test file fails loud instead of guessing a command.
+   */
+  private testFileTemplate: string | undefined;
+
+  /**
    * Narrow port resolving the AC ids declared on a plan's parent spec — implemented
    * by `CorpusService.resolveDeclaredAcIds` and injected here (never imported
    * directly: services don't cross-import — SPEC-038 §7 D4). Defaults to a stub that
@@ -3142,6 +3159,14 @@ export class TaskWorkflowService {
     if (!sessionIdResult.ok) return sessionIdResult;
     const sessionId = sessionIdResult.value;
 
+    // reason: AC-DCS1-10 — the declared write set is validated with the anchor grammar before anything is read or written.
+    let declaredWriteSet: string[] | undefined;
+    if (opts.writeSet !== undefined) {
+      const normalized = normalizeWriteSet(opts.writeSet);
+      if (!normalized.ok) return normalized;
+      declaredWriteSet = normalized.value;
+    }
+
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
@@ -3179,7 +3204,7 @@ export class TaskWorkflowService {
     // the exact same "now", within one claim() call.
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(task, opts, nowIso);
+    const gateResult = await this.enforceClaimGate(task, opts, nowIso, declaredWriteSet);
     if (!gateResult.ok) return gateResult;
 
     const holderResult = await this.refuseWhileWorkingCopyHoldsUnlandedTask(task, opts);
@@ -3273,6 +3298,7 @@ export class TaskWorkflowService {
         ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
         // reason: the landing predicate's start — a branch claim's base commit, a no-branch claim's main head.
         ...(startHead !== undefined ? { start_head: startHead } : {}),
+        ...(declaredWriteSet !== undefined ? { write_set: declaredWriteSet } : {}),
         // reason: BR-1040 — the claim always names the run that took it; the store refuses one that does not (BR-1352).
         harness_run: claimant.harnessRun,
       },
@@ -3366,7 +3392,7 @@ export class TaskWorkflowService {
     // caller observing success) — documented, not eliminated: closing it fully would
     // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
     // 不引入 daemon/锁表/mutex 行").
-    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso);
+    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso, declaredWriteSet);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -3647,6 +3673,10 @@ export class TaskWorkflowService {
 
     const newExtra: Record<string, unknown> = { ...task.extra };
     delete newExtra["claim"];
+    // reason: AC-DCS1-11 — the write-set additions are written in the SAME corpus write that releases the claim, so they survive it.
+    const withAdditions = this.contractWithClaimAdditions(task, existingClaim);
+    if (!withAdditions.ok) return withAdditions;
+    if (withAdditions.value !== undefined) newExtra["done_contract"] = withAdditions.value;
 
     const heldRunNote = `, run ${describeClaimRun(holder.harnessRun)}`;
     const endedRunResult = await this.findEndedHolderRun(existingClaim, staleHolder);
@@ -3779,6 +3809,10 @@ export class TaskWorkflowService {
       const measuredWorktree = cleanliness.status === "measured-clean" ? claim.worktree : undefined;
       const newExtra: Record<string, unknown> = { ...task.extra };
       delete newExtra["claim"];
+      // reason: AC-DCS1-11 — a run end that releases the claim writes the same additions a release does, in the same write.
+      const withAdditions = this.contractWithClaimAdditions(task, claim);
+      if (!withAdditions.ok) return withAdditions;
+      if (withAdditions.value !== undefined) newExtra["done_contract"] = withAdditions.value;
       const worktreeNote = measuredWorktree ?? "not-measured";
       const written = await this.writeTaskExtra(
         task,
@@ -4195,9 +4229,17 @@ export class TaskWorkflowService {
     const landingRecord = readTaskLanding(task.extra);
     const landedCommit = landingRecord?.landing_commit;
 
-    // The oracle set: the contract's plus added_oracles, never fewer (AC-DCS1-11), each listed once.
+    // The oracle set: the contract's plus added_oracles, never fewer (AC-DCS1-11), each listed once. While the claim exists the
+    // write-set additions are derived again here (they are written at release / run end, and a done before either still sees them).
+    const heldClaim = extractHeldClaim(task);
+    let judgedContract: DoneContract = contract;
+    if (heldClaim !== undefined) {
+      const derived = this.deriveClaimAdditions(task, heldClaim, contract);
+      if (!derived.ok) return derived;
+      judgedContract = withAddedOracles(contract, derived.value);
+    }
     const contractOracles: DoneContractOracle[] = [];
-    for (const oracle of [...contract.oracles, ...contract.added_oracles]) {
+    for (const oracle of [...judgedContract.oracles, ...judgedContract.added_oracles]) {
       if (!contractOracles.some((known) => known.id === oracle.id)) contractOracles.push(oracle);
     }
 
@@ -4402,6 +4444,54 @@ export class TaskWorkflowService {
     if (branch === undefined) return false;
     const inside = facts.isInsideBranchWorktree(callerCwd, branch);
     return inside.ok && inside.value;
+  }
+
+  /** Hands the composition root's `workflow.done_contract.test_file` template to the write-set addition derivation. */
+  setTestFileTemplate(template: string | undefined): void {
+    this.testFileTemplate = template;
+  }
+
+  /**
+   * The oracles a claim's write set adds to `contract` (AC-DCS1-11): the test files in the write set that the claim's branch
+   * changed since its start commit and the contract does not already run. A claim with no start commit (a no-branch claim) or no
+   * measurable tip has no branch work to measure and adds nothing. A git read that fails, or a changed test file with no
+   * configured test template, is an error, never an empty answer.
+   */
+  private deriveClaimAdditions(task: DocRecord, claim: TaskClaim, contract: DoneContract): Result<DoneContractOracle[], LoreError> {
+    if (contract.kind !== "code" || claim.start_head === undefined) return ok([]);
+    const tip = this.measureClaimTip(claim);
+    if (tip === undefined) return ok([]);
+    const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+    const changed = git(["diff", "--name-only", "--diff-filter=ACMR", claim.start_head, tip]);
+    if (!changed.ok) {
+      return err({ code: "VALIDATION_ERROR", field: "write_set", message: `the files the branch of "${task.slug}" changed could not be read: ${changed.reason}`, value: task.slug });
+    }
+    const changedFiles = changed.stdout.split("\n").filter((line) => line !== "");
+    const writeSet = claim.write_set ?? extractFileAnchors(task);
+    // reason: the template is needed only when a test file is actually added; probe with a placeholder-free pass first.
+    const probe = deriveWriteSetAdditions({ writeSet, changedFiles, contract, testFileTemplate: "{file}" });
+    if (probe.length === 0) return ok([]);
+    if (this.testFileTemplate === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "workflow.done_contract.test_file",
+        message: `"${task.slug}" changed test file(s) of its write set (${probe.map((oracle) => oracle.id.slice("test:".length)).join(", ")}) but workflow.done_contract.test_file is not configured, so no oracle command can be derived for them.`,
+        value: task.slug,
+      });
+    }
+    return ok(deriveWriteSetAdditions({ writeSet, changedFiles, contract, testFileTemplate: this.testFileTemplate }));
+  }
+
+  /**
+   * `task`'s stored contract with the claim's write-set additions merged in, or `undefined` when there is nothing to change
+   * (no contract, or no addition). Used by the release and the run end to write the additions in the release's own write.
+   */
+  private contractWithClaimAdditions(task: DocRecord, claim: TaskClaim): Result<DoneContract | undefined, LoreError> {
+    const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
+    if (!stored.success) return ok(undefined);
+    const additions = this.deriveClaimAdditions(task, claim, stored.data);
+    if (!additions.ok) return additions;
+    return ok(additions.value.length === 0 ? undefined : withAddedOracles(stored.data, additions.value));
   }
 
   /**
@@ -5246,6 +5336,57 @@ export class TaskWorkflowService {
   }
 
   /**
+   * Appends `paths` to the write set of the task's held claim (the edit-time declare, AC-DCS1-12): one corpus write, one version
+   * and one audit row, naming the caller. The task's `file_anchors` are never touched, so the 50-anchor cap bounds approved
+   * anchors only and a write set has no count cap. A claim that declared no write set starts from the task's approved anchors.
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param paths - repo-relative entries (anchor grammar)
+   * @param opts - `{ by, source? }`
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no held claim / bad entry), STALE_VERSION
+   */
+  async addToWriteSet(
+    idOrSlug: string,
+    paths: readonly string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._addToWriteSetImpl(idOrSlug, paths, opts.by, now);
+    this.recordEvent("task.anchors_updated", startMs, result, opts.source, { count: paths.length });
+    return result;
+  }
+
+  private async _addToWriteSetImpl(
+    idOrSlug: string,
+    paths: readonly string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+    const claim = extractHeldClaim(task);
+    if (claim === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.claim",
+        message: `Task "${task.slug}" holds no claim, so it has no write set to extend (\`lore claim ${task.slug} --worktree <branch>\`).`,
+        value: task.slug,
+      });
+    }
+    const merged = normalizeWriteSet([...(claim.write_set ?? extractFileAnchors(task)), ...paths]);
+    if (!merged.ok) return merged;
+    const nowIso = now();
+    const newExtra: Record<string, unknown> = { ...task.extra, claim: { ...claim, write_set: merged.value } };
+    return this.writeTaskExtra(task, newExtra, nowIso, by, `Write set of the claim extended by ${paths.join(", ")}`, "anchors", {
+      by,
+      write_set_added: [...paths],
+    });
+  }
+
+  /**
    * Read-modify-write DIFFERENCE: removes `anchors` from the task's existing
    * `file_anchors` (the `lore anchor rm` command, D3). `anchors` is itself
    * normalized before comparison (so `"./src/a"` matches a stored `"src/a"`) —
@@ -5924,7 +6065,9 @@ export class TaskWorkflowService {
     const anchorlessSlugs = new Set<string>();
 
     for (const task of tasks) {
-      const taskAnchors = extractFileAnchors(task);
+      // reason: AC-DCS1-10 — overlap is judged on write sets (the claim's declared set, else the approved anchors), the SAME
+      // function the claim gate's sibling context calls. The anchorless advisory below still asks about approved anchors.
+      const taskAnchors = effectiveWriteSet(task);
       const taskClaim = extractHeldClaim(task);
 
       if (taskAnchors.length > 0) {
@@ -5942,7 +6085,7 @@ export class TaskWorkflowService {
               buildClaimParty({ by: taskClaim.by, harnessRun: (taskClaim.harness_run ?? null) as RunId | null }),
             ).kind === "refresh";
           if (sameHolder) continue;
-          const otherAnchors = extractFileAnchors(other);
+          const otherAnchors = effectiveWriteSet(other);
           if (otherAnchors.length === 0) continue;
           const overlap = anchorsOverlap(taskAnchors, otherAnchors);
           if (overlap.overlaps) {
@@ -5957,7 +6100,7 @@ export class TaskWorkflowService {
 
       if (
         anyoneDeclaresAnchors &&
-        taskAnchors.length === 0 &&
+        extractFileAnchors(task).length === 0 &&
         taskClaim !== undefined &&
         !(staleByTask.get(task.id) ?? isClaimStale(taskClaim, nowIso, this.claimTtlMinutes))
       ) {
@@ -6158,6 +6301,7 @@ export class TaskWorkflowService {
     task: DocRecord,
     opts: ClaimOpts,
     nowIso: string,
+    declaredWriteSet: readonly string[] | undefined,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -6173,10 +6317,18 @@ export class TaskWorkflowService {
     }
 
     const by = opts.by;
+    // reason: AC-DCS1-10 — the candidate is judged on the write set the claim being taken will hold: the declared one, else the
+    // one a same-run refresh keeps, else every approved anchor.
+    const existingClaim = readClaimRecord(task);
+    const keptByRefresh =
+      existingClaim?.write_set !== undefined && existingClaim.harness_run != null && existingClaim.harness_run === (opts.harnessRun ?? null)
+        ? existingClaim.write_set
+        : undefined;
+    const candidateWriteSet = declaredWriteSet ?? keptByRefresh ?? extractFileAnchors(task);
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso);
+      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso, candidateWriteSet);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
@@ -6185,11 +6337,11 @@ export class TaskWorkflowService {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateWriteSet);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
       } else {
-        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateWriteSet);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
       }
@@ -6223,8 +6375,9 @@ export class TaskWorkflowService {
     task: DocRecord,
     siblings: readonly DocRecord[],
     nowIso: string,
+    candidateWriteSet?: readonly string[],
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
-    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes);
+    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateWriteSet);
   }
 
   /** {@link claimIsLive} bound to this service's store and TTL (BR-1493's "live claim" for `lore anchor scope --all`). */

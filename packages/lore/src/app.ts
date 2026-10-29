@@ -1783,6 +1783,8 @@ function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService)
 function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string): void {
   const commands = config?.workflow?.done_contract ?? {};
   app.reviewService.setDoneContractPort(new DoneContractService(store, commands, createRealDoneContractGit(repoRoot)));
+  // reason: AC-DCS1-11 — a write-set addition runs a test file with the same template the approve-time contract used.
+  app.taskWorkflowService.setTestFileTemplate(commands.test_file);
 }
 
 /**

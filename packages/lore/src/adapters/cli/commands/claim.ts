@@ -91,6 +91,11 @@ export default defineLoreCommand({
       description:
         "Baseline branch (id or slug) this worktree session may write rules/cites/maps under in the main corpus; requires --worktree (task claims only)",
     },
+    "write-set": {
+      type: "string",
+      description:
+        "[task only, repeatable] A file (or `dir/`) this claim will touch. The claim gate and `lore ready` judge overlap on write sets; without it every approved anchor is the write set. A changed test file of the write set adds an oracle to the task's contract.",
+    },
     steal: {
       type: "boolean",
       description: "Override even a fresh claim held by someone else",
@@ -124,6 +129,8 @@ export default defineLoreCommand({
         machine,
         ...(typeof args.worktree === "string" ? { worktree: args.worktree } : {}),
         ...(typeof args["corpus-scope"] === "string" ? { corpusScope: args["corpus-scope"] } : {}),
+        // reason: citty yields one string for one occurrence of a repeatable flag, an array for two or more.
+        ...(args["write-set"] !== undefined ? { writeSet: (Array.isArray(args["write-set"]) ? args["write-set"] : [args["write-set"]]).map(String) } : {}),
         steal: args.steal === true,
         source: app.callerSurface,
       };
@@ -139,6 +146,10 @@ export default defineLoreCommand({
         // passing it on would silently drop an authority the caller believes they were granted.
         if (claimOpts.corpusScope !== undefined) {
           inv.io.stderr.write("Error: --corpus-scope applies to task claims only; this target is a phase\n");
+          return 2;
+        }
+        if (claimOpts.writeSet !== undefined) {
+          inv.io.stderr.write("Error: --write-set applies to task claims only; this target is a phase\n");
           return 2;
         }
         result = await requirePhaseWorkflowService(app).claim(args.task as string, claimOpts);

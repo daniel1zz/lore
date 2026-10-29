@@ -62,6 +62,12 @@ beforeAll(async () => {
   // reason: the task-claim gate requires an approved ancestor spec (BR-104); approving one needs a live cited rule.
   await citeSpecViaAsyncCli((args) => fixture.mustRun(args), fixture.dir, undefined, fixture.spec, "AC-FX-1");
   await fixture.mustRun(["approve", fixture.spec]);
+  execFileSync("sh", ["-c", "printf '.claude/\\n' >> .git/info/exclude"], { cwd: fixture.dir });
+  // reason: the anchored test files exist on main, so a landed tree always holds every contract test file (floor missing-oracle-file).
+  mkdirSync(join(fixture.dir, "tests"), { recursive: true });
+  for (const file of [...ANCHORED, "tests/untouched.test.ts", "tests/outside.test.ts", "tests/q-1.test.ts"]) writeFileSync(join(fixture.dir, file), "// seed\n");
+  fixture.git(["add", "-A"]);
+  fixture.git(["commit", "-q", "-m", "seed test files"]);
   installShippedGuard(fixture.dir, join(mkdtempSync(join(tmpdir(), "dcs1-ws-guard-")), "hooks"));
   fixture.git(["checkout", "-q", "--detach", "main"]);
   worktreeRoot = mkdtempSync(join(tmpdir(), "dcs1-ws-wt-"));
@@ -154,8 +160,8 @@ interface ConflictShape {
 /** The anchor conflicts the ready report lists for a plan. */
 async function readyConflicts(plan: string): Promise<ConflictShape[]> {
   const out = await fixture.mustRun(["ready", plan, "--json"]);
-  const parsed = JSON.parse(out) as { data: { anchor_conflicts?: ConflictShape[] } };
-  return parsed.data.anchor_conflicts ?? [];
+  const parsed = JSON.parse(out) as { data: { ready: { anchor_conflicts: ConflictShape[] } } };
+  return parsed.data.ready.anchor_conflicts;
 }
 
 async function capturePassIn(cwd: string, slug: string, command: string, extra: readonly string[] = []): Promise<void> {
@@ -197,13 +203,14 @@ async function fixUpTask(label: string, session: string): Promise<{ slug: string
   const flags = WRITE_SET.flatMap((entry) => ["--write-set", entry]);
   const claimed = await loreIn(fixture.dir, ["claim", slug, "--worktree", tree.branch, ...flags], sessionEnv(session));
   expect(claimed.exitCode, claimed.text).toBe(0);
+  // reason: the content names the scenario, so a file an earlier scenario landed on main still changes on this branch.
   commitIn(tree, {
-    "tests/x-1.test.ts": "// one\n",
-    "tests/x-2.test.ts": "// two\n",
-    [ADDED_FILE]: "// extra test under a directory entry\n",
-    "tests/extra/notes.md": "not a test file\n",
-    "tests/outside.test.ts": "// changed, but outside the write set\n",
-    "src/other.ts": "export const other = 1;\n",
+    "tests/x-1.test.ts": `// one ${label}\n`,
+    "tests/x-2.test.ts": `// two ${label}\n`,
+    [ADDED_FILE]: `// extra test under a directory entry ${label}\n`,
+    "tests/extra/notes.md": `not a test file ${label}\n`,
+    "tests/outside.test.ts": `// changed, but outside the write set ${label}\n`,
+    "src/other.ts": `export const other = "${label}";\n`,
   });
   return { slug, plan, tree };
 }
@@ -314,7 +321,7 @@ describe("AC-DCS1-11: the write set's changed test files add oracles; the oracle
     await passFile(slug, "tests/x-2.test.ts");
 
     // The third anchored file is shown executed too (the write set did not drop it), and so is the added file.
-    const missingTwo = await fixture.run(["done", slug]);
+    const missingTwo = await loreIn(fixture.dir, ["done", slug]);
     expect(missingTwo.exitCode, missingTwo.text).toBe(4);
     expect(missingTwo.text).toContain("[floor: unfiltered-test-file]");
     expect(missingTwo.text).toContain("tests/x-3.test.ts");
@@ -323,7 +330,7 @@ describe("AC-DCS1-11: the write set's changed test files add oracles; the oracle
     expect(missingTwo.text).not.toContain("tests/outside.test.ts");
 
     await passFile(slug, "tests/x-3.test.ts");
-    const missingAdded = await fixture.run(["done", slug]);
+    const missingAdded = await loreIn(fixture.dir, ["done", slug]);
     expect(missingAdded.exitCode, missingAdded.text).toBe(4);
     expect(missingAdded.text).toContain("[floor: unfiltered-test-file]");
     expect(missingAdded.text).toContain(ADDED_FILE);
@@ -331,7 +338,7 @@ describe("AC-DCS1-11: the write set's changed test files add oracles; the oracle
     expect((await fixture.readTask(slug)).status).not.toBe("archived");
 
     await passFile(slug, ADDED_FILE);
-    const finished = await fixture.run(["done", slug]);
+    const finished = await loreIn(fixture.dir, ["done", slug]);
     expect(finished.exitCode, finished.text).toBe(0);
     expect((await fixture.readTask(slug)).status).toBe("archived");
   });
@@ -341,7 +348,7 @@ describe("AC-DCS1-11: the write set's changed test files add oracles; the oracle
     const { slug } = await fixUpTask("runend", session);
     expect((await contractOf(slug)).added_oracles).toEqual([]);
 
-    const ended = await fixture.run(["run", "end", `cc:${session}`, "--reason", "dcs1 write-set run end"]);
+    const ended = await loreIn(fixture.dir, ["run", "end", `cc:${session}`, "--reason", "dcs1 write-set run end"]);
     expect(ended.exitCode, ended.text).toBe(0);
     expect(await claimOf(slug)).toBeUndefined();
 

@@ -17,15 +17,18 @@
  */
 
 import {
+  anchorsOverlap,
   err,
   formatTaskKindRequiredMessage,
   isTaskKind,
+  isTestFileAnchor,
   ok,
   resolveRecordedGoverningSpec,
   specAcceptanceCriteriaSchema,
   type AcceptanceCriterion,
   type DocRecord,
   type DoneContract,
+  type DoneContractOracle,
   type LoreError,
   type Result,
 } from "@lore/core";
@@ -59,6 +62,63 @@ export interface ApproveContractOpts {
 /** The port `ReviewService` calls for a task approval. */
 export interface ApproveContractPort {
   compileForApprove(task: DocRecord, opts: ApproveContractOpts): Promise<Result<DoneContract, LoreError>>;
+}
+
+/**
+ * The union of the oracles a contract already added and the `additions` just derived: each id once, the existing ones first.
+ * Never removes an entry (AC-DCS1-11: the oracle set only grows).
+ *
+ * @example
+ * mergeAddedOracles([{ id: "test:a.test.ts" }], [{ id: "test:a.test.ts" }, { id: "test:b.test.ts" }]).map((o) => o.id)
+ * // => ["test:a.test.ts", "test:b.test.ts"]
+ */
+export function mergeAddedOracles(existing: readonly DoneContractOracle[], additions: readonly DoneContractOracle[]): DoneContractOracle[] {
+  const merged: DoneContractOracle[] = [...existing];
+  for (const oracle of additions) if (!merged.some((known) => known.id === oracle.id)) merged.push(oracle);
+  return merged;
+}
+
+/** `contract` with `additions` merged into its added oracles; every other field is untouched. */
+export function withAddedOracles(contract: DoneContract, additions: readonly DoneContractOracle[]): DoneContract {
+  return {
+    ...contract,
+    added_oracles: mergeAddedOracles(contract.added_oracles, additions),
+  };
+}
+
+/** What {@link deriveWriteSetAdditions} reads. */
+export interface WriteSetAdditionsInput {
+  /** The claim's write set: the declared entries (file, `dir/`, `path#Symbol`), else the task's approved anchors. */
+  readonly writeSet: readonly string[];
+  /** The repo-relative files the claim's branch changed since its start commit (added, copied, modified, renamed). */
+  readonly changedFiles: readonly string[];
+  /** The contract the oracles are added to. */
+  readonly contract: DoneContract;
+  /** `workflow.done_contract.test_file`, a command template containing `{file}`. */
+  readonly testFileTemplate: string;
+}
+
+/**
+ * The oracles a claim's write set adds to the contract: each test file that lies in the write set (a file entry, or a file under
+ * a directory entry), that the branch changed, and that the contract does not already run becomes `test:<path>` running the
+ * file unfiltered through the same template the contract's own test oracles use. A test file declared but not changed adds
+ * nothing; a changed file outside the write set adds nothing. Pure.
+ *
+ * @example
+ * deriveWriteSetAdditions({ writeSet: ["tests/"], changedFiles: ["tests/a.test.ts", "src/a.ts"], contract, testFileTemplate: "run {file}" })
+ * // => [{ id: "test:tests/a.test.ts", command: "run tests/a.test.ts" }]  (when the contract does not run it already)
+ */
+export function deriveWriteSetAdditions(input: WriteSetAdditionsInput): DoneContractOracle[] {
+  const known = new Set([...input.contract.oracles, ...input.contract.added_oracles].map((oracle) => oracle.id));
+  const additions: DoneContractOracle[] = [];
+  for (const file of input.changedFiles) {
+    if (!isTestFileAnchor(file)) continue;
+    const id = `test:${file}`;
+    if (known.has(id) || additions.some((added) => added.id === id)) continue;
+    if (!anchorsOverlap([file], [...input.writeSet]).overlaps) continue;
+    additions.push({ id, command: input.testFileTemplate.split("{file}").join(file) });
+  }
+  return additions;
 }
 
 export class DoneContractService implements ApproveContractPort {
