@@ -334,3 +334,70 @@ describe("AC-DCS1-9: the three done_contract config keys are validated and set f
     }
   });
 });
+
+describe("AC-DCS1-3: --falsifier-new-symbol marks a falsifier whose literal does not exist yet", () => {
+  const FALSIFIER_FLAGS = ["--falsifier-path", "src/new-thing.ts", "--falsifier-find", "NEW_THING", "--falsifier-replace", "", "--falsifier-exit-code", "7"] as const;
+  const SCRIPT_BASE = ["--mode", "script", "--oracle", "test", "--command", "echo dcs13"] as const;
+  const FOUR_FLAGS = ["--falsifier-path", "--falsifier-find", "--falsifier-replace", "--falsifier-exit-code"] as const;
+
+  async function listedVerify(id: string): Promise<Record<string, unknown>> {
+    const listed = JSON.parse(await fixture.mustRun(["ac", "list", fixture.spec, "--json"])) as {
+      data: { criteria: Array<{ id: string; verify: Record<string, unknown> }> };
+    };
+    const found = listed.data.criteria.find((c) => c.id === id);
+    if (found === undefined) throw new Error(`criterion ${id} not listed`);
+    return found.verify;
+  }
+
+  async function listedFalsifier(id: string): Promise<Record<string, unknown>> {
+    return (await listedVerify(id))["falsifier"] as Record<string, unknown>;
+  }
+
+  it("AC-DCS1-3: ac add with the flag and the four falsifier flags stores new_symbol true, which ac list prints (JSON and readable)", async () => {
+    await fixture.mustRun(["ac", "add", fixture.spec, "AC-NS-1", "--statement", "Marked.", ...SCRIPT_BASE, ...FALSIFIER_FLAGS, "--falsifier-new-symbol"]);
+    const falsifier = await listedFalsifier("AC-NS-1");
+    expect(falsifier["new_symbol"]).toBe(true);
+    expect(falsifier["path"]).toBe("src/new-thing.ts");
+    expect(falsifier["expected_exit_code"]).toBe(7);
+    const readable = await fixture.mustRun(["ac", "list", fixture.spec]);
+    const line = readable.split("\n").find((l) => l.includes("AC-NS-1")) ?? "";
+    expect(line, readable).toContain("new_symbol");
+  });
+
+  it("AC-DCS1-3: an AC added without the flag carries no new_symbol key and its readable line has no mark (the false green: the flag stored on every falsifier)", async () => {
+    await fixture.mustRun(["ac", "add", fixture.spec, "AC-NS-2", "--statement", "Unmarked.", ...SCRIPT_BASE, ...FALSIFIER_FLAGS]);
+    const falsifier = await listedFalsifier("AC-NS-2");
+    expect(Object.keys(falsifier)).not.toContain("new_symbol");
+    const readable = await fixture.mustRun(["ac", "list", fixture.spec]);
+    const line = readable.split("\n").find((l) => l.includes("AC-NS-2")) ?? "";
+    expect(line, readable).not.toContain("new_symbol");
+  });
+
+  it("AC-DCS1-3: ac set with the flag and the four flags stores it; a later set of the four without the flag clears it", async () => {
+    await fixture.mustRun(["ac", "set", fixture.spec, "AC-NS-2", ...FALSIFIER_FLAGS, "--falsifier-new-symbol"]);
+    expect((await listedFalsifier("AC-NS-2"))["new_symbol"]).toBe(true);
+    await fixture.mustRun(["ac", "set", fixture.spec, "AC-NS-2", ...FALSIFIER_FLAGS]);
+    expect(Object.keys(await listedFalsifier("AC-NS-2"))).not.toContain("new_symbol");
+  });
+
+  it("AC-DCS1-3: --falsifier-new-symbol without the four flags exits 2 naming them and writes nothing (add and set)", async () => {
+    const versionBefore = (await fixture.readTask(fixture.spec)).version;
+    const verifyBefore = JSON.stringify(await listedVerify("AC-NS-1"));
+
+    const addAlone = await fixture.run(["ac", "add", fixture.spec, "AC-NS-3", "--statement", "Alone.", ...SCRIPT_BASE, "--falsifier-new-symbol"]);
+    expect(addAlone.exitCode, addAlone.stderr).toBe(2);
+    for (const flag of FOUR_FLAGS) expect(addAlone.stderr).toContain(flag);
+
+    const addPartial = await fixture.run(["ac", "add", fixture.spec, "AC-NS-3", "--statement", "Partial.", ...SCRIPT_BASE, "--falsifier-path", "src/x.ts", "--falsifier-new-symbol"]);
+    expect(addPartial.exitCode, addPartial.stderr).toBe(2);
+
+    const setAlone = await fixture.run(["ac", "set", fixture.spec, "AC-NS-1", "--falsifier-new-symbol"]);
+    expect(setAlone.exitCode, setAlone.stderr).toBe(2);
+    for (const flag of FOUR_FLAGS) expect(setAlone.stderr).toContain(flag);
+
+    const listed = JSON.parse(await fixture.mustRun(["ac", "list", fixture.spec, "--json"])) as { data: { criteria: Array<{ id: string }> } };
+    expect(listed.data.criteria.map((c) => c.id)).not.toContain("AC-NS-3");
+    expect(JSON.stringify(await listedVerify("AC-NS-1"))).toBe(verifyBefore);
+    expect((await fixture.readTask(fixture.spec)).version).toBe(versionBefore);
+  });
+});
