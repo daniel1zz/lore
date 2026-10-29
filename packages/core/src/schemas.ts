@@ -16,6 +16,7 @@ import { uatVerdictSchema } from "./uat.js";
 import { milestoneReviewSchema } from "./milestone-review.js";
 import { prdRequirementsSchema } from "./requirement.js";
 import { SPEC_KINDS } from "./spec-kind.js";
+import { TASK_KINDS } from "./done-contract.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
 import { WEIGHT_TABLE_KINDS } from "./decision-record.js";
@@ -399,6 +400,14 @@ export const taskExtraSchema = z
      * Source: task-red-first-discipline-is-asked-for-in-prose-but-never
      */
     red_first: z.boolean().optional(),
+    /**
+     * The task kind (`code` | `check` | `corpus`, ledger D28). Required by every creation surface (`lore create task --kind`,
+     * `lore issue adopt --kind`, the HTTP create route); stays OPTIONAL in this shape because tasks created before the kind
+     * existed carry none and must still parse. Writable on a draft only (`lore set <task> --kind`); once the task is
+     * approved the kind is immutable (`DEDICATED_EXTRA_KEYS`, refusal `kind-locked`).
+     * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets AC-DCS1-4.
+     */
+    kind: z.enum(TASK_KINDS).optional(),
     /**
      * Bi-temporal validity metadata (SPEC-043 D1) — a task is a SECOND
      * eligible type alongside knowledge/adr as of

@@ -22,7 +22,7 @@
  */
 
 import { isInvalidated } from "@lore/core";
-import type { CreateDocInput, DocRecord, Slug } from "@lore/core";
+import type { CreateDocInput, DocRecord, Slug, TaskKind } from "@lore/core";
 
 import type { GithubListedIssue } from "./github-intake-port.js";
 import { namesIssue } from "./github-issue-listing.js";
@@ -83,6 +83,8 @@ export interface CarrierTaskParams {
   readonly slug: Slug;
   /** The live plan the task joins; `undefined` for an ad-hoc task (parented to the root PRD by `CorpusService`). */
   readonly planId?: string;
+  /** The carrier task's kind (AC-DCS1-4: every creation path names one). */
+  readonly kind: TaskKind;
 }
 
 /**
@@ -91,7 +93,7 @@ export interface CarrierTaskParams {
  * `ac_scope` (an adopted defect claims no acceptance criterion; the declaration is mandatory when the plan's spec has script ACs).
  */
 export function buildCarrierTaskInput(params: CarrierTaskParams): CreateDocInput {
-  const { issue, repo, repoId, slug, planId } = params;
+  const { issue, repo, repoId, slug, planId, kind } = params;
   const content = [
     `GitHub issue: https://github.com/${repo}/issues/${issue.number}`,
     "",
@@ -103,6 +105,8 @@ export function buildCarrierTaskInput(params: CarrierTaskParams): CreateDocInput
     title: issue.title,
     content,
     slug,
-    ...(planId !== undefined ? { parent_id: planId, extra: { plan_id: planId, ac_scope: [], issues } } : { extra: { adhoc: true, ac_scope: [], issues } }),
+    ...(planId !== undefined
+      ? { parent_id: planId, extra: { plan_id: planId, ac_scope: [], issues, kind } }
+      : { extra: { adhoc: true, ac_scope: [], issues, kind } }),
   };
 }

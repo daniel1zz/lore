@@ -27,7 +27,7 @@ import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
-import { isActivePlan } from "@lore/core";
+import { formatTaskKindRequiredMessage, isActivePlan, isTaskKind } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
 import { computeValidityState } from "../../flows/validity-state.js";
@@ -389,6 +389,32 @@ async function handleListDocs(url: URL, app: App): Promise<Response> {
   return jsonOk({ ...result.value, docs, total: docs.length });
 }
 
+/**
+ * AC-DCS1-4 (BR-1488): the HTTP create route requires a task kind. The kind is read from the top-level `kind` field or from
+ * `extra.kind` (a top-level one is moved into `extra`, the only place a task stores it); a missing or unknown one is a 400
+ * naming the three kinds. Documents of any other type pass through untouched.
+ *
+ * @param body - the parsed request body
+ * @returns the input to create, or the refusal (a `VALIDATION_ERROR` on field `kind`)
+ */
+function requireTaskKindOnCreate(
+  body: Record<string, unknown>,
+):
+  | { readonly ok: true; readonly input: CreateDocInput }
+  | { readonly ok: false; readonly error: { code: "VALIDATION_ERROR"; field: string; message: string } } {
+  if (body["type"] !== "task") return { ok: true, input: body as unknown as CreateDocInput };
+  const extra = typeof body["extra"] === "object" && body["extra"] !== null ? (body["extra"] as Record<string, unknown>) : {};
+  const { kind: topLevelKind, ...rest } = body;
+  const kind = topLevelKind ?? extra["kind"];
+  if (!isTaskKind(kind)) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION_ERROR", field: "kind", message: formatTaskKindRequiredMessage(kind, "kind") },
+    };
+  }
+  return { ok: true, input: { ...rest, extra: { ...extra, kind } } as unknown as CreateDocInput };
+}
+
 async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Promise<Response> {
   const body = await parseJsonBody(req);
   if (body === null || typeof body !== "object") {
@@ -408,7 +434,9 @@ async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Pro
   // is the single cookie-vs-bearer attribution policy seam (see auth.ts). Cookie
   // sessions get the full resolveActor chain + doc/version created_by attribution;
   // bearer sessions keep the pre-existing `by: actor.name` (API key name) behavior.
-  const result = await app.corpusService.create(body as CreateDocInput, resolveDocWriteOpts(actor));
+  const kindChecked = requireTaskKindOnCreate(body as Record<string, unknown>);
+  if (!kindChecked.ok) return jsonError(kindChecked.error, 400);
+  const result = await app.corpusService.create(kindChecked.input, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);
 }

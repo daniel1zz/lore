@@ -42,7 +42,15 @@ import {
 } from "../../../service/issue-verdict.js";
 import { classifyFeedbackUpstream, resolveGithubIssueListing, resolveGithubStatusRows } from "../report-issue-wiring.js";
 import { invocationOf } from "../command-invocation.js";
-import { buildUnconfiguredUpstreamRemedy, isInvalidated, type DocRecord, type LoreError } from "@lore/core";
+import {
+  TASK_KINDS,
+  buildUnconfiguredUpstreamRemedy,
+  formatTaskKindRequiredMessage,
+  isInvalidated,
+  isTaskKind,
+  type DocRecord,
+  type LoreError,
+} from "@lore/core";
 import { printLine } from "../output.js";
 
 /** The verdicts `resolve --state` accepts, rendered once for every refusal and the help text. */
@@ -168,6 +176,10 @@ export default defineLoreCommand({
           type: "string",
           description: "Live plan (id or slug) the task joins; omitted: an ad-hoc task under the root PRD",
         },
+        kind: {
+          type: "string",
+          description: `Kind of the carrier task: ${TASK_KINDS.join(" | ")} (required, no default; AC-DCS1-4)`,
+        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -177,6 +189,12 @@ export default defineLoreCommand({
         const inv = invocationOf(context);
         const { args } = context;
         const argRecord = args as unknown as Record<string, unknown>;
+        // AC-DCS1-4 (BR-1488): argv-decidable, so a usage error (exit 2) before the app loads or GitHub is contacted.
+        const kindArg = readStringArg(argRecord, "kind");
+        if (!isTaskKind(kindArg)) {
+          inv.io.stderr.write(`Error: ${formatTaskKindRequiredMessage(kindArg, "--kind")} Nothing was created.\n`);
+          return 2;
+        }
         const rawNumber = readStringArg(argRecord, "number");
         const issueNumber = Number(rawNumber);
         if (!/^[1-9]\d*$/.test(rawNumber) || !Number.isSafeInteger(issueNumber)) {
@@ -269,7 +287,7 @@ export default defineLoreCommand({
 
           const by = resolveActor(inv);
           const createResult = await app.corpusService.create(
-            buildCarrierTaskInput({ issue, repo: cfg.repo, repoId, slug: decision.slug, ...(planId !== undefined ? { planId } : {}) }),
+            buildCarrierTaskInput({ issue, repo: cfg.repo, repoId, slug: decision.slug, kind: kindArg, ...(planId !== undefined ? { planId } : {}) }),
             { by },
           );
           if (!createResult.ok) {

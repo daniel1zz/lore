@@ -25,6 +25,11 @@ context:
 # the gate and never dogfooded it. An oracle counts as covered iff at least
 # one declared AC binds verify.mode=script to that oracle.
 workflow:
+  # The three commands a task's done contract runs (AC-DCS1-9): written into the contract by `lore approve`.
+  done_contract:
+    install: "bun install --frozen-lockfile"
+    typecheck: "bun run typecheck"
+    test_file: "bun run test:file {file}"
   # Main moves only through `lore integrate` (adr-main-advances-only-by-lore-integrate-per-session).
   # The floor runs in the session's fresh integration worktree: install deps, then the code-only floor
   # (check:static minus the corpus-dependent checks, scripts/run-chain.ts CORPUS_DEPENDENT_CHECKS).
