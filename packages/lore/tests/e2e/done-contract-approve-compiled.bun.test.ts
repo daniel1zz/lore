@@ -24,7 +24,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as yaml from "yaml";
-import { createApp } from "../../src/app";
+import { createApp, type App } from "../../src/app";
 import { handleApiRoute } from "../../src/adapters/http/routes";
 import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
@@ -70,7 +70,7 @@ async function docId(slug: string): Promise<string> {
 }
 
 /** The real application over the fixture corpus, for the HTTP routes (the same App `lore serve` mounts). */
-function openApp(): ReturnType<typeof createApp> {
+function openApp(): App {
   return createApp(join(fixture.dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
 }
 

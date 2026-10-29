@@ -373,7 +373,7 @@ describe("POST /api/docs", () => {
     });
 
     it("returns 422 for a task without parent_id (type-specific validation)", async () => {
-      const { req, url } = makePostRequest("/api/docs", { type: "task", title: "Orphan Task", extra: { plan_id: "p" } });
+      const { req, url } = makePostRequest("/api/docs", { type: "task", title: "Orphan Task", extra: { plan_id: "p", kind: "code" } });
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
       expect(res).not.toBeNull();
       expect(res!.status).toBe(422);

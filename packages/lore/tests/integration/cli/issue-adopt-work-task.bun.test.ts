@@ -89,7 +89,7 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
     const slug = `task-issue-${STUB_REPO_ID}-7`;
     const before = await taskCount(fixture);
     fixture.resetLog();
-    const result = await fixture.run(["issue", "adopt", "7", "--plan", livePlanSlug]);
+    const result = await fixture.run(["issue", "adopt", "7", "--plan", livePlanSlug, "--kind", "code"]);
     expect(result.exitCode, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain(slug);
 
@@ -115,7 +115,7 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
   it(`${SPEC}#AC-GS-7 a second identical run prints 'Already adopted: <slug>', exits 0 and creates nothing`, async () => {
     const slug = `task-issue-${STUB_REPO_ID}-7`;
     const before = await taskCount(fixture);
-    const result = await fixture.run(["issue", "adopt", "7", "--plan", livePlanSlug]);
+    const result = await fixture.run(["issue", "adopt", "7", "--plan", livePlanSlug, "--kind", "code"]);
     expect(result.exitCode, result.stderr + result.stdout).toBe(0);
     expect(result.stdout.trim()).toBe(`Already adopted: ${slug}`);
     expect(await taskCount(fixture)).toBe(before);
@@ -128,8 +128,8 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
     // (empty) and decided `create`, so the loser can only be saved by the DUPLICATE_SLUG arbiter, not by seeing the winner.
     fixture.armListingBarrier();
     const [first, second] = await Promise.all([
-      fixture.runSpawned(["issue", "adopt", "6", "--plan", livePlanSlug], "racer-a"),
-      fixture.runSpawned(["issue", "adopt", "6", "--plan", livePlanSlug], "racer-b"),
+      fixture.runSpawned(["issue", "adopt", "6", "--plan", livePlanSlug, "--kind", "code"], "racer-a"),
+      fixture.runSpawned(["issue", "adopt", "6", "--plan", livePlanSlug, "--kind", "code"], "racer-b"),
     ]).finally(() => fixture.disarmListingBarrier());
     expect(first.exitCode, first.stderr + first.stdout).toBe(0);
     expect(second.exitCode, second.stderr + second.stdout).toBe(0);
@@ -141,7 +141,7 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
 
   it(`${SPEC}#AC-GS-7 an archived plan exits exactly 4 and creates nothing`, async () => {
     const before = await taskCount(fixture);
-    const result = await fixture.run(["issue", "adopt", "5", "--plan", archivedPlanSlug]);
+    const result = await fixture.run(["issue", "adopt", "5", "--plan", archivedPlanSlug, "--kind", "code"]);
     expect(result.exitCode, result.stderr + result.stdout).toBe(4);
     expect(result.stderr).toContain(archivedPlanSlug);
     expect(await taskCount(fixture)).toBe(before);
@@ -149,16 +149,16 @@ describe(`${SPEC}#AC-GS-7 adopt creates one carrier task, idempotent and race-sa
 
   it(`${SPEC}#AC-GS-7 an issue closed on GitHub (#8) and an unlisted number each exit exactly 4 and create nothing`, async () => {
     const before = await taskCount(fixture);
-    const closed = await fixture.run(["issue", "adopt", "8", "--plan", livePlanSlug]);
+    const closed = await fixture.run(["issue", "adopt", "8", "--plan", livePlanSlug, "--kind", "code"]);
     expect(closed.exitCode, closed.stderr + closed.stdout).toBe(4);
-    const unlisted = await fixture.run(["issue", "adopt", "999", "--plan", livePlanSlug]);
+    const unlisted = await fixture.run(["issue", "adopt", "999", "--plan", livePlanSlug, "--kind", "code"]);
     expect(unlisted.exitCode, unlisted.stderr + unlisted.stdout).toBe(4);
     expect(await taskCount(fixture)).toBe(before);
   }, 120_000);
 
   it(`${SPEC}#AC-GS-7 without --plan an ad-hoc carrier is created under the root PRD`, async () => {
     const slug = `task-issue-${STUB_REPO_ID}-5`;
-    const result = await fixture.run(["issue", "adopt", "5"]);
+    const result = await fixture.run(["issue", "adopt", "5", "--kind", "code"]);
     expect(result.exitCode, result.stderr + result.stdout).toBe(0);
     const task = await getDoc(fixture, slug);
     expect(task.extra["adhoc"]).toBe(true);
@@ -181,7 +181,7 @@ describe("AC-IL-6 a malformed issue number is refused before GitHub is contacted
 
   it("AC-IL-6 issue adopt refuses each malformed number with exit exactly 4 naming field 'number' and the value, no gh call", async () => {
     for (const value of MALFORMED_NUMBERS) {
-      const result = await fixture.run(["issue", "adopt", value]);
+      const result = await fixture.run(["issue", "adopt", value, "--kind", "code"]);
       expect(result.exitCode, `adopt '${value}': ${result.stderr}${result.stdout}`).toBe(4);
       expect(result.stderr, `adopt '${value}'`).toContain("number");
       expect(result.stderr, `adopt '${value}'`).toContain(value);
@@ -224,11 +224,11 @@ describe("AC-IL-7 an ad-hoc adoption needs a requirements document, a plan adopt
 
   it("AC-IL-7 without --plan the adoption exits exactly 4 and the task count is unchanged; with a live --plan it exits 0", async () => {
     const before = await taskCount(fixture);
-    const refused = await fixture.run(["issue", "adopt", "5"]);
+    const refused = await fixture.run(["issue", "adopt", "5", "--kind", "code"]);
     expect(refused.exitCode, refused.stderr + refused.stdout).toBe(4);
     expect(await taskCount(fixture)).toBe(before);
 
-    const adopted = await fixture.run(["issue", "adopt", "5", "--plan", planSlug]);
+    const adopted = await fixture.run(["issue", "adopt", "5", "--plan", planSlug, "--kind", "code"]);
     expect(adopted.exitCode, adopted.stderr + adopted.stdout).toBe(0);
     expect(await taskCount(fixture)).toBe(before + 1);
   }, 180_000);
@@ -269,7 +269,7 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
     expect(prdSlug).not.toBe("");
 
     const carrier = async (title: string, n: number): Promise<string> =>
-      slugOf(await must(["create", "task", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"]));
+      slugOf(await must(["create", "task", "--adhoc", "--kind", "code", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"]));
 
     deprecatedTaskSlug = await carrier("Deprecated carrier", DEPRECATED);
     await must(["set", deprecatedTaskSlug, "--status", "deprecated"]);
@@ -295,7 +295,7 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
 
   it("AC-IL-8 an issue with a hand-written body and one with a damaged field block are adopted, the task body carrying the issue text", async () => {
     for (const [n, text] of [[HAND_WRITTEN, "Hand written text with no field block."], [DAMAGED, "Damaged block description."]] as const) {
-      const result = await fixture.run(["issue", "adopt", String(n)]);
+      const result = await fixture.run(["issue", "adopt", String(n), "--kind", "code"]);
       expect(result.exitCode, `#${n}: ${result.stderr}${result.stdout}`).toBe(0);
       const task = await fixture.run(["get", `task-issue-${STUB_REPO_ID}-${n}`], "reader");
       expect(task.exitCode, task.stderr).toBe(0);
@@ -304,7 +304,7 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
   }, 180_000);
 
   it("AC-IL-8 an issue whose only naming task is deprecated is adopted as task-issue-<repo_id>-<n>-r1", async () => {
-    const result = await fixture.run(["issue", "adopt", String(DEPRECATED)]);
+    const result = await fixture.run(["issue", "adopt", String(DEPRECATED), "--kind", "code"]);
     expect(result.exitCode, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain(`task-issue-${STUB_REPO_ID}-${DEPRECATED}-r1`);
     expect((await getDoc(fixture, `task-issue-${STUB_REPO_ID}-${DEPRECATED}-r1`)).status).toBe("draft");
@@ -313,7 +313,7 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
   it("AC-IL-8 an open issue named by an archived task, and one named by an archived plan, each exit exactly 4 naming that work and 'lore issues --sync'; nothing is created", async () => {
     const before = await taskCount(fixture);
     for (const [n, slug] of [[ARCHIVED_TASK, archivedTaskSlug], [ARCHIVED_PLAN, archivedPlanSlug]] as const) {
-      const result = await fixture.run(["issue", "adopt", String(n)]);
+      const result = await fixture.run(["issue", "adopt", String(n), "--kind", "code"]);
       expect(result.exitCode, `#${n}: ${result.stderr}${result.stdout}`).toBe(4);
       expect(result.stderr, `#${n}`).toContain(slug);
       expect(result.stderr, `#${n}`).toContain("lore issues --sync");

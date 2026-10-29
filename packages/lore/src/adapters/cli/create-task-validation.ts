@@ -95,16 +95,16 @@ export interface TaskCreateFlags {
  */
 export function checkTaskCreateRequiredFlags(flags: TaskCreateFlags): string[] {
   const kind = flags.kind;
-  // reason: the kind is required even for an --adhoc task, which relaxes only --plan-id/--parent (AC-DCS1-4).
-  const kindMissing: string[] = [];
-  if (kind === undefined || kind === "") kindMissing.push("kind");
-  if (flags.adhoc === true) return kindMissing;
   const missing: string[] = [];
-  const hasPlanId = flags.planId !== undefined && flags.planId.trim() !== "";
-  const hasParent = flags.parent !== undefined && flags.parent.trim() !== "";
-  if (!hasPlanId) missing.push("--plan-id");
-  if (!hasParent && !hasPlanId) missing.push("--parent");
-  return [...missing, ...kindMissing];
+  // reason: --adhoc relaxes only --plan-id/--parent; the kind below is required for every task, an --adhoc one included (AC-DCS1-4).
+  if (flags.adhoc !== true) {
+    const hasPlanId = flags.planId !== undefined && flags.planId.trim() !== "";
+    const hasParent = flags.parent !== undefined && flags.parent.trim() !== "";
+    if (!hasPlanId) missing.push("--plan-id");
+    if (!hasParent && !hasPlanId) missing.push("--parent");
+  }
+  if (kind === undefined || kind === "") missing.push("kind");
+  return missing;
 }
 
 /**
