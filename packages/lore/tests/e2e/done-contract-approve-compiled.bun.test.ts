@@ -27,7 +27,7 @@ import * as yaml from "yaml";
 import { createApp, type App } from "../../src/app";
 import { handleApiRoute } from "../../src/adapters/http/routes";
 import { liveAmbient, liveWriteContext } from "../live-invocation";
-import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
+import { DONE_CONTRACT_CONFIG, makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "../helpers/gh-issue-stub";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { dropLoreConfigKey, patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config";
@@ -151,6 +151,8 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
   });
 
   it("AC-DCS1-4: lore set <approved task> --kind exits 4 with kind-locked naming the writer verb, and the kind is unchanged", async () => {
+    // reason: approving a code task compiles its contract (AC-DCS1-1), which needs the three config keys.
+    fixture.setDoneContractConfig(DONE_CONTRACT_CONFIG);
     const slug = await fixture.createTask({ plan, kind: "code", title: "Approved kind lock" });
     await fixture.mustRun(["approve", slug]);
     expect((await fixture.readTask(slug)).status).toBe("approved");
@@ -167,6 +169,7 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
   });
 
   it("AC-DCS1-4: a wholesale set of extra with another kind or a done_contract is refused through the HTTP edit route and the service (kind-locked, done-contract-locked)", async () => {
+    fixture.setDoneContractConfig(DONE_CONTRACT_CONFIG);
     const slug = await fixture.createTask({ plan, kind: "code", title: "Wholesale lock" });
     await fixture.mustRun(["approve", slug]);
     const approved = await fixture.readTask(slug);
@@ -399,5 +402,354 @@ describe("AC-DCS1-3: --falsifier-new-symbol marks a falsifier whose literal does
     expect(listed.data.criteria.map((c) => c.id)).not.toContain("AC-NS-3");
     expect(JSON.stringify(await listedVerify("AC-NS-1"))).toBe(verifyBefore);
     expect((await fixture.readTask(fixture.spec)).version).toBe(versionBefore);
+  });
+});
+
+describe("AC-DCS1-4: the dashboard create route requires a kind too (BR-1488)", () => {
+  it("AC-DCS1-4: POST /api/dashboard/docs for a task without a kind answers 400 naming code, check and corpus; with a kind it stores extra.kind", async () => {
+    const planId = await docId(plan);
+    const before = await countDocs("task");
+    const base = { type: "task", title: "Dashboard task", content: "x", parent_id: planId };
+
+    const missing = await httpJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [] } });
+    expect(missing.status, JSON.stringify(missing.json)).toBe(400);
+    expect(namesAllKinds(JSON.stringify(missing.json)), JSON.stringify(missing.json)).toBe(true);
+
+    const unknown = await httpJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test" } });
+    expect(unknown.status, JSON.stringify(unknown.json)).toBe(400);
+    expect(await countDocs("task")).toBe(before);
+
+    const given = await httpJson("POST", "/api/dashboard/docs", { ...base, title: "Dashboard task kind", extra: { plan_id: planId, ac_scope: [], kind: "check" } });
+    expect(given.status, JSON.stringify(given.json)).toBe(201);
+    const created = (given.json["data"] as { doc?: { slug: string } } | undefined)?.doc ?? (given.json as { doc?: { slug: string } }).doc;
+    expect(created?.slug, JSON.stringify(given.json)).toBeDefined();
+    expect((await fixture.readTask(created?.slug ?? "")).extra["kind"]).toBe("check");
+    expect(await countDocs("task")).toBe(before + 1);
+
+    // A document that is not a task needs no kind.
+    const knowledge = await httpJson("POST", "/api/dashboard/docs", { type: "knowledge", title: "Dashboard knowledge", content: "x", parent_id: planId, extra: { sub_type: "research" } });
+    expect(knowledge.status, JSON.stringify(knowledge.json)).toBe(201);
+  });
+});
+
+// ─── The compile at approve (AC-DCS1-1, AC-DCS1-2, AC-DCS1-5) ─────────────────────────────────────────────────────
+
+/** The contract as the tests read it back from `extra.done_contract`. */
+interface StoredContract {
+  readonly compiled_at_commit: string;
+  readonly kind: string;
+  readonly base_branch: string;
+  readonly oracles: ReadonlyArray<{ id: string; command?: string }>;
+  readonly install?: string;
+  readonly red_required: boolean;
+  readonly red_waiver_reason?: string;
+  readonly landing_route: string;
+  readonly new_symbols: readonly string[];
+  readonly added_oracles: readonly unknown[];
+}
+
+describe("the done contract compiled at approve", () => {
+  let cf: DoneContractFixture;
+  let planMain = "";
+  let planIntegration = "";
+  const INTEGRATION = "dcs1-feature";
+  const TEST_FILE = "packages/demo/tests/demo.test.ts";
+  const TEST_COMMAND = `bun run test:file ${TEST_FILE}`;
+
+  beforeAll(async () => {
+    cf = await makeDoneContractFixture();
+    // A second spec whose criterion supersedes one of the first spec's (a superseded criterion gives no oracle).
+    await cf.mustRun(["ac", "add", cf.spec, "AC-FX-SUP", "--statement", "Soon superseded.", "--mode", "script", "--oracle", "test", "--command", "echo sup"]);
+    const spec2Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Two", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+    const spec2 = spec2Out.match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    await cf.mustRun(["ac", "add", spec2, "AC-FX2-1", "--statement", "Supersedes.", "--mode", "script", "--oracle", "test", "--command", "echo fx2"]);
+    await cf.mustRun(["ac", "supersede", cf.spec, "AC-FX-SUP", "--by", `${spec2}:AC-FX2-1`, "--reason", "Replaced by the second spec."]);
+
+    // The plan's integration branch exists and sits one commit ahead of main, so its tip differs from main's.
+    const tree = cf.git(["rev-parse", "HEAD^{tree}"]);
+    const ahead = cf.git(["commit-tree", tree, "-p", "HEAD", "-m", "integration tip"]);
+    cf.git(["branch", INTEGRATION, ahead]);
+
+    planMain = await cf.createPlan("Plan on main");
+    planIntegration = await cf.createPlan("Plan on integration", INTEGRATION);
+  });
+
+  afterAll(() => {
+    cf.dispose();
+  });
+
+  async function contractOf(slug: string): Promise<StoredContract> {
+    const stored = (await cf.readTask(slug)).extra["done_contract"];
+    if (stored === undefined) throw new Error(`${slug} holds no done_contract`);
+    return stored as StoredContract;
+  }
+
+  async function auditCount(slug: string): Promise<number> {
+    const parsed = JSON.parse(await cf.mustRun(["audit", slug, "--json"])) as { data: unknown };
+    const data = parsed.data as unknown[] | { entries?: unknown[] };
+    return Array.isArray(data) ? data.length : (data.entries ?? []).length;
+  }
+
+  describe("AC-DCS1-1: approve stores the compiled contract", () => {
+    it("AC-DCS1-1: a code task on a plan without an integration branch stores the exact oracle ids and commands (script AC yes; ai, human and superseded ACs none)", async () => {
+      const slug = await cf.createTask({
+        plan: planMain,
+        kind: "code",
+        title: "Contract on main",
+        anchors: [TEST_FILE, "packages/demo/src/demo.ts"],
+        acScope: ["AC-FX-1", "AC-FX-AI", "AC-FX-HUMAN", "AC-FX-SUP"],
+      });
+      const out = await cf.run(["approve", slug]);
+      expect(out.exitCode, out.stderr).toBe(0);
+
+      const task = await cf.readTask(slug);
+      expect(task.status).toBe("approved");
+      const contract = await contractOf(slug);
+      expect(contract.kind).toBe("code");
+      expect(contract.base_branch).toBe("main");
+      expect(contract.compiled_at_commit).toBe(cf.git(["rev-parse", "main"]));
+      expect(contract.landing_route).toBe("main");
+      expect(contract.install).toBe(DONE_CONTRACT_CONFIG.install);
+      expect(contract.red_required).toBe(true);
+      expect(Object.keys(contract)).not.toContain("red_waiver_reason");
+      expect(contract.new_symbols).toEqual([]);
+      expect(contract.added_oracles).toEqual([]);
+      // Exact: the false green is a contract with the right fields and a wrong or missing oracle.
+      expect(contract.oracles).toEqual([
+        { id: "ac:AC-FX-1", command: "echo fx1" },
+        { id: `test:${TEST_FILE}`, command: TEST_COMMAND },
+        { id: "typecheck", command: DONE_CONTRACT_CONFIG.typecheck },
+      ]);
+    });
+
+    it("AC-DCS1-1: a code task on a plan with an existing integration branch compiles at that branch's tip with landing_route integration-branch", async () => {
+      const slug = await cf.createTask({ plan: planIntegration, kind: "code", title: "Contract on integration", anchors: [TEST_FILE], acScope: ["AC-FX-1"] });
+      const out = await cf.run(["approve", slug]);
+      expect(out.exitCode, out.stderr).toBe(0);
+      const contract = await contractOf(slug);
+      expect(contract.base_branch).toBe(INTEGRATION);
+      expect(contract.landing_route).toBe("integration-branch");
+      expect(contract.compiled_at_commit).toBe(cf.git(["rev-parse", INTEGRATION]));
+      expect(contract.compiled_at_commit).not.toBe(cf.git(["rev-parse", "main"]));
+      expect(contract.oracles.map((o) => o.id)).toEqual(["ac:AC-FX-1", `test:${TEST_FILE}`, "typecheck"]);
+    });
+
+    it("AC-DCS1-1: a task with no anchored test file and no script AC compiles to the typecheck oracle alone", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Contract typecheck only", anchors: ["packages/demo/src/only.ts"], acScope: ["AC-FX-AI"] });
+      expect((await cf.run(["approve", slug])).exitCode).toBe(0);
+      expect((await contractOf(slug)).oracles).toEqual([{ id: "typecheck", command: DONE_CONTRACT_CONFIG.typecheck }]);
+    });
+
+    it("AC-DCS1-1: a corpus task compiles to the corpus:files-unchanged oracle (with its script ACs), route none, no red run", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "corpus", title: "Corpus contract", acScope: ["AC-FX-1"] });
+      const out = await cf.run(["approve", slug]);
+      expect(out.exitCode, out.stderr).toBe(0);
+      const contract = await contractOf(slug);
+      expect(contract.kind).toBe("corpus");
+      expect(contract.landing_route).toBe("none");
+      expect(contract.red_required).toBe(false);
+      expect(contract.base_branch).toBe("main");
+      expect(contract.oracles).toEqual([{ id: "ac:AC-FX-1", command: "echo fx1" }, { id: "corpus:files-unchanged" }]);
+    });
+
+    it("AC-DCS1-1: a check task with a script AC compiles to that AC alone", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "check", title: "Check contract", acScope: ["AC-FX-1"] });
+      const out = await cf.run(["approve", slug]);
+      expect(out.exitCode, out.stderr).toBe(0);
+      const contract = await contractOf(slug);
+      expect(contract.landing_route).toBe("none");
+      expect(contract.red_required).toBe(false);
+      expect(contract.oracles).toEqual([{ id: "ac:AC-FX-1", command: "echo fx1" }]);
+    });
+
+    it("AC-DCS1-1: lore claim of the approved task prints the stored contract (ids and commands), not a recomputed definition", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Claim prints contract", anchors: [TEST_FILE], acScope: ["AC-FX-1"] });
+      expect((await cf.run(["approve", slug])).exitCode).toBe(0);
+      const worktree = join(cf.dir, "..", `dcs1-wt-${Date.now()}`);
+      cf.git(["worktree", "add", "-q", "-b", "dcs1-claim-branch", worktree]);
+      try {
+        const claimed = await cf.run(["claim", slug, "--worktree", "dcs1-claim-branch"]);
+        expect(claimed.exitCode, claimed.stderr + claimed.stdout).toBe(0);
+        expect(claimed.stdout).toContain("ac:AC-FX-1");
+        expect(claimed.stdout).toContain("echo fx1");
+        expect(claimed.stdout).toContain(`test:${TEST_FILE}`);
+        expect(claimed.stdout).toContain(TEST_COMMAND);
+        expect(claimed.stdout).toContain("typecheck");
+        expect(claimed.stdout).toContain(cf.git(["rev-parse", "main"]).slice(0, 12));
+        expect(claimed.stdout).toMatch(/red run[^\n]*yes/i);
+      } finally {
+        await cf.run(["release", slug]);
+        cf.git(["worktree", "remove", "--force", worktree]);
+      }
+    });
+  });
+
+  describe("AC-DCS1-2: an uncompilable contract is refused with every cause, writing nothing", () => {
+    const ABSENT_LITERAL = { path: "README.md", find: "THIS_LITERAL_IS_NOT_THERE" } as const;
+
+    it("AC-DCS1-2: a code task with every cause at once exits 4 done-contract-uncompilable naming each cause in ONE message; version, status and audit are unchanged", async () => {
+      const ghostPlan = await cf.createPlan("Plan with absent branch", "dcs1-ghost-branch");
+      await cf.mustRun(["ac", "add", cf.spec, "AC-ABS-1", "--statement", "Unmarked absent literal.", "--mode", "script", "--oracle", "test", "--command", "echo abs",
+        "--falsifier-path", ABSENT_LITERAL.path, "--falsifier-find", ABSENT_LITERAL.find, "--falsifier-replace", "", "--falsifier-exit-code", "1"]);
+      await cf.mustRun(["ac", "add", cf.spec, "AC-GONE-1", "--statement", "Soon removed.", "--mode", "script", "--oracle", "test", "--command", "echo gone"]);
+      const slug = await cf.createTask({ plan: ghostPlan, kind: "code", title: "Every cause", anchors: ["packages/demo/src/not-yet.ts"], acScope: ["AC-ABS-1", "AC-GONE-1"] });
+      await cf.mustRun(["ac", "rm", cf.spec, "AC-GONE-1"]);
+      dropLoreConfigKey(cf.dir, ["workflow", "done_contract"]);
+      try {
+        const before = await cf.readTask(slug);
+        const auditBefore = await auditCount(slug);
+        const refused = await cf.run(["approve", slug]);
+        expect(refused.exitCode, refused.stderr).toBe(4);
+        const text = refused.stderr;
+        expect(text).toContain("done-contract-uncompilable");
+        for (const cause of ["no-typecheck", "no-install", "no-test-command", "base-branch-absent", "ac-unresolved", "falsifier-literal-absent"]) {
+          expect(text, `cause ${cause}`).toContain(cause);
+        }
+        expect(text).toContain("dcs1-ghost-branch");
+        expect(text).toContain("git branch dcs1-ghost-branch main"); // the command that creates it
+        expect(text).toContain("AC-GONE-1");
+        expect(text).toContain("AC-ABS-1");
+        expect(text).toContain(ABSENT_LITERAL.path);
+        expect(text).toContain(ABSENT_LITERAL.find);
+        // A non-resolving anchor is never a cause.
+        expect(text).not.toContain("not-yet.ts");
+
+        const after = await cf.readTask(slug);
+        expect(after.status).toBe("draft");
+        expect(after.version).toBe(before.version);
+        expect(Object.keys(after.extra)).not.toContain("done_contract");
+        expect(await auditCount(slug)).toBe(auditBefore);
+      } finally {
+        cf.setDoneContractConfig(DONE_CONTRACT_CONFIG);
+      }
+    });
+
+    it("AC-DCS1-2: only the causes that apply are named (one missing key names that key alone)", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "One cause", acScope: [] });
+      dropLoreConfigKey(cf.dir, ["workflow", "done_contract", "install"]);
+      try {
+        const refused = await cf.run(["approve", slug]);
+        expect(refused.exitCode, refused.stderr).toBe(4);
+        expect(refused.stderr).toContain("no-install");
+        for (const other of ["no-typecheck", "no-test-command", "base-branch-absent", "ac-unresolved", "falsifier-literal-absent", "no-oracle", "kind-anchor"]) {
+          expect(refused.stderr, `must not name ${other}`).not.toContain(other);
+        }
+        expect((await cf.readTask(slug)).status).toBe("draft");
+      } finally {
+        cf.setDoneContractConfig(DONE_CONTRACT_CONFIG);
+      }
+    });
+
+    it("AC-DCS1-2: a check task holding a file anchor and no script oracle is refused with kind-anchor and no-oracle together", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "check", title: "Check with anchor", anchors: ["packages/demo/src/x.ts"], acScope: ["AC-FX-AI"] });
+      const before = await cf.readTask(slug);
+      const refused = await cf.run(["approve", slug]);
+      expect(refused.exitCode, refused.stderr).toBe(4);
+      expect(refused.stderr).toContain("done-contract-uncompilable");
+      expect(refused.stderr).toContain("kind-anchor");
+      expect(refused.stderr).toContain("no-oracle");
+      const after = await cf.readTask(slug);
+      expect(after.status).toBe("draft");
+      expect(after.version).toBe(before.version);
+    });
+
+    it("AC-DCS1-2: a corpus task holding a file anchor is refused with kind-anchor alone (it always has corpus:files-unchanged)", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "corpus", title: "Corpus with anchor", anchors: ["packages/demo/src/y.ts"], acScope: [] });
+      const refused = await cf.run(["approve", slug]);
+      expect(refused.exitCode, refused.stderr).toBe(4);
+      expect(refused.stderr).toContain("kind-anchor");
+      expect(refused.stderr).not.toContain("no-oracle");
+    });
+
+    it("AC-DCS1-2: a check or corpus task needs none of the three config keys (only a code task does)", async () => {
+      const check = await cf.createTask({ plan: planMain, kind: "check", title: "Check without keys", acScope: ["AC-FX-1"] });
+      const corpus = await cf.createTask({ plan: planMain, kind: "corpus", title: "Corpus without keys", acScope: [] });
+      dropLoreConfigKey(cf.dir, ["workflow", "done_contract"]);
+      try {
+        expect((await cf.run(["approve", check])).exitCode).toBe(0);
+        expect((await cf.run(["approve", corpus])).exitCode).toBe(0);
+      } finally {
+        cf.setDoneContractConfig(DONE_CONTRACT_CONFIG);
+      }
+    });
+
+    it("AC-DCS1-2: a task anchoring a file it will create is approved (exit 0); a literal absent from its path is accepted and stored in new_symbols when the AC is marked --falsifier-new-symbol", async () => {
+      await cf.mustRun(["ac", "add", cf.spec, "AC-NEW-1", "--statement", "Marked new symbol.", "--mode", "script", "--oracle", "test", "--command", "echo new",
+        "--falsifier-path", "packages/demo/src/created.ts", "--falsifier-find", "brandNewSymbol", "--falsifier-replace", "", "--falsifier-exit-code", "1", "--falsifier-new-symbol"]);
+      await cf.mustRun(["ac", "add", cf.spec, "AC-PRESENT-1", "--statement", "Literal present.", "--mode", "script", "--oracle", "test", "--command", "echo present",
+        "--falsifier-path", "README.md", "--falsifier-find", "fixture", "--falsifier-replace", "", "--falsifier-exit-code", "1"]);
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Creates files", anchors: ["packages/demo/src/created.ts"], acScope: ["AC-NEW-1", "AC-PRESENT-1"] });
+      const out = await cf.run(["approve", slug]);
+      expect(out.exitCode, out.stderr).toBe(0);
+      const contract = await contractOf(slug);
+      expect(contract.new_symbols).toEqual(["AC-NEW-1"]);
+      expect(contract.oracles.map((o) => o.id)).toEqual(["ac:AC-NEW-1", "ac:AC-PRESENT-1", "typecheck"]);
+    });
+
+    it("AC-DCS1-2: an ac_scope id declared by a spec the plan implements (not its parent) resolves", async () => {
+      const spec3Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Three", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+      const spec3 = spec3Out.match(/Slug:\s+(\S+)/)?.[1] ?? "";
+      await cf.mustRun(["ac", "add", spec3, "AC-IMPL-1", "--statement", "On the implemented spec.", "--mode", "script", "--oracle", "test", "--command", "echo impl"]);
+      const plan3 = await cf.createPlan("Plan that implements spec three");
+      await cf.mustRun(["link", plan3, spec3, "--type", "implements"]);
+      const slug = await cf.createTask({ plan: plan3, kind: "check", title: "Implemented spec criterion", acScope: [] });
+      await cf.mustRun(["scope", "add", slug, "AC-IMPL-1"]);
+      const out = await cf.run(["approve", slug]);
+      expect(out.exitCode, out.stderr).toBe(0);
+      expect((await contractOf(slug)).oracles).toEqual([{ id: "ac:AC-IMPL-1", command: "echo impl" }]);
+    });
+  });
+
+  describe("AC-DCS1-5: the red run is waived once at approve", () => {
+    const REASONS = ["30 days -- a spike with no test to write first", "plain reason", "7"] as const;
+
+    it("AC-DCS1-5: approve of a code task stores red_required true and no reason", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Red required", acScope: [] });
+      expect((await cf.run(["approve", slug])).exitCode).toBe(0);
+      const contract = await contractOf(slug);
+      expect(contract.red_required).toBe(true);
+      expect(Object.keys(contract)).not.toContain("red_waiver_reason");
+    });
+
+    it("AC-DCS1-5: --red-waiver stores red_required false and the reason byte for byte (a leading digit, spaces and a double dash included)", async () => {
+      for (const reason of REASONS) {
+        const slug = await cf.createTask({ plan: planMain, kind: "code", title: `Waived ${reason.slice(0, 8)}`, acScope: [] });
+        const out = await cf.run(["approve", slug, "--red-waiver", reason]);
+        expect(out.exitCode, `${reason}: ${out.stderr}`).toBe(0);
+        const contract = await contractOf(slug);
+        expect(contract.red_required, reason).toBe(false);
+        // The false green: a parser reading the flag as a negation (or a number) drops or alters the reason and still exits 0.
+        expect(contract.red_waiver_reason, reason).toBe(reason);
+        expect(typeof contract.red_waiver_reason).toBe("string");
+      }
+    });
+
+    it("AC-DCS1-5: a blank --red-waiver reason exits 2 and writes nothing", async () => {
+      const slug = await cf.createTask({ plan: planMain, kind: "code", title: "Blank waiver", acScope: [] });
+      const before = await cf.readTask(slug);
+      const auditBefore = await auditCount(slug);
+      for (const blank of ["", "   "]) {
+        const refused = await cf.run(["approve", slug, "--red-waiver", blank]);
+        expect(refused.exitCode, `'${blank}': ${refused.stderr}`).toBe(2);
+        expect(refused.stderr).toContain("--red-waiver");
+      }
+      const after = await cf.readTask(slug);
+      expect(after.status).toBe("draft");
+      expect(after.version).toBe(before.version);
+      expect(await auditCount(slug)).toBe(auditBefore);
+    });
+
+    it("AC-DCS1-5: --red-waiver on a check or corpus task exits 4 red-waiver-not-code and writes nothing", async () => {
+      for (const kind of ["check", "corpus"] as const) {
+        const slug = await cf.createTask({ plan: planMain, kind, title: `Waiver on ${kind}`, acScope: kind === "check" ? ["AC-FX-1"] : [] });
+        const before = await cf.readTask(slug);
+        const refused = await cf.run(["approve", slug, "--red-waiver", "not applicable"]);
+        expect(refused.exitCode, `${kind}: ${refused.stderr}`).toBe(4);
+        expect(refused.stderr).toContain("red-waiver-not-code");
+        const after = await cf.readTask(slug);
+        expect(after.status).toBe("draft");
+        expect(after.version).toBe(before.version);
+      }
+    });
   });
 });
