@@ -314,19 +314,29 @@ describe("AC-AF-6 the review is re-made when its facts changed, never because ma
   });
 
   const base: FactsFingerprintInput = {
-    landingResultIds: [{ landing: "c1", id: "r1" }],
-    attestationIds: [{ subject: "spec:AC-1", id: "t@1" }],
+    headSuiteResultId: "r1",
+    singleFileRunIds: [{ key: "a.test.ts@c1:bisect", id: "t1#1" }],
+    criteriaAttestationIds: [{ subject: "spec:AC-1", id: "t@1" }],
     citedRules: [{ rule_id: "BR-1", state: "verified" }],
     promptVersion: "milestone-6",
-    regressionUncleared: false,
   };
 
-  it("AC-AF-6 the facts fingerprint changes with a landing's suite result id", () => {
-    expect(milestoneFactsFingerprint({ ...base, landingResultIds: [{ landing: "c1", id: "r2" }] })).not.toBe(milestoneFactsFingerprint(base));
+  it("AC-AF-6 the facts fingerprint changes with the head suite result id", () => {
+    expect(milestoneFactsFingerprint({ ...base, headSuiteResultId: "r2" })).not.toBe(milestoneFactsFingerprint(base));
   });
 
-  it("AC-AF-6 the facts fingerprint changes with a criterion's deciding attestation id", () => {
-    expect(milestoneFactsFingerprint({ ...base, attestationIds: [{ subject: "spec:AC-1", id: "t@2" }] })).not.toBe(milestoneFactsFingerprint(base));
+  it("AC-AF-6 the facts fingerprint changes with a single-file run it read", () => {
+    expect(milestoneFactsFingerprint({ ...base, singleFileRunIds: [{ key: "a.test.ts@c1:bisect", id: "t2#0" }] })).not.toBe(milestoneFactsFingerprint(base));
+    expect(milestoneFactsFingerprint({ ...base, singleFileRunIds: [] })).not.toBe(milestoneFactsFingerprint(base));
+  });
+
+  it("AC-AF-6 a head suite that was not run differs from one that was", () => {
+    const { headSuiteResultId: _omitted, ...withoutHead } = base;
+    expect(milestoneFactsFingerprint(withoutHead)).not.toBe(milestoneFactsFingerprint(base));
+  });
+
+  it("AC-AF-6 the facts fingerprint changes with a criterion's attestation id at the assessed commit", () => {
+    expect(milestoneFactsFingerprint({ ...base, criteriaAttestationIds: [{ subject: "spec:AC-1", id: "t@2" }] })).not.toBe(milestoneFactsFingerprint(base));
   });
 
   it("AC-AF-6 the facts fingerprint changes with a cited rule's state", () => {
@@ -337,26 +347,16 @@ describe("AC-AF-6 the review is re-made when its facts changed, never because ma
     expect(milestoneFactsFingerprint({ ...base, promptVersion: "milestone-7" })).not.toBe(milestoneFactsFingerprint(base));
   });
 
-  it("AC-AF-6 the newest main suite result matters only while regression has uncleared files", () => {
-    // nothing uncleared: a newer stored main result (another clearing id) changes nothing
-    expect(milestoneFactsFingerprint({ ...base, clearingResultId: "main-2" })).toBe(milestoneFactsFingerprint({ ...base, clearingResultId: "main-1" }));
-    expect(milestoneFactsFingerprint({ ...base, clearingResultId: "main-1" })).toBe(milestoneFactsFingerprint(base));
-    // uncleared files: a newer stored main result changes it
-    const uncleared = { ...base, regressionUncleared: true };
-    expect(milestoneFactsFingerprint({ ...uncleared, clearingResultId: "main-2" })).not.toBe(milestoneFactsFingerprint({ ...uncleared, clearingResultId: "main-1" }));
-    expect(milestoneFactsFingerprint({ ...uncleared, clearingResultId: "main-1" })).not.toBe(milestoneFactsFingerprint({ ...base, clearingResultId: "main-1" }));
-  });
-
-  it("AC-AF-6 REGRESSION: main's HEAD alone is not an input (no field of the input can carry it) and key order is irrelevant", () => {
-    expect(Object.keys(base).sort()).toEqual(["attestationIds", "citedRules", "landingResultIds", "promptVersion", "regressionUncleared"]);
+  it("AC-AF-6 REGRESSION: main's HEAD alone is not an input (no field of the input can carry it), no retired field exists, and key order is irrelevant", () => {
+    expect(Object.keys(base).sort()).toEqual(["citedRules", "criteriaAttestationIds", "headSuiteResultId", "promptVersion", "singleFileRunIds"]);
     const reordered: FactsFingerprintInput = {
       ...base,
-      landingResultIds: [{ landing: "c2", id: "r2" }, { landing: "c1", id: "r1" }],
+      singleFileRunIds: [{ key: "b@c:bisect", id: "2" }, { key: "a@c:bisect", id: "1" }],
       citedRules: [{ rule_id: "BR-2", state: "stale" }, { rule_id: "BR-1", state: "verified" }],
     };
     const sorted: FactsFingerprintInput = {
       ...base,
-      landingResultIds: [{ landing: "c1", id: "r1" }, { landing: "c2", id: "r2" }],
+      singleFileRunIds: [{ key: "a@c:bisect", id: "1" }, { key: "b@c:bisect", id: "2" }],
       citedRules: [{ rule_id: "BR-1", state: "verified" }, { rule_id: "BR-2", state: "stale" }],
     };
     expect(milestoneFactsFingerprint(reordered)).toBe(milestoneFactsFingerprint(sorted));

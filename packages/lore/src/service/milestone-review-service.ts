@@ -177,12 +177,11 @@ export function selectPlanMilestoneDecisions(
 /** The facts fingerprint of one review: what its verdict read beyond the plan's own state (AC-AF-6). */
 function factsFingerprintOf(facts: MilestoneFacts | undefined, cited: readonly CitedRuleStateRow[]): string {
   return milestoneFactsFingerprint({
-    landingResultIds: facts?.landing_result_ids ?? [],
-    attestationIds: facts?.attestation_ids ?? [],
+    ...(facts?.head_suite_result_id !== undefined ? { headSuiteResultId: facts.head_suite_result_id } : {}),
+    singleFileRunIds: facts?.single_file_run_ids ?? [],
+    criteriaAttestationIds: facts?.criteria_attestation_ids ?? [],
     citedRules: cited.map((r) => ({ rule_id: r.rule_id, state: r.state })),
     promptVersion: MILESTONE_REVIEW_PROMPT_VERSION,
-    regressionUncleared: (facts?.regression_files?.length ?? 0) > 0,
-    ...(facts?.clearing_result_id !== undefined ? { clearingResultId: facts.clearing_result_id } : {}),
   });
 }
 
@@ -392,6 +391,7 @@ export class MilestoneReviewService {
       fingerprint: planStateFingerprint(bundle.plan, bundle.tasks, bundle.spec),
       ...(causes !== undefined ? { causes } : {}),
       ...(opts.facts?.assessed_commit !== undefined ? { assessed_commit: opts.facts.assessed_commit } : {}),
+      ...(opts.facts?.criteria_run !== undefined ? { criteria_run: opts.facts.criteria_run } : {}),
       ...(opts.facts?.failing_fact_files !== undefined && opts.facts.failing_fact_files.length > 0 ? { failing_fact_files: [...new Set(opts.facts.failing_fact_files)].sort() } : {}),
       overall: overallMilestoneVerdict(dimensions),
       dimensions,

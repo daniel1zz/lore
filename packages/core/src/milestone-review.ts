@@ -147,14 +147,22 @@ export interface AiCriterionInput {
 }
 
 /**
+ * Which worktree ran the plan's script criteria: the review's suite worktree (`suite`), or a throwaway worktree at the assessed
+ * commit made for the criteria alone (`own`) with the reason the suite worktree was not used (a stored head result means no
+ * suite worktree exists; or the suite worktree's work failed).
+ */
+export const criteriaRunRecordSchema = z.object({ worktree: z.enum(["suite", "own"]), reason: z.string().min(1).optional() });
+export type CriteriaRunRecord = z.infer<typeof criteriaRunRecordSchema>;
+
+/**
  * The measured facts the judgment prompt carries as a table and the review reads to compute the facts dimensions.
  * Each part is optional: a part nobody measured is absent, which the review reports as not measured, never as pass.
  */
 export interface MilestoneFacts {
   /** Script criteria attestation (`correctness_vs_acs` input). */
   readonly attestation?: readonly MilestoneFactRow[];
-  /** The evidence row that decided each criterion (`subject` = `<spec>:<ac>`); the review fingerprint hashes these (BR-1498). */
-  readonly attestation_ids?: readonly { readonly subject: string; readonly id: string }[];
+  /** The attestation made at the assessed commit that decided each criterion (`subject` = `<spec>:<ac>`); the review fingerprint hashes these (BR-1498). */
+  readonly criteria_attestation_ids?: readonly { readonly subject: string; readonly id: string }[];
   /** Regression at the assessed commit: one row for the head suite, one per red file (BR-1496). */
   readonly regression?: readonly MilestoneFactRow[];
   /** Files charged to the plan as regressions (the regression finding's root cause), from `regression-at-head`. */
@@ -169,13 +177,12 @@ export interface MilestoneFacts {
   readonly unlanded_tasks?: readonly string[];
   /** AI-mode criteria of the plan's task scopes. */
   readonly ai_criteria?: readonly AiCriterionInput[];
-  /**
-   * The stored results the verdict read, hashed by the review fingerprint (BR-1497, AC-AF-6). `landing` is the key:
-   * the assessed commit (its suite result id) and `<file>@<commit>:<kind>` for each single-file run read.
-   */
-  readonly landing_result_ids?: readonly { readonly landing: string; readonly id: string }[];
-  /** Retired: regression is no longer cleared against a later main result (it is measured at main's head). Never set. */
-  readonly clearing_result_id?: string;
+  /** The stored suite result id at the assessed commit (BR-1497); the review fingerprint hashes it. Absent when the head suite was not run. */
+  readonly head_suite_result_id?: string;
+  /** Every stored single-file run the regression verdict read or made, keyed `<file>@<commit>:<kind>`; the review fingerprint hashes them (BR-1496). */
+  readonly single_file_run_ids?: readonly { readonly key: string; readonly id: string }[];
+  /** Where the criteria ran and why that worktree; stored on the review so a fallback from the suite's worktree is never silent (BR-1498). */
+  readonly criteria_run?: CriteriaRunRecord;
 }
 
 /** What the judgment layer did, stored on the review: calls, tokens, time, and the files no call showed. */
@@ -277,14 +284,16 @@ export const milestoneReviewSchema = z.object({
   traced_decisions: z.array(tracedDecisionSchema).optional(),
   /** Main's head when the review measured; the batch compares it with main to see whether a landing touched `failing_fact_files`. Absent on a review stored before it existed. */
   assessed_commit: z.string().min(1).optional(),
+  /** Which worktree ran the criteria and why (absent when no criterion was run or the review predates the field). */
+  criteria_run: criteriaRunRecordSchema.optional(),
   /** Files named by the failing facts, sorted; absent when nothing failed or the review predates the field. */
   failing_fact_files: z.array(z.string().min(1)).optional(),
   /** The judgment layer's calls, tokens, time and unseen files; absent on a review stored before it was recorded. */
   judgment: judgmentRecordSchema.optional(),
   prompt_version: z.string().min(1),
   /**
-   * Fingerprint of the measured facts this review read (suite result ids, deciding attestation ids, cited-rule states,
-   * prompt version, clearing result). `fingerprint` stays the plan-state fingerprint plan close compares; the batch
+   * Fingerprint of the measured facts this review read (head suite result id, single-file run ids, criteria attestation ids made at
+   * the assessed commit, cited-rule states, prompt version). `fingerprint` stays the plan-state fingerprint plan close compares; the batch
    * re-reviews when this one changes. Absent on a review stored before it existed (then re-made once).
    */
   facts_fingerprint: z.string().min(1).optional(),
@@ -358,7 +367,7 @@ export function failedDimensions(dimensions: LlmMilestoneOutput["dimensions"]): 
 
 /** Deterministic Markdown of a stored review; its SSOT is `extra.milestone_review`. */
 export function renderMilestoneReviewContent(review: MilestoneReview): string {
-  const lines = [`# Milestone review: ${review.overall.toUpperCase()}`, "", `Fingerprint: ${review.fingerprint}`, `Diff: ${review.diff_source}`, ""];
+  const lines = [`# Milestone review: ${review.overall.toUpperCase()}`, "", `Fingerprint: ${review.fingerprint}`, `Diff: ${review.diff_source}`, ...(review.criteria_run !== undefined ? [`Criteria ran in: ${review.criteria_run.worktree === "suite" ? "the suite's worktree" : "a worktree of their own"}${review.criteria_run.reason !== undefined ? ` (${review.criteria_run.reason})` : ""}`] : []), ""];
   lines.push("| Dimension | Verdict | Reason | Reference |", "|---|---|---|---|");
   for (const d of MILESTONE_DIMENSIONS) {
     const j = review.dimensions[d];
