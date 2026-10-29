@@ -134,6 +134,7 @@ import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { DoneContractService } from "./service/done-contract-service.js";
+import { TaskFinishService } from "./service/task-finish-service.js";
 import { createRealDoneContractGit } from "./adapters/real-done-contract-git.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
@@ -362,6 +363,11 @@ export interface App {
    * Source: SPEC-039 §2 D3, §9.1
    */
   verifyRunnerService?: VerifyRunnerService;
+  /**
+   * `lore finish` (AC-DCS1-15..17): runs the stored done contract's oracles in the claim worktree and records the finish in one
+   * write. Wired by {@link wireDoneContract} at both composition sites; optional like the services it composes.
+   */
+  taskFinishService?: TaskFinishService;
   /**
    * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
    * siblings so hand-built App stubs stay valid; both composition roots wire it.
@@ -1785,6 +1791,10 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   app.reviewService.setDoneContractPort(new DoneContractService(store, commands, createRealDoneContractGit(repoRoot)));
   // reason: AC-DCS1-11 — a write-set addition runs a test file with the same template the approve-time contract used.
   app.taskWorkflowService.setTestFileTemplate(commands.test_file);
+  // reason: AC-DCS1-15 — finish composes the workflow service (the one write) and the verify runner (the one measurement).
+  if (app.verifyRunnerService !== undefined) {
+    app.taskFinishService = new TaskFinishService({ store, workflow: app.taskWorkflowService, verify: app.verifyRunnerService });
+  }
 }
 
 /**

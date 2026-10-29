@@ -294,7 +294,10 @@ describe("AC-DCS1-16: finish reports every unmet item at once and refuses before
     expect(existsSync(marker)).toBe(true);
     const newRows = (await rowsOf(slug)).slice(rowsBefore);
     expect(newRows.find((row) => row.ac_ref === "AC-FX-1")?.result).toBe("pass");
-    expect(newRows.filter((row) => row.result === "fail").length).toBe(2);
+    // only a proven red is recorded as a fail (BR-1077): the test file's failing summary is, the typecheck's bare exit 1 is not,
+    // because any recorded fail row would satisfy the red-first floor
+    expect(newRows.filter((row) => row.result === "fail").map((row) => row.oracle)).toEqual(["test"]);
+    expect(newRows.some((row) => row.oracle === "tsc")).toBe(false);
     expect((await claimOf(slug))?.finished_commit).toBeUndefined();
   });
 
@@ -384,7 +387,8 @@ describe("AC-DCS1-16: finish reports every unmet item at once and refuses before
     const second = await approvedTask(await fixture.createPlan("Finish shared plan two"), ["tests/x-3.test.ts"], "Finish shared two", ["AC-FX-1"]);
     const tree = addWorktree("shared");
     await claimOn(first, tree, "dcs1-fin-shared-b");
-    await claimOn(second, tree, "dcs1-fin-shared-c");
+    // reason: `lore claim` refuses a second task on one working copy, so the second claim names ANOTHER working copy but records the same branch.
+    await claimOn(second, addWorktree("shared-other"), "dcs1-fin-shared-c", ["--branch", tree.branch]);
     commitIn(tree, { "src/g.ts": "export const g = 1;\n" });
     const rowsBefore = (await rowsOf(first)).length;
     const out = await finishIn(tree, first, "dcs1-fin-shared-b");
@@ -594,7 +598,7 @@ describe("AC-DCS1-18: a finished claim keeps its lease only while the branch tip
     expect(blocked.exitCode, blocked.text).toBe(5);
   });
 
-  it("AC-DCS1-18: a finished claim still blocks an overlapping sibling until it is folded; lore done releases it", async () => {
+  it("AC-DCS1-18: a finished claim still blocks an overlapping sibling claim until its commit is folded into the base (exit 4 anchor-overlap)", async () => {
     const { slug, plan } = await finishedTask("overlap", "dcs1-fin-own-d");
     const sibling = await approvedTask(plan, ONE_ANCHORED, "Overlapping sibling", ["AC-FX-1"]);
     const siblingTree = addWorktree("overlap-sibling");

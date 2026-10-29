@@ -299,6 +299,8 @@ import {
   extractHeldClaim,
   isClaimStale,
   isClaimStaleForRun,
+  isFinishedInForce,
+  markClaimFinished,
   isValidTransition,
   evaluateReadiness,
   buildTaskClaim,
@@ -889,6 +891,28 @@ export type VerifiedEvidenceInput = Omit<
   capture_source: CaptureSource;
 };
 
+/** What {@link TaskWorkflowService.recordFinishRun} writes: the whole outcome of one `lore finish`, in one corpus write. */
+export interface FinishRunWrite {
+  /** The task slug or id. */
+  readonly taskSlug: string;
+  /** The task version `lore finish` read before it ran anything; the write is refused (exit 5) when the task moved on. */
+  readonly expectedVersion: number;
+  /** The run that holds the claim; the write is refused (exit 5) when another run holds it by the time of the write. */
+  readonly holderRun: string;
+  /** Who is recorded as the writer of the rows and the version. */
+  readonly by: string;
+  /** Every runner-attested row of the run (each stamped by the runner with the commit it ran on). */
+  readonly entries: readonly VerifiedEvidenceInput[];
+  /** The write-set additions derived again for this run; merged into the contract in the same write. */
+  readonly additions: readonly DoneContractOracle[];
+  /** Set iff no item is unmet: the claim is marked finished at this commit (the `preRunHead`). */
+  readonly finished_commit?: string;
+  /** Called just before the write: HEAD still the commit the run read, tree still clean. A failure is exit 5. */
+  readonly recheck: () => { readonly ok: true } | { readonly ok: false; readonly path: string; readonly reason: string };
+  /** The one reading of "now" for every row and the version. */
+  readonly nowIso: string;
+}
+
 /** Options for {@link TaskWorkflowService.setAnchors}/`addAnchors`/`removeAnchors` (SPEC-042 D3). */
 export interface AnchorMutationOpts {
   /** Resolved actor identity — recorded in version history + audit, same shape as {@link ClaimOpts.by}. */
@@ -1030,6 +1054,7 @@ export function buildClaimConflictError(
   claim: TaskClaim,
   holder: ClaimHolder,
   nowIso: string,
+  finishedCommit?: string,
 ): LoreError {
   return {
     code: "CLAIM_CONFLICT",
@@ -1037,6 +1062,7 @@ export function buildClaimConflictError(
     holder: claim.by,
     age_minutes: ageMinutesBetween(nowIso, claim.at),
     holder_run: holder.harnessRun,
+    ...(finishedCommit !== undefined ? { finished_commit: finishedCommit } : {}),
   };
 }
 
@@ -1059,7 +1085,12 @@ export async function resolveEffectiveClaimStaleness(
   nowIso: string,
   ttlMinutes: number,
   endedRuns: Map<string, boolean>,
+  tipOf?: ClaimTipPort,
 ): Promise<Result<boolean, LoreError>> {
+  // reason: AC-DCS1-18 — a finished claim (its branch tip still equals the finished commit) keeps its lease until `lore done`:
+  // never stale by age, never stale because its run ended. The same predicate the run-end, claim and overlap paths call.
+  const measuredTip = tipOf?.(claim);
+  if (isFinishedInForce(claim, measuredTip)) return ok(false);
   let runEnded = false;
   const run = claim.harness_run ?? null;
   if (run !== null) {
@@ -1103,10 +1134,11 @@ export async function claimIsLive(
   nowIso: string,
   ttlMinutes: number,
   endedRuns: Map<string, boolean>,
+  tipOf?: ClaimTipPort,
 ): Promise<Result<boolean, LoreError>> {
   const claim = extractHeldClaim(task);
   if (claim === undefined) return ok(false);
-  const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns);
+  const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns, tipOf);
   if (!stale.ok) return stale;
   return ok(!stale.value);
 }
@@ -1119,13 +1151,14 @@ export async function resolveEffectiveStalenessByDoc(
   docs: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  tipOf?: ClaimTipPort,
 ): Promise<Result<Map<DocId, boolean>, LoreError>> {
   const staleByDoc = new Map<DocId, boolean>();
   const endedRuns = new Map<string, boolean>();
   for (const doc of docs) {
     // reason: a terminal task holds no claim (one definition: `extractHeldClaim`).
     if (extractHeldClaim(doc) === undefined) continue;
-    const live = await claimIsLive(store, doc, nowIso, ttlMinutes, endedRuns);
+    const live = await claimIsLive(store, doc, nowIso, ttlMinutes, endedRuns, tipOf);
     if (!live.ok) return live;
     staleByDoc.set(doc.id, !live.value);
   }
@@ -1144,13 +1177,20 @@ export async function applyEffectiveSiblingStaleness<C extends { siblingClaims?:
   siblings: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  finished?: FinishedClaimProbe,
+  candidate?: DocRecord,
 ): Promise<Result<C, LoreError>> {
-  const staleByDoc = await resolveEffectiveStalenessByDoc(store, siblings, nowIso, ttlMinutes);
+  const staleByDoc = await resolveEffectiveStalenessByDoc(store, siblings, nowIso, ttlMinutes, finished?.tipOf);
   if (!staleByDoc.ok) return staleByDoc;
   const staleBySlug = new Map<string, boolean>();
   for (const sibling of siblings) {
     const stale = staleByDoc.value.get(sibling.id);
     if (stale !== undefined) staleBySlug.set(sibling.slug, stale);
+    // reason: AC-DCS1-18 — a finished claim stops counting in overlap only once its finished commit is folded into the base the
+    // claiming task lands on; until then it blocks like any live claim. The same predicate decides the ready report.
+    if (finished !== undefined && candidate !== undefined && siblingFinishedAndFolded(sibling, candidate, finished)) {
+      staleBySlug.set(sibling.slug, true);
+    }
   }
   return ok({
     ...anchorCtx,
@@ -1176,6 +1216,7 @@ export async function buildEffectiveAnchorGateContext(
   nowIso: string,
   ttlMinutes: number,
   candidateWriteSet?: readonly string[],
+  finished?: FinishedClaimProbe,
 ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
   return applyEffectiveSiblingStaleness(
     store,
@@ -1183,7 +1224,27 @@ export async function buildEffectiveAnchorGateContext(
     siblings,
     nowIso,
     ttlMinutes,
+    finished,
+    candidate,
   );
+}
+
+/** Where a claim's branch ends now (`undefined` when it cannot be measured): the one input of {@link isFinishedInForce}. */
+export type ClaimTipPort = (claim: TaskClaim) => string | undefined;
+
+/** The two git facts the finished-claim rules read: the tip of a claim's branch, and whether a commit is folded into a base. */
+export interface FinishedClaimProbe {
+  readonly tipOf: ClaimTipPort;
+  /** Whether `finishedCommit` is an ancestor of the tip of the base branch `claimingTask` lands on (its contract's base, else main). */
+  readonly foldedInto: (finishedCommit: string, claimingTask: DocRecord) => boolean;
+}
+
+/** Whether `sibling` holds a finished claim (in force) whose finished commit is already folded into the base `claimingTask` lands on. */
+function siblingFinishedAndFolded(sibling: DocRecord, claimingTask: DocRecord, finished: FinishedClaimProbe): boolean {
+  const claim = extractHeldClaim(sibling);
+  if (claim === undefined || claim.finished_commit === undefined) return false;
+  if (!isFinishedInForce(claim, finished.tipOf(claim))) return false;
+  return finished.foldedInto(claim.finished_commit, claimingTask);
 }
 
 /** History wording for the run on a claim/release: the run id, or `none` for a lease or caller with no run. */
@@ -2163,6 +2224,8 @@ export type WorktreeCleanlinessStatus =
 export interface WorktreeCleanlinessCheck {
   status: WorktreeCleanlinessStatus;
   paths: string[];
+  /** Why git could not answer; set only for an existing absolute worktree whose state could not be read (`not-measured-not-a-repo`). */
+  cause?: string;
 }
 
 /** Wall-clock budget for the `git` subprocesses this guard shells — generous enough for a cold-cache `status --porcelain` on a large tree, bounded so a hung/unreachable filesystem (e.g. a stale network mount) cannot hang an evidence/release call indefinitely. */
@@ -2225,7 +2288,8 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
       timeout: WORKTREE_GIT_TIMEOUT_MS,
     });
     if (result.error !== undefined || result.status !== 0) {
-      return { status: "not-measured-not-a-repo", paths: [] };
+      const cause = result.error !== undefined ? result.error.message : `git status exited ${result.status}: ${String(result.stderr ?? "").trim()}`;
+      return { status: "not-measured-not-a-repo", paths: [], cause };
     }
 
     // reason: deliberately naive porcelain-line parsing — no shell/diff-
@@ -2241,8 +2305,8 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
       return { status: "measured-clean", paths: [] };
     }
     return { status: "measured-dirty", paths: lines.map((line) => line.slice(3).trim()) };
-  } catch {
-    return { status: "not-measured-not-a-repo", paths: [] };
+  } catch (cause) {
+    return { status: "not-measured-not-a-repo", paths: [], cause: cause instanceof Error ? cause.message : String(cause) };
   }
 }
 
@@ -2698,6 +2762,73 @@ export class TaskWorkflowService {
     return result;
   }
 
+  /**
+   * The ONE corpus write of `lore finish` (AC-DCS1-15, AC-DCS1-16): every runner-attested row of the run, the write-set additions
+   * and (when no item is unmet) the finished mark of the claim, recorded together or not at all.
+   *
+   * It is a compare-and-swap on everything the run measured: the task must still be at `expectedVersion` (a write-set
+   * declaration, a release or a takeover during the run bumps it), the claim must still be held by `holderRun`, and `recheck`
+   * (HEAD unmoved, tree clean) must still hold. Any change is exit 5 and nothing is written. Each row goes through the same
+   * admission rules as {@link recordVerifiedEvidence} (collect mode of the shared append path): no attestation rule is copied.
+   *
+   * @param input - see {@link FinishRunWrite}
+   * @returns the written task, or `STALE_VERSION` / `CLAIM_CONFLICT` / `CONFLICT` (all exit 5) when the world changed during the
+   *   run, or the first row's admission error (nothing written)
+   */
+  async recordFinishRun(input: FinishRunWrite): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await this.resolveTask(input.taskSlug);
+    if (!resolved.ok) return resolved;
+    const task = resolved.value;
+    if (task.version !== input.expectedVersion) {
+      return err({ code: "STALE_VERSION", id: task.id, expected: input.expectedVersion, actual: task.version });
+    }
+    const claim = extractHeldClaim(task);
+    const holder = claim === undefined ? undefined : (claim.harness_run ?? null);
+    if (claim === undefined || holder === null || holder !== input.holderRun) {
+      // reason: a lease that vanished or was taken over during the run is a lost race, exit 5, never a write onto someone else's claim.
+      const current = claim ?? { by: "(no claim)", at: input.nowIso };
+      return err(buildClaimConflictError(task.id, current, buildClaimHolder(current, false), input.nowIso));
+    }
+    const collected: EvidenceEntry[] = [];
+    for (const entry of input.entries) {
+      const prepared = await this.appendEvidenceEntry(task.id, entry, entry.recorded_by, () => input.nowIso, true, undefined, collected);
+      if (!prepared.ok) return prepared;
+    }
+    const existing = readEvidence(task);
+    if (existing.length + collected.length > 50) return evidenceLogFull(existing.length);
+
+    const newExtra: Record<string, unknown> = { ...task.extra, verification_evidence: [...existing, ...collected] };
+    let writtenClaim: TaskClaim = { ...claim, at: input.nowIso };
+    if (input.finished_commit !== undefined) writtenClaim = markClaimFinished(writtenClaim, input.finished_commit, input.nowIso);
+    newExtra["claim"] = writtenClaim;
+    const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
+    if (stored.success && input.additions.length > 0) newExtra["done_contract"] = withAddedOracles(stored.data, input.additions);
+
+    const still = input.recheck();
+    if (!still.ok) return err({ code: "CONFLICT", path: still.path, message: still.reason });
+
+    return this.writeTaskExtra(
+      task,
+      newExtra,
+      input.nowIso,
+      input.by,
+      `lore finish: ${collected.length} row(s) recorded${input.finished_commit !== undefined ? `, claim finished at ${input.finished_commit.slice(0, 12)}` : ""}`,
+      "evidence",
+      {
+        finish: true,
+        rows: collected.length,
+        ...(input.finished_commit !== undefined ? { finished_commit: input.finished_commit } : {}),
+        ...(input.additions.length > 0 ? { added_oracles: input.additions.map((oracle) => oracle.id) } : {}),
+      },
+      true,
+    );
+  }
+
+  /** The write-set additions of `task`'s claim (AC-DCS1-11), derived again for `lore finish`; see {@link deriveClaimAdditions}. */
+  deriveFinishAdditions(task: DocRecord, claim: TaskClaim, contract: DoneContract): Result<DoneContractOracle[], LoreError> {
+    return this.deriveClaimAdditions(task, claim, contract);
+  }
+
   private async _addEvidenceImpl(
     idOrSlug: string,
     entry: EvidenceInput,
@@ -2847,6 +2978,7 @@ export class TaskWorkflowService {
     now: () => string,
     verifyRunIntent = false,
     callerCwd?: string,
+    collect?: EvidenceEntry[],
   ): Promise<Result<DocRecord, LoreError>> {
     // §M5 (AC-DC-8) — fail-loud, NOT a silent strip, and bound to the SHARED chokepoint
     // rather than the self-report path: `ac_oracle_generation` is resolved from the
@@ -3007,6 +3139,13 @@ export class TaskWorkflowService {
           });
         }
       }
+    }
+
+    // reason: AC-DCS1-15 — `lore finish` collects every validated row of one run and writes them together
+    // ({@link recordFinishRun}); the admission rules above are the same single copy, only the write is deferred.
+    if (collect !== undefined) {
+      collect.push(parsedEntry.data);
+      return ok(task);
     }
 
     // SPEC-069 §Design Decisions D4/D5 (W3 fix) — an evidence recorder who IS the
@@ -3230,7 +3369,7 @@ export class TaskWorkflowService {
       const holder = buildClaimHolder(existingClaim, stale);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
-        return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
+        return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
       }
       // reason: SPEC-042 D2 — carry-forward applies ONLY to a same-holder FRESH
       // refresh. A stale takeover (even by the SAME `by`) or a different holder
@@ -3658,7 +3797,7 @@ export class TaskWorkflowService {
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     const staleHolder = staleResult.value;
     if (!isHolder && !staleHolder && opts.force !== true) {
-      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
+      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
     }
 
     // task-lore-evidence-and-lore-release-accept-an-attestation-from —
@@ -3668,7 +3807,7 @@ export class TaskWorkflowService {
     // worktree eligible for the orchestrator's routine cleanup). Checked
     // AFTER the holder/force authorization gate above — an unauthorized
     // release attempt fails for THAT reason first.
-    const worktreeError = this.checkUncommittedAttestationWorktree(task, "`lore release`", opts.callerCwd);
+    const worktreeError = this.checkUncommittedAttestationWorktree(task, "`lore release`", opts.callerCwd, true);
     if (worktreeError !== null) return err(worktreeError);
 
     const newExtra: Record<string, unknown> = { ...task.extra };
@@ -3734,7 +3873,29 @@ export class TaskWorkflowService {
     nowIso: string,
     endedRuns: Map<string, boolean>,
   ): Promise<Result<boolean, LoreError>> {
-    return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns);
+    return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns, (held) => this.measureClaimTip(held));
+  }
+
+  /** The commit of `claim` when its finish is still in force (the branch tip equals it), else `undefined` (AC-DCS1-18). */
+  private finishedCommitInForce(claim: TaskClaim): string | undefined {
+    return isFinishedInForce(claim, this.measureClaimTip(claim)) ? claim.finished_commit : undefined;
+  }
+
+  /**
+   * The git facts of the finished-claim rules, measured through this service's git facts: the tip of a claim's branch, and
+   * whether a finished commit is an ancestor of the base the claiming task lands on (its stored contract's `base_branch`, else
+   * main). A fact git cannot answer reads "not folded": a finished claim then keeps blocking, never silently stops.
+   */
+  private finishedProbe(): FinishedClaimProbe {
+    return {
+      tipOf: (claim) => this.measureClaimTip(claim),
+      foldedInto: (finishedCommit, claimingTask) => {
+        const stored = doneContractSchema.safeParse(claimingTask.extra["done_contract"]);
+        const base = stored.success ? stored.data.base_branch : "main";
+        const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+        return git(["merge-base", "--is-ancestor", finishedCommit, base]).ok;
+      },
+    };
   }
 
   /**
@@ -3754,7 +3915,7 @@ export class TaskWorkflowService {
     tasks: readonly DocRecord[],
     nowIso: string,
   ): Promise<Result<Map<DocId, boolean>, LoreError>> {
-    return resolveEffectiveStalenessByDoc(this.store, tasks, nowIso, this.claimTtlMinutes);
+    return resolveEffectiveStalenessByDoc(this.store, tasks, nowIso, this.claimTtlMinutes, (held) => this.measureClaimTip(held));
   }
 
   /**
@@ -3776,12 +3937,14 @@ export class TaskWorkflowService {
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const outcomes: RunEndClaimOutcome[] = [];
+    const tipOf: ClaimTipPort = (held) => this.measureClaimTip(held);
     const held = tasksResult.value
       .filter((t) => extractHeldClaim(t)?.harness_run === runId)
       .sort((a, b) => a.slug.localeCompare(b.slug));
     for (const task of held) {
       const claim = extractHeldClaim(task);
-      if (claim === undefined || claim.orphaned_dirty !== undefined) continue;
+      // reason: AC-DCS1-18 — a finished claim keeps its lease past its run's end: `lore done` / `lore land` releases it.
+      if (claim === undefined || claim.orphaned_dirty !== undefined || isFinishedInForce(claim, tipOf(claim))) continue;
       const nowIso = now();
       const cleanliness = measureWorktreeCleanliness(claim.worktree);
       if (cleanliness.status === "measured-dirty" && claim.worktree !== undefined) {
@@ -4716,7 +4879,10 @@ export class TaskWorkflowService {
 
     const nowIso = now();
     const claim = readClaimRecord(task);
-    if (claim !== undefined) {
+    // reason: AC-DCS1-18 — a finished claim is the implementer's hand-over of work whose rows the floors above just judged; the
+    // closer (another run) is who `lore done` / `lore land` exists for, so the lease is no obstacle to it and `done` releases it.
+    const finishedHandOver = claim !== undefined && this.finishedCommitInForce(claim) !== undefined;
+    if (claim !== undefined && !finishedHandOver) {
       // reason: BR-1056 — the holder is a RUN, not a name: two runs deriving the same name must not pass for
       // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
       const staleResult = await this.isClaimEffectivelyStale(claim, nowIso, new Map());
@@ -4805,6 +4971,7 @@ export class TaskWorkflowService {
     if (readClaimRecord(task) !== undefined) {
       const released = await this.release(task.id, {
         by: opts.by,
+        ...(finishedHandOver ? { force: true } : {}),
         ...(opts.harnessRun !== undefined ? { harnessRun: opts.harnessRun } : {}),
         ...(opts.source !== undefined ? { source: opts.source } : {}),
         reason: "released by lore done",
@@ -6063,6 +6230,7 @@ export class TaskWorkflowService {
     const anyoneDeclaresAnchors = tasks.some((t) => extractFileAnchors(t).length > 0);
     const anchorConflicts: AnchorConflict[] = [];
     const anchorlessSlugs = new Set<string>();
+    const finishedProbe = this.finishedProbe();
 
     for (const task of tasks) {
       // reason: AC-DCS1-10 — overlap is judged on write sets (the claim's declared set, else the approved anchors), the SAME
@@ -6076,6 +6244,8 @@ export class TaskWorkflowService {
           const otherClaim = extractHeldClaim(other);
           if (otherClaim === undefined) continue;
           if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
+          // reason: AC-DCS1-18 — the same fold rule as the claim gate's sibling context (`applyEffectiveSiblingStaleness`).
+          if (siblingFinishedAndFolded(other, task, finishedProbe)) continue;
           // reason: BR-1056 — same holder means same RUN. Two runs that share a derived name are TWO holders and
           // stay reported; a lease or claim with no run is nobody's and stays reported too.
           const sameHolder =
@@ -6153,6 +6323,7 @@ export class TaskWorkflowService {
     task: DocRecord,
     actionLabel: string,
     callerCwd: string | undefined,
+    refuseUninspectable = false,
   ): LoreError | null {
     const claim = readClaimRecord(task);
     const worktree = claim?.worktree;
@@ -6166,6 +6337,20 @@ export class TaskWorkflowService {
     }
 
     const check = measureWorktreeCleanliness(worktree);
+    // reason: BR-144 — a recorded worktree that exists but whose git state cannot be read is refused, never released as if clean.
+    // A relative value is a branch name (nothing to measure), and a vanished path has nothing left to lose: both release.
+    if (refuseUninspectable && check.status === "not-measured-not-a-repo" && isAbsolute(worktree)) {
+      return {
+        code: "VALIDATION_ERROR",
+        field: "worktree-uninspectable",
+        message:
+          `worktree-uninspectable: ${actionLabel} for task "${task.slug}" — its claim's recorded worktree "${worktree}" exists but its git state ` +
+          `cannot be read (${check.cause ?? "unknown cause"}), so uncommitted work cannot be ruled out. The claim stays held; repair the worktree ` +
+          `(or remove it) and release again.`,
+        value: { refusal: "worktree-uninspectable", worktree, cause: check.cause },
+        rule: "BR-144",
+      };
+    }
     if (check.status !== "measured-dirty") return null;
 
     const ranked = rankDirtyPathsByAnchors(check.paths, extractFileAnchors(task));
@@ -6377,12 +6562,12 @@ export class TaskWorkflowService {
     nowIso: string,
     candidateWriteSet?: readonly string[],
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
-    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateWriteSet);
+    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateWriteSet, this.finishedProbe());
   }
 
   /** {@link claimIsLive} bound to this service's store and TTL (BR-1493's "live claim" for `lore anchor scope --all`). */
   isClaimLive(task: DocRecord, nowIso: string, endedRuns: Map<string, boolean>): Promise<Result<boolean, LoreError>> {
-    return claimIsLive(this.store, task, nowIso, this.claimTtlMinutes, endedRuns);
+    return claimIsLive(this.store, task, nowIso, this.claimTtlMinutes, endedRuns, (held) => this.measureClaimTip(held));
   }
 
   /**

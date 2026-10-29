@@ -85,6 +85,11 @@ export type LoreError = RuleDeclared &
        * carries no run (written before runs existed and not yet expired by `lore migrate schema`).
        */
       holder_run?: string | null;
+      /**
+       * Set when the lease is a finished one (`lore finish`, AC-DCS1-18): the commit its oracles ran on. The refusal then names
+       * the finished state and `lore done`, because the lease is held until the task is done, however old it is.
+       */
+      finished_commit?: string;
     }
   /**
    * `lore verify` refused to execute a script-mode AC's command because it is NEW or

@@ -865,10 +865,22 @@ export const taskClaimSchema = z.object({
    * task's approved anchors are the write set ({@link effectiveWriteSet}). No count cap: the 50-anchor cap bounds approved anchors.
    */
   write_set: z.array(z.string().min(1)).optional(),
+  /**
+   * When `lore finish` ended the claim's run of oracles (AC-DCS1-15). The claim stays held, marked finished, until `lore done` or
+   * `lore land`. Both finished fields are written together, only by `lore finish`, and are in force only while the branch tip
+   * equals `finished_commit` ({@link isFinishedInForce}); a later commit makes the claim an ordinary one again.
+   */
+  finished_at: z.string().optional(),
+  /** The commit `lore finish` ran every oracle on (its `preRunHead`): the code the recorded rows are bound to. */
+  finished_commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
 }).refine((claim) => claim.branch === undefined || claim.start_head !== undefined, {
   // reason: after the one-time back-fill an open branch claim always has a sha start (no unmeasured variant, no read-time default).
   message: "a branch claim needs a sha start_head",
   path: ["start_head"],
+}).refine((claim) => (claim.finished_at === undefined) === (claim.finished_commit === undefined), {
+  // reason: finished_at and finished_commit describe one event; one without the other is a corrupt record, never a partial finish.
+  message: "finished_at and finished_commit are written together",
+  path: ["finished_commit"],
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -977,6 +989,10 @@ export function buildTaskClaim(
   const endTip = base?.end_tip;
   // reason: a same-holder refresh continues the same work, so the files it declared (at claim and at edit time) stay declared.
   const writeSet = input.write_set ?? base?.write_set;
+  // reason: AC-DCS1-18 — a same-holder refresh continues the same work, so a finished mark stays; whether it is still in force is
+  // decided by the branch tip ({@link isFinishedInForce}), never by dropping the mark here.
+  const finishedAt = base?.finished_at;
+  const finishedCommit = base?.finished_commit;
 
   return {
     by: input.by,
@@ -992,6 +1008,7 @@ export function buildTaskClaim(
     ...(startHead !== undefined ? { start_head: startHead } : {}),
     ...(endTip !== undefined ? { end_tip: endTip } : {}),
     ...(writeSet !== undefined ? { write_set: [...writeSet] } : {}),
+    ...(finishedAt !== undefined && finishedCommit !== undefined ? { finished_at: finishedAt, finished_commit: finishedCommit } : {}),
   };
 }
 
@@ -1027,6 +1044,31 @@ export function effectiveWriteSet(task: DocRecord): string[] {
   const claim = extractHeldClaim(task);
   if (claim === undefined) return extractFileAnchors(task);
   return claim.write_set ?? extractFileAnchors(task);
+}
+
+/**
+ * Whether `claim` is finished and the finish still holds: it carries a finished commit and the branch tip measured now equals
+ * it (AC-DCS1-18). A later commit moves the tip and makes the claim an ordinary one again (lease, overlap and run end); an
+ * unmeasured tip (`undefined`) is never "finished". The ONE predicate behind the lease, staleness, run-end and overlap paths.
+ *
+ * @param claim - the held claim
+ * @param tip - where the claim's branch ends now, as measured by the caller (`undefined` when it cannot be measured)
+ * @example
+ * isFinishedInForce({ by: "a", at: "t", finished_at: "t", finished_commit: "a".repeat(40) }, "a".repeat(40)); // => true
+ * isFinishedInForce({ by: "a", at: "t", finished_at: "t", finished_commit: "a".repeat(40) }, "b".repeat(40)); // => false
+ */
+export function isFinishedInForce(claim: TaskClaim, tip: string | undefined): boolean {
+  return claim.finished_commit !== undefined && tip !== undefined && tip === claim.finished_commit;
+}
+
+/**
+ * The claim marked finished at `commit`: the finish event `lore finish` writes (with its rows) in one corpus write. Pure.
+ *
+ * @example
+ * markClaimFinished({ by: "a", at: "t" }, "a".repeat(40), "t2").finished_commit // "aaa…a"
+ */
+export function markClaimFinished(claim: TaskClaim, commit: string, atIso: string): TaskClaim {
+  return { ...claim, finished_at: atIso, finished_commit: commit, end_tip: commit };
 }
 
 /**
