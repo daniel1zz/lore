@@ -42,6 +42,12 @@ export interface LandingGitFacts {
   isInsideBranchWorktree(dir: string, branch: string): FactResult<boolean>;
   /** Whether the repo-relative `path` is a file of the integration branch's tree. */
   pathExistsInIntegration(path: string): FactResult<boolean>;
+  /**
+   * Where main stood before the merge that brought `commit` onto it: the first parent of the oldest commit on the integration
+   * branch's first-parent history that contains `commit`. A fact of the history, so no claim or re-claim can move it. An error
+   * when `commit` is not on the integration branch, or reached it without a merge (no merge marks where the work began).
+   */
+  landingStartOf(commit: string): FactResult<string>;
 }
 
 /** What the claim history says about the work (read from the claim, its audit rows and the release rows). */

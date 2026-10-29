@@ -32,11 +32,10 @@ const LATER_MAIN = sha("e");
 const FILE = "packages/x/tests/x.test.ts";
 const OTHER = "packages/x/tests/other.test.ts";
 
-const landing = (landing_commit: string, main_before: string, kind: "commits" | "no-change" = "commits"): RegressionLandingInput => ({
+const landing = (landing_commit: string, main_before: string): RegressionLandingInput => ({
   landing_commit,
   main_before,
   task_slugs: ["task-1"],
-  kind,
 });
 
 function suiteRun(commit: string, files: readonly string[]): SuiteRun {
@@ -216,9 +215,18 @@ describe("regression per landing", () => {
     expect(r.rows.map((x) => x.verdict)).toEqual(["pass", "fail"]);
   });
 
-  it("AC-AF-1 a no-change landing is not run and passes", async () => {
+  it("AC-AF-1 a landing labelled no-change whose main_before..landing_commit is a real change is measured, never skipped by its label", async () => {
+    const f = build({ suites: { [LAND]: [FILE] }, files: { [`${BEFORE}:${FILE}`]: [0], [`${LAND}:${FILE}`]: [1] } });
+    const mislabelled = { ...landing(LAND, BEFORE), kind: "no-change" } as RegressionLandingInput;
+    const r = await measure(f, [mislabelled]);
+    expect(f.suiteRuns).toEqual([LAND]);
+    expect(r.uncleared).toEqual([{ file: FILE, landing: LAND }]);
+    expect(dimensionOf(r.rows).verdict).toBe("fail");
+  });
+
+  it("AC-AF-1 a landing whose main_before equals its landing_commit has nothing to measure, is not run and passes", async () => {
     const f = build({ suites: {} });
-    const r = await measure(f, [landing(LAND, LAND, "no-change")]);
+    const r = await measure(f, [landing(LAND, LAND)]);
     expect(f.suiteRuns).toEqual([]);
     expect(dimensionOf(r.rows).verdict).toBe("pass");
   });

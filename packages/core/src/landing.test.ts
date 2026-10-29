@@ -29,6 +29,7 @@ function facts(over: Partial<LandingGitFacts> & { onMain?: readonly string[]; re
     headOf: () => ok(MAIN),
     isInsideBranchWorktree: () => ok(false),
     pathExistsInIntegration: () => ok(true),
+    landingStartOf: () => ok("start"),
     ...over,
   };
 }

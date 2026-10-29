@@ -69,7 +69,7 @@ import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-s
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
-import { deriveLandingDiffForPlan, describeCommitCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
+import { deriveLandingDiffForPlan, describeLandingCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
 import { readTaskLanding } from "../../../service/task-commit-range.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
@@ -107,7 +107,7 @@ function describeDiffSource(source: DiffSourceRecord): string {
       if (source.status === "derived") {
         const missing = source.tasks_not_measured.length;
         return (
-          `derived from ${describeCommitCount(source.commits.length, source.excluded_merged_commit_count)} across the plan's tasks` +
+          `derived from ${describeLandingCount(source.landings?.length ?? 0, source.commits.length)}` +
           (missing > 0 ? ` (${String(missing)} task(s) NOT MEASURED: no recorded commit range)` : "")
         );
       }
