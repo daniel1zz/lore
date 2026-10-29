@@ -260,7 +260,10 @@ export default defineLoreCommand({
       // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
       // reason: main's head as the one batch suite run measured it (set by `measureSuite`); regression reads that commit, never a newer main.
       let assessedCommit: string | undefined;
-      type CriteriaFacts = Pick<MilestoneFacts, "attestation" | "attestation_ids" | "ai_criteria">;
+      type CriteriaFacts = Pick<MilestoneFacts, "attestation" | "criteria_attestation_ids" | "ai_criteria" | "failing_fact_files" | "criteria_run">;
+      // reason: why the suite's worktree did not run a plan's criteria (set by `measureSuite`), so the fallback to a worktree of
+      // their own is recorded on the review and written to stderr, never silent (BR-1498).
+      let criteriaFallbackReason: string | undefined;
       // reason: criteria measured in the suite's worktree by `measureSuite`, keyed by the plan ref the batch uses (BR-1498).
       const criteriaByPlan = new Map<string, CriteriaFacts>();
       /** Runs a plan's script criteria once at `commit` (in `worktreeRoot` when given, else a throwaway worktree of the commit). */
@@ -274,6 +277,10 @@ export default defineLoreCommand({
           createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) => createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() })),
         );
       };
+
+      /** Stamps where the criteria ran, only when some criterion was actually run (a plan with none in scope has nothing to place). */
+      const withCriteriaRun = (facts: CriteriaFacts, run: NonNullable<MilestoneFacts["criteria_run"]>): CriteriaFacts =>
+        (facts.attestation ?? []).some((row) => row.verdict !== "na") ? { ...facts, criteria_run: run } : facts;
 
       const measureSuite = async (suiteRefs: readonly string[]): Promise<SuiteRun | undefined> => {
         if (suiteRefs.length === 0) return undefined;
@@ -325,8 +332,18 @@ export default defineLoreCommand({
             criteriaByPlan.set(ref, await measureCriteria(bundle.value, commit, root));
           }
         });
-        if (!refreshed.ok) return { status: "not_measured", reason: formatErrorFor(inv, refreshed.error) };
+        if (!refreshed.ok) {
+          criteriaFallbackReason = `the suite and its worktree could not be run: ${formatErrorFor(inv, refreshed.error)}`;
+          return { status: "not_measured", reason: formatErrorFor(inv, refreshed.error) };
+        }
+        if (refreshed.value.workIn === "own") {
+          // reason: a stored head result means no suite worktree exists; the criteria still ran once, in a worktree of their own.
+          for (const [ref, facts] of criteriaByPlan) criteriaByPlan.set(ref, withCriteriaRun(facts, { worktree: "own", reason: "the head's suite result was already stored, so no suite worktree existed" }));
+        } else if (refreshed.value.workIn === "suite") {
+          for (const [ref, facts] of criteriaByPlan) criteriaByPlan.set(ref, withCriteriaRun(facts, { worktree: "suite" }));
+        }
         if (refreshed.value.workError !== undefined) {
+          criteriaFallbackReason = `the suite worktree's work did not run: ${formatErrorFor(inv, refreshed.value.workError)}`;
           inv.io.stderr.write(`Warning: the worktree work (stale-rule refresh, criteria) could not run: ${formatErrorFor(inv, refreshed.value.workError)}\n`);
         }
         assessedCommit = refreshed.value.result.commit_sha;
@@ -376,7 +393,7 @@ export default defineLoreCommand({
         // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
         // stays not-measured, never pass.
         const suiteResults = app.suiteResultService;
-        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "landing_result_ids" | "assessed_commit" | "failing_fact_files"> = {};
+        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files"> = {};
         if (suiteResults !== undefined) {
           const measured = await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
             suites: suiteResults,
@@ -391,7 +408,8 @@ export default defineLoreCommand({
             regressionFacts = {
               regression: measured.value.rows,
               regression_files: chargedFiles,
-              landing_result_ids: measured.value.measured_ids.map((m) => ({ landing: m.key, id: m.id })),
+              ...(measured.value.head !== undefined ? { head_suite_result_id: measured.value.head.result_id } : {}),
+              single_file_run_ids: measured.value.single_file_run_ids,
               // reason: a plan kept open by a red file is re-reviewed when a later landing changes that file (BR-1379); the batch
               // compares these files with main's changes since the assessed commit.
               failing_fact_files: chargedFiles,
@@ -409,11 +427,23 @@ export default defineLoreCommand({
           const commit = assessedCommit !== undefined ? ok(assessedCommit) : resolveAssessedCommit(inv.cwd, inv.env);
           if (!commit.ok) inv.io.stderr.write(`Warning: criteria not measured for ${ref}: ${formatErrorFor(inv, commit.error)}\n`);
           else if (app.verifyRunnerService === undefined) inv.io.stderr.write(`Warning: criteria not measured for ${ref}: the verify runner is not wired in this app\n`);
-          else attestationFacts = await measureCriteria(bundle.value, commit.value);
+          else {
+            // reason: the fallback the spec allows (a throwaway worktree at the assessed commit for the criteria alone), made loud:
+            // the review records which worktree ran the criteria and why the suite's was not used (BR-1498).
+            const reason = criteriaFallbackReason ?? "the suite's worktree did not run the criteria for this plan";
+            attestationFacts = withCriteriaRun(await measureCriteria(bundle.value, commit.value), { worktree: "own", reason });
+            if (attestationFacts.criteria_run !== undefined) {
+              inv.io.stderr.write(`Warning: criteria for ${ref} ran in a worktree of their own at ${commit.value.slice(0, 12)}, not the suite's: ${reason}\n`);
+            }
+          }
         }
+        // reason: a plan kept open is re-reviewed when a landing changes a file its failing facts name: the charged red files and
+        // the files a failing criterion's verify command names (BR-1379, spec "Fingerprint").
+        const failingFactFiles = [...new Set([...(regressionFacts.failing_fact_files ?? []), ...(attestationFacts.failing_fact_files ?? [])])].sort();
         const facts: MilestoneFacts = {
           ...regressionFacts,
           ...attestationFacts,
+          failing_fact_files: failingFactFiles,
           outside_anchors: derivation.landings.flatMap((l) =>
             l.outside_anchors !== undefined && l.outside_anchors.length > 0 ? [{ landing: l.landing_commit, files: l.outside_anchors }] : [],
           ),

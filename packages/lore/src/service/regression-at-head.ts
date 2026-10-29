@@ -85,8 +85,8 @@ export interface RegressionAtHead {
   readonly files: readonly FileRegression[];
   /** Files charged to the plan (these fail the gate). */
   readonly charged: readonly RegressionFinding[];
-  /** Ids the review fingerprint hashes: the head result and every stored single-file run read (BR-1497). */
-  readonly measured_ids: readonly { readonly key: string; readonly id: string }[];
+  /** Every stored single-file run read or made, keyed `<file>@<commit>:<kind>`; the review fingerprint hashes them (BR-1497). The head suite's own id is `head.result_id`. */
+  readonly single_file_run_ids: readonly { readonly key: string; readonly id: string }[];
   /** Fact rows for `MilestoneFacts.regression`. */
   readonly rows: readonly MilestoneFactRow[];
 }
@@ -289,23 +289,23 @@ export async function regressionAtHead(
   const looked = await ports.suites.lookupOrRun(ports.headRef, ports.runner);
   if (!looked.ok) {
     const row: MilestoneFactRow = { subject: ports.headRef, verdict: "not-measured", detail: `the suite could not be run at ${ports.headRef}: ${loreErrorText(looked.error)}` };
-    return ok({ head: undefined, files: [], charged: [], measured_ids: [], rows: [row, ...unlandedRows] });
+    return ok({ head: undefined, files: [], charged: [], single_file_run_ids: [], rows: [row, ...unlandedRows] });
   }
   const suite = looked.value;
   if (suite.status !== "measured") {
     // reason: an unrunnable attempt is a stored row too (new id per attempt), so its id is part of the facts fingerprint (BR-1497).
     const row: MilestoneFactRow = { subject: suite.commit_sha, verdict: "not-measured", detail: `the suite could not run at ${suite.commit_sha}: ${suite.cause ?? "unrunnable"}` };
-    return ok({ head: { commit: suite.commit_sha, result_id: suite.id }, files: [], charged: [], measured_ids: [{ key: suite.commit_sha, id: suite.id }], rows: [row, ...unlandedRows] });
+    return ok({ head: { commit: suite.commit_sha, result_id: suite.id }, files: [], charged: [], single_file_run_ids: [], rows: [row, ...unlandedRows] });
   }
   const head = { commit: suite.commit_sha, result_id: suite.id };
   const redFiles = [...new Set(suite.failing_test_files.map((f) => f.file))].sort();
-  const measuredIds: { key: string; id: string }[] = [{ key: head.commit, id: head.result_id }];
+  const singleFileRunIds: { key: string; id: string }[] = [];
   const headRow: MilestoneFactRow = {
     subject: head.commit,
     verdict: "pass",
     detail: redFiles.length === 0 ? `the suite is green at main's head ${head.commit}` : `${String(redFiles.length)} red file(s) at main's head ${head.commit}, each examined below`,
   };
-  if (redFiles.length === 0) return ok({ head, files: [], charged: [], measured_ids: measuredIds, rows: [headRow, ...unlandedRows] });
+  if (redFiles.length === 0) return ok({ head, files: [], charged: [], single_file_run_ids: singleFileRunIds, rows: [headRow, ...unlandedRows] });
 
   const files: FileRegression[] = [];
   if (real.length === 0) {
@@ -335,11 +335,11 @@ export async function regressionAtHead(
         for (const file of redFiles) {
           const probe = new FileProbe(file, ports, measuredByCommit);
           files.push(await measureFile(file, history, landingCommits, earliest, probe));
-          measuredIds.push(...probe.consulted);
+          singleFileRunIds.push(...probe.consulted);
         }
       }
     }
   }
   const charged = files.flatMap((f): RegressionFinding[] => (f.outcome === "regression" ? [{ file: f.file, landing: f.landing }] : []));
-  return ok({ head, files, charged, measured_ids: measuredIds, rows: [headRow, ...files.map(rowOfFile), ...unlandedRows] });
+  return ok({ head, files, charged, single_file_run_ids: singleFileRunIds, rows: [headRow, ...files.map(rowOfFile), ...unlandedRows] });
 }

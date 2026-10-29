@@ -59,6 +59,8 @@ export interface LookupWithWorkOutcome {
   readonly result: SuiteResultRecord;
   /** Set when the work could not be run at all (no worktree); absent when it ran, whatever the work itself reported. */
   readonly workError?: LoreError;
+  /** Where the work ran: the suite's own worktree (`suite`, a fresh run) or a worktree made for it alone (`own`, a stored hit). Absent when it did not run. */
+  readonly workIn?: "suite" | "own";
 }
 
 /** The slice of the store this service uses. */
@@ -206,7 +208,7 @@ export class SuiteResultService {
     });
     if (!looked.ok) return looked;
     const result = looked.value;
-    if (workRan) return ok({ result });
+    if (workRan) return ok({ result, workIn: "suite" });
     if (result.status !== "measured") {
       return ok({ result, workError: { code: "STORE_ERROR", message: `the suite could not run at ${result.commit_sha}, so there is no worktree to work in: ${result.cause ?? "unrunnable"}` } });
     }
@@ -214,7 +216,7 @@ export class SuiteResultService {
       return err({ code: "VALIDATION_ERROR", field: "runner.withWorktree", message: "the suite result of this commit is stored and the runner cannot open a worktree for the extra work", rule: "BR-1497" });
     }
     const ran = await runner.withWorktree(result.commit_sha, (root) => work(root, result.commit_sha));
-    return ran.ok ? ok({ result }) : ok({ result, workError: ran.error });
+    return ran.ok ? ok({ result, workIn: "own" }) : ok({ result, workError: ran.error });
   }
 
   /**

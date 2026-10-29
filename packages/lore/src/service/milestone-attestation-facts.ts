@@ -7,12 +7,12 @@
  *   that run made. A plan closes only when what it delivered is correct at the end (D3, D5): a criterion a later plan's
  *   landing broke fails here even though an older attestation passed.
  * Public surface: {@link planCriterionScopes}, {@link attestationRowsOf}, {@link measureCriteriaAtHead},
- *   {@link CriterionScope}, {@link AttestationRow}, {@link HeadCriteriaRunnerPort}, {@link AttestationFacts}.
+ *   {@link filesNamedByCommand}, {@link CriterionScope}, {@link AttestationRow}, {@link HeadCriteriaRunnerPort}, {@link AttestationFacts}.
  * Invariants:
  *   - Only a row whose `state_stamp.head_sha` EQUALS the assessed commit counts; a row at any other commit (a landing, a
  *     task worktree, an older or newer main commit) is never read, pass or fail.
  *   - Each script criterion is run exactly once per measurement; the latest row at the assessed commit (by `recorded_at`)
- *     decides and its id (`<task-slug>@<recorded_at>`) is exposed in `deciding_ids` for the fingerprint (B3 hashes it).
+ *     decides and its id (`<task-slug>@<recorded_at>`) is exposed in `deciding_ids` for the fingerprint.
  *   - A run that cannot complete (worktree, install, refused runner), an unreadable corpus, or a run that left no row at
  *     the assessed commit makes the criterion `not-measured` with the cause, never pass.
  *   - Only runner-attested, conclusive (`pass` | `fail`) rows carrying a `state_stamp` are rows at all.
@@ -50,6 +50,8 @@ export interface CriterionScope {
   readonly mode: "script" | "ai" | "human";
   /** The AI rubric (mode `ai` only). */
   readonly rubric?: string;
+  /** The verify command (mode `script` only); the files it names are a failing criterion's re-review triggers. */
+  readonly command?: string;
   readonly holders: readonly CriterionHolder[];
 }
 
@@ -71,6 +73,23 @@ export interface AttestationFacts {
   readonly ai_criteria: readonly AiCriterionInput[];
   /** `subject` (`<spec>:<ac>`) and the id of the attestation that decided it; absent for a not-measured criterion. */
   readonly deciding_ids: readonly { readonly subject: string; readonly id: string }[];
+  /** Files named by the verify command of each criterion that FAILED at the assessed commit, sorted; a landing touching one re-reviews a kept-open plan. */
+  readonly failing_files: readonly string[];
+}
+
+/**
+ * The source files a verify command names: its whitespace-separated tokens that end in a source or script extension
+ * (`bun run test:file packages/x/a.test.ts && echo ...` names `packages/x/a.test.ts`).
+ *
+ * @param command - a criterion's verify command
+ * @returns the distinct file paths, in order of appearance
+ */
+export function filesNamedByCommand(command: string): string[] {
+  const named = command
+    .split(/\s+/)
+    .map((token) => token.replace(/^["'`(]+|["'`);]+$/g, ""))
+    .filter((token) => !token.startsWith("-") && /^[\w@./-]+\.(?:[cm]?[jt]sx?|sh|py)$/.test(token));
+  return [...new Set(named)];
 }
 
 const short = (sha: string): string => sha.slice(0, 8);
@@ -103,6 +122,7 @@ export function planCriterionScopes(spec: DocRecord | undefined, tasks: readonly
       ac_id: criterion.id,
       mode: criterion.verify.mode,
       ...(criterion.verify.mode === "ai" ? { rubric: criterion.verify.rubric } : {}),
+      ...(criterion.verify.mode === "script" ? { command: criterion.verify.command } : {}),
       holders,
     });
   }
@@ -200,7 +220,7 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
       // block the close, and the reason names the empty scope so it never reads as a vacuous pass.
       rows.push({ subject: "criteria", verdict: "na", detail: "no criterion in scope: the plan's task scopes hold no live script or AI-mode criterion" });
     }
-    return { rows, ai_criteria: aiCriteria, deciding_ids: decidingIds };
+    return { rows, ai_criteria: aiCriteria, deciding_ids: decidingIds, failing_files: [] };
   }
 
   const subjectOf = (scope: CriterionScope): string => `${scope.spec_slug}:${scope.ac_id}`;
@@ -208,6 +228,7 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
     rows: scripts.map((s) => ({ subject: subjectOf(s), verdict: "not-measured" as const, detail: `not run at ${short(input.headCommit)}: ${cause}` })),
     ai_criteria: aiCriteria,
     deciding_ids: [],
+    failing_files: [],
   });
 
   const ran = await input.runner.attestAtHead({
@@ -237,5 +258,8 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
     rows.push({ subject, verdict: decided.result, detail: `attested ${decided.result} at ${short(decided.head_sha)} (${decided.id})` });
     decidingIds.push({ subject, id: decided.id });
   }
-  return { rows, ai_criteria: aiCriteria, deciding_ids: decidingIds };
+  const failingFiles = scripts.flatMap((scope) =>
+    rows.some((r) => r.subject === subjectOf(scope) && r.verdict === "fail") ? filesNamedByCommand(scope.command ?? "") : [],
+  );
+  return { rows, ai_criteria: aiCriteria, deciding_ids: decidingIds, failing_files: [...new Set(failingFiles)].sort() };
 }
