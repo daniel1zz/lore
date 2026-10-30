@@ -61,6 +61,9 @@ interface World {
 
 const worlds: World[] = [];
 
+/** The one run that claims every task and integrates every branch of a test. */
+const OWNER = "dcs2-owner";
+
 afterEach(() => {
   for (const world of worlds.splice(0)) {
     world.fixture.dispose();
@@ -266,7 +269,8 @@ async function landable(
   const slug = await world.fixture.createTask({ plan, kind: "code", title: `Integrate ${label}`, anchors, acScope: opts.acScope ?? ["AC-FX-1"] });
   await world.fixture.mustRun(opts.red === true ? ["approve", slug] : ["approve", slug, "--red-waiver", "the red run is not the subject of this test"]);
   const tree = addWorktree(world, label);
-  const session = `dcs2-${label}-${world.sequence}`;
+  // reason: lore done refuses a task held by a fresh claim of ANOTHER run (floor foreign-claim), so the run that claims is the run that integrates.
+  const session = OWNER;
   const claimed = await loreIn(world, world.fixture.dir, ["claim", slug, "--worktree", tree.branch], sessionEnv(session));
   expect(claimed.exitCode, claimed.text).toBe(0);
   commitIn(world, tree, work);
@@ -286,7 +290,7 @@ function foldInto(world: World, integration: string, trees: readonly Tree[]): st
   return tip;
 }
 
-const integrateBranch = (world: World, branch: string, session = "dcs2-integrator"): Promise<Out> =>
+const integrateBranch = (world: World, branch: string, session = OWNER): Promise<Out> =>
   loreIn(world, world.fixture.dir, ["integrate", branch], sessionEnv(session));
 
 const mainTip = (world: World): string => world.fixture.git(["rev-parse", "refs/heads/main"]);
@@ -363,7 +367,7 @@ describe("AC-DCS2-1: integrate selects the landing tasks, runs the union once an
       expect(rowFor(rows, "echo fx1")?.result).toBe("pass");
       expect(rows.length).toBe(3);
       expect((await landingOf(world, task.slug))?.landing_commit).toBe(merged);
-      expect((await taskOf(world, task.slug)).status).toBe("archived");
+      expect((await taskOf(world, task.slug)).status, out.text).toBe("archived");
     }
     // not selected: C, the draft, the check and the corpus task are byte-identical (no row, no landing, no version)
     expect(await taskOf(world, c.slug)).toEqual(before.c);
@@ -482,7 +486,7 @@ describe("AC-DCS2-2: integrate refuses a landing it cannot prove, before main mo
     expect(await taskOf(world, a.slug)).toEqual(before.a);
     expect(await taskOf(world, b.slug)).toEqual(before.b);
     expect(await taskOf(world, ok.slug)).toEqual(before.ok);
-    const worktree = join(fixture.dir, ".claude", "worktrees", "integrate-dcs2-integrator");
+    const worktree = join(fixture.dir, ".claude", "worktrees", `integrate-${OWNER}`);
     expect(existsSync(worktree)).toBe(true);
     expect(gitIn(worktree, ["rev-parse", "HEAD"])).toBe(mainBefore);
     expect(gitIn(worktree, ["status", "--porcelain"])).toBe("");
@@ -626,6 +630,10 @@ describe("AC-DCS2-4: a flaky oracle lands once, flagged and filed, never silent"
     expect(issues[0]?.labels).toEqual(["flaky-tests"]);
     expect(first.stdout).toMatch(/flaky .*test:tests\/flaky-a\.test\.ts.*#1/);
     expect((await taskOf(world, one.slug)).status).toBe("archived");
+    // lore get shows the flag next to the row
+    const shown = await loreIn(world, fixture.dir, ["get", one.slug]);
+    expect(shown.text).toContain("Flaky oracle rows");
+    expect(shown.text).toContain(testCommand(world, "tests/flaky-a.test.ts"));
 
     // (2) second flaky landing appends to the same issue, naming the oracle, task, landing commit and both outcomes
     const two = await landable(world, plan, "fl2", ["tests/flaky-b.test.ts"], { "tests/flaky-b.test.ts": "// b\n" });
@@ -753,7 +761,10 @@ describe("AC-DCS1-27: a pass row counts while the content it covers is the lande
 
     await recordLandingCommit(world, stale.slug, commitObject(world, main, { path: "src/moved-on.ts", content: "export const moved = 1;\n" }));
     await recordLandingCommit(world, unreadable.slug, "0123456789abcdef0123456789abcdef01234567");
-    await recordLandingCommit(world, same.slug, commitObject(world, mainTip(world)));
+    // the same tree on another commit: an empty commit over the commit the task's rows ran on
+    const rowHead = (await rowsOf(world, same.slug))[0]?.attestation?.head_sha ?? "";
+    expect(rowHead).toMatch(/^[0-9a-f]{40}$/);
+    await recordLandingCommit(world, same.slug, commitObject(world, rowHead));
 
     const refusedStale = await loreIn(world, fixture.dir, ["done", stale.slug], sessionEnv(stale.session));
     expect(refusedStale.exitCode, refusedStale.text).toBe(4);

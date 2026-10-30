@@ -653,10 +653,12 @@ type PlanTerminalityFact =
 export type DoneContractRemovedOracle = NonNullable<DoneContract["removed_oracles"]>[number];
 
 /** One oracle of the set a done judges: the contract's id and the command a pass row must have run (the AC's live command for an `ac:` oracle). */
-interface EvaluatedOracle {
+export interface EvaluatedOracle {
   readonly id: string;
   /** Absent for an oracle with no command of its own (`corpus:files-unchanged`). */
   readonly command: string | undefined;
+  /** The oracle kind of the live criterion, for an `ac:` oracle that resolved; absent for every other oracle. */
+  readonly oracleKind?: EvidenceEntry["oracle"];
   /** Why the command could not be resolved (an `ac:` oracle whose AC no governing spec declares); such an oracle is never passed. */
   readonly unresolved?: string;
 }
@@ -842,7 +844,7 @@ export interface DoneResult {
  */
 export type EvidenceInput = Omit<
   EvidenceEntry,
-  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation" | "milestone_refresh"
+  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation" | "milestone_refresh" | "flaky" | "ledger_error"
 > & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /**
@@ -2887,6 +2889,17 @@ export class TaskWorkflowService {
         value: (entry as Record<string, unknown>)["attestation"],
       });
     }
+    // reason: AC-DCS2-4 — `flaky` and `ledger_error` are written by `lore integrate` only; a self-report naming either is refused, not stripped.
+    for (const integrateOnly of ["flaky", "ledger_error"] as const) {
+      if (Object.prototype.hasOwnProperty.call(entry, integrateOnly)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: integrateOnly,
+          message: `${integrateOnly} is written by lore integrate only (not a valid addEvidence input field)`,
+          value: (entry as Record<string, unknown>)[integrateOnly],
+        });
+      }
+    }
 
     // Baseline slice 1 §C5 — `head_sha` / `worktree_dirty` are MEASURED by the runner
     // (`VerifyRunnerService`), never declared by a caller: a self-reported value would
@@ -3115,6 +3128,10 @@ export class TaskWorkflowService {
       recorded_corpus_rev: corpusRev.value,
       ...(attestation !== undefined ? { attestation } : {}),
       ...(isRefresh ? { milestone_refresh: true as const } : {}),
+      // reason: AC-DCS2-4 — integrate's flaky mark and the ledger failure are the trusted runner path's own fields; a self-report
+      // never reaches this assembly with them (EvidenceInput excludes both), so they are carried only for a VerifiedEvidenceInput.
+      ...(entry.flaky === true ? { flaky: true as const } : {}),
+      ...(entry.ledger_error !== undefined ? { ledger_error: entry.ledger_error } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -4483,6 +4500,84 @@ export class TaskWorkflowService {
     return ok(judged.value.refusal);
   }
 
+  /**
+   * The ONE resolution of a contract oracle to the command a pass row must have run: the contract's own command for every id except
+   * `ac:<id>`, which is the CURRENT live command of that criterion across the specs governing the task (the contract's copy is never
+   * used). Shared by the done floors and by `lore integrate`, so the two always agree on which command proves an oracle.
+   *
+   * @param task - the task the oracles belong to
+   * @param oracles - the oracles to resolve (the caller has already dropped removed ones)
+   * @returns one {@link EvaluatedOracle} per input, in order; an unresolvable `ac:` oracle carries `unresolved`
+   */
+  private async evaluateOracleCommands(task: DocRecord, oracles: readonly DoneContractOracle[]): Promise<Result<EvaluatedOracle[], LoreError>> {
+    const bySpec = await this.criteriaBySpec(task);
+    if (!bySpec.ok) return bySpec;
+    const evaluated: EvaluatedOracle[] = [];
+    for (const oracle of oracles) {
+      if (oracle.id.startsWith("ac:")) {
+        const acId = oracle.id.slice("ac:".length);
+        // reason: an id is resolved across the plan's parent spec and every spec it implements; one match is used, none and
+        // several are named causes (never a guess between two specs).
+        const found = bySpec.value.flatMap((group) => {
+          const criterion = group.criteria.find((candidate) => candidate.id === acId);
+          return criterion === undefined ? [] : [{ spec: group.spec, criterion }];
+        });
+        const live = found.length === 1 ? found[0]!.criterion : undefined;
+        if (found.length > 1) evaluated.push({ id: oracle.id, command: undefined, unresolved: `ac-oracle-ambiguous: declared by ${found.map((hit) => hit.spec).join(" and ")}` });
+        else if (live === undefined) evaluated.push({ id: oracle.id, command: undefined, unresolved: "no governing spec declares this criterion any more" });
+        else if (live.verify.mode !== "script") evaluated.push({ id: oracle.id, command: undefined, unresolved: "the criterion is no longer script-mode" });
+        else evaluated.push({ id: oracle.id, command: live.verify.command, oracleKind: live.verify.oracle });
+      } else {
+        evaluated.push({ id: oracle.id, command: oracle.command });
+      }
+    }
+    return ok(evaluated);
+  }
+
+  /**
+   * `lore integrate`'s read of the commands that prove a task's oracles (see {@link evaluateOracleCommands}).
+   *
+   * @param task - a task holding a stored contract
+   * @param oracles - the oracles to resolve
+   */
+  async liveOracleCommands(task: DocRecord, oracles: readonly DoneContractOracle[]): Promise<Result<EvaluatedOracle[], LoreError>> {
+    return this.evaluateOracleCommands(task, oracles);
+  }
+
+  /**
+   * The ONE corpus write of the evidence `lore integrate` records for a landed task (AC-DCS2-1): every runner-attested row of the
+   * task, in one write. Each row goes through the same admission rules as every runner-attested row (collect mode of the shared
+   * append path). The task is re-read here, so a caller that lost a version race simply calls again (the caller retries up to 3 times).
+   *
+   * @param taskSlug - the task slug or id
+   * @param rows - the rows, each already carrying its runner attestation with `recorded_at_landing`
+   * @param by - who is recorded as the writer of the rows and the version
+   * @param nowIso - the one reading of "now" for every row and the version
+   * @returns the written task, or `STALE_VERSION` (retry) or the first row's admission error (nothing written)
+   */
+  async recordIntegrateEvidence(taskSlug: string, rows: readonly VerifiedEvidenceInput[], by: string, nowIso: string): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await this.resolveTask(taskSlug);
+    if (!resolved.ok) return resolved;
+    const task = resolved.value;
+    const collected: EvidenceEntry[] = [];
+    for (const entry of rows) {
+      const prepared = await this.appendEvidenceEntry(task.id, entry, entry.recorded_by, () => nowIso, true, undefined, collected);
+      if (!prepared.ok) return prepared;
+    }
+    const existing = readEvidence(task);
+    if (existing.length + collected.length > 50) return evidenceLogFull(existing.length);
+    return this.writeTaskExtra(
+      task,
+      { ...task.extra, verification_evidence: [...existing, ...collected] },
+      nowIso,
+      by,
+      `lore integrate: ${collected.length} row(s) recorded at the landing`,
+      "evidence",
+      { integrate: true, rows: collected.length },
+      true,
+    );
+  }
+
   /** The stored contract of `task`; a task with none is refused (the contract is compiled at approve, never recomputed here). */
   private readStoredContract(task: DocRecord): Result<DoneContract, LoreError> {
     const stored = task.extra["done_contract"];
@@ -4587,28 +4682,9 @@ export class TaskWorkflowService {
     }
 
     // The oracles to judge: the contract's, minus the removed, each with the command a pass row must have run.
-    const bySpec = await this.criteriaBySpec(task);
-    if (!bySpec.ok) return bySpec;
-    const evaluated: EvaluatedOracle[] = [];
-    for (const oracle of contractOracles) {
-      if (removed.some((gone) => gone.id === oracle.id)) continue;
-      if (oracle.id.startsWith("ac:")) {
-        const acId = oracle.id.slice("ac:".length);
-        // reason: an id is resolved across the plan's parent spec and every spec it implements; one match is used, none and
-        // several are named causes (never a guess between two specs).
-        const found = bySpec.value.flatMap((group) => {
-          const criterion = group.criteria.find((candidate) => candidate.id === acId);
-          return criterion === undefined ? [] : [{ spec: group.spec, criterion }];
-        });
-        const live = found.length === 1 ? found[0]!.criterion : undefined;
-        if (found.length > 1) evaluated.push({ id: oracle.id, command: undefined, unresolved: `ac-oracle-ambiguous: declared by ${found.map((hit) => hit.spec).join(" and ")}` });
-        else if (live === undefined) evaluated.push({ id: oracle.id, command: undefined, unresolved: "no governing spec declares this criterion any more" });
-        else if (live.verify.mode !== "script") evaluated.push({ id: oracle.id, command: undefined, unresolved: "the criterion is no longer script-mode" });
-        else evaluated.push({ id: oracle.id, command: live.verify.command });
-      } else {
-        evaluated.push({ id: oracle.id, command: oracle.command });
-      }
-    }
+    const evaluatedResult = await this.evaluateOracleCommands(task, contractOracles.filter((oracle) => !removed.some((gone) => gone.id === oracle.id)));
+    if (!evaluatedResult.ok) return evaluatedResult;
+    const evaluated = evaluatedResult.value;
 
     // How each pass row binds to the code (AC-DCS1-27).
     const binding = new Map<EvidenceEntry, RowBinding>();
@@ -5198,6 +5274,16 @@ export class TaskWorkflowService {
     return typeof latest === "string" ? latest : undefined;
   }
 
+  /** The start commit (`start_head`, else `base_sha`) of the newest claim row of a task, whatever branch it named; `undefined` when none recorded one. */
+  private static newestClaimStart(auditRows: readonly AuditEntry[]): string | undefined {
+    const rowsWithStart = auditRows
+      .filter((row) => typeof (row.details?.["start_head"] ?? row.details?.["base_sha"]) === "string" && (row.details?.["start_head"] ?? row.details?.["base_sha"]) !== "")
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const newest = rowsWithStart[rowsWithStart.length - 1]?.details;
+    const start = newest?.["start_head"] ?? newest?.["base_sha"];
+    return typeof start === "string" ? start : undefined;
+  }
+
   /** The branch checked out in `worktree`, read through the injected git port; `undefined` when it cannot be measured. */
   private async measuredBranchOf(worktree: string): Promise<string | undefined> {
     const measurement = await this.detectBranch(worktree);
@@ -5232,7 +5318,7 @@ export class TaskWorkflowService {
    * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
    */
   async recordLanding(request: LandingRequest, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
-    const { base_from_claim: baseFromClaim, ...landing } = request;
+    const { base_from_claim: baseFromClaim, only, ...landing } = request;
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
@@ -5246,6 +5332,8 @@ export class TaskWorkflowService {
     for (const task of tasksResult.value) {
       // reason: BR-1336 — a finished task is never rewritten by a later landing of a branch it once claimed.
       if (task.status === "archived" || task.status === "deprecated") continue;
+      // reason: AC-DCS2-1 — a caller that selected its tasks (integrate, with its oracle run) records the landing on exactly those.
+      if (only !== undefined && !only.includes(task.slug)) continue;
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
       // reason: BR-1348 — the tasks of a branch are those claimed on it AND every task of a plan whose declared
       // integration branch it is (the own-diff judgment at integrate judged the branch against exactly these).
@@ -5279,7 +5367,12 @@ export class TaskWorkflowService {
       // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
       // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
       // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).
-      const startHead = readClaimRecord(task)?.start_head ?? TaskWorkflowService.claimBaseFor(rows, landing.branch);
+      // reason: AC-DCS2-1 — a task that reaches the landing only through the plan's integration branch was claimed on its OWN branch, so
+      // no claim row names the landed branch: its work starts where its newest claim started (the row survives release).
+      const startHead =
+        readClaimRecord(task)?.start_head ??
+        TaskWorkflowService.claimBaseFor(rows, landing.branch) ??
+        (isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ? TaskWorkflowService.newestClaimStart(rows) : undefined);
       const verdict: LandingVerdict =
         startHead === undefined
           ? { state: "unmeasurable", reason: `no claim of this task recorded a start commit for ${landing.branch}` }

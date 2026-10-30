@@ -718,6 +718,17 @@ const WorkflowConfigSchema = z
          * live corpus after the landing's refresh and rebuild. Absent = neither runs and the output says "skipped".
          */
         migrate_command: z.string().min(1).optional(),
+        /**
+         * Per-oracle timeout, in seconds, of the contract-oracle run `lore integrate` makes on the merged tree (AC-DCS2-3). A timeout
+         * is a failed run with the cause `timeout`. Absent = 900. A value that is not a positive integer makes the config unusable
+         * (exit 4, naming this key): it is never replaced by a default.
+         */
+        oracle_timeout_seconds: z.number().int().positive().optional(),
+        /**
+         * Oracle ids (`typecheck`, `test:<path>`, `ac:<id>`) the floor command already runs: integrate does not run them again and
+         * their rows take the floor's result (AC-DCS2-3). Absent = none.
+         */
+        floor_covers: z.array(z.string().min(1)).optional(),
       })
       .strict()
       .optional(),

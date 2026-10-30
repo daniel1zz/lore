@@ -111,6 +111,7 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
+import { formatFlakyRowLines } from "../get-render.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
@@ -415,6 +416,8 @@ export default defineLoreCommand({
       }
 
       printLine(inv.io.stdout, formatDoneMessage(result.value));
+      // reason: AC-DCS2-4 — a flaky row counts as evidence but is never silent: done names it too
+      for (const line of formatFlakyRowLines(extractEvidence(result.value.task))) printLine(inv.io.stdout, line);
       if (result.value.unrecoverable_claims !== undefined) {
         const listed = result.value.unrecoverable_claims;
         printLine(inv.io.stdout, `unrecoverable claims: ${listed.count} (${listed.branches.join(", ")})`);

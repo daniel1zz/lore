@@ -63,6 +63,7 @@ import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
+import { ORACLE_TIMEOUT_DEFAULT_SECONDS } from "../../../service/integrate-oracle-service.js";
 import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
 import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
@@ -266,6 +267,11 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
         return 1;
       }
+      const oracleService = app.integrateOracleService;
+      if (oracleService === undefined) {
+        inv.io.stderr.write("Error: this composition has no oracle service, so the landing's contract oracles cannot be run (AC-DCS2-1); nothing was landed\n");
+        return 1;
+      }
       const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
         spawnDetachedReviewBatch({
           cwd: projectRoot,
@@ -286,6 +292,8 @@ export default defineLoreCommand({
           take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
           remove: (worktree) => removeCorpusSnapshot(worktree),
         },
+        // AC-DCS2-1: the landing's contract oracles run on the merged tree before main moves, and their rows are recorded after
+        oracles: oracleService,
         ledger: new IntegrateLossLedger(corpusDir),
         attempts: new IntegrateAttemptLedger(corpusDir),
         // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
@@ -376,6 +384,13 @@ export default defineLoreCommand({
         postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
         migrateCommand: config?.workflow?.integrate?.migrate_command,
         harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
+        // the CURRENT config's oracle settings (workflow.integrate.oracle_timeout_seconds is a positive integer or the config is refused at load)
+        oracleSettings: {
+          installCommand: config?.workflow?.done_contract?.install,
+          timeoutSeconds: config?.workflow?.integrate?.oracle_timeout_seconds ?? ORACLE_TIMEOUT_DEFAULT_SECONDS,
+          floorCovers: new Set(config?.workflow?.integrate?.floor_covers ?? []),
+          by: resolveActor(inv),
+        },
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
       if (!result.ok) {

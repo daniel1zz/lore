@@ -138,6 +138,10 @@ import { DoneContractMigrationService } from "./service/done-contract-migration-
 import { createRealMigrationGit } from "./adapters/real-done-contract-migration-git.js";
 import { TaskFinishService } from "./service/task-finish-service.js";
 import { TaskStartService } from "./service/task-start-service.js";
+import { IntegrateOracleService } from "./service/integrate-oracle-service.js";
+import { FlakyLedgerService } from "./service/issue-filing-service.js";
+import { createGhFlakyLedgerPort, createUnconfiguredFlakyLedgerPort } from "./service/flaky-ledger-port.js";
+import { createRealOracleGit } from "./adapters/real-oracle-git.js";
 import { createRealDoneContractGit } from "./adapters/real-done-contract-git.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
@@ -376,6 +380,12 @@ export interface App {
    * contract. Wired by {@link wireDoneContract} at both composition sites.
    */
   taskStartService?: TaskStartService;
+  /**
+   * `lore integrate`'s evidence at landing (AC-DCS2-1..4): selects the landing tasks, runs the union of their contract oracles on the
+   * merged tree and records the rows. Wired by {@link wireDoneContract} at both composition sites, so no capability exists without
+   * its command; absent when the verify runner is not composed.
+   */
+  integrateOracleService?: IntegrateOracleService;
   /**
    * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
    * siblings so hand-built App stubs stay valid; both composition roots wire it.
@@ -1799,7 +1809,7 @@ function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService)
  * stores its contract through this port. One wiring, called at BOTH composition sites (SQLite and Turso); the three commands
  * come from `workflow.done_contract` (any may be absent: a code task then refuses with the matching cause).
  */
-function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string): void {
+function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string, ambient: AppAmbient): void {
   const commands = config?.workflow?.done_contract ?? {};
   const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot));
   app.reviewService.setDoneContractPort(contracts);
@@ -1810,6 +1820,21 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   // reason: AC-DCS1-15 — finish composes the workflow service (the one write) and the verify runner (the one measurement).
   if (app.verifyRunnerService !== undefined) {
     app.taskFinishService = new TaskFinishService({ store, workflow: app.taskWorkflowService, verify: app.verifyRunnerService });
+    // reason: AC-DCS2-1..4 — integrate composes the workflow service (the one write), the verify runner (the one measurement) and the
+    // flaky ledger, which reaches GitHub only when `feedback.upstream.repo` names a repository (else every ledger call is refused, named).
+    const upstream = resolveFeedbackUpstreamCfg(config);
+    const ledgerPort =
+      upstream !== undefined && isGithubUpstreamCfg(upstream)
+        ? createGhFlakyLedgerPort(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env }), upstream.repo)
+        : createUnconfiguredFlakyLedgerPort();
+    app.integrateOracleService = new IntegrateOracleService({
+      store,
+      workflow: app.taskWorkflowService,
+      verify: app.verifyRunnerService,
+      ledger: new FlakyLedgerService(ledgerPort),
+      git: createRealOracleGit(ambient.env),
+      projectRoot: repoRoot,
+    });
   }
   // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
   app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService });
@@ -2159,7 +2184,7 @@ function createAppUnscoped(
       buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
-    wireDoneContract(sqliteApp, sqliteStore, config, repoRoot);
+    wireDoneContract(sqliteApp, sqliteStore, config, repoRoot, ambient);
     wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
   }
@@ -2273,7 +2298,7 @@ function createAppUnscoped(
         buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
-    wireDoneContract(tursoApp, store, config, repoRoot);
+    wireDoneContract(tursoApp, store, config, repoRoot, ambient);
     wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };
   } catch (e) {

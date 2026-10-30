@@ -94,6 +94,8 @@ import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
 import type { BoundProseRow, OwnDiffRename, OwnDiffVerdict } from "./own-diff-judgment.js";
 import type { LandingFact, LandingRequest } from "./task-commit-range.js";
+import { decideStampOutcome, probeGitState } from "./git-state-stamp.js";
+import type { LandingOracles, LandingTask, OracleOutcome, OracleProof, OracleSettings } from "./integrate-oracle-service.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
 import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
 
@@ -247,6 +249,12 @@ export interface IntegrateDeps {
   readonly reviewBatch?: ReviewBatchStarter;
   /** The own-diff judgment run before the floor. Absent in a bare construction: the branch is not judged. */
   readonly ownDiff?: OwnDiffJudge;
+  /**
+   * Selects the landing tasks, runs the union of their contract oracles on the merged tree before main moves, and records the rows
+   * after (AC-DCS2-1 to AC-DCS2-4). Absent in a bare construction: no oracle runs and no row is recorded. When present, the request
+   * must carry {@link IntegrateRequest.oracleSettings}.
+   */
+  readonly oracles?: LandingOracles;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
   readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
@@ -288,6 +296,11 @@ export interface IntegrateRequest {
   readonly harnessRun?: string | undefined;
   /** Merge commit message; default `merge(<branch>): <tip subject>`. */
   readonly message?: string;
+  /**
+   * The integrate-time oracle settings of the CURRENT config (install command, per-oracle timeout, floor-covered ids) and who the rows
+   * are recorded for. Required whenever the service was built with `oracles`; absent then = refused before anything moves (never a default).
+   */
+  readonly oracleSettings?: OracleSettings;
 }
 
 /**
@@ -392,6 +405,9 @@ export function renderAttemptPhases(record: AttemptRecord, max: number): string 
 export class IntegrateService {
   constructor(private readonly deps: IntegrateDeps) {}
 
+  /** The settings of the one call this instance serves (set by `integrate`, read by `recordOracleRows`); an instance is single-use per command. */
+  private oracleSettings: OracleSettings | undefined;
+
   /**
    * Lands `request.branch` on main, or reports exactly why it did not. While another run of the same session is live
    * the outcome is `busy` (exit 75, naming the holder), decided before any merge or snapshot.
@@ -415,6 +431,14 @@ export class IntegrateService {
         rule: "BR-1272",
       });
     }
+    if (this.deps.oracles !== undefined && request.oracleSettings === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "oracleSettings",
+        message: "lore integrate was built to run the landing's contract oracles but the request carries no oracle settings (install command, timeout, floor_covers): nothing was integrated",
+      });
+    }
+    this.oracleSettings = request.oracleSettings;
     const migrating = request.migrateCommand !== undefined && request.migrateCommand.trim() !== "";
     if (migrating && !isChildRunId(request.harnessRun)) {
       // reason: the migrate child is a write made by the caller's party; with no attested run to hand it, it would be refused
@@ -477,18 +501,47 @@ export class IntegrateService {
     const message = request.message ?? this.defaultMessage(request.branch, tip);
     const movedBy: string[] = [];
     let lastConsecutiveLosses = 0;
+    const oraclePort = this.deps.oracles;
+    const settings = this.oracleSettings;
+    // reason: ONE selection rule per landing (AC-DCS2-1), read before any attempt: it depends on refs and claims, not on the merge.
+    let selection: readonly LandingTask[] = [];
+    if (oraclePort !== undefined) {
+      const selected = await oraclePort.select(request.branch, tip);
+      if (!selected.ok) return selected;
+      selection = selected.value;
+      if (selection.length === 0) log(`integrate: the landing of ${request.branch} names no task whose oracles integrate runs`);
+    }
+    // reason: with the oracle port wired the landing is recorded on exactly the selected tasks (a task whose claim tip the branch does not
+    // contain, a draft, a check and a corpus task are not landed by this branch).
+    const onlySelected = oraclePort === undefined ? {} : { only: selection.map((task) => task.slug) };
 
     for (let attempt = 1; attempt <= INTEGRATE_MAX_ATTEMPTS; attempt += 1) {
       const base = this.resolveCommit(TARGET_REF);
       if (!base.ok) return base;
       if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
+        // reason: AC-DCS2-1 — a branch already in main has no merge to prove: the union runs once on main's tip T, the rows bind to T, and
+        // only the tasks whose rows were recorded in THIS run are walked to done (an older hand-recorded row never archives one).
+        let proven: OracleProof | undefined;
+        if (oraclePort !== undefined && settings !== undefined && selection.length > 0) {
+          const onTip = this.resetWorktree(wt, base.value);
+          if (!onTip.ok) return onTip;
+          const run = await oraclePort.prove({ branch: request.branch, tip, tasks: selection, worktree: wt, commit: base.value, base: base.value, floor: undefined, settings, runCommand: this.deps.runFloor, log, clock, nowIso: new Date(clock()).toISOString() });
+          if (!run.ok) return run;
+          proven = run.value;
+          await this.recordOracleRows(proven.tasks, base.value, proven.outcomes);
+        }
         // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
         // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
         // and the branch head itself is the landed commit: it is an ancestor of main.
         // reason: BR-1336 — nothing reconstructs a landing from main's history: the branch head is the landed commit and
         // the recorder takes the range start from each task's own claim base (`base_from_claim`).
-        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip, base_from_claim: true });
-        await this.completeLanding(claimants, [], { branch: request.branch, landing_commit: tip });
+        // reason: AC-DCS2-1 — the landing names main's tip T, the commit the oracles ran on and the rows are bound to; with no oracle port
+        // wired (a bare construction) nothing was proven and the branch head stays the landed commit, as BR-1336 had it.
+        const landedAt = oraclePort === undefined ? tip : base.value;
+        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: landedAt, base_from_claim: true, ...onlySelected });
+        const provenSlugs = new Set((proven?.tasks ?? []).map((task) => task.slug));
+        const walked = oraclePort === undefined ? claimants : claimants.filter((slug) => provenSlugs.has(slug));
+        await this.completeLanding(walked, [], { branch: request.branch, landing_commit: landedAt });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -513,6 +566,10 @@ export class IntegrateService {
         return conflicted;
       }
 
+      this.logPhase("merge", mergeMs);
+      // reason: AC-DCS2-3 — the floor's own state reading (before its corpus snapshot exists, after it is gone) stamps the rows of the
+      // oracle ids `floor_covers` names, so such a row certifies the same clean merged tree an oracle run of its own would.
+      const floorBefore = oraclePort !== undefined ? probeGitState(wt) : undefined;
       const snapshotStart = clock();
       const snapshot = this.deps.corpus.take(wt);
       const snapshotMs = clock() - snapshotStart;
@@ -546,6 +603,8 @@ export class IntegrateService {
       // the snapshot is removed whatever the floor said: it is never written back and never outlives its run
       const dropped = this.deps.corpus.remove(wt);
       if (!dropped.ok) return dropped;
+      this.logPhase("floor", floorTotalMs);
+      const floorAfter = oraclePort !== undefined ? probeGitState(wt) : undefined;
       if (floor.status !== 0) {
         const back = this.resetWorktree(wt, base.value);
         if (!back.ok) return back;
@@ -556,12 +615,41 @@ export class IntegrateService {
       const head = git(wt, ["rev-parse", "HEAD"]);
       if (head.status !== 0) return err(gitFailure("rev-parse HEAD in the integration worktree", head));
       const merge = head.stdout.trim();
+      // reason: AC-DCS2-2 — the oracles run on the exact tree that becomes main, after the floor and BEFORE main moves: a refusal here
+      // leaves main, the integration worktree (reset to the main it saw) and every task untouched.
+      let proof: OracleProof | undefined;
+      if (oraclePort !== undefined && settings !== undefined && selection.length > 0) {
+        const run = await oraclePort.prove({
+          branch: request.branch,
+          tip,
+          tasks: selection,
+          worktree: wt,
+          commit: merge,
+          base: base.value,
+          floor: { durationMs: floorTotalMs, stamp: decideStampOutcome(floorBefore, floorAfter) },
+          settings,
+          runCommand: this.deps.runFloor,
+          log,
+          clock,
+          nowIso: new Date(clock()).toISOString(),
+        });
+        if (!run.ok) {
+          const back = this.resetWorktree(wt, base.value);
+          if (!back.ok) return back;
+          finish({ outcome: "oracle_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: null });
+          return run;
+        }
+        proof = run.value;
+      }
+      const tasks: readonly LandingTask[] = proof === undefined ? [] : proof.tasks;
+      const outcomes: readonly OracleOutcome[] = proof === undefined ? [] : proof.outcomes;
       const casStart = clock();
       const swapped = git(projectRoot, ["update-ref", TARGET_REF, merge, base.value], { [INTEGRATE_MARKER_ENV]: "1" });
       const casMs = clock() - casStart;
       if (swapped.status === 0) {
         finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint });
+        await this.recordOracleRows(tasks, merge, outcomes);
+        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint, ...onlySelected });
         await this.completeLanding(claimants, judged.renames, { branch: request.branch, landing_commit: merge });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
@@ -614,6 +702,26 @@ export class IntegrateService {
     return ok({ footprint: { outside_anchors: [...verdict.value.outside_anchors] }, renames: verdict.value.renames });
   }
 
+  /** Prints one phase duration: `phase <name> <seconds>s` (AC-DCS2-3). */
+  private logPhase(name: string, ms: number): void {
+    this.deps.log(`phase ${name} ${(ms / 1000).toFixed(3)}s`);
+  }
+
+  /**
+   * Records the rows of the proven oracles on `tasks`, bound to `commit` (the commit that became main, or main's tip for an
+   * already-integrated branch), through the oracle port. Never fails the integration (main has already moved): a task whose rows could
+   * not be written is a WARNING line from the port, so the missing evidence is visible and `lore done` refuses it by its floor.
+   */
+  private async recordOracleRows(tasks: readonly LandingTask[], commit: string, outcomes: readonly OracleOutcome[]): Promise<void> {
+    const port = this.deps.oracles;
+    const settings = this.oracleSettings;
+    if (port === undefined || settings === undefined || outcomes.length === 0) return;
+    const clock = this.deps.clock ?? Date.now;
+    const started = clock();
+    await port.record({ tasks, commit, outcomes, by: settings.by, nowIso: new Date(started).toISOString(), log: this.deps.log });
+    this.logPhase("recording", clock() - started);
+  }
+
   /**
    * Records the landing on the branch's tasks. Never fails the integration (main has already moved): a task that
    * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
@@ -652,7 +760,10 @@ export class IntegrateService {
       }
     }
     if (completion === undefined || tasks.length === 0) return;
-    for (const done of await completion.complete(tasks)) {
+    const walkStart = (this.deps.clock ?? Date.now)();
+    const completions = await completion.complete(tasks);
+    this.logPhase("done-walk", (this.deps.clock ?? Date.now)() - walkStart);
+    for (const done of completions) {
       if (done.outcome === "archived") {
         log(`integrate: ${done.task} archived by the landing (every done floor is met)`);
         continue;

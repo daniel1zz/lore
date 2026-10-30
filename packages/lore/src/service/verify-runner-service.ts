@@ -350,9 +350,11 @@ export interface ContractOracleToRun {
   /** The contract oracle id (`test:<path>`, `typecheck`, ...). */
   readonly id: string;
   /** The oracle kind its row is recorded under. */
-  readonly oracle: "test" | "tsc";
+  readonly oracle: "test" | "tsc" | "lint" | "build" | "e2e" | "other";
   /** The exact command of the oracle. */
   readonly command: string;
+  /** This run's own time limit in milliseconds (`lore integrate`: `workflow.integrate.oracle_timeout_seconds`); absent = the runner's default. */
+  readonly timeoutMs?: number;
 }
 
 /** One executed script-mode AC's outcome. */
@@ -978,7 +980,7 @@ export class VerifyRunnerService {
         ({
           id: oracle.id,
           statement: `contract oracle ${oracle.id}`,
-          verify: { mode: "script", oracle: oracle.oracle, command: oracle.command },
+          verify: { mode: "script", oracle: oracle.oracle, command: oracle.command, ...(oracle.timeoutMs !== undefined ? { timeout_ms: oracle.timeoutMs } : {}) },
         }) as unknown as AcceptanceCriterion,
     );
     return this._runVerification(criteria, task, undefined, opts, false);

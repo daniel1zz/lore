@@ -545,6 +545,17 @@ export const evidenceEntrySchema = z.object({
    * trusted runner path (`VerifiedEvidenceInput`), never by a self-report.
    */
   milestone_refresh: z.literal(true).optional(),
+  /**
+   * `true` on a pass row `lore integrate` recorded after the oracle failed once and passed on its single re-run (AC-DCS2-4).
+   * Present-iff-true; written only by `lore integrate` through the trusted runner path, never by a self-report. A flaky row counts
+   * as evidence but is shown next to the row by `lore get` and `lore done`.
+   */
+  flaky: z.literal(true).optional(),
+  /**
+   * Why the flaky-tests ledger issue could not be filed or commented (AC-DCS2-4): present only on a `flaky` row whose ledger write
+   * failed (no tracker configured, no network, a refusal). The landing still proceeds; the failure is recorded here, never dropped.
+   */
+  ledger_error: z.string().min(1).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({

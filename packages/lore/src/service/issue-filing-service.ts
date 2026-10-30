@@ -90,6 +90,86 @@ function bodyOf(cause: RootCause, findings: readonly FailedFinding[]): string {
   return lines.join("\n");
 }
 
+/** Title of the ONE open issue every flaky oracle of every landing is attached to (AC-DCS2-4). */
+export const FLAKY_LEDGER_TITLE = "Flaky tests ledger";
+
+/** Label the flaky-tests ledger issue carries. */
+export const FLAKY_LEDGER_LABEL = "flaky-tests";
+
+/** What the real tracker provides for the flaky ledger; tests pass a fake. */
+export interface FlakyLedgerPort {
+  /** The OPEN issue with this title and label, or `undefined` when none is open. */
+  readonly findOpen: (title: string, label: string) => Promise<Result<IssueRef | undefined, LoreError>>;
+  /** Files ONE new issue carrying the label. */
+  readonly create: (input: { readonly title: string; readonly body: string; readonly label: string }) => Promise<Result<IssueRef, LoreError>>;
+  /** Appends one comment to an existing issue. */
+  readonly comment: (issueNumber: number, body: string) => Promise<Result<void, LoreError>>;
+}
+
+/** One flaky oracle of one landing: what the ledger issue records about it. */
+export interface FlakyEntry {
+  /** The oracle id (`test:<path>`, `ac:<id>`). */
+  readonly oracle: string;
+  /** The exact command that failed once and then passed. */
+  readonly command: string;
+  /** Every task of the landing that holds the oracle. */
+  readonly tasks: readonly string[];
+  /** The commit that became main (or main's tip, for an already-integrated branch). */
+  readonly landingCommit: string;
+  /** What the first run reported (for example `failed (exit 1)` or `timeout`). */
+  readonly firstOutcome: string;
+  /** What the single re-run reported (`passed`). */
+  readonly secondOutcome: string;
+}
+
+/** The ledger issue a flaky entry was attached to, and whether this call created it. */
+export interface FlakyAttachment {
+  readonly issue: IssueRef;
+  readonly created: boolean;
+}
+
+function flakyEntryText(entry: FlakyEntry): string {
+  return [
+    `Oracle: ${entry.oracle}`,
+    `Command: ${entry.command}`,
+    `Tasks: ${entry.tasks.join(", ")}`,
+    `Landing commit: ${entry.landingCommit}`,
+    `First run: ${entry.firstOutcome}`,
+    `Re-run: ${entry.secondOutcome}`,
+  ].join("\n");
+}
+
+/**
+ * Attaches flaky oracles to the ONE open flaky-tests ledger issue (AC-DCS2-4): created when none is open, otherwise a comment is
+ * appended naming the oracle, the tasks, the landing commit and both outcomes. A failure is returned as a value (the caller records it
+ * on the row and prints it); nothing here throws and nothing is swallowed.
+ */
+export class FlakyLedgerService {
+  constructor(private readonly port: FlakyLedgerPort) {}
+
+  /**
+   * @param entry - the flaky oracle of one landing
+   * @returns the ledger issue it now sits on, or the tracker's refusal
+   */
+  async attach(entry: FlakyEntry): Promise<Result<FlakyAttachment, LoreError>> {
+    const open = await this.port.findOpen(FLAKY_LEDGER_TITLE, FLAKY_LEDGER_LABEL);
+    if (!open.ok) return open;
+    const text = flakyEntryText(entry);
+    if (open.value === undefined) {
+      const created = await this.port.create({
+        title: FLAKY_LEDGER_TITLE,
+        body: `Oracles that failed once and passed on their re-run during \`lore integrate\`. Each entry below is appended as a comment.\n\n${text}`,
+        label: FLAKY_LEDGER_LABEL,
+      });
+      if (!created.ok) return created;
+      return ok({ issue: created.value, created: true });
+    }
+    const commented = await this.port.comment(open.value.number, text);
+    if (!commented.ok) return commented;
+    return ok({ issue: open.value, created: false });
+  }
+}
+
 /** See the module header. */
 export class IssueFilingService {
   constructor(

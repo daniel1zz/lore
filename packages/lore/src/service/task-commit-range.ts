@@ -92,7 +92,14 @@ export type LandingFact = Omit<TaskLanding, "recorded_at" | "kind">;
  * merge to measure, so the landed commit is the branch head itself, and the recorder takes each task's own claim
  * `base_sha` as the range start (`main_before` is then ignored). The flag is never persisted.
  */
-export type LandingRequest = LandingFact & { readonly base_from_claim?: true };
+export type LandingRequest = LandingFact & {
+  readonly base_from_claim?: true;
+  /**
+   * The slugs the landing is recorded on, when the caller has already selected them (`lore integrate` with its oracle run, AC-DCS2-1):
+   * every other task is left untouched. Never persisted. Absent = every task of the branch, as BR-1336 says.
+   */
+  readonly only?: readonly string[];
+};
 
 /** Reads `extra.landing`; `undefined` when absent or malformed (a malformed record is never trusted). */
 export function readTaskLanding(extra: Record<string, unknown> | undefined): TaskLanding | undefined {
