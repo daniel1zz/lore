@@ -5,7 +5,8 @@
  *   open GitHub issue recorded for it. That record is a fact ABOUT the plan, not work, so it lives on the plan itself
  *   as `extra.known_defects`; no corpus document carries it and no link type names it.
  * Public surface: {@link knownDefectEntrySchema}, {@link KnownDefectEntry}, {@link KNOWN_DEFECTS_FIELD},
- *   {@link judgeKnownDefectsExtra}, {@link readKnownDefects}, {@link knownDefectKey}, {@link appendKnownDefects}.
+ *   {@link judgeKnownDefectsExtra}, {@link readKnownDefects}, {@link knownDefectKey}, {@link appendKnownDefects},
+ *   {@link partitionKnownDefectsAtClose} (BR-1510: which entries a closing plan keeps).
  * Invariants:
  *   - `extra.known_defects` is an array of `{repo_id, number, dimension, fingerprint}`; `dimension` is one of the
  *     milestone review dimensions; the triple (repo_id, number, dimension) is unique within the array.
@@ -99,6 +100,63 @@ export function readKnownDefects(extra: unknown): KnownDefectEntry[] {
  */
 export function acceptedGateDimensions(entries: readonly KnownDefectEntry[]): MilestoneDimension[] {
   return [...new Set(entries.filter((e) => e.gate_accepted === true).map((e) => e.dimension))];
+}
+
+/** What the closing review says about one dimension, as {@link partitionKnownDefectsAtClose} reads it. */
+export interface ClosingDimensionFacts {
+  readonly verdict: "pass" | "fail" | "not-measured" | "na";
+  /** The root-cause fingerprints the review's failing finding of this dimension has; empty unless `verdict` is `fail`. */
+  readonly failingFingerprints: readonly string[];
+}
+
+/** A known defect the closing review no longer has the cause of, with the verdict that detaches it. */
+export interface DetachedKnownDefect {
+  readonly entry: KnownDefectEntry;
+  /** The closing review's verdict for the entry's dimension (`pass`, or `fail` with another cause). */
+  readonly verdict: "pass" | "fail";
+}
+
+/** Result of {@link partitionKnownDefectsAtClose}. */
+export interface KnownDefectsAtClose {
+  readonly kept: readonly KnownDefectEntry[];
+  readonly detached: readonly DetachedKnownDefect[];
+}
+
+/**
+ * Splits a closing plan's known defects by its closing review (BR-1510).
+ *
+ * An entry is detached only when the review MEASURED its dimension and no longer has its cause: the verdict is `pass`,
+ * or `fail` with a set of fingerprints that does not include the entry's. It is kept when its fingerprint is a failing
+ * cause, when the dimension is `not-measured` or `na`, when the review has no fact for the dimension, or when it is a
+ * gate accepted with `--accept-gate` (`acceptedGates`): not measured is never read as fixed.
+ *
+ * @param entries - the plan's known defects, in stored order
+ * @param facts - the closing review's verdict and failing fingerprints per dimension
+ * @param acceptedGates - the gate dimensions the plan accepted for this review (`acceptedGatesOf`)
+ * @returns the kept entries and the detached ones, each in stored order
+ */
+export function partitionKnownDefectsAtClose(
+  entries: readonly KnownDefectEntry[],
+  facts: Readonly<Partial<Record<MilestoneDimension, ClosingDimensionFacts>>>,
+  acceptedGates: readonly MilestoneDimension[],
+): KnownDefectsAtClose {
+  const kept: KnownDefectEntry[] = [];
+  const detached: DetachedKnownDefect[] = [];
+  for (const entry of entries) {
+    const fact = facts[entry.dimension];
+    if (fact === undefined || acceptedGates.includes(entry.dimension)) {
+      kept.push(entry);
+      continue;
+    }
+    if (fact.verdict === "pass") {
+      detached.push({ entry, verdict: "pass" });
+    } else if (fact.verdict === "fail" && !fact.failingFingerprints.includes(entry.fingerprint)) {
+      detached.push({ entry, verdict: "fail" });
+    } else {
+      kept.push(entry);
+    }
+  }
+  return { kept, detached };
 }
 
 /**

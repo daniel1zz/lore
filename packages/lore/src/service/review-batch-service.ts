@@ -159,6 +159,11 @@ export interface BatchRunPorts {
   readonly reviewPlan: (planRef: string, suite: SuiteRun | undefined) => Promise<Result<MilestoneReviewResult, LoreError>>;
   /** Archives the plan through the gated close (coverage reads the plan's known defects, each issue by number). */
   readonly closePlan: (planRef: string) => Promise<Result<void, LoreError>>;
+  /**
+   * Retries the issue writes earlier closes recorded as pending and records the outcome on a new audit row (BR-1510).
+   * Runs FIRST in every batch, whichever plans it reviews; `undefined` when not wired (bare constructions).
+   */
+  readonly retryPendingIssueWrites?: () => Promise<Result<unknown, LoreError>>;
   /** Records an errored attempt as an audit row (never a review). */
   readonly recordError: (error: BatchErrorRecord) => Promise<Result<void, LoreError>>;
   readonly filing: IssueFilingService | undefined;
@@ -290,6 +295,12 @@ export class ReviewBatchRunner {
 
   private async runUnderLease(planRefs: readonly string[], ports: BatchRunPorts, handle: LeaseHandle, tookOver: boolean): Promise<BatchRun> {
     const rows: BatchPlanRow[] = [];
+    // reason: BR-1510 — a pending GitHub write of an earlier close is retried before anything else, so it never waits
+    // on this batch's plans; a failed retry read is a visible row, never a silent drop.
+    if (ports.retryPendingIssueWrites !== undefined) {
+      const retried = await ports.retryPendingIssueWrites();
+      if (!retried.ok) rows.push({ plan: "(pending issue writes)", outcome: "error", reviewed: false, failed: [], issues: [], detail: `retry: ${messageOf(retried.error)}` });
+    }
     let suite: SuiteRun | undefined;
     let suiteRuns = 0;
     const measureOnce = async (): Promise<SuiteRun | undefined> => {

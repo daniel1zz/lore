@@ -679,6 +679,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     measureSuite: input.measureSuite,
     ...(input.changedFilesSince !== undefined ? { changedFilesSince: input.changedFilesSince } : {}),
     reviewPlan: input.reviewOne,
+    retryPendingIssueWrites: () => app.corpusService.retryPendingKnownDefectIssueWrites(actor),
     closePlan: async (ref) => {
       const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor });
       return closed.ok ? ok(undefined) : closed;

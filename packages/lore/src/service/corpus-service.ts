@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
 import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
-import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type KnownDefectEntry, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -100,6 +100,16 @@ import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActor
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
 import { pendingRevisionsOf } from "./baseline-items.js";
 import { acceptedGatesOf } from "./gate-acceptance-service.js";
+import {
+  KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
+  carryOutIssueWrites,
+  issueWritesOf,
+  planKnownDefectDetachment,
+  retryPendingIssueWrites,
+  type IssueWriteRecord,
+  type KnownDefectDetachment,
+  type KnownDefectIssueWriter,
+} from "./known-defects-at-close.js";
 import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -1362,6 +1372,52 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   private planCloseRetirementPort: PlanCloseRetirementPort | undefined;
 
   /**
+   * Hands plan close the GitHub write capability for detached known defects (BR-1510): one comment, then a close.
+   * Called once by `app.ts` for a GitHub upstream; absent, a close that detaches entries is refused up front only when
+   * it cannot read their issues, and its writes are recorded pending (never dropped).
+   *
+   * @param writer - comments on and closes the configured repository's issues
+   */
+  setKnownDefectIssueWriter(writer: KnownDefectIssueWriter): void {
+    this.knownDefectIssueWriter = writer;
+  }
+
+  private knownDefectIssueWriter: KnownDefectIssueWriter | undefined;
+
+  /** The wired detached-known-defect issue writer; `undefined` when no GitHub upstream is configured. */
+  getKnownDefectIssueWriter(): KnownDefectIssueWriter | undefined {
+    return this.knownDefectIssueWriter;
+  }
+
+  /**
+   * Retries every issue write that an earlier close recorded as pending and records the outcome on a new audit row
+   * (BR-1510). Every review batch runs this first, whichever plans it reviews.
+   *
+   * @param by - the writing actor
+   * @returns the outcome of each retried write; empty when nothing was pending
+   */
+  async retryPendingKnownDefectIssueWrites(by?: string): Promise<Result<IssueWriteRecord[], LoreError>> {
+    return retryPendingIssueWrites({
+      listRows: async () => this.store.listAuditRowsByAction(KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION),
+      writer: this.knownDefectIssueWriter,
+      appendRow: (details) =>
+        this.appendAudit({
+          action: KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
+          sessionId: "known-defect-issue-writes",
+          details: { retry: details.retry, writes: [...details.writes], rule: "BR-1510" },
+          ...(by !== undefined ? { by } : {}),
+        }),
+    });
+  }
+
+  /** The other open plans (not archived, not deprecated, not deleted): their known defects decide whether an issue is shared. */
+  private async listOtherOpenPlans(planId: string): Promise<Result<DocRecord[], LoreError>> {
+    const plans = await this.store.findMany({ type: "plan" });
+    if (!plans.ok) return plans;
+    return ok(plans.value.filter((p) => p.id !== planId && p.deleted_at === null && p.status !== "archived" && p.status !== "deprecated"));
+  }
+
+  /**
    * Upgrades a `failed` review currency to `accepted` when every failed dimension has an entry in the plan's
    * `extra.known_defects` whose GitHub issue is OPEN (BR-1372, BR-1421). A closed issue refuses the close naming it; a
    * read that failed refuses naming the issue and the error; anything else (no port, an uncovered dimension) leaves
@@ -1371,6 +1427,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     plan: DocRecord,
     currency: Extract<MilestoneReviewCurrency, { state: "failed" }>,
     reviewDocs: readonly DocRecord[],
+    keptEntries?: readonly KnownDefectEntry[],
   ): Promise<Result<MilestoneReviewCurrency, LoreError>> {
     // reason: BR-1379/BR-1500 — a failed or not-measured gate is not covered by an open issue; only an acceptance
     // bound to this failure's root cause lets it close, on the hand-close path exactly as in the review batch.
@@ -1386,7 +1443,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         rule: "BR-1500",
       });
     }
-    const coverage = await this.coverageOfFailedDimensions(plan.id, currency.failed);
+    const coverage = await this.coverageOfFailedDimensions(plan.id, currency.failed, keptEntries);
     if (!coverage.ok) {
       // reason: a missing open-issue reader is "not wired" (the gate refuses generically); a failed read of a named
       // issue must be shown to the caller verbatim.
@@ -1417,7 +1474,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    * @returns the coverage; `err` when no issue reader is wired, the plan cannot be read, or an issue read failed or
    *   names another repository (the error names the issue; never read as "covered")
    */
-  async coverageOfFailedDimensions(planId: string, failed: readonly string[]): Promise<Result<DimensionCoverage, LoreError>> {
+  async coverageOfFailedDimensions(planId: string, failed: readonly string[], keptEntries?: readonly KnownDefectEntry[]): Promise<Result<DimensionCoverage, LoreError>> {
     const port = this.planCloseIssuePort;
     if (port === undefined) {
       return err({ code: "VALIDATION_ERROR", message: "issue coverage cannot be read: no open-issue reader is wired (no GitHub upstream configured)", field: "planCloseIssuePort", rule: "BR-1379" });
@@ -1425,7 +1482,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     const plan = await this.store.find(planId);
     if (!plan.ok) return plan;
     if (plan.value === null) return err({ code: "DOC_NOT_FOUND", id: planId });
-    const entries = readKnownDefects(plan.value.extra).filter((entry) => failed.includes(entry.dimension));
+    // reason: BR-1510 — a closing plan's gate runs on the entries it KEEPS; a detached entry never covers a failed dimension.
+    const entries = (keptEntries ?? readKnownDefects(plan.value.extra)).filter((entry) => failed.includes(entry.dimension));
     const reads = new Map<number, { repoId: number; state: "open" | "closed" }>();
     const live: KnownDefectLive[] = [];
     for (const entry of entries) {
@@ -3812,6 +3870,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // disabled still gets its execution-scoped docs cleaned up on close.
     const isPlanClosing =
       existing.type === "plan" && newStatus === "archived" && existing.status !== "archived";
+    // BR-1510: set by the plan-close block below when the closing review detaches known defects of this plan.
+    let detachment: { readonly plan: KnownDefectDetachment; readonly reviewSlug: string } | undefined;
 
     if (isPlanClosing && this.gateEnforcer && this.gateEnforcer.isEnabled("plan-close")) {
       const effectiveExtra = (parsedPatch.data.extra !== undefined
@@ -3840,9 +3900,23 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       const reviewDocsResult = await this.listMilestoneReviewDocs(existing.id);
       if (!reviewDocsResult.ok) return reviewDocsResult;
       const measuredReview = assessMilestoneCurrency(existing, bundleResult.value.tasks, reviewDocsResult.value, bundleResult.value.spec);
+      // BR-1510 step 1: the closing review is the one the gate just measured (current fingerprint). Read every detached
+      // entry's issue and the other open plans' known defects; an unreadable issue refuses the close, nothing written.
+      const closingReview = measuredReview.state === "pass" || measuredReview.state === "failed" ? selectLatestMilestoneReview(reviewDocsResult.value) : undefined;
+      if (closingReview !== undefined) {
+        const others = await this.listOtherOpenPlans(existing.id);
+        if (!others.ok) return others;
+        const planned = await planKnownDefectDetachment({ slug: existing.slug, extra: effectiveExtra }, closingReview, others.value, this.planCloseIssuePort);
+        if (!planned.ok) return planned;
+        if (planned.value.detached.length > 0) {
+          detachment = { plan: planned.value, reviewSlug: closingReview.doc.slug };
+          const { known_defects: _dropped, ...rest } = effectiveExtra;
+          docPatch.extra = planned.value.kept.length > 0 ? { ...rest, known_defects: [...planned.value.kept] } : rest;
+        }
+      }
       let milestoneReview: MilestoneReviewCurrency = measuredReview;
       if (measuredReview.state === "failed") {
-        const accepted = await this.acceptKnownDefects(existing, measuredReview, reviewDocsResult.value);
+        const accepted = await this.acceptKnownDefects(existing, measuredReview, reviewDocsResult.value, detachment?.plan.kept);
         if (!accepted.ok) return accepted;
         milestoneReview = accepted.value;
       }
@@ -4032,6 +4106,14 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
           ...(retiredInPlan !== undefined ? { retired_in_plan: retiredInPlan } : {}),
           ...(classification.stateChange !== undefined ? { state_change: classification.stateChange } : {}),
+          // BR-1510 step 2: the detached entries are named on the SAME audit row as the close write.
+          ...(detachment !== undefined
+            ? {
+                known_defects_detached: detachment.plan.detached.map((d) => ({ repo_id: d.entry.repo_id, number: d.entry.number, dimension: d.entry.dimension, fingerprint: d.entry.fingerprint, verdict: d.verdict })),
+                known_defects_review: detachment.reviewSlug,
+                rule: "BR-1510",
+              }
+            : {}),
         },
       },
       classification.snapshot,
@@ -4039,6 +4121,19 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,
     );
     if (!updateResult.ok) return updateResult;
+    if (detachment !== undefined) {
+      // BR-1510 step 3: GitHub writes cannot roll back with the corpus write, so a failure is recorded pending (never
+      // an error of the close) and every later review batch retries it.
+      const records = await carryOutIssueWrites(issueWritesOf(existing.slug, detachment.reviewSlug, detachment.plan), this.knownDefectIssueWriter);
+      const recorded = await this.appendAudit({
+        action: KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
+        sessionId: existing.id,
+        docId: existing.id,
+        details: { plan: existing.slug, review: detachment.reviewSlug, retry: false, writes: records, rule: "BR-1510" },
+        ...(opts?.by !== undefined ? { by: opts.by } : {}),
+      });
+      if (!recorded.ok) return recorded;
+    }
 
     // SPEC-103 §Mechanisms M1, §Design Decisions D4 — uniform edit-reset semantics:
     // an edit to an approved ledger doc (assessment/retro/handoff/uat) still applies
