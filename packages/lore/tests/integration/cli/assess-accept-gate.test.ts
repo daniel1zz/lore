@@ -341,20 +341,20 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     expect(unmeasured.judgments).toBe(1);
   });
 
-  it("AC-AO-4 NEGATIVE: a not-measured regression caused by an unlanded task is not re-judged by the next batch (a retry cannot change it)", async () => {
+  it("AC-AF-7 NEGATIVE: a not-measured regression caused by an unlanded task is not re-judged by the next batch (a retry cannot change it)", async () => {
     const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: unlanded:t (task t has no landing record, so its changes have no measured diff)", cites: ["unlanded:t"] });
     expect((await w.runBatch()).outcome).toBe("kept-open");
     expect((await w.runBatch()).outcome).toBe("kept-open");
     expect(w.judgments).toBe(0);
   });
 
-  it("AC-AO-4 NEGATIVE: a not-measured regression caused by an unmappable landing is not re-judged by the next batch", async () => {
+  it("AC-AF-7 NEGATIVE: a not-measured regression caused by an unmappable landing is not re-judged by the next batch", async () => {
     const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: a.test.ts (landing abc is not on main's first-parent history)", cites: ["a.test.ts"] });
     expect((await w.runBatch()).outcome).toBe("kept-open");
     expect(w.judgments).toBe(0);
   });
 
-  it("AC-AO-4 HAPPY: a not-measured regression whose suite could not complete is re-judged by the next batch, together with an unlanded task", async () => {
+  it("AC-AF-7 HAPPY: a not-measured regression whose suite could not complete is re-judged by the next batch, together with an unlanded task", async () => {
     const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: abc123 (the suite could not run at abc123: timeout); unlanded:t (no landing)", cites: ["abc123", "unlanded:t"] });
     expect((await w.runBatch()).outcome).toBe("kept-open");
     expect(w.judgments).toBe(1);
