@@ -463,14 +463,9 @@ interface BatchCloseInput {
  */
 async function runBatchClose(input: BatchCloseInput): Promise<number> {
   const { app, inv, actor } = input;
-  const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
-  if (!closeService.ok) {
-    inv.io.stderr.write(formatErrorFor(inv, closeService.error) + "\n");
-    return exitCode(closeService.error);
-  }
   const run = await createBatchRunner(app).runBatch(
     input.planRefs,
-    buildBatchRunPorts({ app, actor, wiring: input.wiring, filing: input.filing, leases: input.leases, mode: input.direct ? "direct" : "batch", closeFlow: closeFlowOf(closeService.value) }),
+    buildBatchRunPorts({ app, actor, wiring: input.wiring, filing: input.filing, leases: input.leases, mode: input.direct ? "direct" : "batch", closeFlow: closeFlowOf(() => buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor })) }),
   );
   if (!run.ok) {
     inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");

@@ -327,12 +327,9 @@ export class ReviewBatchRunner {
       }
       return suite;
     };
-    // reason: the plan's keyed lease (BR-1511) is taken inside `runPlan`; the close function (AC-DCS2-11, its own plan-scoped lease)
-    // wraps that assess, so a plan another holder has is a skipped row either way.
-    for (const ref of planRefs) {
-      const assess = (): Promise<BatchPlanRow> => this.runPlan(ref, ports, measureOnce);
-      rows.push(ports.closeFlow === undefined ? await assess() : await ports.closeFlow(ref, assess));
-    }
+    // reason: the plan's keyed lease (BR-1511) is taken inside `runPlan`, which then runs the close function (AC-DCS2-11, its own
+    // plan-scoped lease) around the leased assess.
+    for (const ref of planRefs) rows.push(await this.runPlan(ref, ports, measureOnce));
     return { state: "ran", suiteRuns, rows };
   }
 
@@ -376,7 +373,10 @@ export class ReviewBatchRunner {
     }
     const handle = leased.value.handle;
     try {
-      return await this.runPlanLeased(ref, ports, measureOnce, handle);
+      // reason: AC-DCS2-11 — the close function wraps the assess, and only for a plan whose review lease this holder has: a held plan is
+      // a skipped row above and never reaches (or builds) the close.
+      const assess = (): Promise<BatchPlanRow> => this.runPlanLeased(ref, ports, measureOnce, handle);
+      return ports.closeFlow === undefined ? await assess() : await ports.closeFlow(ref, assess);
     } finally {
       await handle.release();
     }

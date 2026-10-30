@@ -127,8 +127,17 @@ export function rowOfCloseResult(plan: string, result: Result<PlanCloseResult<Ba
 /**
  * The `closeFlow` port of the review batch: each plan the batch assesses goes through the one close function.
  *
- * @param service - from {@link buildPlanCloseService}
+ * The service is built lazily, once, when the first plan is actually closed (the batch calls this only for a plan whose review lease it
+ * holds): a held plan or an empty selection never needs the git common dir. When a close runs and the build fails, the plan's row is
+ * an `error` naming the cause; nothing falls back to another close path.
+ *
+ * @param build - {@link buildPlanCloseService} bound to its inputs
  */
-export function closeFlowOf(service: PlanCloseService): NonNullable<BatchRunPorts["closeFlow"]> {
-  return async (ref, assess) => rowOfCloseResult(ref, await service.close<BatchPlanRow>(ref, () => assess()));
+export function closeFlowOf(build: () => Result<PlanCloseService, LoreError>): NonNullable<BatchRunPorts["closeFlow"]> {
+  let built: Result<PlanCloseService, LoreError> | undefined;
+  return async (ref, assess) => {
+    built ??= build();
+    if (!built.ok) return rowOfCloseResult(ref, built);
+    return rowOfCloseResult(ref, await built.value.close<BatchPlanRow>(ref, () => assess()));
+  };
 }
