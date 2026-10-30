@@ -170,7 +170,7 @@ describe("AC-DCL-5 static scan — only corpus-service.ts and store/* call a sto
       ["SpecKindService", /new SpecKindService\(store, corpusService\)/g],
       ["StateBindingService", /new StateBindingService\(store, corpusService\)/g],
       ["AcService", /new AcService\(store, recordLockService, \{ citeGate: citeGateRaw \}, corpusService\)/g],
-      ["PlanIntegrationBranchService", /new PlanIntegrationBranchService\(store, corpusService\)/g],
+      ["PlanIntegrationBranchService", /new PlanIntegrationBranchService\(store, corpusService(?:, [^)]*\)?)?\)/g],
       ["state-binding occupancy port", /buildStateBindingOccupancyPort\(corpusService\)/g],
     ];
     for (const [name, pattern] of wired) {

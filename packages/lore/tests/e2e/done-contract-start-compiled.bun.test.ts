@@ -52,7 +52,9 @@ beforeAll(async () => {
   scratch = mkdtempSync(join(tmpdir(), "dcs1-start-"));
   // The integration branch is one commit ahead of main (a task before this one already landed on it).
   const side = join(scratch, "integ-side");
-  fixture.git(["worktree", "add", "-q", "-b", INTEG, side, "main"]);
+  // declaring the branch creates it at main's tip (AC-DCS2-10); the earlier task's commit is then made on it
+  planInteg = await fixture.createPlan("Start plan with integration branch", INTEG);
+  fixture.git(["worktree", "add", "-q", side, INTEG]);
   execFileSync("git", ["config", "user.email", "fixture@example.invalid"], { cwd: side });
   execFileSync("git", ["config", "user.name", "fixture"], { cwd: side });
   writeFileSync(join(side, "earlier-task.txt"), "earlier task\n");
@@ -62,7 +64,6 @@ beforeAll(async () => {
   integTip = fixture.git(["rev-parse", INTEG]);
   mainTip = fixture.git(["rev-parse", "main"]);
   planMain = await fixture.createPlan("Start plan on main");
-  planInteg = await fixture.createPlan("Start plan with integration branch", INTEG);
 });
 
 afterAll(() => {

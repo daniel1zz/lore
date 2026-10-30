@@ -441,6 +441,35 @@ describe("AC-DCS2-9: land resumes after a failed step and is idempotent", () => 
   });
 });
 
+describe("AC-DCS2-9: the done walk of the main route resumes without integrating again", () => {
+  it("AC-DCS2-9: a done walk that refuses after the integrate exits 4 naming the next command and keeps the landed entry; the resume skips the integrate and archives; a third run changes nothing", async () => {
+    const plan = await fixture.createPlan("Land resume main plan");
+    // the task anchors a test file its branch never creates: the finish runs the file's oracle command, the integrate lands the
+    // branch, but lore done refuses the task (oracle-file-missing: the landed tree lacks a contract test file)
+    const x = await codeTask(plan, "resume-main", { work: { "src/resume-main.ts": "export const resumeMain = 1;\n" } });
+    const refused = await land(x.slug);
+    expect(refused.exitCode, refused.text).toBe(4);
+    expect(refused.text).toContain(`lore land ${x.slug}`);
+    const landedMain = mainTip();
+    expect(isAncestor(x.tip, landedMain), "the landing stays").toBe(true);
+    expect((await logOf(x.slug)).filter((entry) => entry.kind === "landed").length).toBe(1);
+    expect(await statusOf(x.slug)).toBe("approved");
+
+    // run again: the step already in the log is skipped (no integrate runs, main stays), the walk resumes at the done step and says
+    // what still refuses. A cause that is judged against the landed commit cannot be fixed by landing again; the repair is named.
+    const version = (await fixture.readTask(x.slug)).version;
+    const resumed = await land(x.slug);
+    expect(resumed.exitCode, resumed.text).toBe(4);
+    expect(resumed.text, "the integrate is not run again").not.toContain("integrate:");
+    expect(resumed.text).toContain("already landed");
+    expect(resumed.text).toContain("oracle-file-missing");
+    expect(mainTip()).toBe(landedMain);
+    expect((await logOf(x.slug)).filter((entry) => entry.kind === "landed").length).toBe(1);
+    expect(await statusOf(x.slug)).toBe("approved");
+    expect((await fixture.readTask(x.slug)).version).toBe(version);
+  });
+});
+
 // ───────────────────────────── AC-DCS2-10 ─────────────────────────────
 
 describe("AC-DCS2-10: lore plan integration-branch creates the declared branch at main's tip", () => {

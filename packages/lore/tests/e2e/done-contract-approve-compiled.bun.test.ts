@@ -490,10 +490,11 @@ describe("the done contract compiled at approve", () => {
     // The plan's integration branch exists and sits one commit ahead of main, so its tip differs from main's.
     const tree = cf.git(["rev-parse", "HEAD^{tree}"]);
     const ahead = cf.git(["commit-tree", tree, "-p", "HEAD", "-m", "integration tip"]);
-    cf.git(["branch", INTEGRATION, ahead]);
 
     planMain = await cf.createPlan("Plan on main");
+    // declaring the branch creates it at main's tip (AC-DCS2-10); the fixture then moves it one commit ahead
     planIntegration = await cf.createPlan("Plan on integration", INTEGRATION);
+    cf.git(["branch", "-f", INTEGRATION, ahead]);
   });
 
   afterAll(() => {
@@ -614,6 +615,8 @@ describe("the done contract compiled at approve", () => {
 
     it("AC-DCS1-2: a code task with every cause at once exits 4 done-contract-uncompilable naming each cause in ONE message; version, status and audit are unchanged", async () => {
       const ghostPlan = await cf.createPlan("Plan with absent branch", "dcs1-ghost-branch");
+      // declaring created the branch (AC-DCS2-10); the cause only fires once it is deleted afterwards
+      cf.git(["branch", "-D", "dcs1-ghost-branch"]);
       await cf.mustRun(["ac", "add", cf.spec, "AC-ABS-1", "--statement", "Unmarked absent literal.", "--mode", "script", "--oracle", "test", "--command", "echo abs",
         "--falsifier-path", ABSENT_LITERAL.path, "--falsifier-find", ABSENT_LITERAL.find, "--falsifier-replace", "", "--falsifier-exit-code", "1"]);
       await cf.mustRun(["ac", "add", cf.spec, "AC-GONE-1", "--statement", "Soon removed.", "--mode", "script", "--oracle", "test", "--command", "echo gone"]);
