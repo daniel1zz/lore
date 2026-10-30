@@ -1,6 +1,8 @@
 // @spawns dist/lore
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
+// @reads packages/lore/src/**
 /**
  * done-contract-queue-compiled.bun.test.ts — `lore integrate` serializes landings in a FIFO merge queue
  * (spec-integrate-proves-and-lands-evidence-at-landing-the-merge AC-DCS2-5, decision D40), observed through the compiled
