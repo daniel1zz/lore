@@ -581,7 +581,7 @@ export class IntegrateService {
         if (!run.ok) return run;
         proven = run.value;
         // reason: D44 — the rows ran on T (head_sha) but belong to the landing that brought the branch in (recorded_at_landing).
-        await this.recordOracleRows(proven.tasks, base.value, placed.value.landing_commit, proven.outcomes);
+        await this.recordOracleRows(proven.tasks, base.value, proven.outcomes, placed.value.landing_commit);
       }
       // reason: BR-1336 — an already-integrated branch still records a landing on every selected task that holds none for this head
       // (the recorder skips tasks that already carry one). Main did not move by this call, so main_after is main's tip.
@@ -701,7 +701,7 @@ export class IntegrateService {
     const casMs = clock() - casStart;
     if (swapped.status === 0) {
       finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-      await this.recordOracleRows(tasks, merge, merge, outcomes);
+      await this.recordOracleRows(tasks, merge, outcomes);
       const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint, ...onlySelected });
       // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
       const view = this.refreshSharedView();
@@ -756,7 +756,7 @@ export class IntegrateService {
    * already-integrated branch), through the oracle port. Never fails the integration (main has already moved): a task whose rows could
    * not be written is a WARNING line from the port, so the missing evidence is visible and `lore done` refuses it by its floor.
    */
-  private async recordOracleRows(tasks: readonly LandingTask[], commit: string, landingCommit: string, outcomes: readonly OracleOutcome[]): Promise<void> {
+  private async recordOracleRows(tasks: readonly LandingTask[], commit: string, outcomes: readonly OracleOutcome[], landingCommit: string = commit): Promise<void> {
     const port = this.deps.oracles;
     const settings = this.oracleSettings;
     if (port === undefined || settings === undefined || outcomes.length === 0) return;
