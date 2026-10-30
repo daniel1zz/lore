@@ -108,6 +108,17 @@ interface BuildOptions {
   readonly deletes?: readonly string[];
 }
 
+let sharedPlan: string | undefined;
+
+/**
+ * One plan for every task whose test is not about the plan: each task anchors its own files, so tasks of one plan never
+ * overlap, and the plan is built once instead of once per test (a `lore create plan` costs a corpus write each).
+ */
+async function sharedPlanSlug(): Promise<string> {
+  sharedPlan ??= await newPlan("Shared floors plan");
+  return sharedPlan;
+}
+
 async function newPlan(title: string): Promise<string> {
   return fixture.createPlan(`${title} ${(sequence += 1)}`);
 }
@@ -115,7 +126,7 @@ async function newPlan(title: string): Promise<string> {
 /** Creates, approves and claims a code task on a fresh branch in a linked worktree, and commits its work there. */
 async function buildBranchTask(options: BuildOptions = {}): Promise<Built> {
   sequence += 1;
-  const planSlug = options.plan ?? (await newPlan("Floors plan"));
+  const planSlug = options.plan ?? (await sharedPlanSlug());
   const file = `tests/c-${sequence}.test.ts`;
   const anchors = options.anchors ?? [file];
   const slug = await fixture.createTask({ plan: planSlug, kind: "code", title: `Floors task ${sequence}`, anchors, acScope: options.acScope ?? ["AC-FX-1"] });
@@ -233,7 +244,7 @@ describe("AC-DCS1-6: the retired surfaces are gone", () => {
     expect(commandStderr(retired.stderr).split("--declare-no-new-tests").join("<flag>")).toBe(commandStderr(generic.stderr).split("--no-such-flag-xyz").join("<flag>"));
     expect(retired.stdout).toBe("");
 
-    const draft = await fixture.createTask({ plan: await newPlan("Approve plan"), kind: "code", title: "Approve retired flag" });
+    const draft = await fixture.createTask({ plan: await sharedPlanSlug(), kind: "code", title: "Approve retired flag" });
     const approveBefore = await fixture.readTask(draft);
     const approve = await fixture.run(["approve", draft, "--declare-no-new-tests", reason]);
     const approveGeneric = await fixture.run(["approve", draft, "--no-such-flag-xyz", reason]);
@@ -248,7 +259,7 @@ describe("AC-DCS1-6: the retired surfaces are gone", () => {
   });
 
   it("AC-DCS1-6: lore red-first <task> exits 1 with the unknown-command message, the same as lore nosuchcmd", async () => {
-    const slug = await fixture.createTask({ plan: await newPlan("Red-first plan"), kind: "code", title: "Red-first retired" });
+    const slug = await fixture.createTask({ plan: await sharedPlanSlug(), kind: "code", title: "Red-first retired" });
     const before = await fixture.readTask(slug);
     const retired = await fixture.run(["red-first", slug]);
     const unknown = await fixture.run(["nosuchcmd", slug]);
@@ -261,7 +272,7 @@ describe("AC-DCS1-6: the retired surfaces are gone", () => {
   });
 
   it("AC-DCS1-6: a task archived earlier with the old flag keeps its stored no_new_tests_reason", async () => {
-    const slug = await fixture.createTask({ plan: await newPlan("History plan"), kind: "code", title: "Archived with the old flag" });
+    const slug = await fixture.createTask({ plan: await sharedPlanSlug(), kind: "code", title: "Archived with the old flag" });
     const task = await fixture.readTask(slug);
     const store = actedStore(new SQLiteStore(join(fixture.dir, ".lore", "lore.db")));
     try {
@@ -419,7 +430,7 @@ describe("AC-DCS1-7: done judges by the stored contract in the fixed floor order
   });
 
   it("AC-DCS1-7: a task that never ran finish is judged by the same floors: a draft task holding no contract is refused, never judged by its fields", async () => {
-    const slug = await fixture.createTask({ plan: await newPlan("Draft plan"), kind: "code", title: "Draft never approved", acScope: [] });
+    const slug = await fixture.createTask({ plan: await sharedPlanSlug(), kind: "code", title: "Draft never approved", acScope: [] });
     await capturePassIn(fixture.dir, slug, TYPECHECK);
     const out = await fixture.run(["done", slug]);
     expect(out.exitCode, `${out.stdout}${out.stderr}`).toBe(4);
@@ -452,7 +463,7 @@ describe("AC-DCS1-7: evidence binds to the code (the rule AC-DCS1-27 states)", (
   });
 
   it("AC-DCS1-7: a task with no landing record exits 4 [floor: attested-pass] with the cause evidence-unmeasurable even when it holds attested passes", async () => {
-    const slug = await fixture.createTask({ plan: await newPlan("No landing plan"), kind: "code", title: "Never landed", anchors: [], acScope: [] });
+    const slug = await fixture.createTask({ plan: await sharedPlanSlug(), kind: "code", title: "Never landed", anchors: [], acScope: [] });
     await fixture.mustRun(["approve", slug, "--red-waiver", "nothing to run red"]);
     await capturePassIn(fixture.dir, slug, TYPECHECK);
     await expectFloor(slug, "attested-pass", "evidence-unmeasurable");
@@ -515,8 +526,9 @@ describe("AC-DCS1-7: the contract is evaluated against the landed tree (the rule
   it("AC-DCS1-7: a test file absent from the landed tree that the diff did NOT delete refuses only the task that anchors it, exit 4 oracle-file-missing naming the path", async () => {
     const gone = SEED_FILES[1];
     // Two tasks cut from the same main: one deletes the file and lands first, the other never touched it.
-    const deleter = await buildBranchTask({ anchors: [gone], files: { "deleter.txt": "x\n" }, deletes: [gone] });
-    const bystander = await buildBranchTask({ anchors: [gone], files: { "bystander.txt": "x\n" } });
+    // reason: both anchor the same file, so they live in plans of their own (tasks of one plan may not overlap on an anchor).
+    const deleter = await buildBranchTask({ plan: await newPlan("Deleter plan"), anchors: [gone], files: { "deleter.txt": "x\n" }, deletes: [gone] });
+    const bystander = await buildBranchTask({ plan: await newPlan("Bystander plan"), anchors: [gone], files: { "bystander.txt": "x\n" } });
     // The bystander's claim is released so the deleter's change of the file it anchors is not held (BR-1346); its branch
     // still lands afterwards, and its claim history still names it.
     await fixture.mustRun(["release", bystander.slug]);
