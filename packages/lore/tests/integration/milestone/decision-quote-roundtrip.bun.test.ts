@@ -1,6 +1,5 @@
 /**
  * @spec_ref spec-a-decision-carrying-write-records-its-decision-on-its
- * @ac_ref AC-DR-7
  *
  * Issue #498: the write-time quote (DecisionGate over the real git port) and the milestone re-check read the same pinned
  * lines through ONE shared extractor, so an unchanged file never reads as wrong-when-written. The trigger in the corpus:
@@ -72,7 +71,7 @@ async function roundTrip(path: string, from: number, to: number, mutate?: (quote
   return { findings, quote: source.quote };
 }
 
-describe("AC-DR-7 write-time quote and re-check share one normalisation (#498)", () => {
+describe("write-time quote and re-check share one normalisation (#498)", () => {
   it("a range ending in a blank line after a long box-drawing comment is no finding", async () => {
     const { findings, quote } = await roundTrip("lf.ts", 4, 6);
     expect(quote.endsWith("\n")).toBe(true);
