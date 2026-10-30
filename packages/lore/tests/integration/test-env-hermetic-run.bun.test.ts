@@ -73,28 +73,52 @@ describe("test env is hermetic about the harness run", () => {
       for (const adapter of Object.values(HARNESS_ADAPTERS)) markerEnv[adapter.marker.env] = adapter.marker.value;
       expect(Object.keys(markerEnv).length).toBeGreaterThan(0);
 
-      // The fixture loads the shared vitest config (the strip point), then spawns lore with NO explicit env, the
-      // way a test fixture without a test identity does; it reports the child's exit status as its own.
-      const fixture = join(dir, "spawning-fixture.ts");
+      // Two processes mirror a vitest run. The LAUNCHER stands for the runner's main process: it loads the shared config
+      // (the strip point) and starts the worker with its own, now stripped, environment. The WORKER stands for a test
+      // fixture without a test identity: it spawns `lore` with NO explicit env and reports the child's exit status.
+      const launcher = join(dir, "launcher.ts");
+      const worker = join(dir, "worker.ts");
       writeFileSync(
-        fixture,
+        launcher,
         `import ${JSON.stringify(join(root, "vitest.shared.ts"))};
-const lore = (args: string[]) => Bun.spawnSync(["bun", "run", ${JSON.stringify(INDEX_TS)}, ...args], { cwd: ${JSON.stringify(dir)} });
-const init = lore(["init"]);
-const proc = init.exitCode === 0 ? lore(["create", "prd", "--title", "Marker probe", "--content", "probe"]) : init;
-process.stdout.write(proc.stdout.toString());
-process.stderr.write(proc.stderr.toString());
-process.stderr.write("MARKERS_SEEN=" + JSON.stringify(Object.keys(${JSON.stringify(markerEnv)}).filter((k) => process.env[k] !== undefined)) + "\\n");
+const proc = Bun.spawnSync(["bun", ${JSON.stringify(worker)}], { env: process.env, stdout: "inherit", stderr: "inherit" });
 process.exit(proc.exitCode ?? 1);
+`,
+      );
+      // The worker first starts a write with no identity: in CI that is refused as "no attested agent run and no open human
+      // session"; inside an agent session with the marker inherited it was refused as "inside an agent harness" instead.
+      // It then starts the same write with the identity the test helpers give (the known-party rewrite) and must exit 0.
+      writeFileSync(
+        worker,
+        `import { rewriteLoreStart } from ${JSON.stringify(join(root, "scripts/test-known-party-spawn.ts"))};
+const cwd = ${JSON.stringify(dir)};
+const entry = ["bun", "run", ${JSON.stringify(INDEX_TS)}];
+const start = (args: string[], withIdentity: boolean) => {
+  const argv = [...entry, ...args];
+  const rewritten = withIdentity ? rewriteLoreStart(argv, { cwd }) : undefined;
+  return Bun.spawnSync(rewritten?.argv ?? argv, { cwd, ...(rewritten?.env === undefined ? {} : { env: rewritten.env }) });
+};
+const create = ["create", "prd", "--title", "Marker probe", "--content", "probe"];
+const init = start(["init"], false);
+const refused = start(create, false);
+const accepted = init.exitCode === 0 ? start(create, true) : init;
+process.stdout.write(accepted.stdout.toString());
+process.stderr.write(accepted.stderr.toString());
+process.stderr.write("NO_IDENTITY_REFUSAL=" + refused.stderr.toString().replace(/\\s+/g, " ") + "\\n");
+process.stderr.write("MARKERS_SEEN=" + JSON.stringify(${JSON.stringify(Object.keys(markerEnv))}.filter((k) => process.env[k] !== undefined)) + "\\n");
+process.exit(accepted.exitCode ?? 1);
 `,
       );
       const env: Record<string, string | undefined> = { ...process.env, ...markerEnv };
       delete env[HARNESS_RUN_ENV];
       delete env["LORE_TEST_THROWAWAY_HOME"];
-      const proc = Bun.spawnSync(["bun", fixture], { cwd: root, env });
+      const proc = Bun.spawnSync(["bun", launcher], { cwd: root, env });
       const out = proc.stderr.toString() + proc.stdout.toString();
       expect(proc.exitCode, out).toBe(0);
       expect(out).toContain("MARKERS_SEEN=[]");
+      expect(out).toContain("NO_IDENTITY_REFUSAL=");
+      expect(out).toContain("no attested agent run and no open human session");
+      expect(out).not.toContain("runs inside an agent harness");
     },
     TEST_TIMEOUT_MS,
   );
