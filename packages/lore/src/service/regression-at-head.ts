@@ -19,7 +19,6 @@
  *     (5) charged only if the first failing commit is a main commit that brought one of the plan's landings in. A landing no
  *     main commit can be found for makes `not-measured` only a file whose transition falls after that landing's `main_before`
  *     (where it could be); a transition at or before it, or at another commit, is attributed as usual.
- *   - A stored suite result is a green for a file only if no command of it exited with anything but 0 or 1 (exit 5 = the suite never ran).
  *   - A file absent at a commit counts as not red there (no run), so a test the plan added is charged to the landing that added it.
  *   - A file red at a landing but green at head is never looked at: only the head suite's failing files are examined.
  *   - A step that cannot complete (suite unrunnable, history unreadable, a single-file run erroring or timing out) makes that
@@ -140,13 +139,9 @@ class FileProbe {
     if (stored.value !== undefined) return { ok: true, value: stateOfExit(stored.value.exit_code) };
     const suite = this.measuredByCommit.get(commit);
     if (suite === undefined) return { ok: true, value: undefined };
-    if (suite.failing_test_files.some((f) => f.file === this.file)) return { ok: true, value: "red" };
-    // reason: a suite result that does not list the file as failing proves it passed ONLY if the commands really ran tests. A
-    // command that exited with anything but 0 (pass) or 1 (test failures) never ran them (exit 5 = oracle-lock contended, stored
-    // as `measured` with no failing file): reading that as a pass made a file that was red there the "lower bound", and the
-    // confirmation then contradicted the bisection ("flaky during bisection"). Such a result knows nothing about the file.
-    if (suite.commands.some((c) => c.exit_code !== 0 && c.exit_code !== 1)) return { ok: true, value: undefined };
-    return { ok: true, value: "green" };
+    // reason: a measured suite result that does not list the file as failing means it passed or did not exist: not red either way.
+    // (The store holds `measured` only for a run whose commands exited 0 or 1, so a run that never ran the tests is not here.)
+    return { ok: true, value: suite.failing_test_files.some((f) => f.file === this.file) ? "red" : "green" };
   }
 
   private async exists(commit: string): Promise<Step<boolean>> {

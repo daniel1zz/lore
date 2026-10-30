@@ -309,11 +309,13 @@ describe("regression at the assessed commit", () => {
     expect(r.charged).toEqual([]);
   });
 
-  it("AC-AO-1 a stored suite result whose test command never ran (exit 5, oracle lock contended) is not a pass: it is not the lower bound, so the bisection does not contradict its confirmation", async () => {
+  it("AC-AO-1 a suite whose test command never ran (exit 5, oracle lock contended) is stored unrunnable, so it is not a lower-bound pass and the bisection does not contradict its confirmation", async () => {
     const store = new InMemoryStore();
     const f = build({ commits: 20, files: { [FILE]: { redFrom: 4 } } }, { store });
     // measured, no failing file, but the test command exited 5: nothing ran at commit 12, though the file is red there
-    await f.service.lookupOrRun(sha(12), { ...f.ports.runner, runSuite: async (commit) => ok({ status: "measured", commit, commands: [{ command: "bun run test", exit_code: 5, output_tail: "" }], skipped: [], failing_test_files: [] }) });
+    const stored = await f.service.lookupOrRun(sha(12), { ...f.ports.runner, runSuite: async (commit) => ok({ status: "measured", commit, commands: [{ command: "bun run test", exit_code: 5, output_tail: "oracle-lock: contended" }], skipped: [], failing_test_files: [] }) });
+    // the store records the non-run as unrunnable, so it is never a lower bound: the file falls through to a real run at the floor
+    expect(stored.ok && stored.value.status).toBe("unrunnable");
     const r = await measure(f, [landingAt(3), landingAt(4)]);
     expect(r.files[0]).toEqual({ file: FILE, outcome: "regression", landing: sha(4) });
   });
