@@ -67,8 +67,8 @@ interface JudgeShape {
   /** Stored on the review the judge makes (what a real review records from its facts). */
   readonly assessedCommit?: string;
   readonly failingFactFiles?: readonly string[];
-  /** The regression row's reason and cites when regression is not-measured (what regression-at-head.ts writes for the cause). */
-  readonly regressionNotMeasured?: { readonly reason: string; readonly cites: readonly string[] };
+  /** The structured `regression_causes` stored when regression is not-measured (what regression-at-head.ts reports); absent means `unrunnable`. */
+  readonly regressionCauses?: NonNullable<MilestoneReview["regression_causes"]>;
 }
 
 class World {
@@ -149,9 +149,8 @@ class World {
     const dimensions = Object.fromEntries(
       MILESTONE_DIMENSIONS.map((d) => {
         const verdict = this.shape.verdicts[d] ?? "pass";
-        const cause = verdict === "not-measured" && d === "regression" ? this.shape.regressionNotMeasured : undefined;
-        const cites = verdict === "fail" ? [`src/${d}.ts`] : verdict === "not-measured" ? [...(cause?.cites ?? [`${d}:subject`])] : undefined;
-        return [d, { verdict, reason: cause?.reason ?? `${d} ${verdict}`, reference: "fixture", ...(cites !== undefined ? { cites } : {}) }];
+        const cites = verdict === "fail" ? [`src/${d}.ts`] : verdict === "not-measured" ? [`${d}:subject`] : undefined;
+        return [d, { verdict, reason: `${d} ${verdict}`, reference: "fixture", ...(cites !== undefined ? { cites } : {}) }];
       }),
     ) as MilestoneReview["dimensions"];
     const regressionFails = this.shape.verdicts.regression === "fail";
@@ -162,6 +161,7 @@ class World {
       dimensions,
       decisions: [],
       ...(regressionFails ? { causes: { regression_files: [RED_FILE], suite_failing_files: [RED_FILE] } } : {}),
+      ...(this.shape.verdicts.regression === "not-measured" ? { regression_causes: [...(this.shape.regressionCauses ?? ["unrunnable" as const])] } : {}),
       ...(this.shape.assessedCommit !== undefined ? { assessed_commit: this.shape.assessedCommit } : {}),
       ...(this.shape.failingFactFiles !== undefined ? { failing_fact_files: [...this.shape.failingFactFiles] } : {}),
       prompt_version: "fixture",
@@ -241,7 +241,7 @@ describe("the post-landing batch measures nothing per landing", () => {
 
   it("AC-AO-4 a regression not measured because a task has no landing record is not re-judged by the next batch (a retry cannot change it)", async () => {
     const world = new World();
-    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionNotMeasured: { reason: "landings not measured: unlanded:task-x (task task-x has no landing record, so its changes have no measured diff)", cites: ["unlanded:task-x"] } };
+    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionCauses: ["unlanded"] };
     expect(await batch(world, "first")).toMatchObject({ outcome: "kept-open", reviewed: true });
     world.judgeCalls = 0;
     world.suiteRuns = 0;
@@ -252,7 +252,7 @@ describe("the post-landing batch measures nothing per landing", () => {
 
   it("AC-AO-4 a regression not measured because a landing is not on main's history is not re-judged by the next batch", async () => {
     const world = new World();
-    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionNotMeasured: { reason: "landings not measured: a.test.ts (landing abc is not on main's first-parent history)", cites: ["a.test.ts"] } };
+    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionCauses: ["unmappable"] };
     await batch(world, "first");
     world.judgeCalls = 0;
     expect(await batch(world, "next")).toMatchObject({ reviewed: false });
@@ -261,7 +261,7 @@ describe("the post-landing batch measures nothing per landing", () => {
 
   it("AC-AO-4 an unrunnable head suite alongside an unlanded task is still re-judged by the next batch", async () => {
     const world = new World();
-    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionNotMeasured: { reason: "landings not measured: abc123 (the suite could not run at abc123: timeout); unlanded:task-x (no landing)", cites: ["abc123", "unlanded:task-x"] } };
+    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionCauses: ["unlanded", "unrunnable"] };
     await batch(world, "first");
     world.judgeCalls = 0;
     expect(await batch(world, "next")).toMatchObject({ reviewed: true });

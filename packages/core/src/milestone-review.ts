@@ -139,7 +139,7 @@ export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
  *     at the same head reads the same stored runs and reaches the same disagreement.
  */
 export const NOT_MEASURED_CAUSES = ["unrunnable", "unlanded", "unmappable", "flaky-bisection"] as const;
-export type NotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
+export type RegressionNotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
 
 /**
  * Whether the next batch re-reviewing a plan kept open by a not-measured regression can change the outcome (spec "Fingerprint":
@@ -149,7 +149,7 @@ export type NotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
  * @returns `true` iff some cause is `unrunnable`; every other cause waits for the plan's own landing, a landing touching its
  *   failing facts, or a manual `lore assess`
  */
-export function regressionRetryCanChange(causes: readonly NotMeasuredCause[] | undefined): boolean {
+export function regressionRetryCanChange(causes: readonly RegressionNotMeasuredCause[] | undefined): boolean {
   return causes?.includes("unrunnable") ?? false;
 }
 
@@ -162,7 +162,7 @@ export interface MilestoneFactRow {
   /** What decided it (attestation id, failing files, why not measured). */
   readonly detail: string;
   /** Why a `not-measured` regression row is not measured (absent on other rows). */
-  readonly cause?: NotMeasuredCause;
+  readonly cause?: RegressionNotMeasuredCause;
 }
 
 /** An AI-mode criterion the judge rules on, with its rubric. */
@@ -193,6 +193,8 @@ export interface MilestoneFacts {
   readonly regression?: readonly MilestoneFactRow[];
   /** Files charged to the plan as regressions (the regression finding's root cause), from `regression-at-head`. */
   readonly regression_files?: readonly string[];
+  /** Distinct causes of the not-measured regression rows; the batch re-reviews a kept-open plan only when a cause is `unrunnable` (spec "Fingerprint"). */
+  readonly regression_causes?: readonly RegressionNotMeasuredCause[];
   /** Main's head when the review measured (the assessed commit); stored on the review so the batch can tell which landings came after it. */
   readonly assessed_commit?: string;
   /** Files named by the failing facts (red test files; a file a failing criterion's command names); a later landing changing one re-opens the review. */

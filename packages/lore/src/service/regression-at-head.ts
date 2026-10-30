@@ -32,7 +32,7 @@
  * @spec_ref spec-a-plan-s-tests-and-criteria-are-measured-once-at-its (AC-AO-1, BR-1496, D1, D2, D6)
  */
 
-import { err, ok, type LoreError, type MilestoneFactRow, type Result } from "@lore/core";
+import { err, ok, type LoreError, type MilestoneFactRow, type RegressionNotMeasuredCause, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type SingleFileRunKind } from "./suite-result-service.js";
 
@@ -83,7 +83,7 @@ export type FileRegression =
   | { readonly file: string; readonly outcome: "red-before"; readonly commit: string }
   | { readonly file: string; readonly outcome: "flaky" }
   | { readonly file: string; readonly outcome: "no-landing" }
-  | { readonly file: string; readonly outcome: "not-measured"; readonly reason: string };
+  | { readonly file: string; readonly outcome: "not-measured"; readonly reason: string; readonly cause: RegressionNotMeasuredCause };
 
 /** The measured regression facts of a plan. */
 export interface RegressionAtHead {
@@ -96,6 +96,15 @@ export interface RegressionAtHead {
   readonly single_file_run_ids: readonly { readonly key: string; readonly id: string }[];
   /** Fact rows for `MilestoneFacts.regression`. */
   readonly rows: readonly MilestoneFactRow[];
+  /** Distinct `cause` of the not-measured rows, sorted; empty when every row is measured. The batch retries only on `unrunnable`. */
+  readonly causes: readonly RegressionNotMeasuredCause[];
+}
+
+/** The distinct causes of the not-measured rows, sorted (a structured read: never from a row's prose). */
+function causesOf(rows: readonly MilestoneFactRow[]): RegressionNotMeasuredCause[] {
+  const causes = new Set<RegressionNotMeasuredCause>();
+  for (const row of rows) if (row.verdict === "not-measured" && row.cause !== undefined) causes.add(row.cause);
+  return [...causes].sort();
 }
 
 /**
@@ -187,10 +196,11 @@ async function measureFile(
   probe: FileProbe,
 ): Promise<FileRegression> {
   const earliestLandingIndex = attribution.earliestIndex;
-  const notMeasured = (reason: string): FileRegression => ({ file, outcome: "not-measured", reason });
+  // reason: a step that could not complete is `unrunnable` (a retry can complete it); the two other causes are named where they arise.
+  const notMeasured = (reason: string, cause: RegressionNotMeasuredCause = "unrunnable"): FileRegression => ({ file, outcome: "not-measured", reason, cause });
   const headIndex = history.length - 1;
   const head = history[headIndex];
-  if (head === undefined) return notMeasured("main's first-parent history is empty");
+  if (head === undefined) return notMeasured("main's first-parent history is empty", "unmappable");
 
   const confirmedHead = await probe.confirmAt(head);
   if (!confirmedHead.ok) return notMeasured(confirmedHead.reason);
@@ -249,12 +259,12 @@ async function measureFile(
   const parentConfirm = parent === undefined ? ({ ok: true, value: "green" } as const) : await probe.confirmAt(parent);
   if (!parentConfirm.ok) return notMeasured(parentConfirm.reason);
   if (firstConfirm.value !== "red" || parentConfirm.value !== "green") {
-    return notMeasured(`flaky during bisection: the confirmation runs disagree with the bisection at ${first} (confirm there: ${firstConfirm.value}; at its parent: ${parentConfirm.value})`);
+    return notMeasured(`flaky during bisection: the confirmation runs disagree with the bisection at ${first} (confirm there: ${firstConfirm.value}; at its parent: ${parentConfirm.value})`, "flaky-bisection");
   }
   if (attribution.chargedCommits.has(first)) return { file, outcome: "regression", landing: first };
   const unmapped = attribution.unmapped;
   if (unmapped !== undefined && high > unmapped.afterIndex) {
-    return notMeasured(`red since ${first}, where landing ${unmapped.landing} could have reached main: it is not on main's first-parent history and no main commit containing it was found (${unmapped.reason}), so the transition cannot be attributed`);
+    return notMeasured(`red since ${first}, where landing ${unmapped.landing} could have reached main: it is not on main's first-parent history and no main commit containing it was found (${unmapped.reason}), so the transition cannot be attributed`, "unmappable");
   }
   return { file, outcome: "other-commit", commit: first };
 }
@@ -310,7 +320,7 @@ function rowOfFile(f: FileRegression): MilestoneFactRow {
     case "no-landing":
       return { subject: f.file, verdict: "pass", detail: `red at main's head; the plan has no landing on main, so it is not this plan's (not charged)` };
     case "not-measured":
-      return { subject: f.file, verdict: "not-measured", detail: f.reason };
+      return { subject: f.file, verdict: "not-measured", detail: f.reason, cause: f.cause };
   }
 }
 
@@ -335,18 +345,21 @@ export async function regressionAtHead(
     subject: `unlanded:${slug}`,
     verdict: "not-measured",
     detail: `task ${slug} has no landing record, so its changes have no measured diff`,
+    cause: "unlanded",
   }));
 
   const looked = await ports.suites.lookupOrRun(ports.headRef, ports.runner);
   if (!looked.ok) {
-    const row: MilestoneFactRow = { subject: ports.headRef, verdict: "not-measured", detail: `the suite could not be run at ${ports.headRef}: ${loreErrorText(looked.error)}` };
-    return ok({ head: undefined, files: [], charged: [], single_file_run_ids: [], rows: [row, ...unlandedRows] });
+    const row: MilestoneFactRow = { subject: ports.headRef, verdict: "not-measured", detail: `the suite could not be run at ${ports.headRef}: ${loreErrorText(looked.error)}`, cause: "unrunnable" };
+    const rows = [row, ...unlandedRows];
+    return ok({ head: undefined, files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
   }
   const suite = looked.value;
   if (suite.status !== "measured") {
     // reason: an unrunnable attempt is a stored row too (new id per attempt), so its id is part of the facts fingerprint (BR-1497).
-    const row: MilestoneFactRow = { subject: suite.commit_sha, verdict: "not-measured", detail: `the suite could not run at ${suite.commit_sha}: ${suite.cause ?? "unrunnable"}` };
-    return ok({ head: { commit: suite.commit_sha, result_id: suite.id }, files: [], charged: [], single_file_run_ids: [], rows: [row, ...unlandedRows] });
+    const row: MilestoneFactRow = { subject: suite.commit_sha, verdict: "not-measured", detail: `the suite could not run at ${suite.commit_sha}: ${suite.cause ?? "unrunnable"}`, cause: "unrunnable" };
+    const rows = [row, ...unlandedRows];
+    return ok({ head: { commit: suite.commit_sha, result_id: suite.id }, files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
   }
   const head = { commit: suite.commit_sha, result_id: suite.id };
   const redFiles = [...new Set(suite.failing_test_files.map((f) => f.file))].sort();
@@ -356,7 +369,10 @@ export async function regressionAtHead(
     verdict: "pass",
     detail: redFiles.length === 0 ? `the suite is green at main's head ${head.commit}` : `${String(redFiles.length)} red file(s) at main's head ${head.commit}, each examined below`,
   };
-  if (redFiles.length === 0) return ok({ head, files: [], charged: [], single_file_run_ids: singleFileRunIds, rows: [headRow, ...unlandedRows] });
+  if (redFiles.length === 0) {
+    const rows = [headRow, ...unlandedRows];
+    return ok({ head, files: [], charged: [], single_file_run_ids: singleFileRunIds, rows, causes: causesOf(rows) });
+  }
 
   const files: FileRegression[] = [];
   if (real.length === 0) {
@@ -365,7 +381,7 @@ export async function regressionAtHead(
   } else {
     const historyResult = await ports.firstParentHistory(head.commit);
     const stopAll = (reason: string): void => {
-      for (const file of redFiles) files.push({ file, outcome: "not-measured", reason });
+      for (const file of redFiles) files.push({ file, outcome: "not-measured", reason, cause: "unrunnable" });
     };
     if (!historyResult.ok) {
       stopAll(`main's first-parent history could not be read: ${loreErrorText(historyResult.error)}`);
@@ -387,5 +403,6 @@ export async function regressionAtHead(
     }
   }
   const charged = files.flatMap((f): RegressionFinding[] => (f.outcome === "regression" ? [{ file: f.file, landing: f.landing }] : []));
-  return ok({ head, files, charged, single_file_run_ids: singleFileRunIds, rows: [headRow, ...files.map(rowOfFile), ...unlandedRows] });
+  const rows = [headRow, ...files.map(rowOfFile), ...unlandedRows];
+  return ok({ head, files, charged, single_file_run_ids: singleFileRunIds, rows, causes: causesOf(rows) });
 }

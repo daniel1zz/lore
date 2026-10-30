@@ -40,7 +40,7 @@
  */
 
 import { acceptedGatesOf } from "./gate-acceptance-service.js";
-import { blockingGates, err, filableDimensions, milestoneReviewSchema, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
+import { blockingGates, err, filableDimensions, milestoneReviewSchema, ok, regressionRetryCanChange, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
@@ -266,25 +266,6 @@ export class ReviewTriggerService {
   }
 }
 
-/** Cite prefix `regression-at-head.ts` gives the row of a task with no landing record. */
-const UNLANDED_CITE_PREFIX = "unlanded:";
-/** Wording of the `regression-at-head.ts` detail for a landing that is not on main's first-parent history (an unmappable landing). */
-const UNMAPPABLE_LANDING_TEXT = "is not on main's first-parent history";
-
-/**
- * Whether re-measuring can turn a `not-measured` regression into a measured one (spec "Fingerprint": only "a plan whose gate is
- * not measured because the suite could not complete" is retried by the next batch).
- *
- * @param regression - the stored regression judgment; its `cites` are the subjects of the not-measured rows
- * @returns `false` when every not-measured subject is a task with no landing record or the cause is an unmappable landing (a
- *   retry measures the same nothing and would only buy another judgment); `true` otherwise (suite or single-file run unrunnable)
- */
-function retryCanChangeRegression(regression: MilestoneReview["dimensions"]["regression"]): boolean {
-  if (regression.reason.includes(UNMAPPABLE_LANDING_TEXT)) return false;
-  const cites = regression.cites ?? [];
-  return cites.length === 0 || cites.some((cite) => !cite.startsWith(UNLANDED_CITE_PREFIX));
-}
-
 /** The batch side: runs under the store lease (see the module header). */
 export class ReviewBatchRunner {
   constructor(private readonly deps: ReviewRunDeps) {}
@@ -345,7 +326,7 @@ export class ReviewBatchRunner {
     const accepted = acceptedGatesOf(plan, latest);
     const blockers = blockingGates(review.dimensions).filter((gate) => !accepted.includes(gate));
     if (blockers.length === 0) return ok(false);
-    if (review.dimensions.regression.verdict === "not-measured") return ok(retryCanChangeRegression(review.dimensions.regression));
+    if (review.dimensions.regression.verdict === "not-measured") return ok(regressionRetryCanChange(review.regression_causes));
     const named = review.failing_fact_files ?? [];
     if (named.length === 0 || ports.changedFilesSince === undefined) return ok(false);
     if (review.assessed_commit === undefined) return ok(true);

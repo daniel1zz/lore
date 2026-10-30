@@ -394,7 +394,7 @@ export default defineLoreCommand({
         // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
         // stays not-measured, never pass.
         const suiteResults = app.suiteResultService;
-        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files"> = {};
+        let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
         if (suiteResults !== undefined) {
           const measured = await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
             suites: suiteResults,
@@ -410,6 +410,7 @@ export default defineLoreCommand({
             regressionFacts = {
               regression: measured.value.rows,
               regression_files: chargedFiles,
+              regression_causes: measured.value.causes,
               ...(measured.value.head !== undefined ? { head_suite_result_id: measured.value.head.result_id } : {}),
               single_file_run_ids: measured.value.single_file_run_ids,
               // reason: a plan kept open by a red file is re-reviewed when a later landing changes that file (BR-1379); the batch
