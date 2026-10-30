@@ -1830,7 +1830,7 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   // reason: AC-DCS2-15 — a task past done is reviewed by the contract check of the workflow service, never by the AI judge.
   app.reviewService.setContractCheckPort(app.taskWorkflowService);
   // reason: AC-DCS2-14 — the log writer shares the one write route; AcService appends `superseded` entries through it.
-  app.executionLogService = new ExecutionLogService(store, app.corpusService);
+  app.executionLogService = new ExecutionLogService(store, app.corpusService, app.taskWorkflowService);
   app.acService?.attachExecutionLog(app.executionLogService);
   // reason: AC-DCS1-22 — the migration compiles through the SAME service approve uses, and writes through the one write route.
   app.doneContractMigrationService = new DoneContractMigrationService(store, app.corpusService, contracts, createRealMigrationGit(repoRoot));

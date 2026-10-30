@@ -1027,7 +1027,7 @@ export class AcService {
     });
     if (!writeResult.ok) return writeResult;
     if (correction !== undefined) {
-      const logged = await this.logSuperseded(acId, correction.reason.trim(), "correction");
+      const logged = await this.logSuperseded(spec.slug, acId, correction.reason.trim(), "correction");
       if (!logged.ok) return logged;
     }
     return ok(parsed.data);
@@ -1047,9 +1047,9 @@ export class AcService {
    * Appends the `superseded` entries AFTER the spec write that made them true. A failure is returned (never swallowed): the spec
    * write stands, and the message says which tasks may lack the entry.
    */
-  private async logSuperseded(acId: string, reason: string, via: "correction" | "supersede"): Promise<Result<void, LoreError>> {
+  private async logSuperseded(specSlug: string, acId: string, reason: string, via: "correction" | "supersede"): Promise<Result<void, LoreError>> {
     if (this.executionLog === undefined) return ok(undefined);
-    const logged = await this.executionLog.recordSuperseded(acId, reason, via);
+    const logged = await this.executionLog.recordSuperseded(specSlug, acId, reason, via);
     if (logged.ok) return ok(undefined);
     return err({
       code: "VALIDATION_ERROR",
@@ -1163,7 +1163,7 @@ export class AcService {
       auditDetails: { superseded_by: { spec: superseding.value.id, ac: by.ac, reason: trimmedReason } },
     });
     if (!written.ok) return written;
-    const logged = await this.logSuperseded(acId, trimmedReason, "supersede");
+    const logged = await this.logSuperseded(spec.slug, acId, trimmedReason, "supersede");
     if (!logged.ok) return logged;
     return ok(parsed.data);
   }

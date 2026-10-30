@@ -4606,6 +4606,29 @@ export class TaskWorkflowService {
   }
 
   /**
+   * The slug of the spec a criterion id resolves to for `task`, by the SAME resolution `done` uses ({@link criteriaBySpec}: the plan's
+   * parent spec plus every implements-linked spec). `null` when no governing spec declares the id; an id several governing specs declare is
+   * refused (`ac-oracle-ambiguous`), never guessed.
+   *
+   * @param task - the task whose governing specs are searched
+   * @param acId - the criterion id
+   */
+  async resolveCriterionSpec(task: DocRecord, acId: string): Promise<Result<string | null, LoreError>> {
+    const bySpec = await this.criteriaBySpec(task);
+    if (!bySpec.ok) return bySpec;
+    const hits = bySpec.value.filter((group) => group.criteria.some((candidate) => candidate.id === acId)).map((group) => group.spec);
+    if (hits.length > 1) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message: `ac-oracle-ambiguous: ${acId} in the scope of "${task.slug}" is declared by ${hits.join(" and ")}`,
+        value: acId,
+      });
+    }
+    return ok(hits[0] ?? null);
+  }
+
+  /**
    * The deterministic contract check of a task past done (AC-DCS2-15): every oracle of its stored contract (plus the write-set
    * additions, minus the oracles its landing removed) must hold a counting pass row by the evidence rule of AC-DCS1-27, the same
    * predicate `lore done` applied. Writes nothing and calls no AI.

@@ -27,7 +27,12 @@ export interface ExecutionLogPort {
    *
    * @returns the slugs written
    */
-  readonly recordSuperseded: (acId: string, reason: string, via: "correction" | "supersede") => Promise<Result<string[], LoreError>>;
+  readonly recordSuperseded: (specSlug: string, acId: string, reason: string, via: "correction" | "supersede") => Promise<Result<string[], LoreError>>;
+}
+
+/** The resolution `lore done` uses to find the spec a criterion id of a task's scope belongs to (`TaskWorkflowService.resolveCriterionSpec`). */
+export interface CriterionSpecResolver {
+  readonly resolveCriterionSpec: (task: DocRecord, acId: string) => Promise<Result<string | null, LoreError>>;
 }
 
 const MAX_WRITE_ATTEMPTS = 3;
@@ -41,7 +46,9 @@ export class ExecutionLogService implements ExecutionLogPort {
    */
   constructor(
     private readonly store: StoreInterface,
-    writer?: DocWritePort,
+    writer: DocWritePort | undefined,
+    // reason: AC-DCS2-14 — a task is matched by (spec, AC id), never by the id alone: plans implement several specs and ids repeat.
+    private readonly resolver: CriterionSpecResolver,
   ) {
     this.writer = writer ?? bareDocWriter(store);
   }
@@ -115,15 +122,17 @@ export class ExecutionLogService implements ExecutionLogPort {
   }
 
   /**
-   * Appends a `superseded` entry to every task whose ac_scope holds `acId` (any status: a finished task keeps its history too).
-   * A task of another criterion is never touched.
+   * Appends a `superseded` entry to every task whose ac_scope holds `acId` AND whose governing specs resolve that id to `specSlug`
+   * (any status: a finished task keeps its history too). A task bound to another spec's criterion of the same id is never touched;
+   * an id declared by several of a task's specs is refused (`ac-oracle-ambiguous`).
    *
+   * @param specSlug - the spec whose criterion was corrected or superseded
    * @param acId - the corrected or superseded criterion
    * @param reason - the correction or supersede reason
    * @param via - which verb ran
    * @returns the slugs written
    */
-  async recordSuperseded(acId: string, reason: string, via: "correction" | "supersede"): Promise<Result<string[], LoreError>> {
+  async recordSuperseded(specSlug: string, acId: string, reason: string, via: "correction" | "supersede"): Promise<Result<string[], LoreError>> {
     const tasks = await this.store.findMany({ type: "task" });
     if (!tasks.ok) return tasks;
     const slugs: string[] = [];
@@ -131,6 +140,9 @@ export class ExecutionLogService implements ExecutionLogPort {
     for (const task of tasks.value) {
       const scope = task.extra["ac_scope"];
       if (!Array.isArray(scope) || !scope.includes(acId)) continue;
+      const governing = await this.resolver.resolveCriterionSpec(task, acId);
+      if (!governing.ok) return governing;
+      if (governing.value !== specSlug) continue;
       const entry: ExecutionLogEntry = { kind: "superseded", at, ac: acId, reason, via };
       const appended = await this.appendEntries(task, [entry]);
       if (!appended.ok) return appended;

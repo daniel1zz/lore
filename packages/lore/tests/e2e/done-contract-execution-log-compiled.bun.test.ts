@@ -347,6 +347,35 @@ describe("AC-DCS2-14: the execution log is appended by lore and never rewrites t
     expect(logOf((await fixture.readTask(a)).extra).filter((entry) => entry.kind === "superseded").length).toBe(1);
   });
 
+  it("AC-DCS2-14: the superseded entry is matched by (spec, AC id): the same id declared by two specs logs only to the task whose plan is bound to the corrected spec; an id both specs of one plan declare is refused as ambiguous", async () => {
+    const world = await makeWorld();
+    const { fixture } = world;
+    // a second spec declaring an AC with the SAME id as the fixture spec's AC-FX-1
+    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Twin Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    await fixture.mustRun(["ac", "add", spec2, "AC-FX-1", "--statement", "The twin criterion.", "--mode", "script", "--oracle", "test", "--command", "echo twin1"]);
+    const plan2 = (await fixture.mustRun(["create", "plan", "--title", "Twin plan", "--parent", spec2, "--content", "## Plan\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const plan1 = await fixture.createPlan("Fixture-spec plan");
+    const bound1 = await fixture.createTask({ plan: plan1, kind: "code", title: "Bound to the fixture spec", anchors: ["tests/t1-1.test.ts"], acScope: ["AC-FX-1"] });
+    const bound2 = await fixture.createTask({ plan: plan2, kind: "code", title: "Bound to the twin spec", anchors: ["tests/t2-1.test.ts"], acScope: ["AC-FX-1"] });
+    const beforeTwin = await fixture.readTask(bound2);
+
+    const reason = "the fixture statement had a typo";
+    const corrected = await loreIn(world, fixture.dir, ["ac", "set", fixture.spec, "AC-FX-1", "--statement", "A script criterion, corrected.", "--correction", reason, ...DECIDED_FLAGS]);
+    expect(corrected.exitCode, corrected.text).toBe(0);
+    const entries = logOf((await fixture.readTask(bound1)).extra).filter((entry) => entry.kind === "superseded");
+    expect(entries.length).toBe(1);
+    expect(entries[0]?.ac).toBe("AC-FX-1");
+    // the task whose plan is bound to the other spec is byte-identical: no entry, no version
+    expect(await fixture.readTask(bound2)).toEqual(beforeTwin);
+
+    // a plan that implements both specs resolves the id to both: the log refuses to guess
+    await fixture.mustRun(["link", plan2, fixture.spec, "--type", "implements"]);
+    const again = await loreIn(world, fixture.dir, ["ac", "set", fixture.spec, "AC-FX-1", "--statement", "A script criterion, corrected twice.", "--correction", "second fix", ...DECIDED_FLAGS]);
+    expect(again.exitCode, again.text).toBe(4);
+    expect(again.text).toContain("ac-oracle-ambiguous");
+    expect(logOf((await fixture.readTask(bound2)).extra).filter((entry) => entry.kind === "superseded").length).toBe(0);
+  });
+
   it("AC-DCS2-14: lore ac supersede appends a superseded entry naming the AC and the reason to the task that holds it", async () => {
     const world = await makeWorld();
     const { fixture } = world;
