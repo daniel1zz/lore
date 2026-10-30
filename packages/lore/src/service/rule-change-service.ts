@@ -48,10 +48,12 @@ import { err, ok, validationError, type Result } from "@lore/core";
 import type { DecisionRecord, DocRecord, DocStatus, LoreError, RuleChange } from "@lore/core";
 import {
   baselineExtraSchema,
+  extractDeclaredAcScope,
   resolveStatusAfterContractEdit,
   ruleChangeSchema,
   ruleIdPrefixOfNode,
   specRuleChangesSchema,
+  uatVerdictSchema,
   type BaselineRule,
 } from "@lore/core";
 
@@ -66,7 +68,8 @@ import { RecordLockService } from "./record-lock-service.js";
 import { resolveDoc } from "./resolve.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { findOtherSpecChange, findProposal, isLanded, ruleChangesOf } from "./rule-changes.js";
-import { measureLandingEvidence } from "./landing-evidence.js";
+import { measureLandingEvidence, type LandingPlanView, type PlanUatVerdict } from "./landing-evidence.js";
+import { isPlanMember } from "./plan-membership.js";
 import { approvedRulesOf, pendingRevisionsOf } from "./baseline-items.js";
 import type { AbandonedLeafPlan, AbandonmentPlan, RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
 
@@ -314,10 +317,14 @@ export class RuleChangeService implements RuleChangeLandingPort {
     if (!plans.ok) return plans;
     const tasks = await this.store.findMany({ type: "task" });
     if (!tasks.ok) return tasks;
+    const knowledge = await this.store.findMany({ type: "knowledge" });
+    if (!knowledge.ok) return knowledge;
+    const planViews = await this.landingPlanViews(plans.value, tasks.value, knowledge.value);
+    if (!planViews.ok) return planViews;
     const measured = measureLandingEvidence({
       spec,
       specs: specs.value,
-      plans: plans.value,
+      plans: planViews.value,
       tasks: tasks.value,
       changedRuleIds: new Set(pending.map((change) => change.id)),
       provableRuleIds: new Set(pending.filter((change) => change.op !== "retire").map((change) => change.id)),
@@ -325,13 +332,24 @@ export class RuleChangeService implements RuleChangeLandingPort {
     if (!measured.ok) return err(validationError("acceptance_criteria", measured.reason));
     if (measured.shortfalls.length === 0 && measured.unproven.length === 0) return ok(undefined);
     const parts: string[] = [];
-    if (measured.shortfalls.length > 0) {
-      const lines = measured.shortfalls.map(
+    const scriptShortfalls = measured.shortfalls.filter((s) => s.reason !== "no-uat-verdict");
+    const humanShortfalls = measured.shortfalls.filter((s) => s.reason === "no-uat-verdict");
+    if (scriptShortfalls.length > 0) {
+      const lines = scriptShortfalls.map(
         (s) => `${s.acId} (cites ${s.cites.join(", ")}: ${s.reason === "no-attested-run" ? "no runner-attested pass" : "its latest runner-attested run failed"})`,
       );
       parts.push(
-        `${measured.shortfalls.length} criterion(s) citing a changed rule lack a runner-attested pass — ${lines.join("; ")}. ` +
+        `${scriptShortfalls.length} criterion(s) citing a changed rule lack a runner-attested pass — ${lines.join("; ")}. ` +
           `Record one with \`lore verify\` (a self-reported or expected-fail row does not count)`,
+      );
+    }
+    if (humanShortfalls.length > 0) {
+      // AC-DCS2-18: a human-mode criterion is never counted by being skipped; its one route is the owning plan's newest accepting verdict
+      const lines = humanShortfalls.map((s) => `${s.acId} (cites ${s.cites.join(", ")})`);
+      parts.push(
+        `${humanShortfalls.length} human-mode criterion(s) citing a changed rule have no accepting UAT verdict of the plan that owns them — ${lines.join("; ")}. ` +
+          `Record one with \`lore uat record <plan> --json-file <file>\`: the verdict must be \`accept\` and list each criterion in accepted_criteria ` +
+          `([{spec, ac, observation}]); the plan that owns a criterion is the one whose task lists it in its ac_scope, and only its newest verdict counts`,
       );
     }
     if (measured.unproven.length > 0) {
@@ -345,6 +363,37 @@ export class RuleChangeService implements RuleChangeLandingPort {
       `cannot land the rule changes of ${spec.slug}: ${parts.join("; ")}; then re-run \`lore rule apply ${spec.slug}\``,
       { shortfalls: measured.shortfalls, unproven: measured.unproven }, "BR-1210",
     ));
+  }
+
+  /**
+   * Each plan as the landing measure reads it (AC-DCS2-18): the specs it is parented to or implements, the criterion ids its
+   * tasks (of any status) scope, and the UAT verdicts filed under it. A malformed stored verdict is an error value, never "no verdict".
+   */
+  private async landingPlanViews(plans: readonly DocRecord[], tasks: readonly DocRecord[], knowledge: readonly DocRecord[]): Promise<Result<LandingPlanView[], LoreError>> {
+    const views: LandingPlanView[] = [];
+    for (const plan of plans) {
+      const specIds = new Set<string>();
+      if (plan.parent_id !== null) specIds.add(plan.parent_id as string);
+      const links = await this.store.findLinks(plan.id, "out");
+      if (!links.ok) return links;
+      for (const link of links.value) if (link.link_type === "implements") specIds.add(link.to_id as string);
+      const scoped = new Set<string>();
+      for (const task of tasks) {
+        if (!isPlanMember(task, plan.id)) continue;
+        for (const id of extractDeclaredAcScope(task) ?? []) scoped.add(id);
+      }
+      const verdicts: PlanUatVerdict[] = [];
+      for (const doc of knowledge) {
+        if (doc.deleted_at !== null || doc.parent_id !== plan.id || doc.extra["sub_type"] !== "uat") continue;
+        const parsed = uatVerdictSchema.safeParse(doc.extra["uat"]);
+        if (!parsed.success) {
+          return err(validationError("uat", `the stored UAT verdict ${doc.slug} of plan ${plan.slug} is invalid: ${parsed.error.issues[0]?.message ?? "invalid"}`));
+        }
+        verdicts.push({ created_at: doc.created_at, verdict: parsed.data });
+      }
+      views.push({ doc: plan, spec_ids: specIds, scoped_ac_ids: scoped, verdicts });
+    }
+    return ok(views);
   }
 
   /**

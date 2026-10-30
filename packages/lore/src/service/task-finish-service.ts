@@ -76,7 +76,7 @@ export interface TaskFinishDeps {
     recordFinishRun(input: FinishRunWrite): Promise<Result<DocRecord, LoreError>>;
     findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>>;
     /** Archives a check or corpus task whose rows were just recorded (the same `lore done` floors judge them). */
-    done(idOrSlug: string, opts: DoneOpts): Promise<Result<unknown, LoreError>>;
+    done(idOrSlug: string, opts: DoneOpts): Promise<Result<{ readonly plan_close_start?: string }, LoreError>>;
   };
   readonly verify: Pick<VerifyRunnerService, "verifyPlan" | "verifyAdhocTask" | "runContractOracles">;
 }
@@ -109,6 +109,8 @@ export interface FinishOutcome {
   readonly added_oracles: readonly string[];
   /** The next step the implementer prints. */
   readonly next_step: string;
+  /** What the plan-close trigger did when this finish archived the last task of its plan (AC-DCS2-11); absent otherwise. */
+  readonly plan_close_start?: string;
 }
 
 /** One unmet item of a finish: an oracle id or a floor name, and why. */
@@ -391,6 +393,7 @@ export class TaskFinishService {
       oracles: results.map((result) => ({ id: result.name, result: "pass" })),
       added_oracles: [],
       next_step: `${task.slug} is archived`,
+      ...(archived.value.plan_close_start !== undefined ? { plan_close_start: archived.value.plan_close_start } : {}),
     });
   }
 

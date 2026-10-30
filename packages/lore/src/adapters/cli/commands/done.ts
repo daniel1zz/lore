@@ -107,6 +107,7 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { err, extractEvidence, ok } from "@lore/core";
 import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
+import { buildPlanCloseTrigger } from "../review-batch-wiring.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { resolveCallerSession } from "../caller-session.js";
@@ -317,7 +318,7 @@ export default defineLoreCommand({
       overrideAttestationCiteIndex = Number(trimmedCite);
     }
 
-    const { app } = loadLoreApp({ inv });
+    const { app, dbPath } = loadLoreApp({ inv });
     try {
       // reason: the citation's SEMANTIC checks need the task's stored evidence,
       // so they run here (after loadLoreApp) rather than in the syntax block
@@ -347,6 +348,18 @@ export default defineLoreCommand({
         return exitCode(verifiedIdentity.error);
       }
       const by = resolveActor(inv);
+      // reason: AC-DCS2-11 — the archive that leaves its plan with no open task starts the plan's close in the background (the batch
+      // is delegated this verified run); a done that archives a non-last task, or a phase, starts nothing.
+      const closeTrigger = buildPlanCloseTrigger({
+        app,
+        dbPath,
+        execPath: inv.execPath,
+        isCompiled: inv.isCompiled,
+        env: inv.env,
+        actor: by,
+        caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
+      });
+      if (closeTrigger !== undefined) app.taskWorkflowService.setPlanCloseTrigger(closeTrigger);
       // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
       const callerSession = resolveCallerSession(undefined, inv.env);
       const doneOpts = {
@@ -405,6 +418,7 @@ export default defineLoreCommand({
                 ...(result.value.claim_release_failure !== undefined ? { claim_release_failure: result.value.claim_release_failure } : {}),
                 ...(result.value.issue_close !== undefined ? { issue_close: result.value.issue_close } : {}),
                 ...(result.value.unrecoverable_claims !== undefined ? { unrecoverable_claims: result.value.unrecoverable_claims } : {}),
+                ...("plan_close_start" in result.value && result.value.plan_close_start !== undefined ? { plan_close_start: result.value.plan_close_start } : {}),
               },
             },
             null,
@@ -423,6 +437,8 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, `unrecoverable claims: ${listed.count} (${listed.branches.join(", ")})`);
       }
       emitIssueCloseItems(inv.io, result.value.issue_close, { json: false });
+      // reason: stderr like the last-task advisory above, so the normal stdout of a done is unchanged
+      if ("plan_close_start" in result.value && result.value.plan_close_start !== undefined) inv.io.stderr.write(`${result.value.plan_close_start}\n`);
     } finally {
       app.close();
     }

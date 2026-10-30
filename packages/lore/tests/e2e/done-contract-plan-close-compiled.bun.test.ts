@@ -420,8 +420,10 @@ function writeGhStub(dir: string): void {
       `if (/^search\\/issues/.test(path)) out({ total_count: 0, items: [] });`,
       `if (/^repos\\/[^/]+\\/[^/]+\\/issues(\\?.*)?$/.test(path)) {`,
       `  if (method === "POST") { const issue = { number: state.next, title: fields.title, body: fields.body }; state.next += 1; state.issues.push(issue); fs.writeFileSync(S, JSON.stringify(state)); out(entry(issue)); }`,
-      `  out("HTTP/2.0 200 OK\\n\\n" + JSON.stringify(state.issues.map(entry)) + "\\n");`,
+      `  out(JSON.stringify(argv.includes("--slurp") ? [state.issues.map(entry)] : state.issues.map(entry)) + "\\n");`,
       `}`,
+      `const one = /^repos\\/[^/]+\\/[^/]+\\/issues\\/(\\d+)(\\?.*)?$/.exec(path);`,
+      `if (one && method === "GET") { const hit = state.issues.find((i) => i.number === Number(one[1])); if (hit) out(entry(hit)); process.stderr.write("stub gh: no such issue " + one[1] + "\\n"); process.exit(1); }`,
       `process.stderr.write("stub gh: unrecognised call: " + argv.join(" ") + "\\n"); process.exit(99);`,
       "",
     ].join("\n"),
@@ -483,6 +485,13 @@ afterAll(() => {
 /** Environment with the `gh` stub first on PATH. */
 const withGh = (extra: Record<string, string> = {}): Record<string, string> => ({ PATH: `${join(scratch, "gh-bin")}:${process.env["PATH"] ?? ""}`, ...extra });
 
+/** A plan under the fixture spec, approved (a plan archives only from an approved or active status). */
+const approvedPlan = async (title: string): Promise<string> => {
+  const plan = await fixture.createPlan(title);
+  await fixture.mustRun(["approve", plan]);
+  return plan;
+};
+
 const planDoc = async (slug: string): Promise<{ status: string; version: number }> => {
   const doc = (JSON.parse(await fixture.mustRun(["get", slug, "--json"])) as { data: { doc?: { status: string; version: number }; status: string; version: number } }).data;
   const view = doc.doc ?? doc;
@@ -491,7 +500,7 @@ const planDoc = async (slug: string): Promise<{ status: string; version: number 
 
 describe("AC-DCS2-12: lore plan close refuses a plan with an open task and closes one whose tasks are all terminal", () => {
   it("AC-DCS2-12: a plan with open tasks exits 4 plan-open-tasks naming each open task and its status, and writes nothing", async () => {
-    const plan = await fixture.createPlan("Plan close open tasks");
+    const plan = await approvedPlan("Plan close open tasks");
     const approved = await fixture.createTask({ plan, kind: "check", title: "Open approved check", acScope: ["AC-FX-1"] });
     await fixture.mustRun(["approve", approved]);
     const draft = await fixture.createTask({ plan, kind: "corpus", title: "Open draft corpus" });
@@ -511,17 +520,10 @@ describe("AC-DCS2-12: lore plan close refuses a plan with an open task and close
   });
 
   it("AC-DCS2-12: a deprecated and an archived task are not open: the command runs the close and archives the plan", async () => {
-    const plan = await fixture.createPlan("Plan close terminal tasks");
-    const toArchive = await fixture.createTask({ plan, kind: "check", title: "Terminal check", acScope: ["AC-FX-1"] });
-    const toDeprecate = await fixture.createTask({ plan, kind: "corpus", title: "Terminal deprecated" });
-    await fixture.mustRun(["approve", toArchive]);
-    await fixture.mustRun(["approve", toDeprecate]);
-    // the first task archives by its finish while the second is still open, so this archive is not the last one (no batch starts)
-    const finished = await spawned(fixture.dir, ["finish", toArchive], OWNER);
-    expect(finished.exitCode, finished.text).toBe(0);
-    expect(await fixture.readTask(toArchive)).toMatchObject({ status: "archived" });
-    const deprecated = await inProcess(fixture.dir, ["set", toDeprecate, "--status", "deprecated"], OWNER);
-    expect(deprecated.exitCode, deprecated.text).toBe(0);
+    // one code task archived by its landing and one corpus task deprecated (see closablePlan)
+    const plan = await closablePlan("Plan close terminal tasks", "pc12a");
+    const states = withDb((db) => db.query("SELECT status FROM docs WHERE type = 'task' AND json_extract(extra, '$.plan_id') = (SELECT id FROM docs WHERE slug = ?)").all(plan) as Array<{ status: string }>);
+    expect(states.map((row) => row.status).sort()).toEqual(["archived", "deprecated"]);
 
     const out = await inProcess(fixture.dir, ["plan", "close", plan], OWNER, withGh());
     expect(out.exitCode, out.text).toBe(0);
@@ -576,6 +578,22 @@ async function finishedCodeTask(plan: string, label: string): Promise<Finished> 
 /** `lore land <task>` as a real process, with the `gh` stub on PATH. */
 const landTask = (task: string): Promise<Out> => spawned(fixture.dir, ["land", task], OWNER, withGh());
 
+/**
+ * A plan ready to close by hand: one code task landed (its landing is what the assess measures: a plan with no landing has no measured
+ * diff, so its regression and security are not measured) and one corpus task deprecated. The landing is not the last archive (the corpus
+ * task is still open then), so it starts no batch, and nothing closes the plan before the test does.
+ */
+async function closablePlan(title: string, label: string): Promise<string> {
+  const plan = await approvedPlan(title);
+  const code = await finishedCodeTask(plan, label);
+  const open = await fixture.createTask({ plan, kind: "corpus", title: `${label} open corpus task` });
+  const landed = await landTask(code.slug);
+  expect(landed.exitCode, landed.text).toBe(0);
+  const deprecated = await inProcess(fixture.dir, ["set", open, "--status", "deprecated"], OWNER);
+  expect(deprecated.exitCode, deprecated.text).toBe(0);
+  return plan;
+}
+
 const batchLog = (): string => (existsSync(join(fixture.dir, ".lore", "review-batch.log")) ? readFileSync(join(fixture.dir, ".lore", "review-batch.log"), "utf8") : "");
 const aiCalls = (): string[] => readFileSync(aiLog, "utf8").split("\n").filter((line) => line !== "");
 const planLeaseDir = (): string => join(fixture.dir, ".git", "lore-plan-close");
@@ -597,7 +615,7 @@ async function batchesEnded(count: number): Promise<void> {
 
 describe("AC-DCS2-11: the plan closes itself when its last task archives", () => {
   it("AC-DCS2-11: a non-last archive starts no batch; the last landing returns before the assess starts, with no close line in its phase table; the plan archives afterwards under a review-batch child run", async () => {
-    const plan = await fixture.createPlan("Close main plan");
+    const plan = await approvedPlan("Close main plan");
     const a = await finishedCodeTask(plan, "pc11a");
     const b = await finishedCodeTask(plan, "pc11b");
     const runsBefore = reviewBatchRuns().length;
@@ -646,7 +664,7 @@ describe("AC-DCS2-11: the plan closes itself when its last task archives", () =>
     const issuesBefore = filedIssues().length;
     const runsBefore = reviewBatchRuns().length;
 
-    const gatePlan = await fixture.createPlan("Close gate plan SECFAIL");
+    const gatePlan = await approvedPlan("Close gate plan SECFAIL");
     const gateTask = await finishedCodeTask(gatePlan, "pc11g");
     expect((await landTask(gateTask.slug)).exitCode).toBe(0);
     await batchesEnded(runsBefore + 1);
@@ -656,7 +674,7 @@ describe("AC-DCS2-11: the plan closes itself when its last task archives", () =>
     expect(afterGate[issuesBefore]?.title).toContain("security");
     expect(batchLog()).toContain("gate");
 
-    const defectPlan = await fixture.createPlan("Close defect plan DESFAIL");
+    const defectPlan = await approvedPlan("Close defect plan DESFAIL");
     const defectTask = await finishedCodeTask(defectPlan, "pc11d");
     expect((await landTask(defectTask.slug)).exitCode).toBe(0);
     await eventually(() => statusOf(defectPlan) === "archived", "the plan with only a non-gate failure to archive");
@@ -667,6 +685,7 @@ describe("AC-DCS2-11: the plan closes itself when its last task archives", () =>
     expect(withDb((db) => (db.query("SELECT COUNT(*) AS n FROM audit WHERE action = 'plan-close-accepted-with-known-defects'").get() as { n: number }).n), "known defects are recorded").toBeGreaterThan(0);
 
     const uatPlan = (await fixture.mustRun(["create", "plan", "--title", "Close uat plan", "--parent", fixture.spec, "--content", "## Plan\n\nBody.\n", "--no-ai", "--requires-uat"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    await fixture.mustRun(["approve", uatPlan]);
     const uatTask = await finishedCodeTask(uatPlan, "pc11u");
     expect((await landTask(uatTask.slug)).exitCode).toBe(0);
     await batchesEnded(runsBefore + 3);
@@ -680,7 +699,7 @@ describe("AC-DCS2-11: the plan closes itself when its last task archives", () =>
 
 describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never blocks a landing", () => {
   it("AC-DCS2-20: a landing started while a close holds its plan lease exits 0 at once with no queue wait; a second close of the plan exits 75 plan-close-busy naming the holder; a close of another plan is not blocked", async () => {
-    const holdPlan = await fixture.createPlan("Close hold plan HOLDME");
+    const holdPlan = await approvedPlan("Close hold plan HOLDME");
     const holdTask = await finishedCodeTask(holdPlan, "pc20h");
     const runsBefore = reviewBatchRuns().length;
     writeFileSync(hold, "held\n");
@@ -694,7 +713,7 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     expect(queueTickets(), "the close takes no landing ticket").toEqual([]);
 
     // a landing meanwhile: exit 0, within seconds, no queue wait, while the close is still held
-    const other = await fixture.createPlan("Close landing meanwhile plan");
+    const other = await approvedPlan("Close landing meanwhile plan");
     const otherTask = await finishedCodeTask(other, "pc20o");
     const started = Date.now();
     const landing = await landTask(otherTask.slug);
@@ -712,10 +731,8 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     expect(busy.stderr).toContain(String(lease.pid));
 
     // a close of another plan is not blocked by the held one
-    const free = await fixture.createPlan("Close free plan FREEPASS");
-    const freeTask = await fixture.createTask({ plan: free, kind: "corpus", title: "Free corpus task" });
-    const deprecatedFree = await inProcess(fixture.dir, ["set", freeTask, "--status", "deprecated"], OWNER);
-    expect(deprecatedFree.exitCode, deprecatedFree.text).toBe(0);
+    const free = await closablePlan("Close free plan FREEPASS", "pc20f");
+    expect(planLeaseFiles(), "the first close still holds its lease").toEqual([leaseFile]);
     const closedFree = await spawned(fixture.dir, ["plan", "close", free], OWNER, withGh());
     expect(closedFree.exitCode, closedFree.text).toBe(0);
     expect(statusOf(free)).toBe("archived");
@@ -728,9 +745,7 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
   });
 
   it("AC-DCS2-20: two closes of one plan never overlap: exactly one runs and the other exits 75 plan-close-busy", async () => {
-    const plan = await fixture.createPlan("Close two plan HOLDME");
-    const task = await fixture.createTask({ plan, kind: "corpus", title: "Two corpus task" });
-    await fixture.mustRun(["set", task, "--status", "deprecated"]);
+    const plan = await closablePlan("Close two plan HOLDME", "pc20t");
     writeFileSync(hold, "held\n");
     const callsBefore = aiCalls().length;
     const finished: Out[] = [];
@@ -752,9 +767,7 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
 
   it("AC-DCS2-20: a lease whose holder is gone, or whose pid was reused by another process, is taken over", async () => {
     // a dead holder: a process that has exited
-    const deadPlan = await fixture.createPlan("Close dead holder plan");
-    const deadTask = await fixture.createTask({ plan: deadPlan, kind: "corpus", title: "Dead holder task" });
-    await fixture.mustRun(["set", deadTask, "--status", "deprecated"]);
+    const deadPlan = await closablePlan("Close dead holder plan", "pc20d");
     const gone = spawn("sh", ["-c", "exit 0"]);
     await new Promise((resolve) => gone.on("close", resolve));
     mkdirSync(planLeaseDir(), { recursive: true });
@@ -764,9 +777,7 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     expect(statusOf(deadPlan)).toBe("archived");
 
     // a reused pid: the pid is alive (this test process) but its start time is not the recorded one
-    const reusedPlan = await fixture.createPlan("Close reused pid plan");
-    const reusedTask = await fixture.createTask({ plan: reusedPlan, kind: "corpus", title: "Reused pid task" });
-    await fixture.mustRun(["set", reusedTask, "--status", "deprecated"]);
+    const reusedPlan = await closablePlan("Close reused pid plan", "pc20r");
     writeFileSync(join(planLeaseDir(), `${reusedPlan}.lease`), `${JSON.stringify({ pid: process.pid, start_time: "2001-01-01T00:00:00.000Z", plan: reusedPlan, since: "2001-01-01T00:00:00.000Z" })}\n`);
     const reused = await spawned(fixture.dir, ["plan", "close", reusedPlan], OWNER, withGh());
     expect(reused.exitCode, reused.text).toBe(0);

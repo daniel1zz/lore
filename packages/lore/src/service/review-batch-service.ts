@@ -163,6 +163,13 @@ export interface BatchRunPorts {
   readonly recordError: (error: BatchErrorRecord) => Promise<Result<void, LoreError>>;
   readonly filing: IssueFilingService | undefined;
   readonly now: () => string;
+  /**
+   * The ONE close function (`PlanCloseService.close`, BR-1507) around one plan's assess: it refuses a plan with an open task, holds the
+   * plan's own lease, runs verify, rule apply, the anchor check and the P0 UAT gate, then calls `assess` — the runner's own review,
+   * filing and gated archive of that plan — and returns its row (or a row saying why the plan stayed open or was left to another close).
+   * Optional (absent = the runner assesses and archives directly, as a bare construction does).
+   */
+  readonly closeFlow?: (ref: string, assess: () => Promise<BatchPlanRow>) => Promise<BatchPlanRow>;
 }
 
 /** One errored attempt, as stored in the audit row. */
@@ -304,7 +311,8 @@ export class ReviewBatchRunner {
         rows.push({ plan: ref, outcome: "error", reviewed: false, failed: [], issues: [], detail: messageOf(leaseLostError()) });
         continue;
       }
-      rows.push(await this.runPlan(ref, ports, measureOnce));
+      const assess = (): Promise<BatchPlanRow> => this.runPlan(ref, ports, measureOnce);
+      rows.push(ports.closeFlow === undefined ? await assess() : await ports.closeFlow(ref, assess));
     }
     return { state: "ran", tookOver, suiteRuns, rows };
   }

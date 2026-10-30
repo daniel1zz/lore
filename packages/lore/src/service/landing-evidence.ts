@@ -4,9 +4,11 @@
  * Purpose: answer, for ONE spec, "does every criterion citing a changed rule id hold a runner-attested pass, and is
  *   every added / modified id cited by at least one criterion?" (D2: landing is evidence-gated, not status-gated).
  *   Self-reported rows, `expected-fail` rows and criteria without any run never count; an `add` / `modify` id that
- *   no criterion cites is an UNPROVEN change (nothing would ever vouch for it). A `retire` needs no evidence.
- * Public surface: {@link measureLandingEvidence}, {@link LandingEvidenceInput}, {@link LandingShortfall},
- *   {@link LandingMeasure}.
+ *   no criterion cites is an UNPROVEN change (nothing would ever vouch for it). A `retire` needs no evidence. A human-mode
+ *   criterion counts through the newest accepting UAT verdict of its owning plan instead (AC-DCS2-18, {@link uatAccepts}); a
+ *   superseded criterion is not measured at all.
+ * Public surface: {@link measureLandingEvidence}, {@link uatAccepts}, {@link LandingEvidenceInput}, {@link LandingPlanView},
+ *   {@link LandingShortfall}, {@link LandingMeasure}.
  * Invariants:
  *   - Pure: no store, IO or clock; every function takes already-loaded docs.
  *   - Which run belongs to which criterion is `attested-ac-runs.ts` — the SAME module `RuleStateService` uses, so
@@ -16,7 +18,7 @@
  * Source: spec-a-spec-carries-its-rule-changes-the-baseline-takes-them (D2); rule-state-service.ts (attribution).
  */
 
-import { specAcceptanceCriteriaSchema, type DocRecord } from "@lore/core";
+import { isAcSuperseded, specAcceptanceCriteriaSchema, type DocRecord, type UatVerdict } from "@lore/core";
 import { attestedRunKey, indexLatestAttestedRuns } from "./attested-ac-runs.js";
 import type { GitRunner } from "./evidence-binding.js";
 
@@ -44,11 +46,54 @@ export function commitContainment(git: GitRunner): CommitContainment {
   };
 }
 
+/** One recorded UAT verdict of a plan, as the landing measure reads it. */
+export interface PlanUatVerdict {
+  /** When the verdict doc was created; the newest verdict of a plan is the one that counts. */
+  readonly created_at: string;
+  readonly verdict: UatVerdict;
+}
+
+/**
+ * One plan as the landing measure reads it: the plan, the specs it is parented to or implements, the criterion ids any of its tasks
+ * (of any status) lists in its `ac_scope`, and its recorded UAT verdicts (AC-DCS2-18).
+ */
+export interface LandingPlanView {
+  readonly doc: DocRecord;
+  /** Ids of the specs the plan is parented to or implements. */
+  readonly spec_ids: ReadonlySet<string>;
+  /** Criterion ids listed in the `ac_scope` of any task of the plan, whatever the task's status. */
+  readonly scoped_ac_ids: ReadonlySet<string>;
+  readonly verdicts: readonly PlanUatVerdict[];
+}
+
+/**
+ * Whether a human-mode criterion is accepted by a recorded UAT verdict (AC-DCS2-18).
+ *
+ * The criterion belongs to the plan(s) one of whose tasks, of any status, lists it in its `ac_scope` and that are parented to or
+ * implement the spec; a criterion no task lists has no owning plan and is never accepted. Only the NEWEST verdict of an owning plan
+ * counts: it must be `accept` (not `reject`, not `accept_with_conditions`) and list the pair `{spec, ac}` in `accepted_criteria`.
+ * A verdict recorded on any other plan counts for nothing. Several owning plans: any one whose newest verdict accepts is enough.
+ *
+ * @param plans - every plan with its tasks' scopes and verdicts
+ * @param spec - the spec that declares the criterion (matched by its slug, which `UatService.record` stores)
+ * @param acId - the criterion id
+ * @returns `true` when an owning plan's newest verdict accepts the criterion
+ */
+export function uatAccepts(plans: readonly LandingPlanView[], spec: DocRecord, acId: string): boolean {
+  for (const plan of plans) {
+    if (!plan.spec_ids.has(spec.id as string) || !plan.scoped_ac_ids.has(acId) || plan.verdicts.length === 0) continue;
+    const newest = plan.verdicts.reduce((latest, candidate) => (candidate.created_at >= latest.created_at ? candidate : latest));
+    if (newest.verdict.verdict !== "accept") continue;
+    if ((newest.verdict.accepted_criteria ?? []).some((accepted) => accepted.spec === spec.slug && accepted.ac === acId)) return true;
+  }
+  return false;
+}
+
 /** The docs the measure reads. `specs` must hold every spec (ad-hoc evidence attribution needs all of them). */
 export interface LandingEvidenceInput {
   readonly spec: DocRecord;
   readonly specs: readonly DocRecord[];
-  readonly plans: readonly DocRecord[];
+  readonly plans: readonly LandingPlanView[];
   readonly tasks: readonly DocRecord[];
   /** Rule ids the unlanded change set changes (adds, modifies, retires): a criterion citing one needs a pass. */
   readonly changedRuleIds: ReadonlySet<string>;
@@ -61,7 +106,8 @@ export interface LandingShortfall {
   readonly acId: string;
   /** The changed ids this criterion cites, sorted. */
   readonly cites: readonly string[];
-  readonly reason: "no-attested-run" | "latest-attested-run-failed";
+  /** `no-uat-verdict`: a human-mode criterion with no accepting verdict of its owning plan (AC-DCS2-18). */
+  readonly reason: "no-attested-run" | "latest-attested-run-failed" | "no-uat-verdict";
 }
 
 /** What blocks landing: criteria without a pass, and add/modify ids no criterion cites. Both empty = may land. */
@@ -91,17 +137,25 @@ export function measureLandingEvidence(input: LandingEvidenceInput): ({ ok: true
   }
   const { latest } = indexLatestAttestedRuns({
     specs: input.specs.map((spec) => ({ id: spec.id as string, acIds: declaredAcIdsOf(spec) })),
-    plans: input.plans,
+    plans: input.plans.map((plan) => plan.doc),
     tasks: input.tasks,
   });
   const cited = new Set<string>();
   const shortfalls: LandingShortfall[] = [];
   for (const criterion of parsed.data) {
+    // reason: a superseded criterion is retired (D15): it vouches for nothing and is never measured, with or without a run
+    if (isAcSuperseded(criterion)) continue;
     const cites = [...new Set(criterion.cites ?? [])].filter((id) => input.changedRuleIds.has(id)).sort();
     for (const id of cites) cited.add(id);
     if (cites.length === 0) continue;
+    const isHuman = criterion.verify.mode === "human";
+    // reason: a criterion that cites a changed rule is met in exactly two ways: a runner-attested latest pass, or (human mode only) a
+    // recorded UAT verdict of its owning plan. Skipping a human criterion would be a third way, and it is not one (AC-DCS2-18).
+    if (isHuman) {
+      if (uatAccepts(input.plans, input.spec, criterion.id)) continue;
+    }
     const run = latest.get(attestedRunKey(input.spec.id as string, criterion.id));
-    if (run === undefined) shortfalls.push({ acId: criterion.id, cites, reason: "no-attested-run" });
+    if (run === undefined) shortfalls.push({ acId: criterion.id, cites, reason: isHuman ? "no-uat-verdict" : "no-attested-run" });
     else if (run.result !== "pass") shortfalls.push({ acId: criterion.id, cites, reason: "latest-attested-run-failed" });
   }
   const unproven = [...input.provableRuleIds].filter((id) => !cited.has(id)).sort();

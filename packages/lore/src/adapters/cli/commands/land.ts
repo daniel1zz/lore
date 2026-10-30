@@ -24,6 +24,7 @@ import { resolveCallerSession } from "../caller-session.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { createLandGit, LandIntegrateFailed } from "../../../service/land-service.js";
 import { runIntegrate } from "./integrate.js";
+import { buildReviewBatchStarter } from "../review-batch-wiring.js";
 
 export default defineLoreCommand({
   meta: {
@@ -61,6 +62,15 @@ export default defineLoreCommand({
         return 1;
       }
       const projectRoot = dirname(dirname(resolvePath(dbPath)));
+      const startBatch = buildReviewBatchStarter({
+        app,
+        dbPath,
+        execPath: inv.execPath,
+        isCompiled: inv.isCompiled,
+        env: inv.env,
+        actor: resolveActor(inv),
+        caller: { claimedRun: inv.identity.harnessRun, verified: verified ?? { ok: true, value: undefined } },
+      });
       const commonDir = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: projectRoot, encoding: "utf8", env: { ...inv.env } });
       if (commonDir.status !== 0 || commonDir.stdout.trim() === "") {
         inv.io.stderr.write(`Error: cannot locate the git common dir of ${projectRoot} for the merge queue: ${(commonDir.stderr ?? "").trim()}\n`);
@@ -83,9 +93,22 @@ export default defineLoreCommand({
             harnessRun: verified?.value?.harnessRun ?? null,
             source: app.callerSurface,
             callerSession: session,
+            // reason: AC-DCS2-11 — the landing starts the plan's close itself (the integrate's last step, and the branch seam below),
+            // after the rebuild and the schema migration; the archive walk inside it must not start the batch earlier
+            deferPlanClose: true,
           };
           return app.taskWorkflowService.done(slug, doneOpts);
         },
+        // reason: AC-DCS2-11 — the branch of a plan landed: the plan close starts in the background, the landing never waits for it
+        ...(startBatch === undefined
+          ? {}
+          : {
+              planClose: {
+                afterBranchLanded: async (plan) => {
+                  inv.io.stdout.write(`${await startBatch(plan.slug, "was landed through its integration branch")}\n`);
+                },
+              },
+            }),
         session,
         now: () => new Date().toISOString(),
       });
