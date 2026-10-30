@@ -247,7 +247,7 @@ export default defineLoreCommand({
       let planRefs: string[];
       if (needsReview) {
         // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
-        const trigger = buildReviewTriggerService(app, holder, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+        const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
         if (trigger === undefined) {
           inv.io.stderr.write("Error: this composition cannot compute the needs-review set (no lease store or decision reader wired).\n");
           return 1;
@@ -319,8 +319,8 @@ export default defineLoreCommand({
               };
         // reason: BR-1497 — main's HEAD is looked up in the suite-result store first; the suite runs only when that
         // commit has no measured result, so a second batch at the same commit runs nothing. No suite runs at a landing
-        // commit: the batch measures nothing per landing (spec D1).
-        const suiteResults = app.suiteResultService?.withLeases(leases);
+        // commit: the batch measures nothing per landing (spec D1). The app's suite service is already bound to the suite leases (BR-1511).
+        const suiteResults = app.suiteResultService;
         if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
         const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
         // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
@@ -409,7 +409,7 @@ export default defineLoreCommand({
         // reason: BR-1496 — regression is measured at the assessed commit: main's head suite (stored per commit, so a second plan at
         // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
         // stays not-measured, never pass.
-        const suiteResults = app.suiteResultService?.withLeases(leases);
+        const suiteResults = app.suiteResultService;
         let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
         // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without
         // the suite-result store.

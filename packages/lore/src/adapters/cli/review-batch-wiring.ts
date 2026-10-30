@@ -194,12 +194,10 @@ export function refuseSpawnForRead(): Result<{ readonly pid: number | undefined 
 /**
  * The trigger/start service over the real App.
  *
- * @param _holder - unused: the trigger takes no lease any more (BR-1511); kept so every call site stays unchanged
  * @param spawnBatch - the detached spawn (`spawnDetachedReviewBatch` bound to the invocation)
  */
 export function buildReviewTriggerService(
   app: App,
-  _holder: string,
   spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
 ): ReviewTriggerService | undefined {
   const decisions = app.decisionReadService;

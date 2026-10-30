@@ -25,6 +25,7 @@ import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js"
 import { TursoStore, probeTmpdirUsability, type TursoConfig } from "./store/turso-store.js";
 import type { StoreInterface } from "./store/store-interface.js";
 import { CorpusService, type DocWritePort } from "./service/corpus-service.js";
+import { ReviewLeases } from "./service/review-batch-lease.js";
 import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
 import { OutlineService, renderResolvedToMarkdown } from "./service/outline-service.js";
@@ -1740,10 +1741,18 @@ function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bu
   };
 }
 
-/** The suite-result store's service over a store (BR-1497): the one place a commit's full-suite result is kept. */
+/**
+ * The suite-result store's service over a store (BR-1497): the one place a commit's full-suite result is kept.
+ *
+ * reason: BR-1511 — this is the ONE binding point of the suite leases: every service the app hands out runs a commit's
+ * suite under `suite:C` and a single file under `suite:C:F`, so concurrent callers (any command, any process sharing the
+ * store) single-flight per commit. Each acquisition adds a random suffix to the holder, so two lookups in this process
+ * still exclude each other.
+ */
 function buildSuiteResultService(store: StoreInterface): SuiteResultService {
   return new SuiteResultService({
     store,
+    leases: new ReviewLeases(store, `app:${String(process.pid)}`),
     now: () => new Date().toISOString(),
     newId: () => `suite-${randomUUID()}`,
     clockMs: () => performance.now(),

@@ -38,6 +38,7 @@ import { ReviewBatchRunner, skippedEveryPlan, type BatchRunPorts } from "../../s
 import { SuiteResultService, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../src/service/suite-result-service.js";
 import type { FailedFinding } from "../../src/service/root-cause-fingerprint.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { createLiveApp } from "../helpers/live-app.js";
 import { installStubClaude, stubClaudeEnv } from "../helpers/stub-claude.js";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 
@@ -576,6 +577,23 @@ describe("AC-RL-2 suite single-flight", () => {
     const stored = await lw.store.listSuiteResultsForCommit("c1");
     expect(stored.ok && stored.value).toHaveLength(1);
   });
+
+  it("suite single-flight: the app's own suite service single-flights two concurrent lookups at one commit (BR-1511 binding point)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lore-review-leases-app-"));
+    try {
+      const app = createLiveApp(join(dir, "corpus.db"));
+      const service = app.suiteResultService;
+      expect(service).toBeDefined();
+      const runner = new StubRunner();
+      // reason: the app's leases use the real clock and sleep, so the waiter polls once (up to LEASE_WAIT_POLL_MS) after the holder finishes.
+      const [a, b] = await Promise.all([service!.lookupOrRun("c1", runner), service!.lookupOrRun("c1", runner)]);
+      expect(runner.suiteRuns).toEqual(["c1"]);
+      expect(a.ok && b.ok).toBe(true);
+      if (a.ok && b.ok) expect(a.value.id).toBe(b.value.id);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 40_000);
 
   it("suite single-flight: without the key the same two lookups run the suite twice (the guard is the lease)", async () => {
     const lw = newWorld();
