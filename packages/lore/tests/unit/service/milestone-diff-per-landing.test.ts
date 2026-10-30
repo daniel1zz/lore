@@ -128,7 +128,7 @@ describe("AC-AF-8 review diff per landing", () => {
     expect(r.landings.map((l) => l.range_empty)).toEqual([true]);
   });
 
-  it("AC-AF-8: the diff-source header names landings and says the reviewer sees each file's net final state (AC-FS-1 supersedes the per-landing wording)", () => {
+  it("AC-AF-8: the diff-source header names landings and says the reviewer sees each file's net final state", () => {
     const header = describeLandingCount(2, 3);
     expect(header).toContain("2 landing(s), 3 commit(s)");
     expect(header).toContain("net diff");
