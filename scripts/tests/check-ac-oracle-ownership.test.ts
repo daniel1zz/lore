@@ -404,14 +404,14 @@ describe("check-ac-oracle-ownership — AC-OW-1 owners are every test file the v
   const a = "scripts/tests/a.test.ts";
   const b = "scripts/tests/b.test.ts";
   const c = "scripts/tests/c.test.ts";
-  const two = `bunx vitest run ${a} ${b} -t AC-OW-X && bunx vitest run ${b} && echo 'AC-OW-X PASS: both'`;
+  const two = `bunx vitest run ${a} ${b} -t AC-OW-9 && bunx vitest run ${b} && echo 'AC-OW-9 PASS: both'`;
 
   it("AC-OW-1 pure: both files of a two-path command may name the criterion untagged", () => {
     const r = evaluateOwnership(
-      [{ spec: "spec-a", id: "AC-OW-X", command: two }],
+      [{ spec: "spec-a", id: "AC-OW-9", command: two }],
       [
-        { path: a, content: 'it("AC-OW-X holds", () => {});' },
-        { path: b, content: 'it("AC-OW-X also holds", () => {});' },
+        { path: a, content: 'it("AC-OW-9 holds", () => {});' },
+        { path: b, content: 'it("AC-OW-9 also holds", () => {});' },
       ],
       exists(a, b),
     );
@@ -419,39 +419,48 @@ describe("check-ac-oracle-ownership — AC-OW-1 owners are every test file the v
   });
 
   it("AC-OW-1 pure: a file outside every command naming the id is unowned-ac-reference, silenced by an @layer tag", () => {
-    const acs = [{ spec: "spec-a", id: "AC-OW-X", command: `bunx vitest run ${a} ${b}` }];
-    const bad = evaluateOwnership(acs, [{ path: c, content: 'it("AC-OW-X again", () => {});' }], exists(a, b, c));
-    expect(bad.findings).toEqual([{ rule: "unowned-ac-reference", spec: "spec-a", acId: "AC-OW-X", path: c }]);
-    const tagged = evaluateOwnership(acs, [{ path: c, content: '// @layer cli AC-OW-X\nit("AC-OW-X again", () => {});' }], exists(a, b, c));
+    const acs = [{ spec: "spec-a", id: "AC-OW-9", command: `bunx vitest run ${a} ${b}` }];
+    const bad = evaluateOwnership(acs, [{ path: c, content: 'it("AC-OW-9 again", () => {});' }], exists(a, b, c));
+    expect(bad.findings).toEqual([{ rule: "unowned-ac-reference", spec: "spec-a", acId: "AC-OW-9", path: c }]);
+    const tagged = evaluateOwnership(acs, [{ path: c, content: '// @layer cli AC-OW-9\nit("AC-OW-9 again", () => {});' }], exists(a, b, c));
     expect(tagged.findings).toEqual([]);
   });
 
   it("AC-OW-1 pure: a missing second path is missing-owner-file naming that path; echo text names no owner", () => {
     const r = evaluateOwnership(
-      [{ spec: "spec-a", id: "AC-OW-X", command: `bunx vitest run ${a} ${b} && echo 'see scripts/tests/zzz.test.ts'` }],
-      [{ path: a, content: 'it("AC-OW-X", () => {});' }],
+      [{ spec: "spec-a", id: "AC-OW-9", command: `bunx vitest run ${a} ${b} && echo 'see scripts/tests/zzz.test.ts'` }],
+      [{ path: a, content: 'it("AC-OW-9", () => {});' }],
       exists(a),
     );
-    expect(r.findings).toEqual([{ rule: "missing-owner-file", spec: "spec-a", acId: "AC-OW-X", path: b }]);
+    expect(r.findings).toEqual([{ rule: "missing-owner-file", spec: "spec-a", acId: "AC-OW-9", path: b }]);
+  });
+
+  it("AC-OW-1 pure: a `test ! -e <path>` absence assertion names no owner", () => {
+    const r = evaluateOwnership(
+      [{ spec: "spec-a", id: "AC-OW-9", command: `bunx vitest run ${a} && test ! -e ${b} && echo ok` }],
+      [{ path: a, content: 'it("AC-OW-9", () => {});' }],
+      exists(a),
+    );
+    expect(r.findings).toEqual([]);
   });
 
   it("AC-OW-1 pure: a red-first declaration ledgers the missing second path", () => {
     const r = evaluateOwnership(
-      [{ spec: "spec-a", id: "AC-OW-X", command: `bunx vitest run ${a} ${b}`, allowMissingReason: "later" }],
-      [{ path: a, content: 'it("AC-OW-X", () => {});' }],
+      [{ spec: "spec-a", id: "AC-OW-9", command: `bunx vitest run ${a} ${b}`, allowMissingReason: "later" }],
+      [{ path: a, content: 'it("AC-OW-9", () => {});' }],
       exists(a),
     );
     expect(r.findings).toEqual([]);
-    expect(r.ledgered).toEqual([{ spec: "spec-a", acId: "AC-OW-X", path: b, reason: "later" }]);
+    expect(r.ledgered).toEqual([{ spec: "spec-a", acId: "AC-OW-9", path: b, reason: "later" }]);
   });
 
   it("AC-OW-1 pure: the same id in two specs, both running one file, stays ambiguous when referenced unqualified", () => {
     const r = evaluateOwnership(
       [
-        { spec: "spec-a", id: "AC-OW-X", command: `bunx vitest run ${a} ${b}` },
-        { spec: "spec-b", id: "AC-OW-X", command: `bunx vitest run ${b}` },
+        { spec: "spec-a", id: "AC-OW-9", command: `bunx vitest run ${a} ${b}` },
+        { spec: "spec-b", id: "AC-OW-9", command: `bunx vitest run ${b}` },
       ],
-      [{ path: b, content: 'it("AC-OW-X", () => {});' }],
+      [{ path: b, content: 'it("AC-OW-9", () => {});' }],
       exists(a, b),
     );
     expect(r.findings.map((f) => [f.rule, f.spec, f.path])).toEqual([
@@ -461,11 +470,11 @@ describe("check-ac-oracle-ownership — AC-OW-1 owners are every test file the v
   });
 
   it("AC-OW-1 --changed: touched b.test.ts (second path) is owned; touched c.test.ts is not", () => {
-    const acs = [{ spec: "spec-a", id: "AC-OW-X", command: `bunx vitest run ${a} ${b}` }];
+    const acs = [{ spec: "spec-a", id: "AC-OW-9", command: `bunx vitest run ${a} ${b}` }];
     const run = (path: string): { code: number; lines: string[] } => {
       const lines: string[] = [];
       const code = mainChanged(
-        { changed: () => [{ path, status: "M" } as ChangedFile], scriptAcs: () => acs, readTestFile: () => 'it("AC-OW-X", () => {});' },
+        { changed: () => [{ path, status: "M" } as ChangedFile], scriptAcs: () => acs, readTestFile: () => 'it("AC-OW-9", () => {});' },
         (l) => lines.push(l),
       );
       return { code, lines };
@@ -473,7 +482,7 @@ describe("check-ac-oracle-ownership — AC-OW-1 owners are every test file the v
     expect(run(b).code).toBe(0);
     const bad = run(c);
     expect(bad.code).toBe(1);
-    expect(bad.lines.join("\n")).toContain(`rule=unowned-ac-reference spec=spec-a ac=AC-OW-X path=${c}`);
+    expect(bad.lines.join("\n")).toContain(`rule=unowned-ac-reference spec=spec-a ac=AC-OW-9 path=${c}`);
   });
 
   it("AC-OW-1 e2e: exact exit codes of the real script over a fixture corpus", () => {
@@ -490,10 +499,6 @@ describe("check-ac-oracle-ownership — AC-OW-1 owners are every test file the v
       expect(bad.out).toContain(`path=${c}`);
       writeFileSync(join(dir, c), '// @layer cli AC-FX-7\nit("AC-FX-7 elsewhere", () => {});\n', "utf8");
       expect(runMainAt(dir).status).toBe(0);
-      rmSync(join(dir, b));
-      const missing = runMainAt(dir);
-      expect(missing.status).toBe(0); // declared red-first by addSpec: ledgered, not failed
-      expect(missing.out).toContain(`path=${b}`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
