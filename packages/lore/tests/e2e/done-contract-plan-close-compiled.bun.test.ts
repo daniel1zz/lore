@@ -37,8 +37,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
-import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
-import { DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags";
+import { approveFixtureNodes, citeSpecViaAsyncCli, ensureLiveRuleViaAsyncCli } from "../helpers/cli-live-rule";
+import { DECIDED_FLAGS, DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags";
 import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
@@ -692,6 +692,44 @@ describe("AC-DCS2-11: the plan closes itself when its last task archives", () =>
     expect(statusOf(uatPlan), "a missing P0 UAT keeps the plan open").not.toBe("archived");
     expect(batchLog(), "the batch names the gate").toMatch(/uat/i);
     expect(filedIssues().length, "no issue is filed for a missing UAT").toBe(issuesBefore + 2);
+
+    // the two plans that stay open are complete: left in place they would be in the trigger set of every later landing of this file
+    for (const plan of [gatePlan, uatPlan]) {
+      const deprecated = await inProcess(fixture.dir, ["set", plan, "--status", "deprecated"], OWNER);
+      expect(deprecated.exitCode, deprecated.text).toBe(0);
+    }
+  });
+});
+
+describe("AC-DCS2-11: the close runs rule apply for every spec of the plan", () => {
+  it("AC-DCS2-11: the change set of a spec the plan only IMPLEMENTS lands when the plan closes in the background (a retire needs no evidence); a plan with no change set applies nothing", async () => {
+    const liveRule = await ensureLiveRuleViaAsyncCli((args) => fixture.mustRun(args), fixture.dir);
+    const baseline = JSON.parse(await fixture.mustRun(["list", "--type", "baseline", "--json", "--limit", "100"])) as { data: { docs: Array<{ slug: string; title: string }> } };
+    const leaf = baseline.data.docs.find((doc) => doc.title === "Fixture Leaf")?.slug;
+    expect(leaf, "the fixture leaf").toBeDefined();
+    // a live rule that nothing cites: only the implemented spec retires it
+    const added = await fixture.mustRun(["rule", "add", leaf as string, "--statement", "A live rule only the implemented spec retires", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e1", ...DECIDED_FLAGS]);
+    const rule = added.match(/\bBR-\d+\b/)?.[0] as string;
+    approveFixtureNodes(fixture.dir, "all");
+    const ruleState = async (): Promise<string> => (JSON.parse(await fixture.mustRun(["rule", "show", rule, "--json"])) as { data: { state: string } }).data.state;
+    expect(await ruleState()).toBe("live");
+
+    const implemented = (await fixture.mustRun(["create", "spec", "--title", "Close implemented spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    await fixture.mustRun(["ac", "add", implemented, "AC-IM-1", "--statement", "A script criterion.", "--mode", "script", "--oracle", "test", "--command", "echo im1", "--cite", liveRule]);
+    const proposed = await fixture.run(["rule", "propose", implemented, "retire", rule, "--note", "retired by the spec the plan implements"]);
+    expect(proposed.exitCode, proposed.stderr).toBe(0);
+    await fixture.mustRun(["approve", implemented]);
+
+    const plan = await approvedPlan("Close implements plan");
+    await fixture.mustRun(["link", plan, implemented, "--type", "implements"]);
+    const code = await finishedCodeTask(plan, "pc11i");
+    const runsBefore = reviewBatchRuns().length;
+    // the plan has one task: its landing is the last archive, so the close runs in the background and applies the implemented spec
+    expect((await landTask(code.slug)).exitCode).toBe(0);
+    expect(await ruleState(), "the landing did not apply the change set").toBe("live");
+    await eventually(() => statusOf(plan) === "archived", "the plan to archive");
+    await batchesEnded(runsBefore + 1);
+    expect(await ruleState(), "the close applied the change set of the spec the plan implements").toBe("retired");
   });
 });
 
@@ -742,6 +780,11 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     await eventually(() => statusOf(holdPlan) === "archived", "the held plan to archive");
     await batchesEnded(runsBefore + 1);
     expect(planLeaseFiles(), "the lease is removed when the close ends").toEqual([]);
+
+    // the plan of the landing that went through meanwhile is complete: close it, so no later landing of this file has a plan waiting
+    const closedOther = await spawned(fixture.dir, ["plan", "close", other], OWNER, withGh());
+    expect(closedOther.exitCode, closedOther.text).toBe(0);
+    expect(statusOf(other)).toBe("archived");
   });
 
   it("AC-DCS2-20: two closes of one plan never overlap: exactly one runs and the other exits 75 plan-close-busy", async () => {
