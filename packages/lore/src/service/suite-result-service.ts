@@ -161,14 +161,6 @@ export class SuiteResultService {
   constructor(private readonly deps: SuiteResultServiceDeps) {}
 
   /**
-   * The same service with `leases` wired: a caller that has the store's lease verbs binds them for the runs it starts
-   * (BR-1511). Pure: the receiver is unchanged.
-   */
-  withLeases(leases: ReviewLeases): SuiteResultService {
-    return new SuiteResultService({ ...this.deps, leases });
-  }
-
-  /**
    * The stored suite result of the commit `ref` names; runs the suite only when no `measured` result exists.
    *
    * @param ref - `main` or a commit sha
