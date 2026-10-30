@@ -1549,7 +1549,10 @@ export function evaluateReadiness(
         // its status stays unarchived (`lore done` judges landing against main), so it is reported apart
         // from archived blockers rather than silently dropped. Only a blocker the caller proved landed
         // (`landedOnIntegration`) qualifies; absence from the map keeps the original blocked behaviour.
-        const branch = landedOnIntegration.get(link.from_id);
+        // reason: BR-1313 — a check or corpus task runs at main's tip, so a blocker counts as met for it only when its work is
+        // on main (the blocker is then archived), never merely on the integration branch.
+        const runsOnMain = task.extra["kind"] === "check" || task.extra["kind"] === "corpus";
+        const branch = runsOnMain ? undefined : landedOnIntegration.get(link.from_id);
         if (branch !== undefined && blocker !== undefined) {
           metOnIntegration.push({ id: link.from_id, slug: blocker.slug, status, branch });
         } else {

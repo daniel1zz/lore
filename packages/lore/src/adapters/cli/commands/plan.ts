@@ -81,6 +81,8 @@ export default defineLoreCommand({
           }
           printLine(inv.io.stdout, `Plan ${args.plan as string} integration branch: ${result.value.branch}`);
           printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
+          if (result.value.branch_state === "created") printLine(inv.io.stdout, `  created branch ${result.value.branch} at the tip of main`);
+          if (result.value.branch_state === "reused") printLine(inv.io.stdout, `  branch ${result.value.branch} already exists at the tip of main; reused`);
         } finally {
           app.close();
         }

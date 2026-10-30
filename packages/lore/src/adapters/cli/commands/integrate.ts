@@ -64,6 +64,7 @@ import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-
 import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
+import type { IntegrateQueue } from "../../../service/integrate-queue.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
 import { ORACLE_TIMEOUT_DEFAULT_SECONDS } from "../../../service/integrate-oracle-service.js";
 import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
@@ -246,7 +247,6 @@ export default defineLoreCommand({
   async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
-    const runGit = gitRunnerFor(inv.env);
     const branch = typeof args.branch === "string" ? args.branch : "";
     if (branch === "") {
       inv.io.stderr.write("Error: lore integrate requires a <branch>\n");
@@ -254,6 +254,37 @@ export default defineLoreCommand({
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
+      return await runIntegrate({ inv, app, dbPath, config, branch, args });
+    } finally {
+      app.close();
+    }
+  },
+});
+
+/** What {@link runIntegrate} needs: the loaded app and invocation, the branch, the typed flags, and optionally the merge queue to share. */
+export interface IntegrateRunOptions {
+  readonly inv: ReturnType<typeof invocationOf>;
+  readonly app: ReturnType<typeof loadLoreApp>["app"];
+  readonly dbPath: string;
+  readonly config: ReturnType<typeof loadLoreApp>["config"];
+  readonly branch: string;
+  readonly args: { readonly session?: unknown; readonly message?: unknown; readonly json?: unknown };
+  /**
+   * The queue the landing takes its turn in. `lore land` passes the queue whose turn it already holds, so the integrate it runs
+   * inside that turn does not wait behind its own caller (integrate-queue.ts: a nested taker shares the held ticket).
+   */
+  readonly queue?: IntegrateQueue;
+}
+
+/**
+ * Runs `lore integrate <branch>` against an already loaded app and returns its exit code (the body of the command; `lore land`
+ * runs it too, so there is ONE landing path). Output goes to `inv.io`; the caller closes the app.
+ */
+export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
+  const { inv, app, dbPath, config, branch, args } = opts;
+  const runGit = gitRunnerFor(inv.env);
+  {
+    {
       // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
       // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
@@ -319,7 +350,7 @@ export default defineLoreCommand({
         // AC-DCS2-1: the landing's contract oracles run on the merged tree before main moves, and their rows are recorded after
         oracles: oracleService,
         ledger: new IntegrateLossLedger(corpusDir),
-        queue: createQueue({ commonDir: commonDir.stdout.trim(), log }),
+        queue: opts.queue ?? createQueue({ commonDir: commonDir.stdout.trim(), log }),
         attempts: new IntegrateAttemptLedger(corpusDir),
         // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
         landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
@@ -427,8 +458,6 @@ export default defineLoreCommand({
       else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
       if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
       return integrateExitCode(result.value);
-    } finally {
-      app.close();
     }
-  },
-});
+  }
+}

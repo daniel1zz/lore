@@ -117,8 +117,19 @@ export class IntegrateQueue implements IntegrateQueuePort {
     return (this.deps.clock ?? Date.now)();
   }
 
-  /** Takes the next ticket. */
+  /**
+   * The ticket this instance holds the turn with inside {@link runInTurn}, and how many nested takers share it. A landing started
+   * INSIDE a held turn (`lore land` integrating the branch it just folded into, AC-DCS2-19) takes no second ticket: it would queue
+   * behind its own caller and never run. Only this instance's own `runInTurn` sets it, so another process or instance still queues.
+   */
+  private held: { readonly ticket: QueueTicket; nested: number } | undefined;
+
+  /** Takes the next ticket (the held one, shared, when called inside {@link runInTurn} of this instance). */
   async take(taker: QueueTaker): Promise<QueueTicket> {
+    if (this.held !== undefined) {
+      this.held.nested += 1;
+      return this.held.ticket;
+    }
     const { pid } = this.deps;
     const start = (await this.inspectPid(pid))?.startTime ?? null;
     if (start === null) throw new IntegrateQueueUnreadableError(`integrate: the process table does not list this process (pid ${pid}), so it cannot take a queue ticket`);
@@ -144,6 +155,7 @@ export class IntegrateQueue implements IntegrateQueuePort {
 
   /** Waits until `ticket` is the head; see the module header. */
   async waitForTurn(ticket: QueueTicket): Promise<void> {
+    if (this.held !== undefined && this.held.ticket === ticket) return; // the turn is already ours
     const began = this.now();
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     let lastLine = "";
@@ -174,6 +186,10 @@ export class IntegrateQueue implements IntegrateQueuePort {
 
   /** Removes `ticket`; removing an absent one is not an error. */
   release(ticket: QueueTicket): void {
+    if (this.held !== undefined && this.held.ticket === ticket && this.held.nested > 0) {
+      this.held.nested -= 1; // a nested taker gives back its share; the owner's runInTurn removes the file
+      return;
+    }
     rmSync(ticket.file, { force: true });
   }
 
@@ -182,11 +198,14 @@ export class IntegrateQueue implements IntegrateQueuePort {
    * @throws {IntegrateQueueTimeoutError} @throws {IntegrateQueueUnreadableError} whatever `fn` throws
    */
   async runInTurn<T>(taker: QueueTaker, fn: () => Promise<T>): Promise<T> {
+    if (this.held !== undefined) return await fn(); // already inside a turn of this instance: nothing to wait for
     const ticket = await this.take(taker);
     try {
       await this.waitForTurn(ticket);
+      this.held = { ticket, nested: 0 };
       return await fn();
     } finally {
+      this.held = undefined;
       this.release(ticket);
     }
   }

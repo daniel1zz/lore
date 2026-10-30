@@ -235,6 +235,8 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // integration worktree, post-merge floor, CAS update of main, max 3 attempts, exit 75 on three lost races;
     // spec-main-advances-only-through-lore-integrate-per-session AC-INT-1); see commands/integrate.ts's header.
     integrate: () => import("./commands/integrate.js"),
+    // land — `land <task | integration-branch>`: fold into the plan's integration branch or integrate, archive and clean up; see commands/land.ts.
+    land: () => import("./commands/land.js"),
 };
 
 /**

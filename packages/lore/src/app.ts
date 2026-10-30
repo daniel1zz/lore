@@ -105,7 +105,8 @@ import { createRealProcessTablePort } from "./adapters/process-table-port.js";
 import type { RunAncestryProbe } from "./service/run-identity-verify.js";
 import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
-import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
+import { LandService, type LandPorts } from "./service/land-service.js";
+import { PlanIntegrationBranchService, createPlanBranchGit } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
 import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION, type MainRedLedgerPort } from "./service/milestone-review.js";
 import { SuiteResultService } from "./service/suite-result-service.js";
@@ -395,6 +396,12 @@ export interface App {
    * resolves when it runs, so composing the app never spawns git. Wired by {@link wireDoneContract} at both composition sites.
    */
   createIntegrateQueue?: (options: { readonly commonDir: string; readonly log: (line: string) => void }) => IntegrateQueue;
+  /**
+   * `lore land` (AC-DCS2-7..9, AC-DCS2-19): builds the service over the store and the execution log writer; the command binds what only
+   * it can (the git of the repository, the queue it shares with its integrate, the integrate and done runs). Wired by
+   * {@link wireDoneContract}.
+   */
+  createLandService?: (ports: Omit<LandPorts, "store" | "log">) => LandService;
   /**
    * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
    * siblings so hand-built App stubs stay valid; both composition roots wire it.
@@ -1173,7 +1180,7 @@ function buildAppFromSqlite(
     recordLockService,
     // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
     // `extra.integration_branch`.
-    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService, createPlanBranchGit(repoRoot)),
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
     retiredAcService,
@@ -1617,7 +1624,7 @@ function buildAppFromTurso(
     recordLockService,
     // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
     // `extra.integration_branch`.
-    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService, createPlanBranchGit(repoRoot)),
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
     retiredAcService,
@@ -1866,6 +1873,9 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
       waitSeconds: config?.workflow?.integrate?.queue_wait_seconds ?? QUEUE_WAIT_SECONDS_DEFAULT,
       log,
     });
+  // reason: AC-DCS2-8 — land composes the store, the execution log writer (the `folded` entry) and the ports of the command.
+  const logWriter = app.executionLogService;
+  app.createLandService = (ports) => new LandService({ ...ports, store, log: logWriter });
   // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
   app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService });
 }
