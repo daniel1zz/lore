@@ -236,6 +236,7 @@ interface LandingShape {
   readonly branch: string;
   readonly landing_commit: string;
   readonly branch_head: string;
+  readonly main_before: string;
 }
 
 async function landingOf(world: World, slug: string): Promise<LandingShape | undefined> {
@@ -439,6 +440,64 @@ describe("AC-DCS2-1: integrate selects the landing tasks, runs the union once an
   });
 });
 
+/** Advances main to `commit` by plumbing (a fast-forward made outside integrate), so a branch whose tip it is lies on main's first-parent chain. */
+function fastForwardMainTo(world: World, commit: string): void {
+  execFileSync("git", ["update-ref", "refs/heads/main", commit, mainTip(world)], { cwd: world.fixture.dir, env: { ...process.env, LORE_INTEGRATE: "1" } });
+}
+
+describe("AC-DCS2-1: one selection rule for every landed branch (D44)", () => {
+  it("AC-DCS2-1: B2's branch merged into B1's branch, then B1 lands: B2 gets a landing record and is judged; a task main already contained, and one whose tip the branch does not contain, are not selected", async () => {
+    const world = await makeWorld();
+    const { fixture } = world;
+    const plan = await fixture.createPlan("Merged branch plan");
+    const b1 = await landable(world, plan, "b1", ["tests/b1-1.test.ts"], { "tests/b1-1.test.ts": "// b1\n" });
+    const b2 = await landable(world, plan, "b2", ["tests/b2-1.test.ts"], { "tests/b2-1.test.ts": "// b2\n" });
+    // never selected: its tip is not in B1's branch
+    const lone = await landable(world, plan, "lone", ["tests/lone-1.test.ts"], { "tests/lone-1.test.ts": "// lone\n" });
+    // never selected: main already contained its tip before the landing, and it holds no landing record
+    const early = await landable(world, plan, "early", ["tests/early-1.test.ts"], { "tests/early-1.test.ts": "// early\n" });
+    mergeIntoMainBehindIntegratesBack(world, early.tree.branch);
+    gitIn(b1.tree.path, ["merge", "-q", "--no-ff", "-m", "fold b2 into b1", b2.tree.branch]);
+    const before = { lone: await taskOf(world, lone.slug), early: await taskOf(world, early.slug) };
+
+    const out = await integrateBranch(world, b1.tree.branch);
+    expect(out.exitCode, out.text).toBe(0);
+    const merged = mainTip(world);
+    for (const task of [b1, b2]) {
+      const landing = await landingOf(world, task.slug);
+      expect(landing?.landing_commit, `landing of ${task.slug}`).toBe(merged);
+      expect(landing?.branch).toBe(b1.tree.branch);
+      const rows = await rowsOf(world, task.slug);
+      expect(rows.length, `rows of ${task.slug}`).toBe(3);
+      for (const row of rows) expect(row.attestation?.head_sha).toBe(merged);
+      expect((await taskOf(world, task.slug)).status, out.text).toBe("archived");
+    }
+    expect(countRuns(world, "test tests/b2-1.test.ts")).toBe(1);
+    expect(countRuns(world, "test tests/lone-1.test.ts")).toBe(0);
+    expect(countRuns(world, "test tests/early-1.test.ts")).toBe(0);
+    expect(await taskOf(world, lone.slug)).toEqual(before.lone);
+    expect(await taskOf(world, early.slug)).toEqual(before.early);
+  });
+
+  it("AC-DCS2-1: a fast-forwarded branch (its tip is itself on main's first-parent chain) is recorded with landing_commit = the tip and main_before = the tip's first parent", async () => {
+    const world = await makeWorld();
+    const { fixture } = world;
+    const plan = await fixture.createPlan("Fast-forward plan");
+    const x = await landable(world, plan, "ff", ["tests/ff-1.test.ts"], { "tests/ff-1.test.ts": "// ff\n" });
+    const tip = gitIn(x.tree.path, ["rev-parse", "HEAD"]);
+    const startOfWork = mainTip(world);
+    fastForwardMainTo(world, tip);
+
+    const out = await integrateBranch(world, x.tree.branch);
+    expect(out.exitCode, out.text).toBe(0);
+    expect(out.text).toContain("already integrated");
+    const landing = await landingOf(world, x.slug);
+    expect(landing?.landing_commit).toBe(tip);
+    expect(landing?.main_before).toBe(startOfWork);
+    expect((await taskOf(world, x.slug)).status, out.text).toBe("archived");
+  });
+});
+
 // ───────────────────────────── AC-DCS2-2 ─────────────────────────────
 
 /** Builds the integration plan of A (anchors a missing file), D (the work deletes its anchored file) and G (good). */
@@ -454,6 +513,32 @@ async function missingAndDeleted(world: World): Promise<{ good: Landable; missin
 }
 
 describe("AC-DCS2-2: integrate refuses a landing it cannot prove, before main moves", () => {
+  it("AC-DCS2-2: a branch integrated earlier, followed by later unrelated landings: the re-run records landing_commit = the original merge commit and main_before = its first parent; the rows bind to main's current tip", async () => {
+    const world = await makeWorld();
+    const { fixture } = world;
+    const plan = await fixture.createPlan("Earlier merge plan");
+    const x = await landable(world, plan, "early-merge", ["tests/em-1.test.ts"], { "tests/em-1.test.ts": "// em\n" });
+    const startOfX = mainTip(world);
+    const original = mergeIntoMainBehindIntegratesBack(world, x.tree.branch);
+    // later, unrelated landings move main on
+    const later = await landable(world, plan, "later", ["tests/later-1.test.ts"], { "tests/later-1.test.ts": "// later\n" });
+    const landedLater = await integrateBranch(world, later.tree.branch);
+    expect(landedLater.exitCode, landedLater.text).toBe(0);
+    const current = mainTip(world);
+    expect(current).not.toBe(original);
+
+    const out = await integrateBranch(world, x.tree.branch);
+    expect(out.exitCode, out.text).toBe(0);
+    expect(out.text).toContain("already integrated");
+    expect(mainTip(world)).toBe(current);
+    const landing = await landingOf(world, x.slug);
+    expect(landing?.landing_commit).toBe(original);
+    expect(landing?.main_before).toBe(startOfX);
+    expect(countRuns(world, "test tests/em-1.test.ts")).toBe(1);
+    for (const row of await rowsOf(world, x.slug)) expect(row.attestation?.head_sha).toBe(current);
+    expect((await taskOf(world, x.slug)).status, out.text).toBe("archived");
+  });
+
   it("AC-DCS2-2: two failing oracles on two tasks are both named with their files; every oracle still ran; main, the integration worktree and every task are unchanged (exit 1)", async () => {
     const world = await makeWorld();
     const { fixture } = world;
