@@ -129,6 +129,7 @@ import type { AbandonmentPlan } from "./rule-landing-port.js";
 import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "./spec-evidence-tasks.js";
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
+import type { ExecutionLogPort } from "./execution-log-service.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
@@ -1025,7 +1026,37 @@ export class AcService {
       ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
     });
     if (!writeResult.ok) return writeResult;
+    if (correction !== undefined) {
+      const logged = await this.logSuperseded(acId, correction.reason.trim(), "correction");
+      if (!logged.ok) return logged;
+    }
     return ok(parsed.data);
+  }
+
+  /**
+   * Wires the execution log (AC-DCS2-14): a correction or supersede of a criterion appends a `superseded` entry to every task whose
+   * ac_scope holds it. Set by `app.ts`; a bare construction (a unit test) has none and appends nothing.
+   */
+  attachExecutionLog(port: ExecutionLogPort): void {
+    this.executionLog = port;
+  }
+
+  private executionLog: ExecutionLogPort | undefined;
+
+  /**
+   * Appends the `superseded` entries AFTER the spec write that made them true. A failure is returned (never swallowed): the spec
+   * write stands, and the message says which tasks may lack the entry.
+   */
+  private async logSuperseded(acId: string, reason: string, via: "correction" | "supersede"): Promise<Result<void, LoreError>> {
+    if (this.executionLog === undefined) return ok(undefined);
+    const logged = await this.executionLog.recordSuperseded(acId, reason, via);
+    if (logged.ok) return ok(undefined);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "execution_log",
+      message: `The ${via} of ${acId} was written, but its execution-log entry could not be appended to every task holding it: ${"message" in logged.error ? logged.error.message : logged.error.code}. The log is never edited by hand; report this failure.`,
+      value: acId,
+    });
   }
 
   // ── supersedeCriterion ────────────────────────────────────────────────────
@@ -1132,6 +1163,8 @@ export class AcService {
       auditDetails: { superseded_by: { spec: superseding.value.id, ac: by.ac, reason: trimmedReason } },
     });
     if (!written.ok) return written;
+    const logged = await this.logSuperseded(acId, trimmedReason, "supersede");
+    if (!logged.ok) return logged;
     return ok(parsed.data);
   }
 

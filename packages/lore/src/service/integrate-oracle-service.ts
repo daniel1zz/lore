@@ -369,8 +369,10 @@ export class IntegrateOracleService implements LandingOracles {
     const failed: string[] = [];
     for (const task of input.tasks) {
       const rows: VerifiedEvidenceInput[] = [];
+      const oracleIds: string[] = [];
       for (const outcome of input.outcomes) {
         if (!outcome.passed || outcome.row === undefined || !outcome.oracle.tasks.includes(task.slug)) continue;
+        oracleIds.push(outcome.oracle.id);
         const extra = flakyExtras.get(outcome.oracle.command);
         rows.push({
           ...outcome.row,
@@ -381,9 +383,9 @@ export class IntegrateOracleService implements LandingOracles {
         });
       }
       if (rows.length === 0) continue;
-      let written = await this.deps.workflow.recordIntegrateEvidence(task.slug, rows, input.by, input.nowIso);
+      let written = await this.deps.workflow.recordIntegrateEvidence(task.slug, rows, input.by, input.nowIso, oracleIds);
       for (let attempt = 1; !written.ok && written.error.code === "STALE_VERSION" && attempt < RECORD_MAX_ATTEMPTS; attempt += 1) {
-        written = await this.deps.workflow.recordIntegrateEvidence(task.slug, rows, input.by, input.nowIso);
+        written = await this.deps.workflow.recordIntegrateEvidence(task.slug, rows, input.by, input.nowIso, oracleIds);
       }
       if (written.ok) {
         recorded.push(task.slug);

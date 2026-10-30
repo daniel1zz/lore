@@ -340,7 +340,8 @@ import {
   type FileAnchorResolutionReport,
   type NonResolvingFileAnchor,
 } from "@lore/core";
-import type { DocId, DocRecord, DocStatus, StampBindingContext } from "@lore/core";
+import type { DocId, DocRecord, DocStatus, ExecutionLogEntry, StampBindingContext } from "@lore/core";
+import { readExecutionLog, withExecutionLogEntries } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
@@ -4555,7 +4556,22 @@ export class TaskWorkflowService {
    * @param nowIso - the one reading of "now" for every row and the version
    * @returns the written task, or `STALE_VERSION` (retry) or the first row's admission error (nothing written)
    */
-  async recordIntegrateEvidence(taskSlug: string, rows: readonly VerifiedEvidenceInput[], by: string, nowIso: string): Promise<Result<DocRecord, LoreError>> {
+  async recordIntegrateEvidence(
+    taskSlug: string,
+    rows: readonly VerifiedEvidenceInput[],
+    by: string,
+    nowIso: string,
+    oracleIds: readonly string[],
+  ): Promise<Result<DocRecord, LoreError>> {
+    // reason: AC-DCS2-14 — the log names oracle ids, which a row (oracle KIND + command) does not carry; one id per row, in row order.
+    if (oracleIds.length !== rows.length) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "oracleIds",
+        message: `recordIntegrateEvidence got ${rows.length} row(s) but ${oracleIds.length} oracle id(s); the execution log needs one id per row`,
+        value: oracleIds,
+      });
+    }
     const resolved = await this.resolveTask(taskSlug);
     if (!resolved.ok) return resolved;
     const task = resolved.value;
@@ -4566,9 +4582,20 @@ export class TaskWorkflowService {
     }
     const existing = readEvidence(task);
     if (existing.length + collected.length > 50) return evidenceLogFull(existing.length);
+    // reason: AC-DCS2-14 — the evidence-recorded entry and one flaky entry per flaky row ride THIS write, so an entry never exists without its rows.
+    const landingCommit = rows.find((row) => row.attestation?.recorded_at_landing !== undefined)?.attestation?.recorded_at_landing;
+    if (landingCommit === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "attestation.recorded_at_landing", message: "recordIntegrateEvidence rows carry no landing commit", value: taskSlug });
+    }
+    const logged: ExecutionLogEntry[] = [{ kind: "evidence-recorded", at: nowIso, oracles: [...oracleIds], landing_commit: landingCommit }];
+    rows.forEach((row, index) => {
+      if (row.flaky === true) {
+        logged.push({ kind: "flaky", at: nowIso, oracle: oracleIds[index] as string, landing_commit: landingCommit, ...(row.ledger_error !== undefined ? { ledger_error: row.ledger_error } : {}) });
+      }
+    });
     return this.writeTaskExtra(
       task,
-      { ...task.extra, verification_evidence: [...existing, ...collected] },
+      withExecutionLogEntries({ ...task.extra, verification_evidence: [...existing, ...collected] }, logged),
       nowIso,
       by,
       `lore integrate: ${collected.length} row(s) recorded at the landing`,
@@ -4576,6 +4603,50 @@ export class TaskWorkflowService {
       { integrate: true, rows: collected.length },
       true,
     );
+  }
+
+  /**
+   * The deterministic contract check of a task past done (AC-DCS2-15): every oracle of its stored contract (plus the write-set
+   * additions, minus the oracles its landing removed) must hold a counting pass row by the evidence rule of AC-DCS1-27, the same
+   * predicate `lore done` applied. Writes nothing and calls no AI.
+   *
+   * @param task - a task holding a stored contract
+   * @returns the ids of the met oracles and each unmet oracle with the reason it is unmet
+   */
+  async checkContractOracles(task: DocRecord): Promise<Result<{ met: string[]; unmet: { id: string; reason: string }[] }, LoreError>> {
+    const contractResult = this.readStoredContract(task);
+    if (!contractResult.ok) return contractResult;
+    const contract = contractResult.value;
+    const removed = new Set((contract.removed_oracles ?? []).map((gone) => gone.id));
+    const oracles: DoneContractOracle[] = [];
+    for (const oracle of [...contract.oracles, ...contract.added_oracles]) {
+      if (!removed.has(oracle.id) && !oracles.some((known) => known.id === oracle.id)) oracles.push(oracle);
+    }
+    const evaluated = await this.evaluateOracleCommands(task, oracles);
+    if (!evaluated.ok) return evaluated;
+    const evidence = readEvidence(task);
+    const stampBinding = await loadStampBindingContext(this.store, [task]);
+    if (!stampBinding.ok) return stampBinding;
+    const readings = classifyEvidenceStamps(task.id, evidence, stampBinding.value);
+    const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+    const landedCommit = readTaskLanding(task.extra)?.landing_commit;
+    const bindings = new Map<EvidenceEntry, RowBinding>();
+    for (const [index, row] of evidence.entries()) {
+      if (row.result === "pass" && row.attestation !== undefined && readings[index]?.stamp !== "unbound") bindings.set(row, this.bindRow(git, contract, row, landedCommit));
+    }
+    const met: string[] = [];
+    const unmet: { id: string; reason: string }[] = [];
+    for (const oracle of evaluated.value) {
+      if (oracle.unresolved !== undefined) {
+        unmet.push({ id: oracle.id, reason: oracle.unresolved });
+        continue;
+      }
+      const command = oracle.command ?? oracle.id;
+      const counted = [...bindings.entries()].some(([row, binding]) => binding.counts && row.command === command);
+      if (counted) met.push(oracle.id);
+      else unmet.push({ id: oracle.id, reason: `no counting pass row ran \`${command}\`` });
+    }
+    return ok({ met, unmet });
   }
 
   /** The stored contract of `task`; a task with none is refused (the contract is compiled at approve, never recomputed here). */
@@ -5402,13 +5473,17 @@ export class TaskWorkflowService {
         doc: task,
         // a re-landing replaces `landing` (singular) but the replaced one is appended to `landing_history`, so nothing is lost
         patch: {
-          extra: {
-            ...task.extra,
-            landing: record,
-            ...(task.extra["landing"] !== undefined
-              ? { landing_history: [...(Array.isArray(task.extra["landing_history"]) ? task.extra["landing_history"] : []), task.extra["landing"]] }
-              : {}),
-          },
+          // reason: AC-DCS2-14 — the `landed` entry rides the write of the landing record it describes.
+          extra: withExecutionLogEntries(
+            {
+              ...task.extra,
+              landing: record,
+              ...(task.extra["landing"] !== undefined
+                ? { landing_history: [...(Array.isArray(task.extra["landing_history"]) ? task.extra["landing_history"] : []), task.extra["landing"]] }
+                : {}),
+            },
+            [{ kind: "landed", at: nowIso, branch: landing.branch, tip: verdict.tip, landing_commit: landing.landing_commit, commit_range: `${mainBefore}..${landing.landing_commit}` }],
+          ),
         },
         action: "update",
         changeSummary: `lore integrate: recorded the landing of ${landing.branch} (${landing.landing_commit.slice(0, 12)})`,
@@ -6920,16 +6995,33 @@ export class TaskWorkflowService {
     escapes: { overrideReason?: string; reason?: string; landing?: Record<string, unknown>; removedOracles?: DoneContractRemovedOracle[] } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     // reason: the landing and the removed oracles ride the same write as the status (one CAS), so a rival closer cannot see one without the other.
-    const extraPatch: Record<string, unknown> = { ...task.extra };
-    if (escapes.landing !== undefined) extraPatch["landing"] = escapes.landing;
+    let extraPatch: Record<string, unknown> = { ...task.extra };
+    // reason: AC-DCS2-14 — the log entries of what this write records ride the SAME write (one CAS, no entry without its event).
+    const logged: ExecutionLogEntry[] = [];
+    if (escapes.landing !== undefined) {
+      extraPatch["landing"] = escapes.landing;
+      const branch = escapes.landing["branch"];
+      const tip = escapes.landing["tip"];
+      const landingCommit = escapes.landing["landing_commit"];
+      const alreadyLogged = readExecutionLog(task.extra).some((entry) => entry.kind === "landed" && entry.landing_commit === landingCommit);
+      if (typeof branch === "string" && typeof tip === "string" && typeof landingCommit === "string" && !alreadyLogged) {
+        const before = escapes.landing["main_before"];
+        logged.push({ kind: "landed", at: nowIso, branch, tip, landing_commit: landingCommit, commit_range: `${typeof before === "string" ? before : tip}..${landingCommit}` });
+      }
+    }
     if (escapes.removedOracles !== undefined) {
       const contract = this.readStoredContract(task);
       if (!contract.ok) return contract;
       extraPatch["done_contract"] = { ...contract.value, removed_oracles: escapes.removedOracles };
+      for (const gone of escapes.removedOracles) {
+        logged.push({ kind: "removed-oracle", at: nowIso, oracle: gone.id, path: gone.path, reason: gone.reason, landed_commit: gone.landed_commit });
+      }
     }
+    if (logged.length > 0) extraPatch = withExecutionLogEntries(extraPatch, logged);
     const written = await this.writer.writeDoc({
       doc: task,
       patch: { status: newStatus, ...(escapes.landing !== undefined || escapes.removedOracles !== undefined ? { extra: extraPatch } : {}) },
+      // (extraPatch carries the log entries of this write)
       action: "update",
       changeSummary,
       auditAction: "update",

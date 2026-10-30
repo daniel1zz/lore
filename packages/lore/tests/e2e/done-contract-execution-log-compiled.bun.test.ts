@@ -385,7 +385,7 @@ describe("AC-DCS2-14: the execution log is appended by lore and never rewrites t
     try {
       const found = await app.corpusService.get(planId);
       if (!found.ok) throw new Error("plan not found");
-      const appended = await app.executionLogService.appendEntries(found.value.doc, [{ kind: "evidence-moved", at: "2026-01-01T00:00:00.000Z", from: "tests/old.test.ts", to: "tests/new.test.ts", task: "some-task" }]);
+      const appended = await app.executionLogService!.appendEntries(found.value.doc, [{ kind: "evidence-moved", at: "2026-01-01T00:00:00.000Z", from: "tests/old.test.ts", to: "tests/new.test.ts", task: "some-task" }]);
       expect(appended.ok, JSON.stringify(appended)).toBe(true);
       const reread = await app.corpusService.get(planId);
       if (!reread.ok) throw new Error("plan not found");
@@ -393,7 +393,7 @@ describe("AC-DCS2-14: the execution log is appended by lore and never rewrites t
       expect(entries.map((entry) => entry.kind)).toEqual(["evidence-moved"]);
       expect(entries[0]?.to).toBe("tests/new.test.ts");
       // an entry of an unknown kind is refused and nothing is appended
-      const refused = await app.executionLogService.appendEntries(reread.value.doc, [{ kind: "invented", at: "2026-01-01T00:00:00.000Z" } as never]);
+      const refused = await app.executionLogService!.appendEntries(reread.value.doc, [{ kind: "invented", at: "2026-01-01T00:00:00.000Z" } as never]);
       expect(refused.ok).toBe(false);
       const after = await app.corpusService.get(planId);
       if (!after.ok) throw new Error("plan not found");
@@ -474,8 +474,9 @@ describe("AC-DCS2-15: a finished task is reviewed by its contract, an unstarted 
 
     const out = await loreIn(world, fixture.dir, ["review", x.slug]);
     expect(out.exitCode, out.text).toBe(0);
-    expect(out.text).toContain("contract");
-    expect(out.text).toContain("met");
+    expect(out.text).toContain("Contract check of");
+    expect(out.text).toContain(": met (");
+    for (const oracle of ["ac:AC-FX-1", "test:tests/m-1.test.ts", "typecheck"]) expect(out.text, oracle).toContain(oracle);
     expect(aiCallCount(world)).toBe(calls);
     // the check writes nothing: no judgment row, no version
     expect((await fixture.readTask(x.slug)).version).toBe(versionBefore);

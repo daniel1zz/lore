@@ -10,6 +10,7 @@
  * Source: baseline slice 1 spec §C3 (service-layer guard consumes this table).
  */
 
+import { EXECUTION_LOG_WRITER_TEXT } from "./execution-log.js";
 import type { DocStatus, DocType } from "./types.js";
 
 /** One guarded `extra` key and the verb(s) that legitimately write it. */
@@ -58,7 +59,11 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
   task: [
     { key: "done_contract", writer: "lore approve", refusal: "done-contract-locked" },
     { key: "kind", writer: "lore set <task> --kind (a draft task only)", unlessStatus: "draft", refusal: "kind-locked" },
+    // reason: AC-DCS2-14 (D28) — the execution log is appended by lore at the event it records and never edited by hand.
+    { key: "execution_log", writer: EXECUTION_LOG_WRITER_TEXT, refusal: "execution-log-locked" },
   ],
+  // reason: AC-DCS2-14 — a plan's log takes the evidence-moved entries of the drift check; the same writers-only guard applies.
+  plan: [{ key: "execution_log", writer: EXECUTION_LOG_WRITER_TEXT, refusal: "execution-log-locked" }],
   // reason: DC2-8 — a recorded UAT verdict is writer-owned evidence; `lore set` replaces `extra`
   // wholesale, so without this entry a `lore_set` could flip `extra.uat.verdict` on every route.
   knowledge: [

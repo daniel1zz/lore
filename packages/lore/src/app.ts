@@ -135,6 +135,7 @@ import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { DoneContractService } from "./service/done-contract-service.js";
 import { DoneContractMigrationService } from "./service/done-contract-migration-service.js";
+import { ExecutionLogService } from "./service/execution-log-service.js";
 import { createRealMigrationGit } from "./adapters/real-done-contract-migration-git.js";
 import { TaskFinishService } from "./service/task-finish-service.js";
 import { TaskStartService } from "./service/task-start-service.js";
@@ -515,6 +516,11 @@ export interface App {
    * every in-flight task through the approve-time compile, all or nothing. Wired by {@link wireDoneContract}.
    */
   doneContractMigrationService?: DoneContractMigrationService;
+  /**
+   * ExecutionLogService — the standalone writer of `extra.execution_log` (AC-DCS2-14): a plan's evidence-moved entries and the
+   * `superseded` entry of every task holding a corrected or superseded criterion. Wired by {@link wireDoneContract}.
+   */
+  executionLogService?: ExecutionLogService;
   /**
    * OutlineSectionsRetireMigrationService — `lore migrate outline-sections [--apply]`: removes the stored
    * `extra.outline` from every PRD (the outline command family is gone), through the corpus write route. Same
@@ -1821,6 +1827,11 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   const commands = config?.workflow?.done_contract ?? {};
   const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot));
   app.reviewService.setDoneContractPort(contracts);
+  // reason: AC-DCS2-15 — a task past done is reviewed by the contract check of the workflow service, never by the AI judge.
+  app.reviewService.setContractCheckPort(app.taskWorkflowService);
+  // reason: AC-DCS2-14 — the log writer shares the one write route; AcService appends `superseded` entries through it.
+  app.executionLogService = new ExecutionLogService(store, app.corpusService);
+  app.acService?.attachExecutionLog(app.executionLogService);
   // reason: AC-DCS1-22 — the migration compiles through the SAME service approve uses, and writes through the one write route.
   app.doneContractMigrationService = new DoneContractMigrationService(store, app.corpusService, contracts, createRealMigrationGit(repoRoot));
   // reason: AC-DCS1-11 — a write-set addition runs a test file with the same template the approve-time contract used.

@@ -51,6 +51,17 @@ import { REOPEN_AUDIT_ACTION, REOPEN_OPERATION, type RecordLockService } from ".
 import { findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
 import { redWaiverNotCode } from "./done-contract-compile.js";
 import type { ApproveContractPort } from "./done-contract-service.js";
+import { isTaskPastDone } from "@lore/core";
+
+/** What the review of a task needs from the workflow: the deterministic contract check of a finished task. */
+export interface ContractCheckPort {
+  readonly checkContractOracles: (task: DocRecord) => Promise<Result<{ met: string[]; unmet: { id: string; reason: string }[] }, LoreError>>;
+}
+
+/** How a task is reviewed: by its contract (finished) or on intent (not yet done). */
+export type TaskReviewRoute =
+  | { readonly kind: "contract"; readonly met: string[]; readonly unmet: { id: string; reason: string }[] }
+  | { readonly kind: "intent" };
 import { ANY_RULE_ID_PATTERN } from "@lore/core";
 import {
   appendApprovedRule,
@@ -352,6 +363,43 @@ export class ReviewService {
   }
 
   private doneContracts: ApproveContractPort | undefined;
+
+  /**
+   * Wires the deterministic contract check of a task past done (AC-DCS2-15). Set by `app.ts`; absent = reviewing a finished task is
+   * refused loudly (`contract-check-port-missing`), never answered by the AI judge.
+   */
+  setContractCheckPort(port: ContractCheckPort): void {
+    this.contractChecks = port;
+  }
+
+  private contractChecks: ContractCheckPort | undefined;
+
+  /**
+   * Decides how a task is reviewed: a task past done by its contract with no AI judge, any other task on intent by the AI judge
+   * (the caller runs it). Reads only; nothing is written.
+   *
+   * @param doc - the task
+   * @returns `{kind: "contract", ...}` for a finished task, `{kind: "intent"}` otherwise
+   */
+  async reviewTaskByState(doc: DocRecord): Promise<Result<TaskReviewRoute, LoreError>> {
+    if (isTaskPastDone(doc)) return this.judgeByContract(doc);
+    return ok({ kind: "intent" });
+  }
+
+  /** The deterministic contract check: each contract oracle without a counting row is unmet (AC-DCS1-27). */
+  private async judgeByContract(doc: DocRecord): Promise<Result<TaskReviewRoute, LoreError>> {
+    if (this.contractChecks === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "contract-check-port",
+        message: `contract-check-port-missing: "${doc.slug}" is past done and is reviewed by its contract, but this composition wires no contract check; the AI judge is never asked about a finished task`,
+        value: doc.slug,
+      });
+    }
+    const checked = await this.contractChecks.checkContractOracles(doc);
+    if (!checked.ok) return checked;
+    return ok({ kind: "contract", met: checked.value.met, unmet: checked.value.unmet });
+  }
 
   private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     return resolveDoc(this.store, idOrSlug);

@@ -563,6 +563,31 @@ export default defineLoreCommand({
       // reason: guarded above (`!args.pending && !isStaleness && args.doc === undefined`
       // → exit 2), so args.doc is guaranteed defined here.
       const docIdOrSlug = args.doc as string;
+      // reason: AC-DCS2-15 — a task past done is checked by its contract with no AI judge; any other task goes on to the intent review.
+      const target = await app.corpusService.get(docIdOrSlug);
+      if (target.ok && target.value.doc.type === "task") {
+        const route = await app.reviewService.reviewTaskByState(target.value.doc);
+        if (!route.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, route.error) + "\n");
+          return exitCode(route.error);
+        }
+        if (route.value.kind === "contract") {
+          const { met, unmet } = route.value;
+          const slug = target.value.doc.slug;
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: unmet.length === 0, data: { requested_by: actor, contract_check: { task: slug, met, unmet } } }, null, 2));
+          } else if (unmet.length === 0) {
+            printLine(inv.io.stdout, `Contract check of ${slug}: met (${met.length} oracle(s): ${met.join(", ")}). No AI judge was asked.`);
+          } else {
+            inv.io.stderr.write(
+              `Contract check of ${slug}: ${unmet.length} oracle(s) unmet, ${met.length} met. No AI judge was asked.\n` +
+                unmet.map((oracle) => `  - ${oracle.id}: ${oracle.reason}`).join("\n") +
+                "\n",
+            );
+          }
+          return unmet.length === 0 ? 0 : 4;
+        }
+      }
       const result = await reviewOneDoc(app, docIdOrSlug, blueprint);
 
       if (!result.ok) {
