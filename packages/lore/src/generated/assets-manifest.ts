@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "85addee9e87787c3edd69cc0cbea64f2bff6637b15d2a29698b403de9a674089",
+  tree_digest: "5aecdef5a7a56a6d12cdfef1eda06d5c99218ec04718684c4f3a26bea6dcce74",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -93,7 +93,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "project/CLAUDE.md.skeleton", kind: "project", ownership: "user_once", sha256: "f5dc3ff590bf1791ad5372220de491c7973216d62153452eee022b9518814fc4" },
   { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "18c6a76d66f28df567dcef19dc57a0f3c1a598184e578ed81bc74940cf043f64" },
   { path: "project/gitignore.template", kind: "project", ownership: "merged", sha256: "ae5fc002a59c4c940a269a293d4e5070eda567a5ef55f7e890ad02af18968d74" },
-  { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "10b2ad0ffcced2590c7e1639cd95a0b3590d400bd45d30be6d7c59beb8946d23" },
+  { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "56f123b824b18fc4ed8be7a741a26a36c69cdbac2a965a0fdae61e42a10288a6" },
   { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "b169f38f2ec3a16249764a8360f37f177ad20de6eabe6f91882278bbbe71ddd9" },
   { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "d9598b048d2cf5107dcfb60c128f2c62f8fdb461e4cac281620a6fbf5a8bd1c3" },
   { path: "project/reference-transaction", kind: "project", ownership: "managed", sha256: "14582714d132d6734f2222bf7415eb34e00b31f960fd084eb66e8b7e8453612f" },

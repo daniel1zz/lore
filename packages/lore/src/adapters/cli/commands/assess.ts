@@ -387,17 +387,13 @@ interface BatchCloseInput {
 }
 
 /**
- * `lore assess ... --close`: the review batch (BR-1379). Takes the store lease (a live lease of another batch makes this
- * a no-op, exit 0), then runs `ReviewBatchRunner.runBatch` and prints one row per plan. Each plan goes through the ONE close
- * function (`PlanCloseService`, BR-1507) around its assess, so the batch and `lore plan close` share one path and one plan lease.
+ * `lore assess ... --close`: the review batch (BR-1379). Runs `ReviewBatchRunner.runBatch`, which takes each plan's lease
+ * (BR-1511), and prints one row per plan with its skip reason. Each plan goes through the ONE close function
+ * (`PlanCloseService`, BR-1507) around its assess, so the batch and `lore plan close` share one path. Exits 75 when every
+ * selected plan was skipped as held by another holder (nothing ran).
  */
 async function runBatchClose(input: BatchCloseInput): Promise<number> {
   const { app, inv, actor } = input;
-  const lease = buildReviewLease(app, input.holder);
-  if (lease === undefined) {
-    inv.io.stderr.write("Error: this composition has no lease store, so the review batch cannot run.\n");
-    return 1;
-  }
   const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
   if (!closeService.ok) {
     inv.io.stderr.write(formatErrorFor(inv, closeService.error) + "\n");
@@ -405,19 +401,16 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
   }
   const run = await createBatchRunner(app).runBatch(
     input.planRefs,
-    buildBatchRunPorts({ app, actor, wiring: input.wiring, filing: input.filing, acquireLease: () => lease.acquire(), closeFlow: closeFlowOf(closeService.value) }),
+    buildBatchRunPorts({ app, actor, wiring: input.wiring, filing: input.filing, leases: input.leases, mode: input.direct ? "direct" : "batch", closeFlow: closeFlowOf(closeService.value) }),
   );
   if (!run.ok) {
     inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");
     return exitCode(run.error);
   }
-  if (run.value.state === "busy") {
-    printLine(inv.io.stdout, `Another review batch holds the lease (${run.value.holder}, until ${run.value.expires_at}); nothing ran.`);
-    return 0;
-  }
   const rows: readonly BatchPlanRow[] = run.value.rows;
+  const heldEvery = skippedEveryPlan(run.value, input.planRefs.length);
   if (input.json) {
-    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns, took_over: run.value.tookOver } }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns } }, null, 2));
   } else if (rows.length === 0) {
     printLine(inv.io.stdout, "No plans selected.");
   } else {
@@ -428,6 +421,10 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
         rows.map((r) => [r.outcome.toUpperCase(), r.plan, r.review ?? "-", r.issues.length > 0 ? `${r.detail}; issues ${r.issues.map((n) => `#${String(n)}`).join(", ")}` : r.detail]),
       ),
     );
+  }
+  if (heldEvery) {
+    inv.io.stderr.write("Every selected plan is leased by another holder; nothing ran. Re-run later.\n");
+    return ASSESS_EXIT_LEASE_HELD;
   }
   return rows.some((r) => r.outcome === "error") ? 1 : 0;
 }
