@@ -194,10 +194,15 @@ interface World {
   service(opts?: { tracker?: boolean }): GateAcceptanceService;
   runBatch(): Promise<{ outcome: string; detail: string }>;
   reload(): Promise<DocRecord>;
+  /** How many times the batch asked the judge to re-make the review. */
+  judgments: number;
 }
 
 /** A plan with one archived task and a stored review whose `verdicts` are failing / not measured / passing. */
-async function worldWith(verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[number], "fail" | "not-measured" | "pass">>): Promise<World> {
+async function worldWith(
+  verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[number], "fail" | "not-measured" | "pass">>,
+  notMeasuredDetail?: { readonly reason: string; readonly cites: readonly string[] },
+): Promise<World> {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
   const plan = await seed(store, rawDoc("plan", "Gate plan", {}, "approved"));
@@ -207,7 +212,8 @@ async function worldWith(verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[
   const dimensions = Object.fromEntries(
     MILESTONE_DIMENSIONS.map((d) => {
       const verdict = verdicts[d] ?? "pass";
-      return [d, { verdict, reason: `${d} ${verdict}`, reference: "r", ...(verdict === "fail" ? { cites: [`src/${d}.ts`] } : verdict === "not-measured" ? { cites: [`${d}:subject`] } : {}) }];
+      const detail = verdict === "not-measured" && d === "regression" ? notMeasuredDetail : undefined;
+      return [d, { verdict, reason: detail?.reason ?? `${d} ${verdict}`, reference: "r", ...(verdict === "fail" ? { cites: [`src/${d}.ts`] } : verdict === "not-measured" ? { cites: detail !== undefined ? [...detail.cites] : [`${d}:subject`] } : {}) }];
     }),
   ) as MilestoneReview["dimensions"];
   const review: MilestoneReview = {
@@ -240,6 +246,7 @@ async function worldWith(verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[
     plan,
     open,
     filings: 0,
+    judgments: 0,
     service: (opts) => {
       const port = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, corpus.getPlanCloseIssuePort());
       const counting = { ...port, file: async (input: Parameters<typeof port.file>[0]) => { world.filings += 1; return port.file(input); } };
@@ -264,7 +271,14 @@ async function worldWith(verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[
         acquireLease: () => lease.acquire(),
         settleRetirement: async () => ok({ state: "none" as const }),
         measureSuite: async () => undefined,
-        reviewPlan: async () => err<LoreError>({ code: "STORE_ERROR", message: "the stored review is current: nothing is re-judged here" }),
+        // reason: a judgment re-makes the stored review unchanged (same facts), and is counted so a test can assert WHEN the batch re-judges.
+        reviewPlan: async () => {
+          world.judgments += 1;
+          const docs = await corpus.listMilestoneReviewDocs(plan.id);
+          if (!docs.ok) return docs;
+          const stored = selectLatestMilestoneReview(docs.value);
+          return stored === undefined ? err<LoreError>({ code: "STORE_ERROR", message: "no stored review to re-make" }) : ok({ doc: stored.doc, review: stored.review });
+        },
         closePlan: async (ref) => {
           const closed = await corpus.set(ref, { status: "archived" }, { by: "t" });
           return closed.ok ? ok(undefined) : closed;
@@ -316,9 +330,43 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     expect((await w.reload()).status).toBe("archived");
   });
 
+  it("AC-AF-7 NEGATIVE: a failed (measured) security gate is not re-judged by the batch, and a not-measured one is, until accepted", async () => {
+    const failed = await worldWith({ security: "fail" });
+    expect((await failed.runBatch()).outcome).toBe("kept-open");
+    expect(failed.judgments).toBe(0);
+    const unmeasured = await worldWith({ regression: "not-measured" });
+    await unmeasured.runBatch();
+    expect((await unmeasured.service().acceptGate(unmeasured.plan.slug, "regression", FULL_DECISION)).ok).toBe(true);
+    await unmeasured.runBatch();
+    expect(unmeasured.judgments).toBe(1);
+  });
+
+  it("AC-AF-7 NEGATIVE: a not-measured regression caused by an unlanded task is not re-judged by the next batch (a retry cannot change it)", async () => {
+    const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: unlanded:t (task t has no landing record, so its changes have no measured diff)", cites: ["unlanded:t"] });
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect(w.judgments).toBe(0);
+  });
+
+  it("AC-AF-7 NEGATIVE: a not-measured regression caused by an unmappable landing is not re-judged by the next batch", async () => {
+    const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: a.test.ts (landing abc is not on main's first-parent history)", cites: ["a.test.ts"] });
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect(w.judgments).toBe(0);
+  });
+
+  it("AC-AF-7 HAPPY: a not-measured regression whose suite could not complete is re-judged by the next batch, together with an unlanded task", async () => {
+    const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: abc123 (the suite could not run at abc123: timeout); unlanded:t (no landing)", cites: ["abc123", "unlanded:t"] });
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect(w.judgments).toBe(1);
+  });
+
   it("AC-AF-7 HAPPY: a not-measured regression gate is accepted the same way", async () => {
     const w = await worldWith({ regression: "not-measured" });
-    expect((await w.runBatch()).outcome).toBe("kept-open");
+    // reason: spec "Fingerprint" — a plan kept open by a not-measured regression is re-judged by EVERY batch (the suite may
+    // complete next time), so the first batch calls the judge once; the judge here re-makes the same not-measured review.
+    const first = await w.runBatch();
+    expect(first.outcome).toBe("kept-open");
+    expect(w.judgments).toBe(1);
     expect((await w.service().acceptGate(w.plan.slug, "regression", FULL_DECISION)).ok).toBe(true);
     expect((await w.runBatch()).outcome).toBe("accepted-with-known-defects");
   });
