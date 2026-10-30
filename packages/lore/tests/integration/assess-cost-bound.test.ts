@@ -120,7 +120,7 @@ function world(cwd: string, shared?: InMemoryStore): World {
       for (const c of request.criteria) {
         criteriaRuns.push({ commit: request.commit, ac: c.ac_id, worktree: where });
         const at = `2026-10-29T11:00:${String(rows.length).padStart(2, "0")}.000Z`;
-        rows.push({ id: `task@${at}`, spec_slug: c.spec_slug, ac_id: c.ac_id, result: "pass", head_sha: request.commit, recorded_at: at });
+        rows.push({ id: `task@${at}`, doc_slug: c.doc_slug, ac_id: c.ac_id, result: "pass", head_sha: request.commit, recorded_at: at });
       }
       return ok(request.criteria.map((c) => ({ ...c, ran: true as const })));
     },
@@ -128,7 +128,7 @@ function world(cwd: string, shared?: InMemoryStore): World {
   return { service, suiteRuns, fileRuns, criteriaRuns, ownWorktrees, store, suiteRunner, criteriaRunner, rows };
 }
 
-const scopes: CriterionScope[] = ["AC-1", "AC-2"].map((ac) => ({ spec_slug: "spec-one", ac_id: ac, mode: "script", command: `bun run test:file tests/${ac}.test.ts`, holders: [{ task_slug: "task-one" }] }));
+const scopes: CriterionScope[] = ["AC-1", "AC-2"].map((ac) => ({ doc_slug: "spec-one", ac_id: ac, mode: "script", command: `bun run test:file tests/${ac}.test.ts`, holders: [{ task_slug: "task-one" }] }));
 
 /** One assessment, composed as `lore assess` composes it. */
 async function assess(cwd: string, w: World, landings: RegressionLandingInput[]) {

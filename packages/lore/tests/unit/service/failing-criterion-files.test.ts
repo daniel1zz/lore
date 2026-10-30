@@ -20,7 +20,7 @@ import {
 const HEAD = "h".repeat(40);
 
 const scope = (ac: string, command: string): CriterionScope => ({
-  spec_slug: "spec-one",
+  doc_slug: "spec-one",
   ac_id: ac,
   mode: "script",
   command,
@@ -34,7 +34,7 @@ function measure(scopes: CriterionScope[], verdicts: Record<string, "pass" | "fa
     attestAtHead: async (request) => {
       for (const c of request.criteria) {
         const at = `2026-10-29T10:00:0${String(rows.length)}.000Z`;
-        rows.push({ id: `t@${at}`, spec_slug: c.spec_slug, ac_id: c.ac_id, result: verdicts[c.ac_id] ?? "pass", head_sha: request.commit, recorded_at: at });
+        rows.push({ id: `t@${at}`, doc_slug: c.doc_slug, ac_id: c.ac_id, result: verdicts[c.ac_id] ?? "pass", head_sha: request.commit, recorded_at: at });
       }
       return ok(request.criteria.map((c) => ({ ...c, ran: true as const })));
     },

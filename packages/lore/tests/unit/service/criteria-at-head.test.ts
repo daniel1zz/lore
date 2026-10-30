@@ -27,7 +27,7 @@ const LANDING = "1".repeat(40);
 const WORKTREE_COMMIT = "2".repeat(40);
 
 const scope = (ac: string, mode: CriterionScope["mode"] = "script"): CriterionScope => ({
-  spec_slug: "spec-one",
+  doc_slug: "spec-one",
   ac_id: ac,
   mode,
   ...(mode === "ai" ? { rubric: "rubric" } : {}),
@@ -37,7 +37,7 @@ const scope = (ac: string, mode: CriterionScope["mode"] = "script"): CriterionSc
 let n = 0;
 const row = (ac: string, result: "pass" | "fail", head_sha: string): AttestationRow => {
   const at = `2026-10-29T10:00:${String(++n).padStart(2, "0")}.000Z`;
-  return { id: `task-one@${at}`, spec_slug: "spec-one", ac_id: ac, result, head_sha, recorded_at: at };
+  return { id: `task-one@${at}`, doc_slug: "spec-one", ac_id: ac, result, head_sha, recorded_at: at };
 };
 
 interface FakeRunner {

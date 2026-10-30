@@ -68,7 +68,7 @@ describe("readers of the corpus for the criteria facts", () => {
   it("AC-AO-3 NEGATIVE: only stamped, conclusive attested rows are read; an unstamped one never decides", () => {
     const rows = attestationRowsOf([spec], [plan], [taskDoc()]);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ spec_slug: "spec-one", ac_id: "AC-1", head_sha: L, result: "pass" });
+    expect(rows[0]).toMatchObject({ doc_slug: "spec-one", ac_id: "AC-1", head_sha: L, result: "pass" });
   });
 
   it("AC-AO-3 BOUNDARY: a task with no plan lineage and no recorded spec attributes nothing, even when one spec declares the criterion (BR-1495)", () => {
@@ -82,6 +82,6 @@ describe("readers of the corpus for the criteria facts", () => {
     const twin = doc({ id: "S2", slug: "spec-two", type: "spec", extra: { acceptance_criteria: [{ id: "AC-1", statement: "s", verify: { mode: "human" } }] } });
     const recorded = doc({ id: "T3", slug: "adhoc-recorded", type: "task", extra: { adhoc: true, ac_scope: ["AC-1"], governing_spec: twin.id, verification_evidence: [evidence("AC-1", true)] } });
     const rows = attestationRowsOf([spec, twin], [plan], [recorded]);
-    expect(rows.map((r) => r.spec_slug)).toEqual(["spec-two"]);
+    expect(rows.map((r) => r.doc_slug)).toEqual(["spec-two"]);
   });
 });
