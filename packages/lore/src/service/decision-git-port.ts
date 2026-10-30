@@ -14,6 +14,7 @@
 
 import { spawnSync } from "node:child_process";
 import type { DecisionGitPort, GitAnswer } from "./decision-gate.js";
+import { splitFileLines } from "./decision-quote.js";
 import { resolveGitRoot } from "./rule-state-git-port.js";
 
 interface GitRun {
@@ -55,8 +56,7 @@ export class SpawnDecisionGitPort implements DecisionGitPort {
     // reason: `git show <sha>:<path>` exits 128 for both "unknown commit" and "path not in that commit"; for a quote
     // both mean "these lines are not there", so both answer null.
     if (run.status !== 0) return { ok: true, value: null };
-    const text = run.stdout.endsWith("\n") ? run.stdout.slice(0, -1) : run.stdout;
-    return { ok: true, value: text.split("\n") };
+    return { ok: true, value: splitFileLines(run.stdout) };
   }
 
   private run(args: readonly string[]): GitRun {
