@@ -1467,7 +1467,11 @@ export interface StoreInterface {
   /** One stored result by its id, or null. */
   getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>>;
 
-  /** Append per-file re-run rows (migration-043) in ONE write; an empty array writes nothing. */
+  /**
+   * Append per-file re-run rows (migration-043) in ONE write; an empty array writes nothing. A row whose `suite_result_id` is a
+   * single-file key (`file-<kind>@<commit>`) is insert-or-ignore on (key, file): the first stored run wins (migration-045, #528).
+   * Callers needing the winner read it back with {@link listSuiteFileRuns}.
+   */
   insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>>;
 
   /** The per-file re-runs attached to a suite result, in insertion order. */

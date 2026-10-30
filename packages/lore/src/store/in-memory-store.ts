@@ -84,6 +84,7 @@ import {
   computeAuditEntryHash,
   detectParentCycleViaAncestry,
   emptyKindsError,
+  isSingleFileRunKey,
   withoutNullDecision,
   withoutNullHarnessRun,
 } from "./store-shared.js";
@@ -1901,7 +1902,11 @@ export class InMemoryStore implements StoreInterface {
   }
 
   async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {
-    for (const row of rows) this.suiteFileRuns.push({ ...row });
+    for (const row of rows) {
+      // reason: a single-file key stores one row per file, first wins (migration-045's partial unique index, #528).
+      const taken = isSingleFileRunKey(row.suite_result_id) && this.suiteFileRuns.some((r) => r.suite_result_id === row.suite_result_id && r.file === row.file);
+      if (!taken) this.suiteFileRuns.push({ ...row });
+    }
     return ok(undefined);
   }
 

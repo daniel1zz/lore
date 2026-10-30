@@ -27,6 +27,7 @@
  */
 
 import { isAbsolute } from "node:path";
+import { quoteLines } from "./decision-quote.js";
 import {
   decisionRecordSchema,
   err,
@@ -301,7 +302,7 @@ export class DecisionGate {
     if (to > lines.value.length) {
       return err(refuse(`${label}: lines ${from}-${to} are absent at ${sha}; the file has ${lines.value.length} line(s) there. Nothing was written.`));
     }
-    return ok({ kind: "file", path: path.value, lines: [from, to], sha, quote: lines.value.slice(from - 1, to).join("\n") });
+    return ok({ kind: "file", path: path.value, lines: [from, to], sha, quote: quoteLines(lines.value, from, to) });
   }
 
   /** The repo-root-relative form of a premise path; a path outside the repository is refused. */

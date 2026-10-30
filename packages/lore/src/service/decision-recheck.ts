@@ -59,6 +59,7 @@ import {
   type VersionRecord,
 } from "@lore/core";
 import { judgedDecisionsAnswerSchema, type JudgedDecisionInput } from "../ai/milestone-review-template.js";
+import { splitFileLines, splitQuote } from "./decision-quote.js";
 import { approvedRulesOf } from "./baseline-items.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import type { GitPort } from "./rule-state-service.js";
@@ -186,7 +187,6 @@ function containsRun(haystack: readonly string[], needle: readonly string[]): bo
   return false;
 }
 
-const linesOf = (text: string): string[] => text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
 
 interface FileSource {
   readonly path: string;
@@ -201,19 +201,19 @@ function checkFileSource(git: GitPort, source: FileSource, quote: string | undef
   if (!written.ok) return { kind: "unverifiable", fact: `git could not answer for ${at}: ${describeError(written.error)}` };
   if (written.value.state === "unreachable") return { kind: "unverifiable", fact: `commit ${source.sha} is not reachable, so ${at} cannot be read` };
   if (written.value.state === "path-absent") return { kind: "wrong-when-written", fact: `${source.path} does not exist at ${source.sha}` };
-  const atCommit = linesOf(written.value.content);
+  const atCommit = splitFileLines(written.value.content);
   if (source.lines[1] > atCommit.length) {
     return { kind: "wrong-when-written", fact: `${source.path} has ${atCommit.length} lines at ${source.sha}, the premise cites ${source.lines[0]}-${source.lines[1]}` };
   }
   const actual = atCommit.slice(source.lines[0] - 1, source.lines[1]);
-  const quoted = quote === undefined ? actual : linesOf(quote);
+  const quoted = quote === undefined ? actual : splitQuote(quote);
   if (quote !== undefined && actual.join("\n") !== quoted.join("\n")) {
     return { kind: "wrong-when-written", fact: `${at} read "${actual.join(" / ")}" when written, the premise quotes "${quoted.join(" / ")}"` };
   }
   const now = git.showFile("HEAD", source.path);
   if (!now.ok) return { kind: "unverifiable", fact: `git could not answer for ${source.path} on main: ${describeError(now.error)}` };
   if (now.value.state !== "present") return { kind: "stale-since", fact: `${source.path} no longer exists on main` };
-  if (!containsRun(linesOf(now.value.content), quoted)) {
+  if (!containsRun(splitFileLines(now.value.content), quoted)) {
     return { kind: "stale-since", fact: `the quoted lines of ${at} (${quoted.join(" / ")}) are no longer in ${source.path} on main` };
   }
   return undefined;
