@@ -27,7 +27,7 @@ import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
-import { ReviewBatchLease } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 
@@ -117,15 +117,14 @@ class World {
       listReviewDocs: async () => ok(this.docs),
       pendingDecisionSubjects: async () => ok(new Set<string>()),
       issueCoverage: async (_planId, failed) => ok(coverFailedDimensions(failed, [])),
-      isLeaseLive: async () => ok(false),
       spawnBatch: () => ok({ pid: undefined }),
     });
   }
 
   ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {
-    const lease = new ReviewBatchLease(this.store, holder, () => T0, () => () => undefined);
+    const lease = new ReviewLeases(this.store, holder, () => T0, () => () => undefined);
     return {
-      acquireLease: () => lease.acquire(),
+      acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
       settleRetirement: async () => ok({ state: "none" as const }),
       measureSuite: async () => {
         this.suiteRuns += 1;

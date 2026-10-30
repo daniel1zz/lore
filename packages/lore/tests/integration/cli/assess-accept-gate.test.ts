@@ -31,7 +31,7 @@ import { IssueFilingService } from "../../../src/service/issue-filing-service.js
 import { DecisionOutcomeService } from "../../../src/service/decision-outcome-service.js";
 import { selectPlanDecisions } from "../../../src/service/decision-recheck.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview } from "../../../src/service/milestone-review.js";
-import { REVIEW_BATCH_LEASE_NAME, ReviewBatchLease } from "../../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey } from "../../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner } from "../../../src/service/review-batch-service.js";
 import { issueTitleOf, rootCauseOf } from "../../../src/service/root-cause-fingerprint.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -42,7 +42,6 @@ import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 import { installStubClaude, stubClaudeEnv } from "../../helpers/stub-claude.js";
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
 
-void REVIEW_BATCH_LEASE_NAME;
 
 // ─── The real CLI ─────────────────────────────────────────────────────────────
 
@@ -261,7 +260,7 @@ async function worldWith(
       });
     },
     runBatch: async () => {
-      const lease = new ReviewBatchLease(store, "batch", () => Date.now(), () => () => undefined);
+      const lease = new ReviewLeases(store, "batch", () => Date.now(), () => () => undefined);
       const runner = new ReviewBatchRunner({
         getPlanBundle: (ref) => corpus.getPlanBundle(ref),
         listReviewDocs: (planId) => corpus.listMilestoneReviewDocs(planId),
@@ -269,7 +268,7 @@ async function worldWith(
       });
       const port = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, corpus.getPlanCloseIssuePort());
       const run = await runner.runBatch([plan.slug], {
-        acquireLease: () => lease.acquire(),
+        acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
         settleRetirement: async () => ok({ state: "none" as const }),
         measureSuite: async () => undefined,
         // reason: a judgment re-makes the stored review unchanged (same facts), and is counted so a test can assert WHEN the batch re-judges.
