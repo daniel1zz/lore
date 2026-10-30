@@ -1384,6 +1384,11 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
   private knownDefectIssueWriter: KnownDefectIssueWriter | undefined;
 
+  /** The wired detached-known-defect issue writer; `undefined` when no GitHub upstream is configured. */
+  getKnownDefectIssueWriter(): KnownDefectIssueWriter | undefined {
+    return this.knownDefectIssueWriter;
+  }
+
   /**
    * Retries every issue write that an earlier close recorded as pending and records the outcome on a new audit row
    * (BR-1510). Every review batch runs this first, whichever plans it reviews.
