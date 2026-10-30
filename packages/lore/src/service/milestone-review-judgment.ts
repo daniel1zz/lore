@@ -43,6 +43,7 @@ import {
   type MilestonePromptMode,
   type MilestoneReviewPromptInput,
 } from "../ai/milestone-review-template.js";
+import { noCodeSecurityJudgment } from "./corpus-only-task.js";
 import { judgedFindingsOf } from "./decision-recheck.js";
 
 /** One judge reply with what the call cost. */
@@ -246,6 +247,8 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   }
 
   dimensions.security = withUnlandedTasks(withUnseen(dimensions.security, unseen), input.base.facts?.unlanded_tasks ?? []);
+  // reason: BR-1509 — a plan whose every task is corpus-only has no code to review: security is `na`, never the judge's pass.
+  if (input.base.facts?.no_task_changes_code === true) dimensions.security = noCodeSecurityJudgment(input.base.facts.no_code_tasks ?? []);
   dimensions.concurrency_safety = withUnseen(dimensions.concurrency_safety, unseen);
 
   const expected = input.base.facts?.ai_criteria ?? [];

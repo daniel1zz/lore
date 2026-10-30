@@ -23,9 +23,9 @@ const GIT_MAX_BUFFER = 20 * 1024 * 1024;
 
 /**
  * How one task's commits were found: `recorded_range` (the landing recorded on the task), or `not_measured`
- * (no usable landing record — never guessed from commit messages).
+ * (no usable landing record — never guessed from commit messages), or `no_code` (a corpus-only task, BR-1509).
  */
-export type TaskAttribution = "recorded_range" | "not_measured";
+export type TaskAttribution = "recorded_range" | "not_measured" | "no_code";
 
 /** One commit selected into the derived diff, and which task slug(s) referenced it. */
 export interface DerivedCommit {
@@ -131,6 +131,8 @@ export interface PlanLanding {
 export interface LandingDerivationResult extends CommitDerivationResult {
   /** Tasks of the plan with NO usable landing: named, no diff; regression and security become not-measured. */
   unlanded_tasks: string[];
+  /** Corpus-only tasks (BR-1509): no file anchors, never claimed on a branch, no landing record. They contribute nothing and are never unlanded. */
+  no_code_tasks: string[];
   /** Every distinct landing of the plan (one per landing commit), in task order. */
   landings: PlanLanding[];
 }
@@ -138,6 +140,8 @@ export interface LandingDerivationResult extends CommitDerivationResult {
 /** The slice of a task the landing derivation reads (`landing` = parsed `extra.landing`, `undefined` = none). */
 export interface LandingTaskInput {
   slug: string;
+  /** `true` for a corpus-only task (`isCorpusOnlyTask`, BR-1509); absent for every other task. */
+  corpus_only?: boolean;
   landing:
     | {
         main_before: string;
@@ -168,6 +172,7 @@ export function deriveLandingDiffForPlan(
 ): LandingDerivationResult {
   const warnings: string[] = [];
   const unlanded: string[] = [];
+  const noCode: string[] = [];
   const withoutCommits: string[] = [];
   const attribution: Record<string, TaskAttribution> = {};
   const landings = new Map<string, PlanLanding>();
@@ -182,6 +187,13 @@ export function deriveLandingDiffForPlan(
 
   for (const task of tasks) {
     const l = task.landing;
+    // reason: BR-1509 — a corpus-only task changes no code: it has no diff and no landing to measure, so it is listed as
+    // having no code and is never `unlanded` (which would make regression and security not measured).
+    if (l === undefined && task.corpus_only === true) {
+      noCode.push(task.slug);
+      attribution[task.slug] = "no_code";
+      continue;
+    }
     if (l === undefined) {
       markUnlanded(task.slug);
       continue;
@@ -239,6 +251,7 @@ export function deriveLandingDiffForPlan(
     excluded_merged_commit_count: 0,
     warnings,
     unlanded_tasks: unlanded,
+    no_code_tasks: noCode,
     landings: [...landings.values()],
   };
   if (commitMap.size === 0) {

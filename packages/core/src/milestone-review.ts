@@ -203,6 +203,10 @@ export interface MilestoneFacts {
   readonly outside_anchors?: readonly { readonly landing: string; readonly files: readonly string[] }[];
   /** Tasks of the plan with no landing yet. */
   readonly unlanded_tasks?: readonly string[];
+  /** Corpus-only tasks (BR-1509): no file anchors, never claimed on a branch, no landing record. Listed as having no code; never unlanded. */
+  readonly no_code_tasks?: readonly string[];
+  /** `true` when every task of the plan is corpus-only: regression and security are `na`, never pass (BR-1509). */
+  readonly no_task_changes_code?: boolean;
   /** Files of landings that could not be mapped to main (BR-1508): no call shows them, so security and concurrency_safety are not-measured over them. */
   readonly not_seen_files?: readonly string[];
   /** AI-mode criteria of the plan's task scopes. */
