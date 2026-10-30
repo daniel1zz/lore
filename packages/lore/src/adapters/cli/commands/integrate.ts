@@ -266,7 +266,7 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
         return 1;
       }
-      const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
+      const reviewBatch = buildReviewTriggerService(app, () =>
         spawnDetachedReviewBatch({
           cwd: projectRoot,
           corpusDir,

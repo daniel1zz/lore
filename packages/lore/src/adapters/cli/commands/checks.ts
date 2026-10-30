@@ -95,7 +95,7 @@ export default defineLoreCommand({
           const stats = await service.stats();
           if (!stats.ok) return fail(stats.error);
           // BR-1379 self-measurement: time from complete to accepted per plan, and the over-24h anomalies.
-          const trigger = buildReviewTriggerService(app, `checks:stats:${String(process.pid)}`, refuseSpawnForRead);
+          const trigger = buildReviewTriggerService(app, refuseSpawnForRead);
           if (trigger === undefined) {
             inv.io.stderr.write("Error: this composition cannot classify complete plans (no lease store or decision reader wired).\n");
             return 1;

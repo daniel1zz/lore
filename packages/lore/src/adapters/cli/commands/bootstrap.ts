@@ -360,7 +360,7 @@ export default defineLoreCommand({
       const memoryFileHealth = computeMemoryFileHealth(inv.cwd, config);
 
       // BR-1379 — the complete-plans summary, from the SAME classification the landing's trigger set uses.
-      const trigger = buildReviewTriggerService(app, `${by}:bootstrap:${String(process.pid)}`, refuseSpawnForRead);
+      const trigger = buildReviewTriggerService(app, refuseSpawnForRead);
       if (trigger === undefined || app.checkStatsService === undefined) {
         inv.io.stderr.write("Error: this composition cannot summarise complete plans (no lease store, decision reader or check stats service wired).\n");
         return 1;
