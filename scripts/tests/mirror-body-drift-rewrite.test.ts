@@ -22,6 +22,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { loadMirrorMappings, MIRROR_BODY_DIVERGENT_DETAIL } from "../export-spec-mirror-core.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -93,7 +94,7 @@ function seed(): Fixture {
   );
   const knowledgeId = createdId(
     lore(dir, [
-      "create", "knowledge", "--title", "Body Rewrite Knowledge", "--sub-type", "reference",
+      "create", "knowledge", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, dir), "--title", "Body Rewrite Knowledge", "--sub-type", "reference",
       "--content", "# Body Rewrite Knowledge\n\nOriginal knowledge body.\n", "--json",
     ]),
   );

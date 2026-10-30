@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { MIRROR_DRIFT_EXIT_CODE } from "../export-spec-mirror-core.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -54,7 +55,7 @@ function runMirror(driver: string, dir: string, args: string[]): { exitCode: num
 function createKnowledge(dir: string, title: string): string {
   const out = execFileSync(
     "bun",
-    [LORE_ENTRY, "create", "knowledge", "--title", title, "--sub-type", "reference", "--content", `# ${title}\n\nBody ${title}.\n`, "--json"],
+    [LORE_ENTRY, "create", "knowledge", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, dir), "--title", title, "--sub-type", "reference", "--content", `# ${title}\n\nBody ${title}.\n`, "--json"],
     { cwd: dir, stdio: "pipe" },
   ).toString();
   const parsed = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1)) as { ok: boolean; data: { id: string; slug: string } };

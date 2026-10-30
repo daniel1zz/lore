@@ -531,7 +531,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores the legacy `workflow.gates."task-claim"` config honored for phase-claim (one deprecation warning per process).
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the phase-claim definition.
 // RE-BASELINE (task-skill-implement-dn-1-review-prompt-v4-with-design, spec-the-approval-judge-rejects-patch-shaped-designs-design D3): adds the one "design the end state" sentence.
-  "context/corpus-workflow-2-produce.md": "1c8d39f6e2d20ad3523ac34dd93113f32213513e971199e600994eabaf81dfd9",
+  // RE-BASELINE (task-main-red-files-after-the-parent-required-landings-fix, spec-documents-that-need-a-parent-are-refused-without-one-an-ad): d4a1c43e added `--parent <spec ...>` to the adr and knowledge create examples and the ad-hoc `--spec <spec>` line (a parentless create is now refused).
+  "context/corpus-workflow-2-produce.md": "e712357ee04c4bf2af8153e587dc28125e496da93833c5455d48fcae1bfab988",
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
 // knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments
@@ -556,7 +557,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
   // RE-BASELINE (task-skill-implement-close-fragment-scopes-defect-reports-br, BR-1153): the report-issue bullet gains the scope rule (lore defects only, one root cause per report, repo upkeep to plan/task).
   // RE-BASELINE (orchestrator-owned doc change, spec-the-approval-judge-rejects-patch-shaped-designs-design D3): adds the lesson-changes-a-mechanism bullet after the invalidate bullet.
   // RE-BASELINE (task-igh-t1-close-guidance-and-root-claude-md-file-every, BR-1153): the report-issue bullet now routes every problem not fixed in place to an issue (also in lore's own repo); a task names the issues it resolves, never a task whose subject is the problem; lore defects go to `lore report-issue`, every other problem to the project's own issue tracker (the two coincide in lore's own repo).
-  "context/corpus-workflow-4-close.md": "7c7e6c3e5c6840ff5ca9d0306c7e9c970a859090a3b0915448ea49abfbad21c6",
+  // RE-BASELINE (task-main-red-files-after-the-parent-required-landings-fix, spec-documents-that-need-a-parent-are-refused-without-one-an-ad): d4a1c43e added `--parent <spec or prd it concerns>` to the `lore create knowledge --sub-type handoff` example.
+  "context/corpus-workflow-4-close.md": "d437dd83484cea28d7a368ecfdf8e30274bb647138fa3a2bcf10171b2d315172",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */

@@ -198,14 +198,16 @@ function seedTwoTypeCorpus(): SeededCorpus {
   const dir = makeThrowawayDir();
   execFileSync("bun", [LORE_ENTRY, "init", "--author", "mirror-type-scope-test"], { cwd: dir, stdio: "pipe" });
 
+  // knowledge and adr are refused without a parent: this fixture prd is theirs.
+  const prd = createDoc(dir, ["create", "prd", "--title", "Type Scope Root", "--content", "# Type Scope Root\n", "--no-ai"]);
   const seeded = createDoc(dir, [
-    "create", SEEDED_TYPE,
+    "create", SEEDED_TYPE, "--parent", prd.slug,
     "--title", "Type Scope Seeded Drift",
     "--sub-type", "reference",
     "--content", "# Type Scope Seeded Drift\n\nThe corpus is the only place this body is authored.\n",
   ]);
   const other = createDoc(dir, [
-    "create", OTHER_TYPE,
+    "create", OTHER_TYPE, "--parent", prd.slug,
     "--title", "Type Scope Clean Neighbour",
     "--decision-status", "accepted",
     "--content", "# Type Scope Clean Neighbour\n\nThis document's mirror is never mutated.\n",
