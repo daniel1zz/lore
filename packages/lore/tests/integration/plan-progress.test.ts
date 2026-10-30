@@ -1723,7 +1723,8 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
     const second = await world.runner().runBatch(["p-loop"], world.ports("batch-2"));
     const rows = second.ok && second.value.state === "ran" ? second.value.rows : [];
-    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["kept-open", false]]);
+    // BR-1511: skipped as "already reviewed" (was: a kept-open row)
+    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["skipped", false]]);
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
   });
 

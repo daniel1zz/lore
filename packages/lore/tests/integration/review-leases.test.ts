@@ -1,4 +1,11 @@
 // @spawns packages/lore/src/index.ts
+// @reads packages/lore/src/service/review-batch-lease.ts
+// @reads packages/lore/src/service/review-batch-service.ts
+// @reads packages/lore/src/service/suite-result-service.ts
+// @reads packages/lore/src/service/issue-filing-service.ts
+// @reads packages/lore/src/service/known-defects-at-close.ts
+// @reads assets/skills/lore/SKILL.md
+// @reads assets/skills/lore-autopilot/SKILL.md
 /**
  * @spec_ref spec-review-work-is-leased-per-plan-per-commit-and-per-root (AC-RL-1, AC-RL-2, AC-RL-3, AC-RL-4, BR-1511, BR-1379, BR-1510)
  *
@@ -395,8 +402,8 @@ function createPlan(title: string): { slug: string; id: string } {
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const slug = r.stdout.match(/Slug:\s+(\S+)/)?.[1];
   if (slug === undefined) throw new Error(`no plan slug in: ${r.stdout}`);
-  const got = JSON.parse(runLore(["get", slug, "--json"]).stdout) as { data?: { id?: string }; id?: string };
-  const id = got.data?.id ?? got.id;
+  const got = JSON.parse(runLore(["get", slug, "--json"]).stdout) as { data?: { doc?: { id?: string } } };
+  const id = got.data?.doc?.id;
   if (id === undefined) throw new Error(`no plan id in: ${JSON.stringify(got)}`);
   return { slug, id };
 }

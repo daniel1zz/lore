@@ -211,7 +211,8 @@ describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
     expect(world.issues.filed).toBe(1);
     expect(world.errors).toEqual([]);
     const again = await runOne(world, "p-sec", "batch-2");
-    expect(again).toMatchObject({ outcome: "kept-open", reviewed: false });
+    // BR-1511: skipped as "already reviewed" (was: a kept-open row)
+    expect(again).toMatchObject({ outcome: "skipped", reviewed: false });
     expect(world.judgeCalls).toBe(1);
     expect(world.issues.filed).toBe(1);
     expect(plan.archived).toBe(false);

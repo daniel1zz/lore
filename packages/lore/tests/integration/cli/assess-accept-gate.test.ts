@@ -344,7 +344,8 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
   it("AC-AF-7 NEGATIVE: a not-measured regression caused by an unlanded task is not re-judged by the next batch (a retry cannot change it)", async () => {
     const w = await worldWith({ regression: "not-measured" }, ["unlanded"]);
     expect((await w.runBatch()).outcome).toBe("kept-open");
-    expect((await w.runBatch()).outcome).toBe("kept-open");
+    // BR-1511: the next batch skips the plan as "already reviewed" (was: a kept-open row)
+    expect((await w.runBatch()).outcome).toBe("skipped");
     expect(w.judgments).toBe(0);
   });
 

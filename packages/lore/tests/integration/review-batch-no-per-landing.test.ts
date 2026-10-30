@@ -206,7 +206,9 @@ describe("the post-landing batch measures nothing per landing", () => {
   it("AC-AO-4 an unrelated landing runs no suite and re-reviews nothing (the batch has no criteria step at all)", async () => {
     const world = await keptOpenWorld();
     const row = await batch(world, "after-unrelated", { changedFilesSince: changedFiles([UNRELATED_FILE]) });
-    expect(row).toMatchObject({ outcome: "kept-open", reviewed: false });
+    // BR-1511: a batch reaching a kept-open plan already reviewed at its current state skips it as "already reviewed" (was: a kept-open row)
+    expect(row).toMatchObject({ outcome: "skipped", reviewed: false });
+    expect(row.detail).toContain("already reviewed");
     expect(world.suiteRuns).toBe(0);
     expect(world.judgeCalls).toBe(0);
   });
@@ -244,7 +246,8 @@ describe("the post-landing batch measures nothing per landing", () => {
     expect(await batch(world, "first")).toMatchObject({ outcome: "kept-open", reviewed: true });
     world.judgeCalls = 0;
     world.suiteRuns = 0;
-    expect(await batch(world, "next")).toMatchObject({ outcome: "kept-open", reviewed: false });
+    // BR-1511: skipped as "already reviewed" (was: a kept-open row)
+    expect(await batch(world, "next")).toMatchObject({ outcome: "skipped", reviewed: false });
     expect(world.judgeCalls).toBe(0);
     expect(world.suiteRuns).toBe(0);
   });
