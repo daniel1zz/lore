@@ -296,7 +296,7 @@ describe("AC-DCS2-5: landings are serialized FIFO under a ticket queue, with no 
 
     // no retry and no lost race: one attempt line per call, nothing about a lost race
     for (const out of [outA, outB]) {
-      expect([...out.stdout.matchAll(/integrate: attempt \d+\/\d+ phases:/g)].length, out.text).toBe(1);
+      expect([...out.stdout.matchAll(/integrate: attempt \d+ phases:/g)].length, out.text).toBe(1);
       expect(out.text).not.toMatch(/lost race|lost \d+ races/);
     }
 
@@ -413,7 +413,7 @@ describe("AC-DCS2-5: landings are serialized FIFO under a ticket queue, with no 
     expect(out.text).toContain(mainAfter.slice(0, 12));
     // no retry: the floor ran once, one attempt line, nothing landed or archived
     expect(readFileSync(floorRuns, "utf8").split("\n").filter((line) => line === "floor").length).toBe(1);
-    expect([...out.stdout.matchAll(/integrate: attempt \d+\/\d+ phases:/g)].length).toBe(1);
+    expect([...out.stdout.matchAll(/integrate: attempt \d+ phases:/g)].length).toBe(1);
     expect(out.text).not.toMatch(/lost race/);
     const state = await boundCommits(world, a.slug);
     expect(state.landing).toBeUndefined();
@@ -441,7 +441,9 @@ describe("AC-DCS2-5: landings are serialized FIFO under a ticket queue, with no 
 
   it("AC-DCS2-5: workflow.integrate.queue_wait_seconds that is not a positive integer makes the config unusable: exit 4 naming the key", async () => {
     for (const bad of [0, -5, "soon", 1.5]) {
-      const world = await makeWorld({ integrate: { queue_wait_seconds: bad } });
+      const world = await makeWorld();
+      // reason: patched after the fixture's own setup, which runs lore commands under the config it writes
+      patchLoreConfig(world.fixture.dir, { workflow: { integrate: { queue_wait_seconds: bad } } });
       const out = await loreIn(world, world.fixture.dir, ["integrate", "main"], sessionEnv("queue-s1"));
       expect(out.exitCode, `value ${String(bad)}: ${out.text}`).toBe(4);
       expect(out.text, `value ${String(bad)}`).toContain("queue_wait_seconds");

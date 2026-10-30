@@ -31,6 +31,7 @@ import { detectWorktreeBranch } from "../../src/adapters/real-git-port.js";
 import { createRealWorktreeProbe } from "../../src/service/worktree-cleanup.js";
 import { IntegrateService, type IntegrateGit } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
+import { immediateIntegrateQueue } from "../helpers/immediate-integrate-queue";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
@@ -157,6 +158,7 @@ function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
     runFloor: () => ({ status: 0, output: "" }),
     corpus: { take: () => ok({ takenAt: "t" }), remove: () => ok(undefined) },
     ledger: new IntegrateLossLedger(ledgerDir),
+    queue: immediateIntegrateQueue(),
     attempts: new IntegrateAttemptLedger(ledgerDir),
     projectRoot: f.repo,
     worktreesRoot: join(f.repo, ".claude", "worktrees"),

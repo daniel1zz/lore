@@ -729,6 +729,12 @@ const WorkflowConfigSchema = z
          * their rows take the floor's result (AC-DCS2-3). Absent = none.
          */
         floor_covers: z.array(z.string().min(1)).optional(),
+        /**
+         * How long, in seconds, a landing waits for its turn in the FIFO merge queue before it refuses with `integrate-queue-timeout`
+         * (exit 75), naming the holder (AC-DCS2-5). Absent = 1800. A value that is not a positive integer makes the config unusable
+         * (exit 4, naming this key): it is never replaced by a default.
+         */
+        queue_wait_seconds: z.number().int().positive().optional(),
       })
       .strict()
       .optional(),

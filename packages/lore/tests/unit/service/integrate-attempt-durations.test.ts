@@ -4,8 +4,7 @@
  *
  * A throwaway git repo (mkdtemp) with REAL git; the floor, the corpus snapshot and the clock are injected so every
  * duration is an exact number: the fake clock advances inside each injected phase (merge 120, snapshot 40, floor
- * 3000 + 4000, CAS 5). The CAS loses once (main is moved by a side commit right before the first `update-ref`), so
- * the record must hold BOTH attempts. Falsifier: the pre-change record held losses / moved_by / updated_at only.
+ * 3000 + 4000, CAS 5). Landings are serialized in a merge queue (AC-DCS2-5), so one call makes ONE attempt and the record holds it.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -17,6 +16,7 @@ import { IntegrateService, type IntegrateDeps } from "../../../src/service/integ
 import { IntegrateLossLedger } from "../../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger, medianMs } from "../../../src/service/integrate-attempt-ledger.js";
 import { installShippedGuard } from "../../integration/support/main-guard-repo.js";
+import { immediateIntegrateQueue } from "../../helpers/immediate-integrate-queue";
 import { collectIntegrateLosses, renderIntegrateLossLines } from "../../../src/adapters/cli/status-integrate-losses.js";
 
 const IDENTITY = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
@@ -53,23 +53,15 @@ beforeAll(() => {
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("integrate records per-attempt phase durations", () => {
-  it("both attempts (lost CAS, then landed) hold merge, snapshot, every floor step, CAS and the outcome; stdout prints a phase line per attempt", async () => {
+  it("the one attempt holds merge, snapshot, every floor step, CAS and the outcome; stdout prints its phase line; a stale loss entry of the branch is cleared by the landing", async () => {
     let now = 1_700_000_000_000;
-    let casCalls = 0;
     const logs: string[] = [];
+    // history from before the merge queue: the retired ledger is still readable and a landing clears the branch's entry
+    new IntegrateLossLedger(corpusDir, () => "2026-10-19T00:00:00.000Z").recordLoss("feature", "tip0", ["abc123456789 old"]);
+    expect(existsSync(join(corpusDir, "integrate-losses", "feature.json"))).toBe(true);
     const git: IntegrateDeps["git"] = (cwd, args, env) => {
       if (args[0] === "merge" && args[1] !== "--abort") now += 120;
-      if (args[0] === "update-ref") {
-        now += 5;
-        casCalls += 1;
-        if (casCalls === 1) {
-          // another integration lands first: main moves under this attempt, so the real CAS below is refused by git
-          const tree = sh(repo, ["rev-parse", "main^{tree}"]);
-          const moved = sh(repo, ["commit-tree", tree, "-p", "main", "-m", "someone else landed"]);
-          // the peer's integration carries the marker, exactly as `lore integrate`'s own CAS does
-          sh(repo, ["update-ref", "refs/heads/main", moved], { LORE_INTEGRATE: "1" });
-        }
-      }
+      if (args[0] === "update-ref") now += 5;
       const r = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY, ...env } });
       return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
     };
@@ -89,6 +81,7 @@ describe("integrate records per-attempt phase durations", () => {
         };
       },
       ledger: new IntegrateLossLedger(corpusDir),
+      queue: immediateIntegrateQueue(),
       attempts: new IntegrateAttemptLedger(corpusDir, () => "2026-10-19T00:00:00.000Z"),
       clock: () => now,
       projectRoot: repo,
@@ -97,7 +90,7 @@ describe("integrate records per-attempt phase durations", () => {
     });
 
     const result = await service.integrate({ branch: "feature", sessionId: "s1", floorCommand: "true" });
-    expect(result).toMatchObject({ ok: true, value: { kind: "landed", attempts: 2 } });
+    expect(result).toMatchObject({ ok: true, value: { kind: "landed" } });
 
     const file = join(corpusDir, "integrate-attempts", "feature.json");
     const record = JSON.parse(readFileSync(file, "utf8")) as { attempts: Array<Record<string, unknown>> };
@@ -105,14 +98,12 @@ describe("integrate records per-attempt phase durations", () => {
     const attempts = record.attempts.map(({ base: _base, started_at: _started, ...rest }) => rest);
     const floor = { total_ms: 7000, steps: [{ step: "bun run build", exit: 0, ms: 3000 }, { step: "bun run typecheck", exit: 0, ms: 4000 }] };
     expect(attempts).toEqual([
-      { attempt: 1, outcome: "lost_race", merge_ms: 120, corpus_snapshot_ms: 40, floor, cas_ms: 5, total_ms: 7165 },
-      { attempt: 2, outcome: "landed", merge_ms: 120, corpus_snapshot_ms: 40, floor, cas_ms: 5, total_ms: 7165 },
+      { attempt: 1, outcome: "landed", merge_ms: 120, corpus_snapshot_ms: 40, floor, cas_ms: 5, total_ms: 7165 },
     ]);
 
     const phaseLines = logs.filter((l) => l.startsWith("integrate: attempt ") && l.includes(" phases: "));
     expect(phaseLines).toEqual([
-      "integrate: attempt 1/3 phases: merge 120ms | corpus-snapshot 40ms | floor 7000ms (bun run build 3000ms, bun run typecheck 4000ms) | cas 5ms | total 7165ms -> lost_race",
-      "integrate: attempt 2/3 phases: merge 120ms | corpus-snapshot 40ms | floor 7000ms (bun run build 3000ms, bun run typecheck 4000ms) | cas 5ms | total 7165ms -> landed",
+      "integrate: attempt 1 phases: merge 120ms | corpus-snapshot 40ms | floor 7000ms (bun run build 3000ms, bun run typecheck 4000ms) | cas 5ms | total 7165ms -> landed",
     ]);
     // the landing cleared the loss entry, the cost record stays (cost data exists even when nothing is lost)
     expect(existsSync(join(corpusDir, "integrate-losses", "feature.json"))).toBe(false);
@@ -136,6 +127,7 @@ describe("integrate records per-attempt phase durations", () => {
       corpus: { take: () => ok({ takenAt: "2026-10-19T00:00:00.000Z" }), remove: () => ok(undefined) },
       runFloor: () => ((now += 900), { status: 7, output: "boom" }),
       ledger: new IntegrateLossLedger(corpusDir),
+      queue: immediateIntegrateQueue(),
       attempts: new IntegrateAttemptLedger(corpusDir, () => "t"),
       clock: () => now,
       projectRoot: repo,
