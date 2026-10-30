@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-a-plan-s-tests-and-criteria-are-measured-once-at-its (AC-AO-1, BR-1496)
+ * @spec_ref spec-a-plan-s-tests-and-criteria-are-measured-once-at-its (BR-1496)
  *
  * `createGitFirstParentCommitContaining` over a real throwaway repo: branch X merged into branch Y and Y landed on main, so
  * X's head is off main's first-parent chain; the answer is the main commit that merged Y.
@@ -29,7 +29,7 @@ const commit = (name: string): string => {
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("first-parent commit containing a landing", () => {
-  it("AC-AO-1 a branch merged into another branch that landed maps to the main merge commit that brought it in", async () => {
+  it("a branch merged into another branch that landed maps to the main merge commit that brought it in", async () => {
     git("init", "-b", "main");
     commit("base");
     git("checkout", "-b", "y");
@@ -48,7 +48,7 @@ describe("first-parent commit containing a landing", () => {
     expect(found).toEqual({ ok: true, value: landed });
   });
 
-  it("AC-AO-1 a commit that is not below the ref, or does not resolve, has no containing commit", async () => {
+  it("a commit that is not below the ref, or does not resolve, has no containing commit", async () => {
     git("checkout", "-b", "stray");
     const stray = commit("stray1");
     git("checkout", "main");
