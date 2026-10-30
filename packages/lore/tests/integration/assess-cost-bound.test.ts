@@ -28,7 +28,7 @@ import {
 import type { SuiteRun } from "../../src/service/milestone-review-inputs.js";
 import { regressionAtHead, regressionBisectionBudget, type RegressionLandingInput } from "../../src/service/regression-at-head.js";
 import { measureCriteriaAtHead, type AttestationRow, type CriterionScope, type HeadCriteriaRunnerPort } from "../../src/service/milestone-attestation-facts.js";
-import { createGitFileExistsAt, createGitFirstParentHistory } from "../../src/adapters/cli/assess-regression-git.js";
+import { createGitFileExistsAt, createGitFirstParentCommitContaining, createGitFirstParentHistory } from "../../src/adapters/cli/assess-regression-git.js";
 
 const RED_FILE = "tests/red.test.ts";
 const dirs: string[] = [];
@@ -142,6 +142,7 @@ async function assess(cwd: string, w: World, landings: RegressionLandingInput[])
     headRef: looked.value.result.commit_sha,
     firstParentHistory: createGitFirstParentHistory(cwd, process.env),
     fileExistsAt: createGitFileExistsAt(cwd, process.env),
+    firstParentCommitContaining: createGitFirstParentCommitContaining(cwd, process.env),
   });
   if (!regression.ok) throw new Error(`regressionAtHead failed: ${regression.error.code}`);
   return { looked: looked.value, regression: regression.value };

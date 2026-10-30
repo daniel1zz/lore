@@ -16,7 +16,10 @@
  *     end first narrowed to the oldest stored red above the lower bound, so a second review probes nothing new;
  *     (4) confirm both ends of the found transition once each: it must fail at the first failing commit and pass (or be
  *     absent) at its first parent, else the file is `not-measured` ("flaky during bisection"), never charged by guess;
- *     (5) charged only if the first failing commit is one of the plan's landing commits.
+ *     (5) charged only if the first failing commit is a main commit that brought one of the plan's landings in. A landing no
+ *     main commit can be found for makes `not-measured` only a file whose transition falls after that landing's `main_before`
+ *     (where it could be); a transition at or before it, or at another commit, is attributed as usual.
+ *   - A stored suite result is a green for a file only if no command of it exited with anything but 0 or 1 (exit 5 = the suite never ran).
  *   - A file absent at a commit counts as not red there (no run), so a test the plan added is charged to the landing that added it.
  *   - A file red at a landing but green at head is never looked at: only the head suite's failing files are examined.
  *   - A step that cannot complete (suite unrunnable, history unreadable, a single-file run erroring or timing out) makes that
@@ -61,6 +64,11 @@ export interface RegressionAtHeadPorts {
   readonly firstParentHistory: (ref: string) => Promise<Result<readonly string[], LoreError>>;
   /** Whether `file` exists at `commit` (a file absent there is not red there). */
   readonly fileExistsAt: (commit: string, file: string) => Promise<Result<boolean, LoreError>>;
+  /**
+   * The OLDEST commit on `ref`'s first-parent history that contains `commit`; `undefined` when `commit` is not below `ref`.
+   * A landing whose branch reached main through ANOTHER branch's merge is not itself on the chain, but this commit (that merge) is.
+   */
+  readonly firstParentCommitContaining: (commit: string, ref: string) => Promise<Result<string | undefined, LoreError>>;
 }
 
 /** A file charged to a landing. */
@@ -132,8 +140,13 @@ class FileProbe {
     if (stored.value !== undefined) return { ok: true, value: stateOfExit(stored.value.exit_code) };
     const suite = this.measuredByCommit.get(commit);
     if (suite === undefined) return { ok: true, value: undefined };
-    // reason: a measured suite result that does not list the file as failing means it passed or did not exist: not red either way.
-    return { ok: true, value: suite.failing_test_files.some((f) => f.file === this.file) ? "red" : "green" };
+    if (suite.failing_test_files.some((f) => f.file === this.file)) return { ok: true, value: "red" };
+    // reason: a suite result that does not list the file as failing proves it passed ONLY if the commands really ran tests. A
+    // command that exited with anything but 0 (pass) or 1 (test failures) never ran them (exit 5 = oracle-lock contended, stored
+    // as `measured` with no failing file): reading that as a pass made a file that was red there the "lower bound", and the
+    // confirmation then contradicted the bisection ("flaky during bisection"). Such a result knows nothing about the file.
+    if (suite.commands.some((c) => c.exit_code !== 0 && c.exit_code !== 1)) return { ok: true, value: undefined };
+    return { ok: true, value: "green" };
   }
 
   private async exists(commit: string): Promise<Step<boolean>> {
@@ -175,10 +188,10 @@ class FileProbe {
 async function measureFile(
   file: string,
   history: readonly string[],
-  landingCommits: ReadonlySet<string>,
-  earliestLandingIndex: number,
+  attribution: Attribution,
   probe: FileProbe,
 ): Promise<FileRegression> {
+  const earliestLandingIndex = attribution.earliestIndex;
   const notMeasured = (reason: string): FileRegression => ({ file, outcome: "not-measured", reason });
   const headIndex = history.length - 1;
   const head = history[headIndex];
@@ -243,7 +256,50 @@ async function measureFile(
   if (firstConfirm.value !== "red" || parentConfirm.value !== "green") {
     return notMeasured(`flaky during bisection: the confirmation runs disagree with the bisection at ${first} (confirm there: ${firstConfirm.value}; at its parent: ${parentConfirm.value})`);
   }
-  return landingCommits.has(first) ? { file, outcome: "regression", landing: first } : { file, outcome: "other-commit", commit: first };
+  if (attribution.chargedCommits.has(first)) return { file, outcome: "regression", landing: first };
+  const unmapped = attribution.unmapped;
+  if (unmapped !== undefined && high > unmapped.afterIndex) {
+    return notMeasured(`red since ${first}, where landing ${unmapped.landing} could have reached main: it is not on main's first-parent history and no main commit containing it was found (${unmapped.reason}), so the transition cannot be attributed`);
+  }
+  return { file, outcome: "other-commit", commit: first };
+}
+
+/** Which main commits are the plan's, and where the plan's unmappable landings could be hiding. */
+interface Attribution {
+  /** Main first-parent commits that brought a landing commit in (a landing on the chain maps to itself). */
+  readonly chargedCommits: ReadonlySet<string>;
+  /** Index of the earliest main commit the plan can have changed; the bisection floor is the commit below it. */
+  readonly earliestIndex: number;
+  /** The unmappable landing that could have landed earliest; a transition after `afterIndex` may be it. */
+  readonly unmapped: { readonly landing: string; readonly afterIndex: number; readonly reason: string } | undefined;
+}
+
+/** Maps every landing to the main first-parent commit that brought it in; an unmappable one only bounds where it could be. */
+async function attributeLandings(real: readonly RegressionLandingInput[], history: readonly string[], ports: RegressionAtHeadPorts): Promise<Attribution> {
+  const position = new Map(history.map((commit, index) => [commit, index] as const));
+  const chargedCommits = new Set<string>();
+  let earliestIndex = Number.MAX_SAFE_INTEGER;
+  let unmapped: { landing: string; afterIndex: number; reason: string } | undefined;
+  for (const landing of real) {
+    const direct = position.get(landing.landing_commit);
+    let mapped = direct === undefined ? undefined : landing.landing_commit;
+    let reason = "not below main's head";
+    if (mapped === undefined) {
+      const found = await ports.firstParentCommitContaining(landing.landing_commit, ports.headRef);
+      if (!found.ok) reason = loreErrorText(found.error);
+      else if (found.value !== undefined && position.has(found.value)) mapped = found.value;
+    }
+    if (mapped !== undefined) {
+      chargedCommits.add(mapped);
+      earliestIndex = Math.min(earliestIndex, position.get(mapped) ?? earliestIndex);
+      continue;
+    }
+    // reason: a landing reaches main AFTER the commit main stood at before it, so its transition cannot be at or below that commit.
+    const afterIndex = position.get(landing.main_before) ?? -1;
+    earliestIndex = Math.min(earliestIndex, afterIndex + 1);
+    if (unmapped === undefined || afterIndex < unmapped.afterIndex) unmapped = { landing: landing.landing_commit, afterIndex, reason };
+  }
+  return { chargedCommits, earliestIndex, unmapped };
 }
 
 function rowOfFile(f: FileRegression): MilestoneFactRow {
@@ -320,21 +376,16 @@ export async function regressionAtHead(
       stopAll(`main's first-parent history could not be read: ${loreErrorText(historyResult.error)}`);
     } else {
       const history = historyResult.value;
-      const position = new Map(history.map((commit, index) => [commit, index] as const));
-      const missing = real.find((l) => !position.has(l.landing_commit));
       const results = await ports.suites.listResults();
-      if (missing !== undefined) {
-        stopAll(`landing ${missing.landing_commit} is not on main's first-parent history`);
-      } else if (!results.ok) {
+      if (!results.ok) {
         stopAll(`stored suite results could not be read: ${loreErrorText(results.error)}`);
       } else {
         const measuredByCommit = new Map<string, SuiteResultRecord>();
         for (const r of results.value) if (r.status === "measured") measuredByCommit.set(r.commit_sha, r);
-        const earliest = Math.min(...real.map((l) => position.get(l.landing_commit) ?? Number.MAX_SAFE_INTEGER));
-        const landingCommits = new Set(real.map((l) => l.landing_commit));
+        const attribution = await attributeLandings(real, history, ports);
         for (const file of redFiles) {
           const probe = new FileProbe(file, ports, measuredByCommit);
-          files.push(await measureFile(file, history, landingCommits, earliest, probe));
+          files.push(await measureFile(file, history, attribution, probe));
           singleFileRunIds.push(...probe.consulted);
         }
       }

@@ -48,6 +48,8 @@ interface Script {
   readonly files: Readonly<Record<string, FileModel>>;
   readonly failRunFiles?: boolean;
   readonly unrunnableHead?: boolean;
+  /** Landing commits OFF the first-parent chain (by sha index) and the chain commit index that brought each in. */
+  readonly containing?: Readonly<Record<number, number>>;
 }
 
 interface Fixture {
@@ -110,6 +112,10 @@ function build(script: Script, shared?: { store: InMemoryStore }): Fixture {
     headRef: "main",
     firstParentHistory: async (ref) => ok(Array.from({ length: indexOf(ref === "main" ? sha(headIndex) : ref) + 1 }, (_, i) => sha(i))),
     fileExistsAt: async (commit, file) => ok(exists(file, indexOf(commit))),
+    firstParentCommitContaining: async (commit) => {
+      const via = script.containing?.[indexOf(commit)];
+      return ok(via === undefined ? undefined : sha(via));
+    },
   };
   return { ports, service, suiteRuns, fileRuns, head: sha(headIndex) };
 }
@@ -273,16 +279,42 @@ describe("regression at the assessed commit", () => {
     expect(dimensionOf(r.rows).verdict).toBe("not-measured");
   });
 
-  it("AC-AO-1 a landing commit that is not on main's first-parent history makes the files not-measured", async () => {
+  it("AC-AO-1 a landing with no main commit containing it and no known main_before could be anywhere: a red file's transition is not-measured, never charged or passed", async () => {
     const f = build({ commits: 6, files: { [FILE]: { redFrom: 2 } } });
     const r = await measure(f, [{ landing_commit: sha(200), main_before: sha(199), task_slugs: ["t"] }]);
     expect(r.files[0]).toMatchObject({ outcome: "not-measured" });
-    expect(f.fileRuns).toEqual([]);
+    expect(r.charged).toEqual([]);
   });
 
   it("AC-AO-1 no landings and no unlanded tasks is refused, not a pass", async () => {
     const f = build({ commits: 3, files: {} });
     const r = await regressionAtHead([], [], f.ports);
     expect(r.ok).toBe(false);
+  });
+
+  it("AC-AO-1 a landing that reached main through another branch's merge is charged through that merge commit: a file that turned red there is the plan's regression", async () => {
+    // branch X (landing_commit sha(200)) was merged into Y, and Y landed as main commit 6
+    const f = build({ commits: 10, files: { [FILE]: { redFrom: 6 } }, containing: { 200: 6 } });
+    const r = await measure(f, [landingAt(3), { landing_commit: sha(200), main_before: sha(5), task_slugs: ["x"] }]);
+    expect(r.charged).toEqual([{ file: FILE, landing: sha(6) }]);
+    expect(dimensionOf(r.rows).verdict).toBe("fail");
+  });
+
+  it("AC-AO-1 an unmappable landing does not unmeasure a file whose transition is clearly another commit, only one whose transition could be that landing", async () => {
+    // landing sha(200) has no containing commit; main stood at commit 8 before it, so it can only have landed after 8
+    const f = build({ commits: 12, files: { [FILE]: { redFrom: 5 }, [OTHER]: { redFrom: 10 } } });
+    const r = await measure(f, [landingAt(3), { landing_commit: sha(200), main_before: sha(8), task_slugs: ["x"] }]);
+    expect(r.files.find((x) => x.file === FILE)).toEqual({ file: FILE, outcome: "other-commit", commit: sha(5) });
+    expect(r.files.find((x) => x.file === OTHER)).toMatchObject({ outcome: "not-measured" });
+    expect(r.charged).toEqual([]);
+  });
+
+  it("AC-AO-1 a stored suite result whose test command never ran (exit 5, oracle lock contended) is not a pass: it is not the lower bound, so the bisection does not contradict its confirmation", async () => {
+    const store = new InMemoryStore();
+    const f = build({ commits: 20, files: { [FILE]: { redFrom: 4 } } }, { store });
+    // measured, no failing file, but the test command exited 5: nothing ran at commit 12, though the file is red there
+    await f.service.lookupOrRun(sha(12), { ...f.ports.runner, runSuite: async (commit) => ok({ status: "measured", commit, commands: [{ command: "bun run test", exit_code: 5, output_tail: "" }], skipped: [], failing_test_files: [] }) });
+    const r = await measure(f, [landingAt(3), landingAt(4)]);
+    expect(r.files[0]).toEqual({ file: FILE, outcome: "regression", landing: sha(4) });
   });
 });

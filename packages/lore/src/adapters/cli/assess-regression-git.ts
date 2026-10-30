@@ -3,7 +3,7 @@
  *
  * Purpose: give `regressionAtHead` its history and file-existence ports over real git (BR-1496); replaces the clearing
  *   lookup of regression per landing.
- * Public surface: createGitFirstParentHistory, createGitFileExistsAt, createGitChangedFilesSince.
+ * Public surface: createGitFirstParentHistory, createGitFirstParentCommitContaining, createGitFileExistsAt, createGitChangedFilesSince.
  * Invariants:
  *   - History order is `git rev-list --first-parent --reverse <ref>` (oldest first), never `measured_at`.
  *   - Every git failure is an `err` naming the command's stderr; nothing is read as "empty" or "absent" on failure.
@@ -60,5 +60,33 @@ export function createGitChangedFilesSince(cwd: string, env: NodeJS.ProcessEnv, 
     const diff = spawnSync("git", ["diff", "--name-only", `${commit}..${ref}`], { cwd, env, encoding: "utf8" });
     if (diff.status !== 0) return err(gitFailure(`cannot list the files changed between ${commit} and ${ref}`, diff.stderr));
     return ok(diff.stdout.split("\n").filter((line) => line.length > 0));
+  };
+}
+
+/**
+ * The oldest commit on `ref`'s first-parent history that contains `commit` (the merge that brought it in), or `undefined`
+ * when `commit` is not below `ref`. Meant for a commit OFF the first-parent chain: a branch merged into another branch that
+ * landed is not on it, and its landing is the chain commit that merged the other branch.
+ *
+ * reason: the descendants set (`--ancestry-path`, every parent) intersected with the first-parent list; the same containment
+ * `landingStartOf` uses.
+ *
+ * @param cwd - any directory inside the checkout
+ * @param env - environment for git
+ */
+export function createGitFirstParentCommitContaining(cwd: string, env: NodeJS.ProcessEnv): (commit: string, ref: string) => Promise<Result<string | undefined, LoreError>> {
+  return async (commit, ref) => {
+    const resolved = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`], { cwd, env, encoding: "utf8" });
+    if (resolved.status !== 0) return ok(undefined);
+    const known = resolved.stdout.trim();
+    const below = spawnSync("git", ["merge-base", "--is-ancestor", known, ref], { cwd, env, encoding: "utf8" });
+    if (below.status === 1) return ok(undefined);
+    if (below.status !== 0) return err(gitFailure(`cannot tell whether ${commit} is below ${ref}`, below.stderr));
+    const chain = spawnSync("git", ["rev-list", "--first-parent", "--reverse", `${known}..${ref}`], { cwd, env, encoding: "utf8" });
+    if (chain.status !== 0) return err(gitFailure(`cannot read ${ref}'s first-parent history above ${commit}`, chain.stderr));
+    const descendants = spawnSync("git", ["rev-list", "--ancestry-path", `${known}..${ref}`], { cwd, env, encoding: "utf8" });
+    if (descendants.status !== 0) return err(gitFailure(`cannot read the descendants of ${commit} below ${ref}`, descendants.stderr));
+    const containing = new Set(descendants.stdout.split("\n").filter((line) => line !== ""));
+    return ok(chain.stdout.split("\n").find((line) => line !== "" && containing.has(line)));
   };
 }
