@@ -59,7 +59,8 @@ import {
   type CitedRuleStateRow,
   type MainRedLedgerPort,
 } from "./milestone-review.js";
-import { applyDecisionFindings, rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
+import { withDecisionFindingCites } from "./decision-finding-cites.js";
+import { applyDecisionFindings,rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
 import {
   applySnapshotRule,
   renderSuiteSection,
@@ -367,10 +368,15 @@ export class MilestoneReviewService {
     // for them and an answer on one is stripped. Regression comes from the at-head rows (BR-1496); with none supplied
     // it is not-measured, never a pass inferred from the HEAD suite (no second attribution path).
     const factDims = factsDimensions(opts.facts, judged.value.record.ai_criteria);
-    const dimensions = applyDecisionFindings(
-      applySnapshotRule(
-        applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
-        citedRulesResult.value,
+    // reason: the wrong-when-written finding is deterministic, so it carries its own cites (decision, part, premise
+    // source) and --file-issues can fingerprint it (#500); a judge-text failure keeps none and stays refused.
+    const dimensions = withDecisionFindingCites(
+      applyDecisionFindings(
+        applySnapshotRule(
+          applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
+          citedRulesResult.value,
+        ),
+        decisionFindings,
       ),
       decisionFindings,
     );

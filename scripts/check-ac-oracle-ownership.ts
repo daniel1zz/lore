@@ -3,8 +3,12 @@
  * AC oracle ownership checker (`spec-test-governance-guards-that-refuse-bad-tests-declared`,
  * AC-TG-5; cites AS-17 — a completeness oracle never reports complete over what it could not see).
  *
- * Purpose: every live script-mode acceptance criterion must have exactly one existing OWNING
- * test file, where the owner is the FIRST test file named in its `verify.command`.
+ * Purpose: every live script-mode acceptance criterion must have only existing OWNING test files,
+ * where the owners are EVERY test file its `verify.command` executes (AC-OW-1; AS-17): all test
+ * paths of every `bun run test:file` / `bunx vitest run` / `vitest run` invocation joined by
+ * `&&` / `||` / `;`, ignoring flags and their values (`-t <name>`) and `echo …` summary segments
+ * and `test ! -e <path>` absence assertions (see {@link executedTestFiles}). Each owner may name the id untagged; a file outside that set
+ * still needs `@layer <surface> AC-ID`.
  * Public surface: `evaluateOwnership` (pure), `extractAcReferences` (pure),
  * `collectScriptAcs` (IO, one `lore ac list` spawn per spec — the slow reference reader),
  * `collectScriptAcsBulk` (IO, ONE reader process; the default), `scriptAcsFromDump` (pure), `main` (IO, returns the exit code, never
@@ -17,7 +21,7 @@
  * purpose, #313) — it is not checked for an owner file and is not an owner for the reference rules.
  *
  * Rules (printed as `rule=<name>`):
- *   - `missing-owner-file`: the AC's first test file does not exist on disk.
+ *   - `missing-owner-file`: a test file the AC's command executes (any of them) does not exist on disk.
  *   - `ambiguous-ac-id`: a test file is the owner of the same AC id in two or more specs and
  *     references that id without a spec-qualified `<spec-slug>#AC-ID` reference.
  *   - `unowned-ac-reference`: a test file references (describe/it name or `@spec_ref`) an AC
@@ -140,6 +144,23 @@ export function extractAcReferences(content: string): AcReference[] {
   return out;
 }
 
+const COMMAND_SEGMENT_SPLIT_RE = /&&|\|\||;/;
+
+/**
+ * Pure. Every distinct test file a verify command executes, in order of appearance: all test-file
+ * positionals of every `&&` / `||` / `;` segment (flags and their values such as `-t <name>` never
+ * name a path), skipping `echo …` segments whose text only prints a summary.
+ */
+export function executedTestFiles(command: string): string[] {
+  const out: string[] = [];
+  for (const segment of command.split(COMMAND_SEGMENT_SPLIT_RE)) {
+    // reason: `echo …` only prints; `test ! -e <path>` asserts the path is ABSENT, so it can never be an owner.
+    if (/^\s*echo\b/.test(segment) || /^\s*test\s+!/.test(segment)) continue;
+    for (const p of extractTestFilePaths(segment)) if (!out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
 /**
  * Pure ownership evaluation. `fileExists` is injected so the missing-file rule needs no
  * disk; `testFiles` are the contents scanned for AC references.
@@ -160,22 +181,24 @@ export function evaluateOwnership(
 
   for (const ac of liveAcs) {
     specsByAcId.set(ac.id, [...(specsByAcId.get(ac.id) ?? []), ac.spec]);
-    const owner = extractTestFilePaths(ac.command)[0];
-    if (owner === undefined) {
+    const executed = executedTestFiles(ac.command);
+    if (executed.length === 0) {
       acsWithoutTestFile += 1;
       continue;
     }
-    if (!fileExists(owner)) {
-      if (ac.allowMissingReason !== undefined) {
-        ledgered.push({ spec: ac.spec, acId: ac.id, path: owner, reason: ac.allowMissingReason });
+    for (const owner of executed) {
+      if (!fileExists(owner)) {
+        if (ac.allowMissingReason !== undefined) {
+          ledgered.push({ spec: ac.spec, acId: ac.id, path: owner, reason: ac.allowMissingReason });
+          continue;
+        }
+        findings.push({ rule: "missing-owner-file", spec: ac.spec, acId: ac.id, path: owner });
         continue;
       }
-      findings.push({ rule: "missing-owner-file", spec: ac.spec, acId: ac.id, path: owner });
-      continue;
+      const byId = owners.get(owner) ?? new Map<string, string[]>();
+      byId.set(ac.id, [...(byId.get(ac.id) ?? []), ac.spec]);
+      owners.set(owner, byId);
     }
-    const byId = owners.get(owner) ?? new Map<string, string[]>();
-    byId.set(ac.id, [...(byId.get(ac.id) ?? []), ac.spec]);
-    owners.set(owner, byId);
   }
 
   for (const tf of testFiles) {
