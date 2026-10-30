@@ -88,12 +88,11 @@ export type TaskLanding = z.infer<typeof taskLandingSchema>;
 export type LandingFact = Omit<TaskLanding, "recorded_at" | "kind">;
 
 /**
- * What `lore integrate` hands the recorder. `base_from_claim: true` marks a branch found ALREADY on main: there is no
- * merge to measure, so the landed commit is the branch head itself, and the recorder takes each task's own claim
- * `base_sha` as the range start (`main_before` is then ignored). The flag is never persisted.
+ * What `lore integrate` hands the recorder. `landing_commit` and `main_before` are always the measured pair (a landing of this call,
+ * or, for a branch found ALREADY on main, the earliest main first-parent commit containing the branch tip and its first parent, D44):
+ * the recorder never derives a start from a claim.
  */
 export type LandingRequest = LandingFact & {
-  readonly base_from_claim?: true;
   /**
    * The slugs the landing is recorded on, when the caller has already selected them (`lore integrate` with its oracle run, AC-DCS2-1):
    * every other task is left untouched. Never persisted. Absent = every task of the branch, as BR-1336 says.

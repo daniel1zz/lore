@@ -8,8 +8,8 @@
  *   {@link collectLandingTasks}, {@link LandingTask}, {@link UnionOracle}, {@link OracleOutcome}, {@link OracleProof},
  *   {@link OracleSettings}, {@link ORACLE_TIMEOUT_DEFAULT_SECONDS}, {@link INTEGRATE_ORACLE_FAILED}.
  * Invariants:
- *   - ONE selection rule ({@link collectLandingTasks}): tasks claimed on the branch, plus — when the branch is a plan's declared
- *     integration branch — the plan's approved or active code tasks with no landing record whose recorded claim tip the branch contains.
+ *   - ONE selection rule ({@link collectLandingTasks}): tasks claimed on the branch, plus every approved or active
+ *     code task with no landing record whose recorded work tip the branch contains and the pre-landing main did not (D44).
  *     A draft, deprecated, archived, check or corpus task is never selected.
  *   - the oracles that run are exactly the union of the selected tasks' contract oracles (plus write-set additions), de-duplicated by
  *     command, minus the ids `workflow.integrate.floor_covers` names; nothing is sampled and the full suite never runs.
@@ -36,7 +36,7 @@ import {
   type Result,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
-import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
+import { claimedNamesOf } from "./branch-membership.js";
 import { createGitRunner, deletedByDiff, missingOracleFiles, pathExistsAt, type TestFileOracle } from "./evidence-binding.js";
 import type { StampOutcome } from "./git-state-stamp.js";
 import type { FlakyLedgerService } from "./issue-filing-service.js";
@@ -62,8 +62,8 @@ export interface LandingTask {
   readonly slug: string;
   readonly doc: DocRecord;
   readonly contract: DoneContract;
-  /** Why it was selected: it was claimed on the branch, or it belongs to the plan whose integration branch this is. */
-  readonly via: "claimed" | "integration-branch";
+  /** Why it was selected: it was claimed on the branch, or its recorded work tip is inside the branch and was not in main before the landing. */
+  readonly via: "claimed" | "contained-tip";
 }
 
 /** One distinct oracle of the union. */
@@ -152,7 +152,7 @@ export interface OracleRecordSummary {
 
 /** The port `IntegrateService` calls; wired by the composition root, absent in a bare construction (then nothing is proven). */
 export interface LandingOracles {
-  readonly select: (branch: string, tip: string) => Promise<Result<readonly LandingTask[], LoreError>>;
+  readonly select: (branch: string, tip: string, mainBefore: string) => Promise<Result<readonly LandingTask[], LoreError>>;
   readonly prove: (input: OracleRunInput) => Promise<Result<OracleProof, LoreError>>;
   readonly record: (input: OracleRecordInput) => Promise<OracleRecordSummary>;
 }
@@ -180,26 +180,24 @@ function newestFirst(rows: readonly AuditEntry[]): AuditEntry[] {
 }
 
 /**
- * The ONE selection rule of a landing (AC-DCS2-1): (a) the tasks claimed on `branch`, plus (b) when `branch` is a plan's declared
- * integration branch, every task of that plan that is approved or active, kind code, has no landing record and whose recorded claim tip
- * (the live claim's branch tip, else the `end_tip` of the newest release row) is an ancestor of `tip`. Never a draft, deprecated,
- * archived, check or corpus task.
+ * The ONE selection rule of a landing, for EVERY landed branch (AC-DCS2-1, D44): (a) the tasks claimed on `branch`, plus (b) every
+ * task that is approved or active, kind code, has no landing record, and whose recorded work tip (landingOf's tip: the live claim's
+ * branch tip, else the `end_tip` of the newest release row) the branch contains and the pre-landing main did not. Never a draft,
+ * deprecated, archived, check or corpus task. A recorded tip git cannot compare is a refusal naming the task.
  *
  * @param deps - store and git reads
  * @param branch - the branch being landed, as typed
  * @param tip - its commit
+ * @param mainBefore - main before this landing (main's tip for a new landing; the first parent of the landing commit for a branch already in main)
  * @returns the selected tasks in corpus order, or the failing read
  */
-export async function collectLandingTasks(deps: Pick<IntegrateOracleDeps, "store" | "git" | "projectRoot">, branch: string, tip: string): Promise<Result<LandingTask[], LoreError>> {
+export async function collectLandingTasks(deps: Pick<IntegrateOracleDeps, "store" | "git" | "projectRoot">, branch: string, tip: string, mainBefore: string): Promise<Result<LandingTask[], LoreError>> {
   const tasks = await deps.store.findMany({ type: "task" });
   if (!tasks.ok) return tasks;
-  const plans = await deps.store.findMany({ type: "plan" });
-  if (!plans.ok) return plans;
   const claims = await deps.store.queryAudit({ action: "claim" });
   if (!claims.ok) return claims;
   const releases = await deps.store.queryAudit({ action: "release" });
   if (!releases.ok) return releases;
-  const integrationBranches = planIntegrationBranches(plans.value);
   const selected: LandingTask[] = [];
   for (const task of tasks.value) {
     if (!ELIGIBLE_STATUSES.has(task.status)) continue;
@@ -213,13 +211,34 @@ export async function collectLandingTasks(deps: Pick<IntegrateOracleDeps, "store
       selected.push({ slug: task.slug, doc: task, contract: contract.data, via: "claimed" });
       continue;
     }
-    if (!isTaskOfIntegrationBranch(task, integrationBranches, branch) || landing !== undefined) continue;
+    if (landing !== undefined) continue;
+    // reason: D44 — a task that never recorded a work tip (never claimed, nothing released with an end_tip) has no work to place
+    // in any branch, so it is not selected; a tip that exists but cannot be measured is a named refusal below, never a skip.
     const claimTip = recordedClaimTip(deps, task, newestFirst(releases.value.filter((row) => row.doc_id === task.id)));
     if (claimTip === undefined) continue;
-    const contained = deps.git(deps.projectRoot, ["merge-base", "--is-ancestor", claimTip, tip]);
-    if (contained.status === 0) selected.push({ slug: task.slug, doc: task, contract: contract.data, via: "integration-branch" });
+    const inBranch = ancestorStatus(deps, task.slug, claimTip, tip, branch);
+    if (!inBranch.ok) return inBranch;
+    if (!inBranch.value) continue;
+    // reason: D44 — a tip main already contained before this landing belongs to an earlier landing, not this one.
+    const inMain = ancestorStatus(deps, task.slug, claimTip, mainBefore, "the pre-landing main");
+    if (!inMain.ok) return inMain;
+    if (inMain.value) continue;
+    selected.push({ slug: task.slug, doc: task, contract: contract.data, via: "contained-tip" });
   }
   return ok(selected);
+}
+
+/** Whether `ancestor` is an ancestor of `descendant`; a git failure (an unreadable commit) is a refusal naming the task, never "no". */
+function ancestorStatus(deps: Pick<IntegrateOracleDeps, "git" | "projectRoot">, slug: string, ancestor: string, descendant: string, descendantName: string): Result<boolean, LoreError> {
+  const run = deps.git(deps.projectRoot, ["merge-base", "--is-ancestor", ancestor, descendant]);
+  if (run.status === 0) return ok(true);
+  if (run.status === 1) return ok(false);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "extra.claim",
+    message: `${slug}: its recorded work tip ${ancestor.slice(0, 12)} cannot be compared with ${descendantName} (git exit ${String(run.status)}), so integrate cannot tell whether this landing carries it`,
+    value: slug,
+  });
 }
 
 /** The commit a task's claim ended on: the live claim's branch tip, else the `end_tip` of the newest release row; `undefined` when neither exists. */
@@ -289,8 +308,8 @@ export class IntegrateOracleService implements LandingOracles {
   constructor(private readonly deps: IntegrateOracleDeps) {}
 
   /** {@link collectLandingTasks} over this service's reads. */
-  select(branch: string, tip: string): Promise<Result<readonly LandingTask[], LoreError>> {
-    return collectLandingTasks(this.deps, branch, tip);
+  select(branch: string, tip: string, mainBefore: string): Promise<Result<readonly LandingTask[], LoreError>> {
+    return collectLandingTasks(this.deps, branch, tip, mainBefore);
   }
 
   /**

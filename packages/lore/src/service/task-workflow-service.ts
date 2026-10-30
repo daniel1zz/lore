@@ -5401,30 +5401,6 @@ export class TaskWorkflowService {
     return [...copies.values()];
   }
 
-  /**
-   * The `base_sha` of the most recent claim of a task that named `branch` (as its `branch` or its `worktree`), from
-   * the claim audit rows (they survive release); `undefined` when no such claim recorded one. Only the fallback for a landing
-   * with no merge to measure ({@link recordLanding}).
-   */
-  private static claimBaseFor(auditRows: readonly AuditEntry[], branch: string): string | undefined {
-    const named = auditRows
-      .filter((row) => row.details?.["branch"] === branch || row.details?.["worktree"] === branch)
-      .filter((row) => typeof row.details?.["base_sha"] === "string" && row.details["base_sha"] !== "")
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const latest = named[named.length - 1]?.details?.["base_sha"];
-    return typeof latest === "string" ? latest : undefined;
-  }
-
-  /** The start commit (`start_head`, else `base_sha`) of the newest claim row of a task, whatever branch it named; `undefined` when none recorded one. */
-  private static newestClaimStart(auditRows: readonly AuditEntry[]): string | undefined {
-    const rowsWithStart = auditRows
-      .filter((row) => typeof (row.details?.["start_head"] ?? row.details?.["base_sha"]) === "string" && (row.details?.["start_head"] ?? row.details?.["base_sha"]) !== "")
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const newest = rowsWithStart[rowsWithStart.length - 1]?.details;
-    const start = newest?.["start_head"] ?? newest?.["base_sha"];
-    return typeof start === "string" ? start : undefined;
-  }
-
   /** The branch checked out in `worktree`, read through the injected git port; `undefined` when it cannot be measured. */
   private async measuredBranchOf(worktree: string): Promise<string | undefined> {
     const measurement = await this.detectBranch(worktree);
@@ -5459,7 +5435,7 @@ export class TaskWorkflowService {
    * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
    */
   async recordLanding(request: LandingRequest, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
-    const { base_from_claim: baseFromClaim, only, ...landing } = request;
+    const { only, ...landing } = request;
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
@@ -5478,7 +5454,10 @@ export class TaskWorkflowService {
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
       // reason: BR-1348 — the tasks of a branch are those claimed on it AND every task of a plan whose declared
       // integration branch it is (the own-diff judgment at integrate judged the branch against exactly these).
+      // reason: D44 (AC-DCS2-1) — a caller that selected its tasks already applied the ONE selection rule (claimed on the branch, or
+      // its recorded work tip is inside the branch), so a task merged in through another branch is not re-filtered by claim names.
       const ofBranch =
+        only !== undefined ||
         isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ||
         (await this.landingCandidateNames(rows, task)).includes(landing.branch);
       if (!ofBranch) continue;
@@ -5489,32 +5468,9 @@ export class TaskWorkflowService {
         slugs.push(task.slug);
         continue;
       }
-      // reason: BR-1336/BR-1372 — a branch found already on main has no merge of this call to measure; the range starts where
-      // main stood before the merge that brought the branch head onto it ({@link LandingGitFacts.landingStartOf}), a fact of
-      // history that no claim or re-claim can move. Never the claim's base_sha (a re-claim at the branch head made it the tip).
-      // A branch that reached main without a merge has no such start: a failure naming the task, never a guess.
-      let mainBefore = landing.main_before;
-      if (baseFromClaim === true) {
-        const start = this.landingFacts().landingStartOf(landing.landing_commit);
-        // reason: AC-DCS2-1 — a branch that reached main WITHOUT a merge (fast-forward) has no merge to mark its start, so the range
-        // starts where the task's claim recorded it (the audit row survives release), as before the history fact existed. That
-        // fallback is only for this case: a branch with a merge always uses the history fact. A task with no recorded start at all
-        // is a failure naming the task and both reasons, never a guess.
-        const claimStart = start.ok
-          ? undefined
-          : TaskWorkflowService.claimBaseFor(rows, landing.branch) ??
-            (isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ? TaskWorkflowService.newestClaimStart(rows) : undefined);
-        if (!start.ok && claimStart === undefined) {
-          firstFailure ??= {
-            code: "VALIDATION_ERROR",
-            field: "extra.landing.main_before",
-            message: `${task.slug}: the landing range of ${landing.branch} has no measurable start (${start.reason}; no claim of this task recorded a start commit for it either)`,
-            value: task.slug,
-          };
-          continue;
-        }
-        mainBefore = start.ok ? start.value : (claimStart as string);
-      }
+      // reason: D44 (BR-1336, BR-1372, BR-1496) — the range start is the one the caller measured (`landing.main_before`, the first
+      // parent of the landing commit): a fact of main's history that no claim or re-claim can move. No claim-derived start exists.
+      const mainBefore = landing.main_before;
       // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
       // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
       // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).

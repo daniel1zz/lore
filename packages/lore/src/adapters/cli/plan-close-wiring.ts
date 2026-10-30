@@ -43,11 +43,6 @@ export interface PlanCloseWiringInput {
   readonly dbPath: string;
   /** The acting identity of the close's writes. */
   readonly actor: string;
-  /**
-   * An extra verification step before the assess; `undefined` = none. The batch no longer attests at each landing (main's BR-1379:
-   * criteria run once at the assessed commit inside the assess), so the callers pass none.
-   */
-  readonly verify?: ((planSlug: string) => Promise<Result<unknown, LoreError>>) | undefined;
 }
 
 /**
@@ -56,7 +51,7 @@ export interface PlanCloseWiringInput {
  * @returns the service, or the error when the git common dir (the lease's home) cannot be located
  */
 export function buildPlanCloseService(input: PlanCloseWiringInput): Result<PlanCloseService, LoreError> {
-  const { app, inv, dbPath, actor, verify } = input;
+  const { app, inv, dbPath, actor } = input;
   const projectRoot = dirname(dirname(resolvePath(dbPath)));
   const commonDir = resolveGitCommonDir(projectRoot, inv.env);
   if (!commonDir.ok) return commonDir;
@@ -83,7 +78,9 @@ export function buildPlanCloseService(input: PlanCloseWiringInput): Result<PlanC
       leases: new PlanCloseLease({ commonDir: commonDir.value, pid: process.pid, inspect: (pid) => processes.inspect(pid) }),
       getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
       linkedSpecs,
-      verifyPlan: async (plan) => (verify === undefined ? ok(undefined) : verify(plan.slug)),
+      // reason: BR-1379 (main) — the batch has no attestation step: criteria run once at the assessed commit inside the assess, so this
+      // step has nothing to verify; the service port stays (PlanCloseService's own tests drive it) and is bound to that fact, not to an optional caller hook.
+      verifyPlan: async () => ok(undefined),
       applySpec: async (spec) => {
         if (ruleChanges === undefined) return err({ code: "STORE_ERROR", message: "this composition has no rule change service, so the rule changes of a spec cannot be applied" });
         return ruleChanges.apply(spec.slug, { by: actor });

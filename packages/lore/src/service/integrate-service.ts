@@ -277,6 +277,12 @@ export interface IntegrateDeps {
   readonly clock?: () => number;
   /** The main checkout's root: the repo whose refs main lives in (git commands run here). */
   readonly projectRoot: string;
+  /**
+   * The oldest commit of `ref`'s first-parent history that contains `commit` (the merge that brought it in), `undefined` when none:
+   * the adapters' `findFirstParentCommitContaining`, injected. Used only for a branch found ALREADY in main (D44). Absent in a bare
+   * construction: landing such a branch is then refused, never guessed.
+   */
+  readonly firstParentContaining?: (commit: string, ref: string) => Result<string | undefined, LoreError>;
   /** Directory under which integration worktrees are created (`<main checkout>/.claude/worktrees`). */
   readonly worktreesRoot: string;
   /** Progress lines (attempts, lost races); the CLI wires stdout. */
@@ -543,22 +549,28 @@ export class IntegrateService {
     const message = request.message ?? this.defaultMessage(request.branch, tip);
     const oraclePort = this.deps.oracles;
     const settings = this.oracleSettings;
+    // reason: the turn is ours (landInTurn awaited it), so main is where this landing will merge onto and nothing but a bypassed guard moves it.
+    const base = this.resolveCommit(TARGET_REF);
+    if (!base.ok) return base;
+    const alreadyInMain = git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0;
+    // reason: D44 — a branch already in main is placed on main's history first: the commit that brought it in and its first parent are
+    // the landing's range, and "main before the landing" for the selection below is that first parent, never main's tip.
+    const placed = alreadyInMain ? this.placeLandingOnMain(tip) : undefined;
+    if (placed !== undefined && !placed.ok) return await this.placementRefusal(request.branch, tip, base.value, placed.error);
+    const mainBeforeLanding = placed === undefined ? base.value : placed.value.main_before;
     // reason: ONE selection rule per landing (AC-DCS2-1), read before any attempt: it depends on refs and claims, not on the merge.
     let selection: readonly LandingTask[] = [];
     if (oraclePort !== undefined) {
-      const selected = await oraclePort.select(request.branch, tip);
+      const selected = await oraclePort.select(request.branch, tip, mainBeforeLanding);
       if (!selected.ok) return selected;
       selection = selected.value;
       if (selection.length === 0) log(`integrate: the landing of ${request.branch} names no task whose oracles integrate runs`);
     }
-    // reason: with the oracle port wired the landing is recorded on exactly the selected tasks (a task whose claim tip the branch does not
+    // reason: with the oracle port wired the landing is recorded on exactly the selected tasks (a task whose work tip the branch does not
     // contain, a draft, a check and a corpus task are not landed by this branch).
     const onlySelected = oraclePort === undefined ? {} : { only: selection.map((task) => task.slug) };
 
-    // reason: the turn is ours (landInTurn awaited it), so main is where this landing will merge onto and nothing but a bypassed guard moves it.
-    const base = this.resolveCommit(TARGET_REF);
-    if (!base.ok) return base;
-    if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
+    if (placed !== undefined && placed.ok) {
       // reason: AC-DCS2-1 — a branch already in main has no merge to prove: the union runs once on main's tip T, the rows bind to T, and
       // only the tasks whose rows were recorded in THIS run are walked to done (an older hand-recorded row never archives one).
       let proven: OracleProof | undefined;
@@ -570,15 +582,13 @@ export class IntegrateService {
         proven = run.value;
         await this.recordOracleRows(proven.tasks, base.value, proven.outcomes);
       }
-      // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
-      // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
-      // and the branch head itself is the landed commit: it is an ancestor of main.
-      // reason: BR-1336 — nothing reconstructs a landing from main's history: the branch head is the landed commit and
-      // the recorder takes the range start from each task's own claim base (`base_from_claim`).
-      // reason: AC-DCS2-1 — the landing names main's tip T, the commit the oracles ran on and the rows are bound to; with no oracle port
-      // wired (a bare construction) nothing was proven and the branch head stays the landed commit, as BR-1336 had it.
-      const landedAt = oraclePort === undefined ? tip : base.value;
-      const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: landedAt, base_from_claim: true, ...onlySelected });
+      // reason: BR-1336 — an already-integrated branch still records a landing on every selected task that holds none for this head
+      // (the recorder skips tasks that already carry one). Main did not move by this call, so main_after is main's tip.
+      // reason: D44 (AC-DCS2-2, BR-1496, BR-1508) — the landing is the commit that really brought the branch into main (the earliest
+      // first-parent commit containing the tip) and its range starts at that commit's first parent, never main's tip: the milestone
+      // review attributes ranges and regressions by landing_commit. The oracle rows stay bound to T, the tip they ran on.
+      const landedAt = placed.value.landing_commit;
+      const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: placed.value.main_before, main_after: base.value, landing_commit: landedAt, ...onlySelected });
       const provenSlugs = new Set((proven?.tasks ?? []).map((task) => task.slug));
       const walked = oraclePort === undefined ? claimants : claimants.filter((slug) => provenSlugs.has(slug));
       // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
@@ -969,6 +979,42 @@ export class IntegrateService {
       if (located.status === 0 && existsSync(located.stdout.trim())) return label;
     }
     return undefined;
+  }
+
+  /**
+   * Where a branch already in main landed (D44): the earliest commit of main's first-parent history that contains `tip` (the tip itself
+   * when it lies on that history, a fast-forward) and that commit's first parent. A tip that cannot be placed is an error, never a guess.
+   */
+  private placeLandingOnMain(tip: string): Result<{ readonly landing_commit: string; readonly main_before: string }, LoreError> {
+    const { git, projectRoot, firstParentContaining } = this.deps;
+    const chain = git(projectRoot, ["rev-list", "--first-parent", TARGET_REF]);
+    if (chain.status !== 0) return err(gitFailure(`reading the first-parent history of ${TARGET_NAME}`, chain));
+    let landingCommit: string | undefined;
+    if (chain.stdout.split("\n").includes(tip)) landingCommit = tip;
+    else {
+      if (firstParentContaining === undefined) return err({ code: "STORE_ERROR", message: `integrate: no first-parent placement is wired, so where ${short(tip)} entered ${TARGET_NAME} cannot be measured` });
+      const found = firstParentContaining(tip, TARGET_REF);
+      if (!found.ok) return found;
+      landingCommit = found.value;
+    }
+    if (landingCommit === undefined) return err({ code: "STORE_ERROR", message: `integrate: no first-parent commit of ${TARGET_NAME} contains ${short(tip)}` });
+    const parent = git(projectRoot, ["rev-parse", "--verify", "-q", `${landingCommit}^1`]);
+    if (parent.status !== 0 || parent.stdout.trim() === "") {
+      return err({ code: "STORE_ERROR", message: `integrate: the landing commit ${short(landingCommit)} of ${short(tip)} has no first parent, so its range start cannot be measured` });
+    }
+    return ok({ landing_commit: landingCommit, main_before: parent.stdout.trim() });
+  }
+
+  /** A placement failure, naming every task the landing would have judged (those claimed on the branch) so nothing is skipped silently. */
+  private async placementRefusal(branch: string, tip: string, main: string, cause: LoreError): Promise<Result<never, LoreError>> {
+    const named: string[] = [];
+    if (this.deps.oracles !== undefined) {
+      const claimed = await this.deps.oracles.select(branch, tip, main);
+      if (claimed.ok) named.push(...claimed.value.map((task) => task.slug));
+    }
+    const reason = "message" in cause && typeof cause.message === "string" ? cause.message : cause.code;
+    const tasks = named.length === 0 ? "" : `; tasks whose landing range has no measurable start: ${named.join(", ")}`;
+    return err({ code: "STORE_ERROR", message: `${reason}${tasks}` });
   }
 
   /** `rev` as a full commit sha, or a refusal naming the rev. */

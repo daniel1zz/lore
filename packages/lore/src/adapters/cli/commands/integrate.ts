@@ -67,6 +67,7 @@ import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledge
 import type { IntegrateQueue } from "../../../service/integrate-queue.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
 import { ORACLE_TIMEOUT_DEFAULT_SECONDS } from "../../../service/integrate-oracle-service.js";
+import { findFirstParentCommitContaining } from "../assess-regression-git.js";
 import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
 import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
@@ -431,6 +432,8 @@ export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
       matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
     }),
     projectRoot,
+    // D44: a branch already in main is placed on main's first-parent history by the one mapping the milestone review uses
+    firstParentContaining: (commit, ref) => findFirstParentCommitContaining(projectRoot, inv.env, commit, ref),
     worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
     log,
   });
