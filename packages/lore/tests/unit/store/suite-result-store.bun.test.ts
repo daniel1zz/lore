@@ -8,7 +8,7 @@
  *
  * Dimensions: HAPPY (round trip), NEGATIVE (duplicate attempt, unrunnable without cause), BOUNDARY (no rows -> empty /
  * null), ERROR (corrupt JSON column fails loud as STORE_ERROR), STATE (retry attempt 2 beside attempt 1), REGRESSION
- * (schema version is 44; migration-044 reclassifies non-run suite results).
+ * (migration-044 reclassifies non-run suite results).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,10 +51,6 @@ afterEach(() => {
 });
 
 describe("suite_results (migration-043)", () => {
-  it("AC-AF-2 the schema version is 44", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(44);
-  });
-
   it("AC-AF-2 a stored result reads back field for field, by commit, by id and in the full list", async () => {
     const record = result();
     expect((await store.insertSuiteResult(record)).ok).toBe(true);
@@ -160,6 +156,54 @@ describe("migration-044 reclassifies suite results whose command never ran the t
       expect((after.ok ? after.value : []).filter((r) => r.status === "unrunnable").map((r) => r.id).sort()).toEqual(["r-contended", "r-unrunnable"]);
     } finally {
       again.close();
+    }
+  });
+});
+
+describe("migration-045 single-file runs are unique per (key, file) (#528)", () => {
+  const base = { commit_sha: COMMIT, file: "tests/a.test.ts", duration_ms: 5, measured_at: "2026-10-28T10:01:00.000Z" };
+  const key = `file-bisect@${COMMIT}`;
+
+  it("AC-AF-2 the schema version is 45", () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(45);
+  });
+
+  it("AC-AF-2 a second row for the same single-file key and file is ignored, the first stays; another file or key still stores", async () => {
+    expect((await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 0, output_tail: "first" }])).ok).toBe(true);
+    expect((await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 1, output_tail: "second" }])).ok).toBe(true);
+    await store.insertSuiteFileRuns([{ ...base, file: "tests/b.test.ts", suite_result_id: key, exit_code: 1, output_tail: "other file" }]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: `file-confirm@${COMMIT}`, exit_code: 1, output_tail: "other kind" }]);
+    const listed = await store.listSuiteFileRuns(key);
+    expect(listed.ok && listed.value.map((r) => [r.file, r.output_tail])).toEqual([
+      ["tests/a.test.ts", "first"],
+      ["tests/b.test.ts", "other file"],
+    ]);
+  });
+
+  it("AC-AF-2 re-runs attached to a suite result id are still appended, duplicates included", async () => {
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: "suite-1", exit_code: 0, output_tail: "a" }]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: "suite-1", exit_code: 1, output_tail: "b" }]);
+    const listed = await store.listSuiteFileRuns("suite-1");
+    expect(listed.ok && listed.value.map((r) => r.output_tail)).toEqual(["a", "b"]);
+  });
+
+  it("AC-AF-2 upgrading a schema-44 corpus keeps every existing row (re-run duplicates included) and then enforces uniqueness on single-file keys", async () => {
+    const old = new SQLiteStore(join(dir, "old45.db"), { schemaCeiling: 44 });
+    await old.insertSuiteFileRuns([
+      { ...base, suite_result_id: "suite-1", exit_code: 0, output_tail: "a" },
+      { ...base, suite_result_id: "suite-1", exit_code: 1, output_tail: "b" },
+    ]);
+    old.close();
+    const upgraded = new SQLiteStore(join(dir, "old45.db"), { migrate: true });
+    try {
+      const kept = await upgraded.listSuiteFileRuns("suite-1");
+      expect(kept.ok && kept.value.map((r) => r.output_tail)).toEqual(["a", "b"]);
+      await upgraded.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 0, output_tail: "first" }]);
+      await upgraded.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 1, output_tail: "second" }]);
+      const once = await upgraded.listSuiteFileRuns(key);
+      expect(once.ok && once.value.map((r) => r.output_tail)).toEqual(["first"]);
+    } finally {
+      upgraded.close();
     }
   });
 });

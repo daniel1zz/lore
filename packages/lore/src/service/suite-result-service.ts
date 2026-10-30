@@ -276,16 +276,20 @@ export class SuiteResultService {
   }
 
   /**
-   * Runs ONE test file at `commit` (always runs; the caller reads {@link listFileRuns} with {@link singleFileRunKey} first)
-   * and stores the outcome keyed by (commit, file, kind).
+   * Runs ONE test file at `commit` and stores the outcome keyed by (commit, file, kind), once: when a row for that key and
+   * file is already stored it is returned and nothing runs; when a concurrent review stored one while this run was in
+   * flight, the store keeps the first row (migration-045) and that row is returned, not this run's result (#528, BR-1497).
    *
    * @param commit - the commit to run at (a full sha)
    * @param file - repo-relative test file
    * @param kind - `bisect` probe or `confirm` run; they are stored apart so a confirmation is always an independent run
    * @param runner - runs the file at the commit
-   * @returns the stored row; `err` when the runner fails, reports no outcome or an incomplete one (not stored), or the store fails
+   * @returns the first stored row; `err` when the runner fails, reports no outcome or an incomplete one (not stored), or the store fails
    */
   async runSingleFile(commit: string, file: string, kind: SingleFileRunKind, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord, LoreError>> {
+    const key = singleFileRunKey(kind, commit);
+    const existing = await this.firstStoredFileRun(key, file);
+    if (!existing.ok || existing.value !== null) return existing.ok ? ok(existing.value as SuiteFileRunRecord) : existing;
     const ran = await runner.runFiles(commit, [file]);
     if (!ran.ok) return ran;
     const outcome = ran.value.find((o) => o.file === file);
@@ -301,7 +305,7 @@ export class SuiteResultService {
       return err({ code: "STORE_ERROR", message: `${file} did not run at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` });
     }
     const row: SuiteFileRunRecord = {
-      suite_result_id: singleFileRunKey(kind, commit),
+      suite_result_id: key,
       commit_sha: commit,
       file,
       exit_code: outcome.exit_code,
@@ -311,7 +315,18 @@ export class SuiteResultService {
     };
     const inserted = await this.deps.store.insertSuiteFileRuns([row]);
     if (!inserted.ok) return inserted;
-    return ok(row);
+    // reason: the insert is ignored when a concurrent review stored this (key, file) first; read back the winner so every review sees one outcome.
+    const stored = await this.firstStoredFileRun(key, file);
+    if (!stored.ok) return stored;
+    if (stored.value === null) return err({ code: "STORE_ERROR", message: `the single-file run of ${file} at ${commit} was not found after it was stored` });
+    return ok(stored.value);
+  }
+
+  /** The earliest stored row of `file` under `key`, or null when none is stored. */
+  private async firstStoredFileRun(key: string, file: string): Promise<Result<SuiteFileRunRecord | null, LoreError>> {
+    const rows = await this.deps.store.listSuiteFileRuns(key);
+    if (!rows.ok) return rows;
+    return ok(rows.value.find((r) => r.file === file) ?? null);
   }
 
   /** The per-file re-runs stored for a result, in the order they ran. */
