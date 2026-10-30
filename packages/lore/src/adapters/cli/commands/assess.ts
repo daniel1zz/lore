@@ -68,6 +68,7 @@ import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { deriveLandingDiffForPlan, describeLandingCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
+import { findCorpusOnlyTaskSlugs, noCodeRegressionRow } from "../../../service/corpus-only-task.js";
 import { readTaskLanding } from "../../../service/task-commit-range.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
@@ -376,9 +377,13 @@ export default defineLoreCommand({
         const tasks = bundle.value.tasks;
         // reason: #459 — the diff is each landing's own `main_before..landing_commit`; a task without a landing record is
         // named in `unlanded_tasks` (no commit-range fallback).
+        // reason: BR-1509 — a task with no anchors, never claimed on a branch and no landing record changes no code: it is
+        // listed as having no code, never `unlanded`.
+        const corpusOnly = await findCorpusOnlyTaskSlugs(tasks, app.auditService);
+        if (!corpusOnly.ok) return corpusOnly;
         const derivation = deriveLandingDiffForPlan(
           inv.cwd,
-          tasks.map((t) => ({ slug: t.slug, landing: readTaskLanding(t.extra) })),
+          tasks.map((t) => ({ slug: t.slug, landing: readTaskLanding(t.extra), ...(corpusOnly.value.has(t.slug) ? { corpus_only: true } : {}) })),
           tasks.length > 0 && tasks.every((t) => t.status === "archived"),
           { env: inv.env, ref: assessedCommit ?? "main" },
         );
@@ -395,7 +400,12 @@ export default defineLoreCommand({
         // stays not-measured, never pass.
         const suiteResults = app.suiteResultService;
         let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
-        if (suiteResults !== undefined) {
+        // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without
+        // the suite-result store.
+        const noTaskChangesCode = tasks.length > 0 && derivation.no_code_tasks.length === tasks.length;
+        if (noTaskChangesCode) {
+          regressionFacts = { regression: [noCodeRegressionRow(derivation.no_code_tasks)], regression_files: [], regression_causes: [], single_file_run_ids: [], failing_fact_files: [] };
+        } else if (suiteResults !== undefined) {
           const measured = await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
             suites: suiteResults,
             runner: createGitCommitSuiteRunner(inv.cwd, inv.env),
@@ -451,6 +461,8 @@ export default defineLoreCommand({
             l.outside_anchors !== undefined && l.outside_anchors.length > 0 ? [{ landing: l.landing_commit, files: l.outside_anchors }] : [],
           ),
           unlanded_tasks: derivation.unlanded_tasks,
+          no_code_tasks: derivation.no_code_tasks,
+          ...(noTaskChangesCode ? { no_task_changes_code: true } : {}),
           not_seen_files: derivation.not_seen_files,
         };
         return ok({ derivation, diffSource, facts, rerunCriterion });

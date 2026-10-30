@@ -34,6 +34,7 @@
 
 import { err, ok, type LoreError, type MilestoneFactRow, type RegressionNotMeasuredCause, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
+import { noCodeRegressionRow } from "./corpus-only-task.js";
 import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type SingleFileRunKind } from "./suite-result-service.js";
 
 /** One landing of the plan, as `deriveLandingDiffForPlan` reports it. */
@@ -330,14 +331,21 @@ function rowOfFile(f: FileRegression): MilestoneFactRow {
  * @param landings - the plan's landings (one per landing commit)
  * @param unlandedTasks - tasks with no usable landing record (their changes have no measured diff: not-measured)
  * @param ports - the head suite, single-file runs, history and file existence
+ * @param noCodeTasks - corpus-only tasks (BR-1509): they add no row; with no landing and no unlanded task they make the dimension `na`
  * @returns the per-file outcomes, the charged files and the fact rows; `err` only when there is nothing to say (no landing, no task)
  */
 export async function regressionAtHead(
   landings: readonly RegressionLandingInput[],
   unlandedTasks: readonly string[],
   ports: RegressionAtHeadPorts,
+  noCodeTasks: readonly string[] = [],
 ): Promise<Result<RegressionAtHead, LoreError>> {
   const real = landings.filter((l) => l.main_before !== l.landing_commit);
+  // reason: BR-1509 — when every task is corpus-only no task changes code: nothing to bisect and no suite to run; the
+  // regression dimension is `na`, never pass. A corpus-only task beside landed or unlanded tasks contributes nothing.
+  if (landings.length === 0 && unlandedTasks.length === 0 && noCodeTasks.length > 0) {
+    return ok({ head: undefined, files: [], charged: [], single_file_run_ids: [], rows: [noCodeRegressionRow(noCodeTasks)], causes: [] });
+  }
   if (landings.length === 0 && unlandedTasks.length === 0) {
     return err({ code: "VALIDATION_ERROR", field: "landings", message: "regression at head needs at least one landing or unlanded task", rule: "BR-1496" });
   }
