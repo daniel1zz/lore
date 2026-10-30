@@ -276,6 +276,18 @@ export const reviewCausesSchema = z.object({
 });
 export type ReviewCauses = z.infer<typeof reviewCausesSchema>;
 
+/**
+ * The structured address of the source a decision finding is about (#500), so a finding is identified without reading
+ * its wording: a pinned file span, a re-run command, an issue or a document.
+ */
+export const decisionFindingSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("file"), path: z.string().min(1), lines: z.tuple([z.number().int().min(1), z.number().int().min(1)]).optional(), sha: z.string().min(1).optional() }),
+  z.object({ kind: z.literal("cmd"), command: z.string().min(1) }),
+  z.object({ kind: z.literal("issue"), number: z.number().int().min(1) }),
+  z.object({ kind: z.literal("doc"), slug: z.string().min(1), version: z.number().int().min(1).optional() }),
+]);
+export type DecisionFindingSource = z.infer<typeof decisionFindingSourceSchema>;
+
 /** One finding of the recorded-decision re-check (spec-a-decision-carrying-write-records-its-decision-on-its). */
 export const decisionFindingSchema = z.object({
   /** The decision's address, `<slug>@<version>`. */
@@ -285,6 +297,8 @@ export const decisionFindingSchema = z.object({
   /** The finding kind, e.g. `wrong-when-written`, `stale-since`, `unverifiable`, `not-rerunnable`. */
   kind: z.string().min(1),
   fact: z.string().min(1),
+  /** The source the finding is about, when it has a structured address; absent on a finding stored before this field or about no source. */
+  source: decisionFindingSourceSchema.optional(),
 });
 export type DecisionFinding = z.infer<typeof decisionFindingSchema>;
 
