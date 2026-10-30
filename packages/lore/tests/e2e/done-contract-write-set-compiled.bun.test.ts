@@ -32,6 +32,7 @@ import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
+import { landWithoutIntegrate } from "../helpers/done-contract-land";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -179,11 +180,13 @@ function passFile(slug: string, file: string): Promise<void> {
   return capturePassIn(fixture.dir, slug, `echo Ran 1 tests in ${file}`);
 }
 
-/** Lands the branch on main through the real `lore integrate`. */
+/**
+ * Lands the branch the way a landing leaves it (a merge commit on main and the landing record), without `lore integrate`:
+ * integrate runs the contract oracles and records attested rows, which would put the evidence into the very state the
+ * done floors under test are about. Integrate's own behaviour is tested in `done-contract-integrate-compiled.bun.test.ts`.
+ */
 async function integrate(branch: string): Promise<void> {
-  const out = await fixture.run(["integrate", branch, "--session", "dcs1-ws-session"]);
-  if (out.exitCode !== 0) throw new Error(`integrate failed: ${out.stderr}${out.stdout}`);
-  fixture.git(["checkout", "-q", "--detach", "main"]);
+  await landWithoutIntegrate(fixture, branch);
 }
 
 const ANCHORED = ["tests/x-1.test.ts", "tests/x-2.test.ts", "tests/x-3.test.ts"] as const;

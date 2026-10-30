@@ -34,6 +34,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
+import { landWithoutIntegrate } from "../helpers/done-contract-land";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 240_000 });
 
@@ -183,11 +184,13 @@ async function recordStandard(built: Built, skip: readonly Skippable[] = [], cwd
   if (!skip.includes("typecheck")) await capturePassIn(cwd, built.slug, TYPECHECK);
 }
 
-/** Lands the branch on main through the real `lore integrate`. */
+/**
+ * Lands the branch on main the way a landing leaves it (a merge commit and the landing record), without `lore integrate`:
+ * integrate runs the contract oracles and records attested rows, which would put the evidence into the very state the done
+ * floors under test are about. Integrate's own behaviour is tested in `done-contract-integrate-compiled.bun.test.ts`.
+ */
 async function integrate(built: Built): Promise<void> {
-  const out = await fixture.run(["integrate", built.branch, "--session", "dcs1-session"]);
-  if (out.exitCode !== 0) throw new Error(`integrate failed: ${out.stderr}${out.stdout}`);
-  fixture.git(["checkout", "-q", "--detach", "main"]);
+  await landWithoutIntegrate(fixture, built.branch);
 }
 
 /**
