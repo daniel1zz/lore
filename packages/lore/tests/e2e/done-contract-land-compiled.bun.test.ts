@@ -79,10 +79,10 @@ interface Out {
   readonly text: string;
 }
 
-async function loreIn(cwd: string, args: readonly string[], session = OWNER): Promise<Out> {
+async function loreIn(cwd: string, args: readonly string[], session = OWNER, extraEnv: Record<string, string> = {}): Promise<Out> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (typeof value === "string") env[key] = value;
-  const result = await runLoreInProcess([...args], { cwd, home: FIXTURE_HOME_OUTSIDE_REPO, env: { ...env, ...sessionEnv(session), HOME: FIXTURE_HOME_OUTSIDE_REPO } });
+  const result = await runLoreInProcess([...args], { cwd, home: FIXTURE_HOME_OUTSIDE_REPO, env: { ...env, ...sessionEnv(session), ...extraEnv, HOME: FIXTURE_HOME_OUTSIDE_REPO } });
   return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, text: `${result.stdout}\n${result.stderr}` };
 }
 
@@ -241,6 +241,10 @@ describe("AC-DCS2-7: land finishes a landing in one command for a plan without a
     const bound = (await rowsOf(task.slug)).filter((row) => row.attestation?.recorded_at_landing === merged);
     expect(bound.length).toBeGreaterThan(0);
     for (const row of bound) expect(row.attestation?.head_sha).toBe(merged);
+    // the worktree and the branch of the archived task are removed (lore done's cleanup, BR-1079); the other task's are not
+    expect(existsSync(task.tree.path), "worktree removed").toBe(false);
+    expect(fixture.git(["branch", "--list", task.tree.branch]), `branch removed: ${out.text}`).toBe("");
+    expect(existsSync(other.tree.path)).toBe(true);
     // the other task of the plan was on its own branch: untouched
     expect(await statusOf(other.slug)).toBe("approved");
 
@@ -275,6 +279,8 @@ describe("AC-DCS2-8: land folds a task into the plan integration branch", () => 
     const t0 = refOf(branch);
     const a = await codeTask(plan, "fold-a", { from: branch });
     const b = await codeTask(plan, "fold-b", { from: branch });
+    // a third open code task nobody folds keeps the branch from landing (AC-DCS2-19), so these folds are only folds
+    await codeTask(plan, "fold-open", { from: branch, finish: false });
     const mainBefore = mainTip();
 
     const first = await land(a.slug);
@@ -328,6 +334,35 @@ describe("AC-DCS2-8: land folds a task into the plan integration branch", () => 
     expect(out.text).toContain("src/shared.ts");
     expect(refOf(branch)).toBe(head);
     expect(await logOf(e.slug)).toEqual([]);
+  });
+
+  it("AC-DCS2-8: a branch ref that moved during the fold exits 75 fold-raced and changes nothing; the next land folds", async () => {
+    const branch = "integration/p8-raced";
+    const plan = await planWithBranch("Land fold raced plan", branch);
+    const a = await codeTask(plan, "raced-a", { from: branch });
+    await codeTask(plan, "raced-open", { from: branch, finish: false });
+    const head = refOf(branch);
+    // a `git` first on PATH that moves the branch right before the fold's compare-and-swap, once (another writer winning the race)
+    const bin = join(scratch, `race-bin-${(sequence += 1)}`);
+    mkdirSync(bin, { recursive: true });
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const rival = fixture.git(["-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit-tree", `${head}^{tree}`, "-p", head, "-m", "rival"]);
+    const once = join(bin, "done");
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nif [ "$1" = "update-ref" ] && [ "$2" = "refs/heads/${branch}" ] && [ ! -f "${once}" ]; then touch "${once}"; "${realGit}" update-ref "$2" ${rival}; fi\nexec "${realGit}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const raced = await loreIn(fixture.dir, ["land", a.slug], OWNER, { PATH: `${bin}:${process.env["PATH"] ?? ""}` });
+    expect(raced.exitCode, raced.text).toBe(75);
+    expect(raced.text).toContain("fold-raced");
+    expect(refOf(branch), "the rival's head stands").toBe(rival);
+    expect(await logOf(a.slug)).toEqual([]);
+
+    const resumed = await land(a.slug);
+    expect(resumed.exitCode, resumed.text).toBe(0);
+    expect(isAncestor(a.tip, refOf(branch))).toBe(true);
+    expect((await logOf(a.slug)).filter((entry) => entry.kind === "folded").length).toBe(1);
   });
 
   it("AC-DCS2-8: two simultaneous lands of two tasks both fold, one after the other, with no lost fold", async () => {
@@ -449,7 +484,7 @@ describe("AC-DCS2-10: lore plan integration-branch creates the declared branch a
   it("AC-DCS2-10: an invalid branch name is refused with exit 4 and creates nothing", async () => {
     const plan = await planWithoutBranch("Branch invalid plan");
     const branchesBefore = fixture.git(["branch", "--list"]);
-    for (const bad of ["bad..name", "-leading-dash", "trailing/", "has space"]) {
+    for (const bad of ["bad..name", "trailing/", "has space", "tilde~1"]) {
       const refused = await fixture.run(["plan", "integration-branch", plan, bad]);
       expect(refused.exitCode, `${bad}: ${refused.stderr}`).toBe(4);
     }
@@ -563,6 +598,8 @@ describe("AC-DCS2-19: land integrates the branch once no open code task of the p
     for (const task of tasks) {
       expect(isAncestor(task.tip, merged)).toBe(true);
       expect(await statusOf(task.slug)).toBe("archived");
+      expect(existsSync(task.tree.path), "worktree removed").toBe(false);
+      expect(fixture.git(["branch", "--list", task.tree.branch]), "branch removed").toBe("");
     }
   });
 

@@ -31,6 +31,7 @@ import {
   extractEvidence,
   extractHeldClaim,
   ok,
+  readClaimRecord,
   readExecutionLog,
   type DocId,
   type DocRecord,
@@ -58,10 +59,10 @@ export interface LandGitResult {
 /** Runs `git <args>` in the repository the landing works on. */
 export type LandGit = (args: readonly string[]) => LandGitResult;
 
-/** The real {@link LandGit} over the repository at `cwd`. */
-export function createLandGit(cwd: string): LandGit {
+/** The real {@link LandGit} over the repository at `cwd`, run with the invocation's environment `env`. */
+export function createLandGit(cwd: string, env: Readonly<Record<string, string | undefined>>): LandGit {
   return (args) => {
-    const run = spawnSync("git", [...args], { cwd, encoding: "utf8" });
+    const run = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...env } });
     return { status: run.status ?? 1, stdout: run.stdout ?? "", stderr: run.stderr ?? run.error?.message ?? "" };
   };
 }
@@ -151,6 +152,19 @@ function refusal(field: string, message: string, value?: unknown): LoreError {
 
 const short = (sha: string): string => sha.slice(0, 12);
 
+/** A task the landing is about to archive, with the branch it worked on (read before the landing: an archived task holds no claim). */
+interface LandEntry {
+  readonly slug: string;
+  readonly branch: string | undefined;
+}
+
+const landEntryOf = (task: DocRecord): LandEntry => ({ slug: task.slug, branch: claimBranchOf(extractHeldClaim(task)) });
+
+/** The branch a claim worked on: the recorded branch, else the `--worktree <branch>` value (a non-absolute path is a branch name). */
+function claimBranchOf(claim: TaskClaim | undefined): string | undefined {
+  return claim?.branch ?? (claim?.worktree !== undefined && !claim.worktree.startsWith("/") ? claim.worktree : undefined);
+}
+
 export class LandService {
   constructor(private readonly ports: LandPorts) {}
 
@@ -182,7 +196,7 @@ export class LandService {
       return err(refusal("land-not-code", `${task.slug} is a ${contract.data.kind} task: it finishes on main by itself (\`lore finish ${task.slug}\`), it is never landed`));
     }
     const claim = extractHeldClaim(task);
-    const branch = claim?.branch ?? (claim?.worktree !== undefined && !claim.worktree.startsWith("/") ? claim.worktree : undefined);
+    const branch = claimBranchOf(claim);
     if (claim === undefined || branch === undefined) {
       return err(refusal("no-claim", `${task.slug} holds no claim on a branch, so there is no work to land; take it with \`lore start ${task.slug}\` first`));
     }
@@ -243,7 +257,7 @@ export class LandService {
     const integrated = await this.integrateStep(branch, tip, log);
     if (integrated.exit !== 0) return ok(this.failed(integrated.exit, `integrating ${branch}`, task.slug));
     const lines = [integrated.skipped ? `land: ${branch} already landed on main (execution log); resuming at the done walk` : `land: landed ${branch} on main`];
-    const archived = await this.archiveWalk([task.slug], task.slug);
+    const archived = await this.archiveWalk([{ slug: task.slug, branch }], task.slug);
     return ok({ exit: archived.errors.length === 0 ? 0 : 4, lines: [...lines, ...archived.lines], errors: archived.errors });
   }
 
@@ -296,7 +310,7 @@ export class LandService {
     const branch = plan.extra["integration_branch"];
     if (typeof branch !== "string" || branch === "") return err(refusal("integration-branch-missing", `the plan of ${task.slug} declares no integration branch`));
     const claim = extractHeldClaim(task);
-    const claimBranch = claim?.branch ?? claim?.worktree;
+    const claimBranch = claimBranchOf(claim);
     if (claimBranch === undefined) return err(refusal("no-claim", `${task.slug} holds no claim on a branch`));
     const tipResult = this.resolveBranch(claimBranch);
     if (!tipResult.ok) return tipResult;
@@ -379,12 +393,14 @@ export class LandService {
   /** Integrates the plan's integration branch into main inside the turn the fold holds, then archives and reports (AC-DCS2-19). */
   private async integrateBranch(plan: DocRecord, turn: HeldTurn): Promise<Result<LandOutcome, LoreError>> {
     const branch = String(plan.extra["integration_branch"]);
+    // reason: the tasks the landing archives are read BEFORE it (afterwards they are archived and no longer open).
+    const open = await this.openCodeTasks(plan);
+    if (!open.ok) return open;
+    const entries = open.value.map(landEntryOf);
     // reason: the queue instance holds this turn, so the integrate port's own ticket shares it instead of waiting behind the fold.
     const exit = await this.integrateOnce(branch);
     if (exit !== 0) return ok({ ...this.failed(exit, `integrating ${branch}`, turn.target), lines: turn.lines });
-    const open = await this.openCodeTasks(plan);
-    if (!open.ok) return open;
-    const archived = await this.archiveWalk(open.value.map((task) => task.slug), turn.target);
+    const archived = await this.archiveWalk(entries, turn.target);
     await this.ports.planClose?.afterBranchLanded(plan);
     return ok({
       exit: archived.errors.length === 0 ? 0 : 4,
@@ -395,20 +411,22 @@ export class LandService {
 
   /** `lore land <integration-branch>`: integrates the branch itself, also when it is already in main (integrate's oracle run is the proof). */
   private async landBranch(branch: string): Promise<Result<LandOutcome, LoreError>> {
-    const exit = await this.integrateOnce(branch);
-    if (exit !== 0) return ok(this.failed(exit, `integrating ${branch}`, branch));
     const plans = await this.ports.store.findMany({ type: "plan" });
     if (!plans.ok) return plans;
     const declaring = plans.value.filter((plan) => plan.extra["integration_branch"] === branch);
-    const slugs: string[] = [];
+    // reason: read BEFORE the integrate, which archives them; only the tasks the branch holds are landed by it, an unfolded task keeps
+    // its own branch and is not walked.
+    const entries: LandEntry[] = [];
+    const head = this.resolveBranch(branch);
+    if (!head.ok) return head;
     for (const plan of declaring) {
       const open = await this.openCodeTasks(plan);
       if (!open.ok) return open;
-      // reason: only the tasks the branch holds were landed by it; an unfolded task keeps its own branch and is not walked.
-      const head = this.resolveBranch(branch);
-      for (const task of open.value) if (head.ok && head.value !== null && this.isFolded(task, head.value)) slugs.push(task.slug);
+      for (const task of open.value) if (head.value !== null && this.isFolded(task, head.value)) entries.push(landEntryOf(task));
     }
-    const archived = await this.archiveWalk(slugs, branch);
+    const exit = await this.integrateOnce(branch);
+    if (exit !== 0) return ok(this.failed(exit, `integrating ${branch}`, branch));
+    const archived = await this.archiveWalk(entries, branch);
     for (const plan of declaring) await this.ports.planClose?.afterBranchLanded(plan);
     return ok({ exit: archived.errors.length === 0 ? 0 : 4, lines: [`land: landed ${branch} on main`, ...archived.lines], errors: archived.errors });
   }
@@ -429,27 +447,41 @@ export class LandService {
   }
 
   /** The done walk for tasks the landing should have archived: those still open get `lore done`, whose refusal is reported with the next command. */
-  private async archiveWalk(slugs: readonly string[], target: string): Promise<{ readonly lines: string[]; readonly errors: string[] }> {
+  private async archiveWalk(entries: readonly LandEntry[], target: string): Promise<{ readonly lines: string[]; readonly errors: string[] }> {
     const lines: string[] = [];
     const errors: string[] = [];
-    for (const slug of slugs) {
+    for (const { slug, branch: claimed } of entries) {
       const found = await resolveDoc(this.ports.store, slug);
       if (!found.ok) {
         errors.push(`land: ${slug} cannot be read: ${found.error.code}`);
         continue;
       }
       if (found.value.status === "archived") {
-        lines.push(`land: archived ${slug}`);
+        lines.push(`land: archived ${slug}`, ...this.removeBranch(claimed));
         continue;
       }
       const done = await this.ports.done(slug);
       if (done.ok) {
-        lines.push(`land: archived ${slug}`);
+        lines.push(`land: archived ${slug}`, ...this.removeBranch(claimed));
         continue;
       }
       errors.push(`land: ${slug} is landed but not archived: ${"message" in done.error ? done.error.message : done.error.code}\nland: the landing stays recorded; fix the cause, then run \`lore land ${target}\` again`);
     }
     return { lines, errors };
+  }
+
+  /**
+   * Removes the branch of an archived task once nothing holds it: `lore done` removed the worktree, but its `git branch -d` ran before
+   * the shared checkout moved to the landed main, so a merged branch can still be there. Plain `-d` only (git refuses an unmerged branch).
+   */
+  private removeBranch(branch: string | undefined): string[] {
+    if (branch === undefined) return [];
+    const exists = this.resolveBranch(branch);
+    if (!exists.ok) return [`land: branch ${branch} kept: ${exists.error.code}`];
+    if (exists.value === null) return [];
+    const removed = this.ports.git(["branch", "-d", branch]);
+    if (removed.status === 0) return [`land: removed branch ${branch}`];
+    return [`land: kept branch ${branch}: ${removed.stderr.trim().split("\n")[0] ?? ""}`];
   }
 
   // ───────────────────────────── helpers ─────────────────────────────

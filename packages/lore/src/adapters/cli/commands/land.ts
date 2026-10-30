@@ -69,7 +69,7 @@ export default defineLoreCommand({
       // reason: ONE queue instance serves the fold and the integrate, so the integrate inside a held turn shares it (integrate-queue.ts).
       const queue = createQueue({ commonDir: commonDir.stdout.trim(), log: (line) => inv.io.stdout.write(`${line}\n`) });
       const service = createLand({
-        git: createLandGit(projectRoot),
+        git: createLandGit(projectRoot, inv.env),
         queue,
         integrate: {
           integrate: async (branch) => {
