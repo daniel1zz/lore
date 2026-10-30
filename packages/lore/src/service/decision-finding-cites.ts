@@ -2,31 +2,43 @@
  * Structured cites of a decision-recheck snapshot_accuracy failure (#500, BR-1379).
  *
  * Purpose: a snapshot_accuracy failure built from a wrong-when-written `decision_findings` entry is deterministic: it
- *   names its decision (`slug@version`), the premise part and the premise source file. Those become the finding's
- *   cites, so the root-cause fingerprint (`rootCauseOf`) keys on them instead of refusing a "cite-less" finding.
+ *   names its decision (`slug@version`), the premise part and the structured `source` it is about. Those become the
+ *   finding's cites, so the root-cause fingerprint (`rootCauseOf`) keys on them instead of refusing a "cite-less" finding.
  * Public surface: {@link decisionFindingCites}, {@link withDecisionFindingCites}.
  * Invariants:
  *   - Only `wrong-when-written` findings (the kind that fails snapshot_accuracy, see `applyDecisionFindings`) cite.
- *   - Cites are the decision address, `<address> <part>` and, when the fact names one, the premise source path; never
- *     the finding's wording, so a reworded re-review keeps one fingerprint.
+ *   - Cites are the decision address, `<address> <part>` and the `source`'s address (file path, command, issue number or
+ *     document slug); never the finding's wording, which is not read here, so a reworded re-review keeps one fingerprint.
  *   - A pure judge-text snapshot_accuracy failure is untouched: it still has no cite and is still refused.
  * Side-effect class: pure.
  */
-import type { DecisionFinding, LlmMilestoneOutput } from "@lore/core";
+import type { DecisionFinding, DecisionFindingSource, LlmMilestoneOutput } from "@lore/core";
 
-// reason: `DecisionFinding` has no structured source field and decision-recheck.ts (`checkFileSource`) emits the premise
-// source only inside `fact`, always as the leading token: `<path>:<a>-<b>@<sha> read ...` (quote mismatch),
-// `<path> does not exist at <sha>` or `<path> has N lines at <sha>, ...`. All three are matched here; a changed shape
-// degrades to decision+part cites (never to no cite), pinned by decision-finding-cites.test.ts.
-const SOURCE_PATH = /^(\S+?)(?::\d+-\d+@[0-9a-f]+ read | does not exist at | has \d+ lines at )/;
+/** The cite of a structured source: a file path, the command, `#<issue>` or the document slug (with version when pinned). */
+function sourceCite(source: DecisionFindingSource): string {
+  switch (source.kind) {
+    case "file":
+      return source.path;
+    case "cmd":
+      return source.command;
+    case "issue":
+      return `#${String(source.number)}`;
+    case "doc":
+      return source.version === undefined ? source.slug : `${source.slug}@${String(source.version)}`;
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
+  }
+}
 
 /**
- * The cites of the wrong-when-written findings: decision address, decision+part and premise source path.
+ * The cites of the wrong-when-written findings: decision address, decision+part and the structured source address.
  *
  * @param findings - the re-check's findings
  * @returns sorted, de-duplicated cites; empty when no finding is wrong-when-written
  * @example
- * decisionFindingCites([{ decision: "d@2", part: "premise 1", kind: "wrong-when-written", fact: "a.ts does not exist at abc" }]);
+ * decisionFindingCites([{ decision: "d@2", part: "premise 1", kind: "wrong-when-written", fact: "x", source: { kind: "file", path: "a.ts" } }]);
  * // => ["a.ts", "d@2", "d@2 premise 1"]
  */
 export function decisionFindingCites(findings: readonly DecisionFinding[]): string[] {
@@ -35,8 +47,7 @@ export function decisionFindingCites(findings: readonly DecisionFinding[]): stri
     if (f.kind !== "wrong-when-written") continue;
     cites.add(f.decision);
     cites.add(`${f.decision} ${f.part}`);
-    const path = SOURCE_PATH.exec(f.fact)?.[1];
-    if (path !== undefined) cites.add(path);
+    if (f.source !== undefined) cites.add(sourceCite(f.source));
   }
   return [...cites].sort();
 }

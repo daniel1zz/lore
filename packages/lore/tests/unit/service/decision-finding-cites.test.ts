@@ -11,11 +11,15 @@ import { decisionFindingCites, withDecisionFindingCites } from "../../../src/ser
 import { rootCauseOf } from "../../../src/service/root-cause-fingerprint.js";
 
 const sha = "bba93a16";
-const wrong = (fact: string, decision = "decision-x@2", part = "premise 1"): DecisionFinding => ({ decision, part, kind: "wrong-when-written", fact });
-// the three wrong-when-written fact shapes decision-recheck.ts checkFileSource emits
-const QUOTE = wrong(`packages/a/t.bun.test.ts:254-275@${sha} read "x" when written, the premise quotes "y"`);
-const ABSENT = wrong(`packages/a/t.bun.test.ts does not exist at ${sha}`);
-const SHORT = wrong(`packages/a/t.bun.test.ts has 10 lines at ${sha}, the premise cites 254-275`);
+const FILE_SOURCE: DecisionFinding["source"] = { kind: "file", path: "packages/a/t.bun.test.ts", lines: [254, 275], sha };
+const wrong = (fact: string, decision = "decision-x@2", part = "premise 1", source: DecisionFinding["source"] = FILE_SOURCE): DecisionFinding => ({
+  decision,
+  part,
+  kind: "wrong-when-written",
+  fact,
+  ...(source !== undefined ? { source } : {}),
+});
+const QUOTE = wrong("any wording");
 
 const dims = (snapshot: Record<string, unknown>) => ({ snapshot_accuracy: snapshot }) as never;
 const failed = { verdict: "fail", reason: "recorded decision wrong when written: ...", reference: "Bazel action cache" };
@@ -25,10 +29,14 @@ function snapshotFinding(cites: readonly string[] | undefined) {
 }
 
 describe("decision finding cites (#500)", () => {
-  it("HAPPY: each wrong-when-written fact shape yields decision, decision+part and the premise source path", () => {
-    for (const f of [QUOTE, ABSENT, SHORT]) {
-      expect(decisionFindingCites([f])).toEqual(["decision-x@2", "decision-x@2 premise 1", "packages/a/t.bun.test.ts"]);
-    }
+  it("HAPPY: a wrong-when-written finding with a file source yields decision, decision+part and the premise source path", () => {
+    expect(decisionFindingCites([QUOTE])).toEqual(["decision-x@2", "decision-x@2 premise 1", "packages/a/t.bun.test.ts"]);
+  });
+
+  it("HAPPY: non-file sources cite their structured address (command, issue number, document slug@version)", () => {
+    expect(decisionFindingCites([wrong("w", "d@1", "premise 1", { kind: "cmd", command: "grep -n X f.ts" })])).toContain("grep -n X f.ts");
+    expect(decisionFindingCites([wrong("w", "d@1", "premise 1", { kind: "issue", number: 7 })])).toContain("#7");
+    expect(decisionFindingCites([wrong("w", "d@1", "premise 1", { kind: "doc", slug: "spec-y", version: 3 })])).toContain("spec-y@3");
   });
 
   it("HAPPY: the failed snapshot_accuracy gets the cites and the filing fingerprints it, same across rewording", () => {
@@ -46,7 +54,7 @@ describe("decision finding cites (#500)", () => {
     };
     expect(fp(wrong(QUOTE.fact, "decision-y@1"))).not.toBe(fp(QUOTE));
     expect(fp(wrong(QUOTE.fact, "decision-x@2", "premise 2"))).not.toBe(fp(QUOTE));
-    expect(fp(wrong(QUOTE.fact.replace("t.bun", "u.bun")))).not.toBe(fp(QUOTE));
+    expect(fp(wrong(QUOTE.fact, "decision-x@2", "premise 1", { kind: "file", path: "packages/a/u.bun.test.ts" }))).not.toBe(fp(QUOTE));
   });
 
   it("BOUNDARY: findings of other kinds add no cite and leave the dimension untouched", () => {
@@ -56,8 +64,12 @@ describe("decision finding cites (#500)", () => {
     expect(withDecisionFindingCites(d, [stale])).toBe(d);
   });
 
-  it("BOUNDARY: a fact with no parseable path still cites decision and part", () => {
-    expect(decisionFindingCites([wrong("garbled")])).toEqual(["decision-x@2", "decision-x@2 premise 1"]);
+  it("STATE: the source cite comes from the structured field, never from the fact text", () => {
+    const f = wrong("other/path.ts does not exist at abc123 (a file the wording names but the source does not)");
+    expect(decisionFindingCites([f])).not.toContain("other/path.ts");
+    expect(decisionFindingCites([f])).toContain("packages/a/t.bun.test.ts");
+    // no structured source: only decision and part, whatever the wording says
+    expect(decisionFindingCites([{ decision: "decision-x@2", part: "premise 1", kind: "wrong-when-written", fact: "a.ts does not exist at abc" }])).toEqual(["decision-x@2", "decision-x@2 premise 1"]);
   });
 
   it("ERROR: a pure judge-text snapshot_accuracy failure with no cite is still refused", () => {
