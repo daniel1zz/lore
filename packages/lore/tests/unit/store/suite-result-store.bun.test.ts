@@ -8,7 +8,7 @@
  *
  * Dimensions: HAPPY (round trip), NEGATIVE (duplicate attempt, unrunnable without cause), BOUNDARY (no rows -> empty /
  * null), ERROR (corrupt JSON column fails loud as STORE_ERROR), STATE (retry attempt 2 beside attempt 1), REGRESSION
- * (schema version is 43).
+ * (schema version is 44; migration-044 reclassifies non-run suite results).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,8 +51,8 @@ afterEach(() => {
 });
 
 describe("suite_results (migration-043)", () => {
-  it("AC-AF-2 the schema version is 43", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(43);
+  it("AC-AF-2 the schema version is 44", () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(44);
   });
 
   it("AC-AF-2 a stored result reads back field for field, by commit, by id and in the full list", async () => {
@@ -123,5 +123,43 @@ describe("suite_file_runs (migration-043)", () => {
     const other = await store.listSuiteFileRuns("suite-2");
     expect(other.ok && other.value).toEqual([]);
     expect((await store.insertSuiteFileRuns([])).ok).toBe(true);
+  });
+});
+
+describe("migration-044 reclassifies suite results whose command never ran the tests", () => {
+  const cmd = (exit_code: number, output_tail = "") => [{ command: "bun run test", exit_code, output_tail }];
+
+  it("AC-AF-2 a measured result with a command exit outside {0, 1} becomes unrunnable with its cause, every other row and every column kept, and a second open changes nothing", async () => {
+    const old = new SQLiteStore(join(dir, "old.db"), { schemaCeiling: 43 });
+    const contended = result({ id: "r-contended", commit_sha: "1".repeat(40), commands: [...cmd(1), ...cmd(5, "oracle-lock: contended")], failing_test_files: [] });
+    const redRow = result({ id: "r-red", commit_sha: "2".repeat(40), commands: cmd(1) });
+    const greenRow = result({ id: "r-green", commit_sha: "3".repeat(40), commands: cmd(0), failing_test_files: [] });
+    const noCommands = result({ id: "r-none", commit_sha: "4".repeat(40), commands: [], failing_test_files: [] });
+    const unrunnable = result({ id: "r-unrunnable", commit_sha: "5".repeat(40), status: "unrunnable", cause: "timed out", commands: [], failing_test_files: [] });
+    for (const r of [contended, redRow, greenRow, noCommands, unrunnable]) expect((await old.insertSuiteResult(r)).ok).toBe(true);
+    old.close();
+
+    const upgraded = new SQLiteStore(join(dir, "old.db"), { migrate: true });
+    try {
+      const all = await upgraded.listSuiteResults();
+      const byId = new Map((all.ok ? all.value : []).map((r) => [r.id, r] as const));
+      expect(byId.size).toBe(5);
+      expect(byId.get("r-contended")).toMatchObject({ status: "unrunnable", attempt: 1, commands: contended.commands });
+      expect(byId.get("r-contended")?.cause).toContain("`bun run test` exited with code 5");
+      expect(byId.get("r-contended")?.cause).toContain("the tests did not run");
+      expect(byId.get("r-red")).toEqual(redRow);
+      expect(byId.get("r-green")).toEqual(greenRow);
+      expect(byId.get("r-none")).toEqual(noCommands);
+      expect(byId.get("r-unrunnable")).toEqual(unrunnable);
+    } finally {
+      upgraded.close();
+    }
+    const again = new SQLiteStore(join(dir, "old.db"));
+    try {
+      const after = await again.listSuiteResults();
+      expect((after.ok ? after.value : []).filter((r) => r.status === "unrunnable").map((r) => r.id).sort()).toEqual(["r-contended", "r-unrunnable"]);
+    } finally {
+      again.close();
+    }
   });
 });

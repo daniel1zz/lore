@@ -54,6 +54,7 @@ function build(failing: readonly string[] = []): Fixture {
     headRef: "main",
     firstParentHistory: async (ref) => ok(Array.from({ length: Number.parseInt(ref === "main" ? sha(HEAD_INDEX) : ref, 16) + 1 }, (_, i) => sha(i))),
     fileExistsAt: async () => ok(true),
+    firstParentCommitContaining: async () => ok(undefined),
   };
   return { ports, service, suiteRuns, fileRuns, setUnrunnable: (value) => { unrunnable = value; } };
 }

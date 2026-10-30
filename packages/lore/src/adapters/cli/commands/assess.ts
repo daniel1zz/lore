@@ -62,7 +62,7 @@ import { suiteRunOfResult } from "../../../service/suite-result-service.js";
 import { regressionAtHead } from "../../../service/regression-at-head.js";
 import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "../assess-attestation-wiring.js";
 import { createGitHeadCriteriaRunner } from "../assess-landing-attester.js";
-import { createGitChangedFilesSince, createGitFileExistsAt, createGitFirstParentHistory } from "../assess-regression-git.js";
+import { createGitChangedFilesSince, createGitFileExistsAt, createGitFirstParentCommitContaining, createGitFirstParentHistory } from "../assess-regression-git.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
 import { ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
@@ -402,6 +402,7 @@ export default defineLoreCommand({
             headRef: assessedCommit ?? "main",
             firstParentHistory: createGitFirstParentHistory(inv.cwd, inv.env),
             fileExistsAt: createGitFileExistsAt(inv.cwd, inv.env),
+            firstParentCommitContaining: createGitFirstParentCommitContaining(inv.cwd, inv.env),
           });
           if (measured.ok) {
             const chargedFiles = [...new Set(measured.value.charged.map((c) => c.file))].sort();
