@@ -18,6 +18,7 @@ import { IssueFilingService } from "../../service/issue-filing-service.js";
 import type { SuiteRun } from "../../service/milestone-review-inputs.js";
 import { regressionAtHead } from "../../service/regression-at-head.js";
 import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchRunPorts } from "../../service/review-batch-service.js";
+import { planLeaseKey, type ReviewLeases } from "../../service/review-batch-lease.js";
 import { suiteRunOfResult } from "../../service/suite-result-service.js";
 import { readTaskLanding } from "../../service/task-commit-range.js";
 import { findCorpusOnlyTaskSlugs, noCodeRegressionRow } from "../../service/corpus-only-task.js";
@@ -87,6 +88,8 @@ export interface AssessWiringInput {
   /** The acting identity recorded on the evidence the measurements write. */
   readonly actor: string;
   readonly reviewService: MilestoneReviewServiceOf;
+  /** The process's keyed leases: the suite run of a commit is leased per commit (BR-1511). */
+  readonly leases: ReviewLeases;
 }
 
 /**
@@ -96,7 +99,7 @@ export interface AssessWiringInput {
  * @returns the closures; they share the assessed commit and the criteria measured once in the suite's worktree
  */
 export function createAssessWiring(input: AssessWiringInput): AssessWiring {
-  const { app, inv, actor, reviewService } = input;
+  const { app, inv, actor, reviewService, leases } = input;
 
   // reason: Part D — the plan-close chain and the full suite run ONCE for the whole batch on main's HEAD (in a
   // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
@@ -150,7 +153,7 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
     // reason: BR-1497 — main's HEAD is looked up in the suite-result store first; the suite runs only when that
     // commit has no measured result, so a second batch at the same commit runs nothing. No suite runs at a landing
     // commit: the batch measures nothing per landing (spec D1).
-    const suiteResults = app.suiteResultService;
+    const suiteResults = app.suiteResultService?.withLeases(leases);
     if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
     const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
     // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
@@ -229,7 +232,7 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
     // reason: BR-1496 — regression is measured at the assessed commit: main's head suite (stored per commit, so a second plan at
     // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
     // stays not-measured, never pass.
-    const suiteResults = app.suiteResultService;
+    const suiteResults = app.suiteResultService?.withLeases(leases);
     let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
     // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without the
     // suite-result store.
@@ -325,8 +328,8 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
  *
  * @param input.upstream - the GitHub `feedback.upstream`; `undefined` = none configured (the filing is then absent, never faked)
  */
-export function createAssessFiling(input: { readonly app: App; readonly inv: Inv; readonly actor: string; readonly upstream: GithubUpstreamCfg | undefined }): IssueFilingService | undefined {
-  const { app, inv, actor, upstream } = input;
+export function createAssessFiling(input: { readonly app: App; readonly inv: Inv; readonly actor: string; readonly upstream: GithubUpstreamCfg | undefined; readonly leases: ReviewLeases }): IssueFilingService | undefined {
+  const { app, inv, actor, upstream, leases } = input;
   if (upstream === undefined) return undefined;
   const filingCtx = {
     consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
@@ -335,7 +338,7 @@ export function createAssessFiling(input: { readonly app: App; readonly inv: Inv
     home: inv.paths.home,
     env: inv.env,
   };
-  return new IssueFilingService(createGithubIssuePort(upstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()));
+  return new IssueFilingService(createGithubIssuePort(upstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()), undefined, leases);
 }
 
 /** The batch runner over the real app's plan bundle, review docs and issue coverage reads. */
@@ -353,8 +356,10 @@ export interface BatchRunPortsInput {
   readonly actor: string;
   readonly wiring: AssessWiring;
   readonly filing: IssueFilingService | undefined;
-  /** The lease the batch runs under: the store lease of the post-landing batch; a no-op handle for `lore plan close` (its own plan lease is the guard). */
-  readonly acquireLease: BatchRunPorts["acquireLease"];
+  /** The process's keyed leases: each plan of the batch is reviewed under its own plan lease (BR-1511). */
+  readonly leases: ReviewLeases;
+  /** `direct` (plans named by id, and `lore plan close`) always judges again; `batch` (`--where`) skips a plan whose review stands. */
+  readonly mode: "batch" | "direct";
   /** The one close function (`PlanCloseService.close`) around each plan's assess; absent = the runner assesses and archives directly. */
   readonly closeFlow?: BatchRunPorts["closeFlow"];
 }
@@ -366,7 +371,8 @@ export interface BatchRunPortsInput {
 export function buildBatchRunPorts(input: BatchRunPortsInput): BatchRunPorts {
   const { app, actor, wiring } = input;
   return {
-    acquireLease: input.acquireLease,
+    acquirePlanLease: (planId) => input.leases.acquire(planLeaseKey(planId)),
+    mode: input.mode,
     settleRetirement: async (bundle) => {
       if (app.retiredAcService === undefined) return ok(undefined);
       return app.retiredAcService.settle(bundle);

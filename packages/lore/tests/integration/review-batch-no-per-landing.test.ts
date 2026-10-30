@@ -27,7 +27,7 @@ import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
-import { ReviewBatchLease } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 
@@ -117,15 +117,14 @@ class World {
       listReviewDocs: async () => ok(this.docs),
       pendingDecisionSubjects: async () => ok(new Set<string>()),
       issueCoverage: async (_planId, failed) => ok(coverFailedDimensions(failed, [])),
-      isLeaseLive: async () => ok(false),
       spawnBatch: () => ok({ pid: undefined }),
     });
   }
 
   ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {
-    const lease = new ReviewBatchLease(this.store, holder, () => T0, () => () => undefined);
+    const lease = new ReviewLeases(this.store, holder, () => T0, () => () => undefined);
     return {
-      acquireLease: () => lease.acquire(),
+      acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
       settleRetirement: async () => ok({ state: "none" as const }),
       measureSuite: async () => {
         this.suiteRuns += 1;
@@ -207,7 +206,9 @@ describe("the post-landing batch measures nothing per landing", () => {
   it("AC-AO-4 an unrelated landing runs no suite and re-reviews nothing (the batch has no criteria step at all)", async () => {
     const world = await keptOpenWorld();
     const row = await batch(world, "after-unrelated", { changedFilesSince: changedFiles([UNRELATED_FILE]) });
-    expect(row).toMatchObject({ outcome: "kept-open", reviewed: false });
+    // BR-1511: a batch reaching a kept-open plan already reviewed at its current state skips it as "already reviewed" (was: a kept-open row)
+    expect(row).toMatchObject({ outcome: "skipped", reviewed: false });
+    expect(row.detail).toContain("already reviewed");
     expect(world.suiteRuns).toBe(0);
     expect(world.judgeCalls).toBe(0);
   });
@@ -245,7 +246,8 @@ describe("the post-landing batch measures nothing per landing", () => {
     expect(await batch(world, "first")).toMatchObject({ outcome: "kept-open", reviewed: true });
     world.judgeCalls = 0;
     world.suiteRuns = 0;
-    expect(await batch(world, "next")).toMatchObject({ outcome: "kept-open", reviewed: false });
+    // BR-1511: skipped as "already reviewed" (was: a kept-open row)
+    expect(await batch(world, "next")).toMatchObject({ outcome: "skipped", reviewed: false });
     expect(world.judgeCalls).toBe(0);
     expect(world.suiteRuns).toBe(0);
   });

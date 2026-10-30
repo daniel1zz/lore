@@ -5,10 +5,11 @@
  * Purpose: group findings by root-cause fingerprint, search the open issues for each fingerprint first, file ONE issue
  *   per fingerprint that has none, and record it on every plan that shares it, one known-defect entry per failed
  *   dimension of that plan carrying the fingerprint (`extra.known_defects`; no corpus document, no link).
- * Public surface: {@link IssuePort}, {@link IssueRef}, {@link FilingGroup}, {@link IssueFilingService}.
+ * Public surface: {@link Fence}, {@link IssuePort}, {@link IssueRef}, {@link FilingGroup}, {@link IssueFilingService}.
  * Invariants:
  *   - One group (and so at most one new issue) per fingerprint, however many plans or batches hit it; an open issue
- *     carrying the fingerprint is linked, never duplicated.
+ *     carrying the fingerprint is linked, never duplicated. Across concurrent reviews this holds because search-then-create
+ *     runs under the store lease `issue:<fingerprint>` (BR-1511); it no longer rests on one corpus-wide batch lease.
  *   - Filing is idempotent: a re-run after a partial failure finds the issue it already filed (it is open and tagged)
  *     and only completes the missing records.
  *   - The number of a just-created issue comes from the create call, never from a listing.
@@ -23,7 +24,11 @@
  */
 
 import type { LoreError, MilestoneDimension, Result } from "@lore/core";
-import { ok } from "@lore/core";
+import { err, ok } from "@lore/core";
+import { issueLeaseKey, leaseLostError, type LeaseHandle, type ReviewLeases } from "./review-batch-lease.js";
+
+/** Renews the caller's lease and answers whether it still holds it (false: write nothing, stop). */
+export type Fence = () => Promise<boolean>;
 import { issueTitleOf, rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
 
 /** A filed or found issue. */
@@ -175,16 +180,20 @@ export class IssueFilingService {
   constructor(
     private readonly port: IssuePort,
     private readonly rootCause: (finding: FailedFinding) => Result<RootCause, LoreError> = rootCauseOf,
+    /** The keyed leases that make search-then-create one holder per fingerprint (BR-1511); absent only in bare constructions. */
+    private readonly leases?: ReviewLeases,
   ) {}
 
   /**
    * Files and links the findings by root cause.
    *
    * @param findings - every failed dimension of the plans under filing
+   * @param fence - renews the caller's own lease (a plan lease) and answers whether it still holds it; asked before each
+   *   known-defect write, which is not made when it answers false (BR-1511). Absent in bare constructions.
    * @returns one group per fingerprint, in first-seen order; each group carries its own error when it failed; an error
    *   when any finding has no root cause (a stored regression review lacking `suite_failing_files`)
    */
-  async fileFindings(findings: readonly FailedFinding[]): Promise<Result<FilingGroup[], LoreError>> {
+  async fileFindings(findings: readonly FailedFinding[], fence?: Fence): Promise<Result<FilingGroup[], LoreError>> {
     const byFingerprint = new Map<string, { cause: RootCause; findings: FailedFinding[] }>();
     for (const finding of findings) {
       const caused = this.rootCause(finding);
@@ -196,18 +205,23 @@ export class IssueFilingService {
     }
     const groups: FilingGroup[] = [];
     for (const { cause, findings: members } of byFingerprint.values()) {
-      groups.push(await this.fileGroup(cause, members));
+      groups.push(await this.fileGroup(cause, members, fence));
     }
     return ok(groups);
   }
 
-  private async fileGroup(cause: RootCause, members: readonly FailedFinding[]): Promise<FilingGroup> {
+  private async fileGroup(cause: RootCause, members: readonly FailedFinding[], fence: Fence | undefined): Promise<FilingGroup> {
     const plans = [...new Set(members.map((m) => m.plan))].sort();
-    const open = await this.port.findOpenByFingerprint(cause.short);
-    if (!open.ok) return { cause, plans, reused: false, linked: [], error: open.error };
-    let issue = open.value;
-    const reused = issue !== undefined;
-    if (issue === undefined) {
+    const findOrFile = async (handle?: LeaseHandle): Promise<Result<{ readonly issue: IssueRef; readonly reused: boolean }, LoreError>> => {
+      const open = await this.port.findOpenByFingerprint(cause.short);
+      if (!open.ok) return open;
+      if (open.value !== undefined) return ok({ issue: open.value, reused: true });
+      // reason: BR-1511 fencing — the lease is renewed right before the create; a renewal that fails means another holder may own the key, so nothing is created.
+      if (handle !== undefined) {
+        const renewed = await handle.renewNow();
+        if (!renewed.ok) return renewed;
+        if (!renewed.value) return err(leaseLostError());
+      }
       const filed = await this.port.file({
         title: issueTitleOf(cause),
         body: bodyOf(cause, members),
@@ -215,12 +229,17 @@ export class IssueFilingService {
         dimension: cause.dimension,
         plans,
       });
-      if (!filed.ok) return { cause, plans, reused: false, linked: [], error: filed.error };
-      issue = filed.value;
-    }
+      return filed.ok ? ok({ issue: filed.value, reused: false }) : filed;
+    };
+    // reason: BR-1511 — search-then-create runs under `issue:<fingerprint>`, so concurrent reviews create at most one open
+    // issue per root cause; the search inside the lease is what lets the second holder find the first one's issue.
+    const found = this.leases === undefined ? await findOrFile() : await this.leases.withWaiting(issueLeaseKey(cause.fingerprint), (handle) => findOrFile(handle));
+    if (!found.ok) return { cause, plans, reused: false, linked: [], error: found.error };
+    const { issue, reused } = found.value;
     const linked: string[] = [];
     for (const plan of plans) {
       const dimensions = [...new Set(members.filter((m) => m.plan === plan).map((m) => m.dimension))];
+      if (fence !== undefined && !(await fence())) return { cause, plans, issue, reused, linked, error: leaseLostError() };
       const result = await this.port.recordKnownDefects(
         plan,
         issue,

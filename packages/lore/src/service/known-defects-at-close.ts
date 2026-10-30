@@ -15,6 +15,7 @@
  *     audit details in the close write; (3) {@link carryOutIssueWrites} runs after that write and never fails it.
  *   - A dimension the review did not measure (`not-measured`, `na`, an accepted gate) never detaches its entries.
  *   - A pending write is never dropped: it stays pending on a new audit row until a retry succeeds.
+ *   - A retry of an issue's pending writes runs under the lease `issue-write:<n>` and re-reads the audit rows after acquiring (BR-1511).
  * Side-effect class: IO through injected ports (issue reader, issue writer, audit reader/appender); the pure parts
  *   ({@link closingFactsOf}, {@link issueWritesOf}, {@link foldPendingIssueWrites}) touch nothing.
  *
@@ -38,6 +39,7 @@ import {
 } from "@lore/core";
 import { acceptedGatesOf } from "./gate-acceptance-service.js";
 import type { IssueRead } from "./milestone-review-inputs.js";
+import { issueWriteLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
 import { rootCauseOf } from "./root-cause-fingerprint.js";
 
 /** Audit action of the row that records the issue writes of a close (or of a retry of earlier pending ones). */
@@ -189,12 +191,21 @@ export function issueWritesOf(planSlug: string, reviewSlug: string, detachment: 
  *
  * @returns one record per write
  */
-export async function carryOutIssueWrites(writes: readonly PlannedIssueWrite[], writer: KnownDefectIssueWriter | undefined): Promise<IssueWriteRecord[]> {
+export async function carryOutIssueWrites(
+  writes: readonly PlannedIssueWrite[],
+  writer: KnownDefectIssueWriter | undefined,
+  /** Renews the caller's lease and answers whether it still holds it; a write is not made (it stays pending) when it answers false (BR-1511). */
+  fence?: () => Promise<boolean>,
+): Promise<IssueWriteRecord[]> {
   const records: IssueWriteRecord[] = [];
   for (const write of writes) {
     const base = { plan: write.plan, issue: write.issue, action: write.action, ...(write.body !== undefined ? { body: write.body } : {}) } as const;
     if (writer === undefined) {
       records.push({ ...base, status: "pending", error: "no issue writer is wired (no GitHub upstream configured)" });
+      continue;
+    }
+    if (fence !== undefined && !(await fence())) {
+      records.push({ ...base, status: "pending", error: "the lease of this write expired and was taken over; not written" });
       continue;
     }
     const outcome = write.action === "comment" ? await writer.commentIssue(write.issue, write.body ?? "") : await writer.closeIssue(write.issue);
@@ -236,6 +247,8 @@ export interface PendingRetryPorts {
   readonly listRows: () => Promise<Result<readonly IssueWriteAuditRow[], LoreError>>;
   readonly writer: KnownDefectIssueWriter | undefined;
   readonly appendRow: (details: { readonly retry: true; readonly writes: readonly IssueWriteRecord[] }) => Promise<Result<void, LoreError>>;
+  /** The keyed leases that give each issue's pending writes one retrying holder (BR-1511); absent only in bare constructions. */
+  readonly leases?: ReviewLeases;
 }
 
 /**
@@ -249,8 +262,38 @@ export async function retryPendingIssueWrites(ports: PendingRetryPorts): Promise
   if (!rows.ok) return rows;
   const pending = foldPendingIssueWrites(rows.value);
   if (pending.length === 0) return ok([]);
-  const records = await carryOutIssueWrites(pending, ports.writer);
-  const appended = await ports.appendRow({ retry: true, writes: records });
-  if (!appended.ok) return appended;
-  return ok(records);
+  const leases = ports.leases;
+  if (leases === undefined) {
+    const records = await carryOutIssueWrites(pending, ports.writer);
+    const appended = await ports.appendRow({ retry: true, writes: records });
+    if (!appended.ok) return appended;
+    return ok(records);
+  }
+  // reason: BR-1511 — the pending writes of one issue are retried under `issue-write:<n>`. The holder re-reads the audit rows
+  // AFTER acquiring and appends its outcome row BEFORE releasing, so a second pass never sees a write as pending that the
+  // first one did: without both, two concurrent retries comment twice.
+  const outcomes: IssueWriteRecord[] = [];
+  for (const issue of [...new Set(pending.map((w) => w.issue))]) {
+    const taken = await leases.acquire(issueWriteLeaseKey(issue));
+    if (!taken.ok) return taken;
+    // reason: a busy key means another holder is retrying these writes right now; skipping is not a drop, they stay pending on the audit until a row says done.
+    if (taken.value.state === "busy") continue;
+    try {
+      const fresh = await ports.listRows();
+      if (!fresh.ok) return fresh;
+      const stillPending = foldPendingIssueWrites(fresh.value).filter((w) => w.issue === issue);
+      if (stillPending.length === 0) continue;
+      const handle = taken.value.handle;
+      const records = await carryOutIssueWrites(stillPending, ports.writer, async () => {
+        const renewed = await handle.renewNow();
+        return renewed.ok && renewed.value;
+      });
+      const appended = await ports.appendRow({ retry: true, writes: records });
+      if (!appended.ok) return appended;
+      outcomes.push(...records);
+    } finally {
+      await taken.value.handle.release();
+    }
+  }
+  return ok(outcomes);
 }

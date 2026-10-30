@@ -15,11 +15,12 @@
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { App } from "../../app.js";
-import type { BatchPlanRow, BatchRunPorts } from "../../service/review-batch-service.js";
+import type { BatchPlanRow } from "../../service/review-batch-service.js";
 import { buildBatchRunPorts, createAssessFiling, createAssessWiring, createBatchRunner } from "./assess-batch-wiring.js";
 import type { invocationOf } from "./command-invocation.js";
 import { printLine } from "./output.js";
 import { buildPlanCloseService } from "./plan-close-wiring.js";
+import { buildReviewLeases } from "./review-batch-wiring.js";
 import { classifyFeedbackUpstream } from "./report-issue-wiring.js";
 import { exitCode, formatErrorFor, resolveActor } from "./utils.js";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
@@ -39,14 +40,6 @@ export interface PlanCloseRunInput {
   readonly planRef: string;
   readonly json: boolean;
 }
-
-/** The lease of the review batch is not taken here: a no-op handle (see the module header). */
-const NO_REVIEW_LEASE: BatchRunPorts["acquireLease"] = async () =>
-  ok({
-    state: "held" as const,
-    tookOver: false,
-    handle: { lost: () => false, lastError: () => undefined, renewNow: async () => ok(true), release: async () => ok(undefined) },
-  });
 
 function printOutcome(input: PlanCloseRunInput, data: Record<string, unknown>, text: string): void {
   if (input.json) printLine(input.inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
@@ -75,20 +68,26 @@ export async function runPlanClose(input: PlanCloseRunInput): Promise<number> {
     inv.io.stderr.write(`${formatErrorFor(inv, classification.error)}\n`);
     return exitCode(classification.error);
   }
-  const wiring = createAssessWiring({ app, inv, actor, reviewService });
-  const filing = createAssessFiling({ app, inv, actor, upstream: classification.kind === "unconfigured" ? undefined : classification.cfg });
+  // reason: BR-1511 — the assess of the plan runs under that plan's keyed lease like every review; this process's keyed leases name its holder
+  const leases = buildReviewLeases(app, `${actor}:plan-close:${String(process.pid)}`);
+  if (leases === undefined) {
+    inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased; nothing was changed\n");
+    return 1;
+  }
+  const wiring = createAssessWiring({ app, inv, actor, reviewService, leases });
+  const filing = createAssessFiling({ app, inv, actor, upstream: classification.kind === "unconfigured" ? undefined : classification.cfg, leases });
   const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
   if (!closeService.ok) {
     inv.io.stderr.write(`${formatErrorFor(inv, closeService.error)}\n`);
     return exitCode(closeService.error);
   }
-  const ports = buildBatchRunPorts({ app, actor, wiring, filing, acquireLease: NO_REVIEW_LEASE });
+  const ports = buildBatchRunPorts({ app, actor, wiring, filing, leases, mode: "direct" });
   const runner = createBatchRunner(app);
   const closed = await closeService.value.close<Result<BatchPlanRow, LoreError>>(input.planRef, async (plan) => {
     const run = await runner.runBatch([plan.slug], ports);
     if (!run.ok) return run;
-    if (run.value.state === "busy") return err({ code: "STORE_ERROR", message: `the review lease is held by ${run.value.holder}` });
     const row = run.value.rows[0];
+    if (row?.held !== undefined) return err({ code: "STORE_ERROR", message: `the plan's review lease is held by ${row.held.holder} until ${row.held.expires_at}` });
     return row === undefined ? err({ code: "STORE_ERROR", message: "the assess returned no row for the plan" }) : ok(row);
   });
   if (!closed.ok) {

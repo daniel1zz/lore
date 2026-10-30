@@ -2,8 +2,8 @@
  * Binds `ReviewTriggerService` to the real App and the detached process spawn (BR-1379).
  *
  * Purpose: the CLI-side wiring of the post-landing review batch: the trigger/start service for `lore integrate`, the
- *   store lease for the batch process, and the detached `lore assess --where needs-review --file-issues --close` spawn.
- * Public surface: buildReviewTriggerService, buildReviewLease, spawnDelegatedJob, spawnDetachedReviewBatch,
+ *   keyed store leases of the process, and the detached `lore assess --where needs-review --file-issues --close` spawn.
+ * Public surface: buildReviewTriggerService, buildReviewLeases, spawnDelegatedJob, spawnDetachedReviewBatch,
  *   buildReviewBatchStarter, buildPlanCloseTrigger (the automatic plan close, AC-DCS2-11), REVIEW_BATCH_ARGS, REVIEW_BATCH_JOB.
  * Invariants:
  *   - ONE batch per process: a process that already started a review batch for a corpus while it still runs reuses it, so the several steps of
@@ -35,7 +35,7 @@ import {
   type DelegatedRunRegistry,
   type DelegatingCaller,
 } from "../../service/delegated-run.js";
-import { ReviewBatchLease } from "../../service/review-batch-lease.js";
+import { ReviewLeases } from "../../service/review-batch-lease.js";
 import type { ListCompletePlans } from "../../service/check-stats-service.js";
 import { ReviewTriggerService } from "../../service/review-batch-service.js";
 
@@ -45,9 +45,9 @@ export const REVIEW_BATCH_ARGS: readonly string[] = ["assess", "--where", "needs
 /** The review batch's job name: its child run's agent type. */
 export const REVIEW_BATCH_JOB = "review-batch";
 
-/** The lease for one batch process; `holder` identifies it (actor plus pid). */
-export function buildReviewLease(app: App, holder: string): ReviewBatchLease | undefined {
-  return app.reviewLeaseStore === undefined ? undefined : new ReviewBatchLease(app.reviewLeaseStore, holder);
+/** The keyed leases of one process (plan, suite, issue keys, BR-1511); `holder` identifies it (actor plus pid). */
+export function buildReviewLeases(app: App, holder: string): ReviewLeases | undefined {
+  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder);
 }
 
 /** Spec of one delegated detached job. */
@@ -209,7 +209,7 @@ export interface PlanCloseTriggerInput {
 
 /**
  * The starter behind every trigger of the automatic plan close: the existing `ReviewTriggerService.start` over the detached, delegated
- * spawn. One call computes the trigger set and, when it is non-empty and no review lease is live, starts ONE detached batch and returns at
+ * spawn. One call computes the trigger set and, when it is non-empty, starts ONE detached batch (plans another batch holds are skipped by its per-plan lease, BR-1511) and returns at
  * once; a start that could not happen is a line, never a failure of the caller.
  *
  * @returns a function from the plan's slug and the reason it is asked (one phrase) to the line the caller prints; `undefined` when this
@@ -237,8 +237,6 @@ export function buildReviewBatchStarter(input: PlanCloseTriggerInput): ((planSlu
     switch (started.value.state) {
       case "empty":
         return `plan close: ${planSlug} ${why}; no plan needs review`;
-      case "lease-live":
-        return `plan close: ${planSlug} ${why}; a review batch already holds the lease and closes the plans that need it`;
       case "started":
         return `plan close: ${planSlug} ${why}; the review batch started${started.value.pid !== undefined ? ` (pid ${String(started.value.pid)})` : ""} and closes it in the background`;
     }
@@ -278,18 +276,17 @@ export function refuseSpawnForRead(): Result<{ readonly pid: number | undefined 
 /**
  * The trigger/start service over the real App.
  *
+ * @param _holder - unused: the trigger takes no lease any more (BR-1511); kept so every call site stays unchanged
  * @param spawnBatch - the detached spawn (`spawnDetachedReviewBatch` bound to the invocation)
- * @param holder - this process's lease holder id
  */
 export function buildReviewTriggerService(
   app: App,
-  holder: string,
+  _holder: string,
   spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
 ): ReviewTriggerService | undefined {
-  const lease = buildReviewLease(app, holder);
   const decisions = app.decisionReadService;
   const retired = app.retiredAcService;
-  if (lease === undefined || decisions === undefined) return undefined;
+  if (decisions === undefined) return undefined;
   return new ReviewTriggerService({
     listPlans: async () => {
       const listed = await app.corpusService.listFull({ type: "plan" });
@@ -303,7 +300,6 @@ export function buildReviewTriggerService(
     },
     issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
     ...(retired !== undefined ? { hasStaleOwnerDecision: (bundle: PlanBundle) => retired.hasStalePendingDecision(bundle) } : {}),
-    isLeaseLive: () => lease.isLive(),
     spawnBatch,
   });
 }

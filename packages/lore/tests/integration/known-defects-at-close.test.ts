@@ -37,7 +37,7 @@ import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION } from "../../src/service/known-defects-at-close.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
-import { ReviewBatchLease } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import type { IssueRead } from "../../src/service/milestone-review-inputs.js";
 import { actedStore } from "../live-invocation.js";
@@ -321,9 +321,9 @@ describe("AC-AQ-2 which known defects a closing plan keeps", () => {
       listReviewDocs: async () => ok([]),
       issueCoverage: async () => err<LoreError>({ code: "STORE_ERROR", message: "unused" }),
     });
-    const lease = new ReviewBatchLease(store, "b", () => T0, () => () => undefined);
+    const lease = new ReviewLeases(store, "b", () => T0, () => () => undefined);
     const ports = {
-      acquireLease: () => lease.acquire(),
+      acquirePlanLease: (planId: string) => lease.acquire(planLeaseKey(planId)),
       retryPendingIssueWrites: async () => {
         order.push("retry");
         return ok(undefined);
@@ -370,14 +370,14 @@ describe("AC-AQ-3 the detach runs on every close path with one audit row", () =>
       file: async () => ok<IssueRef>({ number: 99 }),
       recordKnownDefects: async () => ok(undefined),
     };
-    const lease = new ReviewBatchLease(w.store, "batch", () => T0, () => () => undefined);
+    const lease = new ReviewLeases(w.store, "batch", () => T0, () => () => undefined);
     const runner = new ReviewBatchRunner({
       getPlanBundle: (ref) => w.corpus.getPlanBundle(ref),
       listReviewDocs: (planId) => w.corpus.listMilestoneReviewDocs(planId),
       issueCoverage: (planId, failed) => w.corpus.coverageOfFailedDimensions(planId, failed),
     });
     const run = await runner.runBatch([w.plan.slug], {
-      acquireLease: () => lease.acquire(),
+      acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
       settleRetirement: async () => ok({ state: "none" as const }),
       measureSuite: async () => undefined,
       reviewPlan: async () => err<LoreError>({ code: "STORE_ERROR", message: "the stored review is current; nothing is judged" }),

@@ -110,6 +110,7 @@ import {
   type KnownDefectDetachment,
   type KnownDefectIssueWriter,
 } from "./known-defects-at-close.js";
+import { ReviewLeases } from "./review-batch-lease.js";
 import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -1406,6 +1407,8 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     return retryPendingIssueWrites({
       listRows: async () => this.store.listAuditRowsByAction(KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION),
       writer: this.knownDefectIssueWriter,
+      // reason: BR-1511 — each issue's pending writes are retried under `issue-write:<n>` (the store carries the lease rows).
+      leases: new ReviewLeases(this.store, by ?? "known-defect-retry"),
       appendRow: (details) =>
         this.appendAudit({
           action: KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,

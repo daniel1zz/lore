@@ -4,8 +4,9 @@
  *
  * Purpose: (1) {@link ReviewTriggerService.computeTriggerSet}: from stored plan progress, the complete plans that need a
  *   review, a retry of their issue filing, a close, or an owner-resolved settle; (2) {@link ReviewTriggerService.start}:
- *   the landing's one cheap question "is there work and no live lease" answered by starting ONE detached batch;
- *   (3) {@link ReviewBatchRunner.runBatch}: the batch itself, under the store lease.
+ *   the landing's one cheap question "is there work" answered by starting ONE detached batch, whatever other batches run;
+ *   (3) {@link ReviewBatchRunner.runBatch}: the batch itself; each plan's review runs under its own lease `plan:<id>` (BR-1511),
+ *   so reviews of different plans run concurrently and a plan another batch holds is skipped and named.
  * Public surface: {@link classifyPlan}, {@link PlanReviewNeed}, {@link ReviewTriggerDeps}, {@link ReviewRunDeps}, {@link ReviewTriggerService}, {@link ReviewBatchRunner},
  *   {@link BatchPlanRow}, {@link BATCH_ERROR_AUDIT_ACTION}.
  * Invariants:
@@ -117,8 +118,6 @@ export interface ReviewTriggerDeps {
   readonly hasStaleOwnerDecision?: (bundle: PlanBundle) => Promise<Result<boolean, LoreError>>;
   /** The plan-close coverage predicate (`CorpusService.coverageOfFailedDimensions`): which failed dimensions an open linked issue's record covers. */
   readonly issueCoverage: (planId: string, failed: readonly string[]) => Promise<Result<DimensionCoverage, LoreError>>;
-  /** True when a live lease is held (reads only). */
-  readonly isLeaseLive: () => Promise<Result<boolean, LoreError>>;
   /** Starts the detached batch process; returns once it is spawned (never waits for it). */
   readonly spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
 }
@@ -143,12 +142,12 @@ export interface CompletePlanEntry {
 /** What the landing's start did. */
 export type StartOutcome =
   | { readonly state: "empty" }
-  | { readonly state: "lease-live"; readonly triggered: number }
   | { readonly state: "started"; readonly triggered: number; readonly pid: number | undefined };
 
 /** The ports `runBatch` drives. */
 export interface BatchRunPorts {
-  readonly acquireLease: () => Promise<Result<LeaseOutcome, LoreError>>;
+  /** Takes the lease `plan:<planId>` (BR-1511); `busy` names the other holder and its expiry. */
+  readonly acquirePlanLease: (planId: string) => Promise<Result<LeaseOutcome, LoreError>>;
   /** Carries out an answered owner decision and raises the one pending decision; `undefined` when not wired. */
   readonly settleRetirement: (bundle: PlanBundle) => Promise<Result<PlanRetirementState | undefined, LoreError>>;
   /** Measures the batch's one full-suite run. */
@@ -178,6 +177,11 @@ export interface BatchRunPorts {
    * Optional (absent = the runner assesses and archives directly, as a bare construction does).
    */
   readonly closeFlow?: (ref: string, assess: () => Promise<BatchPlanRow>) => Promise<BatchPlanRow>;
+  /**
+   * `batch` (default, `--where`): a plan whose current review stands is skipped as "already reviewed". `direct` (plan ids given):
+   * the plan is always judged again (BR-1379, BR-1511).
+   */
+  readonly mode?: "batch" | "direct";
 }
 
 /** One errored attempt, as stored in the audit row. */
@@ -201,12 +205,24 @@ export interface BatchPlanRow {
   readonly issues: readonly number[];
   readonly detail: string;
   readonly stage?: BatchErrorRecord["stage"];
+  /** Set on a `skipped` row whose plan lease another holder had: who held it and until when (BR-1511). */
+  readonly held?: { readonly holder: string; readonly expires_at: string };
 }
 
-/** The batch result. */
-export type BatchRun =
-  | { readonly state: "busy"; readonly holder: string; readonly expires_at: string }
-  | { readonly state: "ran"; readonly tookOver: boolean; readonly suiteRuns: number; readonly rows: readonly BatchPlanRow[] };
+/** The batch result: one row per selected plan (plus an error row when the pending-issue-write retry could not read). */
+export interface BatchRun {
+  readonly state: "ran";
+  readonly suiteRuns: number;
+  readonly rows: readonly BatchPlanRow[];
+}
+
+/**
+ * True when the batch selected plans and every one of them was skipped because another holder had its lease: it ran
+ * nothing, so its caller exits 75 rather than 0 (BR-1511).
+ */
+export function skippedEveryPlan(run: BatchRun, selected: number): boolean {
+  return selected > 0 && run.rows.filter((row) => row.held !== undefined).length === selected;
+}
 
 function messageOf(error: LoreError): string {
   return "message" in error && typeof error.message === "string" ? error.message : error.code;
@@ -264,16 +280,14 @@ export class ReviewTriggerService {
   }
 
   /**
-   * The landing's step: compute the trigger set; when non-empty and no lease is live, start ONE detached batch and
-   * return. An empty set or a live lease starts nothing. No review runs here.
+   * The landing's step: compute the trigger set; when non-empty start ONE detached batch and return, whatever other
+   * batches are running (plans another batch holds are skipped by the per-plan lease, BR-1511). An empty set starts
+   * nothing. No review runs here.
    */
   async start(): Promise<Result<StartOutcome, LoreError>> {
     const set = await this.computeTriggerSet();
     if (!set.ok) return set;
     if (set.value.length === 0) return ok({ state: "empty" });
-    const live = await this.deps.isLeaseLive();
-    if (!live.ok) return live;
-    if (live.value) return ok({ state: "lease-live", triggered: set.value.length });
     // reason: the spawn registers the batch's child run before it returns (#501), so it is awaited
     const spawned = await this.deps.spawnBatch();
     if (!spawned.ok) return spawned;
@@ -286,24 +300,17 @@ export class ReviewBatchRunner {
   constructor(private readonly deps: ReviewRunDeps) {}
 
   /**
-   * Runs the batch for `planRefs` under the store lease: per plan settle the owner decision, judge when no valid
-   * review matches the current fingerprint, file by root cause when the review failed, then close.
+   * Runs the batch for `planRefs`: per plan, under that plan's lease (BR-1511), settle the owner decision, judge when no
+   * valid review matches the current fingerprint, file by root cause when the review failed, then close. A plan whose
+   * lease another holder has is skipped and named; the batch goes on to the next plan.
    *
-   * @returns `busy` when another live batch holds the lease (nothing ran); otherwise one row per plan
+   * @returns one row per plan (a held plan is a `skipped` row carrying `held`); an error only when the store fails
    */
   async runBatch(planRefs: readonly string[], ports: BatchRunPorts): Promise<Result<BatchRun, LoreError>> {
-    const leased = await ports.acquireLease();
-    if (!leased.ok) return leased;
-    if (leased.value.state === "busy") return ok({ state: "busy", holder: leased.value.holder, expires_at: leased.value.expires_at });
-    const handle = leased.value.handle;
-    try {
-      return ok(await this.runUnderLease(planRefs, ports, handle, leased.value.tookOver));
-    } finally {
-      await handle.release();
-    }
+    return ok(await this.runPlans(planRefs, ports));
   }
 
-  private async runUnderLease(planRefs: readonly string[], ports: BatchRunPorts, handle: LeaseHandle, tookOver: boolean): Promise<BatchRun> {
+  private async runPlans(planRefs: readonly string[], ports: BatchRunPorts): Promise<BatchRun> {
     const rows: BatchPlanRow[] = [];
     // reason: BR-1510 — a pending GitHub write of an earlier close is retried before anything else, so it never waits
     // on this batch's plans; a failed retry read is a visible row, never a silent drop.
@@ -320,15 +327,13 @@ export class ReviewBatchRunner {
       }
       return suite;
     };
+    // reason: the plan's keyed lease (BR-1511) is taken inside `runPlan`; the close function (AC-DCS2-11, its own plan-scoped lease)
+    // wraps that assess, so a plan another holder has is a skipped row either way.
     for (const ref of planRefs) {
-      if (handle.lost()) {
-        rows.push({ plan: ref, outcome: "error", reviewed: false, failed: [], issues: [], detail: messageOf(leaseLostError()) });
-        continue;
-      }
       const assess = (): Promise<BatchPlanRow> => this.runPlan(ref, ports, measureOnce);
       rows.push(ports.closeFlow === undefined ? await assess() : await ports.closeFlow(ref, assess));
     }
-    return { state: "ran", tookOver, suiteRuns, rows };
+    return { state: "ran", suiteRuns, rows };
   }
 
   /**
@@ -358,11 +363,44 @@ export class ReviewBatchRunner {
     return ok(named.some((file) => touched.has(file)));
   }
 
+  /** Takes the plan's lease, runs the plan under it, releases it; a held plan is a `skipped` row naming the holder. */
   private async runPlan(ref: string, ports: BatchRunPorts, measureOnce: () => Promise<SuiteRun | undefined>): Promise<BatchPlanRow> {
+    const resolved = await this.deps.getPlanBundle(ref);
+    if (!resolved.ok) return { plan: ref, outcome: "error", reviewed: false, failed: [], issues: [], detail: messageOf(resolved.error) };
+    const planSlug = resolved.value.plan.slug;
+    const leased = await ports.acquirePlanLease(resolved.value.plan.id);
+    if (!leased.ok) return { plan: planSlug, outcome: "error", reviewed: false, failed: [], issues: [], detail: `plan lease: ${messageOf(leased.error)}` };
+    if (leased.value.state === "busy") {
+      const held = { holder: leased.value.holder, expires_at: leased.value.expires_at };
+      return { plan: planSlug, outcome: "skipped", reviewed: false, failed: [], issues: [], detail: `skipped: held by ${held.holder} until ${held.expires_at}`, held };
+    }
+    const handle = leased.value.handle;
+    try {
+      return await this.runPlanLeased(ref, ports, measureOnce, handle);
+    } finally {
+      await handle.release();
+    }
+  }
+
+  private async runPlanLeased(ref: string, ports: BatchRunPorts, measureOnce: () => Promise<SuiteRun | undefined>, handle: LeaseHandle): Promise<BatchPlanRow> {
+    // reason: BR-1511 — the plan is read AGAIN after its lease is acquired: another batch may have reviewed and archived it
+    // between selection and now, and judging it a second time would write a second review document.
     const first = await this.deps.getPlanBundle(ref);
     if (!first.ok) return { plan: ref, outcome: "error", reviewed: false, failed: [], issues: [], detail: messageOf(first.error) };
     const planId = first.value.plan.id;
     const planSlug = first.value.plan.slug;
+    if (first.value.plan.status === "archived" || first.value.plan.status === "deprecated") {
+      return { plan: planSlug, outcome: "skipped", reviewed: false, failed: [], issues: [], detail: `skipped: already ${first.value.plan.status}` };
+    }
+    const lostRow = (reviewed: boolean): BatchPlanRow => ({ plan: planSlug, outcome: "error", reviewed, failed: [], issues: [], detail: messageOf(leaseLostError()) });
+    // reason: BR-1511 fencing — before each write under the plan key (settle, review document, known-defect write, archive) the lease
+    // is renewed; a renewal that fails (the row no longer names this holder) means nothing is written and the holder stops.
+    const fenced = async (): Promise<boolean> => {
+      if (handle.lost()) return false;
+      const renewed = await handle.renewNow();
+      return renewed.ok && renewed.value;
+    };
+    const direct = ports.mode === "direct";
     const fail = async (stage: BatchErrorRecord["stage"], fingerprint: string, error: LoreError, reviewed: boolean, review?: string): Promise<BatchPlanRow> => {
       const message = messageOf(error);
       await ports.recordError({ planId, planSlug, fingerprint, stage, message, at: ports.now() });
@@ -371,6 +409,7 @@ export class ReviewBatchRunner {
 
     // reason: the owner's answer is carried out FIRST (a rejection restores ACs, which changes the fingerprint), so the
     // fingerprint compared below is the one the plan has after the restore.
+    if (!(await fenced())) return lostRow(false);
     const settled = await ports.settleRetirement(first.value);
     if (!settled.ok) return fail("settle", planStateFingerprint(first.value.plan, first.value.tasks, first.value.spec), settled.error, false);
     const retirement = settled.value;
@@ -392,10 +431,13 @@ export class ReviewBatchRunner {
       }
     }
     let coverFixed = false;
+    // reason: the number of failed dimensions with no open linked issue; -1 when not read (no findings to file or retired ACs).
+    let uncoveredCount = -1;
     if (latest !== undefined && latest.review.fingerprint === fingerprint && hasFindingsToFile(latest.review) && (latest.review.retired_acs?.length ?? 0) === 0) {
       const coverage = await this.deps.issueCoverage(planId, filableDimensions(latest.review.dimensions));
       if (!coverage.ok) return fail("review", fingerprint, coverage.error, false);
       coverFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
+      uncoveredCount = coverage.value.uncovered.length;
     }
     // reason: spec D1 / BR-1379 — the batch measures nothing per landing. A current review is re-made only on the three
     // triggers named in the module header; the decision reads the stored review, so it costs no suite run and no checkout.
@@ -406,7 +448,18 @@ export class ReviewBatchRunner {
       if (!due.ok) return fail("review", fingerprint, due.error, false);
       factsChanged = due.value;
     }
-    if (planStateChanged || factsChanged) {
+    // reason: BR-1511 — a BATCH skips a plan whose current review stands and has nothing left to do (kept open by a gate, every
+    // finding already filed): the plan was reviewed just before this batch got its lease, and judging again would write a second
+    // review document. A direct `lore assess <plan>` always reviews (BR-1379), so it never takes this skip.
+    if (!direct && !planStateChanged && !factsChanged && latest !== undefined && uncoveredCount === 0 && (latest.review.retired_acs?.length ?? 0) === 0) {
+      const accepted = acceptedGatesOf(bundle.plan, latest);
+      const stillBlocked = blockingGates(latest.review.dimensions).filter((gate) => !accepted.includes(gate));
+      if (stillBlocked.length > 0) {
+        return { plan: planSlug, outcome: "skipped", reviewed: false, review: latest.doc.slug, failed: filableDimensions(latest.review.dimensions), issues: [], detail: `skipped: already reviewed at the current state (${latest.doc.slug}); kept open by gate(s) ${stillBlocked.join(", ")}` };
+      }
+    }
+    if (planStateChanged || factsChanged || direct) {
+      if (!(await fenced())) return lostRow(false);
       const suite = await measureOnce();
       const judged = await ports.reviewPlan(ref, suite);
       // reason: an errored review is recorded as an audit row, NOT a review: it does not count toward once-per-fingerprint.
@@ -424,6 +477,7 @@ export class ReviewBatchRunner {
     const failed = filableDimensions(review.dimensions);
     const issues: number[] = [];
     if (failed.length > 0) {
+      if (!(await fenced())) return lostRow(reviewed);
       if (ports.filing === undefined) {
         return fail("filing", fingerprint, { code: "VALIDATION_ERROR", field: "feedback.upstream", message: "the review failed and needs issues filed, but no issue tracker is configured (feedback.upstream.repo)", rule: "BR-1379" }, reviewed, latest.doc.slug);
       }
@@ -436,7 +490,7 @@ export class ReviewBatchRunner {
         reviewSlug: latest.doc.slug,
         causes: review.causes,
       }));
-      const filed = await ports.filing.fileFindings(findings);
+      const filed = await ports.filing.fileFindings(findings, fenced);
       if (!filed.ok) return fail("filing", fingerprint, filed.error, reviewed, latest.doc.slug);
       const broken = filed.value.find((g) => g.error !== undefined);
       if (broken?.error !== undefined) return fail("filing", fingerprint, broken.error, reviewed, latest.doc.slug);
@@ -458,6 +512,7 @@ export class ReviewBatchRunner {
         detail: `kept open: gate(s) ${blockers.map((g) => `${g} ${review.dimensions[g].verdict}`).join(", ")} (a gate is accepted only with \`lore assess ${planSlug} --accept-gate <dimension>\` and a decision)`,
       };
     }
+    if (!(await fenced())) return lostRow(reviewed);
     const closed = await ports.closePlan(ref);
     if (!closed.ok) return fail("close", fingerprint, closed.error, reviewed, latest.doc.slug);
     return {

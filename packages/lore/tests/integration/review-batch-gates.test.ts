@@ -38,12 +38,11 @@ import { actedStore } from "../live-invocation.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, milestoneFactsFingerprint, planStateFingerprint, type FactsFingerprintInput } from "../../src/service/milestone-review.js";
-import { REVIEW_BATCH_LEASE_NAME, ReviewBatchLease } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, type BatchErrorRecord, type BatchPlanRow, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 
 const T0 = Date.parse("2026-10-29T12:00:00.000Z");
-void REVIEW_BATCH_LEASE_NAME;
 
 type Verdict = "fail" | "not-measured" | "na";
 
@@ -128,9 +127,9 @@ class World {
   }
 
   ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {
-    const lease = new ReviewBatchLease(this.store, holder, () => this.now, () => () => undefined);
+    const lease = new ReviewLeases(this.store, holder, () => this.now, () => () => undefined);
     return {
-      acquireLease: () => lease.acquire(),
+      acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
       settleRetirement: async () => ok({ state: "none" as const }),
       measureSuite: async () => undefined,
       reviewPlan: async (ref) => this.judge(ref),
@@ -212,7 +211,8 @@ describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
     expect(world.issues.filed).toBe(1);
     expect(world.errors).toEqual([]);
     const again = await runOne(world, "p-sec", "batch-2");
-    expect(again).toMatchObject({ outcome: "kept-open", reviewed: false });
+    // BR-1511: skipped as "already reviewed" (was: a kept-open row)
+    expect(again).toMatchObject({ outcome: "skipped", reviewed: false });
     expect(world.judgeCalls).toBe(1);
     expect(world.issues.filed).toBe(1);
     expect(plan.archived).toBe(false);
