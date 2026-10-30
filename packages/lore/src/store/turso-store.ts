@@ -47,6 +47,7 @@ import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migra
 import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
+import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -1285,6 +1286,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 44) {
         // reason: migration-044 marks stored suite results whose command exited outside {0,1} unrunnable (BR-1497).
         await this.client.executeMultiple(MIGRATION_044_SQL);
+      }
+
+      if (currentVersion < 45) {
+        // reason: migration-045 makes a single-file run unique per (key, file) (#528, BR-1497).
+        await this.client.executeMultiple(MIGRATION_045_SQL);
       }
     })();
 
@@ -4482,7 +4488,8 @@ export class TursoStore implements StoreInterface {
       // reason: one batch (implicit transaction) so a re-run's per-file rows land whole or not at all.
       await this.client.batch(
         rows.map((row) => ({
-          sql: "INSERT INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          // reason: OR IGNORE honours migration-045's partial unique index (first single-file run of a (key, file) wins, #528).
+          sql: "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
         })),
         "write",

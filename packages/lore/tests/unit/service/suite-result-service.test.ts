@@ -548,3 +548,71 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(worktreeCount(green.repo)).toBe(1);
   }, 30_000);
 });
+
+describe("single-file runs are stored once per (commit, file, kind) (#528, BR-1497)", () => {
+  /** A runner whose every file run is numbered (the tail and exit code say which run it was) and waits on a gate. */
+  function gatedRunner(gate: Promise<void>): { runner: CommitSuiteRunnerPort; calls: () => number } {
+    let calls = 0;
+    const base = fakeRunner(() => ok(GREEN));
+    const runner: CommitSuiteRunnerPort = {
+      ...base,
+      runFiles: async (_commit, files) => {
+        calls += 1;
+        const mine = calls;
+        await gate;
+        return ok(files.map((file): FileRunOutcome => ({ file, exit_code: mine === 1 ? 0 : 1, output_tail: `run ${String(mine)}`, duration_ms: 3 })));
+      },
+    };
+    return { runner, calls: () => calls };
+  }
+
+  it("AC-AF-2 two concurrent runs of the same (commit, file, kind) store one row and both callers get it", async () => {
+    const { service } = build();
+    let open: () => void = () => undefined;
+    const { runner } = gatedRunner(new Promise<void>((resolve) => (open = resolve)));
+    const a = service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    const b = service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    open();
+    const [first, second] = await Promise.all([a, b]);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.value.output_tail).toBe(first.value.output_tail);
+    expect(second.value.exit_code).toBe(first.value.exit_code);
+    const stored = await service.listFileRuns(`file-bisect@${COMMIT_A}`);
+    expect(stored.ok && stored.value).toHaveLength(1);
+    expect(stored.ok && stored.value[0]?.output_tail).toBe(first.value.output_tail);
+  });
+
+  it("AC-AF-2 a later review of the same (commit, file, kind) reads the stored outcome and does not run again", async () => {
+    const { service } = build();
+    const { runner, calls } = gatedRunner(Promise.resolve());
+    const first = await service.runSingleFile(COMMIT_A, FILE_X, "confirm", runner);
+    const second = await service.runSingleFile(COMMIT_A, FILE_X, "confirm", runner);
+    expect(calls()).toBe(1);
+    expect(first.ok && second.ok && second.value).toEqual(first.ok ? first.value : null);
+  });
+
+  it("AC-AF-2 kind, commit and file each keep their own row", async () => {
+    const { service } = build();
+    const { runner, calls } = gatedRunner(Promise.resolve());
+    await service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    await service.runSingleFile(COMMIT_A, FILE_X, "confirm", runner);
+    await service.runSingleFile(COMMIT_B, FILE_X, "bisect", runner);
+    await service.runSingleFile(COMMIT_A, "packages/x/tests/y.test.ts", "bisect", runner);
+    expect(calls()).toBe(4);
+  });
+
+  it("AC-AF-2 the store ignores a second row for a single-file key but still appends re-runs under a suite result id", async () => {
+    const store = new InMemoryStore();
+    const base = { commit_sha: COMMIT_A, file: FILE_X, duration_ms: 1, measured_at: "2026-10-28T10:00:00.000Z" };
+    const key = `file-bisect@${COMMIT_A}`;
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 0, output_tail: "first" }]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 1, output_tail: "second" }]);
+    const kept = await store.listSuiteFileRuns(key);
+    expect(kept.ok && kept.value.map((r) => r.output_tail)).toEqual(["first"]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: "suite-1", exit_code: 0, output_tail: "a" }]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: "suite-1", exit_code: 1, output_tail: "b" }]);
+    const reruns = await store.listSuiteFileRuns("suite-1");
+    expect(reruns.ok && reruns.value.map((r) => r.output_tail)).toEqual(["a", "b"]);
+  });
+});
