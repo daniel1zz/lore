@@ -15,8 +15,8 @@
  * with its own verdict; a row fails alone. Exit 0 = every plan passed; 1 = any plan failed its review or could not
  * be reviewed; 2 = usage (no selector, ids and --where together, --no-ai, a bad --where).
  *
- * The diff is derived per plan from each landing's own `main_before..landing_commit`
- * (`assess-commit-derivation.ts::deriveLandingDiffForPlan`); a task with no landing record is named, has no measured diff,
+ * The diff is derived per plan as each changed file's NET diff across the plan's landings (BR-1508,
+ * `assess-commit-derivation.ts::deriveLandingDiffForPlan` -> `assess-final-state-diff.ts`); a task with no landing record is named, has no measured diff,
  * and makes regression and security not-measured (the stored review says so in `diff_source`).
  *
  * Gates (BR-1379): `correctness_vs_acs`, `regression` and `security` keep a plan open when they fail or are not measured
@@ -380,6 +380,7 @@ export default defineLoreCommand({
           inv.cwd,
           tasks.map((t) => ({ slug: t.slug, landing: readTaskLanding(t.extra) })),
           tasks.length > 0 && tasks.every((t) => t.status === "archived"),
+          { env: inv.env, ref: assessedCommit ?? "main" },
         );
         const diffSource: DiffSourceRecord = { mode: "auto_derived", ...derivation };
         // reason: spec D6 — criteria citing a reworded rule are re-run through the same trusted runner as the stale
@@ -449,6 +450,7 @@ export default defineLoreCommand({
             l.outside_anchors !== undefined && l.outside_anchors.length > 0 ? [{ landing: l.landing_commit, files: l.outside_anchors }] : [],
           ),
           unlanded_tasks: derivation.unlanded_tasks,
+          not_seen_files: derivation.not_seen_files,
         };
         return ok({ derivation, diffSource, facts, rerunCriterion });
       };
