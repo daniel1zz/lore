@@ -457,6 +457,10 @@ describe("AC-DCS2-1: one selection rule for every landed branch (D44)", () => {
     // never selected: main already contained its tip before the landing, and it holds no landing record
     const early = await landable(world, plan, "early", ["tests/early-1.test.ts"], { "tests/early-1.test.ts": "// early\n" });
     mergeIntoMainBehindIntegratesBack(world, early.tree.branch);
+    // B2's work is finished and its claim released (its end_tip is its recorded work tip); a live claim on a file B1 now carries would
+    // be refused by the own-diff judgment (BR-1346) before selection
+    const released = await loreIn(world, b2.tree.path, ["release", b2.slug], sessionEnv(b2.session));
+    expect(released.exitCode, released.text).toBe(0);
     gitIn(b1.tree.path, ["merge", "-q", "--no-ff", "-m", "fold b2 into b1", b2.tree.branch]);
     const before = { lone: await taskOf(world, lone.slug), early: await taskOf(world, early.slug) };
 

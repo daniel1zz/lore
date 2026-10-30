@@ -136,8 +136,10 @@ export interface OracleRunInput {
 /** Everything `record` needs. */
 export interface OracleRecordInput {
   readonly tasks: readonly LandingTask[];
-  /** The commit that became main (the landing commit). */
+  /** The commit the oracles ran on and the rows are bound to (`head_sha`): the commit that became main, or main's tip for a branch already in it. */
   readonly commit: string;
+  /** The landing the rows belong to (`recorded_at_landing`): the merge commit for a new landing; for a branch already in main, the commit that brought it in (D44). */
+  readonly landingCommit: string;
   readonly outcomes: readonly OracleOutcome[];
   readonly by: string;
   readonly nowIso: string;
@@ -370,7 +372,7 @@ export class IntegrateOracleService implements LandingOracles {
         oracle: outcome.oracle.id,
         command: outcome.oracle.command,
         tasks: outcome.oracle.tasks,
-        landingCommit: input.commit,
+        landingCommit: input.landingCommit,
         firstOutcome: outcome.flaky.firstOutcome,
         secondOutcome: "passed",
       });
@@ -398,7 +400,7 @@ export class IntegrateOracleService implements LandingOracles {
           recorded_by: input.by,
           ...(outcome.flaky !== undefined ? { flaky: true as const } : {}),
           ...(extra?.ledgerError !== undefined ? { ledger_error: extra.ledgerError } : {}),
-          attestation: { ...(outcome.row.attestation as NonNullable<VerifiedEvidenceInput["attestation"]>), recorded_at_landing: input.commit },
+          attestation: { ...(outcome.row.attestation as NonNullable<VerifiedEvidenceInput["attestation"]>), recorded_at_landing: input.landingCommit },
         });
       }
       if (rows.length === 0) continue;

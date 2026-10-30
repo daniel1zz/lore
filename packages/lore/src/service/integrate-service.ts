@@ -580,7 +580,8 @@ export class IntegrateService {
         const run = await oraclePort.prove({ branch: request.branch, tip, tasks: selection, worktree: wt, commit: base.value, base: base.value, floor: undefined, settings, runCommand: this.deps.runFloor, log, clock, nowIso: new Date(clock()).toISOString() });
         if (!run.ok) return run;
         proven = run.value;
-        await this.recordOracleRows(proven.tasks, base.value, proven.outcomes);
+        // reason: D44 — the rows ran on T (head_sha) but belong to the landing that brought the branch in (recorded_at_landing).
+        await this.recordOracleRows(proven.tasks, base.value, placed.value.landing_commit, proven.outcomes);
       }
       // reason: BR-1336 — an already-integrated branch still records a landing on every selected task that holds none for this head
       // (the recorder skips tasks that already carry one). Main did not move by this call, so main_after is main's tip.
@@ -700,7 +701,7 @@ export class IntegrateService {
     const casMs = clock() - casStart;
     if (swapped.status === 0) {
       finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-      await this.recordOracleRows(tasks, merge, outcomes);
+      await this.recordOracleRows(tasks, merge, merge, outcomes);
       const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint, ...onlySelected });
       // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
       const view = this.refreshSharedView();
@@ -755,13 +756,13 @@ export class IntegrateService {
    * already-integrated branch), through the oracle port. Never fails the integration (main has already moved): a task whose rows could
    * not be written is a WARNING line from the port, so the missing evidence is visible and `lore done` refuses it by its floor.
    */
-  private async recordOracleRows(tasks: readonly LandingTask[], commit: string, outcomes: readonly OracleOutcome[]): Promise<void> {
+  private async recordOracleRows(tasks: readonly LandingTask[], commit: string, landingCommit: string, outcomes: readonly OracleOutcome[]): Promise<void> {
     const port = this.deps.oracles;
     const settings = this.oracleSettings;
     if (port === undefined || settings === undefined || outcomes.length === 0) return;
     const clock = this.deps.clock ?? Date.now;
     const started = clock();
-    await port.record({ tasks, commit, outcomes, by: settings.by, nowIso: new Date(started).toISOString(), log: this.deps.log });
+    await port.record({ tasks, commit, landingCommit, outcomes, by: settings.by, nowIso: new Date(started).toISOString(), log: this.deps.log });
     this.logPhase("recording", clock() - started);
   }
 
